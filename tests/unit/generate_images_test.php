@@ -183,43 +183,53 @@ test('generate-images weaves the site context into each prompt as one sentence',
     $project->writeJson('siteSpec.json', [
         'name'        => 'Hearth & Crumb',
         'topic'       => 'artisan sourdough',
-        'description' => 'A neighborhood bakery selling sourdough and pastries.',
+        'description' => 'Hearth & Crumb is a neighborhood bakery selling sourdough and pastries.',
     ]);
     $images = new FakeImageClient('JPEGDATA');
 
     (new GenerateImagesStep($images))->run($project);
 
     $sent = $images->calls[0]['prompt'];
-    // Page context and site name read as one grammatical sentence, with the
-    // description following — and the topic NOT repeated beside it.
+    // The identity-bearing description is rejected whole; the recast page
+    // context and clean topic fallback read as adjacent guidance sentences.
     assert_contains(
-        'This image is used as full-bleed hero with text overlay on the website “Hearth & Crumb”.',
+        'Composition: full-frame editorial photograph with a reserved area kept as open, low-detail negative space.'
+        . ' The subject matter is artisan sourdough.',
         $sent
     );
-    assert_contains('A neighborhood bakery selling sourdough and pastries.', $sent);
-    assert_true(!str_contains($sent, 'artisan sourdough'), 'topic not repeated when the description covers it');
+    // The site NAME never reaches the image model: it is what painted-in fake
+    // wordmarks stand in for (BIGR-768), and nothing in the prompt may
+    // describe the image as part of a website.
+    assert_true(!str_contains($sent, 'Hearth & Crumb'), 'site name withheld from the image prompt');
+    assert_true(!str_contains(strtolower($sent), 'website'), 'the prompt never mentions a website');
+    assert_true(
+        !str_contains($sent, 'neighborhood bakery selling'),
+        'identity-bearing description is not partially forwarded'
+    );
     assert_contains('A bakery at dawn', $sent);               // the image subject is still there
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('siteContext leads with a noun phrase and never stutters the topic', function () {
+test('siteContext carries only subject matter and never the site name', function () {
     // Empty spec → no context at all.
     assert_eq('', GenerateImagesStep::siteContext([]));
 
-    // Name only.
-    assert_eq('the website “Hearth & Crumb”.', GenerateImagesStep::siteContext([
+    // The name alone contributes nothing: it is deliberately withheld from
+    // image prompts (BIGR-768 — a painted-in fake wordmark is the model
+    // typesetting the name the prompt told it about).
+    assert_eq('', GenerateImagesStep::siteContext([
         'name' => 'Hearth & Crumb',
     ]));
 
-    // The topic is included only while there is no description to cover it…
-    assert_eq('the website “Hearth & Crumb”, about artisan sourdough.', GenerateImagesStep::siteContext([
+    // The concise topic is the preferred subject-matter source.
+    assert_eq('The subject matter is artisan sourdough.', GenerateImagesStep::siteContext([
         'name' => 'Hearth & Crumb', 'topic' => 'artisan sourdough',
     ]));
 
-    // …and folds away once a description exists (it restates the topic).
+    // It remains preferred over a longer description of the site artifact.
     assert_eq(
-        'the website “Hearth & Crumb”. A neighborhood bakery selling sourdough and pastries.',
+        'The subject matter is artisan sourdough.',
         GenerateImagesStep::siteContext([
             'name'        => 'Hearth & Crumb',
             'topic'       => 'artisan sourdough',
@@ -227,24 +237,72 @@ test('siteContext leads with a noun phrase and never stutters the topic', functi
         ])
     );
 
-    // Specs without a name still read after "on".
-    assert_eq('a website about artisan sourdough.', GenerateImagesStep::siteContext([
-        'topic' => 'artisan sourdough',
+    // A description remains a fallback. Without terminal punctuation it is
+    // closed, so the composer's following guidance never runs on.
+    assert_eq('Fresh bread daily.', GenerateImagesStep::siteContext([
+        'name' => 'Hearth & Crumb', 'description' => 'Fresh bread daily',
     ]));
-    assert_eq('a website. A neighborhood bakery.', GenerateImagesStep::siteContext([
-        'description' => 'A neighborhood bakery.',
+    assert_eq('Fresh bread daily!', GenerateImagesStep::siteContext([
+        'description' => 'Fresh bread daily!', // already punctuated: untouched
+    ]));
+    assert_eq('静かな喫茶店です。', GenerateImagesStep::siteContext([
+        'description' => '静かな喫茶店です。', // Unicode sentence terminal: untouched
     ]));
 
-    // A description without terminal punctuation is closed, so the composer's
-    // guidance sentence (which relies on this phrase ending one) never runs on.
-    assert_eq(
-        'the website “Hearth & Crumb”. Fresh bread daily.',
-        GenerateImagesStep::siteContext([
-            'name' => 'Hearth & Crumb', 'description' => 'Fresh bread daily',
-        ])
-    );
-    assert_eq('a website. Fresh bread daily!', GenerateImagesStep::siteContext([
-        'description' => 'Fresh bread daily!', // already punctuated: untouched
+    // Canonical descriptions commonly repeat the identity. Reject the whole
+    // prose candidate and fall back to a clean factual field rather than
+    // deleting the name into an ungrammatical fragment.
+    assert_eq('The subject matter is construction management app.', GenerateImagesStep::siteContext([
+        'name'        => 'Atlas Field',
+        'description' => 'Atlas Field is a mobile app for construction crews.',
+        'topic'       => 'construction management app',
+        'area'        => 'business software',
+    ]));
+
+    // Identity matching is conservative and Unicode-safe; web-artifact prose
+    // is rejected, while a real-world use of "site" remains valid subject matter.
+    assert_eq('The subject matter is hospitality.', GenerateImagesStep::siteContext([
+        'name'        => 'Café C++（東京）',
+        'description' => 'The official website for Café C++（東京）.',
+        'topic'       => 'Café C++（東京） hospitality',
+        'area'        => 'hospitality',
+    ]));
+    assert_eq('The subject matter is hospitality.', GenerateImagesStep::siteContext([
+        'email_domain' => 'cafecpp.example',
+        'topic'        => 'Book at cafecpp.example',
+        'area'         => 'hospitality',
+    ]));
+    assert_eq('The subject matter is construction site reporting.', GenerateImagesStep::siteContext([
+        'name'  => 'Atlas Field',
+        'topic' => 'construction site reporting',
+    ]));
+    assert_eq('The subject matter is 喫茶店.', GenerateImagesStep::siteContext([
+        'name'  => '東京茶房',
+        'topic' => '東京茶房は喫茶店です。', // no word boundary before the particle
+        'area'  => '喫茶店',
+    ]));
+
+    assert_eq('The subject matter is astronomy lodging.', GenerateImagesStep::siteContext([
+        'topic'       => 'astronomy lodging',
+        'description' => 'A one-page site for an observatory lodge.',
+    ]));
+    assert_eq('', GenerateImagesStep::siteContext([
+        'description' => 'A one-page site for an observatory lodge.',
+    ]));
+    assert_eq('', GenerateImagesStep::siteContext([
+        'description' => 'A minimalist portfolio for a documentary photographer.',
+    ]));
+    assert_eq('', GenerateImagesStep::siteContext([
+        'description' => 'Photography portfolios and landing pages for artists.',
+    ]));
+
+    // If every available fact leaks identity or website framing, omit this
+    // optional context; never send the trigger or broken prose to the model.
+    assert_eq('', GenerateImagesStep::siteContext([
+        'name'        => 'Alcorta',
+        'description' => 'Alcorta is a portfolio website.',
+        'topic'       => 'Alcorta website',
+        'area'        => 'official site',
     ]));
 });
 
@@ -256,7 +314,11 @@ test('generate-images leads with the subject + style and adds the page context',
 
     $sent = $images->calls[0]['prompt'];
     assert_contains('A bakery at dawn. Style: photorealistic', $sent);   // subject leads, style appended
-    assert_contains('full-bleed hero with text overlay', $sent);         // page context is included as guidance
+    // The page context is included as guidance, recast photographically.
+    assert_contains(
+        'full-frame editorial photograph with a reserved area kept as open, low-detail negative space',
+        $sent
+    );
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -366,6 +428,35 @@ test('generate-images marks failed and removes only its media block on error', f
     assert_contains('authored MIME image/jpeg', $warnings[0]);
     assert_contains('delivered removed', $warnings[0]);
     assert_contains('container media', $warnings[0]);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images records caption text removed with a failed image', function () {
+    $tmp = sys_get_temp_dir() . '/builder_gi_caption_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeText(
+        'theme/parts/content.html',
+        '<!-- wp:group --><div class="wp-block-group">'
+            . '<!-- wp:image --><figure class="wp-block-image">'
+            . '<img src="theme:./assets/failed.jpg" '
+            . 'alt="AI_IMAGE: A failed scene | content image | photorealistic | landscape">'
+            . '</figure><!-- /wp:image -->'
+            . '<!-- wp:paragraph {"fontSize": "caption"} -->'
+            . '<p>The unavailable scene at dawn.</p><!-- /wp:paragraph -->'
+            . '</div><!-- /wp:group -->'
+    );
+    (new CollectImagesStep())->run($project);
+
+    (new GenerateImagesStep(new FakeImageClient('', true)))->run($project);
+
+    $markup = $project->readText('theme/parts/content.html');
+    assert_true(!str_contains($markup, 'failed.jpg'));
+    assert_true(!str_contains($markup, 'unavailable scene'));
+    $warnings = implode(' ', $project->readJson('warnings.json')['generate-images'] ?? []);
+    assert_contains('authored caption "The unavailable scene at dawn."', $warnings);
+    assert_contains('delivered removed', $warnings);
+    assert_contains('orphaned description', $warnings);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

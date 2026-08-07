@@ -17,7 +17,6 @@ final class HeroComposition
         'cinematic-safe-zone',
         'editorial-split',
         'framed-portrait',
-        'panorama-rail',
         'focal-subject-stage',
         'layered-poster',
     ];
@@ -57,13 +56,17 @@ final class HeroComposition
             'fallback_family' => 'cover',
             'root_hook' => '.hero-composition--cinematic-safe-zone',
             'prompt' => 'hero-compositions/cinematic-safe-zone.md',
-            'headline_registers' => ['restrained', 'display'],
+            // BIGR-775: the register is fixed at restrained — audited display
+            // headlines overflowed their measure inside the cover's copy zone
+            // (atlas7) — and the copy region is centered rather than pinned to
+            // a corner of the frame.
+            'headline_registers' => ['restrained'],
             'height_profiles' => ['standard', 'immersive'],
             'defaults' => [
-                'media_mode' => 'cover-image', 'headline_register' => 'display',
-                'text_anchor' => 'bottom-start',
-                'headline_line_target' => ['desktop' => [1, 3], 'mobile' => [2, 5]],
-                'focal_region' => 'end', 'text_safe_region' => 'start',
+                'media_mode' => 'cover-image', 'headline_register' => 'restrained',
+                'text_anchor' => 'center',
+                'headline_line_target' => ['desktop' => [1, 2], 'mobile' => [2, 4]],
+                'focal_region' => 'end', 'text_safe_region' => 'center',
                 'height_profile' => 'immersive', 'cta_treatment' => 'prominent',
                 'mobile_transformation' => 'stack-media-first',
             ],
@@ -120,32 +123,6 @@ final class HeroComposition
                 'mobile_transformation' => 'stack-media-first',
             ],
         ],
-        'panorama-rail' => [
-            'canvases' => ['full-bleed', 'framed'],
-            'media_modes' => ['foreground-image'],
-            'min_images' => 1,
-            'max_images' => 1,
-            'backgrounds' => ['base', 'tinted', 'contrast'],
-            'default_background' => 'base',
-            'fallback_background' => 'base',
-            'header_modes' => ['stacked'],
-            'copy_capacity' => 'compact',
-            'mobile_transformations' => ['rail-below'],
-            'layout_archetype' => 'mixed-width-editorial',
-            'fallback_family' => 'foreground-split',
-            'root_hook' => '.hero-composition--panorama-rail',
-            'prompt' => 'hero-compositions/panorama-rail.md',
-            'headline_registers' => ['restrained', 'display'],
-            'height_profiles' => ['compact', 'standard'],
-            'defaults' => [
-                'media_mode' => 'foreground-image', 'headline_register' => 'restrained',
-                'text_anchor' => 'bottom-start',
-                'headline_line_target' => ['desktop' => [1, 3], 'mobile' => [2, 4]],
-                'focal_region' => 'none', 'text_safe_region' => 'full',
-                'height_profile' => 'standard', 'cta_treatment' => 'quiet',
-                'mobile_transformation' => 'rail-below',
-            ],
-        ],
         'focal-subject-stage' => [
             'canvases' => ['full-bleed', 'framed'],
             'media_modes' => ['foreground-image'],
@@ -155,10 +132,6 @@ final class HeroComposition
             'default_background' => 'base',
             'fallback_background' => 'base',
             'header_modes' => ['stacked'],
-            // The recipe opens with its own uppercase eyebrow directly under
-            // the header; double-decker's caption topbar stacks a second
-            // caption strip right above it (audited: naturaleza22/23).
-            'header_archetype_excludes' => ['double-decker'],
             'copy_capacity' => 'compact',
             'mobile_transformations' => ['stack-media-first', 'stack-copy-first'],
             'layout_archetype' => 'asymmetric-split',
@@ -185,7 +158,9 @@ final class HeroComposition
             'default_background' => 'image',
             'fallback_background' => 'contrast',
             'header_modes' => ['stacked', 'overlay'],
-            'copy_capacity' => 'standard',
+            // BIGR-775: poster copy stays compact — audited layered-poster
+            // heroes stacked a third caption line under the standfirst.
+            'copy_capacity' => 'compact',
             'mobile_transformations' => ['flatten-layers'],
             'layout_archetype' => 'full-bleed-cover',
             'fallback_family' => 'cover',
@@ -195,7 +170,10 @@ final class HeroComposition
             'height_profiles' => ['standard', 'immersive'],
             'defaults' => [
                 'media_mode' => 'cover-image', 'headline_register' => 'poster',
-                'text_anchor' => 'top-start',
+                // BIGR-775 follow-up: a top-pinned safe zone left a dead band
+                // under the copy on the viewport-scale stage (lumen8) — the
+                // zone rides the cover's vertical center.
+                'text_anchor' => 'center-start',
                 'headline_line_target' => ['desktop' => [1, 4], 'mobile' => [2, 6]],
                 'focal_region' => 'end', 'text_safe_region' => 'start',
                 'height_profile' => 'immersive', 'cta_treatment' => 'prominent',
@@ -490,10 +468,59 @@ final class HeroComposition
                 'safe parseable hero was retained; replace only the background cover with the assigned foreground-media block',
             );
         }
+        // BIGR-775 advisory copy-budget check: every hero holds at most the
+        // headline plus ONE supporting paragraph (naturaleza9's three stacked
+        // bodies read as clutter even inside the old standard budget).
+        // copy_capacity stays a selection-only dimension. Overrun keeps the
+        // safe hero and stays actionable.
+        $copyTextBlocks = 0;
+        foreach ($document->indices() as $index) {
+            if (!in_array($document->name($index), ['heading', 'paragraph'], true)) {
+                continue;
+            }
+            for ($parent = $document->parent($index); $parent !== null; $parent = $document->parent($parent)) {
+                $parentClasses = preg_split(
+                    '/\s+/',
+                    trim((string) (($document->attrs($parent) ?? [])['className'] ?? '')),
+                    -1,
+                    PREG_SPLIT_NO_EMPTY,
+                ) ?: [];
+                if (in_array('hero-composition__copy', $parentClasses, true)) {
+                    $copyTextBlocks++;
+                    break;
+                }
+            }
+        }
+        $textBudget = 2;
+        if ($copyTextBlocks > $textBudget) {
+            $warnings[] = self::markupWarning(
+                $part,
+                'hero copy budget',
+                ['copy_capacity' => $meta['copy_capacity'], 'max_text_blocks' => $textBudget],
+                ['text_blocks' => $copyTextBlocks],
+                'safe parseable hero was retained; fold the overflow lines into the standfirst instead of stacking more copy',
+            );
+        }
+
+        // BIGR-775 advisory headline-punctuation check: an em/en dash joins
+        // two thoughts the H1 should not carry together (audited: atlas7).
+        if (preg_match('~<h1\b[^>]*>(.*?)</h1>~is', $markup, $h1Match) === 1) {
+            $headline = html_entity_decode(strip_tags($h1Match[1]), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            if (preg_match('/[\x{2013}\x{2014}]/u', $headline) === 1) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'hero headline punctuation',
+                    ['headline' => 'a short phrase without em/en dashes'],
+                    ['headline' => $headline],
+                    'safe parseable hero was retained; move the dash-joined clause into the standfirst',
+                );
+            }
+        }
+
         $images = self::imageFacts($markup);
         $expectedAspect = match ($recipe) {
             'framed-portrait' => 'portrait',
-            'panorama-rail', 'cinematic-safe-zone', 'layered-poster' => 'landscape',
+            'cinematic-safe-zone', 'layered-poster' => 'landscape',
             default => null,
         };
         if ($expectedAspect !== null && $images !== []) {

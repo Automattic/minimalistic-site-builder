@@ -214,9 +214,11 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporti
      * Shared concurrent-batch transport for completeJsonBatch and completeBatch.
      *
      * @param array<array-key,array<string,mixed>> $requests
+     * @param null|callable(array<array-key,array<string,mixed>>):array<array-key,array<string,mixed>> $transport
+     *        Test seam; defaults to the live concurrent transport.
      * @return array<array-key,array<string,mixed>>
      */
-    private function responseBatch(array $requests, bool $json): array
+    private function responseBatch(array $requests, bool $json, ?callable $transport = null): array
     {
         if ($requests === []) {
             return [];
@@ -240,22 +242,25 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporti
         // Keys may be ints too (PHP coerces numeric keys), so admit both.
         $labelFor = fn (string|int $key): string => (string) ($requests[$key]['log_label'] ?? $key);
 
-        $transport = fn (array $subset): array => $this->streamMulti($subset);
+        $transport ??= fn (array $subset): array => $this->streamMulti($subset);
         $onFailure = function (string|int $key, string $error, float $time) use ($labelFor, &$bodies): void {
             LlmLogger::log($labelFor($key), $bodies[$key], ['text' => '', 'input' => 0, 'output' => 0], $time, $error);
         };
-        $delays = [2, 5, 12];
-        $results = $this->provider === 'openrouter'
-            ? self::retryOpenRouterBatch($bodies, $transport, $delays, $onFailure)
-            : AnthropicClient::retryTextBatch($bodies, $transport, $delays, $onFailure);
-
-        $out = [];
-        foreach ($results as $key => $res) {
+        $logPaths = [];
+        $onSuccess = function (string|int $key, array $res) use ($labelFor, &$bodies, &$logPaths): void {
             $this->requests++;
             $this->inputTokens += $res['input'];
             $this->outputTokens += $res['output'];
+            $logPaths[$key] = LlmLogger::log($labelFor($key), $bodies[$key], $res, $res['time']);
+        };
+        $delays = [2, 5, 12];
+        $results = $this->provider === 'openrouter'
+            ? self::retryOpenRouterBatch($bodies, $transport, $delays, $onFailure, onSuccess: $onSuccess)
+            : AnthropicClient::retryTextBatch($bodies, $transport, $delays, $onFailure, onSuccess: $onSuccess);
 
-            $res['log_path'] = LlmLogger::log($labelFor($key), $bodies[$key], $res, $res['time']);
+        $out = [];
+        foreach ($results as $key => $res) {
+            $res['log_path'] = $logPaths[$key] ?? null;
             $res['model'] = (string) $bodies[$key]['model'];
             $out[$key] = $res;
         }
@@ -432,6 +437,7 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporti
      * @param null|callable(int):void $sleeper Test seam for the remaining
      *        Retry-After wait and the shared helper's backoff waits
      * @param null|callable():int $clock Test seam returning the current epoch
+     * @param null|callable(string|int,array<string,mixed>):void $onSuccess
      * @return array<array-key,array<string,mixed>>
      */
     public static function retryOpenRouterBatch(
@@ -441,6 +447,7 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporti
         ?callable $onFailure = null,
         ?callable $sleeper = null,
         ?callable $clock = null,
+        ?callable $onSuccess = null,
     ): array {
         /** @var array<array-key,int> $retryAfterDeadlineByKey */
         $retryAfterDeadlineByKey = [];
@@ -490,6 +497,7 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporti
             $delays,
             $onFailure,
             $sleeper,
+            $onSuccess,
         );
     }
 

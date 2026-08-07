@@ -198,9 +198,11 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting
      * returns each response record keyed as the input.
      *
      * @param array<array-key,array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float,json_schema?:array{name:string,schema:array<string,mixed>},cached_prefixes?:list<string>}> $requests
+     * @param null|callable(array<array-key,array<string,mixed>>):array<array-key,array<string,mixed>> $transport
+     *        Test seam; defaults to the live concurrent transport.
      * @return array<array-key,array<string,mixed>>
      */
-    private function responseBatch(array $requests, bool $json): array
+    private function responseBatch(array $requests, bool $json, ?callable $transport = null): array
     {
         if ($requests === []) {
             return [];
@@ -222,28 +224,38 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting
         // (already a clean name like "header" or "section-hero"). Keys may be
         // ints too (PHP coerces numeric keys), so the type must admit both.
         $labelFor = fn (string|int $key): string => (string) ($requests[$key]['log_label'] ?? $key);
+        $transport ??= fn (array $subset): array => $this->streamMulti($subset);
+
+        // Accrue and log each successful request as soon as its transport
+        // outcome is final. The batch can still abort when a sibling fails;
+        // those successful calls were nevertheless billed and must remain in
+        // usageTotals() for a caller that recovers by retrying the batch.
+        $logPaths = [];
+        $onSuccess = function (string|int $key, array $res) use ($labelFor, &$bodies, &$logPaths): void {
+            $this->requests++;
+            $this->inputTokens += $res['input'];
+            $this->outputTokens += $res['output'];
+            $this->cacheReadInputTokens += $res['cache_read_input_tokens'];
+            $this->cacheCreationInputTokens += $res['cache_creation_input_tokens'];
+            $logPaths[$key] = LlmLogger::log($labelFor($key), $bodies[$key], $res, $res['time']);
+        };
 
         // Run them all concurrently, retrying only the transient failures. A
         // request that fails for good is logged before the batch aborts, so the
         // call that broke the build is still inspectable.
         $results = self::retryTextBatch(
             $bodies,
-            fn (array $subset): array => $this->streamMulti($subset),
+            $transport,
             [2, 5, 12],
             function (string|int $key, string $error, float $time) use ($labelFor, &$bodies): void {
                 LlmLogger::log($labelFor($key), $bodies[$key], ['text' => '', 'input' => 0, 'output' => 0], $time, $error);
             },
+            onSuccess: $onSuccess,
         );
 
         $out = [];
         foreach ($results as $key => $res) {
-            $this->requests++;
-            $this->inputTokens += $res['input'];
-            $this->outputTokens += $res['output'];
-            $this->cacheReadInputTokens += $res['cache_read_input_tokens'];
-            $this->cacheCreationInputTokens += $res['cache_creation_input_tokens'];
-
-            $res['log_path'] = LlmLogger::log($labelFor($key), $bodies[$key], $res, $res['time']);
+            $res['log_path'] = $logPaths[$key] ?? null;
             $res['model'] = (string) $bodies[$key]['model'];
             $out[$key] = $res;
         }
@@ -451,9 +463,19 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting
      * @param array<int,int> $delays backoff seconds before each retry (length = max retries)
      * @param null|callable(string|int,string,float):void $onFailure called with (key, error, time) for a request that fails for good, just before the batch aborts — lets the caller log it
      * @param null|callable(int):void $sleeper Test seam for the backoff waits; defaults to sleep().
+     * @param null|callable(string|int,array<string,mixed>):void $onSuccess
+     *        Called once when a request succeeds for good, even if a sibling
+     *        later aborts the batch.
      * @return array<array-key,array{text:string,input:int,output:int,cache_read_input_tokens:int,cache_creation_input_tokens:int,time:float,stop_reason:?string}>
      */
-    public static function retryTextBatch(array &$bodies, callable $transport, array $delays, ?callable $onFailure = null, ?callable $sleeper = null): array
+    public static function retryTextBatch(
+        array &$bodies,
+        callable $transport,
+        array $delays,
+        ?callable $onFailure = null,
+        ?callable $sleeper = null,
+        ?callable $onSuccess = null,
+    ): array
     {
         $sleeper ??= static function (int $seconds): void {
             sleep($seconds);
@@ -475,10 +497,11 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting
             while ($immediate !== []) {
                 $outcomes = $transport(array_intersect_key($bodies, array_flip($immediate)));
                 $stripRetry = [];
+                $terminalFailure = null;
                 foreach ($outcomes as $key => $outcome) {
                     $dropParam = $outcome['retry_without'] ?? null;
                     if ($outcome['ok']) {
-                        $results[$key] = [
+                        $result = [
                             'text'   => (string) ($outcome['text'] ?? ''),
                             'input'  => (int) ($outcome['input'] ?? 0),
                             'output' => (int) ($outcome['output'] ?? 0),
@@ -489,6 +512,10 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting
                                 ? (string) $outcome['stop_reason']
                                 : null,
                         ];
+                        $results[$key] = $result;
+                        if ($onSuccess !== null) {
+                            $onSuccess($key, $result);
+                        }
                     } elseif ($dropParam !== null && self::stripRejectedParam($bodies[$key], $dropParam)) {
                         $stripRetry[] = $key;
                         Narrator::write("    (model rejected '{$dropParam}' on request '{$key}'; retrying without it)\n");
@@ -516,8 +543,12 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting
                         if ($onFailure !== null) {
                             $onFailure($key, $error, (float) ($outcome['time'] ?? 0));
                         }
-                        throw new \RuntimeException("LLM batch request '{$key}' failed: {$error}");
+                        $terminalFailure ??= [$key, $error];
                     }
+                }
+                if ($terminalFailure !== null) {
+                    [$key, $error] = $terminalFailure;
+                    throw new \RuntimeException("LLM batch request '{$key}' failed: {$error}");
                 }
                 $immediate = $stripRetry;
             }

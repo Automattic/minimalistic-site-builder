@@ -95,11 +95,7 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
         'image_grade' => 'warm kodachrome color, soft golden light, gentle film grain',
         'motion' => 'calm',
         'motion_note' => 'Let the hero settle gently and keep card hover restrained.',
-        'signature_device' => 'hairline rules with small caps folios',
-        'signature_device_slots' => ['hero', 'footer'],
-        'hero_blueprint' => array_merge(HeroBlueprint::defaultFor('cinematic-safe-zone'), [
-            'signature_device_use' => 'Use one hairline folio beside the proposition.',
-        ]),
+        'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
     ]]);
     // Concurrent group, request order is [theme-json, page-plan(home), page-plan(menu)]:
     // theme-json (json) — translates the committed design direction into tokens
@@ -209,7 +205,16 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
         ],
     );
     $project->writeText('design/site.css', '/* STALE-HTML-FIRST-CSS */');
-    legacy_integration_pipeline($builder)->runThrough($project);
+    // The queued fixture responses script a cinematic-safe-zone build, but
+    // the cover+compact constraint pool now holds two recipes (BIGR-775
+    // downgraded layered-poster to compact) and the stable identifier is a
+    // uniqid temp path — pin the recipe so selection stays deterministic.
+    putenv('HERO_RECIPE=cinematic-safe-zone');
+    try {
+        legacy_integration_pipeline($builder)->runThrough($project);
+    } finally {
+        putenv('HERO_RECIPE');
+    }
 
     $problems = ThemeValidator::validate($project);
     assert_eq([], $problems, 'theme should validate; problems: ' . implode('; ', $problems));
@@ -468,7 +473,7 @@ test('pipeline step order is correct', function () {
     $ids = legacy_integration_pipeline(make_integration_builder(new FakeLlm(), $tmp))->stepIds();
     assert_eq([
         'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
-        'theme-json+page-plan', 'sections', 'section-rhythm',
+        'theme-json+page-plan', 'sections', 'section-rhythm', 'copy-dedupe',
         'collect-images', 'normalize-layout', 'header-hero', 'contrast-fix', 'motion-sanity', 'fix-blocks', 'assemble-pages', 'page-styles', 'custom-motion',
         'bundle-fonts', 'fonts-php', 'finalize-theme', 'validate-theme',
     ], $ids);

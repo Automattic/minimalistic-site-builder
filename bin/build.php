@@ -3,12 +3,9 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\BlockFixers;
 use Automattic\SiteBuild\BuildReport;
-use Automattic\SiteBuild\ModelConfig;
-use Automattic\SiteBuild\Package;
-use Automattic\SiteBuild\SiteBuilder;
+use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\Steps\CoverContrastStep;
-use Automattic\SiteBuild\Steps\GenerateImagesStep;
 
 /**
  * Build a site from a prompt.
@@ -20,8 +17,10 @@ use Automattic\SiteBuild\Steps\GenerateImagesStep;
  * env overrides still win. Unset falls back to LLM_PROVIDER / the config default.
  *
  * Seeds projects/<slug>/meta.json with the prompt, then runs the pipeline,
- * printing per-step timing and token spend and writing the full run overview to
- * projects/<slug>/logs/project.log. Without --slug the folder gets a short
+ * printing per-step timing, token spend and configured model(s) as each step
+ * lands, then a consolidated report at the end. The same overview is written to
+ * projects/<slug>/logs/project.log, and the run's machine-readable accounting
+ * to projects/<slug>/build-stats.json. Without --slug the folder gets a short
  * arbitrary name (e.g. "amber-otter"); pass --slug to target a fixed directory
  * and reuse it across re-runs.
  *
@@ -62,99 +61,76 @@ use Automattic\SiteBuild\Steps\GenerateImagesStep;
 
 require_once __DIR__ . '/../src/bootstrap.php';
 
-$args = array_slice($argv, 1);
-$prompt = null;
-$slug = null;
-$until = null;
-$from = null;
-$withImages = false;
-$multiPage = false;
-$pagesArg = null;
-$port = null;
-$serve = true;
-$provider = null;
-$writingDirection = null;
-$heroCanvas = null;
-$heroMediaModesArg = null;
-$maxHeroImagesArg = null;
-$heroCopyCapacity = null;
-foreach ($args as $a) {
-    if (str_starts_with($a, '--slug=')) {
-        $slug = substr($a, 7);
-    } elseif (str_starts_with($a, '--provider=')) {
-        $provider = substr($a, 11);
-    } elseif (str_starts_with($a, '--until=')) {
-        $until = substr($a, 8);
-    } elseif (str_starts_with($a, '--from=')) {
-        $from = substr($a, 7);
-    } elseif (str_starts_with($a, '--pages=')) {
-        $pagesArg = substr($a, 8);
-    } elseif (str_starts_with($a, '--port=')) {
-        $port = (int) substr($a, 7);
-    } elseif (str_starts_with($a, '--writing-direction=')) {
-        $writingDirection = substr($a, 20);
-    } elseif (str_starts_with($a, '--hero-canvas=')) {
-        $heroCanvas = substr($a, 14);
-    } elseif (str_starts_with($a, '--hero-media-modes=')) {
-        $heroMediaModesArg = substr($a, 19);
-    } elseif (str_starts_with($a, '--max-hero-images=')) {
-        $maxHeroImagesArg = substr($a, 18);
-    } elseif (str_starts_with($a, '--hero-copy-capacity=')) {
-        $heroCopyCapacity = substr($a, 21);
-    } elseif ($a === '--no-serve') {
-        $serve = false;
-    } elseif ($a === '--with-images') {
-        $withImages = true;
-    } elseif ($a === '--multi-page') {
-        $multiPage = true;
-    } elseif ($prompt === null && !str_starts_with($a, '--')) {
-        $prompt = $a;
-    } else {
-        fwrite(STDERR, "Unknown argument: {$a}\n");
-        fwrite(STDERR, "Usage: php bin/build.php \"<prompt>\" [--provider=anthropic|openai|xai|openrouter] [--slug=...] [--from=step-id] [--until=step-id] [--multi-page] [--pages=\"Home, Menu, About\"] [--with-images] [--port=9400] [--no-serve]\n");
-        exit(1);
-    }
+$args = parse_cli_args($argv, [
+    '--slug'               => 'value',
+    '--provider'           => 'value',
+    '--until'              => 'value',
+    '--from'               => 'value',
+    '--pages'              => 'value',
+    '--port'               => 'value',
+    '--writing-direction'  => 'value',
+    '--hero-canvas'        => 'value',
+    '--hero-media-modes'   => 'value',
+    '--max-hero-images'    => 'value',
+    '--hero-copy-capacity' => 'value',
+    '--with-images'        => 'bool',
+    '--multi-page'         => 'bool',
+    '--serve'              => 'toggle',
+], maxPositionals: 1);
+if ($args['unknown'] !== null) {
+    Narrator::write("Unknown argument: {$args['unknown']}\n");
+    usage();
 }
+$flags = $args['flags'];
+$prompt = $args['positionals'][0] ?? null;
+$slug = $flags['--slug'] ?? null;
+$until = $flags['--until'] ?? null;
+$from = $flags['--from'] ?? null;
+$withImages = $flags['--with-images'] ?? false;
+$multiPage = $flags['--multi-page'] ?? false;
+$pagesArg = $flags['--pages'] ?? null;
+$port = isset($flags['--port']) ? (int) $flags['--port'] : null;
+$serve = $flags['--serve'] ?? true;
+$provider = $flags['--provider'] ?? null;
+$writingDirection = $flags['--writing-direction'] ?? null;
+$heroCanvas = $flags['--hero-canvas'] ?? null;
+$heroMediaModesArg = $flags['--hero-media-modes'] ?? null;
+$maxHeroImagesArg = $flags['--max-hero-images'] ?? null;
+$heroCopyCapacity = $flags['--hero-copy-capacity'] ?? null;
 
 // --from resumes an existing build's deterministic tail against on-disk
 // artifacts, so the prompt is optional (the design already exists); every
 // other invocation still requires it.
 if ($from === null && ($prompt === null || trim($prompt) === '')) {
-    fwrite(STDERR, "Usage: php bin/build.php \"<prompt>\" [--provider=anthropic|openai|xai|openrouter] [--slug=...] [--from=step-id] [--until=step-id] [--multi-page] [--pages=\"Home, Menu, About\"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=cover-image,foreground-image] [--max-hero-images=1..2] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--port=9400] [--no-serve]\n");
-    exit(1);
+    usage();
 }
 
 // --from resumes a materialized project in place, so it needs the existing
 // slug to locate that directory (createProject would otherwise pick a random
 // one, and there would be no design/*.html to resume from).
 if ($from !== null && ($slug === null || trim($slug) === '')) {
-    fwrite(STDERR, "--from requires --slug=<existing project> to resume its on-disk artifacts.\n");
+    Narrator::write("--from requires --slug=<existing project> to resume its on-disk artifacts.\n");
     exit(1);
 }
 
-// --pages fixes WHICH pages get built; --multi-page owns WHETHER inner pages
-// exist at all, so a list without the flag is a contradiction — fail loud
-// rather than silently ignore either.
-if ($pagesArg !== null && !$multiPage) {
-    fwrite(STDERR, "--pages requires --multi-page.\n");
+try {
+    require_multi_page_for_pages($pagesArg, $multiPage);
+    $pages = $pagesArg === null ? [] : split_csv_flag($pagesArg);
+} catch (InvalidArgumentException $e) {
+    Narrator::write($e->getMessage() . "\n");
     exit(1);
 }
-$pages = $pagesArg === null ? []
-    : array_values(array_filter(array_map('trim', explode(',', $pagesArg)), static fn (string $t): bool => $t !== ''));
 
 $designConstraints = [];
 if ($heroCanvas !== null) {
     $designConstraints['hero_canvas'] = $heroCanvas;
 }
 if ($heroMediaModesArg !== null) {
-    $designConstraints['allowed_hero_media_modes'] = array_values(array_filter(
-        array_map('trim', explode(',', $heroMediaModesArg)),
-        static fn (string $mode): bool => $mode !== '',
-    ));
+    $designConstraints['allowed_hero_media_modes'] = split_csv_flag($heroMediaModesArg);
 }
 if ($maxHeroImagesArg !== null) {
     if (preg_match('/^\d+$/', $maxHeroImagesArg) !== 1) {
-        fwrite(STDERR, "--max-hero-images must be an integer from 1 through 2.\n");
+        Narrator::write("--max-hero-images must be an integer from 1 through 2.\n");
         exit(1);
     }
     $designConstraints['max_hero_images'] = (int) $maxHeroImagesArg;
@@ -165,33 +141,30 @@ if ($heroCopyCapacity !== null) {
 
 // --provider selects the model set for the whole run. It just sets LLM_PROVIDER
 // (which make_llm() and StepDefaults both read), so per-step LLM_MODEL_<STEP>
-// overrides still apply on top. Validate here for a friendly early error.
+// overrides still apply on top. Keep this after the design-constraint checks so
+// a command with multiple invalid flags reports the same first error as before.
+try {
+    $provider = normalize_provider($provider);
+} catch (InvalidArgumentException $e) {
+    Narrator::write($e->getMessage() . "\n");
+    exit(1);
+}
 if ($provider !== null) {
-    $provider = strtolower(trim($provider));
-    if (!ModelConfig::hasProvider($provider)) {
-        fwrite(STDERR, "Unknown --provider '{$provider}'. Known: "
-            . implode(', ', ModelConfig::providerNames()) . "\n");
-        exit(1);
-    }
     putenv("LLM_PROVIDER={$provider}");
-    $_ENV['LLM_PROVIDER'] = $provider;
 }
 
 $llm = make_llm();
-$builder = new SiteBuilder(
-    llm: $llm,
-    promptsDir: Package::promptsDir(),
-    outputRoot: repo_path('projects'),
-    blockFixer: BlockFixers::default(),
-    models: step_models(),
-);
+$builder = make_site_builder($llm);
 $pipeline = $builder->pipeline();
+
+// step id => model, for the model column (see BuildReport::modelLabel).
+$models = step_models();
 
 // Validate --until BEFORE creating the project, so an unknown id fails loud
 // (instead of silently running the whole build) without leaving a stray project
 // directory behind. Group members are valid stops too (see Pipeline::stopIds).
 if ($until !== null && !in_array($until, $pipeline->stopIds(), true)) {
-    fwrite(STDERR, "Unknown --until step '{$until}'. Valid steps:\n  "
+    Narrator::write("Unknown --until step '{$until}'. Valid steps:\n  "
         . implode("\n  ", $pipeline->stopIds()) . "\n");
     exit(1);
 }
@@ -199,7 +172,7 @@ if ($until !== null && !in_array($until, $pipeline->stopIds(), true)) {
 // Validate --from the same way (same id list, group members included), so an
 // unknown resume point fails loud instead of silently running everything.
 if ($from !== null && !in_array($from, $pipeline->stopIds(), true)) {
-    fwrite(STDERR, "Unknown --from step '{$from}'. Valid steps:\n  "
+    Narrator::write("Unknown --from step '{$from}'. Valid steps:\n  "
         . implode("\n  ", $pipeline->stopIds()) . "\n");
     exit(1);
 }
@@ -212,7 +185,7 @@ if ($from !== null) {
     try {
         $project = $builder->store()->open($slug);
     } catch (RuntimeException $e) {
-        fwrite(STDERR, "--from: {$e->getMessage()}\n");
+        Narrator::write("--from: {$e->getMessage()}\n");
         exit(1);
     }
     // The prompt argument is ignored on resume; the report reuses the recorded one.
@@ -233,61 +206,79 @@ if ($from !== null) {
             writingDirection: $writingDirection,
         );
     } catch (InvalidArgumentException $e) {
-        fwrite(STDERR, $e->getMessage() . "\n");
+        Narrator::write($e->getMessage() . "\n");
         exit(1);
     }
 }
 
 echo ($from !== null ? "Resuming '{$project->slug()}' from {$from}\n" : "Building '{$project->slug()}'\n");
+echo "  prompt: {$prompt}\n\n";
 
 $report = new BuildReport($prompt, $project->slug(), $project->path(), gmdate('c'));
+echo BuildReport::formatHeader(), "\n";
 
-// Attribute token spend to each step by diffing the client's cumulative usage
-// totals before and after it ran (the reporter fires once a step completes).
+// Announce a step before it runs, flushed immediately so it appears in real
+// time — a long step (landing-page, image generation) never leaves the build
+// looking frozen.
+$announce = static function (Step $step): void {
+    echo BuildReport::formatStartRow($step->id(), $step->label()), "\n";
+    flush();
+};
+
+// Record one completed step from the client's cumulative totals. Reusing this
+// for both pipeline and opt-in steps keeps one usage cursor, so a conditional
+// image-prompt repair is attributed instead of disappearing from the report.
+$recordCompleted = static function (Step $step, float $secs) use ($llm, $models, $report): void {
+    $usage = $llm->usageTotals();
+    $configuredModels = BuildReport::modelLabel($step->id(), $models);
+    $row = $report->recordStep(
+        $step->id(),
+        $secs,
+        $usage['input_tokens'],
+        $usage['output_tokens'],
+        $configuredModels,
+    );
+    echo BuildReport::formatRow($row['id'], $row['secs'], $row['in'], $row['out'], $row['model']), "\n";
+};
+
+// Run a step that lives OUTSIDE the pipeline (the opt-in image pair below):
+// announce it, time it, and record it through the same usage path as the graph.
+$runExtraStep = static function (Step $step) use ($announce, $project, $recordCompleted): void {
+    $announce($step);
+    $start = microtime(true);
+    $step->run($project);
+    $secs = microtime(true) - $start;
+    $recordCompleted($step, $secs);
+};
+
 // The onStart callback tracks the step being run, so a failure names the step
 // that threw — the per-step rows only print on completion, so without it the
 // error would appear under the LAST COMPLETED step and point at the wrong one.
-$prevIn = 0;
-$prevOut = 0;
 $currentStep = null;
+$wallStart = microtime(true);
 try {
-    $pipeline->runThrough($project, $until, function (Step $step, float $secs) use (&$report, &$prevIn, &$prevOut, $llm) {
-        $u = $llm->usageTotals();
-        $inDelta = $u['input_tokens'] - $prevIn;
-        $outDelta = $u['output_tokens'] - $prevOut;
-        $prevIn = $u['input_tokens'];
-        $prevOut = $u['output_tokens'];
-        $report->addStep($step->id(), $secs, $inDelta, $outDelta);
-        echo BuildReport::formatRow($step->id(), $secs, $inDelta, $outDelta), "\n";
-    }, function (Step $step) use (&$currentStep): void {
+    $pipeline->runThrough($project, $until, function (Step $step, float $secs) use ($recordCompleted) {
+        $recordCompleted($step, $secs);
+    }, function (Step $step) use (&$currentStep, $announce): void {
         $currentStep = $step->id();
+        $announce($step);
     }, $from);
 } catch (Throwable $e) {
-    fwrite(STDERR, '✗ FAILED' . ($currentStep !== null ? " in step {$currentStep}" : '') . ": {$e->getMessage()}\n");
+    Narrator::write('✗ FAILED' . ($currentStep !== null ? " in step {$currentStep}" : '') . ": {$e->getMessage()}\n");
     exit(1);
 }
 
 // Image generation is opt-in: slow and networked, so it runs only on request
 // and only for a full build (skipped when --until stops the pipeline early).
 if ($withImages && $until === null) {
-    // The Llm rewrites safety-filtered prompts (small tier) and regenerates.
-    $step = new GenerateImagesStep(make_image_client(), $llm, step_models()['image-prompt-repair'] ?? null);
-    $start = microtime(true);
-    $step->run($project);
-    $secs = microtime(true) - $start;
-    // Image generation uses the Vertex proxy, not Claude, so it spends no LLM
-    // tokens; the row records its wall time, and the tally comes from images.json.
-    $report->addStep($step->id(), $secs, 0, 0);
-    echo BuildReport::formatRow($step->id(), $secs, 0, 0), "\n";
+    // Image generation goes through the Vertex proxy, not the LLM — its only
+    // model use is the Llm rewriting safety-filtered prompts (small tier) and
+    // regenerating. The tally comes from images.json below.
+    $runExtraStep(make_generate_images_step($llm));
 
     // Now that the real pixels exist, re-check cover text against the actual
     // (dimmed) images and raise dimRatio / flip text colors where needed.
-    $step = new CoverContrastStep(BlockFixers::default());
-    $start = microtime(true);
-    $step->run($project);
-    $secs = microtime(true) - $start;
-    $report->addStep($step->id(), $secs, 0, 0);
-    echo BuildReport::formatRow($step->id(), $secs, 0, 0), "\n";
+    $runExtraStep(new CoverContrastStep(BlockFixers::default()));
 
     $specs = $project->exists('images.json') ? $project->readJson('images.json') : [];
     $generated = 0;
@@ -302,7 +293,10 @@ if ($withImages && $until === null) {
     $report->setImages($generated, $failed, count($specs));
 }
 
-$report->setRequestCount($llm->usageTotals()['requests']);
+$usage = $llm->usageTotals();
+$report->setLlmTotals($usage['requests'], $usage['input_tokens'], $usage['output_tokens']);
+$report->setWallSeconds(microtime(true) - $wallStart);
+$report->setBuiltAt(gmdate('c'));
 
 // Surface the defects the build delivered through (warnings.json) so a
 // warned build never looks identical to a clean one on the console. A corrupt
@@ -312,17 +306,16 @@ $report->setWarnings(
     $project->exists('warnings.json') ? $project->readJson('warnings.json') : []
 );
 
-echo $report->totalLine(), "\n";
-if (($imagesLine = $report->imagesLine()) !== null) {
-    echo $imagesLine, "\n";
-}
-if (($warningsLine = $report->warningsLine()) !== null) {
-    echo $warningsLine, "\n";
-}
+// One consolidated breakdown of where the time, tokens and models went, so the
+// numbers don't have to be reassembled from the rows that scrolled past. The
+// very same bytes are persisted next to the per-call LLM transcripts.
+$overview = $report->render();
+echo "\n", $overview;
+$project->writeText('logs/project.log', $overview);
 
-// Persist the full run overview alongside the per-call LLM transcripts, so a
-// finished project carries its own step-by-step timing/token/image accounting.
-$project->writeText('logs/project.log', $report->render());
+// The same run as a machine-readable record, for comparing cost and model mix
+// across builds after the fact.
+$project->writeJson('build-stats.json', $report->stats(default_llm_model(), $models));
 
 echo "Output: {$project->path()}\n";
 
@@ -336,4 +329,11 @@ if ($serve && $until === null) {
     }
     passthru($cmd, $exit);
     exit($exit);
+}
+
+/** The one invocation summary, shared by every path that rejects the line. */
+function usage(): never
+{
+    Narrator::write("Usage: php bin/build.php \"<prompt>\" [--provider=anthropic|openai|xai|openrouter] [--slug=...] [--from=step-id] [--until=step-id] [--multi-page] [--pages=\"Home, Menu, About\"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=cover-image,foreground-image] [--max-hero-images=1..2] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--port=9400] [--no-serve]\n");
+    exit(1);
 }

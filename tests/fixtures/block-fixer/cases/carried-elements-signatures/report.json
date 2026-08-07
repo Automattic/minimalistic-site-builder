@@ -3,7 +3,7 @@
   "totals": {
     "N": 1,
     "M": 1,
-    "D": 2,
+    "D": 1,
     "T": 1
   },
   "files": [
@@ -15,13 +15,7 @@
           "kind": "style",
           "value": "color:var(--wp--preset--color--base)",
           "lost": 1,
-          "line": "DROPPED style `color:var(--wp--preset--color--base)` \u2014 not mirrored in the block comment JSON attributes"
-        },
-        {
-          "kind": "class",
-          "value": "has-text-align-center",
-          "lost": 1,
-          "line": "DROPPED class `has-text-align-center` \u2014 not mirrored in the block comment JSON attributes"
+          "line": "DROPPED style `color:var(--wp--preset--color--base)` — not mirrored in the block comment JSON attributes"
         }
       ]
     }

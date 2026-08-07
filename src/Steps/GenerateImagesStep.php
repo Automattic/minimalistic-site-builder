@@ -3,13 +3,13 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
-use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\ImageClient;
 use Automattic\SiteBuild\ImageLogger;
 use Automattic\SiteBuild\GeminiImage;
 use Automattic\SiteBuild\ImagePromptComposer;
 use Automattic\SiteBuild\ImageTransparency;
 use Automattic\SiteBuild\Llm;
+use Automattic\SiteBuild\MediaReferenceRemoval;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\Project;
@@ -17,6 +17,7 @@ use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\ThemeValidator;
+use Automattic\SiteBuild\Warnings;
 
 /**
  * Step (opt-in, networked): generate the images collected by CollectImagesStep
@@ -45,6 +46,13 @@ final class GenerateImagesStep implements Step
 {
     /** Written only once this step has completed all generation and rewrites. */
     public const COMPLETION_ARTIFACT = 'images.generated.json';
+
+    /** Web-artifact wording is a design-comp cue, not subject matter. */
+    private const WEB_ARTIFACT_CONTEXT = '/\b(?:web[- ]?sites?|web[- ]?pages?|home[- ]?pages?'
+        . '|landing[- ]?(?:pages?|sites?)|(?:one|single)[- ]page\s+sites?'
+        . '|portfolios?(?:\s+(?:web[- ]?sites?|sites?))?|official\s+sites?'
+        . '|sitios?\s+(?:web\s+)?oficial(?:es)?|sitios?\s+web'
+        . '|páginas?\s+(?:web|de\s+inicio|de\s+aterrizaje)|sites?\s+(?:web|oficial(?:es)?))\b/iu';
 
     /**
      * @param ?Llm    $llm         used only to rewrite safety-filtered prompts;
@@ -123,8 +131,9 @@ final class GenerateImagesStep implements Step
         // this step directly, logs too.
         ImageLogger::setDir($project->logPath('images'));
 
-        // Site-wide context (name/topic/description) prepended to every image
-        // prompt so the model grounds each image in what the site is about.
+        // Site-wide subject matter (topic/area/description — never identity;
+        // see siteContext) woven into every image prompt so the model grounds
+        // each image in what the site is about.
         $siteContext = self::siteContext(
             $project->exists('siteSpec.json') ? $project->readJson('siteSpec.json') : []
         );
@@ -267,44 +276,71 @@ final class GenerateImagesStep implements Step
     }
 
     /**
-     * A compact, factual site-context phrase built from the site spec's name,
-     * topic and description, fed into every image prompt so the model knows
-     * what the site is about. Returns '' when the spec carries none of those
-     * facts. Public so tools (e.g. the image-prompt debugger) can reproduce
-     * the exact context the step feeds into ImagePromptComposer.
+     * A compact identity-free subject-matter sentence selected from the site
+     * spec, fed into every image prompt so the model grounds each image in what
+     * the site is about. Public so tools (e.g. the image-prompt debugger) can
+     * reproduce the exact context the step feeds into ImagePromptComposer.
      *
-     * Shaped to read after "…on" in the composer's guidance sentence ("This
-     * image is used as X on {siteContext}"), so it leads with a noun phrase:
-     * `the website “Name”` (or `a website` when the spec has no name),
-     * followed by the description as its own sentence. The topic is included
-     * only when there is NO description — a description restates what the
-     * site is about, and repeating the topic next to it reads like a stutter.
+     * The site NAME is deliberately never included (BIGR-768): telling a
+     * typography-capable image model the site is called “X” is exactly what a
+     * painted-in fake wordmark stands in for — the model typesets a title
+     * block for the name it was told about, in the very region reserved for
+     * the real HTML copy. Only subject-matter steering survives. A canonical
+     * description may itself repeat the site/person name or call the artifact
+     * a website, so merely omitting the `name` field does not enforce that
+     * boundary. Candidates are accepted whole or rejected whole: the concise
+     * topic and area facts take priority, with description as a fallback. This
+     * avoids broken prose from deleting an identity in place and avoids
+     * preferring a description of the web artifact over its actual subject.
+     * Returns '' when every candidate is absent or unsafe.
      *
      * @param array<mixed> $spec
      */
     public static function siteContext(array $spec): string
     {
-        $name        = trim((string) ($spec['name'] ?? ''));
-        $topic       = trim((string) ($spec['topic'] ?? ''));
-        $description = trim((string) ($spec['description'] ?? ''));
-
-        if ($name === '' && $topic === '' && $description === '') {
-            return '';
+        $identities = [
+            trim((string) ($spec['name'] ?? '')),
+            trim((string) ($spec['persona_name'] ?? '')),
+            trim((string) ($spec['email_domain'] ?? '')),
+        ];
+        foreach (['topic', 'area', 'description'] as $field) {
+            $candidate = trim((string) ($spec[$field] ?? ''));
+            if ($candidate === '' || !self::safeSubjectMatter($candidate, $identities)) {
+                continue;
+            }
+            if ($field !== 'description') {
+                $candidate = "The subject matter is {$candidate}";
+            }
+            // Keep this explicit for PHP 8.1 builds linked against PCRE2
+            // before 10.40, where the Unicode STerm property is unavailable.
+            return preg_match('/[.!?…。！？｡؟۔।॥]$/u', $candidate)
+                ? $candidate
+                : $candidate . '.';
         }
+        return '';
+    }
 
-        $lead = $name !== '' ? "the website “{$name}”" : 'a website';
-        if ($topic !== '' && $description === '') {
-            $lead .= ($name !== '' ? ', about ' : ' about ') . $topic;
+    /**
+     * Reject one complete prose candidate instead of deleting identity words
+     * and risking grammatical shards such as "is a bakery".
+     *
+     * @param list<string> $identities
+     */
+    private static function safeSubjectMatter(string $candidate, array $identities): bool
+    {
+        foreach ($identities as $identity) {
+            if ($identity === '') {
+                continue;
+            }
+            // Word boundaries do not exist between an identity and particles
+            // in scripts such as Japanese. This is optional steering, so a
+            // conservative literal substring check is preferable to leaking
+            // even one identity-bearing candidate.
+            if (mb_stripos($candidate, $identity, 0, 'UTF-8') !== false) {
+                return false;
+            }
         }
-
-        // The composer splices this phrase into its guidance sentence relying
-        // on it being terminally punctuated; the spec doesn't guarantee that
-        // for the description, so close it here.
-        if ($description !== '' && !preg_match('/[.!?…]$/u', $description)) {
-            $description .= '.';
-        }
-
-        return $description === '' ? "{$lead}." : "{$lead}. {$description}";
+        return preg_match(self::WEB_ARTIFACT_CONTEXT, $candidate) !== 1;
     }
 
     /**
@@ -638,8 +674,9 @@ final class GenerateImagesStep implements Step
             $content = $project->readText($relative);
             $updated = $content;
             foreach (array_keys($sources) as $source) {
-                $candidate = self::removeSourceFromMarkup($updated, $source);
-                if (self::firstMediaSourcePosition($candidate, $source) !== null) {
+                $removal = MediaReferenceRemoval::removeSourceWithReport($updated, $source);
+                $candidate = $removal['markup'];
+                if (MediaReferenceRemoval::position($candidate, $source) !== null) {
                     // The source sits in malformed/unclosed markup without a
                     // safe block span. Keep this source's pre-cleanup bytes and
                     // report the residual instead of half-mutating the file.
@@ -650,6 +687,13 @@ final class GenerateImagesStep implements Step
                     continue;
                 }
                 $updated = $candidate;
+                foreach ($removal['removedCaptions'] as $caption) {
+                    $project->addWarnings($this->id(), [
+                        "{$relative}: block wp:paragraph at byte {$caption['start']}; authored caption "
+                        . Warnings::value($caption['text']) . "; delivered removed; disposition: caption "
+                        . "removed with unavailable media source {$source} instead of shipping an orphaned description",
+                    ]);
+                }
             }
             if ($updated !== $content) {
                 $project->writeText($relative, $updated);
@@ -657,152 +701,8 @@ final class GenerateImagesStep implements Step
         }
     }
 
-    /** Remove every safely isolated occurrence of one failed asset source. */
-    private static function removeSourceFromMarkup(string $markup, string $source): string
-    {
-        while (($position = self::firstMediaSourcePosition($markup, $source)) !== null) {
-            $document = BlockMarkup::parse($markup);
-            $best = null;
-            foreach ($document->indices() as $index) {
-                if (!in_array($document->name($index), ['image', 'cover', 'media-text'], true)) {
-                    continue;
-                }
-                $start = $document->openingOffset($index);
-                $end = $document->endOffset($index);
-                if ($end === null || $position < $start || $position >= $end) {
-                    continue;
-                }
-                $length = $end - $start;
-                if ($best === null || $length < $best['length']) {
-                    $best = ['index' => $index, 'start' => $start, 'length' => $length];
-                }
-            }
-            if ($best !== null) {
-                $name = $document->name($best['index']);
-                if ($name === 'cover') {
-                    // A cover's image is only one visual layer. Strip that
-                    // layer while retaining the cover wrapper and every byte
-                    // of its headline, copy, buttons, and freeform content.
-                    $coverMarkup = substr($markup, $best['start'], $best['length']);
-                    $beforeCoverCleanup = $coverMarkup;
-                    $coverDocument = BlockMarkup::parse($coverMarkup);
-                    $coverIndex = $coverDocument->topLevel();
-                    if ($coverIndex === null || $coverDocument->name($coverIndex) !== 'cover') {
-                        break;
-                    }
-                    $attrs = $coverDocument->attrs($coverIndex);
-                    if (is_array($attrs)) {
-                        $changedAttrs = false;
-                        foreach (['url', 'src'] as $key) {
-                            if (($attrs[$key] ?? null) === $source) {
-                                unset($attrs[$key]);
-                                $changedAttrs = true;
-                            }
-                        }
-                        if ($changedAttrs) {
-                            unset($attrs['id'], $attrs['focalPoint']);
-                            $coverDocument->setAttrs($coverIndex, $attrs);
-                            $coverMarkup = $coverDocument->render();
-                        }
-                    }
-                    $coverMarkup = self::removeMatchingImageTags($coverMarkup, $source);
-                    $quotedSource = preg_quote($source, '~');
-                    $coverMarkup = (string) preg_replace(
-                        '~background-image\s*:\s*url\(\s*(["\']?)' . $quotedSource . '\1\s*\)\s*;?~i',
-                        '',
-                        $coverMarkup,
-                    );
-                    if ($coverMarkup === $beforeCoverCleanup) {
-                        break;
-                    }
-                    $markup = substr_replace(
-                        $markup,
-                        $coverMarkup,
-                        $best['start'],
-                        $best['length'],
-                    );
-                    continue;
-                }
 
-                $replacement = '';
-                if ($name === 'media-text') {
-                    // Unwrap media-text and retain every authored inner block
-                    // byte-for-byte; keeping its grid with no media would leave
-                    // a large empty column beside the surviving copy.
-                    foreach ($document->children($best['index']) as $child) {
-                        $childStart = $document->openingOffset($child);
-                        $childEnd = $document->endOffset($child);
-                        if ($childEnd === null) {
-                            $replacement = null;
-                            break;
-                        }
-                        $replacement .= substr($markup, $childStart, $childEnd - $childStart);
-                    }
-                }
-                if ($replacement === null) {
-                    break;
-                }
-                $markup = substr_replace(
-                    $markup,
-                    $replacement,
-                    $best['start'],
-                    $best['length'],
-                );
-                continue;
-            }
 
-            // Recovered placeholders can be bare HTML with no Gutenberg block.
-            // Remove only an img whose src attribute is this exact source.
-            $withoutImage = self::removeMatchingImageTags($markup, $source);
-            if ($withoutImage === $markup) {
-                break; // unsafe/unrecognized context: preserve the file bytes
-            }
-            $markup = $withoutImage;
-        }
-        return $markup;
-    }
-
-    /** Remove bare/rendered img tags whose src is this exact failed source. */
-    private static function removeMatchingImageTags(string $markup, string $source): string
-    {
-        return (string) preg_replace_callback(
-            '/<img\b[^>]*>/is',
-            static function (array $match) use ($source): string {
-                if (!preg_match(
-                    '/\bsrc\s*=\s*(?:(["\'])' . preg_quote($source, '/') . '\1|'
-                    . preg_quote($source, '/') . '(?=\s|\/?>))/i',
-                    $match[0],
-                )) {
-                    return $match[0];
-                }
-                return '';
-            },
-            $markup,
-        );
-    }
-
-    /** Byte position of an exact block-JSON url/src or HTML src value. */
-    private static function firstMediaSourcePosition(string $markup, string $source): ?int
-    {
-        $quoted = preg_quote($source, '/');
-        $patterns = [
-            '/"(?:url|src)"\s*:\s*"' . $quoted . '"/i',
-            '/\bsrc\s*=\s*(?:(["\'])' . $quoted . '\1|' . $quoted . '(?=\s|\/?>))/i',
-        ];
-        $positions = [];
-        foreach ($patterns as $pattern) {
-            if (!preg_match_all($pattern, $markup, $matches, PREG_OFFSET_CAPTURE)) {
-                continue;
-            }
-            foreach ($matches[0] as [$match, $offset]) {
-                $within = strpos($match, $source);
-                if ($within !== false) {
-                    $positions[] = $offset + $within;
-                }
-            }
-        }
-        return $positions === [] ? null : min($positions);
-    }
 
     /** Root-relative URL the theme's assets are served at in Playground. */
     private function servedUrl(Project $project, string $filename): string

@@ -965,3 +965,35 @@ test('layout fixer does not mirror-copy over a declared attribute or into non-co
     assert_eq([], $r['notes']);
     assert_eq($markup, $r['markup']);
 });
+
+test('header flex rows without alignment are promoted to the wide band (BIGR-778)', function () {
+    $header = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:group {"layout":{"type":"flex","flexWrap":"nowrap","justifyContent":"space-between"}} -->'
+        . '<div class="wp-block-group"><!-- wp:site-title /--><!-- wp:navigation /--></div>'
+        . '<!-- /wp:group --></div><!-- /wp:group -->';
+
+    $fixed = LayoutFixer::fix($header, LayoutFixer::ROLE_HEADER);
+    assert_contains('"align":"wide"', $fixed['markup']);
+    assert_contains('wide band', implode(' ', $fixed['notes']));
+
+    // Idempotent, and an explicit alignment is authorial intent.
+    $again = LayoutFixer::fix($fixed['markup'], LayoutFixer::ROLE_HEADER);
+    assert_eq([], array_filter($again['notes'], static fn (string $n): bool => str_contains($n, 'wide band')));
+    $full = str_replace(
+        '{"layout":{"type":"flex"',
+        '{"align":"full","layout":{"type":"flex"',
+        $header,
+    );
+    $keptFull = LayoutFixer::fix($full, LayoutFixer::ROLE_HEADER);
+    assert_true(!str_contains($keptFull['markup'], '"align":"wide"'));
+
+    // Non-flex children and non-header roles are untouched.
+    $stack = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group"><!-- wp:site-title /--></div>'
+        . '<!-- /wp:group --></div><!-- /wp:group -->';
+    assert_true(!str_contains(LayoutFixer::fix($stack, LayoutFixer::ROLE_HEADER)['markup'], '"align":"wide"'));
+    assert_true(!str_contains(LayoutFixer::fix($header, LayoutFixer::ROLE_SECTION)['markup'], '"align":"wide"'));
+});

@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\GeminiImage;
+use Automattic\SiteBuild\MediaReferenceRemoval;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Step;
@@ -92,9 +93,7 @@ final class CollectImagesStep implements Step
         foreach ($this->themeHtmlFiles($project) as $rel) {
             $content = $project->readText('theme/' . $rel);
             $parsed = self::parseAndNormalize($content);
-            if ($parsed['content'] !== $content) {
-                $project->writeText('theme/' . $rel, $parsed['content']);
-            }
+            $updated = $parsed['content'];
 
             // parseAndNormalize returns four-field canonical entries first,
             // followed by recovery fallbacks. Preserve that parser provenance:
@@ -111,11 +110,15 @@ final class CollectImagesStep implements Step
                         || $image['style'] !== ''
                         || $image['aspectRatio'] !== 'landscape'
                     ),
+                    'assigned' => false,
                 ];
             }
             if ($this->htmlFirst) {
                 foreach (self::parseAssignedImages($parsed['content'], $rel) as $image) {
-                    $images[] = ['image' => $image, 'canonical' => false];
+                    // An assigned row is a re-detection of an <img> that already
+                    // carries a theme asset path, so it is never an independent
+                    // placeholder and must never trigger a collision rename.
+                    $images[] = ['image' => $image, 'canonical' => false, 'assigned' => true];
                 }
             }
             foreach ($images as $entry) {
@@ -136,32 +139,165 @@ final class CollectImagesStep implements Step
                 }
                 $filename = $img['filename'];
                 if (isset($byFilename[$filename])) {
-                    if (!in_array($rel, $byFilename[$filename]['sources'], true)) {
-                        $byFilename[$filename]['sources'][] = $rel;
-                    }
-                    if ($entry['canonical'] && !$canonicalByFilename[$filename]) {
-                        foreach (['subject', 'pageContext', 'style', 'aspectRatio'] as $field) {
-                            $byFilename[$filename][$field] = $img[$field];
+                    $sameSubject = self::normalizeSubject((string) $img['subject'])
+                        === self::normalizeSubject((string) $byFilename[$filename]['subject']);
+                    // A canonical AI_IMAGE occurrence upgrades a spec first seen
+                    // as a non-canonical fallback for the same filename, so the
+                    // richer four-field description wins even when the fallback's
+                    // provisional subject differed.
+                    $upgradesFallback = $entry['canonical'] && !$canonicalByFilename[$filename];
+                    if ($sameSubject || $entry['assigned'] || $upgradesFallback) {
+                        // The same asset genuinely shared, a re-detected assigned
+                        // duplicate of a placeholder already collected here, or a
+                        // canonical row upgrading a stored fallback — record the
+                        // source once and never split.
+                        if (!in_array($rel, $byFilename[$filename]['sources'], true)) {
+                            $byFilename[$filename]['sources'][] = $rel;
                         }
-                        $canonicalByFilename[$filename] = true;
+                        if ($upgradesFallback) {
+                            foreach (['subject', 'pageContext', 'style', 'aspectRatio'] as $field) {
+                                $byFilename[$filename][$field] = $img[$field];
+                            }
+                            $canonicalByFilename[$filename] = true;
+                        }
+                        if ($cappedForFooter) {
+                            // A shared asset must use the footer-safe shape even
+                            // if an earlier non-footer source (or a canonical row
+                            // above) set a portrait ratio, so the footer band
+                            // can't be stretched.
+                            $byFilename[$filename]['aspectRatio'] = 'square';
+                        }
+                        continue;
                     }
-                    if ($cappedForFooter) {
-                        // A shared asset must use the footer-safe shape even if an
-                        // earlier non-footer source (or a canonical row above) set a
-                        // portrait ratio, so the footer band can't be stretched.
-                        $byFilename[$filename]['aspectRatio'] = 'square';
+                    // Concurrently authored sections cannot see each other's
+                    // asset names, so two of them sometimes coin the SAME
+                    // descriptive filename for DIFFERENT subjects. Merging on
+                    // the name would render one photo in both slots
+                    // (BIGR-793); give the newcomer a deterministic variant
+                    // name and its own spec instead.
+                    $variant = self::availableVariantFilename(
+                        $filename,
+                        (string) $img['subject'],
+                        $byFilename,
+                    );
+                    $rewritten = self::renameCanonicalPlaceholder(
+                        $updated,
+                        $filename,
+                        (string) $img['subject'],
+                        $variant,
+                    );
+                    if ($rewritten === null) {
+                        if (!in_array($rel, $byFilename[$filename]['sources'], true)) {
+                            $byFilename[$filename]['sources'][] = $rel;
+                        }
+                        if ($cappedForFooter) {
+                            $byFilename[$filename]['aspectRatio'] = 'square';
+                        }
+                        $warnings[] = "file='theme/{$rel}'; block="
+                            . Warnings::value('AI_IMAGE placeholder for ' . (string) $img['subject'])
+                            . '; authored asset=' . Warnings::value($filename)
+                            . '; delivered asset=' . Warnings::value($filename)
+                            . '; disposition=different-subject filename collision retained because the '
+                            . 'individual placeholder could not be isolated safely; the first image may repeat';
+                        continue;
                     }
-                    continue;
+                    $updated = $rewritten;
+                    $warnings[] = "file='theme/{$rel}'; block="
+                        . Warnings::value('AI_IMAGE placeholder for ' . (string) $img['subject'])
+                        . '; authored asset=' . Warnings::value($filename)
+                        . '; delivered asset=' . Warnings::value($variant)
+                        . '; disposition=another placeholder already claimed this filename for a different '
+                        . 'subject, so this reference was renamed to generate its own image instead of '
+                        . 'repeating that photo';
+                    $img['filename'] = $variant;
+                    $img['src'] = 'theme:./assets/' . $variant;
+                    $filename = $variant;
+                    if (isset($byFilename[$filename])) {
+                        if (!in_array($rel, $byFilename[$filename]['sources'], true)) {
+                            $byFilename[$filename]['sources'][] = $rel;
+                        }
+                        if ($cappedForFooter) {
+                            $byFilename[$filename]['aspectRatio'] = 'square';
+                        }
+                        continue;
+                    }
                 }
                 $img['sources'] = [$rel];
                 $img['status']  = 'pending';
                 $byFilename[$filename] = $img;
                 $canonicalByFilename[$filename] = $entry['canonical'];
             }
+            if ($updated !== $content) {
+                $project->writeText('theme/' . $rel, $updated);
+            }
+        }
+
+        // A part can reference a theme asset that no placeholder declares —
+        // typically a mangled marker ("AI_IMATE_PLACEHOLDER") on an otherwise
+        // well-shaped theme: src (BIGR-787). Nothing will ever generate that
+        // file, so the reference would ship as a broken image with its raw alt
+        // visible. Degrade exactly like a failed generation: remove the owning
+        // media block where structurally safe, warn either way.
+        foreach ($this->themeHtmlFiles($project) as $rel) {
+            $content = $project->readText('theme/' . $rel);
+            $updated = $content;
+            foreach (self::unresolvableSources($updated, $byFilename) as $source) {
+                $removal = MediaReferenceRemoval::removeSourceWithReport($updated, $source);
+                $candidate = $removal['markup'];
+                if (MediaReferenceRemoval::position($candidate, $source) !== null) {
+                    $warnings[] = "file='theme/{$rel}'; asset=" . Warnings::value($source)
+                        . '; delivered retained in unsafe markup; disposition=no placeholder declares '
+                        . 'this asset and no safe media isolation was available';
+                    continue;
+                }
+                $updated = $candidate;
+                $warnings[] = "file='theme/{$rel}'; asset=" . Warnings::value($source)
+                    . '; delivered removed; disposition=referenced theme asset has no AI_IMAGE '
+                    . 'placeholder (malformed or missing spec), so nothing would ever generate it; '
+                    . 'its media block was removed instead of shipping a broken image';
+                foreach ($removal['removedCaptions'] as $caption) {
+                    $warnings[] = "file='theme/{$rel}'; block='wp:paragraph at byte {$caption['start']}'; asset="
+                        . Warnings::value($source) . '; authored caption=' . Warnings::value($caption['text'])
+                        . '; delivered removed; disposition=caption removed with its unavailable image '
+                        . 'instead of shipping an orphaned description';
+                }
+            }
+            if ($updated !== $content) {
+                $project->writeText('theme/' . $rel, $updated);
+            }
         }
 
         $project->writeJson('images.json', array_values($byFilename));
         $project->addWarnings($this->id(), $warnings);
+    }
+
+    /**
+     * Theme asset sources referenced in this markup that no collected
+     * placeholder declares — the set nothing will ever generate.
+     *
+     * @param array<string,array<string,mixed>> $byFilename collected specs
+     * @return list<string> unique "theme:./assets/<file>" sources
+     */
+    public static function unresolvableSources(string $content, array $byFilename): array
+    {
+        if (!preg_match_all(
+            '/theme:\.\/assets\/([a-z0-9-]+\.(?:jpe?g|png))/i',
+            $content,
+            $matches,
+            PREG_SET_ORDER
+        )) {
+            return [];
+        }
+        $sources = [];
+        foreach ($matches as $match) {
+            if (
+                !isset($byFilename[$match[1]])
+                && MediaReferenceRemoval::position($content, $match[0]) !== null
+            ) {
+                $sources[$match[0]] = true;
+            }
+        }
+        return array_keys($sources);
     }
 
     /**
@@ -474,6 +610,93 @@ final class CollectImagesStep implements Step
     private static function normalizeSubject(string $subject): string
     {
         return strtolower((string) preg_replace('/\s+/', ' ', trim($subject)));
+    }
+
+    /**
+     * A deterministic variant name for a filename another section already
+     * claimed for a different subject: the stem plus a short hash of this
+     * subject, so re-runs and retries produce the same variant.
+     */
+    public static function variantFilename(string $filename, string $subject): string
+    {
+        $dot = strrpos($filename, '.');
+        $stem = $dot === false ? $filename : substr($filename, 0, $dot);
+        $ext = $dot === false ? '' : substr($filename, $dot);
+        return $stem . '-' . substr(sha1(self::normalizeSubject($subject)), 0, 6) . $ext;
+    }
+
+    /**
+     * Pick the stable subject variant unless that exact filename already
+     * belongs to another subject; never overwrite a collected manifest row.
+     *
+     * @param array<string,array<string,mixed>> $byFilename
+     */
+    private static function availableVariantFilename(string $filename, string $subject, array $byFilename): string
+    {
+        $variant = self::variantFilename($filename, $subject);
+        if (
+            !isset($byFilename[$variant])
+            || self::normalizeSubject((string) $byFilename[$variant]['subject']) === self::normalizeSubject($subject)
+        ) {
+            return $variant;
+        }
+
+        $dot = strrpos($variant, '.');
+        $stem = $dot === false ? $variant : substr($variant, 0, $dot);
+        $ext = $dot === false ? '' : substr($variant, $dot);
+        for ($suffix = 2; ; $suffix++) {
+            $candidate = $stem . '-' . $suffix . $ext;
+            if (
+                !isset($byFilename[$candidate])
+                || self::normalizeSubject((string) $byFilename[$candidate]['subject']) === self::normalizeSubject($subject)
+            ) {
+                return $candidate;
+            }
+        }
+    }
+
+    /**
+     * Rename only canonical placeholders for the colliding subject. Bare
+     * references and placeholders for another subject stay byte-for-byte.
+     */
+    private static function renameCanonicalPlaceholder(
+        string $content,
+        string $filename,
+        string $subject,
+        string $variant,
+    ): ?string {
+        $changed = false;
+        $oldSrc = 'theme:./assets/' . $filename;
+        $newSrc = 'theme:./assets/' . $variant;
+        $normalizedSubject = self::normalizeSubject($subject);
+        $updated = preg_replace_callback(
+            '/<img\b[^>]*>/is',
+            static function (array $match) use (
+                &$changed,
+                $filename,
+                $normalizedSubject,
+                $oldSrc,
+                $newSrc,
+            ): string {
+                $images = self::parseCanonicalPlaceholders($match[0]);
+                if (count($images) !== 1) {
+                    return $match[0];
+                }
+                $image = $images[0];
+                if (
+                    $image['filename'] !== $filename
+                    || self::normalizeSubject((string) $image['subject']) !== $normalizedSubject
+                ) {
+                    return $match[0];
+                }
+                $renamed = str_replace($oldSrc, $newSrc, $match[0]);
+                $changed = $changed || $renamed !== $match[0];
+                return $renamed;
+            },
+            $content,
+        );
+
+        return $changed && is_string($updated) ? $updated : null;
     }
 
     /**

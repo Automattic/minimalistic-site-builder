@@ -10,7 +10,7 @@ test('hero blueprint defaults are complete and recipe-compatible', function () {
         assert_eq([
             'version', 'recipe', 'media_mode', 'headline_register', 'text_anchor',
             'headline_line_target', 'focal_region', 'text_safe_region', 'height_profile',
-            'cta_treatment', 'mobile_transformation', 'signature_device_use',
+            'cta_treatment', 'mobile_transformation',
         ], array_keys($blueprint));
         assert_eq(1, $blueprint['version']);
         assert_eq($recipe, $blueprint['recipe']);
@@ -22,14 +22,9 @@ test('hero blueprint preserves valid generated fields and reaches a fixed point'
     $raw['headline_register'] = 'restrained';
     $raw['text_anchor'] = 'top-end';
     $raw['cta_treatment'] = 'quiet';
-    $raw['signature_device_use'] = 'Place the motif once beside the copy anchor.';
-    $context = [
-        'signature_device' => 'One token-built corner notch.',
-        'signature_device_slots' => ['hero', 'body'],
-    ];
     $repairs = [];
     $warnings = [];
-    $normalized = HeroBlueprint::normalize($raw, 'editorial-split', $context, $repairs, $warnings);
+    $normalized = HeroBlueprint::normalize($raw, 'editorial-split', $repairs, $warnings);
     assert_eq($raw, $normalized);
     assert_eq([], $repairs);
     assert_eq([], $warnings);
@@ -38,7 +33,7 @@ test('hero blueprint preserves valid generated fields and reaches a fixed point'
     $againWarnings = [];
     assert_eq(
         $normalized,
-        HeroBlueprint::normalize($normalized, 'editorial-split', $context, $againRepairs, $againWarnings),
+        HeroBlueprint::normalize($normalized, 'editorial-split', $againRepairs, $againWarnings),
     );
     assert_eq([], $againRepairs);
     assert_eq([], $againWarnings);
@@ -55,7 +50,7 @@ test('hero blueprint repairs invalid enums and clamps line targets to a fixed po
     $raw['headline_line_target'] = ['desktop' => [9, -2], 'mobile' => [5, 2]];
     $repairs = [];
     $warnings = [];
-    $normalized = HeroBlueprint::normalize($raw, 'editorial-split', [], $repairs, $warnings);
+    $normalized = HeroBlueprint::normalize($raw, 'editorial-split', $repairs, $warnings);
 
     assert_eq('editorial-split', $normalized['recipe']);
     assert_eq('foreground-image', $normalized['media_mode']);
@@ -71,7 +66,7 @@ test('hero blueprint repairs invalid enums and clamps line targets to a fixed po
     $againWarnings = [];
     assert_eq(
         $normalized,
-        HeroBlueprint::normalize($normalized, 'editorial-split', [], $againRepairs, $againWarnings),
+        HeroBlueprint::normalize($normalized, 'editorial-split', $againRepairs, $againWarnings),
     );
     assert_eq([], $againRepairs);
     assert_eq([], $againWarnings);
@@ -84,34 +79,30 @@ test('cover blueprint repairs conflicting safe, focal, and anchor fields', funct
     $raw['focal_region'] = 'start';
     $repairs = [];
     $warnings = [];
-    $normalized = HeroBlueprint::normalize($raw, 'cinematic-safe-zone', [], $repairs, $warnings);
-    assert_eq('bottom-start', $normalized['text_anchor']);
-    assert_eq('start', $normalized['text_safe_region']);
-    assert_eq('end', $normalized['focal_region']);
+    $normalized = HeroBlueprint::normalize($raw, 'cinematic-safe-zone', $repairs, $warnings);
+    // The mismatched anchor falls back to the recipe's centered default, and
+    // the safe region follows it; the authored focal region no longer
+    // collides with the repaired safe region, so it survives.
+    assert_eq('center', $normalized['text_anchor']);
+    assert_eq('center', $normalized['text_safe_region']);
+    assert_eq('start', $normalized['focal_region']);
     assert_true(count($repairs) >= 2);
 });
 
-test('hero signature use is removed with actionable warning when placement is not assigned', function () {
+test('a legacy signature_device_use field is dropped from the normalized blueprint', function () {
     $raw = HeroBlueprint::defaultFor('editorial-split');
     $raw['signature_device_use'] = 'Repeat the device across the hero.';
     $repairs = [];
     $warnings = [];
-    $normalized = HeroBlueprint::normalize($raw, 'editorial-split', [
-        'signature_device' => 'One corner notch.',
-        'signature_device_slots' => ['body'],
-    ], $repairs, $warnings);
-    assert_eq('', $normalized['signature_device_use']);
-    assert_eq(1, count($warnings));
-    assert_contains('authored', $warnings[0]);
-    assert_contains('delivered', $warnings[0]);
-    assert_contains('signature_device_use', $warnings[0]);
+    $normalized = HeroBlueprint::normalize($raw, 'editorial-split', $repairs, $warnings);
+    assert_true(!array_key_exists('signature_device_use', $normalized));
 });
 
 test('an unusable hero blueprint degrades to complete assigned defaults and warns', function () {
     $repairs = [];
     $warnings = [];
-    $normalized = HeroBlueprint::normalize('not an object', 'panorama-rail', [], $repairs, $warnings);
-    assert_eq(HeroBlueprint::defaultFor('panorama-rail'), $normalized);
+    $normalized = HeroBlueprint::normalize('not an object', 'focal-subject-stage', $repairs, $warnings);
+    assert_eq(HeroBlueprint::defaultFor('focal-subject-stage'), $normalized);
     assert_eq(1, count($warnings));
     assert_contains('hero_blueprint', $warnings[0]);
     assert_contains('synthesized', $warnings[0]);

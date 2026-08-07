@@ -25,6 +25,7 @@ use Automattic\SiteBuild\Steps\PageStylesStep;
 use Automattic\SiteBuild\Steps\RefinePromptStep;
 use Automattic\SiteBuild\Steps\ScaffoldPluginStep;
 use Automattic\SiteBuild\Steps\ScaffoldThemeStep;
+use Automattic\SiteBuild\Steps\SectionCopyDedupeStep;
 use Automattic\SiteBuild\Steps\SectionLayoutStep;
 use Automattic\SiteBuild\Steps\SectionRhythmStep;
 use Automattic\SiteBuild\Steps\SectionsStep;
@@ -231,6 +232,12 @@ final class StepComposition
             // step later composes them deterministically.
             new SectionsStep($llm, $renderer, $models['sections'], $temps['sections']),
             new SectionRhythmStep(),
+            // Concurrently authored sections independently derive the same
+            // short identity line (kicker/tagline/quote) from one brief; this
+            // deterministic pass removes the later repeats page-wide plus the
+            // closing-section/footer seam, while the parts are still separate
+            // ordered files (BIGR-783). Hero copy stays with HeaderHeroStep.
+            new SectionCopyDedupeStep(),
             // Collect image placeholders BEFORE fix-blocks: the block re-serializer
             // strips the alt from wp:cover background images (core cover save()
             // resets it to ""), which would lose every hero's AI_IMAGE spec.

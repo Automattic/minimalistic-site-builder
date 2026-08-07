@@ -83,7 +83,7 @@ test('StepComposition legacy env preserves the full legacy graph byte-for-byte',
 
         assert_eq([
             'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
-            'theme-json+page-plan', 'sections', 'section-rhythm',
+            'theme-json+page-plan', 'sections', 'section-rhythm', 'copy-dedupe',
             'collect-images', 'normalize-layout', 'header-hero', 'contrast-fix', 'motion-sanity', 'fix-blocks',
             'assemble-pages', 'page-styles', 'custom-motion', 'bundle-fonts', 'fonts-php', 'finalize-theme', 'validate-theme',
         ], $ids);

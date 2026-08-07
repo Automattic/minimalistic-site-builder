@@ -6,7 +6,6 @@ use Automattic\SiteBuild\Eval\EvalMetrics;
 use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
-use Automattic\SiteBuild\SiteBuilder;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\ThemeValidator;
 
@@ -43,13 +42,7 @@ if ($only === '--report') {
 }
 
 $llm = make_llm();
-$builder = new SiteBuilder(
-    llm: $llm,
-    promptsDir: Package::promptsDir(),
-    outputRoot: repo_path('projects'),
-    blockFixer: BlockFixers::default(),
-    models: step_models(),
-);
+$builder = make_site_builder($llm);
 
 $results = [];
 foreach (SITES as $slug => $prompt) {

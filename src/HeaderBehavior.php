@@ -53,7 +53,7 @@ final class HeaderBehavior
     public const SURFACES = ['base', 'contrast', 'primary', 'secondary', 'accent'];
 
     /** These compositions are too tall to remain useful as persistent chrome. */
-    public const TALL_ARCHETYPES = ['centered-masthead', 'oversized-wordmark', 'double-decker'];
+    public const TALL_ARCHETYPES = ['centered-masthead', 'oversized-wordmark'];
 
     private const FIELDS = [
         'behavior',
@@ -158,7 +158,12 @@ final class HeaderBehavior
                     'topSurface' => self::TRANSPARENT,
                     'scrolledSurface' => $scrolled,
                     'foreground' => $foreground,
-                    'topTreatment' => self::TREATMENT_TRANSPARENT,
+                    // The plan-time overlay rests behind the kit scrim — the
+                    // dark translucent veil is factually a glass treatment.
+                    // HeaderHeroStep upgrades it to a truly transparent top
+                    // once the delivered opening covers prove their own dim
+                    // sufficient (clearOverlayTopIsSafe).
+                    'topTreatment' => self::TREATMENT_GLASS,
                     'scrolledTreatment' => self::TREATMENT_SOLID,
                 ]);
             }
@@ -384,6 +389,84 @@ final class HeaderBehavior
     }
 
     /**
+     * Core Cover serializes dimRatio through a 10-point opacity class. Model
+     * the value the browser receives, not a more favorable authored fraction.
+     * Values outside Core's implemented 0..100 class range have no trustworthy
+     * rendered opacity and cannot participate in a clear-top grant.
+     */
+    public static function renderedCoverDim(float $dimRatio): ?int
+    {
+        if (!is_finite($dimRatio) || $dimRatio < 0 || $dimRatio > 100) {
+            return null;
+        }
+        return (int) (10 * round($dimRatio / 10, 0, PHP_ROUND_HALF_UP));
+    }
+
+    /**
+     * Whether the overlay header may rest with no kit scrim at all: the
+     * foreground must stay readable over the opening cover's own rendered
+     * dim for every pixel the image can produce (the dim composited over pure
+     * white and pure black bound the luminance range), and — when the
+     * underlay is stationary — along the whole premultiplied path into the
+     * scrolled solid. Same proof shape as the sticky grants: the clear state
+     * is earned per delivered opening, never assumed. HeaderHeroStep uses an
+     * instant landing for fixed clear headers because scrolling can replace
+     * their underlay during a timed transition.
+     *
+     * @param array{0:int,1:int,2:int}      $foreground
+     * @param array{0:int,1:int,2:int}      $protection cover dim color
+     * @param array{0:int,1:int,2:int}|null $scrolled   scrolled solid surface
+     */
+    public static function clearOverlayTopIsSafe(
+        array $foreground,
+        array $protection,
+        float $dimRatio,
+        ?array $scrolled,
+        bool $smooth,
+    ): bool {
+        $renderedDim = self::renderedCoverDim($dimRatio);
+        if ($renderedDim === null) {
+            return false;
+        }
+        $alpha = $renderedDim / 100;
+        foreach ([[255, 255, 255], [0, 0, 0]] as $under) {
+            $rest = ContrastMath::compositeOver($protection, $alpha, $under);
+            if (ContrastMath::ratio($foreground, $rest) < ContrastMath::NORMAL_TEXT) {
+                return false;
+            }
+            if ($smooth && $scrolled !== null && !self::transitionIsSafe($foreground, $rest, $scrolled)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * The smallest rendered cover dimRatio (Core's 10-point classes, capped
+     * so the image remains an image) whose own dim proves the clear resting
+     * state, or null when none does. Lets a just-short delivered dim be raised
+     * as a recorded repair instead of keeping the redundant kit scrim.
+     *
+     * @param array{0:int,1:int,2:int}      $foreground
+     * @param array{0:int,1:int,2:int}      $protection
+     * @param array{0:int,1:int,2:int}|null $scrolled
+     */
+    public static function minimalClearOverlayDim(
+        array $foreground,
+        array $protection,
+        ?array $scrolled,
+        bool $smooth,
+        int $cap = 70,
+    ): ?int {
+        for ($dim = 40; $dim <= $cap; $dim += 10) {
+            if (self::clearOverlayTopIsSafe($foreground, $protection, (float) $dim, $scrolled, $smooth)) {
+                return $dim;
+            }
+        }
+        return null;
+    }
+
+    /**
      * @param array{0:int,1:int,2:int} $tint
      * @param array{0:int,1:int,2:int} $under
      * @return array{0:int,1:int,2:int}
@@ -500,9 +583,11 @@ final class HeaderBehavior
             if ($mode !== self::MODE_OVERLAY || $top !== self::TRANSPARENT) {
                 throw new \InvalidArgumentException('overlay-to-solid requires overlay mode and a transparent top surface');
             }
-            if ($topTreatment !== self::TREATMENT_TRANSPARENT || $scrolledTreatment !== self::TREATMENT_SOLID) {
+            if (!in_array($topTreatment, [self::TREATMENT_GLASS, self::TREATMENT_TRANSPARENT], true)
+                || $scrolledTreatment !== self::TREATMENT_SOLID) {
                 throw new \InvalidArgumentException(
-                    'overlay-to-solid requires a transparent top treatment and a solid scrolled treatment'
+                    'overlay-to-solid requires a scrim-glass or earned-transparent top treatment '
+                        . 'and a solid scrolled treatment'
                 );
             }
         } else {
@@ -542,10 +627,12 @@ final class HeaderBehavior
             'header-scrolled-' . $artifact['scrolledSurface'],
             'header-foreground-' . $artifact['foreground'],
         ];
-        // Treatment hooks are sticky-only: the overlay's transparent start is
-        // already its scrim-veiled topSurface, and its glass enhancement is
-        // kit-automatic. The solid token classes above stay present as the
-        // no-JS / no-support fallback surface either way.
+        // Sticky treatment hooks name each airier state; the overlay's
+        // default scrim veil is kit-automatic and needs no class, but an
+        // earned truly-clear resting state (proven against the opening
+        // cover's own dim) is opted into explicitly. The solid token classes
+        // above stay present as the no-JS / no-support fallback surface
+        // either way.
         if ($artifact['behavior'] === self::STICKY_SOFT) {
             if ($artifact['topTreatment'] !== self::TREATMENT_SOLID) {
                 $classes[] = 'header-top-' . $artifact['topTreatment'];
@@ -553,6 +640,10 @@ final class HeaderBehavior
             if ($artifact['scrolledTreatment'] === self::TREATMENT_GLASS) {
                 $classes[] = 'header-scrolled-glass';
             }
+        }
+        if ($artifact['behavior'] === self::OVERLAY_TO_SOLID
+            && $artifact['topTreatment'] === self::TREATMENT_TRANSPARENT) {
+            $classes[] = 'header-top-transparent';
         }
         if ($artifact['transition'] === self::TRANSITION_INSTANT) {
             $classes[] = 'header-transition-instant';

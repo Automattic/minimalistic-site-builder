@@ -85,6 +85,42 @@ test('sections requests one part per header/footer/page-section', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('sections safely adapts non-string persisted card style, briefs flush, and persists the fallback warning', function () {
+    [$project, $tmp] = sections_fixture();
+    $direction = $project->readJson('designDirection.json');
+    $direction['card_style'] = ['polaroid'];
+    $project->writeJson('designDirection.json', $direction);
+
+    $llm = new FakeLlm();
+    $step = new SectionsStep($llm, new PromptRenderer(repo_path('prompts')));
+    set_error_handler(static function (int $severity, string $message, string $file, int $line): bool {
+        throw new ErrorException($message, 0, $severity, $file, $line);
+    });
+    try {
+        $requests = $step->requests($project);
+        assert_contains(
+            'ASSIGNED CARD STYLE (authoritative machine contract): flush',
+            sections_request_text($requests['page-home--about']),
+        );
+
+        $llm->queueText('OK');
+        $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
+        $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
+        $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
+        $llm->queueText('<!-- wp:heading --><h2>About</h2><!-- /wp:heading -->');
+        $step->run($project);
+    } finally {
+        restore_error_handler();
+    }
+
+    $warnings = implode("\n", $project->readJson('warnings.json')['sections'] ?? []);
+    assert_contains('designDirection.json: field card_style', $warnings);
+    assert_contains('authored ["polaroid"]', $warnings);
+    assert_contains('delivered "flush"', $warnings);
+    assert_contains('disposition', $warnings);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('sections fans out across every page and gives each section its own page context', function () {
     [$project, $tmp] = sections_fixture();
     $project->writeJson('pages.json', ['pages' => [
@@ -213,12 +249,11 @@ test('footer composition is stable, varied, and shared with the closing-section 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('footer prompt renders only its selected high-impact recipe without overriding signature placement', function () {
+test('footer prompt renders only its selected high-impact recipe', function () {
     [$project, $tmp] = sections_fixture();
     $project->writeJson('designDirection.json', [
         'title' => 'Restricted device',
         'description' => 'A graphic editorial system.',
-        'signature_device' => 'Use the stepped accent only in the hero and nowhere else.',
         'canvas' => 'full-bleed',
         'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
     ]);
@@ -251,8 +286,6 @@ test('footer prompt renders only its selected high-impact recipe without overrid
     assert_contains('ONE dominant focal gesture and low content density', $footer);
     assert_contains('FIT-TEXT IDENTITY LINE', $footer);
     assert_contains('"fitText":true', $footer);
-    assert_contains('signature-device PLACEMENT restrictions are binding', $footer);
-    assert_contains('ONLY when the direction explicitly makes it site-wide', $footer);
     assert_contains('NEVER set `"tagName":"footer"`', $footer);
     assert_contains('External/social links use only an exact URL present in the SITE SPEC', $footer);
     assert_contains('NEVER invent `is-style-none`, `is-style-plain`', $footer);
@@ -387,6 +420,61 @@ test('sections persists the deterministic plan repairs back into pages.json', fu
     $report = $project->readText('logs/sections.txt');
     assert_contains("role '' corrected to 'hero'", $report);
     assert_contains("missing semantic type; defaulted to 'content'", $report);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('sections persists ambiguous list-thumb warnings and delivers that row unchanged', function () {
+    [$project, $tmp] = sections_fixture();
+    $ambiguousRow = trim(<<<'HTML'
+<!-- wp:columns {"className":"list-thumb-flush"} -->
+<div class="wp-block-columns list-thumb-flush">
+<!-- wp:column {"width":"18%"} -->
+<div class="wp-block-column" style="flex-basis:18%">
+<!-- wp:image {"className":"card-media-thumb"} -->
+<figure class="wp-block-image card-media-thumb"><img src="thumb.jpg" alt=""/></figure>
+<!-- /wp:image -->
+</div>
+<!-- /wp:column -->
+<!-- wp:column {"width":"72%"} -->
+<div class="wp-block-column" style="flex-basis:72%">
+<!-- wp:heading {"level":3} --><h3 class="wp-block-heading">Row title</h3><!-- /wp:heading -->
+<!-- wp:paragraph --><p>One concise line.</p><!-- /wp:paragraph -->
+</div>
+<!-- /wp:column -->
+<!-- wp:column {"width":"10%"} -->
+<div class="wp-block-column" style="flex-basis:10%">
+<!-- wp:paragraph --><p>Unexpected.</p><!-- /wp:paragraph -->
+</div>
+<!-- /wp:column -->
+</div>
+<!-- /wp:columns -->
+HTML);
+
+    $llm = new FakeLlm();
+    $llm->queueText('OK');
+    $llm->queueText('<!-- wp:group --><!-- wp:site-title /--><!-- /wp:group -->');
+    $llm->queueText('<!-- wp:group --><!-- wp:paragraph --><p>Footer</p><!-- /wp:paragraph --><!-- /wp:group -->');
+    $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
+    $llm->queueText($ambiguousRow);
+
+    (new SectionsStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    assert_eq(
+        $ambiguousRow . "\n",
+        $project->readText('theme/parts/page-home--about.html'),
+        'the ambiguous row is delivered byte-for-byte apart from the project file terminator',
+    );
+    assert_contains('<h2>Hero</h2>', $project->readText('theme/parts/page-home--hero.html'));
+    $warnings = implode("\n", $project->readJson('warnings.json')['sections'] ?? []);
+    foreach ([
+        "file='theme/parts/page-home--about.html'",
+        "block='wp:columns[0]'",
+        '3 direct columns and 3 direct blocks instead of exactly two columns',
+        'delivered=unchanged',
+        'disposition=',
+    ] as $context) {
+        assert_contains($context, $warnings);
+    }
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

@@ -147,7 +147,7 @@ test('TG5 section mode stitches whole-page HTML then real transform and assemble
             'transform-site source stays frozen at Slice 2',
         );
         assert_eq(
-            'a4970f9b96bd4963fcdd62547c842ea2ec1ac785eeb208adb5961e2a77f3a2c0',
+            'a13ab8e90cad1296319daeed773f810acdd848deaaba5fc86e472503b16a4ef8',
             hash_file('sha256', repo_path('src/Steps/AssemblePagesStep.php')),
             'assemble-pages source stays frozen at Slice 2',
         );

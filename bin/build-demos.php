@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\ProjectStore;
 
 /**
@@ -62,54 +63,45 @@ use Automattic\SiteBuild\ProjectStore;
 
 require_once __DIR__ . '/../src/bootstrap.php';
 
-$withImages = false;
-$multiPage = false;
-$pagesArg = null;
-$only = null;
-$serve = false;
-$screenshot = true;
-$parallel = 0; // 0 = provider-aware default (all entries; OpenRouter <= 3)
-$port = 9400;
-$provider = null;
-$file = repo_path('eval/theme-prompts.json');
-foreach (array_slice($argv, 1) as $a) {
-    if ($a === '--with-images') { $withImages = true; }
-    elseif ($a === '--multi-page') { $multiPage = true; }
-    elseif (str_starts_with($a, '--pages=')) { $pagesArg = substr($a, 8); }
-    elseif (str_starts_with($a, '--only=')) { $only = substr($a, 7); }
-    elseif (str_starts_with($a, '--provider=')) { $provider = substr($a, 11); }
-    elseif (str_starts_with($a, '--parallel=')) { $parallel = max(1, (int) substr($a, 11)); }
-    elseif (str_starts_with($a, '--port=')) { $port = (int) substr($a, 7); }
-    elseif (str_starts_with($a, '--file=')) { $file = substr($a, 7); }
-    elseif ($a === '--no-serve') { $serve = false; }
-    elseif ($a === '--serve') { $serve = true; }
-    elseif ($a === '--no-screenshot') { $screenshot = false; }
-    elseif ($a === '--screenshot') { $screenshot = true; }
-    else {
-        fwrite(STDERR, "Unknown argument: {$a}\n");
-        fwrite(STDERR, "Usage: php bin/build-demos.php [--multi-page] [--pages=\"Home, Menu, About\"] [--with-images] [--only=<slug>] [--provider=anthropic|openai|xai|openrouter] [--parallel=<n>] [--no-screenshot] [--serve] [--port=9400] [--no-serve] [--file=<path>]\n");
-        exit(1);
-    }
-}
-
-// --pages fixes WHICH pages each site gets; --multi-page owns WHETHER inner
-// pages exist at all, so a list without the flag is a contradiction — fail
-// loud here rather than let every child build fail with the same message.
-if ($pagesArg !== null && !$multiPage) {
-    fwrite(STDERR, "--pages requires --multi-page.\n");
+$args = parse_cli_args($argv, [
+    '--with-images' => 'bool',
+    '--multi-page'  => 'bool',
+    '--pages'       => 'value',
+    '--only'        => 'value',
+    '--provider'    => 'value',
+    '--parallel'    => 'value',
+    '--port'        => 'value',
+    '--file'        => 'value',
+    '--serve'       => 'toggle',
+    '--screenshot'  => 'toggle',
+]);
+if ($args['unknown'] !== null) {
+    fwrite(STDERR, "Unknown argument: {$args['unknown']}\n");
+    fwrite(STDERR, "Usage: php bin/build-demos.php [--multi-page] [--pages=\"Home, Menu, About\"] [--with-images] [--only=<slug>] [--provider=anthropic|openai|xai|openrouter] [--parallel=<n>] [--no-screenshot] [--serve] [--port=9400] [--no-serve] [--file=<path>]\n");
     exit(1);
 }
+$flags = $args['flags'];
+$withImages = $flags['--with-images'] ?? false;
+$multiPage = $flags['--multi-page'] ?? false;
+$pagesArg = $flags['--pages'] ?? null;
+$only = $flags['--only'] ?? null;
+$serve = $flags['--serve'] ?? false;
+$screenshot = $flags['--screenshot'] ?? true;
+// 0 = provider-aware default (all entries; OpenRouter <= 3)
+$parallel = isset($flags['--parallel']) ? max(1, (int) $flags['--parallel']) : 0;
+$port = (int) ($flags['--port'] ?? 9400);
+$provider = $flags['--provider'] ?? null;
+$file = $flags['--file'] ?? repo_path('eval/theme-prompts.json');
 
-// Validate --provider once up front and forward it to each child build.php, so
-// the whole demo set builds on one provider's model set. Per-step LLM_MODEL_*
-// env overrides still apply inside each child.
-if ($provider !== null) {
-    $provider = strtolower(trim($provider));
-    if (!\Automattic\SiteBuild\ModelConfig::hasProvider($provider)) {
-        fwrite(STDERR, "Unknown --provider '{$provider}'. Known: "
-            . implode(', ', \Automattic\SiteBuild\ModelConfig::providerNames()) . "\n");
-        exit(1);
-    }
+// Both flags are forwarded to the children, so check them once here rather than
+// let every child build fail with the same message. The page list goes over
+// verbatim; only --provider's normalized form is kept, for the child commands.
+try {
+    require_multi_page_for_pages($pagesArg, $multiPage);
+    $provider = normalize_provider($provider);
+} catch (InvalidArgumentException $e) {
+    Narrator::write($e->getMessage() . "\n");
+    exit(1);
 }
 
 $data = json_decode((string) file_get_contents($file), true);
@@ -469,15 +461,7 @@ function serve_all(array $slugs, int $basePort, int $exitCode): void
     while ($servers !== []) {
         pump_children($servers, static function (int $idx, int $fd, string $line) use (&$servers): void {
             echo "[{$servers[$idx]['slug']}] " . $line;
-            // Playground prints this exact line once it is actually serving; it
-            // carries the real port (playground.php auto-bumps busy ones). The
-            // CLI may wrap it in ANSI colour codes — strip them before matching.
-            if ($servers[$idx]['url'] === null) {
-                $plain = preg_replace('~\x1b\[[0-9;]*m~', '', $line) ?? $line;
-                if (preg_match('~Ready!\s+WordPress is running on (http://127\.0\.0\.1:\d+)~', $plain, $m)) {
-                    $servers[$idx]['url'] = $m[1] . '/';
-                }
-            }
+            $servers[$idx]['url'] ??= playground_ready_url($line);
         });
 
         $allReady = $servers !== [];

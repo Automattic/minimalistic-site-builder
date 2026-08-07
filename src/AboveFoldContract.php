@@ -27,7 +27,6 @@ final class AboveFoldContract
         'minimal-overlay',
         'oversized-wordmark',
         'branded-lockup',
-        'double-decker',
         'split-nav',
     ];
 
@@ -152,6 +151,10 @@ final class AboveFoldContract
         $recipeHeaderModes = is_array($recipeMeta['header_modes'] ?? null)
             ? $recipeMeta['header_modes']
             : [self::MODE_STACKED];
+        // A solid interior opening only supports overlay when it IS the
+        // prospective protection surface — the luminance-ordered dark token,
+        // not a name-fixed 'contrast'.
+        [$overlayForeground, $overlayProtection] = self::overlayTokenRoles($tokens);
         $overlaySupported = $imageLed
             && $canvas !== 'framed'
             && in_array(self::MODE_OVERLAY, $recipeHeaderModes, true)
@@ -159,7 +162,7 @@ final class AboveFoldContract
             && array_reduce(
                 $openings,
                 static fn (bool $ok, array $opening): bool => $ok
-                    && in_array($opening['surface'], ['image', 'contrast'], true),
+                    && in_array($opening['surface'], ['image', $overlayProtection], true),
                 true,
             );
         $mode = $overlaySupported ? self::MODE_OVERLAY : self::MODE_STACKED;
@@ -173,12 +176,8 @@ final class AboveFoldContract
             );
         }
 
-        $recipeExcludes = array_values(array_filter(
-            (array) ($recipeMeta['header_archetype_excludes'] ?? []),
-            'is_string',
-        ));
-        $pool = self::headerPool($mode, count($pages), $imageLed, $recipeExcludes);
-        if ($forced !== '' && self::forcedHeaderCompatible($forced, $overlaySupported, count($pages), $imageLed, $recipeExcludes)) {
+        $pool = self::headerPool($mode, count($pages), $imageLed);
+        if ($forced !== '' && self::forcedHeaderCompatible($forced, $overlaySupported, count($pages), $imageLed)) {
             $archetype = $forced;
             $mode = $forced === 'minimal-overlay' ? self::MODE_OVERLAY : self::MODE_STACKED;
         } elseif ($forced !== '') {
@@ -204,8 +203,9 @@ final class AboveFoldContract
         if ($archetype === 'minimal-overlay') {
             $mode = self::MODE_OVERLAY;
         }
-        $foreground = $mode === self::MODE_OVERLAY ? 'base' : 'contrast';
-        $protection = $mode === self::MODE_OVERLAY ? 'contrast' : 'base';
+        $tagline = trim((string) ($siteContext['tagline'] ?? ''));
+        $foreground = $mode === self::MODE_OVERLAY ? $overlayForeground : 'contrast';
+        $protection = $mode === self::MODE_OVERLAY ? $overlayProtection : 'base';
         foreach ($openings as &$opening) {
             $opening['top_protection_token'] = $opening['surface'] === 'image'
                 || $opening['surface'] === $protection
@@ -244,7 +244,7 @@ final class AboveFoldContract
                 'protection_orientation' => 'top-edge',
                 'protect_top_edge' => $mode === self::MODE_OVERLAY,
                 'safe_top_px' => $mode === self::MODE_OVERLAY ? 80 : 0,
-            ],
+            ] + self::headerTextFacts($archetype, $tagline),
             'viewport' => [
                 'height_profile' => (string) ($blueprint['height_profile'] ?? 'standard'),
                 'headline_register' => (string) ($blueprint['headline_register'] ?? 'display'),
@@ -267,10 +267,6 @@ final class AboveFoldContract
                     : $footerSurface,
                 'footer_archetype' => $footerArchetype,
                 'footer_surface' => $footerSurface,
-            ],
-            'signature_device' => [
-                'use' => (string) ($blueprint['signature_device_use'] ?? ''),
-                'budget' => trim((string) ($blueprint['signature_device_use'] ?? '')) === '' ? 0 : 1,
             ],
             'ownership' => [
                 'header' => ['identity', 'navigation'],
@@ -384,6 +380,47 @@ final class AboveFoldContract
     {
         self::assertPhase($delivery, self::PHASE_DELIVERY);
         $contract = self::finalizeDelivery($delivery, $deliveredPages, $facts);
+        $headerFacts = is_array($facts['header'] ?? null) ? $facts['header'] : [];
+        if (($contract['header']['displays_tagline'] ?? false) === true
+            && (($headerFacts['site_tagline_blocks'] ?? 0) !== 1
+                || ($headerFacts['malformed_site_tagline_blocks'] ?? 0) !== 0
+                || ($headerFacts['invalid_site_tagline_topology'] ?? 0) !== 0)
+        ) {
+            $authored = $contract['header']['tagline_text'] ?? null;
+            $contract['header']['displays_tagline'] = false;
+            $contract['header']['tagline_text'] = null;
+            $contract['header']['text_rows'] = 1;
+            $contract['degradations'][] = self::degradation(
+                'header-tagline-not-delivered',
+                'theme/parts/header.html',
+                'wp:site-tagline',
+                $authored,
+                null,
+                'the finalized header does not contain exactly one structurally complete wp:site-tagline block; '
+                    . 'the delivered text-shape facts were narrowed instead of claiming an identity row count '
+                    . 'that visitors do not receive',
+            );
+            $contract['degradations'] = self::uniqueDegradations((array) $contract['degradations']);
+        }
+        if (($contract['header']['displays_tagline'] ?? false) !== true
+            && (($headerFacts['site_tagline_blocks'] ?? 0) > 0
+                || ($headerFacts['malformed_site_tagline_blocks'] ?? 0) > 0)
+        ) {
+            $contract['degradations'][] = self::degradation(
+                'header-tagline-unplanned-delivery',
+                'theme/parts/header.html',
+                'wp:site-tagline',
+                false,
+                [
+                    'complete_blocks' => $headerFacts['site_tagline_blocks'] ?? 0,
+                    'malformed_blocks' => $headerFacts['malformed_site_tagline_blocks'] ?? 0,
+                ],
+                'the finalized header retained dynamic tagline markup even though the authoritative contract '
+                    . 'does not display one; contract facts remain narrowed and the residual block was queued '
+                    . 'for isolated removal',
+            );
+            $contract['degradations'] = self::uniqueDegradations((array) $contract['degradations']);
+        }
         $contract['phase'] = self::PHASE_FINAL;
         return $contract;
     }
@@ -518,17 +555,41 @@ final class AboveFoldContract
         return $pages[0];
     }
 
-    /** @param list<string> $recipeExcludes @return list<string> */
+    /**
+     * Canonical header text-shape facts (BIGR-773), shared byte-for-byte by
+     * both above-fold authors. `displays_tagline` is true only when the
+     * archetype's catalog form includes wp:site-tagline AND a stated tagline
+     * exists to render (an empty tagline leaves a title-only form — the
+     * blank block is stripped deterministically). The tagline-bearing forms
+     * are branded-lockup and standard-row (BIGR-775): the hero no longer
+     * carries an eyebrow, so the orientation micro-copy that used to live
+     * there renders as the header tagline instead. `text_rows` counts the
+     * header's stacked text lines: a two-row header bans the hero eyebrow,
+     * because a third caption-scale line ~100px below reads as a masthead
+     * row, not hero copy.
+     *
+     * @return array{displays_tagline:bool,tagline_text:?string,text_rows:int}
+     */
+    private static function headerTextFacts(string $archetype, string $tagline): array
+    {
+        $displays = in_array($archetype, ['branded-lockup', 'standard-row'], true) && $tagline !== '';
+        return [
+            'displays_tagline' => $displays,
+            'tagline_text' => $displays ? $tagline : null,
+            'text_rows' => $displays || $archetype === 'centered-masthead' ? 2 : 1,
+        ];
+    }
+
+    /** @return list<string> */
     private static function headerPool(
         string $mode,
         int $pageCount,
         bool $imageLed,
-        array $recipeExcludes = [],
     ): array {
         if ($mode === self::MODE_OVERLAY) {
             return ['minimal-overlay'];
         }
-        $excluded = ['minimal-overlay', 'oversized-wordmark', ...$recipeExcludes];
+        $excluded = ['minimal-overlay', 'oversized-wordmark'];
         if ($pageCount <= 1) {
             $excluded[] = 'split-nav';
         }
@@ -538,13 +599,11 @@ final class AboveFoldContract
         return array_values(array_diff(self::HEADER_ARCHETYPES, $excluded));
     }
 
-    /** @param list<string> $recipeExcludes */
     private static function forcedHeaderCompatible(
         string $archetype,
         bool $overlaySupported,
         int $pageCount,
         bool $imageLed,
-        array $recipeExcludes = [],
     ): bool
     {
         if ($archetype === 'minimal-overlay') {
@@ -554,11 +613,6 @@ final class AboveFoldContract
             return false;
         }
         if ($archetype === 'centered-masthead' && $imageLed) {
-            return false;
-        }
-        // Catalog-owned pairing exclusions (e.g. an eyebrow-led copy recipe
-        // rejecting double-decker's caption topbar) bind overrides too.
-        if (in_array($archetype, $recipeExcludes, true)) {
             return false;
         }
         // The initial production catalog conservatively excludes this when a
@@ -600,6 +654,28 @@ final class AboveFoldContract
             default => null,
         };
         return ['logical' => $logical, 'physical' => $physical];
+    }
+
+    /**
+     * The overlay pair is luminance-ordered, not name-ordered: the header
+     * text sits on a dimmed image, so the foreground must be whichever of
+     * the two verified tokens is lighter and the protection dim whichever
+     * is darker. Light themes keep the historical base/contrast assignment;
+     * a dark theme's inverted palette previously demanded a light scrim
+     * over the image that no hero author could sensibly deliver.
+     *
+     * @param array<string,mixed> $tokens
+     * @return array{0:string,1:string} [foreground, protection]
+     */
+    private static function overlayTokenRoles(array $tokens): array
+    {
+        $base = ContrastMath::hexToRgb((string) ($tokens['base']['hex'] ?? ''));
+        $contrast = ContrastMath::hexToRgb((string) ($tokens['contrast']['hex'] ?? ''));
+        if ($base === null || $contrast === null
+            || ContrastMath::luminance($base) >= ContrastMath::luminance($contrast)) {
+            return ['base', 'contrast'];
+        }
+        return ['contrast', 'base'];
     }
 
     private static function tokensContrast(array $tokens): bool
@@ -697,7 +773,7 @@ final class AboveFoldContract
             'protection_orientation' => 'top-edge',
             'protect_top_edge' => false,
             'safe_top_px' => 0,
-        ];
+        ] + self::headerTextFacts('standard-row', '');
         $contract['viewport']['stacked_cover_max_vh'] = 80;
         $contract['degradations'][] = self::degradation(
             $code,
@@ -791,11 +867,14 @@ final class AboveFoldContract
             throw new \RuntimeException('aboveFold.json has invalid header protection facts');
         }
         $overlay = $header['mode'] === self::MODE_OVERLAY;
+        [$overlayForeground, $overlayProtection] = self::overlayTokenRoles(
+            is_array($contract['theme_tokens'] ?? null) ? $contract['theme_tokens'] : [],
+        );
         $expectedHeader = $overlay
             ? [
                 'archetype' => 'minimal-overlay',
-                'foreground_token' => 'base',
-                'protection_token' => 'contrast',
+                'foreground_token' => $overlayForeground,
+                'protection_token' => $overlayProtection,
                 'protect_top_edge' => true,
                 'safe_top_px' => 80,
             ]

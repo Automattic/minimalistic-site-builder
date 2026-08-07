@@ -49,14 +49,15 @@ use Automattic\SiteBuild\TransformArtifacts;
  * The model's CSS is validated (validate()) before writing: every selector must
  * be scoped under a documented class, colors must come from theme preset custom
  * properties, and only @media at-rules are allowed. When validation fails on
- * declaration-level offences only (a raw-color shadow, a --motion-* override),
- * the offending declarations are dropped (dropOffendingDeclarations()) and the
- * rest of the appendix ships — one lost decoration beats every used utility
- * losing its CSS. Structural problems (unbalanced braces, disallowed at-rules,
- * unscoped selectors) still reject the whole appendix: it is logged and
- * skipped rather than failing the build — a utility class without its CSS
- * still renders as a plain block, so degrading (loudly) beats losing a
- * finished build at its final step over decorative styling.
+ * declaration-level offences only (a raw-color shadow, a --motion-* override,
+ * or a shape-owned corner radius), the offending declarations are dropped
+ * (dropOffendingDeclarations()) and the rest of the appendix ships — one lost
+ * decoration beats every used utility losing its CSS. Structural problems
+ * (unbalanced braces, disallowed at-rules, unscoped selectors) still reject the
+ * whole appendix: it is logged and skipped rather than failing the build — a
+ * utility class without its CSS still renders as a plain block, so degrading
+ * (loudly) beats losing a finished build at its final step over decorative
+ * styling.
  */
 final class PageStylesStep implements Step
 {
@@ -264,7 +265,9 @@ CSS;
                 . ' offending declaration(s), kept the rest — see logs/' . self::LOG_FILE . "\n";
             $project->addWarnings($this->id(), array_map(
                 static fn (string $declaration): string =>
-                    "dropped offending CSS declaration `{$declaration}` from the page-styles appendix",
+                    "theme/style.css page-styles appendix: authored declaration `{$declaration}`; "
+                    . 'delivered removed; disposition dropped offending CSS declaration; see logs/'
+                    . self::LOG_FILE,
                 $dropped,
             ));
             $css = $salvaged;
@@ -2638,6 +2641,17 @@ CSS;
         if (preg_match('/--motion-[\w-]+\s*:/i', $stripped) === 1) {
             $problems[] = 'motion custom properties are profile-owned and cannot be overridden';
         }
+        foreach (CssChecks::scanDeclarations($stripped) as $declaration) {
+            if (self::declarationTargetsShape($declaration)
+                && CssChecks::isShapeAffectingDeclaration(
+                    $declaration['property'],
+                    $declaration['value'],
+                )
+            ) {
+                $problems[] = 'contained-image/button corner declarations are shape-owned by the design direction';
+                break;
+            }
+        }
         // Parse opacity values instead of pattern-matching literal zeros:
         // 0%, .0 and calc(0) hide content just as well as 0.
         if (preg_match_all('/(?<![-\w])opacity\s*:\s*([^;{}]+)/i', $stripped, $opacities) > 0) {
@@ -2671,41 +2685,41 @@ CSS;
     /**
      * Salvage pass for CSS that failed validate(): remove each declaration
      * that carries a declaration-level offence (raw color literal, resource-
-     * loading function, --motion-* override, content-hiding value) and keep
-     * the rest. Only rule bodies are touched — selectors, @media preludes and
-     * brace structure pass through, so structural problems deliberately
-     * survive into the re-validation and still reject the whole appendix.
-     * Comments are stripped first (they could shelter braces from the body
-     * matcher), so a salvaged appendix ships comment-free. Pure — unit-testable.
+     * loading function, --motion-* override, shape-owned corner radius,
+     * content-hiding value) and keep the rest. Only rule bodies are touched —
+     * selectors, @media preludes and brace structure pass through, so
+     * structural problems deliberately survive into the re-validation and
+     * still reject the whole appendix. A quote/comment/function-aware shared
+     * scanner supplies exact source spans, so untouched declarations and
+     * declaration-looking text values stay byte-identical. Pure — unit-testable.
      *
      * @return array{0: string, 1: string[]} [salvaged CSS, dropped-declaration notes]
      */
     public static function dropOffendingDeclarations(string $css): array
     {
-        $css = trim((string) preg_replace('~/\*.*?\*/~s', '', $css));
-        $dropped = [];
-        $salvaged = (string) preg_replace_callback(
-            // Innermost brace pairs only: rule bodies, never an @media block
-            // (its body contains braces and so never matches).
-            '/\{([^{}]*)\}/s',
-            static function (array $m) use (&$dropped): string {
-                $kept = [];
-                foreach (explode(';', $m[1]) as $declaration) {
-                    if (trim($declaration) === '') {
-                        continue;
-                    }
-                    $problem = self::declarationProblem($declaration);
-                    if ($problem !== null) {
-                        $dropped[] = trim((string) preg_replace('/\s+/', ' ', $declaration)) . " ({$problem})";
-                        continue;
-                    }
-                    $kept[] = trim((string) preg_replace('/\s+/', ' ', $declaration));
-                }
-                return $kept === [] ? '{}' : "{\n    " . implode(";\n    ", $kept) . ";\n}";
-            },
-            $css
+        $problems = [];
+        foreach (CssChecks::scanDeclarations($css) as $declaration) {
+            $problem = self::declarationProblem(
+                $declaration['raw'],
+                self::declarationTargetsShape($declaration),
+            );
+            if ($problem !== null) {
+                $problems[$declaration['start']] = $problem;
+            }
+        }
+        [$salvaged, $droppedRows] = CssChecks::dropDeclarations(
+            $css,
+            static fn (array $declaration): bool => isset($problems[$declaration['start']]),
         );
-        return [$salvaged, $dropped];
+        $dropped = array_map(
+            static fn (array $declaration): string => trim((string) preg_replace(
+                '/\s+/',
+                ' ',
+                $declaration['raw'],
+            )) . ' (' . $problems[$declaration['start']] . ')',
+            $droppedRows,
+        );
+        return [$salvaged, array_values($dropped)];
     }
 
     /**
@@ -2714,7 +2728,7 @@ CSS;
      * validate(); anything unparsable is dropped too — the salvage pass fails
      * closed.
      */
-    private static function declarationProblem(string $declaration): ?string
+    private static function declarationProblem(string $declaration, bool $targetsShape = false): ?string
     {
         if (preg_match('/^\s*([-\w]+)\s*:\s*(\S[\s\S]*)$/', $declaration, $m) !== 1) {
             return 'not a single property: value declaration';
@@ -2723,6 +2737,9 @@ CSS;
         $value = $m[2];
         if (str_starts_with($property, '--motion-')) {
             return 'motion custom properties are profile-owned';
+        }
+        if ($targetsShape && CssChecks::isShapeAffectingDeclaration($property, $value)) {
+            return 'contained-image/button corner is shape-owned by the design direction';
         }
         if (preg_match('/#[0-9a-fA-F]{3,8}\b/', $value) === 1
             || preg_match('/\b(?:rgba?|hsla?)\s*\(/i', $value) === 1
@@ -2742,6 +2759,15 @@ CSS;
             return 'hides content';
         }
         return null;
+    }
+
+    /**
+     * @param array{context:string,kind:string} $declaration
+     */
+    private static function declarationTargetsShape(array $declaration): bool
+    {
+        return $declaration['kind'] === 'style'
+            && CssChecks::selectorTargetsShape($declaration['context']);
     }
 
     /** @return string[] */

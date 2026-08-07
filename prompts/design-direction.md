@@ -9,7 +9,7 @@ Factual info about the site (JSON — no design guidance). Use it to ground the 
 
 ## Chosen Concept Seed
 
-The concept seed below was already chosen for this site. It is the creative core of the whole direction — do not replace it with a different concept. Everything the seed commits (its palette family, typography character, imagery treatment, mood) is binding; everything it leaves open — the exact hexes, the exact font names and weights, the image grade, the signature device, spacing, texture — is yours to design, and every choice must serve this one concept:
+The concept seed below was already chosen for this site. It is the creative core of the whole direction — do not replace it with a different concept. Everything the seed commits (its palette family, typography character, imagery treatment, mood) is binding; everything it leaves open — the exact hexes, the exact font names and weights, the image grade, spacing, texture — is yours to design, and every choice must serve this one concept:
 
 {{seed}}
 
@@ -39,14 +39,14 @@ Do NOT produce a direction that feels like generic AI output:
 
 Besides the vivid narrative, the direction commits to explicit structured fields. Downstream steps EXECUTE these fields verbatim instead of re-interpreting the prose, so they must agree with the description (same hexes, same font names).
 
-- `palette`: the five named hexes the theme will ship. `base` = page background, `contrast` = body text on it (strong contrast required), `primary` = main brand color, `secondary` = supporting color, `accent` = for CTAs/interaction — and the direction MAY also commit accent to its `signature_device` micro-motif (say so explicitly in that field); never to body text or broad fills.
+- `palette`: the five named hexes the theme will ship. `base` = page background, `contrast` = body text on it (strong contrast required), `primary` = main brand color, `secondary` = supporting color, `accent` = for CTAs/interaction only; never for body text, decorative motifs, or broad fills.
 - `type`: the heading and body typography as structured objects. Each `family` MUST be a real Google Fonts family spelled exactly (e.g. "Fraunces", "Source Serif 4", "Oswald"), and `weights` MUST list every 100-step weight the direction commits to using. Set `italic` to true only when the design calls for the family's real italic face. `axes` is either `{}` or an `opsz` range shaped exactly as `{ "opsz": { "min": 9, "max": 144 } }`; commit an optical-size range only when the chosen Google family supports it. Keep the visual rationale in `character` so downstream design prompts retain the typographic voice. The build deterministically unions these commitments with observed usage and enqueues them from Google Fonts; never name Druk, Canela, GT Sectra, or other unavailable foundry fonts.
 - `image_grade`: the one-sentence photographic treatment per the Image Grade section above.
 - `motion`: how the page MOVES — one of `"calm"`, `"energetic"`, `"dramatic"`, `"minimal"`, `"none"`. The theme ships fixed, hand-tuned motion families, not one animation at different speeds: `calm` = soft fades and gentle settling; `energetic` = quick diagonal arrivals, spring overshoot, and livelier hover; `dramatic` = long directional masks, a hero focus pull, and cinematic image movement; `minimal` = hover micro-interactions only, no scroll motion; `none` = completely static. Pick the movement language that serves the concept instead of defaulting to `calm` — a contemplative portfolio may want `calm`, a kids' brand `energetic`, a theatrical launch `dramatic`, and a brutalist manifesto perhaps `none`.
 - `motion_note`: ONE short line of motion art direction refining the profile (e.g. "let the hero image breathe; cards rise one by one"), or `""` when the profile alone says enough.
 - `canvas`: `"full-bleed"` or `"framed"` — how the page meets the viewport edge. `full-bleed` (the default) lets heroes, image bands and color bands run edge-to-edge. Commit to `framed` ONLY when the concept genuinely calls for a contained, gallery-mat presentation (an art-book portfolio, a print-inspired editorial) — the page then keeps a visible mat of page background around every band below the fold, and the header can never float over the hero. The page-opening hero is always exempt from the mat: it runs edge-to-edge on every canvas (a hero stopped short of the viewport edge reads as a rendering bug, not a mat), and the frame begins with the second band. Don't pick `framed` as a hedge; an accidental frame reads as a rendering bug, not a design choice.
-- `signature_device`: the ONE repeated visual motif that makes the direction recognizable. Invent it FOR this concept from the site's real-world visual culture, and test it before committing: if an unrelated site could adopt it unchanged, or it amounts to "every section opens with <the same treatment>", it is a default, not a signature — design a different one. It must be executable with theme tokens (type, color, spacing, sparingly borders): never a generated image asset (drawn ornaments — sprigs, crests, emblems, icons — come out off-palette and wobbly), and never words or letters rendered as imagery (models garble glyphs; lettering ideas become real typography instead). The device must also never damage reading copy: no misregistration/echo effects that duplicate visible text as an overlapping layer (blocks cannot offset a text copy cleanly — it renders as garble and reads twice), and no strikethrough or negation marks on headline or proposition words (a strike means "not this" and inverts the message; crossing off genuinely sold-out list items is the only legitimate strike). Generated directions herd onto the same few defaults — treat these as ALREADY TAKEN: hairline rules and ruled boxes, section numbering ("01, 02…"), indentation systems, repeated glyph marks (✳ ❖ ✦ and kin). Commit to one of those only when the subject matter makes it near-literal (a numbered tasting menu, an archive with real catalogue numbers), name the real-world source it quotes, and confine it to a few deliberate moments — never before every heading or eyebrow, never as list bullets, metadata separators, or a divider under every block, and never as a paragraph of its own: a device that is not attached to real content renders as a stray floating speck, not a motif.
-- `signature_device_slots`: zero to two unique placement slots chosen explicitly from `"header"`, `"hero"`, `"body"`, `"closing"`, and `"footer"`. Use `[]` when no signature device was selected. This is a hard placement budget: do not encode placement prose inside `signature_device`.
+- `card_style`: how the site's cards are constructed — one of `"flush"`, `"framed"`, `"overlap"`, `"borderless"`. `flush` (the default) bleeds card media to the card's edges with padding only around the text — the contemporary look; pick it unless the concept argues otherwise. `framed` insets the media behind padding on all sides — commit to it ONLY when the concept genuinely calls for that framing (a polaroid/print/scrapbook mood, an archival editorial); as an accidental default it reads dated. `overlap` rides the text panel up over the media's bottom edge — for layered, energetic, poster-like concepts. `borderless` drops the card box entirely — media above a plain text stack, whitespace as the only separator — for austere or gallery-minimal concepts.
+- `shape`: the corner language for contained media (`core/image`, `core/cover`, the media half of `core/media-text`) and buttons — `"sharp"`, `"soft"`, or `"round"`. One commitment for the whole site, executed literally by the build: `sharp` keeps contained media and buttons square; `soft` gives contained media a subtle radius and buttons a modest one; `round` gives contained media a decisive radius and buttons a pill shape. Full-bleed media always meets its edges square, whatever the shape. Generic card wrappers are outside this deterministic commitment, so do not promise their geometry from this field. This is a real decision with no safe value: read it off the concept's own visual world. A world of crisp, printed, or architectural geometry commits to `sharp`; a world of warm, organic, tactile, or playful geometry commits to `soft` or `round`. Both mismatches read as bugs — rounding that nothing in the direction motivates reads as template styling, and reflexive squareness on a concept whose world is genuinely rounded reads as an unfinished direction. Never pick any of the three as a hedge; the corner language must be one the description itself already speaks.
 - `hero_blueprint`: fill the bounded front-page-only object from the one assigned recipe below. The assigned `recipe` is authoritative. Do not mention that recipe, its topology, its media placement, or any hero-specific spatial arrangement in `description`; downstream general prompts receive the narrative but must not learn the front-page structure through prose.
 
 ## Front-page hero assignment (front page only)
@@ -89,11 +89,11 @@ Respond with ONLY a JSON object. No explanation, no commentary, no text before o
       }
     },
     "image_grade": "One compact, concrete art-direction sentence applied to ALL of the site's imagery, per the Image Grade section above.",
-    "motion": "calm",
+    "motion": "One bounded motion profile chosen per the motion field above.",
     "motion_note": "One short line of motion art direction, or an empty string.",
-    "canvas": "full-bleed",
-    "signature_device": "The one repeated visual motif, one concrete sentence.",
-    "signature_device_slots": ["hero", "body"],
+    "canvas": "One bounded canvas value chosen per the canvas field above.",
+    "card_style": "One bounded card construction — flush, framed, overlap, or borderless — chosen per the card_style field above.",
+    "shape": "One bounded corner commitment — sharp, soft, or round — read off the concept per the shape field above.",
     "hero_blueprint": {
       "version": 1,
       "recipe": "Copy the exact assigned recipe id",
@@ -108,8 +108,7 @@ Respond with ONLY a JSON object. No explanation, no commentary, no text before o
       "text_safe_region": "start",
       "height_profile": "standard",
       "cta_treatment": "prominent",
-      "mobile_transformation": "Use one bounded value allowed by the selected recipe",
-      "signature_device_use": "One bounded placement instruction, or an empty string."
+      "mobile_transformation": "Use one bounded value allowed by the selected recipe"
     }
   }
 }

@@ -6,8 +6,10 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\CssTokenExtractor;
 use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\GeneratedJsonFallbackStep;
+use Automattic\SiteBuild\CssChecks;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
+use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
@@ -37,6 +39,18 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
 
     private const REQUIRED_COLORS = ['base', 'contrast', 'primary', 'secondary', 'accent'];
     private const REQUIRED_FONTS = ['heading', 'body'];
+
+    /** Element selectors whose box is the text itself, never a visual surface. */
+    private const TEXT_SHADOW_ELEMENTS = [
+        'caption', 'cite', 'heading', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'link',
+    ];
+
+    /** Block selectors whose root box is authored copy rather than a card/media surface. */
+    private const TEXT_SHADOW_BLOCKS = [
+        'core/heading', 'core/list', 'core/list-item', 'core/paragraph',
+        'core/post-title', 'core/pullquote', 'core/quote', 'core/site-tagline',
+        'core/site-title', 'core/verse',
+    ];
 
     /**
      * Readable neutral defaults for palette slugs the model omitted, used only
@@ -85,14 +99,16 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     /**
      * One bounded spacing vocabulary for every generated site.
      *
-     * sm/md are component-level gaps. lg/xl/xxl are the compact, standard,
-     * and spacious section-padding choices. Their fluid ranges prevent the
-     * largest token from becoming fixed 128px padding on mobile or growing
-     * beyond 112px on wide screens.
+     * xs is the tight intra-component text rhythm (an eyebrow/heading/line
+     * stack inside one card or list row — BIGR-777). sm/md are component-level
+     * gaps. lg/xl/xxl are the compact, standard, and spacious section-padding
+     * choices. Their fluid ranges prevent the largest token from becoming
+     * fixed 128px padding on mobile or growing beyond 112px on wide screens.
      *
      * @var list<array{slug: string, name: string, size: string}>
      */
     private const SPACING_PROFILE = [
+        ['slug' => 'xs', 'name' => 'Extra Small', 'size' => 'clamp(0.25rem, 0.5vw, 0.5rem)'],
         ['slug' => 'sm', 'name' => 'Small', 'size' => 'clamp(0.75rem, 1vw, 1rem)'],
         ['slug' => 'md', 'name' => 'Medium', 'size' => 'clamp(1.5rem, 2vw, 2rem)'],
         ['slug' => 'lg', 'name' => 'Compact', 'size' => 'clamp(3rem, 4vw, 4rem)'],
@@ -104,6 +120,9 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      * roles and makes zero aesthetic choices — every value is a var:preset
      * token whose actual color, family and size the model chose, so sites stay
      * visually distinct. No borders, radii, shadows or decorative treatment.
+     * (The direction-committed shape wiring in repairShapeWiring() is the one
+     * deliberate exception, and it executes an explicit design commitment
+     * rather than making a choice here.)
      *
      * Context-free block/caption text colors are deliberately absent:
      * ContrastFixStep evaluates rendered backgrounds but cannot see
@@ -218,7 +237,31 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      */
     private const ROOT_GUTTER = 'var:preset|spacing|md';
 
+    /**
+     * The image-corner radius each committed corner language wires onto
+     * core/image (WordPress applies the block's border support to the inner
+     * img, so contained figures, card crops and gallery items all pick it
+     * up). Covers and media-text halves have no structured theme.json path to
+     * their media surface; their committed radius ships in the build-owned
+     * shape kit instead (ShapeMarkup::kitCss(), enqueued by FinalizeThemeStep).
+     * `sharp` removes the declaration instead of writing a redundant zero.
+     *
+     * @var array<string,string>
+     */
+    private const IMAGE_SHAPE_RADII = [
+        'soft'  => '0.5rem',
+        'round' => '1.25rem',
+    ];
+
+    /** @var array<string,string> */
+    private const BUTTON_SHAPE_RADII = [
+        'sharp' => '0',
+        'soft'  => '0.5rem',
+        'round' => '9999px',
+    ];
+
     private const REQ = 'theme-json';
+    private const SHAPE_REPORT_FILE = 'theme-json-shape.txt';
 
     public function __construct(
         private Llm $llm,
@@ -249,7 +292,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             id: $this->id(),
             label: $this->label(),
             reads: $reads,
-            writes: ['theme/theme.json', 'warnings.json'],
+            writes: ['theme/theme.json', 'logs/' . self::SHAPE_REPORT_FILE, 'warnings.json'],
             concurrent: false,
         );
     }
@@ -326,7 +369,6 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         $theme['version'] = 3;
         $theme = self::disableCoreDefaultPresets($theme);
         $theme = self::normalizeSpacingSettings($theme);
-        $theme = self::normalizeRootPadding($theme);
 
         // A default vertical rhythm between sibling blocks: without it, per-block
         // "blockGap" the parts set (e.g. the branded-lockup header's zero-gap
@@ -359,6 +401,9 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $theme['styles']['spacing'] = [];
         }
         $theme['styles']['spacing']['blockGap'] ??= 'var:preset|spacing|md';
+        // After the shape repairs above so a malformed styles.spacing records
+        // its warning before normalizeRootPadding's silent guard repairs it.
+        $theme = self::normalizeRootPadding($theme);
 
         // Guarantee a root inline gutter so useRootPaddingAwareAlignments gives
         // constrained/wide content a side inset. SectionLayoutStep strips each
@@ -377,9 +422,13 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         [$theme, $fontWarnings] = self::repairFonts($theme, $preferredType);
         [$theme, $sizeWarnings] = self::repairFontSizes($theme);
 
-        // Last: the scaffold references the preset slugs repaired above, and
-        // every well-shaped model-authored leaf wins over the wiring it fills in.
+        // Last: the scaffold references the preset slugs repaired above. The
+        // committed shape is then authoritative over model-authored radii.
         [$theme, $scaffoldWarnings] = self::repairScaffold($theme);
+        [$theme, $shapeRepairs, $shapeWarnings] = self::repairShapeWiring(
+            $theme,
+            DesignDirectionStep::shapeFor($project) ?? '',
+        );
         [$theme, $groupPaddingWarnings] = self::repairGroupBlockPadding($theme);
         $warnings = array_merge(
             $warnings,
@@ -388,7 +437,18 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $sizeWarnings,
             $scaffoldWarnings,
             $groupPaddingWarnings,
+            $shapeWarnings,
         );
+
+        $shapeReport = ['Successful deterministic shape repairs: ' . count($shapeRepairs)];
+        foreach ($shapeRepairs as $repair) {
+            $shapeReport[] = '- ' . $repair;
+        }
+        $project->writeText('logs/' . self::SHAPE_REPORT_FILE, implode("\n", $shapeReport) . "\n");
+        if ($shapeRepairs !== []) {
+            Narrator::write('  [theme-json] repaired ' . count($shapeRepairs)
+                . " conflicting shape declaration(s); see logs/" . self::SHAPE_REPORT_FILE . "\n");
+        }
 
         if ($warnings !== []) {
             $project->addWarnings($this->id(), $warnings);
@@ -483,7 +543,11 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      * Normalize the root padding stanza the model reliably copies from
      * published themes but never gets quite right:
      *
-     * - A theme that sets root left/right padding MUST also opt into
+     * - Left/right root padding is the only viewport gutter constrained
+     *   content gets on mobile, so a missing or zero side is synthesized to
+     *   the md preset: without it every section that doesn't bring its own
+     *   padding renders text flush against the 390px screen edge.
+     * - A theme with root left/right padding MUST also opt into
      *   root-padding-aware alignments: without the flag WordPress puts the
      *   padding on <body>, where no block can escape it, so every align:full
      *   hero/footer renders inset by a page-background gutter.
@@ -492,26 +556,37 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      *   and the vertical rhythm belongs to the header/sections/footer, which
      *   all bring their own padding.
      *
-     * Pure — unit-testable.
+     * Pure and total — malformed styles/styles.spacing shapes are repaired
+     * here too (silently; writeTheme's earlier shape repairs own the warning),
+     * so no caller order can fatal.
      *
      * @param array<mixed> $theme
      * @return array<mixed>
      */
     public static function normalizeRootPadding(array $theme): array
     {
+        if (!is_array($theme['styles'] ?? null)) {
+            $theme['styles'] = [];
+        }
+        if (!is_array($theme['styles']['spacing'] ?? null)) {
+            $theme['styles']['spacing'] = [];
+        }
         $padding = $theme['styles']['spacing']['padding'] ?? null;
         if (!is_array($padding)) {
-            return $theme;
+            $padding = [];
         }
-        $theme['styles']['spacing']['padding']['top'] = '0';
-        $theme['styles']['spacing']['padding']['bottom'] = '0';
+        $normalized = ['top' => '0', 'bottom' => '0'];
         foreach (['left', 'right'] as $side) {
-            $value = trim((string) ($padding[$side] ?? ''));
-            if ($value !== '' && preg_match('/^0(?:[a-z%]+)?$/i', $value) !== 1) {
-                $theme['settings']['useRootPaddingAwareAlignments'] = true;
-                return $theme;
-            }
+            $value = $padding[$side] ?? '';
+            // Only scalar CSS-length candidates survive; arrays/objects/bools
+            // would serialize as garbage in theme.json.
+            $usable = (is_string($value) || is_int($value) || is_float($value))
+                && trim((string) $value) !== ''
+                && preg_match('/^0(?:[a-z%]+)?$/i', trim((string) $value)) !== 1;
+            $normalized[$side] = $usable ? $value : 'var:preset|spacing|md';
         }
+        $theme['styles']['spacing']['padding'] = $normalized;
+        $theme['settings']['useRootPaddingAwareAlignments'] = true;
         return $theme;
     }
 
@@ -899,10 +974,630 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      */
     public static function repairScaffold(array $theme): array
     {
-        [$theme, $warnings] = self::removeUnverifiedContextColors($theme);
+        [$theme, $colorWarnings] = self::removeUnverifiedContextColors($theme);
+        [$theme, $shadowWarnings] = self::repairTextTargetShadows($theme);
         $shapeWarnings = [];
         $theme = self::mergeScaffoldDefaultsAtPath(self::SCAFFOLD, $theme, '', $shapeWarnings);
-        return [$theme, array_merge($warnings, $shapeWarnings)];
+        return [$theme, array_merge($colorWarnings, $shadowWarnings, $shapeWarnings)];
+    }
+
+    /**
+     * Remove generated shadows whose selector paints text rather than a
+     * surface. A direct `shadow` is retained on buttons, groups/cards, media,
+     * covers, navigation and the global canvas. `typography.textShadow` is
+     * always text-directed, so it is removed from every root, block, element,
+     * variation and pseudo-state style node.
+     *
+     * Every removed declaration gets its own actionable warning. Shadow
+     * presets remain available in settings for safe surface use. Pure and
+     * idempotent — unit-testable.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>} theme, warnings
+     */
+    public static function repairTextTargetShadows(array $theme): array
+    {
+        $styles = $theme['styles'] ?? null;
+        if (!is_array($styles) || ($styles !== [] && array_is_list($styles))) {
+            return [$theme, []];
+        }
+
+        $warnings = [];
+        self::repairTextShadowsAtStyleNode($styles, 'styles', false, $warnings);
+        $theme['styles'] = $styles;
+        return [$theme, $warnings];
+    }
+
+    /**
+     * @param array<mixed> $node
+     * @param list<string> $warnings
+     */
+    private static function repairTextShadowsAtStyleNode(
+        array &$node,
+        string $path,
+        bool $boxShadowTargetsText,
+        array &$warnings,
+    ): bool {
+        $changed = false;
+
+        if ($boxShadowTargetsText
+            && array_key_exists('shadow', $node)
+            && self::shadowValueCanPaint($node['shadow'])) {
+            $warnings[] = "theme/theme.json {$path}.shadow: authored "
+                . Warnings::value($node['shadow'])
+                . '; delivered removed'
+                . '; disposition removed text-targeted box shadow; shadows are reserved for media, card,'
+                . ' and cover surfaces';
+            unset($node['shadow']);
+            $changed = true;
+        }
+
+        $typography = $node['typography'] ?? null;
+        if (is_array($typography)
+            && ($typography === [] || !array_is_list($typography))
+            && array_key_exists('textShadow', $typography)
+            && self::shadowValueCanPaint($typography['textShadow'])) {
+            $warnings[] = "theme/theme.json {$path}.typography.textShadow: authored "
+                . Warnings::value($typography['textShadow'])
+                . '; delivered removed'
+                . '; disposition removed glyph shadow; shadow atmosphere is reserved for media, card,'
+                . ' and cover surfaces';
+            unset($typography['textShadow']);
+            if ($typography === []) {
+                unset($node['typography']);
+            } else {
+                $node['typography'] = $typography;
+            }
+            $changed = true;
+        }
+
+        $changed = self::repairTextShadowStyleMap(
+            $node,
+            'elements',
+            $path,
+            self::TEXT_SHADOW_ELEMENTS,
+            $warnings,
+        ) || $changed;
+        $changed = self::repairTextShadowStyleMap(
+            $node,
+            'blocks',
+            $path,
+            self::TEXT_SHADOW_BLOCKS,
+            $warnings,
+        ) || $changed;
+
+        $variations = $node['variations'] ?? null;
+        if (is_array($variations) && ($variations === [] || !array_is_list($variations))) {
+            $variationChanged = false;
+            foreach (array_keys($variations) as $name) {
+                if (!is_string($name)
+                    || !is_array($variations[$name])
+                    || ($variations[$name] !== [] && array_is_list($variations[$name]))) {
+                    continue;
+                }
+                $childChanged = self::repairTextShadowsAtStyleNode(
+                    $variations[$name],
+                    "{$path}.variations.{$name}",
+                    $boxShadowTargetsText,
+                    $warnings,
+                );
+                if ($childChanged && $variations[$name] === []) {
+                    unset($variations[$name]);
+                }
+                $variationChanged = $childChanged || $variationChanged;
+            }
+            if ($variationChanged) {
+                if ($variations === []) {
+                    unset($node['variations']);
+                } else {
+                    $node['variations'] = $variations;
+                }
+                $changed = true;
+            }
+        }
+
+        foreach (array_keys($node) as $key) {
+            if (!is_string($key)
+                || !str_starts_with($key, ':')
+                || !is_array($node[$key])
+                || ($node[$key] !== [] && array_is_list($node[$key]))) {
+                continue;
+            }
+            $childChanged = self::repairTextShadowsAtStyleNode(
+                $node[$key],
+                "{$path}.{$key}",
+                $boxShadowTargetsText,
+                $warnings,
+            );
+            if ($childChanged && $node[$key] === []) {
+                unset($node[$key]);
+            }
+            $changed = $childChanged || $changed;
+        }
+
+        return $changed;
+    }
+
+    /**
+     * Explicit resets and falsey malformed values cannot paint a shadow. They
+     * are harmless, and `none` can intentionally suppress an inherited text
+     * shadow, so retain their exact authored representation without warning.
+     */
+    private static function shadowValueCanPaint(mixed $value): bool
+    {
+        if (is_string($value)) {
+            $withoutComments = preg_replace('~/\*.*?\*/~s', '', $value) ?? $value;
+            $withoutImportant = preg_replace('/\s*!important\s*\z/i', '', $withoutComments)
+                ?? $withoutComments;
+            return !in_array(
+                strtolower(trim($withoutImportant)),
+                ['', 'none', 'initial', 'unset', 'revert', 'revert-layer'],
+                true,
+            );
+        }
+        if ($value === null || $value === false || $value === []) {
+            return false;
+        }
+        if ((is_int($value) || is_float($value)) && (float) $value === 0.0) {
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * @param array<mixed> $node
+     * @param list<string> $textTargets
+     * @param list<string> $warnings
+     */
+    private static function repairTextShadowStyleMap(
+        array &$node,
+        string $mapKey,
+        string $path,
+        array $textTargets,
+        array &$warnings,
+    ): bool {
+        $map = $node[$mapKey] ?? null;
+        if (!is_array($map) || ($map !== [] && array_is_list($map))) {
+            return false;
+        }
+
+        $changed = false;
+        foreach (array_keys($map) as $name) {
+            if (!is_string($name)
+                || !is_array($map[$name])
+                || ($map[$name] !== [] && array_is_list($map[$name]))) {
+                continue;
+            }
+            $childChanged = self::repairTextShadowsAtStyleNode(
+                $map[$name],
+                "{$path}.{$mapKey}.{$name}",
+                in_array($name, $textTargets, true),
+                $warnings,
+            );
+            if ($childChanged && $map[$name] === []) {
+                unset($map[$name]);
+            }
+            $changed = $childChanged || $changed;
+        }
+        if (!$changed) {
+            return false;
+        }
+        if ($map === []) {
+            unset($node[$mapKey]);
+        } else {
+            $node[$mapKey] = $map;
+        }
+        return true;
+    }
+
+    /**
+     * Execute the design direction's committed corner language as authoritative
+     * build wiring for contained images and buttons. A conflicting authored
+     * radius is repaired and recorded in the step report; unrelated style
+     * siblings survive. Fully resolved conflicts do not enter warnings.json.
+     * `sharp` removes the image radius and gives buttons a zero radius, `soft`
+     * gives both a subtle radius, and `round` gives contained images a decisive
+     * radius with pill buttons. Cover and media-text corners are owned by the
+     * build-owned shape kit stylesheet (FinalizeThemeStep), so authored radii
+     * on those blocks are repaired here without an authoritative base leaf;
+     * FixBlocksStep adds a local zero-radius override to alignfull core/image
+     * blocks so full-bleed media also stays square. A direction persisted
+     * before the shape field existed remains a complete no-op.
+     *
+     * Pure — unit-testable.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>,2:list<string>}
+     *         theme, successful repair notes, durable warnings
+     */
+    public static function repairShapeWiring(array $theme, string $shape): array
+    {
+        $buttonRadius = self::BUTTON_SHAPE_RADII[$shape] ?? null;
+        if ($buttonRadius === null) {
+            return [$theme, [], []];
+        }
+
+        $repairs = [];
+        $warnings = [];
+        $theme = self::repairCompetingShapeOverrides(
+            $theme,
+            $shape,
+            $repairs,
+            $warnings,
+        );
+        if ($shape === 'sharp') {
+            [$theme] = self::removeCommittedShapeValueAtPath(
+                $theme,
+                ['styles', 'blocks', 'core/image', 'border', 'radius'],
+                0,
+                'styles.blocks.core/image.border.radius',
+                $shape,
+                $repairs,
+            );
+        }
+        $styles = [];
+        $imageRadius = self::IMAGE_SHAPE_RADII[$shape] ?? null;
+        if ($imageRadius !== null) {
+            $styles['blocks'] = [
+                'core/image' => ['border' => ['radius' => $imageRadius]],
+            ];
+        }
+        $styles['elements'] = [
+            'button' => ['border' => ['radius' => $buttonRadius]],
+        ];
+
+        $theme = self::enforceCommittedShapeAtPath(
+            ['styles' => $styles],
+            $theme,
+            '',
+            $shape,
+            $repairs,
+        );
+        return [$theme, $repairs, $warnings];
+    }
+
+    /**
+     * Remove every structured or custom-CSS radius that WordPress emits after
+     * an authoritative base image/button rule. This walks pseudo/responsive
+     * states, block-style variations, nested element styles, and variation
+     * inner-block styles using the same recursive shapes as the global-styles
+     * engine. The two authoritative base leaves themselves are preserved for
+     * repairShapeWiring() to enforce below.
+     *
+     * @param array<mixed> $theme
+     * @param list<string> $repairs
+     * @param list<string> $warnings
+     * @return array<mixed>
+     */
+    private static function repairCompetingShapeOverrides(
+        array $theme,
+        string $shape,
+        array &$repairs,
+        array &$warnings,
+    ): array {
+        $styles = $theme['styles'] ?? null;
+        if (!is_array($styles) || ($styles !== [] && array_is_list($styles))) {
+            return $theme;
+        }
+        $theme['styles'] = self::repairShapeStyleNode(
+            $styles,
+            'styles',
+            null,
+            false,
+            $shape,
+            $repairs,
+            $warnings,
+        );
+        return $theme;
+    }
+
+    /**
+     * @param array<mixed> $node
+     * @param 'image'|'button'|'cover'|'media-text'|null $target
+     * @param list<string> $repairs
+     * @param list<string> $warnings
+     * @return array<mixed>
+     */
+    private static function repairShapeStyleNode(
+        array $node,
+        string $path,
+        ?string $target,
+        bool $authoritativeBase,
+        string $shape,
+        array &$repairs,
+        array &$warnings,
+    ): array {
+        if (is_string($node['css'] ?? null)) {
+            $authoredCss = $node['css'];
+            $scopedDeclarationList = $path !== 'styles';
+            $selectorOwned = static fn (string $selector): bool =>
+                CssChecks::selectorTargetsShape($selector)
+                || ($target !== null && self::selectorTargetsImplicitStyleRoot($selector));
+            $authoredDeclarations = CssChecks::shapeAffectingDeclarations(
+                $authoredCss,
+                $selectorOwned,
+                $scopedDeclarationList,
+                $target !== null,
+            );
+            if ($authoredDeclarations !== []) {
+                $unsafe = array_filter(
+                    $authoredDeclarations,
+                    static fn (array $declaration): bool => !$declaration['structurallySafe'],
+                );
+                if ($unsafe !== []) {
+                    unset($node['css']);
+                    $warnings[] = "theme/theme.json {$path}.css: authored "
+                        . Warnings::value($authoredCss)
+                        . '; delivered removed; disposition structurally malformed custom CSS contained '
+                        . 'an image/button corner override that could not be isolated safely';
+                } else {
+                    $ownedStarts = array_fill_keys(array_column($authoredDeclarations, 'start'), true);
+                    [$deliveredCss, $dropped] = CssChecks::dropDeclarations(
+                        $authoredCss,
+                        static fn (array $declaration): bool => isset($ownedStarts[$declaration['start']]),
+                        $scopedDeclarationList,
+                    );
+                    $residual = CssChecks::shapeAffectingDeclarations(
+                        $deliveredCss,
+                        $selectorOwned,
+                        $scopedDeclarationList,
+                        $target !== null,
+                    );
+                    if ($residual !== [] || count($dropped) !== count($authoredDeclarations)) {
+                        unset($node['css']);
+                        $warnings[] = "theme/theme.json {$path}.css: authored "
+                            . Warnings::value($authoredCss)
+                            . '; delivered removed; disposition custom CSS contained an image/button '
+                            . 'corner override that could not be isolated safely';
+                    } else {
+                        if (trim($deliveredCss) === '') {
+                            unset($node['css']);
+                        } else {
+                            $node['css'] = $deliveredCss;
+                        }
+                        foreach ($dropped as $declaration) {
+                            $message = "theme/theme.json {$path}.css: authored declaration "
+                                . Warnings::value(trim($declaration['raw']))
+                                . '; delivered removed; disposition removed custom-CSS corner override '
+                                . 'that bypasses the committed shape scope';
+                            $repairs[] = $message . " for authoritative {$shape} "
+                                . ($target ?? 'image/button selector') . ' styling';
+                        }
+                    }
+                }
+            }
+        }
+
+        if ($target !== null
+            && !$authoritativeBase
+            && is_array($node['border'] ?? null)
+            && (($node['border'] ?? []) === [] || !array_is_list($node['border']))
+            && array_key_exists('radius', $node['border'])
+        ) {
+            $repairs[] = "theme/theme.json {$path}.border.radius: authored "
+                . Warnings::value($node['border']['radius'])
+                . '; delivered removed'
+                . "; disposition removed conflicting radius to enforce committed {$shape} shape";
+            unset($node['border']['radius']);
+            if ($node['border'] === []) {
+                unset($node['border']);
+            }
+        }
+
+        $blocks = $node['blocks'] ?? null;
+        if (is_array($blocks) && ($blocks === [] || !array_is_list($blocks))) {
+            foreach ($blocks as $block => $child) {
+                if (!is_string($block)
+                    || !is_array($child)
+                    || ($child !== [] && array_is_list($child))
+                ) {
+                    continue;
+                }
+                $childPath = $path . '.blocks.' . $block;
+                $childTarget = match ($block) {
+                    'core/image' => 'image',
+                    'core/button' => 'button',
+                    'core/cover' => 'cover',
+                    'core/media-text' => 'media-text',
+                    default => null,
+                };
+                $blocks[$block] = self::repairShapeStyleNode(
+                    $child,
+                    $childPath,
+                    $childTarget,
+                    $childPath === 'styles.blocks.core/image',
+                    $shape,
+                    $repairs,
+                    $warnings,
+                );
+            }
+            $node['blocks'] = $blocks;
+        }
+
+        $elements = $node['elements'] ?? null;
+        if (is_array($elements) && ($elements === [] || !array_is_list($elements))) {
+            foreach ($elements as $element => $child) {
+                if (!is_string($element)
+                    || !is_array($child)
+                    || ($child !== [] && array_is_list($child))
+                ) {
+                    continue;
+                }
+                $childPath = $path . '.elements.' . $element;
+                // Element selectors own their own rendered surface. A caption
+                // nested under core/image, for example, is not image-corner
+                // geometry and must not inherit the parent target.
+                $childTarget = $element === 'button' ? 'button' : null;
+                $elements[$element] = self::repairShapeStyleNode(
+                    $child,
+                    $childPath,
+                    $childTarget,
+                    $childPath === 'styles.elements.button',
+                    $shape,
+                    $repairs,
+                    $warnings,
+                );
+            }
+            $node['elements'] = $elements;
+        }
+
+        $variations = $node['variations'] ?? null;
+        if (is_array($variations) && ($variations === [] || !array_is_list($variations))) {
+            foreach ($variations as $variation => $child) {
+                if (!is_string($variation)
+                    || !is_array($child)
+                    || ($child !== [] && array_is_list($child))
+                ) {
+                    continue;
+                }
+                $variations[$variation] = self::repairShapeStyleNode(
+                    $child,
+                    $path . '.variations.' . $variation,
+                    $target,
+                    false,
+                    $shape,
+                    $repairs,
+                    $warnings,
+                );
+            }
+            $node['variations'] = $variations;
+        }
+
+        foreach ($node as $state => $child) {
+            if (!is_string($state)
+                || (!str_starts_with($state, ':')
+                    && !str_starts_with($state, '@')
+                    && !in_array($state, ['mobile', 'tablet', 'desktop'], true))
+                || !is_array($child)
+                || ($child !== [] && array_is_list($child))
+            ) {
+                continue;
+            }
+            $node[$state] = self::repairShapeStyleNode(
+                $child,
+                $path . '.' . $state,
+                $target,
+                false,
+                $shape,
+                $repairs,
+                $warnings,
+            );
+        }
+
+        return $node;
+    }
+
+    private static function selectorTargetsImplicitStyleRoot(string $selector): bool
+    {
+        return CssChecks::selectorTargetsSubject($selector, '&');
+    }
+
+    /**
+     * Remove one build-owned shape leaf, pruning only containers made empty by
+     * that removal. The boolean reports whether the requested leaf existed.
+     *
+     * @param array<mixed> $model
+     * @param list<string> $path
+     * @param list<string> $repairs
+     * @return array{0:array<mixed>,1:bool}
+     */
+    private static function removeCommittedShapeValueAtPath(
+        array $model,
+        array $path,
+        int $offset,
+        string $label,
+        string $shape,
+        array &$repairs,
+    ): array {
+        $key = $path[$offset] ?? null;
+        if (!is_string($key) || !array_key_exists($key, $model)) {
+            return [$model, false];
+        }
+
+        if ($offset === count($path) - 1) {
+            $repairs[] = "theme/theme.json {$label}: authored "
+                . Warnings::value($model[$key])
+                . '; delivered removed'
+                . "; disposition removed conflicting radius to enforce committed {$shape} shape";
+            unset($model[$key]);
+            return [$model, true];
+        }
+
+        $child = $model[$key];
+        if (!is_array($child) || ($child !== [] && array_is_list($child))) {
+            return [$model, false];
+        }
+        [$child, $removed] = self::removeCommittedShapeValueAtPath(
+            $child,
+            $path,
+            $offset + 1,
+            $label,
+            $shape,
+            $repairs,
+        );
+        if (!$removed) {
+            return [$model, false];
+        }
+        if ($child === []) {
+            unset($model[$key]);
+        } else {
+            $model[$key] = $child;
+        }
+        return [$model, true];
+    }
+
+    /**
+     * Recursively install build-owned shape leaves, replacing conflicts rather
+     * than letting model-authored radii override the committed direction.
+     *
+     * @param array<mixed> $commitment
+     * @param array<mixed> $model
+     * @param list<string> $repairs
+     * @return array<mixed>
+     */
+    private static function enforceCommittedShapeAtPath(
+        array $commitment,
+        array $model,
+        string $path,
+        string $shape,
+        array &$repairs,
+    ): array {
+        foreach ($commitment as $key => $committedValue) {
+            $currentPath = $path === '' ? (string) $key : $path . '.' . $key;
+            if (!array_key_exists($key, $model)) {
+                $model[$key] = $committedValue;
+                continue;
+            }
+
+            $modelValue = $model[$key];
+            $committedIsMap = is_array($committedValue)
+                && ($committedValue === [] || !array_is_list($committedValue));
+            $modelIsMap = is_array($modelValue)
+                && ($modelValue === [] || !array_is_list($modelValue));
+            if ($committedIsMap && $modelIsMap) {
+                $model[$key] = self::enforceCommittedShapeAtPath(
+                    $committedValue,
+                    $modelValue,
+                    $currentPath,
+                    $shape,
+                    $repairs,
+                );
+                continue;
+            }
+            if ($modelValue === $committedValue) {
+                continue;
+            }
+
+            $repairs[] = "theme/theme.json {$currentPath}: authored "
+                . Warnings::value($modelValue) . '; delivered '
+                . Warnings::value($committedValue)
+                . ($committedIsMap
+                    ? "; disposition replaced malformed container to enforce committed {$shape} shape"
+                    : "; disposition replaced conflicting radius to enforce committed {$shape} shape");
+            $model[$key] = $committedValue;
+        }
+
+        return $model;
     }
 
     /**

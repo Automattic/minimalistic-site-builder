@@ -180,7 +180,14 @@ async function main() {
     args: ['--no-sandbox', '--disable-gpu', '--hide-scrollbars'],
   });
   try {
-    const page = await browser.newPage({ viewport: { width: opts.width, height: 900 } });
+    // Emulate prefers-reduced-motion: the motion kit's accessibility contract
+    // (assets/motion/motion.css) serves reduced-motion visitors a fully
+    // static, fully visible page, so the capture can never race a scroll
+    // reveal and photograph opacity:0 sections or mid-flight transforms.
+    const page = await browser.newPage({
+      viewport: { width: opts.width, height: 900 },
+      reducedMotion: 'reduce',
+    });
     await page.goto(opts.url, { waitUntil: 'networkidle', timeout: 60000 });
 
     if (opts.scroll) {

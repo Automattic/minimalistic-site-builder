@@ -417,6 +417,42 @@ function testPersistentFocusSkip() {
     );
 }
 
+function testObserverWatchdog() {
+    // A silent observer (occluded/automation window) must fail open instead of
+    // leaving pending targets at opacity:0 forever.
+    const stranded = fakeElement(['reveal'], 900);
+    const silent = environment({ height: 800, targets: [stranded] });
+    check(!isVisible(stranded), 'watchdog fixture target revealed too early');
+    silent.flushTimers();
+    check(isVisible(stranded), 'silent observer did not fail open via the watchdog');
+    check(!silent.context.document.documentElement.classList.contains('motion-js'), 'watchdog fail-open left the hiding scope enabled');
+
+    // A delivering observer proves itself healthy even with nothing
+    // intersecting yet; the watchdog must not disturb normal reveal flow.
+    const pending = fakeElement(['reveal'], 900);
+    const healthy = environment({ height: 800, targets: [pending] });
+    mainObservers(healthy)[0].emitEntries([{
+        target: pending,
+        isIntersecting: false,
+        intersectionRatio: 0,
+    }]);
+    healthy.flushTimers();
+    check(!isVisible(pending), 'watchdog revealed a pending target despite a healthy observer');
+    check(healthy.context.document.documentElement.classList.contains('motion-js'), 'watchdog disabled a healthy motion scope');
+
+    // A hidden page delivers nothing legitimately: the watchdog re-arms and
+    // only fails open once the page has been visible for a full deadline.
+    const backgrounded = fakeElement(['reveal'], 900);
+    const hidden = environment({ height: 800, targets: [backgrounded] });
+    hidden.context.document.visibilityState = 'hidden';
+    hidden.flushTimers();
+    check(!isVisible(backgrounded), 'hidden page triggered the watchdog fail-open');
+    check(hidden.context.document.documentElement.classList.contains('motion-js'), 'hidden page disabled the motion scope');
+    hidden.context.document.visibilityState = 'visible';
+    hidden.flushTimers();
+    check(isVisible(backgrounded), 'watchdog did not fail open after the page became visible');
+}
+
 function testReducedMotion() {
     const target = fakeElement(['reveal'], 500);
     const env = environment({ height: 800, targets: [target], reducedMotion: true });
@@ -431,6 +467,7 @@ testDocumentEndViewportObserver();
 testStationaryLayoutFallbacks();
 testFailOpen();
 testPersistentFocusSkip();
+testObserverWatchdog();
 testReducedMotion();
 
 process.stdout.write('motion driver runtime harness passed\n');

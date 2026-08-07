@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\AboveFoldContract;
+use Automattic\SiteBuild\CardStyle;
 use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\HeroBlueprint;
@@ -26,8 +27,8 @@ use Automattic\SiteBuild\Warnings;
  * Output: designDirection.json — the chosen direction as structured data:
  *         title + vivid description plus the explicit fields downstream steps
  *         execute instead of re-interpreting (palette hexes, type pairing,
- *         image grade, signature device placement, and a separately consumed
- *         structured front-page hero blueprint).
+ *         image grade, and a separately consumed structured front-page hero
+ *         blueprint).
  *
  * Two calls. First, a cheap seed call (small model, hot sampling) brainstorms
  * THREE concept seeds — each one string: an evocative title plus one vivid
@@ -77,15 +78,25 @@ final class DesignDirectionStep implements Step
     /** Palette roles a direction commits to — the same slugs theme.json requires. */
     public const PALETTE_ROLES = ['base', 'contrast', 'primary', 'secondary', 'accent'];
 
+    /**
+     * The corner languages a direction may commit to. `sharp` is the default
+     * and wires square corners; `soft`/`round` make downstream repair wire a
+     * corner radius onto contained core/image media and buttons.
+     */
+    public const SHAPES = ['sharp', 'soft', 'round'];
+
     /** Env var forcing seed N (1-based) — the reproducible-evals escape hatch. */
     public const CHOICE_ENV = 'DESIGN_DIRECTION_CHOICE';
 
     /** Exact operator/evaluation override for the code-owned hero catalog. */
     public const HERO_RECIPE_ENV = 'HERO_RECIPE';
 
-    /** Slots in which the one global signature device may appear. */
-    public const SIGNATURE_DEVICE_SLOTS = ['header', 'hero', 'body', 'closing', 'footer'];
-
+    /**
+     * Card constructions a direction may commit to. The section prompt's card
+     * anatomy documents one markup recipe per value; `flush` is the default so
+     * the dated inset-media card only appears when a direction opts into it.
+     */
+    public const CARD_STYLES = CardStyle::ALL;
     public function __construct(
         private Llm $llm,
         private PromptRenderer $renderer,
@@ -270,10 +281,10 @@ final class DesignDirectionStep implements Step
             ],
             'image_grade'      => '',
             'canvas'           => $canvas,
+            'card_style'       => 'flush',
+            'shape'            => 'sharp',
             'motion'           => Motion::DEFAULT_PROFILE,
             'motion_note'      => '',
-            'signature_device' => '',
-            'signature_device_slots' => [],
             'concept_seed'     => $seed,
             'hero_blueprint'   => HeroBlueprint::defaultFor($recipe),
         ];
@@ -547,20 +558,9 @@ final class DesignDirectionStep implements Step
 
         HeroComposition::assertKnown($assignedRecipe);
 
-        $signatureDevice = trim((string) ($raw['signature_device'] ?? ''));
-        $signatureSlots = self::normalizeSignatureDeviceSlots(
-            $raw['signature_device_slots'] ?? null,
-            $signatureDevice,
-            $repairs,
-            $warnings,
-        );
         $blueprint = HeroBlueprint::normalize(
             $raw['hero_blueprint'] ?? null,
             $assignedRecipe,
-            [
-                'signature_device' => $signatureDevice,
-                'signature_device_slots' => $signatureSlots,
-            ],
             $repairs,
             $warnings,
         );
@@ -572,6 +572,8 @@ final class DesignDirectionStep implements Step
                 . self::describe($raw['canvas']) . ' delivered "full-bleed"; disposition repaired invalid value';
         }
 
+        $cardStyle = self::normalizeCardStyle($raw['card_style'] ?? null, $warnings);
+
         $motion = self::motionProfile($raw['motion'] ?? null);
         $rawMotion = is_string($raw['motion'] ?? null)
             ? strtolower(trim($raw['motion']))
@@ -580,6 +582,21 @@ final class DesignDirectionStep implements Step
             $repairs[] = 'designDirection.json: field motion authored '
                 . self::describe($raw['motion']) . ' delivered ' . self::describe($motion)
                 . '; disposition repaired invalid profile';
+        }
+
+        // The corner language is a fixed list; anything unrecognized falls
+        // back to sharp — an accidental radius reads as template styling, so
+        // rounding only ships on an explicit commitment.
+        $rawShape = $raw['shape'] ?? null;
+        $explicitShape = self::explicitShape($rawShape);
+        $shape = $explicitShape ?? 'sharp';
+        if (
+            array_key_exists('shape', $raw)
+            && $explicitShape === null
+        ) {
+            $warnings[] = "file='designDirection.json'; path=\"shape\"; authored="
+                . Warnings::value($rawShape)
+                . '; delivered="sharp"; disposition=invalid corner language replaced by deterministic sharp fallback';
         }
 
         return [
@@ -594,16 +611,43 @@ final class DesignDirectionStep implements Step
             // Anything that isn't an explicit "framed" commitment is full-bleed:
             // an accidental frame reads as a rendering bug, not a design choice.
             'canvas'           => $canvas,
+            // Anything outside the bounded card constructions delivers the
+            // flush default — inset media must be an explicit opt-in, never
+            // the accidental look every site gets.
+            'card_style'       => $cardStyle,
+            'shape'            => $shape,
             // The motion profile is a fixed list (the kit ships exactly these);
             // anything unrecognized falls back to the default so every build
             // commits to ONE profile the downstream steps can gate on.
             'motion'           => $motion,
             'motion_note'      => trim((string) ($raw['motion_note'] ?? '')),
-            'signature_device' => $signatureDevice,
-            'signature_device_slots' => $signatureSlots,
             'concept_seed'     => $conceptSeed,
             'hero_blueprint'   => $blueprint,
         ];
+    }
+
+    /**
+     * Normalize the one machine-readable card construction contract shared by
+     * direction generation and every downstream adapter. Missing/null/blank is
+     * the documented flush default. Any non-empty unsupported commitment loses
+     * authored intent, so its fallback is durable-warning material.
+     *
+     * @param list<string> $warnings
+     */
+    public static function normalizeCardStyle(mixed $authored, array &$warnings = []): string
+    {
+        $normalized = is_string($authored) ? strtolower(trim($authored)) : '';
+        if (in_array($normalized, self::CARD_STYLES, true)) {
+            return $normalized;
+        }
+        if ($authored === null || (is_string($authored) && $normalized === '')) {
+            return 'flush';
+        }
+
+        $warnings[] = 'designDirection.json: field card_style authored '
+            . Warnings::value($authored)
+            . '; delivered "flush"; disposition unsupported generated card treatment replaced by default';
+        return 'flush';
     }
 
     /**
@@ -826,6 +870,35 @@ final class DesignDirectionStep implements Step
             $facts[] = '- **Canvas**: full-bleed — heroes, image bands and color bands may run edge-to-edge with `"align":"full"`.';
         }
 
+        // Render the card commitment with its executable meaning: the section
+        // prompt's card anatomy executes exactly the named construction, and
+        // defaults to flush when a direction predates the field.
+        $rawCardStyle = $direction['card_style'] ?? null;
+        $cardStyle = is_string($rawCardStyle) ? strtolower(trim($rawCardStyle)) : '';
+        if (in_array($cardStyle, self::CARD_STYLES, true)) {
+            $meaning = match ($cardStyle) {
+                'flush'      => 'card media bleeds to the card edges and padding wraps only the text — use the `flush` construction from the card anatomy',
+                'framed'     => 'card media sits inset behind padding on all sides — use the `framed` construction from the card anatomy, with concentric corner radii',
+                'overlap'    => 'the text panel rides up over the media\'s bottom edge — use the `overlap` construction from the card anatomy',
+                'borderless' => 'cards have no box at all; media above a plain text stack — use the `borderless` construction from the card anatomy',
+            };
+            $facts[] = "- **Card treatment**: {$cardStyle} — {$meaning}.";
+        }
+
+        // Render the shape commitment with its executable meaning. The build
+        // wires contained media (core/image, core/cover, the media half of
+        // core/media-text) and button radii itself; this line keeps prompts
+        // from re-interpreting a bare keyword. Directions persisted before
+        // the field existed carry none.
+        $shape = self::explicitShape($direction['shape'] ?? null);
+        if ($shape !== null) {
+            $facts[] = match ($shape) {
+                'sharp' => '- **Shape**: sharp — the build keeps contained media (`core/image`, `core/cover`, the media half of `core/media-text`) and buttons square. Full-bleed media stays square.',
+                'soft'  => '- **Shape**: soft — the build wires a subtle corner radius onto contained media (`core/image`, `core/cover`, the media half of `core/media-text`) and a modest radius onto buttons. Full-bleed media stays square.',
+                'round' => '- **Shape**: round — the build wires a decisive corner radius onto contained media (`core/image`, `core/cover`, the media half of `core/media-text`) and pill-shaped buttons. Full-bleed media stays square.',
+            };
+        }
+
         // Render the motion commitment with its executable meaning: the
         // section prompts gate their motion-class placement on this line.
         $motion = strtolower(trim((string) ($direction['motion'] ?? '')));
@@ -843,23 +916,9 @@ final class DesignDirectionStep implements Step
             $facts[] = "- **Motion**: {$motion} — {$meaning}." . ($note !== '' ? " Motion note: {$note}" : '');
         }
 
-        foreach ([
-            'signature_device' => 'Signature device',
-            'image_grade'      => 'Image grade (all imagery)',
-        ] as $key => $label) {
-            $value = trim((string) ($direction[$key] ?? ''));
-            if ($value !== '') {
-                $facts[] = "- **{$label}**: {$value}";
-            }
-        }
-
-        $signatureDevice = trim((string) ($direction['signature_device'] ?? ''));
-        if ($signatureDevice !== '') {
-            $slots = is_array($direction['signature_device_slots'] ?? null)
-                ? array_values(array_map('strval', $direction['signature_device_slots']))
-                : [];
-            $facts[] = '- **Signature device placement slots**: '
-                . ($slots === [] ? 'none — do not place the device' : implode(', ', $slots));
+        $imageGrade = trim((string) ($direction['image_grade'] ?? ''));
+        if ($imageGrade !== '') {
+            $facts[] = "- **Image grade (all imagery)**: {$imageGrade}";
         }
 
         return $head . ($facts === [] ? '' : "\n\n" . implode("\n", $facts));
@@ -906,10 +965,7 @@ final class DesignDirectionStep implements Step
         }
         $repairs = [];
         $warnings = [];
-        $normalized = HeroBlueprint::normalize($blueprint, $recipe, [
-            'signature_device' => $direction['signature_device'] ?? '',
-            'signature_device_slots' => $direction['signature_device_slots'] ?? [],
-        ], $repairs, $warnings);
+        $normalized = HeroBlueprint::normalize($blueprint, $recipe, $repairs, $warnings);
         if ($normalized !== $blueprint) {
             throw new \RuntimeException(
                 'designDirection.json hero_blueprint is not normalized (the producing step must persist its fixed point)'
@@ -964,6 +1020,19 @@ final class DesignDirectionStep implements Step
     }
 
     /**
+     * The authoritative site-wide card construction, including the documented
+     * flush default. Adapter callers pass warnings through to their own durable
+     * step boundary so an invalid non-empty persisted value is never hidden.
+     *
+     * @param list<string> $warnings
+     */
+    public static function cardStyleFor(Project $project, array &$warnings = []): string
+    {
+        $direction = self::dataFor($project);
+        return self::normalizeCardStyle($direction['card_style'] ?? null, $warnings);
+    }
+
+    /**
      * The committed direction's image grade — the one-sentence photographic
      * treatment shared by ALL of the site's imagery, consumed verbatim by
      * GenerateImagesStep. Returns '' when no direction (or no grade) was
@@ -1008,66 +1077,30 @@ final class DesignDirectionStep implements Step
     }
 
     /**
-     * Normalize the explicit placement budget without parsing motif prose.
-     * Any invalid list for a real device degrades as a whole to [] so a
-     * partially trusted list cannot accidentally duplicate the global motif.
-     *
-     * @param mixed        $raw
-     * @param list<string> $repairs
-     * @param list<string> $warnings
-     * @return list<string>
+     * The explicit committed corner language ("sharp", "soft" or "round"),
+     * or null when no direction was persisted or its shape field is absent or
+     * garbled. The producing step normalizes every generated direction onto a
+     * valid value; null lets isolated downstream steps preserve pre-field
+     * artifacts instead of silently rewriting them as sharp.
      */
-    private static function normalizeSignatureDeviceSlots(
-        mixed $raw,
-        string $signatureDevice,
-        array &$repairs,
-        array &$warnings,
-    ): array {
-        if ($signatureDevice === '') {
-            if ($raw !== null && $raw !== []) {
-                $repairs[] = 'designDirection.json: field signature_device_slots authored '
-                    . self::describe($raw)
-                    . ' delivered []; disposition cleared because signature_device is empty';
-            }
-            return [];
+    public static function shapeFor(Project $project): ?string
+    {
+        if (!$project->exists(self::FILE)) {
+            return null;
         }
-
-        if (!is_array($raw) || !array_is_list($raw)) {
-            $warnings[] = 'designDirection.json: field signature_device_slots authored '
-                . self::describe($raw)
-                . ' delivered []; disposition removed invalid/missing placement budget without inferring from prose';
-            return [];
-        }
-
-        $slots = [];
-        $valid = count($raw) <= 2;
-        foreach ($raw as $slot) {
-            if (!is_string($slot)) {
-                $valid = false;
-                continue;
-            }
-            $normalized = strtolower(trim($slot));
-            if (!in_array($normalized, self::SIGNATURE_DEVICE_SLOTS, true)
-                || in_array($normalized, $slots, true)) {
-                $valid = false;
-                continue;
-            }
-            $slots[] = $normalized;
-            if ($slot !== $normalized) {
-                $repairs[] = 'designDirection.json: field signature_device_slots authored '
-                    . self::describe($slot) . ' delivered ' . self::describe($normalized)
-                    . '; disposition canonicalized';
-            }
-        }
-
-        if (!$valid) {
-            $warnings[] = 'designDirection.json: field signature_device_slots authored '
-                . self::describe($raw)
-                . ' delivered []; disposition removed invalid placement budget without inferring from prose';
-            return [];
-        }
-        return $slots;
+        return self::explicitShape($project->readJson(self::FILE)['shape'] ?? null);
     }
+
+    /** Parse only an explicit valid corner-language commitment. */
+    private static function explicitShape(mixed $raw): ?string
+    {
+        if (!is_string($raw)) {
+            return null;
+        }
+        $shape = strtolower(trim($raw));
+        return in_array($shape, self::SHAPES, true) ? $shape : null;
+    }
+
 
     /** Coerce a raw motion value onto the fixed profile list. */
     private static function motionProfile(mixed $raw): string

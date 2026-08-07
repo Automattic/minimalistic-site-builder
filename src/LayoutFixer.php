@@ -122,6 +122,9 @@ final class LayoutFixer
         }
         self::promoteAlignClassNames($all, $notes);
 
+        if ($role === self::ROLE_HEADER) {
+            self::widenHeaderRows($roots, $notes);
+        }
         if ($role === self::ROLE_FOOTER) {
             self::widenFooterColumns($roots, $all, $notes);
             self::evenOutFooterRows($all, $notes);
@@ -905,6 +908,36 @@ final class LayoutFixer
      * @param object[] $all
      * @param string[] $notes
      */
+    /**
+     * The header's title/nav rows must share the page's wide band. Sections
+     * and footers put their structural rows at align:wide; a header row left
+     * at content width plants a competing left edge directly above the fold
+     * (naturaleza's fallback title at 860px over 1320px section rows).
+     * Promote direct flex-row group children of a constrained header root
+     * that carry no explicit alignment of their own.
+     *
+     * @param object[] $roots
+     * @param string[] $notes
+     */
+    private static function widenHeaderRows(array $roots, array &$notes): void
+    {
+        $root = $roots[0] ?? null;
+        if ($root === null || !self::is($root, 'group')
+            || ($root->attrs->layout->type ?? null) !== 'constrained') {
+            return;
+        }
+        foreach ($root->children as $child) {
+            if (!self::is($child, 'group')
+                || ($child->attrs->layout->type ?? null) !== 'flex'
+                || self::align($child) !== '') {
+                continue;
+            }
+            $child->attrs->align = 'wide';
+            $child->dirty = true;
+            $notes[] = 'header row did not share the canonical wide band — set "align":"wide"';
+        }
+    }
+
     private static function widenFooterColumns(array $roots, array $all, array &$notes): void
     {
         $root = $roots[0] ?? null;

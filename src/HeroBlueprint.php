@@ -26,7 +26,7 @@ final class HeroBlueprint
     public const CTA_TREATMENTS = ['quiet', 'prominent'];
     public const MOBILE_TRANSFORMATIONS = [
         'retain-media-overlay', 'stack-copy-first', 'stack-media-first',
-        'rail-below', 'flatten-layers',
+        'flatten-layers',
     ];
 
     /**
@@ -62,27 +62,20 @@ final class HeroBlueprint
             'height_profile' => $defaults['height_profile'],
             'cta_treatment' => $defaults['cta_treatment'],
             'mobile_transformation' => $defaults['mobile_transformation'],
-            'signature_device_use' => '',
         ];
     }
 
     /**
      * Normalize generated data against one authoritative assigned recipe.
      *
-     * Context keys:
-     * - signature_device: the global motif string
-     * - signature_device_slots: normalized bounded placement slots
-     *
-     * @param mixed               $raw
-     * @param array<string,mixed> $context
-     * @param list<string>        $repairs successful deterministic repairs
-     * @param list<string>        $warnings delivered-value losses/fallbacks
+     * @param mixed        $raw
+     * @param list<string> $repairs successful deterministic repairs
+     * @param list<string> $warnings delivered-value losses/fallbacks
      * @return array<string,mixed>
      */
     public static function normalize(
         mixed $raw,
         string $assignedRecipe,
-        array $context = [],
         array &$repairs = [],
         array &$warnings = [],
     ): array {
@@ -225,44 +218,6 @@ final class HeroBlueprint
         }
 
         self::repairSpatialCompatibility($out, $defaults, $repairs);
-
-        $signature = trim((string) ($context['signature_device'] ?? ''));
-        $slots = is_array($context['signature_device_slots'] ?? null)
-            ? $context['signature_device_slots']
-            : [];
-        $authoredUse = is_string($raw['signature_device_use'] ?? null)
-            ? trim($raw['signature_device_use'])
-            : '';
-        if ($signature === '' || !in_array('hero', $slots, true)) {
-            if ($authoredUse !== '') {
-                $warnings[] = self::warning(
-                    'hero_blueprint.signature_device_use',
-                    $authoredUse,
-                    '',
-                    'removed because the global signature device is absent or not assigned to the hero slot',
-                );
-            } elseif (array_key_exists('signature_device_use', $raw)
-                && !is_string($raw['signature_device_use'])) {
-                self::repair(
-                    $repairs,
-                    'signature_device_use',
-                    $raw['signature_device_use'],
-                    '',
-                );
-            }
-            $out['signature_device_use'] = '';
-        } else {
-            if (array_key_exists('signature_device_use', $raw)
-                && !is_string($raw['signature_device_use'])) {
-                self::repair(
-                    $repairs,
-                    'signature_device_use',
-                    $raw['signature_device_use'],
-                    '',
-                );
-            }
-            $out['signature_device_use'] = $authoredUse;
-        }
 
         return $out;
     }

@@ -37,7 +37,7 @@ final class Pipeline implements BuildPipeline
     {
         $ids = [];
         foreach ($this->steps as $step) {
-            foreach (explode('+', $step->id()) as $part) {
+            foreach (ConcurrentGroup::memberIds($step->id()) as $part) {
                 $ids[] = $part;
             }
         }
@@ -90,7 +90,7 @@ final class Pipeline implements BuildPipeline
             // Stop after this step if its id matches — or, for a concurrent
             // group, if $untilId names one of its members (you can't stop
             // mid-group, so it stops once the whole group has run).
-            if ($untilId !== null && in_array($untilId, explode('+', $step->id()), true)) {
+            if ($untilId !== null && in_array($untilId, ConcurrentGroup::memberIds($step->id()), true)) {
                 return;
             }
         }
