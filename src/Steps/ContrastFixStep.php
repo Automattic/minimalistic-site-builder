@@ -394,6 +394,30 @@ final class ContrastFixStep implements Step
 
     // ── theme.json readers (public: CoverContrastStep reuses them) ────────
 
+    /**
+     * Resolve one authored color value — a hex literal, a bare palette slug,
+     * or either preset var() form — to its uppercase hex, if any.
+     *
+     * @param array<string,string> $palette slug => hex (see paletteMap)
+     */
+    public static function paletteHex(array $palette, mixed $value): ?string
+    {
+        if (!is_string($value)) {
+            return null;
+        }
+        $value = trim($value);
+        if (isset($palette[$value])) {
+            return strtoupper($palette[$value]);
+        }
+        if ((preg_match('/^var:preset\|color\|([a-z0-9_-]+)$/i', $value, $match) === 1
+                || preg_match('/^var\(--wp--preset--color--([a-z0-9_-]+)\)$/i', $value, $match) === 1)
+            && isset($palette[$match[1]])
+        ) {
+            return strtoupper($palette[$match[1]]);
+        }
+        return ContrastMath::hexToRgb($value) === null ? null : strtoupper($value);
+    }
+
     /** @param array<mixed> $themeJson @return array<string,string> slug => hex */
     public static function paletteMap(array $themeJson): array
     {

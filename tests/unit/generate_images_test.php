@@ -1240,6 +1240,45 @@ test('a near-miss stage tile is tone-aligned onto the delivered surface instead 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('borderline contrast headroom skips model attempts and synthesizes directly (BIGR-776)', function () {
+    // #6D6D6D against a #F8F8F8 stage is ~4.85:1 — above the 4.5:1 gate
+    // bound but inside the headroom band where a generated tile's grain
+    // dips below it. No model calls should be spent; the procedural tile
+    // (whose grain is tight by construction) delivers.
+    [$project, $tmp] = generate_fixture();
+    $project->writeJson('theme/theme.json', ['settings' => ['color' => ['palette' => [
+        ['slug' => 'base', 'color' => '#F8F8F8'],
+        ['slug' => 'secondary', 'color' => '#F8F8F8'],
+        ['slug' => 'contrast', 'color' => '#6D6D6D'],
+    ]]]]);
+    $project->writeText('theme/parts/header.html', stage_texture_markup_fixture(
+        Automattic\SiteBuild\Units\GeneratedMarkup::STAGE_TEXTURE_ASSET,
+        'base',
+    ));
+    $project->writeText('plugin/pages/home.html', stage_texture_markup_fixture(
+        Automattic\SiteBuild\Units\GeneratedMarkup::STAGE_TEXTURE_ASSET,
+        'secondary',
+    ));
+
+    $images = new FakeImageClient('JPEGDATA');
+    (new GenerateImagesStep($images))->run($project);
+
+    $texturePrompts = array_filter(
+        array_column($images->calls, 'prompt'),
+        static fn (string $prompt): bool => str_contains($prompt, 'photographed head-on'),
+    );
+    assert_eq(0, count($texturePrompts), 'no model attempts spent inside the headroom band');
+    $texture = array_values(array_filter(
+        $project->readJson('images.json'),
+        static fn (array $spec): bool => ($spec['filename'] ?? '') === 'stage_backdrop-texture.jpg',
+    ));
+    assert_eq('completed', $texture[0]['status'], 'the procedural tile delivers');
+    assert_contains('model generation skipped',
+        implode("\n", $project->readJson('warnings.json')['generate-images'] ?? []));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('stage-texture foregrounds skip text hosted on its own opaque surface (BIGR-776)', function () {
     // A cream button label on a dark button never touches the texture, yet
     // demanding 4.5:1 against it makes every light texture impossible for
@@ -1596,7 +1635,7 @@ test('generate-images removes both nested exact stage roots after tile rejection
     $images = new FakeImageClient(stage_texture_checker_jpeg());
     (new GenerateImagesStep($images))->run($project);
 
-    assert_eq(3, count($images->calls), 'a rejected tile exhausts the retry ladder');
+    assert_eq(0, count($images->calls), 'an infeasible palette is caught before any generation');
     $delivered = $project->readText('plugin/pages/home.html');
     assert_true(!str_contains($delivered, $source));
     assert_true(!str_contains($delivered, GeneratedMarkup::STAGE_TEXTURE_CLASS));
@@ -1859,7 +1898,7 @@ test('generate-images rejects a busy stage tile and transactionally delivers the
     $images = new FakeImageClient(stage_texture_checker_jpeg());
     (new GenerateImagesStep($images))->run($project);
 
-    assert_eq(3, count($images->calls), 'the rejected tile exhausts the material-rotation retry ladder');
+    assert_eq(0, count($images->calls), 'an infeasible palette is caught before any generation');
     $header = $project->readText('theme/parts/header.html');
     $hero = $project->readText('plugin/pages/home.html');
     foreach ([$header, $hero] as $delivered) {

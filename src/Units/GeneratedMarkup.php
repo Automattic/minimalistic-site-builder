@@ -403,8 +403,7 @@ final class GeneratedMarkup
     private static function withoutOwnInlineShadowDeclarations(string $ownHtml, array $properties): array
     {
         if (preg_match(
-            '~\A(?:(?:\s+)|(?:<!--(?:(?!-->).)*-->))*(?<tag><[a-z][a-z0-9:-]*(?=[\s>])'
-                . '(?:[^>"\']+|"[^"]*"|\'[^\']*\')*>)~is',
+            self::SAVED_OPENING_TAG,
             $ownHtml,
             $opening,
             PREG_OFFSET_CAPTURE,
@@ -681,8 +680,7 @@ final class GeneratedMarkup
         }
         $ownHtml = $document->ownHtml($root);
         if (preg_match(
-            '~\A(?:(?:\s+)|(?:<!--(?:(?!-->).)*-->))*(?<tag><[a-z][a-z0-9:-]*(?=[\s>])'
-                . '(?:[^>"\']+|"[^"]*"|\'[^\']*\')*>)~is',
+            self::SAVED_OPENING_TAG,
             $ownHtml,
             $opening,
             PREG_OFFSET_CAPTURE
@@ -802,8 +800,7 @@ final class GeneratedMarkup
         }
         $ownHtml = $document->ownHtml($root);
         if (preg_match(
-            '~\A(?:(?:\s+)|(?:<!--(?:(?!-->).)*-->))*(?<tag><[a-z][a-z0-9:-]*(?=[\s>])'
-                . '(?:[^>"\']+|"[^"]*"|\'[^\']*\')*>)~is',
+            self::SAVED_OPENING_TAG,
             $ownHtml,
             $opening,
             PREG_OFFSET_CAPTURE,
@@ -1344,8 +1341,7 @@ final class GeneratedMarkup
         }
         $ownHtml = $document->ownHtml($root);
         if (preg_match(
-            '~\A(?:(?:\s+)|(?:<!--(?:(?!-->).)*-->))*(?<tag><[a-z][a-z0-9:-]*(?=[\s>])'
-                . '(?:[^>"\']+|"[^"]*"|\'[^\']*\')*>)~is',
+            self::SAVED_OPENING_TAG,
             $ownHtml,
             $opening,
             PREG_OFFSET_CAPTURE
@@ -1472,8 +1468,7 @@ final class GeneratedMarkup
         }
         $ownHtml = $document->ownHtml($root);
         if (preg_match(
-            '~\A(?:(?:\s+)|(?:<!--(?:(?!-->).)*-->))*(?<tag><[a-z][a-z0-9:-]*(?=[\s>])'
-                . '(?:[^>"\']+|"[^"]*"|\'[^\']*\')*>)~is',
+            self::SAVED_OPENING_TAG,
             $ownHtml,
             $opening,
             PREG_OFFSET_CAPTURE,
@@ -2531,6 +2526,13 @@ final class GeneratedMarkup
      * and GenerateImagesStep's strtr rewrite resolves it in style attributes
      * the same way it resolves img srcs.
      */
+    /**
+     * First real opening tag of a block's saved HTML, skipping leading
+     * whitespace and HTML comments; `(?<tag>…)` captures the complete tag.
+     */
+    public const SAVED_OPENING_TAG = '~\A(?:(?:\s+)|(?:<!--(?:(?!-->).)*-->))*(?<tag><[a-z][a-z0-9:-]*(?=[\s>])'
+        . '(?:[^>"\']+|"[^"]*"|\'[^\']*\')*>)~is';
+
     public const STAGE_TEXTURE_ASSET = 'theme:./assets/stage_backdrop-texture.jpg';
 
     /** CSS hook that lets the reviewed header texture opt out of generic paint suppression. */
@@ -2580,61 +2582,45 @@ final class GeneratedMarkup
     /** Whether the root has any complete or stale fragment of the code-owned texture contract. */
     public static function hasStageTextureEvidence(string $markup): bool
     {
+        // When the root cannot be inspected, fall back to a raw byte scan:
+        // any mention of the class or asset anywhere counts as evidence.
         $rawEvidence = str_contains($markup, self::STAGE_TEXTURE_CLASS)
             || str_contains($markup, basename(self::STAGE_TEXTURE_ASSET));
-        try {
-            $document = BlockMarkup::parse($markup);
-            $root = $document->topLevel();
-            if ($root === null || $document->name($root) !== 'group') {
-                return $rawEvidence;
-            }
-            $attrs = $document->attrs($root);
-            if (is_array($attrs)) {
-                $tokens = self::classTokens(is_string($attrs['className'] ?? null) ? $attrs['className'] : '');
-                $style = is_array($attrs['style'] ?? null) ? $attrs['style'] : [];
-                $background = is_array($style['background'] ?? null) ? $style['background'] : [];
-                $image = is_array($background['backgroundImage'] ?? null)
-                    ? $background['backgroundImage']
-                    : [];
-                if (in_array(self::STAGE_TEXTURE_CLASS, $tokens, true)
-                    || self::isStageTextureSource($image['url'] ?? null)
-                ) {
-                    return true;
-                }
-            }
-            $ownHtml = $document->ownHtml($root);
-            if (preg_match(
-                '~\A(?:(?:\s+)|(?:<!--(?:(?!-->).)*-->))*(?<tag><[a-z][a-z0-9:-]*(?=[\s>])'
-                    . '(?:[^>"\']+|"[^"]*"|\'[^\']*\')*>)~is',
-                $ownHtml,
-                $opening,
-            ) !== 1) {
-                return $rawEvidence;
-            }
-            foreach (self::htmlAttributes($opening['tag'], 'class') as $class) {
-                if (in_array(self::STAGE_TEXTURE_CLASS, self::classTokens($class['value']), true)) {
-                    return true;
-                }
-            }
-            foreach (self::htmlAttributes($opening['tag'], 'style') as $style) {
-                if (self::stageTextureSourcesInCss($style['value']) !== []) {
-                    return true;
-                }
-            }
-            return false;
-        } catch (\Throwable) {
-            return $rawEvidence;
-        }
+        return self::rootStageTextureEvidence(
+            $markup,
+            onUnparsable: $rawEvidence,
+            onUninspectableRoot: $rawEvidence,
+        );
     }
 
     /** Whether only the top-level root (not a nested child) retains stage paint. */
     public static function hasOwnStageTextureEvidence(string $markup): bool
     {
+        // A root that parses but cannot be inspected carries no OWN paint;
+        // an unparsable unit must be presumed to retain it.
+        return self::rootStageTextureEvidence(
+            $markup,
+            onUnparsable: true,
+            onUninspectableRoot: false,
+        );
+    }
+
+    /**
+     * Shared evidence walk for the two predicates above: stage paint on the
+     * top-level group root, in either the block attrs or the saved opening
+     * tag. The callers differ only in what an unparsable unit or an
+     * uninspectable root (non-group, or no recoverable opening tag) means.
+     */
+    private static function rootStageTextureEvidence(
+        string $markup,
+        bool $onUnparsable,
+        bool $onUninspectableRoot
+    ): bool {
         try {
             $document = BlockMarkup::parse($markup);
             $root = $document->topLevel();
             if ($root === null || $document->name($root) !== 'group') {
-                return false;
+                return $onUninspectableRoot;
             }
             $attrs = $document->attrs($root);
             if (is_array($attrs)) {
@@ -2652,12 +2638,11 @@ final class GeneratedMarkup
             }
             $ownHtml = $document->ownHtml($root);
             if (preg_match(
-                '~\A(?:(?:\s+)|(?:<!--(?:(?!-->).)*-->))*(?<tag><[a-z][a-z0-9:-]*(?=[\s>])'
-                    . '(?:[^>"\']+|"[^"]*"|\'[^\']*\')*>)~is',
+                self::SAVED_OPENING_TAG,
                 $ownHtml,
                 $opening,
             ) !== 1) {
-                return false;
+                return $onUninspectableRoot;
             }
             foreach (self::htmlAttributes($opening['tag'], 'class') as $class) {
                 if (in_array(self::STAGE_TEXTURE_CLASS, self::classTokens($class['value']), true)) {
@@ -2671,7 +2656,7 @@ final class GeneratedMarkup
             }
             return false;
         } catch (\Throwable) {
-            return true;
+            return $onUnparsable;
         }
     }
 
@@ -2925,8 +2910,7 @@ final class GeneratedMarkup
             return false;
         }
         if (preg_match(
-            '~\A(?:(?:\s+)|(?:<!--(?:(?!-->).)*-->))*(?<tag><[a-z][a-z0-9:-]*(?=[\s>])'
-                . '(?:[^>"\']+|"[^"]*"|\'[^\']*\')*>)~is',
+            self::SAVED_OPENING_TAG,
             $ownHtml,
             $opening,
         ) !== 1) {
@@ -2986,8 +2970,7 @@ final class GeneratedMarkup
                 }
                 $ownHtml = $document->ownHtml($index);
                 if (preg_match(
-                    '~\A(?:(?:\s+)|(?:<!--(?:(?!-->).)*-->))*(?<tag><[a-z][a-z0-9:-]*(?=[\s>])'
-                        . '(?:[^>"\']+|"[^"]*"|\'[^\']*\')*>)~is',
+                    self::SAVED_OPENING_TAG,
                     $ownHtml,
                     $opening,
                     PREG_OFFSET_CAPTURE,
@@ -3102,8 +3085,7 @@ final class GeneratedMarkup
         }
         $ownHtml = $document->ownHtml($root);
         if (preg_match(
-            '~\A(?:(?:\s+)|(?:<!--(?:(?!-->).)*-->))*(?<tag><[a-z][a-z0-9:-]*(?=[\s>])'
-                . '(?:[^>"\']+|"[^"]*"|\'[^\']*\')*>)~is',
+            self::SAVED_OPENING_TAG,
             $ownHtml,
             $opening,
             PREG_OFFSET_CAPTURE,
@@ -3220,8 +3202,7 @@ final class GeneratedMarkup
             }
             $ownHtml = $document->ownHtml($root);
             if (preg_match(
-                '~\A(?:(?:\s+)|(?:<!--(?:(?!-->).)*-->))*(?<tag><[a-z][a-z0-9:-]*(?=[\s>])'
-                    . '(?:[^>"\']+|"[^"]*"|\'[^\']*\')*>)~is',
+                self::SAVED_OPENING_TAG,
                 $ownHtml,
                 $opening,
                 PREG_OFFSET_CAPTURE,

@@ -58,6 +58,64 @@ final class GenerateImagesStep implements Step
      */
     private const STAGE_TEXTURE_ATTEMPTS = 3;
 
+    /**
+     * Minimum multiple of ContrastMath::NORMAL_TEXT the surface-to-foreground
+     * ratio must clear before MODEL generation is worth attempting: a
+     * generated tile's darkest grain dips well below the surface's own ratio
+     * (observed misses: 4.34-4.45:1 on a surface barely above 4.5:1), while
+     * the procedural tile's tighter grain still fits inside this band.
+     */
+    private const STAGE_TEXTURE_CONTRAST_HEADROOM = 1.1;
+
+    /**
+     * Delivery-gate bounds for the stage texture, shared by the gate
+     * (assertStageTextureDelivery), the tone aligner and the synthesizer so
+     * the three stay tuned against one declared table. All spreads are
+     * fractions of the channel range; drifts are 8-bit channel units.
+     */
+    private const STAGE_TEXTURE_MAX_DRIFT = 20.0;           // mean vs delivered surface
+    private const STAGE_TEXTURE_MAX_ALIGNABLE_DRIFT = 48.0; // beyond: color request ignored
+    private const STAGE_TEXTURE_MAX_SOURCE_SPREAD = 0.36;   // full-res max-min pre-filter
+    private const STAGE_TEXTURE_MAX_SOURCE_DEVIATION = 0.08;
+    private const STAGE_TEXTURE_MAX_CENTRAL_LUMINANCE_SPREAD = 0.12; // thumbnail 5th-95th pct
+    private const STAGE_TEXTURE_MAX_FULL_LUMINANCE_SPREAD = 0.28;
+    private const STAGE_TEXTURE_MAX_CENTRAL_CHANNEL_SPREAD = 36;
+    private const STAGE_TEXTURE_MAX_FULL_CHANNEL_SPREAD = 72;
+
+    /**
+     * Palette-geometry feasibility of a committed stage texture, decidable
+     * BEFORE any generation: the delivery gate requires every delivered
+     * foreground to hold ContrastMath::NORMAL_TEXT against every tile pixel,
+     * and the tile's mean is bound to the delivered surface color, so the
+     * surface-to-foreground ratio caps what any tile can achieve.
+     *
+     * @param array<string,mixed> $spec one images.json row
+     * @return 'generate'|'synthesize'|'impossible' 'generate' when model
+     *         attempts can pass; 'synthesize' when only the procedural
+     *         tile's tight grain can; 'impossible' when nothing can.
+     */
+    private static function stageTextureFeasibility(array $spec): string
+    {
+        $target = ContrastMath::hexToRgb((string) ($spec['targetColor'] ?? ''));
+        if ($target === null) {
+            return 'generate'; // the unresolvable-target guard owns this case
+        }
+        $floor = INF;
+        foreach ((array) ($spec['foregroundColors'] ?? []) as $hex) {
+            $foreground = ContrastMath::hexToRgb((string) $hex);
+            if ($foreground !== null) {
+                $floor = min($floor, ContrastMath::ratio($foreground, $target));
+            }
+        }
+        if ($floor < ContrastMath::NORMAL_TEXT) {
+            return 'impossible';
+        }
+        if ($floor < ContrastMath::NORMAL_TEXT * self::STAGE_TEXTURE_CONTRAST_HEADROOM) {
+            return 'synthesize';
+        }
+        return 'generate';
+    }
+
     /** Web-artifact wording is a design-comp cue, not subject matter. */
     private const WEB_ARTIFACT_CONTEXT = '/\b(?:web[- ]?sites?|web[- ]?pages?|home[- ]?pages?'
         . '|landing[- ]?(?:pages?|sites?)|(?:one|single)[- ]page\s+sites?'
@@ -275,6 +333,38 @@ final class GenerateImagesStep implements Step
                     continue;
                 }
             }
+            if ($isStageTexture) {
+                // The gate's outcome is decidable from palette geometry alone
+                // (BIGR-776): keep doomed textures out of the model batch
+                // entirely instead of burning attempts on them.
+                $feasibility = self::stageTextureFeasibility($specs[$i]);
+                if ($feasibility === 'impossible') {
+                    $error = sprintf(
+                        'stage texture cannot satisfy %.1f:1 against the delivered foregrounds'
+                            . ' at surface %s; no tile can pass, degrading to solid without generation',
+                        ContrastMath::NORMAL_TEXT,
+                        $targetColor,
+                    );
+                    $specs[$i]['status'] = 'failed';
+                    $specs[$i]['error'] = $error;
+                    unset($specs[$i]['url']);
+                    $this->warnFailure(
+                        $project,
+                        $specs[$i],
+                        $i,
+                        GeminiImage::mimeForFilename((string) ($spec['filename'] ?? '')),
+                        $error,
+                    );
+                    continue;
+                }
+                if ($feasibility === 'synthesize') {
+                    Narrator::write(
+                        "    stage texture: palette contrast headroom too small for generated"
+                        . " grain; skipping model attempts for the procedural tile\n"
+                    );
+                    continue; // retryStageTexture synthesizes it after the batch
+                }
+            }
             $pending[$i] = $specs[$i]; // preserve the original images.json index
         }
 
@@ -303,20 +393,18 @@ final class GenerateImagesStep implements Step
             // else finishes and persists immediately, so progress survives an
             // interruption while the rest of the batch is still generating.
             $this->drainBatch($batchSpecs, function (int $pos, array $result) use (
-                $project, &$specs, $indices, $batchSpecs, $imageGrade, &$resolved, &$repairs, $textureSources
+                $project, &$specs, $indices, $batchSpecs, $imageGrade, &$resolved, &$repairs
             ): void {
                 $i = $indices[$pos];
                 $filename = (string) $specs[$i]['filename'];
-                $isStageTexture = CollectImagesStep::isStageTextureSpec($specs[$i]);
 
                 // The stage texture's prompt is code-owned and its failures
                 // (recitation filter, busyness gate) are stochastic per
                 // material, so it gets the material-rotation retry ladder
-                // below instead of an LLM subject rewrite — and only the
-                // ladder's final failure is warned.
+                // below instead of an LLM subject rewrite.
                 if (
                     $this->llm !== null && !($result['ok'] ?? false) && ($result['filtered'] ?? false)
-                    && !$isStageTexture
+                    && !CollectImagesStep::isStageTextureSpec($specs[$i])
                 ) {
                     $error = (string) ($result['error'] ?? 'safety-filtered');
                     Narrator::write("    FILTERED {$filename}: {$error}\n");
@@ -325,16 +413,7 @@ final class GenerateImagesStep implements Step
                     return;
                 }
 
-                $this->finish(
-                    $project,
-                    $specs,
-                    $i,
-                    $batchSpecs[$pos],
-                    $result,
-                    $resolved,
-                    $imageGrade,
-                    warnOnFailure: !($isStageTexture && $textureSources !== []),
-                );
+                $this->finish($project, $specs, $i, $batchSpecs[$pos], $result, $resolved, $imageGrade);
                 $project->writeJsonAtomic('images.json', $specs);
             });
 
@@ -370,13 +449,10 @@ final class GenerateImagesStep implements Step
      */
     private function degradeReservedStageCollision(Project $project, array $specs): array
     {
-        $root = rtrim($project->root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
         $collisions = [];
         $warnings = [];
         foreach ($project->markupFiles() as $absolute) {
-            $relative = str_starts_with($absolute, $root)
-                ? str_replace(DIRECTORY_SEPARATOR, '/', substr($absolute, strlen($root)))
-                : $absolute;
+            $relative = $project->relative($absolute);
             if (CollectImagesStep::containsReservedOrdinaryAiPlaceholder($project->readText($relative))) {
                 $collisions[] = $relative;
             }
@@ -531,11 +607,8 @@ final class GenerateImagesStep implements Step
     private function removeReservedOrdinaryManifestReferences(Project $project): void
     {
         $source = GeneratedMarkup::STAGE_TEXTURE_ASSET;
-        $root = rtrim($project->root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
         foreach ($project->markupFiles() as $absolute) {
-            $relative = str_starts_with($absolute, $root)
-                ? str_replace(DIRECTORY_SEPARATOR, '/', substr($absolute, strlen($root)))
-                : $absolute;
+            $relative = $project->relative($absolute);
             $before = $project->readText($relative);
             [$delivered, $removed, $residual] = self::removeOrdinaryReservedMediaOnly($before, $source);
             if ($delivered !== $before) {
@@ -909,11 +982,8 @@ final class GenerateImagesStep implements Step
     private static function stageTextureSources(Project $project): array
     {
         $sources = [];
-        $root = rtrim($project->root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
         foreach ($project->markupFiles() as $absolute) {
-            $relative = str_starts_with($absolute, $root)
-                ? str_replace(DIRECTORY_SEPARATOR, '/', substr($absolute, strlen($root)))
-                : $absolute;
+            $relative = $project->relative($absolute);
             if (!self::containsCanonicalStageTextureContract($project->readText($relative))) {
                 continue;
             }
@@ -961,10 +1031,7 @@ final class GenerateImagesStep implements Step
     private static function canonicalizeStageTextureUrls(Project $project): void
     {
         foreach ($project->markupFiles() as $absolute) {
-            $root = rtrim($project->root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
-            $relative = str_starts_with($absolute, $root)
-                ? str_replace(DIRECTORY_SEPARATOR, '/', substr($absolute, strlen($root)))
-                : $absolute;
+            $relative = $project->relative($absolute);
             $content = $project->readText($relative);
             try {
                 $document = BlockMarkup::parse($content);
@@ -995,8 +1062,7 @@ final class GenerateImagesStep implements Step
                     }
                     $ownHtml = $document->ownHtml($index);
                     if (preg_match(
-                        '~\A(?:(?:\s+)|(?:<!--(?:(?!-->).)*-->))*(?<tag><[a-z][a-z0-9:-]*(?=[\s>])'
-                            . '(?:[^>"\']+|"[^"]*"|\'[^\']*\')*>)~is',
+                        GeneratedMarkup::SAVED_OPENING_TAG,
                         $ownHtml,
                         $opening,
                         PREG_OFFSET_CAPTURE,
@@ -1132,8 +1198,7 @@ final class GenerateImagesStep implements Step
                     }
                     $ownHtml = $verified->ownHtml($index);
                     if (preg_match(
-                        '~\A(?:(?:\s+)|(?:<!--(?:(?!-->).)*-->))*(?<tag><[a-z][a-z0-9:-]*(?=[\s>])'
-                            . '(?:[^>"\']+|"[^"]*"|\'[^\']*\')*>)~is',
+                        GeneratedMarkup::SAVED_OPENING_TAG,
                         $ownHtml,
                         $opening,
                     ) !== 1) {
@@ -1208,11 +1273,8 @@ final class GenerateImagesStep implements Step
         }
         $palette = ContrastFixStep::paletteMap($project->readJson('theme/theme.json'));
         $colors = [];
-        $root = rtrim($project->root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
         foreach ($project->markupFiles() as $absolute) {
-            $relative = str_starts_with($absolute, $root)
-                ? str_replace(DIRECTORY_SEPARATOR, '/', substr($absolute, strlen($root)))
-                : $absolute;
+            $relative = $project->relative($absolute);
             $markup = $project->readText($relative);
             if (!CollectImagesStep::containsCommittedStageTexture($markup)) {
                 continue;
@@ -1300,19 +1362,7 @@ final class GenerateImagesStep implements Step
     /** @param array<string,string> $palette */
     private static function resolvePaletteColor(mixed $value, array $palette): ?string
     {
-        if (!is_string($value)) {
-            return null;
-        }
-        $value = trim($value);
-        if (isset($palette[$value])) {
-            return strtoupper($palette[$value]);
-        }
-        if (preg_match('/^var:preset\|color\|([a-z0-9_-]+)$/i', $value, $match) === 1
-            && isset($palette[$match[1]])
-        ) {
-            return strtoupper($palette[$match[1]]);
-        }
-        return ContrastMath::hexToRgb($value) === null ? null : strtoupper($value);
+        return ContrastFixStep::paletteHex($palette, $value);
     }
 
     /**
@@ -1345,18 +1395,25 @@ final class GenerateImagesStep implements Step
             if (!is_array($spec) || !CollectImagesStep::isStageTextureSpec($spec)) {
                 continue;
             }
-            if (($spec['status'] ?? '') !== 'failed') {
+            if (($spec['status'] ?? '') === 'completed') {
                 return;
             }
             $targetColor = is_string($spec['targetColor'] ?? null) ? $spec['targetColor'] : null;
             if (ContrastMath::hexToRgb((string) $targetColor) === null) {
                 return; // already warned as unresolvable; no retry can fix it
             }
+            $feasibility = self::stageTextureFeasibility($spec);
+            if ($feasibility === 'impossible') {
+                return; // already warned by the pre-batch feasibility guard
+            }
             $sources = array_values(array_filter(
                 array_map('strval', (array) ($spec['sources'] ?? [])),
                 static fn (string $value): bool => $value !== '',
             ));
-            for ($attempt = 1; $attempt < self::STAGE_TEXTURE_ATTEMPTS; $attempt++) {
+            $modelAttempts = $feasibility === 'generate' && ($spec['status'] ?? '') === 'failed'
+                ? self::STAGE_TEXTURE_ATTEMPTS
+                : 1; // 'synthesize' skipped the batch; go straight to the tile
+            for ($attempt = 1; $attempt < $modelAttempts; $attempt++) {
                 $rotated = CollectImagesStep::stageTextureSpec(
                     $sources === [] ? $textureSources : $sources,
                     $targetColor,
@@ -1374,16 +1431,7 @@ final class GenerateImagesStep implements Step
                 $this->drainBatch([$genSpec], function (int $pos, array $result) use (
                     $project, &$specs, $i, $genSpec, &$resolved, $imageGrade
                 ): void {
-                    $this->finish(
-                        $project,
-                        $specs,
-                        $i,
-                        $genSpec,
-                        $result,
-                        $resolved,
-                        $imageGrade,
-                        warnOnFailure: false,
-                    );
+                    $this->finish($project, $specs, $i, $genSpec, $result, $resolved, $imageGrade);
                     $project->writeJsonAtomic('images.json', $specs);
                 });
                 if (($specs[$i]['status'] ?? '') === 'completed') {
@@ -1416,7 +1464,10 @@ final class GenerateImagesStep implements Step
         array &$resolved
     ): void {
         $filename = (string) ($specs[$i]['filename'] ?? '');
-        $lastError = (string) ($specs[$i]['error'] ?? 'generation failed');
+        $lastError = (string) ($specs[$i]['error'] ?? '');
+        $reason = $lastError === ''
+            ? 'model generation skipped (palette contrast headroom too small for generated grain)'
+            : "every model generation attempt failed (last: {$lastError})";
         $logRequest = [
             'model'             => 'code-synthesized',
             'prompt'            => "procedural tone-on-tone tile at {$targetColor}",
@@ -1435,7 +1486,7 @@ final class GenerateImagesStep implements Step
         } catch (\Throwable $error) {
             Narrator::write("    FAILED {$filename}: synthesized fallback rejected: {$error->getMessage()}\n");
             ImageLogger::log($filename, $logRequest, [], $error->getMessage());
-            $this->warnFailure($project, $specs[$i], $i, 'image/jpeg', $lastError);
+            $this->warnFailure($project, $specs[$i], $i, 'image/jpeg', $reason);
             return;
         }
         $project->writeText('theme/assets/' . $filename, $bytes);
@@ -1452,7 +1503,7 @@ final class GenerateImagesStep implements Step
             "file='designDirection.json'; path=\"hero_blueprint.stage_backdrop\"; "
                 . "block='theme/assets/{$filename}'; authored=\"texture\"; "
                 . 'delivered="code-synthesized tone-on-tone tile"; '
-                . 'disposition=every model generation attempt failed (last: ' . $lastError . '); '
+                . 'disposition=' . $reason . '; '
                 . 'the procedural fallback passed the same stage-texture delivery gate',
         ]);
         $project->writeJsonAtomic('images.json', $specs);
@@ -1478,7 +1529,11 @@ final class GenerateImagesStep implements Step
         $image->addNoiseImage(\Imagick::NOISE_GAUSSIAN);
         $image->blurImage(0, 0.7);
         $quantum = (float) (\Imagick::getQuantumRange()['quantumRangeLong'] ?? 65535);
-        $keep = 0.20; // grain amplitude retained around the target tone
+        // Grain amplitude retained around the target tone. Must stay well
+        // inside the STAGE_TEXTURE_MAX_* gate bounds above: the full noise
+        // range times $keep bounds the tile's spread, and the symmetric
+        // noise keeps the mean on target.
+        $keep = 0.20;
         $channels = [\Imagick::CHANNEL_RED, \Imagick::CHANNEL_GREEN, \Imagick::CHANNEL_BLUE];
         foreach ($channels as $c => $channel) {
             $image->evaluateImage(\Imagick::EVALUATE_MULTIPLY, $keep, $channel);
@@ -1580,8 +1635,7 @@ final class GenerateImagesStep implements Step
         array $result,
         array &$resolved,
         string $imageGrade,
-        ?string $subject = null,
-        bool $warnOnFailure = true
+        ?string $subject = null
     ): void {
         $filename = (string) $specs[$i]['filename'];
         $logRequest = $this->requestLog($specs[$i], $genSpec, $imageGrade, $subject);
@@ -1613,7 +1667,9 @@ final class GenerateImagesStep implements Step
             $specs[$i]['error']  = $e->getMessage();
             Narrator::write("    FAILED {$filename}: {$e->getMessage()}\n");
             ImageLogger::log($filename, $logRequest, [], $e->getMessage());
-            if ($warnOnFailure) {
+            // Stage texture failures are never warned here: the retry ladder
+            // and synthesis fallback own the texture's one final warning.
+            if (!CollectImagesStep::isStageTextureSpec($specs[$i])) {
                 $this->warnFailure($project, $specs[$i], $i, $genSpec['mime'], $e->getMessage());
             }
             return;
@@ -1823,10 +1879,11 @@ final class GenerateImagesStep implements Step
                 $deltas[$c] = (float) $target[$c] - 255.0 * (float) $mean['mean'] / $quantum;
             }
             $drift = max(array_map('abs', $deltas));
-            // Below the gate's own 20-channel drift bound the tile passes
-            // as-is: keep the model's exact bytes rather than re-encoding.
-            // Beyond 48 the model ignored the color request entirely.
-            if ($drift <= 20.0 || $drift > 48.0) {
+            // Below the gate's own drift bound the tile passes as-is:
+            // keep the model's exact bytes rather than re-encoding.
+            if ($drift <= self::STAGE_TEXTURE_MAX_DRIFT
+                || $drift > self::STAGE_TEXTURE_MAX_ALIGNABLE_DRIFT
+            ) {
                 return $bytes;
             }
             foreach ($channels as $c => $channel) {
@@ -1902,7 +1959,9 @@ final class GenerateImagesStep implements Step
         // one dark fleck on an otherwise quiet surface spans it, so it sits
         // a step wider than the thumbnail bounds below, which average flecks
         // away and are the perceptual authority on busyness.
-        if ($sourceChannelSpread > 0.36 || $sourceChannelDeviation > 0.08) {
+        if ($sourceChannelSpread > self::STAGE_TEXTURE_MAX_SOURCE_SPREAD
+            || $sourceChannelDeviation > self::STAGE_TEXTURE_MAX_SOURCE_DEVIATION
+        ) {
             throw new \RuntimeException(sprintf(
                 'stage texture source pixels are too visually busy (channel spread %.3f, deviation %.3f)',
                 $sourceChannelSpread,
@@ -1926,7 +1985,7 @@ final class GenerateImagesStep implements Step
             abs($mean[1] - $target[1]),
             abs($mean[2] - $target[2]),
         );
-        if ($channelDrift > 20) {
+        if ($channelDrift > self::STAGE_TEXTURE_MAX_DRIFT) {
             throw new \RuntimeException(
                 'stage texture mean color drifted too far from target '
                 . (string) $spec['targetColor'] . " (max channel drift {$channelDrift})"
@@ -1937,7 +1996,9 @@ final class GenerateImagesStep implements Step
         $high = $pixels[(int) ceil(($count - 1) * 0.95)];
         $centralSpread = $high['luminance'] - $low['luminance'];
         $fullSpread = $pixels[$count - 1]['luminance'] - $pixels[0]['luminance'];
-        if ($centralSpread > 0.12 || $fullSpread > 0.28) {
+        if ($centralSpread > self::STAGE_TEXTURE_MAX_CENTRAL_LUMINANCE_SPREAD
+            || $fullSpread > self::STAGE_TEXTURE_MAX_FULL_LUMINANCE_SPREAD
+        ) {
             throw new \RuntimeException(sprintf(
                 'stage texture is too visually busy (central luminance spread %.3f, full spread %.3f)',
                 $centralSpread,
@@ -1960,7 +2021,9 @@ final class GenerateImagesStep implements Step
             );
             $channelFullSpread = max($channelFullSpread, $values[$count - 1] - $values[0]);
         }
-        if ($channelCentralSpread > 36 || $channelFullSpread > 72) {
+        if ($channelCentralSpread > self::STAGE_TEXTURE_MAX_CENTRAL_CHANNEL_SPREAD
+            || $channelFullSpread > self::STAGE_TEXTURE_MAX_FULL_CHANNEL_SPREAD
+        ) {
             throw new \RuntimeException(
                 "stage texture is too chromatically busy (central channel spread {$channelCentralSpread}, "
                 . "full channel spread {$channelFullSpread})"
@@ -2052,11 +2115,8 @@ final class GenerateImagesStep implements Step
             return;
         }
 
-        $root = rtrim($project->root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
         foreach ($project->markupFiles() as $absolute) {
-            $relative = str_starts_with($absolute, $root)
-                ? str_replace(DIRECTORY_SEPARATOR, '/', substr($absolute, strlen($root)))
-                : $absolute;
+            $relative = $project->relative($absolute);
             $content = $project->readText($relative);
             $updated = $content;
             foreach (array_keys($sources) as $source) {
@@ -2271,8 +2331,7 @@ final class GenerateImagesStep implements Step
                     ]];
                     $beforeOwn = $beforeBlock->ownHtml($beforeRoot);
                     $afterOwn = $afterBlock->ownHtml($afterRoot);
-                    $tagPattern = '~\A(?:(?:\s+)|(?:<!--(?:(?!-->).)*-->))*(?<tag><[a-z][a-z0-9:-]*(?=[\s>])'
-                        . '(?:[^>"\']+|"[^"]*"|\'[^\']*\')*>)~is';
+                    $tagPattern = GeneratedMarkup::SAVED_OPENING_TAG;
                     if (preg_match($tagPattern, $beforeOwn, $beforeTag, PREG_OFFSET_CAPTURE) !== 1
                         || preg_match($tagPattern, $afterOwn, $afterTag, PREG_OFFSET_CAPTURE) !== 1
                     ) {
@@ -2372,8 +2431,7 @@ final class GenerateImagesStep implements Step
                 }
                 $ownHtml = $document->ownHtml($index);
                 if (preg_match(
-                    '~\A(?:(?:\s+)|(?:<!--(?:(?!-->).)*-->))*(?<tag><[a-z][a-z0-9:-]*(?=[\s>])'
-                        . '(?:[^>"\']+|"[^"]*"|\'[^\']*\')*>)~is',
+                    GeneratedMarkup::SAVED_OPENING_TAG,
                     $ownHtml,
                     $opening,
                 ) !== 1) {
@@ -2430,8 +2488,7 @@ final class GenerateImagesStep implements Step
                 $htmlSource = false;
                 $ownHtml = $document->ownHtml($index);
                 if (preg_match(
-                    '~\A(?:(?:\s+)|(?:<!--(?:(?!-->).)*-->))*(?<tag><[a-z][a-z0-9:-]*(?=[\s>])'
-                        . '(?:[^>"\']+|"[^"]*"|\'[^\']*\')*>)~is',
+                    GeneratedMarkup::SAVED_OPENING_TAG,
                     $ownHtml,
                     $opening,
                 ) === 1) {
@@ -2590,8 +2647,7 @@ final class GenerateImagesStep implements Step
                 }
                 $ownHtml = $document->ownHtml($index);
                 if (preg_match(
-                    '~\A(?:(?:\s+)|(?:<!--(?:(?!-->).)*-->))*(?<tag><[a-z][a-z0-9:-]*(?=[\s>])'
-                        . '(?:[^>"\']+|"[^"]*"|\'[^\']*\')*>)~is',
+                    GeneratedMarkup::SAVED_OPENING_TAG,
                     $ownHtml,
                     $opening,
                     PREG_OFFSET_CAPTURE,

@@ -277,16 +277,14 @@ final class CollectImagesStep implements Step
         $files = $allMarkup
             ? $project->markupFiles()
             : (glob($project->themePath('parts/*.html')) ?: []);
-        $root = rtrim($project->root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
         foreach ($files as $absolute) {
-            $relative = str_starts_with($absolute, $root)
-                ? str_replace(DIRECTORY_SEPARATOR, '/', substr($absolute, strlen($root)))
-                : $absolute;
+            $relative = $project->relative($absolute);
             if ($relative === 'theme/parts/header.html') {
                 continue;
             }
+            $markup = $project->readText($relative);
             try {
-                $document = BlockMarkup::parse($project->readText($relative));
+                $document = BlockMarkup::parse($markup);
             } catch (\Throwable) {
                 continue;
             }
@@ -307,7 +305,7 @@ final class CollectImagesStep implements Step
                 if (!is_string($source)
                     || $end === null
                     || !GeneratedMarkup::hasExactStageTextureContract(
-                        substr($project->readText($relative), $start, $end - $start),
+                        substr($markup, $start, $end - $start),
                         $source,
                     )
                 ) {
@@ -346,20 +344,9 @@ final class CollectImagesStep implements Step
         $style = is_array($attrs['style'] ?? null) ? $attrs['style'] : [];
         $colorStyle = is_array($style['color'] ?? null) ? $style['color'] : [];
         foreach ([$colorStyle['background'] ?? null, $attrs['backgroundColor'] ?? null] as $value) {
-            if (!is_string($value)) {
-                continue;
-            }
-            $value = trim($value);
-            if (isset($palette[$value])) {
-                return strtoupper($palette[$value]);
-            }
-            if (preg_match('/^var:preset\|color\|([a-z0-9_-]+)$/i', $value, $match) === 1
-                && isset($palette[$match[1]])
-            ) {
-                return strtoupper($palette[$match[1]]);
-            }
-            if (preg_match('/^#[0-9a-f]{6}$/i', $value) === 1) {
-                return strtoupper($value);
+            $hex = ContrastFixStep::paletteHex($palette, $value);
+            if ($hex !== null) {
+                return $hex;
             }
         }
         return null;

@@ -25,6 +25,15 @@ final class Project
         return $rel === '' ? $this->root : $this->root . '/' . ltrim($rel, '/');
     }
 
+    /** Project-relative, forward-slashed form of an absolute path under the root. */
+    public function relative(string $absolute): string
+    {
+        $root = rtrim($this->root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
+        return str_starts_with($absolute, $root)
+            ? str_replace(DIRECTORY_SEPARATOR, '/', substr($absolute, strlen($root)))
+            : $absolute;
+    }
+
     /** Absolute path under the theme directory. */
     public function themePath(string $rel = ''): string
     {
