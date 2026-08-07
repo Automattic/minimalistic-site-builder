@@ -46,9 +46,18 @@ final class HeaderFallback
             $classes[] = 'has-background';
         }
 
-        // The title rides in an align:wide row so even worst-case chrome
-        // shares the page's wide band: a bare site-title in a constrained
-        // root sits at contentSize while every section row sits at wideSize,
+        $tagline = ($header['displays_tagline'] ?? false) === true
+            ? '<!-- wp:site-tagline {"textColor":"' . self::escapeJson($foreground)
+                . '","fontSize":"caption"} /-->'
+            : '';
+        $title = '<!-- wp:site-title {"textColor":"' . self::escapeJson($foreground) . '"} /-->';
+        $identity = $tagline === ''
+            ? $title
+            : '<!-- wp:group {"style":{"spacing":{"blockGap":"0"}},"layout":{"type":"constrained"}} -->'
+                . '<div class="wp-block-group">' . $title . $tagline . '</div><!-- /wp:group -->';
+        // The identity rides in an align:wide row so even worst-case chrome
+        // shares the page's wide band: bare identity blocks in a constrained
+        // root sit at contentSize while every section row sits at wideSize,
         // which reads as a misaligned header (BIGR-778).
         $row = [
             'align' => 'wide',
@@ -63,7 +72,7 @@ final class HeaderFallback
             . '<div class="' . implode(' ', $classes) . '">'
             . '<!-- wp:group ' . self::encode($row) . ' -->' . "\n"
             . '<div class="wp-block-group alignwide">'
-            . '<!-- wp:site-title {"textColor":"' . self::escapeJson($foreground) . '"} /-->'
+            . $identity
             . '</div>' . "\n" . '<!-- /wp:group -->'
             . '</div>' . "\n<!-- /wp:group -->";
 

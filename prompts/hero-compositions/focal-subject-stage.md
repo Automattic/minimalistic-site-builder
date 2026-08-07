@@ -9,6 +9,8 @@ the blueprint's order; never turn the subject into wallpaper or a tiny card.
 
 - Structure: one unequal columns/media-text stage pairs one concise
   `hero-composition__copy` region with one dominant `hero-composition__media`.
+- Copy budget: the copy region is one level-1 heading, at most ONE supporting
+  paragraph, and at most one planned button — the exhibit carries the rest.
 - Identity: the one root group carries exactly `.hero-composition--focal-subject-stage`.
 - Media: exactly one opaque foreground JPG-compatible image with a singular
   subject; never request transparency or a cutout. Use group, columns/column or

@@ -380,6 +380,47 @@ final class AboveFoldContract
     {
         self::assertPhase($delivery, self::PHASE_DELIVERY);
         $contract = self::finalizeDelivery($delivery, $deliveredPages, $facts);
+        $headerFacts = is_array($facts['header'] ?? null) ? $facts['header'] : [];
+        if (($contract['header']['displays_tagline'] ?? false) === true
+            && (($headerFacts['site_tagline_blocks'] ?? 0) !== 1
+                || ($headerFacts['malformed_site_tagline_blocks'] ?? 0) !== 0
+                || ($headerFacts['invalid_site_tagline_topology'] ?? 0) !== 0)
+        ) {
+            $authored = $contract['header']['tagline_text'] ?? null;
+            $contract['header']['displays_tagline'] = false;
+            $contract['header']['tagline_text'] = null;
+            $contract['header']['text_rows'] = 1;
+            $contract['degradations'][] = self::degradation(
+                'header-tagline-not-delivered',
+                'theme/parts/header.html',
+                'wp:site-tagline',
+                $authored,
+                null,
+                'the finalized header does not contain exactly one structurally complete wp:site-tagline block; '
+                    . 'the delivered text-shape facts were narrowed instead of claiming an identity row count '
+                    . 'that visitors do not receive',
+            );
+            $contract['degradations'] = self::uniqueDegradations((array) $contract['degradations']);
+        }
+        if (($contract['header']['displays_tagline'] ?? false) !== true
+            && (($headerFacts['site_tagline_blocks'] ?? 0) > 0
+                || ($headerFacts['malformed_site_tagline_blocks'] ?? 0) > 0)
+        ) {
+            $contract['degradations'][] = self::degradation(
+                'header-tagline-unplanned-delivery',
+                'theme/parts/header.html',
+                'wp:site-tagline',
+                false,
+                [
+                    'complete_blocks' => $headerFacts['site_tagline_blocks'] ?? 0,
+                    'malformed_blocks' => $headerFacts['malformed_site_tagline_blocks'] ?? 0,
+                ],
+                'the finalized header retained dynamic tagline markup even though the authoritative contract '
+                    . 'does not display one; contract facts remain narrowed and the residual block was queued '
+                    . 'for isolated removal',
+            );
+            $contract['degradations'] = self::uniqueDegradations((array) $contract['degradations']);
+        }
         $contract['phase'] = self::PHASE_FINAL;
         return $contract;
     }
@@ -518,17 +559,20 @@ final class AboveFoldContract
      * Canonical header text-shape facts (BIGR-773), shared byte-for-byte by
      * both above-fold authors. `displays_tagline` is true only when the
      * archetype's catalog form includes wp:site-tagline AND a stated tagline
-     * exists to render (branded-lockup with an empty tagline is a logo+title
-     * lockup — the blank block is stripped deterministically). `text_rows`
-     * counts the header's stacked text lines: a two-row header bans the hero
-     * eyebrow, because a third caption-scale line ~100px below reads as a
-     * masthead row, not hero copy.
+     * exists to render (an empty tagline leaves a title-only form — the
+     * blank block is stripped deterministically). The tagline-bearing forms
+     * are branded-lockup and standard-row (BIGR-775): the hero no longer
+     * carries an eyebrow, so the orientation micro-copy that used to live
+     * there renders as the header tagline instead. `text_rows` counts the
+     * header's stacked text lines: a two-row header bans the hero eyebrow,
+     * because a third caption-scale line ~100px below reads as a masthead
+     * row, not hero copy.
      *
      * @return array{displays_tagline:bool,tagline_text:?string,text_rows:int}
      */
     private static function headerTextFacts(string $archetype, string $tagline): array
     {
-        $displays = $archetype === 'branded-lockup' && $tagline !== '';
+        $displays = in_array($archetype, ['branded-lockup', 'standard-row'], true) && $tagline !== '';
         return [
             'displays_tagline' => $displays,
             'tagline_text' => $displays ? $tagline : null,

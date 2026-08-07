@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\BlockSerializer\Attributes;
 
+use Automattic\SiteBuild\BlockSerializer\Json\JsJsonEncoder;
 use Automattic\SiteBuild\BlockSerializer\Json\JsonNative;
 use Automattic\SiteBuild\BlockSerializer\Json\JsonObject;
 use Automattic\SiteBuild\BlockSerializer\Json\JsonString;
@@ -49,6 +50,83 @@ final class AttributeNormalizer
                 'duplicate-attribute-merged:' . $mergedPath,
                 $blockPath,
             );
+        }
+
+        // Legacy top-level text alignment — models author core's historical
+        // {"textAlign":"center"} on blocks whose pinned registry only knows
+        // style.typography.textAlign. The heading deprecation adapter can
+        // migrate it, but the later raw-comment overlay clobbers the migrated
+        // style whenever the block ALSO authored other style keys, and the
+        // unmirrored has-text-align-* class is then dropped (audited:
+        // lumen10's centered H1 with typography.lineHeight). Fold the legacy
+        // key into the authored style up front so sourcing, validation, and
+        // the overlay all see one canonical form. Reviewed scope: only the
+        // two reading-copy blocks — button and the site-identity blocks keep
+        // their own pinned textAlign deprecations, and blocks that genuinely
+        // register a top-level textAlign (e.g. core/quote) are left alone.
+        // An authored typography.textAlign always wins over the legacy key.
+        // A registered align migration or an authored alignment class is
+        // stronger evidence too: leave those for the reviewed deprecation
+        // chain instead of manufacturing a second, conflicting class from
+        // the legacy key. Malformed authored containers stay fail-closed so
+        // the fixer's per-file transaction can deliver the original bytes
+        // with a warning; never replace authored state with an empty object.
+        if ($node->attributes !== null
+            && in_array($node->name, ['core/heading', 'core/paragraph'], true)
+            && !array_key_exists('textAlign', $schemas)
+        ) {
+            $legacyAlign = $node->attributes->get('textAlign');
+            if ($legacyAlign instanceof JsonString
+                && in_array($legacyAlign->toNative(), ['left', 'center', 'right'], true)
+            ) {
+                $style = $node->attributes->get('style');
+                if ($style !== null && !$style instanceof JsonObject) {
+                    throw new \RuntimeException(sprintf(
+                        'Cannot canonicalize legacy textAlign for %s at %s: authored style %s is not an object',
+                        $node->name,
+                        $blockPath,
+                        JsJsonEncoder::stringify($style) ?? get_debug_type($style->toNative()),
+                    ));
+                }
+                $typography = $style?->get('typography');
+                if ($typography !== null && !$typography instanceof JsonObject) {
+                    throw new \RuntimeException(sprintf(
+                        'Cannot canonicalize legacy textAlign for %s at %s: authored style.typography %s is not an object',
+                        $node->name,
+                        $blockPath,
+                        JsJsonEncoder::stringify($typography) ?? get_debug_type($typography->toNative()),
+                    ));
+                }
+
+                $registeredAlign = $node->attributes->get('align');
+                $hasRegisteredTextAlign = $registeredAlign instanceof JsonString
+                    && in_array($registeredAlign->toNative(), ['left', 'center', 'right'], true);
+                $className = $node->attributes->get('className');
+                $hasAuthoredTextAlignClass = $className instanceof JsonString
+                    && preg_match(
+                        '/(?:^|\s)has-text-align-(?:left|center|right)(?:\s|$)/',
+                        $className->toNative(),
+                    ) === 1;
+
+                if ($typography?->has('textAlign') !== true
+                    && !$hasRegisteredTextAlign
+                    && !$hasAuthoredTextAlignClass
+                ) {
+                    // Reviewed canonicalization, not a repair: like the
+                    // deprecation adapters it replaces, it does not count
+                    // toward the fixer's K.
+                    if ($style === null) {
+                        $style = new JsonObject();
+                        $node->attributes->set('style', $style);
+                    }
+                    if ($typography === null) {
+                        $typography = new JsonObject();
+                        $style->set('typography', $typography);
+                    }
+                    $typography->set('textAlign', new JsonString($legacyAlign->toNative()));
+                }
+                $node->attributes->remove('textAlign');
+            }
         }
 
         // Invented style keys — authored paths that exist neither in the
