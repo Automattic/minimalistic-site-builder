@@ -45,6 +45,40 @@ function section_unit_request_text(array $request): string
     return implode('', $request['cached_prefixes'] ?? []) . $request['prompt'];
 }
 
+test('section prompt keeps dash-free headings semantically lossless', function () {
+    $prompt = (string) file_get_contents(repo_path('prompts/section.md'));
+
+    assert_contains('no em or en dashes', $prompt, 'all section heading levels reject dash-joined labels');
+    assert_contains('preserve both endpoints', $prompt, 'semantic ranges cannot lose a bound');
+    assert_contains('From 2004 to 2024', $prompt, 'ranges have a dash-free heading form');
+    assert_contains('move the intact range into supporting copy', $prompt, 'ranges may move without losing meaning');
+});
+
+test('section prompt keeps unbreakable contact tokens out of display type', function () {
+    $prompt = (string) file_get_contents(repo_path('prompts/section.md'));
+
+    assert_contains('email addresses, long URLs', $prompt, 'the affected token shapes are named');
+    assert_contains('never take a display or heading scale', $prompt, 'large-type prohibition covers paragraphs and headings');
+    assert_contains('`lead`-at-most mailto link or a button labeled with words', $prompt, 'safe contact treatments remain available');
+    assert_true(!str_contains($prompt, 'inquiries@alcortaph'), 'malformed cohort identity copy is excluded');
+});
+
+test('centered-stack prompts keep wrapping copy aligned to the writing-direction start', function () {
+    $section = (string) file_get_contents(repo_path('prompts/section.md'));
+    $composition = (string) file_get_contents(repo_path('prompts/section-composition.md'));
+    $pagePlan = (string) file_get_contents(repo_path('prompts/page-plan.md'));
+
+    assert_contains('center display type only', $section, 'short display lines may remain centered');
+    assert_contains('writing direction\'s start edge', $section, 'reading copy follows language direction');
+    assert_contains('`"align":"left"` for LTR', $section, 'LTR Gutenberg mapping is explicit');
+    assert_contains('`"align":"right"` for RTL', $section, 'RTL Gutenberg mapping is explicit');
+    foreach ([$composition, $pagePlan] as $centeredStackContract) {
+        assert_contains('start-aligned', $centeredStackContract);
+        assert_contains('left for LTR', $centeredStackContract);
+        assert_contains('right for RTL', $centeredStackContract);
+    }
+});
+
 test('SectionUnit generates normalized markup from self-contained input', function () {
     $llm = new FakeLlm();
     $llm->queueText(
