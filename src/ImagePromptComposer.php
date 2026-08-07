@@ -32,6 +32,16 @@ namespace Automattic\SiteBuild;
  * unreliably as negations while the enumeration plants those very concepts
  * into the prompt.
  *
+ * The SUBJECT itself is the remaining text vector (BIGR-781): a subject whose
+ * focal object is a text carrier — a storefront, sign, menu board, screen,
+ * placard — invites the model to complete that carrier with garbled fake
+ * lettering, at worst a wrong brand name painted over the site's own shopfront.
+ * When (and only when) the subject names such a carrier, a lettering clause is
+ * appended stating positively how those surfaces appear: distant, oblique or
+ * defocused enough to read as shapes and texture. It is conditional because
+ * on a clean subject the clause itself would plant the signage concept the
+ * guard exists to keep out.
+ *
  * The IMAGE GRADE — the design direction's one-sentence photographic treatment
  * shared by ALL of the site's imagery (color vs B&W, grain, light) — IS render
  * instruction: it is appended to every prompt so independently generated images
@@ -118,6 +128,17 @@ final class ImagePromptComposer
                 . ' no glow, no shadows, no scenery and no backdrop of any kind.'
             : '';
 
+        // A subject naming a text carrier gets a render instruction stating how
+        // such surfaces appear (BIGR-781). Conditional: on a clean subject the
+        // clause would plant the very signage concept it constrains. Transparent
+        // assets skip it — they are isolated subjects with no scene to dress.
+        $letteringClause = (!$transparent && self::subjectNamesTextCarrier($subject))
+            ? 'Any sign, board, screen or printed surface in the scene is quiet'
+                . ' set dressing: kept distant, obliquely angled or softly out of'
+                . ' focus so its surface reads as simple shapes, glare and texture,'
+                . ' and the image tells its story through form, light and color alone.'
+            : '';
+
         // Page and site context only steer mood/composition — they are NOT
         // drawn, so they are framed as guidance and omitted entirely when
         // there is none. Nothing here may describe the image as part of a
@@ -163,6 +184,7 @@ final class ImagePromptComposer
             'style_clause'        => $styleClause,
             'grade_clause'        => $gradeClause,
             'transparency_clause' => $transparencyClause,
+            'lettering_clause'    => $letteringClause,
             'guidance'            => $guidance,
         ]);
 
@@ -171,6 +193,31 @@ final class ImagePromptComposer
         // limit (sheds trailing context first — see class doc).
         $prompt = (string) preg_replace("/\n{3,}/", "\n\n", trim($prompt));
         return GeminiImage::fitToTokens($prompt, GeminiImage::MAX_PROMPT_TOKENS);
+    }
+
+    /**
+     * Whether the authored subject names a text-carrying object — the surfaces
+     * the image model reliably completes with garbled fake lettering
+     * (BIGR-781). Subjects are written in the site's language, so common
+     * Spanish carrier nouns are matched alongside English, mirroring the
+     * page-context matchers above. Deliberately a noun allowlist, not prose
+     * analysis: a false positive only adds a harmless render instruction,
+     * while enumerating carriers unconditionally would plant the concept
+     * into clean prompts.
+     */
+    private static function subjectNamesTextCarrier(string $subject): bool
+    {
+        return preg_match(
+            '/\b(?:signs?|signages?|signboards?|storefronts?|shop\s?fronts?|facades?|fa[çc]ades?'
+            . '|marquees?|billboards?|posters?|placards?|banners?|plaques?|awnings?'
+            . '|men[uú]s?|menu\s?boards?|chalkboards?|blackboards?|whiteboards?'
+            . '|screens?|smartphones?|phones?|tablets?|laptops?|monitors?|dashboards?'
+            . '|newspapers?|magazines?|books?|labels?|packagings?|record\s?sleeves?|album\s?covers?'
+            . '|letreros?|carteles?|pancartas?|r[oó]tulos?|vallas?|marquesinas?|toldos?'
+            . '|pizarras?|pantallas?|tel[eé]fonos?|m[oó]viles?|peri[oó]dicos?|revistas?'
+            . '|libros?|etiquetas?|placas?|fachadas?|portadas?|escaparates?)\b/iu',
+            $subject
+        ) === 1;
     }
 
     /**

@@ -294,6 +294,54 @@ test('compose phrases the no-text guard positively', function () {
     }
 });
 
+test('compose adds the lettering clause when the subject names a text carrier', function () {
+    $subjects = [
+        'A bakery storefront at dusk with warm light spilling onto the pavement',
+        'A vegetarian restaurant menu board beside the entrance',
+        'A hand holding a phone over a wooden desk',
+        'Un letrero de madera sobre la puerta de un restaurante',
+        'Una pizarra junto al mostrador de la panadería',
+    ];
+    foreach ($subjects as $subject) {
+        $out = ImagePromptComposer::compose($subject, 'wide feature band', 'photorealistic', '');
+        assert_contains('quiet set dressing', $out);
+        // The clause is a render instruction: it precedes the sheddable guidance.
+        assert_true(
+            strpos($out, 'quiet set dressing') < strpos($out, 'never depicted literally'),
+            "lettering clause precedes the guidance for “{$subject}”"
+        );
+    }
+});
+
+test('compose omits the lettering clause for subjects without text carriers', function () {
+    // An unconditional clause would plant the signage concept into clean
+    // prompts (BIGR-781) — abstract and scenic subjects must never see it.
+    $subjects = [
+        'A misty mountain range at dawn seen from a low valley vantage',
+        'Close-up of hands folding dough on a floured counter',
+        'Sunlight raking across raw concrete columns in an empty atrium',
+    ];
+    foreach ($subjects as $subject) {
+        $out = ImagePromptComposer::compose($subject, 'wide feature band', 'photorealistic', '');
+        assert_true(!str_contains($out, 'quiet set dressing'), "no lettering clause for “{$subject}”");
+        foreach (['sign', 'screen', 'printed'] as $carrier) {
+            assert_true(!str_contains(strtolower($out), $carrier), "clean prompt does not name “{$carrier}”");
+        }
+    }
+});
+
+test('compose omits the lettering clause for transparent assets', function () {
+    $out = ImagePromptComposer::compose(
+        'A hand-painted wooden sign shape',
+        'isolated accent',
+        'illustration',
+        '',
+        '',
+        true
+    );
+    assert_true(!str_contains($out, 'quiet set dressing'), 'transparent asset has no scene to dress');
+});
+
 test('compose with no page or site context is just the subject + style', function () {
     $out = ImagePromptComposer::compose('A sourdough loaf', '', 'photorealistic', '');
     assert_eq('A sourdough loaf. Style: photorealistic', $out);
