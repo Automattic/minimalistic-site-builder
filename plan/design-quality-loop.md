@@ -1,6 +1,18 @@
 # Design-quality loop state
 
 ## Current position
+- **2026-08-07 (iter 8, fresh cohort)**: Cohort rebuilt on trunk 78b2a4b (7 sites, images, desktop+mobile shots; note trunk predates open PRs #236/#237/#238, so their defect classes recur as expected — extra incidence evidence only, not refiled). Fix BIGR-788 ✓ — **PR #240 open**: cinematic×stack-media-first mobile panel now forces base copy color; invisible H1 fixed on portfolio + pulso, hearth byte-identical. Evidence gist 8f38ee01dba01e3858facd24608b2d9d. PR count since 10-PR directive: 3 (#237, #238, #240).
+
+## Fresh-cohort backlog (triaged 2026-08-07, trunk 78b2a4b)
+| # | Cluster | Incidence | Class | Status |
+|---|---------|-----------|-------|--------|
+| P0-A | stack-media-first mobile panel → invisible H1 | 2/7 | deterministic CSS | **pr-open #240** (BIGR-788) |
+| G | Long fully-centered body paragraphs (220-434 chars) | 5/7 | prompt | next: file+fix |
+| K | Em dashes in headings ("Step One — …" ×6 lumen; "2004 — 2024" portfolio) | 2/7 | prompt | new |
+| W | Giant email display text wraps mid-domain (portfolio inquiries@…) | 1/7 | CSS/prompt | new |
+| J | Same photo in two slots (naturaleza defensa street ×2) | 1/7 | pipeline | new (polish) |
+| C786 | Contrast minors: naturaleza pink band 4.43:1; portfolio hero sub-par over busy crowd; pulso Chromatic Echo heading unverified | 3/7 | deterministic | add evidence to BIGR-786 |
+| — | Wrong-brand storefront (hearth FIELD & FLOUR), garbled banners (portfolio) | 2/7 | — | covered by open #236 |
 - **2026-08-07 (iter 4)**: Fix BIGR-784 caption half ✓ — **PR #235 merged to trunk** (e9796cb). ContrastFix walk now records image/gallery figcaption rows (gallery caption matched only in the tail after its last child) and repairs failures via caption-text-* className hooks (scoped `> figcaption` selectors); ScaffoldThemeStep ships the matching CSS hooks; 1758/1758 tests. Evidence: lumen step-boundary replay — gist 4815382fe2abe300ceca0ff5f95832d7. Remaining BIGR-784 scope (kickers/preset-pairs/double classes/mobile scrim) split to **BIGR-786** — needs a fresh cohort; the cited instances no longer exist on disk.
 - **2026-08-07 (iter 3)**: Fix BIGR-782 ✓ — **PR #234** (this branch, reviewed 2026-08-07, merging). screenshot.js now captures under emulated prefers-reduced-motion (rides motion.css's accessibility contract → deterministic, fully visible captures); motion.js gains a 4s observer watchdog (IO always delivers an initial batch, so silence while visible = broken observer → fail open; hidden pages re-arm). Harness: silent/healthy/hidden watchdog tests. Evidence: pulso→pulso8 replay, IO stubbed silent via addInitScript, 6s captures, motion.js swapped between shots — gist cad2b2541fd05256950a4f55ab076ccc.
 - Earlier same day: BIGR-779 → **#231 merged** (e89288f); BIGR-780 → **#233 merged** (fb4ae2f); #230 (BIGR-778) + #227 merged; cohort atlas/hearth theme.json were already hand-touched by prior evidence work (pulso was the clean before).
