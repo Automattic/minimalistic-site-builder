@@ -2,8 +2,8 @@
 
 ## Current position
 - **2026-08-07 (iter 3)**: Fix BIGR-782 ✓ — **PR #234 open** (branch fix/bigr-782-screenshot-motion-race). screenshot.js now captures under emulated prefers-reduced-motion (rides motion.css's accessibility contract → deterministic, fully visible captures); motion.js gains a 4s observer watchdog (IO always delivers an initial batch, so silence while visible = broken observer → fail open; hidden pages re-arm). Harness: silent/healthy/hidden watchdog tests. Evidence: pulso→pulso8 replay, IO stubbed silent via addInitScript, 6s captures, motion.js swapped between shots — gist cad2b2541fd05256950a4f55ab076ccc.
-- Earlier same day: BIGR-780 ✓ — **PR #233 open** (see below); #230 (BIGR-778) + #227 merged; cohort atlas/hearth theme.json were already hand-touched by prior evidence work (pulso was the clean before).
-- **Stop-condition note**: 4 design-quality PRs now open unreviewed (#228, #231, #233, #234) — the maintainer explicitly told the loop to keep going despite it (2026-08-07). Continue fix iterations; prefer replay evidence since cohort artifacts increasingly diverge from trunk.
+- Earlier same day: BIGR-780 ✓ — **PR #233 merged to trunk** (fb4ae2f); #230 (BIGR-778) + #227 merged; cohort atlas/hearth theme.json were already hand-touched by prior evidence work (pulso was the clean before).
+- **Stop-condition note**: design-quality PRs open unreviewed (#228, #231, #234) — the maintainer explicitly told the loop to keep going despite it (2026-08-07). Continue fix iterations; prefer replay evidence since cohort artifacts increasingly diverge from trunk.
 - Next fix: **BIGR-784** (contrast blind spots: captions/kickers/preset-pairs/double-classes/mobile scrim), then BIGR-781 (fake signage in images), BIGR-783 (repeated copy). Instrument note: after #234 merges, cohort screenshots become deterministic — rebuild cohort before the next Triage.
 - Full per-site critique reports: scratchpad `reports/<slug>.md`; crops: scratchpad `crops/<slug>/` (note: scratchpad is session-scoped; the cohort projects/ + logs remain the durable evidence source).
 - Evidence replay trick (deterministic fixes): copy projects/<slug> → <slug>NNN, apply the fix output to plugin/pages/home.html, `sed s#themes/<slug>/#themes/<slug>NNN/#`, screenshot — identical geometry to the cohort shot, crops pair 1:1.
@@ -17,7 +17,7 @@
 | # | Cluster | Incidence | Class | Status |
 |---|---------|-----------|-------|--------|
 | A | fix-blocks drops authored `has-text-align-*` (not mirrored in comment JSON) → off-axis eyebrows/prices | 5/7 | deterministic | **filed BIGR-779 — NEXT FIX** |
-| B | No root padding synthesized when model omits it → zero mobile gutters (normalizeRootPadding early-return) | 3/7 P0 | deterministic | filed BIGR-780 |
+| B | No root padding synthesized when model omits it → zero mobile gutters (normalizeRootPadding early-return) | 3/7 P0 | deterministic | **merged #233** (BIGR-780) |
 | F | Contrast repair misses captions/kickers/preset-pairs/double-classes/mobile scrim (1.2–2.1:1 shipped) | 4/7 | deterministic | filed BIGR-784 |
 | C | Painted-in fake signage/text in images (wrong-brand storefront etc.) — recurrence after BIGR-768 | 6/7, 4×P0 | prompt+pipeline | filed BIGR-781 |
 | D | Screenshot races motion reveal (blank images in captures) + motion.js lacks user-facing fallback | 1/7 + instrument | deterministic | filed BIGR-782 |
