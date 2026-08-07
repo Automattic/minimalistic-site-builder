@@ -176,3 +176,18 @@ test('interior opening fallback uses the dynamic post title instead of inventing
     assert_contains('<!-- wp:post-title {"level":1,"isLink":false,"fontSize":"section-title"} /-->', $markup);
     assert_true(!str_contains($markup, '>Page<'));
 });
+
+test('header fallback rides its title in a wide row so worst-case chrome stays band-aligned (BIGR-778)', function () {
+    foreach (['stacked', 'overlay'] as $mode) {
+        $contract = hero_fallback_contract($mode);
+        $markup = HeaderFallback::render(['site_spec' => ['name' => 'Northlight']], $contract, 'bad header')->markup;
+        assert_contains('"align":"wide"', $markup, $mode);
+        assert_contains('alignwide', $markup, $mode);
+        // The row wraps the title: a bare site-title in a constrained root
+        // would sit at contentSize while every section row sits at wideSize.
+        assert_true(
+            strpos($markup, 'alignwide') < strpos($markup, 'wp:site-title'),
+            'the site-title sits inside the wide row',
+        );
+    }
+});

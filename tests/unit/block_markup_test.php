@@ -213,6 +213,21 @@ test('removeClassTokenInOwnHtml tokenizes: any whitespace, exact tokens, both qu
     assert_contains('Mention reveal here', $out, 'text content untouched');
 });
 
+test('replaceClassTokenInOwnHtml can expand one exact token without touching prefixes or text', function () {
+    $src = '<!-- wp:group -->'
+        . '<div class="wp-block-group has-background-dim has-background-dimmed">'
+        . 'Mention has-background-dim here</div><!-- /wp:group -->';
+    $doc = BlockMarkup::parse($src);
+    $doc->replaceClassTokenInOwnHtml(
+        0,
+        'has-background-dim',
+        'has-background-dim-60 has-background-dim',
+    );
+    $out = $doc->render();
+    assert_contains('class="wp-block-group has-background-dim-60 has-background-dim has-background-dimmed"', $out);
+    assert_contains('Mention has-background-dim here', $out);
+});
+
 test('bounded class-token edits ignore class-like text inside sourced attributes', function () {
     $href = "https://example.test/?class='no-border-radius'";
     $src = '<!-- wp:button -->'

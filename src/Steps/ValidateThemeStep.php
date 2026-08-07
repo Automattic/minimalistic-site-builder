@@ -769,6 +769,7 @@ final class ValidateThemeStep implements Step
                 || str_starts_with($class, 'header-start-')
                 || str_starts_with($class, 'header-scrolled-')
                 || str_starts_with($class, 'header-foreground-')
+                || str_starts_with($class, 'header-top-')
                 || $class === 'header-transition-instant',
         ));
     }

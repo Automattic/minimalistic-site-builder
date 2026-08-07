@@ -1493,3 +1493,161 @@ test('late overlay protection loss produces matching stacked bytes and the 80vh 
     assert_contains('delivered="stacked"', $warnings);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('a surviving overlay earns the clear resting state and raises a just-short cover dim (BIGR-778)', function () {
+    with_project('builder_hh_clear_top_', function ($project) {
+        $pages = [[
+            'slug' => 'home', 'title' => 'Home', 'front' => true,
+            'sections' => [[
+                'slug' => 'hero',
+                'role' => 'hero',
+                'layout_archetype' => 'full-bleed-cover',
+                'background' => 'image',
+            ]],
+        ], [
+            'slug' => 'menu', 'title' => 'Menu', 'front' => false,
+            'sections' => [[
+                'slug' => 'opening',
+                'role' => 'opening',
+                'layout_archetype' => 'full-bleed-cover',
+                'background' => 'image',
+            ]],
+        ]];
+        $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+        $project->writeJson('theme/theme.json', hh_theme_json());
+        $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'calm']);
+        $project->writeJson('pages.json', ['pages' => $pages]);
+        hh_above_fold($project, $pages, 'cinematic-safe-zone');
+        $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
+        $project->writeText(
+            'theme/parts/page-home--hero.html',
+            '<!-- wp:group {"anchor":"hero","className":"hero-composition--cinematic-safe-zone hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
+                . '<div id="hero" class="wp-block-group hero-composition--cinematic-safe-zone hero-mobile--stack-media-first">'
+                . '<!-- wp:cover {"url":"theme:./assets/hero.jpg","align":"full","dimRatio":54,"overlayColor":"contrast"} -->'
+                . '<div class="wp-block-cover alignfull"><span aria-hidden="true" '
+                . 'class="wp-block-cover__background has-contrast-background-color has-background-dim"></span>'
+                . '<div class="wp-block-cover__inner-container"></div></div><!-- /wp:cover -->'
+                . '</div><!-- /wp:group -->',
+        );
+        $project->writeText(
+            'theme/parts/page-menu--opening.html',
+            '<!-- wp:group {"anchor":"opening","layout":{"type":"constrained"}} -->'
+                . '<div id="opening" class="wp-block-group">'
+                . '<!-- wp:cover {"url":"theme:./assets/menu.jpg","align":"full","overlayColor":"contrast"} -->'
+                . '<div class="wp-block-cover alignfull"><span aria-hidden="true" '
+                . 'class="wp-block-cover__background has-contrast-background-color has-background-dim-100 has-background-dim"></span>'
+                . '<div class="wp-block-cover__inner-container"></div></div><!-- /wp:cover -->'
+                . '</div><!-- /wp:group -->',
+        );
+
+        putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
+        (new HeaderHeroStep())->run($project);
+
+        $artifact = $project->readJson(HeaderBehavior::FILE);
+        assert_eq(HeaderBehavior::OVERLAY_TO_SOLID, $artifact['behavior']);
+        assert_eq(HeaderBehavior::TREATMENT_TRANSPARENT, $artifact['topTreatment'], 'the proven overlay rests clear');
+        assert_contains('header-top-transparent', $project->readText('theme/parts/header.html'));
+
+        // Core renders authored dim 54 through its 50% class, which cannot
+        // bound a white pixel for the white foreground; 60 is the smallest
+        // supported passing value, recorded as a repair note, not a loss.
+        $hero = BlockMarkup::parse($project->readText('theme/parts/page-home--hero.html'));
+        $cover = null;
+        foreach ($hero->indices() as $i) {
+            if ($hero->name($i) === 'cover') {
+                $cover = $i;
+            }
+        }
+        assert_true($cover !== null);
+        assert_eq(60, ($hero->attrs($cover) ?? [])['dimRatio']);
+        assert_contains('has-background-dim-60 has-background-dim', $hero->ownHtml($cover));
+        $implicitFullDim = $project->readText('theme/parts/page-menu--opening.html');
+        assert_true(!str_contains($implicitFullDim, '"dimRatio"'), 'Core default 100 stays implicit');
+        assert_contains('has-background-dim-100 has-background-dim', $implicitFullDim);
+        assert_contains('cover dimRatio 54 raised to 60', $project->readText('logs/header-hero.txt'));
+        assert_true(!$project->exists('warnings.json'), 'the earned clear state is warning-free');
+    });
+});
+
+test('competing cover paint keeps a surviving overlay behind its scrim veil (BIGR-778)', function () {
+    with_project('builder_hh_competing_paint_', function ($project) {
+        $pages = [[
+            'slug' => 'home', 'title' => 'Home', 'front' => true,
+            'sections' => [[
+                'slug' => 'hero',
+                'role' => 'hero',
+                'layout_archetype' => 'full-bleed-cover',
+                'background' => 'image',
+            ]],
+        ]];
+        $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+        $project->writeJson('theme/theme.json', hh_theme_json());
+        $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'calm']);
+        $project->writeJson('pages.json', ['pages' => $pages]);
+        hh_above_fold($project, $pages, 'cinematic-safe-zone');
+        $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
+        $project->writeText(
+            'theme/parts/page-home--hero.html',
+            '<!-- wp:group {"anchor":"hero","className":"hero-composition--cinematic-safe-zone hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
+                . '<div id="hero" class="wp-block-group hero-composition--cinematic-safe-zone hero-mobile--stack-media-first">'
+                . '<!-- wp:cover {"url":"theme:./assets/hero.jpg","align":"full","dimRatio":60,"overlayColor":"contrast","customGradient":"linear-gradient(#fff,#fff)"} -->'
+                . '<div class="wp-block-cover alignfull"></div><!-- /wp:cover -->'
+                . '</div><!-- /wp:group -->',
+        );
+
+        putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
+        (new HeaderHeroStep())->run($project);
+
+        $artifact = $project->readJson(HeaderBehavior::FILE);
+        assert_eq(HeaderBehavior::OVERLAY_TO_SOLID, $artifact['behavior']);
+        assert_eq(HeaderBehavior::TREATMENT_GLASS, $artifact['topTreatment']);
+        assert_true(!str_contains($project->readText('theme/parts/header.html'), 'header-top-transparent'));
+        assert_contains('customGradient', $project->readText('theme/parts/page-home--hero.html'));
+    });
+});
+
+test('an unprovable clear resting state keeps the scrim veil and the delivered dim (BIGR-778)', function () {
+    with_project('builder_hh_veiled_top_', function ($project) {
+        $pages = [[
+            'slug' => 'home', 'title' => 'Home', 'front' => true,
+            'sections' => [[
+                'slug' => 'hero',
+                'role' => 'hero',
+                'layout_archetype' => 'full-bleed-cover',
+                'background' => 'image',
+            ]],
+        ]];
+        // A mid-gray protection token can never bound a white image pixel at
+        // any grantable dim, so the kit scrim must stay.
+        $theme = hh_theme_json();
+        foreach ($theme['settings']['color']['palette'] as &$entry) {
+            if ($entry['slug'] === 'contrast') {
+                $entry['color'] = '#666666';
+            }
+        }
+        unset($entry);
+        $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+        $project->writeJson('theme/theme.json', $theme);
+        $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'calm']);
+        $project->writeJson('pages.json', ['pages' => $pages]);
+        hh_above_fold($project, $pages, 'cinematic-safe-zone', $theme);
+        $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
+        $project->writeText(
+            'theme/parts/page-home--hero.html',
+            '<!-- wp:group {"anchor":"hero","className":"hero-composition--cinematic-safe-zone hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
+                . '<div id="hero" class="wp-block-group hero-composition--cinematic-safe-zone hero-mobile--stack-media-first">'
+                . '<!-- wp:cover {"url":"theme:./assets/hero.jpg","align":"full","dimRatio":50,"overlayColor":"contrast"} -->'
+                . '<div class="wp-block-cover alignfull"></div><!-- /wp:cover -->'
+                . '</div><!-- /wp:group -->',
+        );
+
+        putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
+        (new HeaderHeroStep())->run($project);
+
+        $artifact = $project->readJson(HeaderBehavior::FILE);
+        assert_eq(HeaderBehavior::OVERLAY_TO_SOLID, $artifact['behavior']);
+        assert_eq(HeaderBehavior::TREATMENT_GLASS, $artifact['topTreatment'], 'no proof, no clear state');
+        assert_true(!str_contains($project->readText('theme/parts/header.html'), 'header-top-transparent'));
+        assert_contains('"dimRatio":50', $project->readText('theme/parts/page-home--hero.html'));
+    });
+});
