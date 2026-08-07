@@ -11,6 +11,7 @@ use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\HeaderBehavior;
 use Automattic\SiteBuild\HeaderFallback;
 use Automattic\SiteBuild\HeroFallback;
+use Automattic\SiteBuild\HeroHeadlineFit;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\PlaygroundArtifact;
 use Automattic\SiteBuild\Project;
@@ -334,6 +335,15 @@ final class HeaderHeroStep implements Step
                     : (string) json_encode($repair, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
             }
             array_push($warnings, ...$actionResult['warnings']);
+
+            // With the hero copy final, guarantee its longest headline word
+            // fits the copy measure at the display preset's maximum — the
+            // CSS mid-word break guard must stay dormant (BIGR-798).
+            $fit = HeroHeadlineFit::apply($writes[$heroRel], $theme);
+            $writes[$heroRel] = $fit['markup'];
+            foreach ($fit['notes'] as $note) {
+                $report[] = "[{$heroRel}] {$note}";
+            }
 
             // With the hero's delivered copy and action known, drop the
             // header's duplicates of them (echoed caption lines, same-label

@@ -1,10 +1,10 @@
 # Design-quality loop state
 
 ## Iteration counter
-- **18** (2026-08-07, Triage iteration — backlog validated, root-caused, filed BIGR-797…802, ranked below). Variety cadence: every 4th iteration → next variety-cadence turn is iteration **20**. Variety PR slot currently OCCUPIED by #228 (BIGR-776, open unreviewed) — a cadence turn while it stays open parks its proposal on the Linear issue instead of opening a second PR.
+- **20** (2026-08-07, Fix iteration — BIGR-798, run on the deferred variety-cadence turn because a P0 was open). Iterations 19 (Fix BIGR-797 → PR #249) and 20 both opened PRs; the deferred variety turn moves to iteration 21. Variety PR slot still OCCUPIED by #228 (BIGR-776, open unreviewed).
 
-## Next iteration (20 — VARIETY CADENCE TURN)
-Iteration 20 is the 4th-iteration variety turn. BIGR-798 (H1 mid-word snap) is an unfixed P0/craft finding → per the cadence rule it defers variety to iteration 21: **fix BIGR-798 first** (deterministic text-fit where H1 + hero recipe are both known: HeroUnit/HeaderHeroStep; evidence replay on pulso2 hero). Then iteration 21 runs the variety turn (gap from cohort: centered-cinematic underused, no type-led/no-image hero; #228 still occupies the slot → park proposal on its Linear issue if unreviewed). Queue after: BIGR-799 (one-line validator fix), BIGR-800, BIGR-801, BIGR-802.
+## Next iteration (21 — deferred VARIETY CADENCE TURN) — but loop STOPPED on the 3-open-PR condition
+With #228 (variety), #249 (BIGR-797) and the BIGR-798 PR all open unreviewed, the 3-open-unreviewed-PR stop condition is met: the loop stops after iteration 20 and resumes when reviews land. On resume, reconcile merges first; iteration 21 is the deferred variety turn (gap from the iteration-17 cohort: centered-cinematic underused, no type-led/no-image hero; if #228 still holds the slot, park the finished proposal on its Linear issue with renders + go/no-go). Fix queue after: BIGR-799 (one-line validator fix + regression test), BIGR-800 (retarget relabel), BIGR-801 (page-plan coverage floor, ≥3 rebuilds), BIGR-802 (image locale plumbing, ≥3 image rebuilds).
 
 ## Fresh cohort (iteration 17) — trunk 1d27e76, built 2026-08-07
 - Slugs (build-demos auto-suffixed): **portfolio6, tbilisi4, naturaleza6, lumen4, atlas3, pulso2, hearth2**. 7/7 built, 0 image-generation failures. Desktop `logs/home.png` (1366px) + mobile `logs/home-mobile.png` (390px) captured for all 7.
@@ -26,7 +26,7 @@ Iteration 20 is the 4th-iteration variety turn. BIGR-798 (H1 mid-word snap) is a
 | rank | BIGR | Cluster | Incidence | Class | Status |
 |---|---|---|---|---|---|
 | 1 | **BIGR-797** | bare `<li>` items dropped at re-serialization → empty `<ul>` ships (pulso2 3 ticket-tier lists, atlas3 schedule bullets; LLM logs prove authored content). Fixed by BareListItemLift pre-fixer pass in FixBlocksStep. Evidence gist 57df7f9d224cb14b796df55524cfbd42; replays pulso21/atlas31 in projects/. | 2/7, 4 lists | deterministic | **pr-open #249** |
-| 2 | **BIGR-798** | pulso2 desktop H1 "ELECTRONI/C" mid-word snap; display clamp max 104px vs ~610px layered-poster column; style.css:257 guard violated its dormancy contract. Fix: text-fit where H1 + recipe are both known (HeroUnit/HeaderHeroStep). | 1/7 P0 | deterministic | filed |
+| 2 | **BIGR-798** | pulso2 desktop H1 "ELECTRONI/C" mid-word snap; display clamp max 104px vs 640px copy measure. Fixed by HeroHeadlineFit in HeaderHeroStep (per-glyph width estimate → pin heading to min(display, cap px); preset attr+class dropped since core renders has-*-font-size with !important). Evidence gist 78b02439043f39d163cc82101f3c1419; replay pulso22 in projects/. | 1/7 P0 | deterministic | **pr-open** (iter 20) |
 | 3 | **BIGR-799** | validator misreads EVERY overlay header as "stacked" — AboveFoldPartFacts.php:456 checks literal `header-overlay` class HeaderBehavior never emits; 4/7 false drift warnings; masks real downgrades. One-line + test. (Header markup verified overlay-correct on all 4.) | 4/7 warnings | deterministic | filed |
 | 4 | **BIGR-800** | primary-action retarget keeps stale label ("EXPLORE OUR MENU" → reservations band, naturaleza6). Fix in page-plan repair step. | 1/7 | deterministic | filed |
 | 5 | **BIGR-801** | page-plan authored a ONE-section front page for a restaurant (padding saved it; 3150px page, no menu). Coverage-obligation wording in page-plan.md; ≥3-rebuild evidence. | 1/7 | prompt | filed |
