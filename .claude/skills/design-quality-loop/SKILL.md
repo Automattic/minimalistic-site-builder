@@ -23,7 +23,17 @@ evidence, not "fixed" by hand-editing a generated project.
 
 ## Iteration structure
 
-Each invocation, do exactly ONE of these (in priority order) and stop:
+Treat `plan/design-quality-loop.md` as a cached working snapshot, not the authority for remote status. At
+the start of every invocation:
+
+1. Read the state file.
+2. Reconcile every row carrying a BIGR key or PR number against Linear and GitHub
+   (`gh pr list --state all --search "BIGR-XXX"`), and correct stale statuses in the working copy. A
+   `pr-open` update committed only on its feature branch is not visible from fresh trunk until merge;
+   GitHub and Linear win when they disagree with the file.
+3. Apply the stop conditions below using the reconciled remote state.
+
+Then do exactly ONE of these (in priority order) and stop:
 
 1. **If a validated finding is ready to fix** → do one Fix iteration (phases 4–6).
 2. **If a critique backlog exists but is unvalidated/stale** → do a Triage iteration (phase 3).
@@ -31,20 +41,28 @@ Each invocation, do exactly ONE of these (in priority order) and stop:
    propose one new archetype/recipe.
 4. **Otherwise** → do a Cohort iteration (phases 1–2) to produce a fresh backlog.
 
-Keep state in `plan/design-quality-loop.md` (committed on trunk is fine): the current backlog with per-finding
-status (`new / filed BIGR-XXX / pr-open #NN / merged / rejected`), which cohort it came from, and what the
-next iteration should do. Read it first thing, update it last thing, every iteration.
+Keep the current backlog in that state file with per-finding status
+(`new / filed BIGR-XXX / pr-open #NN / merged / rejected`), which cohort it came from, and what the next
+iteration should do. Update it last thing, every iteration. Commit a fix/variety update on that iteration's
+PR branch; never push a state-only commit directly to trunk and never assume an unmerged branch's update is
+already present there.
 
 ### Phase 1 — Build the cohort
 
 ```bash
-git checkout trunk && git pull
+git checkout trunk && git pull --ff-only origin trunk
 php bin/build-demos.php --with-images        # all 7 demos, screenshots auto-captured
 ```
 
-Output: `projects/<slug>/logs/home.png` (desktop, 1366px). Also capture a mobile pass for each site:
-`SHOT_WIDTH=390 php bin/screenshot.php <slug>` (use `--serve` on build-demos or boot playground.php per
-site as needed). If a build fails or a screenshot is blank, that itself is a P0 finding — file it.
+Output: `projects/<slug>/logs/home.png` (desktop, 1366px). Also capture a mobile pass for each site without
+overwriting the desktop evidence:
+
+```bash
+SHOT_WIDTH=390 php bin/screenshot.php <slug> --out=projects/<slug>/logs/home-mobile.png
+```
+
+`screenshot.php` boots and tears down Playground itself; do not use `build-demos.php --serve` for this pass.
+If a build fails or a screenshot is blank, that itself is a P0 finding — file it.
 
 Cohorts are expensive (7 sites × full LLM graph × image generation). Reuse the current cohort as the
 "before" evidence for as many findings as possible; only build a fresh cohort when the backlog is exhausted
@@ -100,8 +118,11 @@ root cause (which prompt file / pipeline step / fixer / CSS).
 
 ### Phase 4 — Fix (one finding)
 
+Refresh GitHub and Linear once more to ensure nobody claimed the finding after this invocation started.
+Before editing or creating the branch, move its Linear issue to **In Progress**, as required by AGENTS.md.
+
 ```bash
-git checkout trunk && git pull
+git checkout trunk && git pull --ff-only origin trunk
 git checkout -b fix/bigr-XXX-<short-slug>
 ```
 
@@ -134,8 +155,8 @@ Host images per AGENTS.md (gist seeded with a text file, push PNGs, use raw URLs
   their own website, not a pipeline engineer: what looked wrong, what it looks like now, one sentence on
   why it happened. Then the Before/After images, then a short technical note (root cause, files touched,
   tests), then `Fixes BIGR-XXX` + Linear URL and the generated-with footer.
-- Move the Linear issue to In Progress, mark the finding `pr-open #NN` in the state file, and stop the
-  iteration. Do not start the next fix on top of this branch.
+- After the PR has a number, mark the finding `pr-open #NN` in the state file, commit and push that update
+  on the same PR branch, and stop the iteration. Do not start the next fix on top of this branch.
 
 ### Phase V — Variety iteration: propose a new archetype or recipe
 
