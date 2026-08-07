@@ -1,8 +1,11 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\AboveFoldContract;
 use Automattic\SiteBuild\BlockFixer;
+use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\GeminiImage;
+use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\PhpBlockFixer;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
@@ -10,9 +13,12 @@ use Automattic\SiteBuild\StepGraph;
 use Automattic\SiteBuild\Steps\AssemblePagesStep;
 use Automattic\SiteBuild\Steps\CollectImagesStep;
 use Automattic\SiteBuild\Steps\CoverContrastStep;
+use Automattic\SiteBuild\Steps\FixBlocksStep;
 use Automattic\SiteBuild\Steps\GenerateImagesStep;
+use Automattic\SiteBuild\Steps\HeaderHeroStep;
 use Automattic\SiteBuild\Tests\FakeImageClient;
 use Automattic\SiteBuild\Tests\FakeLlm;
+use Automattic\SiteBuild\Units\GeneratedMarkup;
 
 require_once __DIR__ . '/../FakeImageClient.php';
 
@@ -43,6 +49,16 @@ function stage_texture_markup_fixture(string $source, string $surface): string
         . 'background-repeat:repeat;background-attachment:fixed">'
         . '<!-- wp:paragraph --><p class="keep  spacing">Keep this copy.</p><!-- /wp:paragraph -->'
         . '</div><!-- /wp:group -->';
+}
+
+function unsafe_stage_texture_markup_fixture(string $source, string $surface = 'base'): string
+{
+    return '<!-- wp:group {"className":"has-stage-texture-backdrop","backgroundColor":"' . $surface
+        . '","style":{"background":{"backgroundImage":{"url":"' . $source
+        . '"},"backgroundPosition":"0% 0%","backgroundSize":"420px","backgroundRepeat":"repeat",'
+        . '"backgroundAttachment":"fixed"}}} --><div class="wp-block-group has-stage-texture-backdrop" '
+        . 'style="background-image:url(' . $source . ');background-position:0% 0%;background-size:420px;'
+        . 'background-repeat:repeat;background-attachment:fixed">unsafe';
 }
 
 function stage_texture_checker_jpeg(string $dark = '#000000', string $light = '#FFFFFF'): string
@@ -588,8 +604,12 @@ test('generate-images keeps an unsafe failed cover unchanged and reports the res
 
     assert_eq($unclosed, $project->readText('theme/parts/hero.html'));
     $warnings = $project->readJson('warnings.json')['generate-images'] ?? [];
-    assert_contains('theme/parts/hero.html: authored media source theme:./assets/unsafe-cover.jpg', implode("\n", $warnings));
-    assert_contains('pre-cleanup bytes kept', implode("\n", $warnings));
+    $joined = implode("\n", $warnings);
+    assert_contains('file="theme/parts/hero.html"', $joined);
+    assert_contains('block="unsafe generated media owner"', $joined);
+    assert_contains('authored source="theme:./assets/unsafe-cover.jpg"', $joined);
+    assert_contains('delivered="pre-cleanup media bytes retained"', $joined);
+    assert_contains('disposition=', $joined);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -1077,6 +1097,554 @@ test('generate-images synthesizes the stage-texture spec painted after collect-i
     ));
     assert_eq(1, count($again), 'backstop is idempotent');
     assert_eq(0, count($rerunImages->calls), 'valid completed texture bytes are revalidated, not regenerated');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('the real header-hero to fixer and assembly flow delivers a generated stage tile (BIGR-776)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_gi_stage_flow_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $theme = ['version' => 3, 'settings' => ['color' => ['palette' => [
+        ['slug' => 'base', 'name' => 'Base', 'color' => '#FFFFFF'],
+        ['slug' => 'contrast', 'name' => 'Contrast', 'color' => '#111111'],
+        ['slug' => 'primary', 'name' => 'Primary', 'color' => '#274C77'],
+        ['slug' => 'secondary', 'name' => 'Secondary', 'color' => '#E5E7EB'],
+        ['slug' => 'accent', 'name' => 'Accent', 'color' => '#C2410C'],
+    ]]]];
+    $sections = [[
+        'slug' => 'hero',
+        'role' => 'hero',
+        'layout_archetype' => 'asymmetric-split',
+        'background' => 'base',
+    ]];
+    $pages = [[
+        'slug' => 'home',
+        'title' => 'Home',
+        'front' => true,
+        'sections' => $sections,
+    ]];
+    $blueprint = HeroBlueprint::defaultFor('focal-subject-stage');
+    $blueprint['stage_backdrop'] = 'texture';
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    $project->writeJson('theme/theme.json', $theme);
+    $project->writeJson('designDirection.json', [
+        'canvas' => 'full-bleed',
+        'motion' => 'calm',
+        'hero_blueprint' => $blueprint,
+    ]);
+    $project->writeJson('pages.json', ['pages' => $pages]);
+    $project->writeJson('aboveFold.json', AboveFoldContract::resolve(
+        $pages,
+        $blueprint,
+        'full-bleed',
+        $theme,
+        ['stable_id' => 'stage-flow', 'writing_direction' => 'ltr', 'page_count' => 1],
+        ['archetype' => 'minimal-columns', 'surface' => 'base'],
+    ));
+    // This is the durable result of collect-images, which intentionally runs
+    // before HeaderHero paints the code-owned texture contract.
+    $project->writeJson('images.json', []);
+    $project->writeText(
+        'theme/parts/header.html',
+        '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">'
+            . '<!-- wp:site-title /--></div><!-- /wp:group -->',
+    );
+    $project->writeText(
+        'theme/parts/page-home--hero.html',
+        '<!-- wp:group {"backgroundColor":"base","anchor":"hero",'
+            . '"className":"hero-composition--focal-subject-stage hero-mobile--stack-media-first",'
+            . '"layout":{"type":"constrained"}} -->'
+            . '<div id="hero" class="wp-block-group has-base-background-color has-background '
+            . 'hero-composition--focal-subject-stage hero-mobile--stack-media-first">'
+            . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Exhibit</h1><!-- /wp:heading -->'
+            . '</div><!-- /wp:group -->',
+    );
+    $project->writeText(
+        'theme/parts/footer.html',
+        '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">'
+            . '<!-- wp:paragraph --><p>Footer</p><!-- /wp:paragraph --></div><!-- /wp:group -->',
+    );
+
+    (new HeaderHeroStep())->run($project);
+    assert_true(GeneratedMarkup::hasStageTextureSavedHtml($project->readText('theme/parts/header.html')));
+    assert_true(GeneratedMarkup::hasStageTextureSavedHtml(
+        $project->readText('theme/parts/page-home--hero.html'),
+    ));
+
+    quietly(fn () => (new FixBlocksStep(new PhpBlockFixer()))->run($project));
+    assert_true(
+        GeneratedMarkup::hasStageTextureSavedHtml($project->readText('theme/parts/header.html')),
+        'the real group serializer must re-assert the trusted saved paint',
+    );
+    assert_true(GeneratedMarkup::hasStageTextureSavedHtml(
+        $project->readText('theme/parts/page-home--hero.html'),
+    ));
+
+    (new AssemblePagesStep())->run($project);
+    $images = new FakeImageClient(stage_texture_solid_jpeg('#FFFFFF'));
+    (new GenerateImagesStep($images))->run($project);
+
+    assert_eq(1, count($images->calls));
+    $served = '/wp-content/themes/demo/assets/stage_backdrop-texture.jpg';
+    assert_true(GeneratedMarkup::hasExactStageTextureContract(
+        $project->readText('theme/parts/header.html'),
+        $served,
+    ));
+    assert_true(GeneratedMarkup::hasExactStageTextureContract(
+        $project->readText('plugin/pages/home.html'),
+        $served,
+    ));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images scopes stale stage aliases to safe roots and retains unsafe and ordinary sentinels (BIGR-776)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_gi_stage_scope_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('images.json', []);
+    $project->writeJson('theme/theme.json', ['settings' => ['color' => ['palette' => [
+        ['slug' => 'base', 'color' => '#FFFFFF'],
+        ['slug' => 'contrast', 'color' => '#000000'],
+    ]]]]);
+    $oldA = '/wp-content/themes/old-a/assets/stage_backdrop-texture.jpg';
+    $oldB = '/wp-content/themes/old-b/assets/stage_backdrop-texture.jpg';
+    $safe = str_replace($oldA, $oldB, stage_texture_markup_fixture($oldA, 'base'));
+    $safe = (string) preg_replace('~' . preg_quote($oldB, '~') . '~', $oldA, $safe, 1);
+    $safe = str_replace('<div class=', '<div data-proof="' . $oldA . '" class=', $safe);
+    $safe = str_replace(
+        'Keep this copy.',
+        'Keep this copy. ' . $oldA . '<img src="' . $oldA . '" alt="ordinary sentinel"/>',
+        $safe,
+    );
+    $unsafe = unsafe_stage_texture_markup_fixture($oldA);
+    $project->writeText('plugin/pages/home.html', $safe . $unsafe);
+
+    $images = new FakeImageClient(stage_texture_solid_jpeg('#FFFFFF'));
+    (new GenerateImagesStep($images))->run($project);
+
+    assert_eq(1, count($images->calls));
+    $delivered = $project->readText('plugin/pages/home.html');
+    $current = '/wp-content/themes/demo/assets/stage_backdrop-texture.jpg';
+    assert_eq(2, substr_count($delivered, $current), 'only safe root comment + saved paint are served');
+    assert_contains('data-proof="' . $oldA . '"', $delivered);
+    assert_contains('Keep this copy. ' . $oldA, $delivered);
+    assert_contains('<img src="' . $oldA . '" alt="ordinary sentinel"/>', $delivered);
+    assert_contains($unsafe, $delivered, 'unsafe sibling remains byte-for-byte');
+    assert_true(!str_contains($delivered, $oldB));
+    assert_contains('unsafe block boundary', implode("\n", $project->readJson('warnings.json')['generate-images'] ?? []));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images ignores an attrs-only stage contract and warns without an image call (BIGR-776)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_gi_stage_incomplete_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('images.json', []);
+    $project->writeJson('theme/theme.json', ['settings' => ['color' => ['palette' => [
+        ['slug' => 'base', 'color' => '#FFFFFF'],
+    ]]]]);
+    $old = '/wp-content/themes/old-theme/assets/stage_backdrop-texture.jpg';
+    $incomplete = stage_texture_markup_fixture($old, 'base');
+    $incomplete = (string) preg_replace('~\sstyle="[^"]*"~', '', $incomplete, 1);
+    $project->writeText('plugin/pages/home.html', $incomplete);
+
+    $images = new FakeImageClient(stage_texture_solid_jpeg('#FFFFFF'));
+    (new GenerateImagesStep($images))->run($project);
+
+    assert_eq(0, count($images->calls));
+    assert_eq($incomplete, $project->readText('plugin/pages/home.html'));
+    assert_eq([], $project->readJson('images.json'));
+    $warnings = implode("\n", $project->readJson('warnings.json')['generate-images'] ?? []);
+    assert_contains('pre-canonicalization bytes retained', $warnings);
+    assert_contains('unique class and style', $warnings);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images retains a wrapperless stage marker and warns without an image call (BIGR-776)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_gi_stage_wrapperless_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('images.json', []);
+    $project->writeJson('theme/theme.json', ['settings' => ['color' => ['palette' => [
+        ['slug' => 'base', 'color' => '#FFFFFF'],
+    ]]]]);
+    $source = GeneratedMarkup::STAGE_TEXTURE_ASSET;
+    $wrapperless = '<!-- wp:group {"className":"has-stage-texture-backdrop","backgroundColor":"base",'
+        . '"style":{"background":{"backgroundImage":{"url":"' . $source . '"},'
+        . '"backgroundPosition":"0% 0%","backgroundSize":"420px","backgroundRepeat":"repeat",'
+        . '"backgroundAttachment":"fixed"}}} -->Keep wrapperless copy.<!-- /wp:group -->';
+    $project->writeText('plugin/pages/home.html', $wrapperless);
+
+    $images = new FakeImageClient(stage_texture_solid_jpeg('#FFFFFF'));
+    (new GenerateImagesStep($images))->run($project);
+
+    assert_eq(0, count($images->calls));
+    assert_eq($wrapperless, $project->readText('plugin/pages/home.html'));
+    assert_eq([], $project->readJson('images.json'));
+    $warning = implode("\n", $project->readJson('warnings.json')['generate-images'] ?? []);
+    assert_contains("file='plugin/pages/home.html'", $warning);
+    assert_contains("block='stage-texture block 0'", $warning);
+    assert_contains('no isolated saved wrapper', $warning);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images removes safe stage paint while retaining an unsafe failed sibling (BIGR-776)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_gi_stage_mixed_failure_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('images.json', []);
+    $project->writeJson('theme/theme.json', ['settings' => ['color' => ['palette' => [
+        ['slug' => 'contrast', 'color' => '#111111'],
+    ]]]]);
+    $source = GeneratedMarkup::STAGE_TEXTURE_ASSET;
+    $unsafe = unsafe_stage_texture_markup_fixture($source);
+    $project->writeText('plugin/pages/home.html', stage_texture_markup_fixture($source, 'base') . $unsafe);
+
+    $images = new FakeImageClient(stage_texture_solid_jpeg('#FFFFFF'));
+    (new GenerateImagesStep($images))->run($project);
+
+    assert_eq(0, count($images->calls));
+    $delivered = $project->readText('plugin/pages/home.html');
+    assert_eq(2, substr_count($delivered, $source), 'only the unsafe comment + saved source remain');
+    assert_eq(2, substr_count($delivered, GeneratedMarkup::STAGE_TEXTURE_CLASS));
+    assert_contains($unsafe, $delivered);
+    $warnings = implode("\n", $project->readJson('warnings.json')['generate-images'] ?? []);
+    assert_contains('safe stage roots were cleaned independently', $warnings);
+    assert_contains("file=\"plugin/pages/home.html\"", $warnings);
+    assert_contains('block="unsafe stage-texture root"', $warnings);
+    assert_eq(2, substr_count($warnings, 'authored source="' . $source . '"'));
+    assert_true(!str_contains(
+        $warnings,
+        'authored source="/wp-content/themes/demo/assets/stage_backdrop-texture.jpg"',
+    ));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('failed stage cleanup keeps an uncleanable child without rolling back its cleanable parent (BIGR-776)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_gi_stage_sibling_isolation_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('images.json', []);
+    $project->writeJson('theme/theme.json', ['settings' => ['color' => ['palette' => [
+        ['slug' => 'contrast', 'color' => '#111111'],
+    ]]]]);
+    $source = GeneratedMarkup::STAGE_TEXTURE_ASSET;
+    $safe = stage_texture_markup_fixture($source, 'base');
+    $uncleanable = str_replace(
+        '<div class="wp-block-group',
+        '<div class="duplicate-class-proof" class="wp-block-group',
+        stage_texture_markup_fixture($source, 'base'),
+    );
+    $nested = (string) preg_replace(
+        '~</div><!-- /wp:group -->$~',
+        $uncleanable . '</div><!-- /wp:group -->',
+        $safe,
+        1,
+    );
+    $project->writeText('plugin/pages/home.html', $nested);
+
+    $images = new FakeImageClient(stage_texture_solid_jpeg('#FFFFFF'));
+    (new GenerateImagesStep($images))->run($project);
+
+    assert_eq(0, count($images->calls), 'unresolved hero surface rejects before the image call');
+    $delivered = $project->readText('plugin/pages/home.html');
+    assert_contains($uncleanable, $delivered, 'only the uncleanable unit retains its pre-cleanup bytes');
+    assert_eq(2, substr_count($delivered, $source), 'safe sibling comment and saved sources were removed');
+    assert_eq(2, substr_count($delivered, GeneratedMarkup::STAGE_TEXTURE_CLASS));
+    assert_eq(2, substr_count($delivered, 'Keep this copy.'), 'both roots retain visible copy');
+    $warnings = implode("\n", $project->readJson('warnings.json')['generate-images'] ?? []);
+    assert_contains('safe stage roots were cleaned independently', $warnings);
+    assert_eq(2, substr_count($warnings, 'authored source="' . $source . '"'));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images serves nested exact stage roots without overlap rollback (BIGR-776)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_gi_stage_nested_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('images.json', []);
+    $project->writeJson('theme/theme.json', ['settings' => ['color' => ['palette' => [
+        ['slug' => 'base', 'color' => '#FFFFFF'],
+        ['slug' => 'contrast', 'color' => '#000000'],
+    ]]]]);
+    $source = GeneratedMarkup::STAGE_TEXTURE_ASSET;
+    $outer = stage_texture_markup_fixture($source, 'base');
+    $inner = stage_texture_markup_fixture($source, 'base');
+    $nested = (string) preg_replace(
+        '~</div><!-- /wp:group -->$~',
+        $inner . '</div><!-- /wp:group -->',
+        $outer,
+        1,
+    );
+    $project->writeText('plugin/pages/home.html', $nested);
+
+    $images = new FakeImageClient(stage_texture_solid_jpeg('#FFFFFF'));
+    (new GenerateImagesStep($images))->run($project);
+
+    assert_eq(1, count($images->calls));
+    $delivered = $project->readText('plugin/pages/home.html');
+    assert_eq(4, substr_count($delivered, '/wp-content/themes/demo/assets/stage_backdrop-texture.jpg'));
+    assert_true(!str_contains($delivered, $source));
+    assert_true(!$project->exists('warnings.json'));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images removes both nested exact stage roots after tile rejection (BIGR-776)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_gi_stage_nested_failure_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('images.json', []);
+    $project->writeJson('theme/theme.json', ['settings' => ['color' => ['palette' => [
+        ['slug' => 'base', 'color' => '#FFFFFF'],
+        ['slug' => 'contrast', 'color' => '#111111'],
+    ]]]]);
+    $source = GeneratedMarkup::STAGE_TEXTURE_ASSET;
+    $outer = stage_texture_markup_fixture($source, 'base');
+    $inner = stage_texture_markup_fixture($source, 'base');
+    $nested = (string) preg_replace(
+        '~</div><!-- /wp:group -->$~',
+        $inner . '</div><!-- /wp:group -->',
+        $outer,
+        1,
+    );
+    $project->writeText('plugin/pages/home.html', $nested);
+
+    $images = new FakeImageClient(stage_texture_checker_jpeg());
+    (new GenerateImagesStep($images))->run($project);
+
+    assert_eq(1, count($images->calls));
+    $delivered = $project->readText('plugin/pages/home.html');
+    assert_true(!str_contains($delivered, $source));
+    assert_true(!str_contains($delivered, GeneratedMarkup::STAGE_TEXTURE_CLASS));
+    assert_eq(2, substr_count($delivered, 'Keep this copy.'), 'both nested roots retain their copy');
+    $warning = implode("\n", $project->readJson('warnings.json')['generate-images'] ?? []);
+    assert_contains('generated stage texture rejected', $warning);
+    assert_true(!str_contains($warning, 'unsafe stage-texture root'));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images keeps one stage manifest writer and degrades malformed collisions (BIGR-776)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_gi_stage_manifest_owner_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $source = GeneratedMarkup::STAGE_TEXTURE_ASSET;
+    $stage = CollectImagesStep::stageTextureSpec(['parts/header.html'], '#FFFFFF');
+    $project->writeJson('images.json', [
+        $stage,
+        [
+            'filename' => basename($source),
+            'src' => $source,
+            'subject' => 'An ordinary image that must not overwrite the tile',
+            'pageContext' => 'card',
+            'style' => 'photorealistic',
+            'aspectRatio' => 'square',
+            'status' => 'pending',
+        ],
+        $stage,
+        'malformed-row',
+    ]);
+    $project->writeJson('theme/theme.json', ['settings' => ['color' => ['palette' => [
+        ['slug' => 'base', 'color' => '#FFFFFF'],
+        ['slug' => 'contrast', 'color' => '#111111'],
+    ]]]]);
+    $project->writeText('theme/parts/header.html', stage_texture_markup_fixture($source, 'base'));
+    $project->writeText('theme/parts/page-home--hero.html', stage_texture_markup_fixture($source, 'base'));
+    $project->writeText(
+        'plugin/pages/home.html',
+        '<!-- wp:group --><div class="wp-block-group"><!-- wp:paragraph --><p>Keep sibling.</p><!-- /wp:paragraph -->'
+            . '<!-- wp:image {"url":"' . $source . '"} --><figure class="wp-block-image">'
+            . '<img src="' . $source . '" alt=""/></figure><!-- /wp:image -->'
+            . '</div><!-- /wp:group -->',
+    );
+
+    $bytes = stage_texture_solid_jpeg('#FFFFFF');
+    $images = new FakeImageClient($bytes);
+    (new GenerateImagesStep($images))->run($project);
+
+    assert_eq(1, count($images->calls), 'only the single trusted stage writer generates');
+    $specs = $project->readJson('images.json');
+    assert_eq(1, count($specs));
+    assert_true(CollectImagesStep::isStageTextureSpec($specs[0]));
+    assert_eq('completed', $specs[0]['status']);
+    assert_eq($bytes, $project->readText('theme/assets/stage_backdrop-texture.jpg'));
+    $page = $project->readText('plugin/pages/home.html');
+    assert_contains('Keep sibling.', $page);
+    assert_true(!str_contains($page, 'wp:image'));
+    assert_true(!str_contains($page, $source));
+    assert_true(GeneratedMarkup::hasExactStageTextureContract(
+        $project->readText('theme/parts/header.html'),
+        '/wp-content/themes/demo/assets/stage_backdrop-texture.jpg',
+    ));
+    $warning = implode("\n", $project->readJson('warnings.json')['generate-images'] ?? []);
+    assert_contains("block='images.json[1]'", $warning);
+    assert_contains("block='images.json[2]'", $warning);
+    assert_contains("block='images.json[3]'", $warning);
+    assert_contains("block='ordinary reserved media owner'", $warning);
+    assert_contains('delivered="ordinary media reference removed"', $warning);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('reserved ordinary manifest cleanup ignores a nested exact stage child (BIGR-776)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_gi_stage_nested_media_owner_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $source = GeneratedMarkup::STAGE_TEXTURE_ASSET;
+    $project->writeJson('images.json', [[
+        'filename' => basename($source),
+        'src' => $source,
+        'subject' => 'Ambiguous ordinary manifest row',
+        'pageContext' => 'card',
+        'style' => 'photorealistic',
+        'aspectRatio' => 'square',
+        'status' => 'pending',
+    ]]);
+    $project->writeJson('theme/theme.json', ['settings' => ['color' => ['palette' => [
+        ['slug' => 'base', 'color' => '#FFFFFF'],
+        ['slug' => 'contrast', 'color' => '#111111'],
+    ]]]]);
+    $nestedStage = stage_texture_markup_fixture($source, 'base');
+    $cover = '<!-- wp:cover {"dimRatio":40} --><div class="wp-block-cover media-ancestor-proof">'
+        . '<span aria-hidden="true" class="wp-block-cover__background has-background-dim-40 has-background-dim"></span>'
+        . '<div class="wp-block-cover__inner-container">' . $nestedStage . '</div></div><!-- /wp:cover -->';
+    $project->writeText('plugin/pages/home.html', $cover);
+
+    $images = new FakeImageClient(stage_texture_solid_jpeg('#FFFFFF'));
+    (new GenerateImagesStep($images))->run($project);
+
+    assert_eq(1, count($images->calls), 'the nested stage backstop still owns one generated tile');
+    $delivered = $project->readText('plugin/pages/home.html');
+    assert_contains('media-ancestor-proof', $delivered);
+    $document = BlockMarkup::parse($delivered);
+    $stageBlocks = [];
+    foreach ($document->indices() as $index) {
+        $end = $document->endOffset($index);
+        if ($document->name($index) !== 'group' || $end === null) {
+            continue;
+        }
+        $block = substr($delivered, $document->openingOffset($index), $end - $document->openingOffset($index));
+        if (GeneratedMarkup::hasExactStageTextureContract(
+            $block,
+            '/wp-content/themes/demo/assets/stage_backdrop-texture.jpg',
+        )) {
+            $stageBlocks[] = $block;
+        }
+    }
+    assert_eq(1, count($stageBlocks));
+    assert_contains(GeneratedMarkup::STAGE_TEXTURE_CLASS, $delivered);
+    $warning = implode("\n", $project->readJson('warnings.json')['generate-images'] ?? []);
+    assert_contains("block='images.json[0]'", $warning);
+    assert_true(!str_contains($warning, "block='ordinary reserved media owner'"));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images repairs a reserved filename on a distinct ordinary source (BIGR-776)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_gi_stage_manifest_rename_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $source = GeneratedMarkup::STAGE_TEXTURE_ASSET;
+    $ordinarySource = 'theme:./assets/portrait.jpg';
+    $project->writeJson('images.json', [
+        CollectImagesStep::stageTextureSpec(['parts/header.html'], '#FFFFFF'),
+        [
+            'filename' => basename($source),
+            'src' => $ordinarySource,
+            'subject' => 'A quiet portrait',
+            'pageContext' => 'card',
+            'style' => 'photorealistic',
+            'aspectRatio' => 'portrait',
+            'status' => 'completed',
+            'url' => '/wp-content/themes/old/assets/stage_backdrop-texture.jpg',
+        ],
+        [
+            'filename' => 'portrait.jpg',
+            'src' => 'theme:./assets/other.jpg',
+            'subject' => 'A later ordinary owner of portrait.jpg',
+            'pageContext' => 'card',
+            'style' => 'photorealistic',
+            'aspectRatio' => 'square',
+            'status' => 'pending',
+        ],
+    ]);
+    $project->writeJson('theme/theme.json', ['settings' => ['color' => ['palette' => [
+        ['slug' => 'base', 'color' => '#FFFFFF'],
+        ['slug' => 'contrast', 'color' => '#111111'],
+    ]]]]);
+    $project->writeText('theme/parts/header.html', stage_texture_markup_fixture($source, 'base'));
+    $project->writeText('theme/parts/page-home--hero.html', stage_texture_markup_fixture($source, 'base'));
+    $project->writeText(
+        'plugin/pages/home.html',
+        '<!-- wp:image {"url":"' . $ordinarySource . '"} --><figure class="wp-block-image">'
+            . '<img src="' . $ordinarySource . '" alt="Portrait"/></figure><!-- /wp:image -->',
+    );
+
+    $images = new FakeImageClient(stage_texture_solid_jpeg('#FFFFFF'));
+    (new GenerateImagesStep($images))->run($project);
+
+    assert_eq(3, count($images->calls), 'renamed completed state is reset and every unique writer generates');
+    $specs = $project->readJson('images.json');
+    $ordinary = array_values(array_filter(
+        $specs,
+        static fn (array $spec): bool => !CollectImagesStep::isStageTextureSpec($spec),
+    ));
+    assert_eq(2, count($ordinary));
+    $repaired = array_values(array_filter(
+        $ordinary,
+        static fn (array $spec): bool => ($spec['src'] ?? null) === 'theme:./assets/portrait.jpg',
+    ))[0];
+    assert_true($repaired['filename'] !== basename($source));
+    assert_true($repaired['filename'] !== 'portrait.jpg', 'later filename owner forces a unique deterministic name');
+    assert_eq('completed', $repaired['status']);
+    assert_true($project->exists('theme/assets/' . $repaired['filename']));
+    assert_true($project->exists('theme/assets/portrait.jpg'));
+    assert_contains(
+        '/wp-content/themes/demo/assets/' . $repaired['filename'],
+        $project->readText('plugin/pages/home.html'),
+    );
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images degrades a residual reserved AI collision and persists the filtered manifest (BIGR-776)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_gi_stage_collision_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $source = GeneratedMarkup::STAGE_TEXTURE_ASSET;
+    $project->writeJson('images.json', [CollectImagesStep::stageTextureSpec(
+        ['parts/header.html', 'parts/page-home--hero.html'],
+        '#FFFFFF',
+    )]);
+    $project->writeJson('theme/theme.json', ['settings' => ['color' => ['palette' => [
+        ['slug' => 'base', 'color' => '#FFFFFF'],
+    ]]]]);
+    $project->writeText('theme/parts/header.html', stage_texture_markup_fixture($source, 'base'));
+    $project->writeText('theme/parts/page-home--hero.html', stage_texture_markup_fixture($source, 'base'));
+    $project->writeText(
+        'theme/parts/content.html',
+        '<!-- wp:group --><div class="wp-block-group"><!-- wp:paragraph --><p>Keep sibling.</p><!-- /wp:paragraph -->'
+            . '<!-- wp:image {"id":7} --><figure class="wp-block-image"><img src="' . $source . '" '
+            . 'alt="AI_IMAGE: Reserved collision | card | photorealistic | portrait"/></figure><!-- /wp:image -->'
+            . '</div><!-- /wp:group -->',
+    );
+
+    $images = new FakeImageClient(stage_texture_solid_jpeg('#FFFFFF'));
+    (new GenerateImagesStep($images))->run($project);
+
+    assert_eq(1, count($images->calls));
+    $specs = $project->readJson('images.json');
+    assert_eq(1, count($specs));
+    assert_true(CollectImagesStep::isStageTextureSpec($specs[0]));
+    assert_eq('completed', $specs[0]['status']);
+    $served = '/wp-content/themes/demo/assets/stage_backdrop-texture.jpg';
+    foreach (['theme/parts/header.html', 'theme/parts/page-home--hero.html'] as $file) {
+        assert_true(GeneratedMarkup::hasExactStageTextureContract($project->readText($file), $served));
+    }
+    $content = $project->readText('theme/parts/content.html');
+    assert_contains('Keep sibling.', $content);
+    assert_true(!str_contains($content, 'wp:image'));
+    assert_true(!str_contains($content, 'AI_IMAGE:'));
+    $warnings = implode("\n", $project->readJson('warnings.json')['generate-images'] ?? []);
+    assert_contains('theme/parts/content.html', $warnings);
+    assert_contains('media removed', $warnings);
+    assert_true(!str_contains($warnings, "block='stage-texture root'"));
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

@@ -408,36 +408,55 @@ final class CollectImagesStep implements Step
         // copies it into an ordinary AI_IMAGE media block. Rename that media
         // deterministically and only at media url/src boundaries; a true
         // marker + Group background keeps the code-owned source untouched.
-        $reservedReplacement = null;
-        foreach ($images as &$image) {
-            if (($image['src'] ?? null) !== GeneratedMarkup::STAGE_TEXTURE_ASSET) {
-                continue;
-            }
-            $reservedReplacement ??= 'theme:./assets/' . self::synthesizeFilename(
-                (string) ($image['subject'] ?? 'stage texture media'),
-                'reserved-stage-texture-media|' . json_encode($image, JSON_UNESCAPED_SLASHES),
-            );
-            $image['src'] = $reservedReplacement;
-            $image['filename'] = basename($reservedReplacement);
-        }
-        unset($image);
         $normalized = $recovered['content'];
-        if ($reservedReplacement !== null) {
-            $renamed = self::renameReservedMediaSource(
+        // Bind each replacement to the same valid canonical img tag that
+        // produced its spec. A malformed reserved AI_IMAGE tag still needs a
+        // warning, but must not consume the next valid tag's replacement.
+        /** @var array<int,string> reserved-tag ordinal => replacement */
+        $reservedReplacements = [];
+        $replacementValues = [];
+        $validImageIndex = 0;
+        $reservedTagOrdinal = 0;
+        preg_match_all('/<img\b[^>]*>/is', $normalized, $allTags);
+        foreach ($allTags[0] ?? [] as $tag) {
+            $reservedTag = self::isReservedAiImageTag($tag, GeneratedMarkup::STAGE_TEXTURE_ASSET);
+            $parsedTag = self::parseCanonicalPlaceholders($tag);
+            if ($parsedTag !== []) {
+                $imageIndex = $validImageIndex++;
+                if (($images[$imageIndex]['src'] ?? null) === GeneratedMarkup::STAGE_TEXTURE_ASSET
+                    && $reservedTag
+                ) {
+                    $original = $images[$imageIndex];
+                    $replacement = 'theme:./assets/' . self::synthesizeFilename(
+                        (string) ($original['subject'] ?? 'stage texture media'),
+                        'reserved-stage-texture-media|'
+                            . json_encode($original, JSON_UNESCAPED_SLASHES),
+                    );
+                    $reservedReplacements[$reservedTagOrdinal] = $replacement;
+                    $replacementValues[] = $replacement;
+                    $images[$imageIndex]['src'] = $replacement;
+                    $images[$imageIndex]['filename'] = basename($replacement);
+                }
+            }
+            if ($reservedTag) {
+                $reservedTagOrdinal++;
+            }
+        }
+        if ($reservedReplacements !== []) {
+            $renamed = self::renameReservedMediaSources(
                 $normalized,
                 GeneratedMarkup::STAGE_TEXTURE_ASSET,
-                $reservedReplacement,
+                $reservedReplacements,
             );
             $normalized = $renamed['content'];
-            if ($renamed['rewritten'] === 0) {
-                // Do not pay for an image whose only generated reference was
-                // retained at the old source because its owner was unsafe to
-                // synchronize. The durable warning is the repair queue row.
-                $images = array_values(array_filter(
-                    $images,
-                    static fn (array $image): bool => ($image['src'] ?? null) !== $reservedReplacement,
-                ));
-            }
+            // Do not pay for a replacement whose generated reference stayed
+            // at the reserved source because its owner could not be updated.
+            $rewritten = array_fill_keys($renamed['rewritten'], true);
+            $images = array_values(array_filter(
+                $images,
+                static fn (array $image): bool => !in_array($image['src'] ?? null, $replacementValues, true)
+                    || isset($rewritten[$image['src']]),
+            ));
         }
 
         return [
@@ -508,20 +527,30 @@ final class CollectImagesStep implements Step
      * attribute would create a split-brain block, so that tag is retained and
      * surfaced through containsReservedOrdinaryAiPlaceholder().
      *
-     * @return array{content:string,rewritten:int}
+     * @param array<int,string> $replacements reserved-tag ordinal => deterministic source
+     * @return array{content:string,rewritten:list<string>}
      */
-    private static function renameReservedMediaSource(string $content, string $old, string $new): array
+    private static function renameReservedMediaSources(string $content, string $old, array $replacements): array
     {
         try {
             $document = BlockMarkup::parse($content);
-            /** @var array<int,true> $owners */
+            /** @var array<int,string> $owners */
             $owners = [];
-            /** @var array<int,bool> $rewriteTags exact reserved AI img ordinal => rewrite */
+            /** @var array<int,list<int>> $ownerOrdinals */
+            $ownerOrdinals = [];
+            /** @var array<int,true> $invalidOwners */
+            $invalidOwners = [];
+            /** @var array<int,string|null> $rewriteTags exact reserved AI img ordinal => replacement */
             $rewriteTags = [];
             $tagOrdinal = 0;
             preg_match_all('/<img\b[^>]*>/is', $content, $tags, PREG_OFFSET_CAPTURE);
             foreach ($tags[0] ?? [] as [$tag, $tagStart]) {
                 if (!self::isReservedAiImageTag($tag, $old)) {
+                    continue;
+                }
+                $new = $replacements[$tagOrdinal] ?? null;
+                if (!is_string($new)) {
+                    $rewriteTags[$tagOrdinal++] = null;
                     continue;
                 }
 
@@ -554,7 +583,7 @@ final class CollectImagesStep implements Step
                 if ($owner === null) {
                     // No parsed media owner means the exact img tag itself is
                     // the smallest complete unit and can be renamed directly.
-                    $rewriteTags[$tagOrdinal++] = true;
+                    $rewriteTags[$tagOrdinal++] = $new;
                     continue;
                 }
 
@@ -568,13 +597,32 @@ final class CollectImagesStep implements Step
                         }
                     }
                 }
-                $rewriteTags[$tagOrdinal++] = $ownerCanChange;
-                if ($ownerCanChange) {
-                    $owners[$owner] = true;
+                $ordinal = $tagOrdinal++;
+                $rewriteTags[$ordinal] = $ownerCanChange ? $new : null;
+                if (!$ownerCanChange) {
+                    continue;
                 }
+                $ownerOrdinals[$owner][] = $ordinal;
+                if (isset($invalidOwners[$owner])) {
+                    $rewriteTags[$ordinal] = null;
+                    continue;
+                }
+                if (isset($owners[$owner]) && $owners[$owner] !== $new) {
+                    // One media owner cannot truthfully point at two distinct
+                    // primary sources. Invalidate the entire owner, including
+                    // tags tentatively accepted earlier, so its comment attrs
+                    // and every saved tag retain one coherent old source.
+                    $invalidOwners[$owner] = true;
+                    unset($owners[$owner]);
+                    foreach ($ownerOrdinals[$owner] as $ownedOrdinal) {
+                        $rewriteTags[$ownedOrdinal] = null;
+                    }
+                    continue;
+                }
+                $owners[$owner] = $new;
             }
 
-            foreach (array_keys($owners) as $index) {
+            foreach ($owners as $index => $new) {
                 $attrs = $document->attrs($index);
                 if (!is_array($attrs)) {
                     continue;
@@ -593,12 +641,11 @@ final class CollectImagesStep implements Step
             $rendered = $document->render();
 
             $tagOrdinal = 0;
-            $rewritten = 0;
+            $rewritten = [];
             $delivered = preg_replace_callback(
                 '/<img\b[^>]*>/is',
                 static function (array $match) use (
                     $old,
-                    $new,
                     $rewriteTags,
                     &$tagOrdinal,
                     &$rewritten,
@@ -606,11 +653,11 @@ final class CollectImagesStep implements Step
                     if (!self::isReservedAiImageTag($match[0], $old)) {
                         return $match[0];
                     }
-                    $rewrite = $rewriteTags[$tagOrdinal++] ?? false;
-                    if (!$rewrite) {
+                    $new = $rewriteTags[$tagOrdinal++] ?? null;
+                    if (!is_string($new)) {
                         return $match[0];
                     }
-                    $rewritten++;
+                    $rewritten[] = $new;
                     return (string) preg_replace(
                         '/(\bsrc\s*=\s*["\'])' . preg_quote($old, '/') . '(["\'])/i',
                         '$1' . $new . '$2',
@@ -622,12 +669,12 @@ final class CollectImagesStep implements Step
             );
             return is_string($delivered)
                 ? ['content' => $delivered, 'rewritten' => $rewritten]
-                : ['content' => $content, 'rewritten' => 0];
+                : ['content' => $content, 'rewritten' => []];
         } catch (\Throwable) {
             // Without a parsed ownership map we cannot prove that a tag is
             // truly bare. Retain the whole pre-normalization unit; the caller
             // warns and suppresses stage-texture mapping.
-            return ['content' => $content, 'rewritten' => 0];
+            return ['content' => $content, 'rewritten' => []];
         }
     }
 

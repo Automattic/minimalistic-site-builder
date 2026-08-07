@@ -1648,6 +1648,12 @@ test('withStageTextureBackdrop tiles a root group and stays idempotent (BIGR-776
         'background-image:linear-gradient(#fff,#eee),url(theme:./assets/stage_backdrop-texture.jpg)',
         Automattic\SiteBuild\Units\GeneratedMarkup::STAGE_TEXTURE_ASSET,
     ), 'a competing image layer cannot satisfy the one-tile contract');
+    assert_true(!Automattic\SiteBuild\Units\GeneratedMarkup::hasExactStageTextureInlineStyle(
+        'background-image:url(theme:./assets/stage_backdrop-texture.jpg);'
+            . 'background-position:50% 50%;background-size:420px;background-repeat:repeat;'
+            . 'background-attachment:fixed',
+        Automattic\SiteBuild\Units\GeneratedMarkup::STAGE_TEXTURE_ASSET,
+    ), 'wrong saved geometry cannot satisfy the exact stage contract');
     $scalarCleanup = '<!-- wp:group {"className":"has-stage-texture-backdrop","style":"oops"} -->'
         . '<div class="wp-block-group has-stage-texture-backdrop" style="background-image:url('
         . Automattic\SiteBuild\Units\GeneratedMarkup::STAGE_TEXTURE_ASSET
@@ -1664,4 +1670,65 @@ test('withStageTextureBackdrop tiles a root group and stays idempotent (BIGR-776
     $r = [];
     assert_eq($coverRoot, Automattic\SiteBuild\Units\GeneratedMarkup::withStageTextureBackdrop($coverRoot, 'p', $r));
     assert_eq([], $r);
+});
+
+test('stage texture saved paint is restored only from the complete trusted attrs contract (BIGR-776)', function () {
+    $plain = '<!-- wp:group {"backgroundColor":"base","className":"stage-root","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group stage-root has-base-background-color has-background">'
+        . '<!-- wp:paragraph --><p>Keep.</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->';
+    $repairs = [];
+    $painted = Automattic\SiteBuild\Units\GeneratedMarkup::withStageTextureBackdrop(
+        $plain,
+        'page-home--hero',
+        $repairs,
+    );
+    $missingSavedPaint = (string) preg_replace('~\sstyle="[^"]*"~', '', $painted, 1);
+
+    $paths = [];
+    $restored = Automattic\SiteBuild\Units\GeneratedMarkup::resyncStageTextureSavedHtml(
+        $missingSavedPaint,
+        $paths,
+    );
+    assert_true(Automattic\SiteBuild\Units\GeneratedMarkup::hasStageTextureSavedHtml($restored));
+    assert_eq(['block 0'], $paths);
+    $again = [];
+    assert_eq(
+        $restored,
+        Automattic\SiteBuild\Units\GeneratedMarkup::resyncStageTextureSavedHtml($restored, $again),
+    );
+    assert_eq([], $again, 'saved-paint repair reaches a fixed point');
+
+    $servedSource = '/wp-content/themes/demo/assets/stage_backdrop-texture.jpg';
+    $servedMissing = str_replace(
+        Automattic\SiteBuild\Units\GeneratedMarkup::STAGE_TEXTURE_ASSET,
+        $servedSource,
+        $missingSavedPaint,
+    );
+    $servedPaths = [];
+    $served = Automattic\SiteBuild\Units\GeneratedMarkup::resyncStageTextureSavedHtml(
+        $servedMissing,
+        $servedPaths,
+    );
+    assert_true(Automattic\SiteBuild\Units\GeneratedMarkup::hasExactStageTextureContract(
+        $served,
+        $servedSource,
+    ));
+
+    foreach ([
+        str_replace('has-stage-texture-backdrop', 'missing-stage-marker', $missingSavedPaint),
+        str_replace('"backgroundSize":"420px"', '"backgroundSize":"cover"', $missingSavedPaint),
+        str_replace('"style":{"background":', '"style":"unsafe","ignored":', $missingSavedPaint),
+    ] as $untrusted) {
+        $untrustedPaths = [];
+        assert_eq(
+            $untrusted,
+            Automattic\SiteBuild\Units\GeneratedMarkup::resyncStageTextureSavedHtml(
+                $untrusted,
+                $untrustedPaths,
+            ),
+            'partial or malformed attrs cannot resurrect saved stage paint',
+        );
+        assert_eq([], $untrustedPaths);
+    }
 });

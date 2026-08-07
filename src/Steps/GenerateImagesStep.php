@@ -128,6 +128,7 @@ final class GenerateImagesStep implements Step
         $specsBeforeCollision = $specs;
         self::canonicalizeStageTextureUrls($project);
         $specs = $this->degradeReservedStageCollision($project, $specs);
+        $specs = $this->normalizeReservedManifestOwners($project, $specs);
         if ($specs !== $specsBeforeCollision) {
             $project->writeJsonAtomic('images.json', $specs);
         }
@@ -332,8 +333,8 @@ final class GenerateImagesStep implements Step
 
     /**
      * A residual ordinary AI placeholder cannot share the reserved stage
-     * source. Drop that smallest dead tag, remove safe stage paint, and keep
-     * the reserved mapping out of the generation batch.
+     * source. Drop only that smallest dead ordinary-media unit; exact stage
+     * roots remain unambiguous because their URL resolution is block-scoped.
      *
      * @param array<int,array<string,mixed>> $specs
      * @return array<int,array<string,mixed>>
@@ -355,48 +356,403 @@ final class GenerateImagesStep implements Step
             return $specs;
         }
 
+        foreach ($collisions as $relative) {
+            $content = $project->readText($relative);
+            [$updated, $removed, $retained] = self::removeOrdinaryReservedMediaOnly(
+                $content,
+                GeneratedMarkup::STAGE_TEXTURE_ASSET,
+            );
+            if ($updated !== $content) {
+                $project->writeText($relative, $updated);
+            }
+            $warnings[] = "file=" . Warnings::value($relative)
+                . "; block='reserved ordinary AI_IMAGE media owner'; authored source="
+                . Warnings::value(GeneratedMarkup::STAGE_TEXTURE_ASSET)
+                . '; delivered=' . Warnings::value($retained
+                    ? 'unsafe media bytes retained and unwired'
+                    : ($removed ? 'media removed' : 'ordinary reference absent'))
+                . '; disposition=' . ($retained
+                    ? 'no safe ordinary-media boundary was available; the scoped stage resolver leaves it unwired for later repair'
+                    : 'ordinary media was isolated at its smallest safe owner while legitimate stage roots remained generated');
+        }
+        $project->addWarnings($this->id(), $warnings);
+        return $specs;
+    }
+
+    /** Keep the reserved asset/source under one code-owned stage spec writer. */
+    private function normalizeReservedManifestOwners(Project $project, array $specs): array
+    {
+        $kept = [];
+        $sawStage = false;
+        $usedFilenames = [];
+        $claimedFilenames = [];
+        foreach ($specs as $candidateSpec) {
+            if (is_array($candidateSpec)
+                && is_string($candidateSpec['filename'] ?? null)
+                && trim($candidateSpec['filename']) !== ''
+            ) {
+                $claimedFilenames[$candidateSpec['filename']] = true;
+            }
+        }
+        $removeReservedOrdinaryReferences = false;
+        $reservedFilename = basename(GeneratedMarkup::STAGE_TEXTURE_ASSET);
+        foreach ($specs as $index => $spec) {
+            if (!is_array($spec)) {
+                $project->addWarnings($this->id(), [
+                    "file='images.json'; block='images.json[{$index}]'; authored value="
+                        . Warnings::value($spec)
+                        . '; delivered="spec removed"; disposition=malformed generated manifest row was not an object',
+                ]);
+                continue;
+            }
+            if (!is_string($spec['src'] ?? null)
+                || trim($spec['src']) === ''
+                || !is_string($spec['filename'] ?? null)
+                || trim($spec['filename']) === ''
+            ) {
+                $project->addWarnings($this->id(), [
+                    "file='images.json'; block='images.json[{$index}]'; authored value="
+                        . Warnings::value($spec)
+                        . '; delivered="spec removed"; disposition=generated manifest row had no usable string '
+                        . 'source and filename pair',
+                ]);
+                continue;
+            }
+            $stage = CollectImagesStep::isStageTextureSpec($spec);
+            $source = $spec['src'] ?? null;
+            $filename = $spec['filename'] ?? null;
+            $reservedSource = $source === GeneratedMarkup::STAGE_TEXTURE_ASSET;
+            $reservedName = $filename === $reservedFilename;
+            if ($stage && $sawStage) {
+                $project->addWarnings($this->id(), [
+                    "file='images.json'; block='images.json[{$index}]'; authored source="
+                        . Warnings::value($source)
+                        . '; authored filename=' . Warnings::value($filename)
+                        . '; delivered="spec removed"; disposition=duplicate stage manifest row cannot become '
+                        . 'a second writer for the validated tile bytes',
+                ]);
+                continue;
+            }
+            if (!$stage && $reservedName && !$reservedSource) {
+                $sourceFilename = self::themeSourceFilename($source);
+                if ($sourceFilename !== null && $sourceFilename !== $reservedFilename) {
+                    $candidate = $sourceFilename;
+                    if (isset($claimedFilenames[$candidate]) || isset($usedFilenames[$candidate])) {
+                        $extension = pathinfo($candidate, PATHINFO_EXTENSION);
+                        $stem = pathinfo($candidate, PATHINFO_FILENAME);
+                        $suffix = substr(
+                            sha1((string) $source . '|' . json_encode($spec, JSON_UNESCAPED_SLASHES)),
+                            0,
+                            8,
+                        );
+                        $candidate = $stem . '-' . $suffix . '.' . $extension;
+                        $ordinal = 2;
+                        while (isset($claimedFilenames[$candidate]) || isset($usedFilenames[$candidate])) {
+                            $candidate = $stem . '-' . $suffix . '-' . $ordinal++ . '.' . $extension;
+                        }
+                    }
+                    $spec['filename'] = $candidate;
+                    $spec['status'] = 'pending';
+                    unset($spec['url'], $spec['error']);
+                    $filename = $candidate;
+                    $reservedName = false;
+                    $claimedFilenames[$candidate] = true;
+                }
+            }
+            if (!$stage && ($reservedSource || $reservedName)) {
+                $removeReservedOrdinaryReferences = $removeReservedOrdinaryReferences || $reservedSource;
+                $project->addWarnings($this->id(), [
+                    "file='images.json'; block='images.json[{$index}]'; authored source="
+                        . Warnings::value($source)
+                        . '; authored filename=' . Warnings::value($filename)
+                        . '; delivered="spec removed"; disposition=ordinary manifest row could not be '
+                        . 'deterministically separated from the one code-owned stage asset writer',
+                ]);
+                continue;
+            }
+            if ($stage) {
+                $sawStage = true;
+            }
+            if (is_string($filename) && $filename !== '') {
+                $usedFilenames[$filename] = true;
+            }
+            $kept[] = $spec;
+        }
+        if ($removeReservedOrdinaryReferences) {
+            $this->removeReservedOrdinaryManifestReferences($project);
+        }
+        return array_values($kept);
+    }
+
+    /** A valid generated theme source's filename, or null for unowned URLs. */
+    private static function themeSourceFilename(mixed $source): ?string
+    {
+        if (!is_string($source)
+            || preg_match('~^theme:\./assets/([a-z0-9_-]+\.(?:jpe?g|png))$~i', $source, $match) !== 1
+        ) {
+            return null;
+        }
+        return $match[1];
+    }
+
+    /**
+     * Remove visible ordinary media that lost an ambiguous reserved manifest
+     * row, while leaving every exact stage Group untouched.
+     */
+    private function removeReservedOrdinaryManifestReferences(Project $project): void
+    {
+        $source = GeneratedMarkup::STAGE_TEXTURE_ASSET;
+        $root = rtrim($project->root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
         foreach ($project->markupFiles() as $absolute) {
             $relative = str_starts_with($absolute, $root)
                 ? str_replace(DIRECTORY_SEPARATOR, '/', substr($absolute, strlen($root)))
                 : $absolute;
-            $content = $project->readText($relative);
-            $hadStage = self::containsStageTextureMarkerEvidence($content);
-            $updated = self::removeMatchingBlockBackgroundImages(
-                $content,
-                GeneratedMarkup::STAGE_TEXTURE_ASSET,
-            );
-            if (in_array($relative, $collisions, true)) {
-                $updated = self::removeOrdinarySourceFromMarkup(
-                    $updated,
-                    GeneratedMarkup::STAGE_TEXTURE_ASSET,
-                );
-                $retained = CollectImagesStep::containsReservedOrdinaryAiPlaceholder($updated);
-                $warnings[] = "file=" . Warnings::value($relative)
-                    . "; block='reserved ordinary AI_IMAGE media owner'; authored source="
-                    . Warnings::value(GeneratedMarkup::STAGE_TEXTURE_ASSET)
-                    . '; delivered=' . Warnings::value($retained ? 'pre-cleanup media retained' : 'media removed')
-                    . '; disposition=ambiguous ordinary media was isolated at its smallest safe owner so the '
-                    . 'code-owned stage URL cannot be mapped into it';
+            $before = $project->readText($relative);
+            [$delivered, $removed, $residual] = self::removeOrdinaryReservedMediaOnly($before, $source);
+            if ($delivered !== $before) {
+                $project->writeText($relative, $delivered);
             }
-            $hasStage = self::containsStageTextureMarkerEvidence($updated);
-            if ($hadStage) {
-                $warnings[] = "file=" . Warnings::value($relative)
-                    . "; block='stage-texture root'; authored=\"texture\"; delivered=\""
-                    . ($hasStage ? 'pre-cleanup texture retained' : 'solid')
-                    . '"; disposition=reserved ordinary media made the stage mapping ambiguous; '
-                    . ($hasStage
-                        ? 'unsafe root bytes were retained for later repair'
-                        : 'the safe code-owned root paint was removed transactionally');
-            }
-            if ($updated !== $content) {
-                $project->writeText($relative, $updated);
+            if ($removed || $residual) {
+                $project->addWarnings($this->id(), [
+                    'file=' . Warnings::value($relative)
+                        . "; block='ordinary reserved media owner'; authored source=" . Warnings::value($source)
+                        . '; delivered=' . Warnings::value($residual
+                            ? 'unsafe media bytes retained and unwired'
+                            : 'ordinary media reference removed')
+                        . '; disposition=' . ($residual
+                            ? 'no safe ordinary media boundary was available; retained bytes need later repair'
+                            : 'removed the smallest ordinary media unit after its ambiguous manifest writer was suppressed'),
+                ]);
             }
         }
-        $project->addWarnings($this->id(), $warnings);
-        return array_values(array_filter(
-            $specs,
-            static fn (mixed $spec): bool => !is_array($spec) || !CollectImagesStep::isStageTextureSpec($spec),
-        ));
+    }
+
+    /** @return array{0:string,1:bool,2:bool} content, removed, residual ordinary media */
+    private static function removeOrdinaryReservedMediaOnly(string $markup, string $source): array
+    {
+        $removed = false;
+        try {
+            while (true) {
+                $document = BlockMarkup::parse($markup);
+                $candidates = [];
+                foreach ($document->indices() as $index) {
+                    if (!in_array($document->name($index), ['image', 'cover', 'media-text'], true)) {
+                        continue;
+                    }
+                    $start = $document->openingOffset($index);
+                    $end = $document->endOffset($index);
+                    if ($end === null || !$document->isStructurallySafe($index)) {
+                        continue;
+                    }
+                    $block = substr($markup, $start, $end - $start);
+                    if (!self::mediaOwnerHasSource($document, $index, $markup, $source)) {
+                        continue;
+                    }
+                    $candidates[] = [
+                        'start' => $start,
+                        'length' => $end - $start,
+                        'block' => $block,
+                        'name' => $document->name($index),
+                    ];
+                }
+                usort($candidates, static fn (array $a, array $b): int => $a['length'] <=> $b['length']);
+                $changed = false;
+                foreach ($candidates as $candidate) {
+                    $cleaned = self::removeReservedSourceFromMediaOwner($candidate['block'], $source);
+                    if ($cleaned === null || $cleaned === $candidate['block']) {
+                        continue;
+                    }
+                    $markup = substr_replace(
+                        $markup,
+                        $cleaned,
+                        $candidate['start'],
+                        $candidate['length'],
+                    );
+                    $removed = true;
+                    $changed = true;
+                    break;
+                }
+                if (!$changed) {
+                    break;
+                }
+            }
+
+            // A generated placeholder may be a bare exact img rather than a
+            // block. Remove only tags not enclosed by any parsed media owner;
+            // unsafe owners stay intact and are reported as residual below.
+            $document = BlockMarkup::parse($markup);
+            preg_match_all('/<img\b[^>]*>/is', $markup, $tags, PREG_OFFSET_CAPTURE);
+            $tagEdits = [];
+            foreach ($tags[0] ?? [] as [$tag, $offset]) {
+                if (self::firstMediaSourcePosition($tag, $source) === null) {
+                    continue;
+                }
+                $insideMedia = false;
+                foreach ($document->indices() as $index) {
+                    if (!in_array($document->name($index), ['image', 'cover', 'media-text'], true)) {
+                        continue;
+                    }
+                    $start = $document->openingOffset($index);
+                    $end = $document->endOffset($index) ?? strlen($markup);
+                    if ($offset >= $start && $offset < $end) {
+                        $insideMedia = true;
+                        break;
+                    }
+                }
+                if (!$insideMedia) {
+                    $tagEdits[] = ['offset' => $offset, 'length' => strlen($tag)];
+                }
+            }
+            usort($tagEdits, static fn (array $a, array $b): int => $b['offset'] <=> $a['offset']);
+            foreach ($tagEdits as $edit) {
+                $markup = substr_replace($markup, '', $edit['offset'], $edit['length']);
+                $removed = true;
+            }
+
+            $document = BlockMarkup::parse($markup);
+            foreach ($document->indices() as $index) {
+                if (!in_array($document->name($index), ['image', 'cover', 'media-text'], true)) {
+                    continue;
+                }
+                if (self::mediaOwnerHasSource($document, $index, $markup, $source)) {
+                    return [$markup, $removed, true];
+                }
+            }
+            return [$markup, $removed, false];
+        } catch (\Throwable) {
+            return [$markup, $removed, true];
+        }
+    }
+
+    /** Whether the media owner's own attrs/rendered layer names the source. */
+    private static function mediaOwnerHasSource(
+        BlockMarkup $document,
+        int $index,
+        string $markup,
+        string $source,
+    ): bool {
+        $attrs = $document->attrs($index);
+        if (is_array($attrs)) {
+            foreach (['url', 'src', 'mediaUrl'] as $key) {
+                if (($attrs[$key] ?? null) === $source) {
+                    return true;
+                }
+            }
+            $style = is_array($attrs['style'] ?? null) ? $attrs['style'] : [];
+            $background = is_array($style['background'] ?? null) ? $style['background'] : [];
+            $image = is_array($background['backgroundImage'] ?? null) ? $background['backgroundImage'] : [];
+            if (($image['url'] ?? null) === $source) {
+                return true;
+            }
+        }
+        $ownStart = $document->openingOffset($index) + $document->openingLength($index);
+        $children = $document->children($index);
+        $ownEnd = $children === []
+            ? $document->innerEndOffset($index)
+            : $document->openingOffset($children[0]);
+        if ($ownEnd < $ownStart) {
+            return false;
+        }
+        return self::firstMediaSourcePosition(
+            substr($markup, $ownStart, $ownEnd - $ownStart),
+            $source,
+        ) !== null;
+    }
+
+    /** Remove one media owner's own layer without inspecting child blocks. */
+    private static function removeReservedSourceFromMediaOwner(string $block, string $source): ?string
+    {
+        try {
+            $document = BlockMarkup::parse($block);
+            $root = $document->topLevel();
+            if ($root === null || !$document->isStructurallySafe($root)) {
+                return null;
+            }
+            $name = $document->name($root);
+            if ($name === 'image') {
+                return '';
+            }
+            if ($name === 'media-text') {
+                $children = '';
+                foreach ($document->children($root) as $child) {
+                    $start = $document->openingOffset($child);
+                    $end = $document->endOffset($child);
+                    if ($end === null) {
+                        return null;
+                    }
+                    $children .= substr($block, $start, $end - $start);
+                }
+                return $children;
+            }
+            if ($name !== 'cover') {
+                return null;
+            }
+
+            $attrs = $document->attrs($root);
+            if (!is_array($attrs)) {
+                return null;
+            }
+            $changed = false;
+            foreach (['url', 'src', 'mediaUrl'] as $key) {
+                if (($attrs[$key] ?? null) === $source) {
+                    unset($attrs[$key]);
+                    $changed = true;
+                }
+            }
+            $style = is_array($attrs['style'] ?? null) ? $attrs['style'] : [];
+            $background = is_array($style['background'] ?? null) ? $style['background'] : [];
+            $image = is_array($background['backgroundImage'] ?? null) ? $background['backgroundImage'] : [];
+            if (($image['url'] ?? null) === $source) {
+                unset($background['backgroundImage']);
+                if ($background === []) {
+                    unset($style['background']);
+                } else {
+                    $style['background'] = $background;
+                }
+                if ($style === []) {
+                    unset($attrs['style']);
+                } else {
+                    $attrs['style'] = $style;
+                }
+                $changed = true;
+            }
+            if ($changed) {
+                unset($attrs['id'], $attrs['focalPoint']);
+                $document->setAttrs($root, $attrs);
+                $block = $document->render();
+            }
+
+            $document = BlockMarkup::parse($block);
+            $root = $document->topLevel();
+            if ($root === null) {
+                return null;
+            }
+            $ownStart = $document->openingOffset($root) + $document->openingLength($root);
+            $children = $document->children($root);
+            $ownEnd = $children === []
+                ? $document->innerEndOffset($root)
+                : $document->openingOffset($children[0]);
+            $own = substr($block, $ownStart, $ownEnd - $ownStart);
+            $cleanedOwn = self::removeMatchingImageTags($own, $source);
+            $quotedSource = preg_quote($source, '~');
+            $cleanedOwn = (string) preg_replace(
+                '~background-image\s*:\s*url\(\s*(["\']?)' . $quotedSource . '\1\s*\)\s*;?~i',
+                '',
+                $cleanedOwn,
+            );
+            $cleanedOwn = (string) preg_replace(
+                '~background\s*:[^;]*url\(\s*(["\']?)' . $quotedSource . '\1\s*\)[^;]*;?~i',
+                '',
+                $cleanedOwn,
+            );
+            if ($cleanedOwn !== $own) {
+                $block = substr_replace($block, $cleanedOwn, $ownStart, $ownEnd - $ownStart);
+                $changed = true;
+            }
+            return $changed ? $block : null;
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     /**
@@ -590,9 +946,6 @@ final class GenerateImagesStep implements Step
                     if (!is_array($attrs) || !CollectImagesStep::isCommittedStageTextureAttrs($attrs)) {
                         continue;
                     }
-                    if (!$document->isStructurallySafe($index)) {
-                        throw new \RuntimeException("stage-texture block {$index} is structurally unsafe");
-                    }
                     $style = is_array($attrs['style'] ?? null) ? $attrs['style'] : [];
                     $background = is_array($style['background'] ?? null) ? $style['background'] : [];
                     $image = is_array($background['backgroundImage'] ?? null)
@@ -600,6 +953,15 @@ final class GenerateImagesStep implements Step
                         : [];
                     $old = $image['url'] ?? null;
                     if (!is_string($old)) {
+                        continue;
+                    }
+                    if (!$document->isStructurallySafe($index)) {
+                        $project->addWarnings('generate-images', [
+                            "file='{$relative}'; block='stage-texture block {$index}'; authored source="
+                                . Warnings::value($old)
+                                . '; delivered="pre-canonicalization bytes retained"; disposition=unsafe '
+                                . 'block boundary prevented a transactional theme-slug repair',
+                        ]);
                         continue;
                     }
                     $ownHtml = $document->ownHtml($index);
@@ -610,12 +972,14 @@ final class GenerateImagesStep implements Step
                         $opening,
                         PREG_OFFSET_CAPTURE,
                     ) !== 1) {
-                        if ($old !== GeneratedMarkup::STAGE_TEXTURE_ASSET) {
-                            throw new \RuntimeException("stage-texture block {$index} has no isolated saved wrapper");
-                        }
+                        $project->addWarnings('generate-images', [
+                            "file='{$relative}'; block='stage-texture block {$index}'; authored source="
+                                . Warnings::value($old)
+                                . '; delivered="pre-canonicalization bytes retained"; disposition=no isolated '
+                                . 'saved wrapper was available for synchronized source repair',
+                        ]);
                         continue;
                     }
-                    $safeIndices[$index] = true;
                     $canonicalTag = $opening['tag'][0];
                     $styleAttributes = array_values(array_filter(
                         MarkupSanitizer::openingTagAttributes($canonicalTag),
@@ -623,8 +987,20 @@ final class GenerateImagesStep implements Step
                             && $attribute['valueStart'] !== null
                             && $attribute['valueEnd'] !== null,
                     ));
-                    if (count($styleAttributes) !== 1) {
-                        throw new \RuntimeException("stage-texture block {$index} has no unique saved style");
+                    $classAttributes = array_values(array_filter(
+                        MarkupSanitizer::openingTagAttributes($canonicalTag),
+                        static fn (array $attribute): bool => $attribute['name'] === 'class'
+                            && $attribute['valueStart'] !== null
+                            && $attribute['valueEnd'] !== null,
+                    ));
+                    if (count($styleAttributes) !== 1 || count($classAttributes) !== 1) {
+                        $project->addWarnings('generate-images', [
+                            "file='{$relative}'; block='stage-texture block {$index}'; authored source="
+                                . Warnings::value($old)
+                                . '; delivered="pre-canonicalization bytes retained"; disposition=saved wrapper '
+                                . 'did not have one unique class and style attribute',
+                        ]);
+                        continue;
                     }
                     $styleAttribute = $styleAttributes[0];
                     $savedStyle = substr(
@@ -633,14 +1009,41 @@ final class GenerateImagesStep implements Step
                         $styleAttribute['valueEnd'] - $styleAttribute['valueStart'],
                     );
                     $canonicalStyle = GeneratedMarkup::canonicalizeStageTextureInlineStyle($savedStyle);
+                    $savedClass = substr(
+                        $canonicalTag,
+                        $classAttributes[0]['valueStart'],
+                        $classAttributes[0]['valueEnd'] - $classAttributes[0]['valueStart'],
+                    );
+                    $savedClasses = preg_split(
+                        '/\s+/',
+                        trim(html_entity_decode($savedClass)),
+                        -1,
+                        PREG_SPLIT_NO_EMPTY,
+                    ) ?: [];
                     if ($canonicalStyle === null
-                        || !GeneratedMarkup::hasStageTextureInlineStyleSource(
+                        || !GeneratedMarkup::hasExactStageTextureInlineStyle(
                             $canonicalStyle,
                             GeneratedMarkup::STAGE_TEXTURE_ASSET,
                         )
+                        || !in_array(GeneratedMarkup::STAGE_TEXTURE_CLASS, $savedClasses, true)
+                        || ($background['backgroundPosition'] ?? null) !== '0% 0%'
+                        || ($background['backgroundSize'] ?? null) !== '420px'
+                        || ($background['backgroundRepeat'] ?? null) !== 'repeat'
+                        || ($background['backgroundAttachment'] ?? null) !== 'fixed'
+                        || array_key_exists('gradient', $attrs)
+                        || array_key_exists('customGradient', $attrs)
+                        || isset($style['color']['gradient'])
+                        || array_key_exists('gradient', $background)
                     ) {
-                        throw new \RuntimeException("stage-texture block {$index} has no safe saved background-image");
+                        $project->addWarnings('generate-images', [
+                            "file='{$relative}'; block='stage-texture block {$index}'; authored source="
+                                . Warnings::value($old)
+                                . '; delivered="pre-canonicalization bytes retained"; disposition=comment and '
+                                . 'saved stage paint did not satisfy the exact synchronized contract',
+                        ]);
+                        continue;
                     }
+                    $safeIndices[$index] = true;
                     $canonicalTag = substr_replace(
                         $canonicalTag,
                         $canonicalStyle,
@@ -1365,23 +1768,38 @@ final class GenerateImagesStep implements Step
                 $candidate = self::removeSourceFromMarkup($updated, $source);
                 $stageSource = GeneratedMarkup::isStageTextureSource($source);
                 $unsafeResidual = $stageSource
-                    ? self::containsStageTextureMarkerEvidence($candidate)
+                    ? self::containsStageTextureSourceEvidence($candidate, $source)
                     : self::firstMediaSourcePosition($candidate, $source) !== null;
                 if ($unsafeResidual) {
                     // The source sits in malformed/unclosed markup without a
                     // safe block span. Keep this source's pre-cleanup bytes and
                     // report the residual instead of half-mutating the file.
                     $project->addWarnings($this->id(), [
-                        "{$relative}: authored media source {$source}; delivered retained in unsafe markup; "
-                        . 'disposition: pre-cleanup bytes kept because no safe media isolation was available',
+                        'file=' . Warnings::value($relative)
+                            . '; block=' . Warnings::value($stageSource
+                                ? 'unsafe stage-texture root'
+                                : 'unsafe generated media owner')
+                            . '; authored source=' . Warnings::value($source)
+                            . '; delivered=' . Warnings::value($stageSource
+                                ? 'safe stage roots solid; unsafe root pre-cleanup bytes retained'
+                                : 'pre-cleanup media bytes retained')
+                            . '; disposition=' . ($stageSource
+                                ? 'safe stage roots were cleaned independently while this unsafe root remained for later repair'
+                                : 'no safe media isolation boundary was available'),
                     ]);
+                    if ($stageSource) {
+                        $updated = $candidate;
+                    }
                     continue;
                 }
                 if ($stageSource && self::firstMediaSourcePosition($candidate, $source) !== null) {
                     $project->addWarnings($this->id(), [
-                        "{$relative}: authored ordinary media source {$source}; delivered retained and unwired; "
-                            . 'disposition: the reserved source was not part of a committed stage root, so stage '
-                            . 'failure cleanup left its bytes intact and the scoped URL resolver will not map it',
+                        'file=' . Warnings::value($relative)
+                            . "; block='ordinary non-stage media reference'; authored source="
+                            . Warnings::value($source)
+                            . '; delivered="retained and unwired"; disposition=the reserved source was not part '
+                            . 'of a committed stage root, so stage failure cleanup left its bytes intact and the '
+                            . 'scoped URL resolver will not map it',
                     ]);
                 }
                 $updated = $candidate;
@@ -1523,7 +1941,7 @@ final class GenerateImagesStep implements Step
             $document = BlockMarkup::parse($markup);
             $stageTexture = GeneratedMarkup::isStageTextureSource($source);
             if ($stageTexture) {
-                $spans = [];
+                $edits = [];
                 foreach ($document->indices() as $index) {
                     $attrs = $document->attrs($index);
                     $end = $document->endOffset($index);
@@ -1534,31 +1952,69 @@ final class GenerateImagesStep implements Step
                     ) {
                         continue;
                     }
-                    $spans[] = [
-                        'start' => $document->openingOffset($index),
-                        'end' => $end,
-                    ];
-                }
-                usort($spans, static fn (array $a, array $b): int => $a['start'] <=> $b['start']);
-                $previousEnd = -1;
-                foreach ($spans as $span) {
-                    if ($span['start'] < $previousEnd) {
-                        return $markup;
-                    }
-                    $previousEnd = $span['end'];
-                }
-                $spans = array_reverse($spans);
-                foreach ($spans as $span) {
-                    $block = substr($markup, $span['start'], $span['end'] - $span['start']);
+                    $start = $document->openingOffset($index);
+                    $block = substr($markup, $start, $end - $start);
                     $cleaned = GeneratedMarkup::withoutStageTextureBackdrop($block);
-                    if ($cleaned === null || GeneratedMarkup::hasStageTextureEvidence($cleaned)) {
-                        return $markup;
+                    if ($cleaned === null || GeneratedMarkup::hasOwnStageTextureEvidence($cleaned)) {
+                        continue;
                     }
+                    $beforeBlock = BlockMarkup::parse($block);
+                    $afterBlock = BlockMarkup::parse($cleaned);
+                    $beforeRoot = $beforeBlock->topLevel();
+                    $afterRoot = $afterBlock->topLevel();
+                    if ($beforeRoot === null || $afterRoot === null) {
+                        continue;
+                    }
+                    $localEdits = [[
+                        'offset' => $beforeBlock->openingOffset($beforeRoot),
+                        'length' => $beforeBlock->openingLength($beforeRoot),
+                        'replacement' => substr(
+                            $cleaned,
+                            $afterBlock->openingOffset($afterRoot),
+                            $afterBlock->openingLength($afterRoot),
+                        ),
+                    ]];
+                    $beforeOwn = $beforeBlock->ownHtml($beforeRoot);
+                    $afterOwn = $afterBlock->ownHtml($afterRoot);
+                    $tagPattern = '~\A(?:(?:\s+)|(?:<!--(?:(?!-->).)*-->))*(?<tag><[a-z][a-z0-9:-]*(?=[\s>])'
+                        . '(?:[^>"\']+|"[^"]*"|\'[^\']*\')*>)~is';
+                    if (preg_match($tagPattern, $beforeOwn, $beforeTag, PREG_OFFSET_CAPTURE) !== 1
+                        || preg_match($tagPattern, $afterOwn, $afterTag, PREG_OFFSET_CAPTURE) !== 1
+                    ) {
+                        continue;
+                    }
+                    $localEdits[] = [
+                        'offset' => $beforeBlock->openingOffset($beforeRoot)
+                            + $beforeBlock->openingLength($beforeRoot)
+                            + $beforeTag['tag'][1],
+                        'length' => strlen($beforeTag['tag'][0]),
+                        'replacement' => $afterTag['tag'][0],
+                    ];
+                    usort($localEdits, static fn (array $a, array $b): int => $b['offset'] <=> $a['offset']);
+                    $candidate = $block;
+                    foreach ($localEdits as $edit) {
+                        $candidate = substr_replace(
+                            $candidate,
+                            $edit['replacement'],
+                            $edit['offset'],
+                            $edit['length'],
+                        );
+                    }
+                    if ($candidate !== $cleaned) {
+                        continue;
+                    }
+                    foreach ($localEdits as $edit) {
+                        $edit['offset'] += $start;
+                        $edits[] = $edit;
+                    }
+                }
+                usort($edits, static fn (array $a, array $b): int => $b['offset'] <=> $a['offset']);
+                foreach ($edits as $edit) {
                     $markup = substr_replace(
                         $markup,
-                        $cleaned,
-                        $span['start'],
-                        $span['end'] - $span['start'],
+                        $edit['replacement'],
+                        $edit['offset'],
+                        $edit['length'],
                     );
                 }
                 return $markup;
@@ -1650,6 +2106,70 @@ final class GenerateImagesStep implements Step
             return !$sawBlock && str_contains($markup, GeneratedMarkup::STAGE_TEXTURE_CLASS);
         } catch (\Throwable) {
             return str_contains($markup, GeneratedMarkup::STAGE_TEXTURE_CLASS);
+        }
+    }
+
+    /** Whether one marker-bearing stage root still names this exact source. */
+    private static function containsStageTextureSourceEvidence(string $markup, string $source): bool
+    {
+        try {
+            $document = BlockMarkup::parse($markup);
+            foreach ($document->indices() as $index) {
+                $attrs = $document->attrs($index);
+                $attrMarker = false;
+                $attrSource = false;
+                if (is_array($attrs)) {
+                    $classes = is_string($attrs['className'] ?? null)
+                        ? preg_split('/\s+/', trim($attrs['className']), -1, PREG_SPLIT_NO_EMPTY)
+                        : [];
+                    $attrMarker = in_array(GeneratedMarkup::STAGE_TEXTURE_CLASS, $classes ?: [], true);
+                    $style = is_array($attrs['style'] ?? null) ? $attrs['style'] : [];
+                    $background = is_array($style['background'] ?? null) ? $style['background'] : [];
+                    $image = is_array($background['backgroundImage'] ?? null)
+                        ? $background['backgroundImage']
+                        : [];
+                    $attrSource = ($image['url'] ?? null) === $source;
+                }
+
+                $htmlMarker = false;
+                $htmlSource = false;
+                $ownHtml = $document->ownHtml($index);
+                if (preg_match(
+                    '~\A(?:(?:\s+)|(?:<!--(?:(?!-->).)*-->))*(?<tag><[a-z][a-z0-9:-]*(?=[\s>])'
+                        . '(?:[^>"\']+|"[^"]*"|\'[^\']*\')*>)~is',
+                    $ownHtml,
+                    $opening,
+                ) === 1) {
+                    foreach (MarkupSanitizer::openingTagAttributes($opening['tag']) as $attribute) {
+                        if ($attribute['valueStart'] === null || $attribute['valueEnd'] === null) {
+                            continue;
+                        }
+                        $value = substr(
+                            $opening['tag'],
+                            $attribute['valueStart'],
+                            $attribute['valueEnd'] - $attribute['valueStart'],
+                        );
+                        if ($attribute['name'] === 'class') {
+                            $tokens = preg_split(
+                                '/\s+/',
+                                trim(html_entity_decode($value)),
+                                -1,
+                                PREG_SPLIT_NO_EMPTY,
+                            ) ?: [];
+                            $htmlMarker = in_array(GeneratedMarkup::STAGE_TEXTURE_CLASS, $tokens, true);
+                        } elseif ($attribute['name'] === 'style') {
+                            $htmlSource = GeneratedMarkup::hasStageTextureInlineStyleSource($value, $source);
+                        }
+                    }
+                }
+                if (($attrMarker || $htmlMarker) && ($attrSource || $htmlSource)) {
+                    return true;
+                }
+            }
+            return false;
+        } catch (\Throwable) {
+            return str_contains($markup, GeneratedMarkup::STAGE_TEXTURE_CLASS)
+                && str_contains($markup, $source);
         }
     }
 
@@ -1758,7 +2278,8 @@ final class GenerateImagesStep implements Step
         $before = $markup;
         try {
             $document = BlockMarkup::parse($markup);
-            $spans = [];
+            $htmlEdits = [];
+            $indices = [];
             foreach ($document->indices() as $index) {
                 $end = $document->endOffset($index);
                 if (!$document->isStructurallySafe($index) || $end === null) {
@@ -1769,27 +2290,10 @@ final class GenerateImagesStep implements Step
                 if (GeneratedMarkup::hasExactStageTextureContract(
                     $block,
                     GeneratedMarkup::STAGE_TEXTURE_ASSET,
-                )) {
-                    $spans[] = ['start' => $start, 'end' => $end];
+                ) === false) {
+                    continue;
                 }
-            }
-            usort($spans, static fn (array $a, array $b): int => $a['start'] <=> $b['start']);
-            $previousEnd = -1;
-            foreach ($spans as $span) {
-                if ($span['start'] < $previousEnd) {
-                    throw new \RuntimeException('nested stage roots have overlapping transaction spans');
-                }
-                $previousEnd = $span['end'];
-            }
-            $spans = array_reverse($spans);
-            foreach ($spans as $span) {
-                $block = substr($markup, $span['start'], $span['end'] - $span['start']);
-                $blockDocument = BlockMarkup::parse($block);
-                $root = $blockDocument->topLevel();
-                if ($root === null || !$blockDocument->isStructurallySafe($root)) {
-                    throw new \RuntimeException('stage root lost its safe boundary');
-                }
-                $ownHtml = $blockDocument->ownHtml($root);
+                $ownHtml = $document->ownHtml($index);
                 if (preg_match(
                     '~\A(?:(?:\s+)|(?:<!--(?:(?!-->).)*-->))*(?<tag><[a-z][a-z0-9:-]*(?=[\s>])'
                         . '(?:[^>"\']+|"[^"]*"|\'[^\']*\')*>)~is',
@@ -1816,7 +2320,7 @@ final class GenerateImagesStep implements Step
                 );
                 $servedStyle = GeneratedMarkup::serveStageTextureInlineStyle($style, $served);
                 if ($servedStyle === null
-                    || !GeneratedMarkup::hasStageTextureInlineStyleSource($servedStyle, $served)
+                    || !GeneratedMarkup::hasExactStageTextureInlineStyle($servedStyle, $served)
                 ) {
                     throw new \RuntimeException('stage root saved source could not be resolved safely');
                 }
@@ -1826,14 +2330,24 @@ final class GenerateImagesStep implements Step
                     $styles[0]['valueStart'],
                     $styles[0]['valueEnd'] - $styles[0]['valueStart'],
                 );
-                $tagStart = $blockDocument->openingOffset($root)
-                    + $blockDocument->openingLength($root)
+                $tagStart = $document->openingOffset($index)
+                    + $document->openingLength($index)
                     + $opening['tag'][1];
-                $block = substr_replace($block, $tag, $tagStart, strlen($opening['tag'][0]));
-                $blockDocument = BlockMarkup::parse($block);
-                $root = $blockDocument->topLevel();
-                $attrs = $root === null ? null : $blockDocument->attrs($root);
-                if ($root === null || !is_array($attrs)) {
+                $htmlEdits[] = [
+                    'offset' => $tagStart,
+                    'length' => strlen($opening['tag'][0]),
+                    'tag' => $tag,
+                ];
+                $indices[] = $index;
+            }
+            usort($htmlEdits, static fn (array $a, array $b): int => $b['offset'] <=> $a['offset']);
+            foreach ($htmlEdits as $edit) {
+                $markup = substr_replace($markup, $edit['tag'], $edit['offset'], $edit['length']);
+            }
+            $document = BlockMarkup::parse($markup);
+            foreach ($indices as $index) {
+                $attrs = $document->attrs($index);
+                if (!is_array($attrs)) {
                     throw new \RuntimeException('stage root attrs disappeared during URL resolution');
                 }
                 $styleAttrs = is_array($attrs['style'] ?? null) ? $attrs['style'] : [];
@@ -1841,17 +2355,19 @@ final class GenerateImagesStep implements Step
                 $background['backgroundImage'] = ['url' => $served];
                 $styleAttrs['background'] = $background;
                 $attrs['style'] = $styleAttrs;
-                $blockDocument->setAttrs($root, $attrs);
-                $delivered = $blockDocument->render();
-                if (!GeneratedMarkup::hasExactStageTextureContract($delivered, $served)) {
+                $document->setAttrs($index, $attrs);
+            }
+            $markup = $document->render();
+            $verified = BlockMarkup::parse($markup);
+            foreach ($indices as $index) {
+                $end = $verified->endOffset($index);
+                $start = $verified->openingOffset($index);
+                if ($end === null || !GeneratedMarkup::hasExactStageTextureContract(
+                    substr($markup, $start, $end - $start),
+                    $served,
+                )) {
                     throw new \RuntimeException('stage root failed served URL verification');
                 }
-                $markup = substr_replace(
-                    $markup,
-                    $delivered,
-                    $span['start'],
-                    $span['end'] - $span['start'],
-                );
             }
             return $markup;
         } catch (\Throwable $error) {

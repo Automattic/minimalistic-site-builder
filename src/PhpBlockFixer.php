@@ -11,6 +11,7 @@ use Automattic\SiteBuild\BlockSerializer\Repair;
 use Automattic\SiteBuild\BlockSerializer\Serializer;
 use Automattic\SiteBuild\BlockSerializer\StagedFileWriter;
 use Automattic\SiteBuild\BlockSerializer\TemplateTransformer;
+use Automattic\SiteBuild\Units\GeneratedMarkup;
 
 /** Pure-PHP, fixed-point Gutenberg compatibility fixer. */
 final class PhpBlockFixer implements ReportingBlockFixer
@@ -88,6 +89,19 @@ final class PhpBlockFixer implements ReportingBlockFixer
             if ($failure !== null) {
                 $reports[] = new FileReport($relative, 'failed', error: $failure);
                 continue;
+            }
+
+            // core/group's pinned save() intentionally omits style.background.
+            // The generated stage tile is a narrower code-owned extension:
+            // after the generic serializer reaches its own fixed point,
+            // restore its saved wrapper only when the complete trusted attrs
+            // contract and marker survived. Keeping this outside the fixed-
+            // point loop preserves the generic serializer's frozen behavior
+            // while making every PhpBlockFixer caller deliver the same paint.
+            $stageRepairPaths = [];
+            $current = GeneratedMarkup::resyncStageTextureSavedHtml($current, $stageRepairPaths);
+            foreach ($stageRepairPaths as $blockPath) {
+                $repairs[] = new Repair('stage-texture-saved-html-resync', $blockPath);
             }
 
             $changed = $current !== $original;

@@ -7,6 +7,7 @@ use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Steps\CoverContrastStep;
 use Automattic\SiteBuild\Steps\GenerateImagesStep;
+use Automattic\SiteBuild\Units\GeneratedMarkup;
 
 const COVER_WHITE = [255, 255, 255];
 const COVER_BLACK = [17, 17, 17];
@@ -306,6 +307,42 @@ test('unstyled cover text is modeled as core white, not theme contrast', functio
     cover_step_run($project);
     $out = $project->readText('theme/templates/front-page.html');
     assert_true(!str_contains($out, '"dimRatio":40'), 'a bright image under white text cannot stay at dim 40');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('cover contrast reserialization preserves the served stage texture contract (BIGR-776)', function () {
+    if (!extension_loaded('imagick')) {
+        return;
+    }
+    $cover = '<!-- wp:cover {"url":"theme:./assets/hero.png","dimRatio":40} -->' . "\n"
+        . '<div class="wp-block-cover"><div class="wp-block-cover__inner-container">'
+        . '<!-- wp:paragraph --><p>Unstyled over a bright photo</p><!-- /wp:paragraph -->'
+        . '</div></div>' . "\n" . '<!-- /wp:cover -->';
+    [$project, $tmp] = cover_step_project($cover, 'white');
+    $plainHeader = '<!-- wp:group {"backgroundColor":"base","textColor":"contrast",'
+        . '"layout":{"type":"constrained"}} --><div class="wp-block-group has-base-background-color '
+        . 'has-background has-contrast-color"><!-- wp:site-title /--></div><!-- /wp:group -->';
+    $repairs = [];
+    $painted = GeneratedMarkup::withStageTextureBackdrop($plainHeader, 'header', $repairs);
+    $servedSource = '/wp-content/themes/demo/assets/stage_backdrop-texture.jpg';
+    $served = str_replace(GeneratedMarkup::STAGE_TEXTURE_ASSET, $servedSource, $painted);
+    assert_true(GeneratedMarkup::hasExactStageTextureContract($served, $servedSource));
+    $project->writeText('theme/parts/header.html', $served);
+
+    quietly(fn () => (new CoverContrastStep(new PhpBlockFixer()))->run($project));
+
+    assert_true(
+        !str_contains($project->readText('theme/templates/front-page.html'), '"dimRatio":40'),
+        'fixture must exercise the whole-tree fixer pass',
+    );
+    assert_true(
+        GeneratedMarkup::hasExactStageTextureContract(
+            $project->readText('theme/parts/header.html'),
+            $servedSource,
+        ),
+        'post-image cover repair cannot strip the served stage paint',
+    );
+
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

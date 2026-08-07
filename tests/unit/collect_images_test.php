@@ -389,6 +389,84 @@ test('collect-images keeps ordinary similarly named media independent from the c
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('collect-images gives distinct reserved ordinary media distinct synchronized replacements (BIGR-776)', function () {
+    [$project, $tmp] = collect_fixture();
+    $source = GeneratedMarkup::STAGE_TEXTURE_ASSET;
+    $markup = '<!-- wp:image {"url":"' . $source . '"} --><figure class="wp-block-image"><img src="'
+        . $source . '" alt="AI_IMAGE: A red ceramic vessel | card one | photorealistic | square"/>'
+        . '</figure><!-- /wp:image -->'
+        . '<!-- wp:image {"url":"' . $source . '"} --><figure class="wp-block-image"><img src="'
+        . $source . '" alt="AI_IMAGE: A blue timber chair | card two | photorealistic | landscape"/>'
+        . '</figure><!-- /wp:image -->';
+    $project->writeText('theme/parts/content.html', $markup);
+
+    (new CollectImagesStep())->run($project);
+
+    $specs = $project->readJson('images.json');
+    assert_eq(2, count($specs));
+    assert_true($specs[0]['src'] !== $specs[1]['src']);
+    assert_contains('red ceramic vessel', $specs[0]['subject']);
+    assert_contains('blue timber chair', $specs[1]['subject']);
+    $delivered = $project->readText('theme/parts/content.html');
+    foreach ($specs as $spec) {
+        assert_eq(2, substr_count($delivered, $spec['src']), 'each owner comment and img use its own source');
+    }
+    assert_true(!str_contains($delivered, $source));
+    assert_true(!$project->exists('warnings.json'));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images retains a multi-source reserved media owner as one coherent unit (BIGR-776)', function () {
+    [$project, $tmp] = collect_fixture();
+    $source = GeneratedMarkup::STAGE_TEXTURE_ASSET;
+    $markup = '<!-- wp:image {"url":"' . $source . '"} --><figure class="wp-block-image gallery-proof">'
+        . '<img src="' . $source . '" alt="AI_IMAGE: A red ceramic vessel | card one | photorealistic | square"/>'
+        . '<img src="' . $source . '" alt="AI_IMAGE: A blue timber chair | card two | photorealistic | landscape"/>'
+        . '</figure><!-- /wp:image -->';
+    $project->writeText('theme/parts/content.html', $markup);
+
+    (new CollectImagesStep())->run($project);
+
+    assert_eq(
+        $markup,
+        $project->readText('theme/parts/content.html'),
+        'one owner cannot be split between two distinct deterministic sources',
+    );
+    assert_eq([], $project->readJson('images.json'), 'unwired replacements cannot trigger unused image calls');
+    $warning = implode("\n", $project->readJson('warnings.json')['collect-images'] ?? []);
+    assert_contains('theme/parts/content.html', $warning);
+    assert_contains('stage texture mapping suppressed', $warning);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('a malformed reserved tag cannot steal the following valid replacement (BIGR-776)', function () {
+    [$project, $tmp] = collect_fixture();
+    $source = GeneratedMarkup::STAGE_TEXTURE_ASSET;
+    $malformed = '<!-- wp:image {"url":"' . $source . '"} --><figure class="wp-block-image malformed-proof">'
+        . '<img src="' . $source . '" alt="AI_IMAGE: malformed sentinel"/></figure><!-- /wp:image -->';
+    $valid = '<!-- wp:image {"url":"' . $source . '"} --><figure class="wp-block-image valid-proof">'
+        . '<img src="' . $source . '" alt="AI_IMAGE: A blue timber chair | card two | photorealistic | landscape"/>'
+        . '</figure><!-- /wp:image -->';
+    $project->writeText('theme/parts/content.html', $malformed . $valid);
+
+    (new CollectImagesStep())->run($project);
+
+    $specs = $project->readJson('images.json');
+    assert_eq(1, count($specs));
+    assert_contains('blue timber chair', $specs[0]['subject']);
+    $delivered = $project->readText('theme/parts/content.html');
+    assert_contains($malformed, $delivered, 'malformed owner remains byte-for-byte for the warning path');
+    assert_eq(2, substr_count($delivered, $specs[0]['src']), 'valid comment attrs and img share its replacement');
+    assert_contains('valid-proof', $delivered);
+    assert_eq(2, substr_count($delivered, $source), 'only the malformed comment attrs and img stay reserved');
+    $warning = implode("\n", $project->readJson('warnings.json')['collect-images'] ?? []);
+    assert_contains('stage texture mapping suppressed', $warning);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('collect-images renames only the innermost media owner of a reserved placeholder (BIGR-776)', function () {
     [$project, $tmp] = collect_fixture();
     $reserved = GeneratedMarkup::STAGE_TEXTURE_ASSET;
