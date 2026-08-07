@@ -4,4 +4,6 @@
 
 {{transparency_clause}}
 
+{{lettering_clause}}
+
 {{guidance}}
