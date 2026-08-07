@@ -27,8 +27,9 @@ namespace Automattic\SiteBuild;
  *  - The later occurrence in reading order is removed; the footer is shared
  *    by every page and is treated as read-only canon, so a closing-section
  *    line that duplicates a footer line is removed on the page side only.
- *  - A candidate that is its parent's only child stays (removing it would
- *    deliver an empty wrapper), and removals are capped per page.
+ *  - A removal widens through newly emptied wrappers but never deletes a
+ *    whole planned section. Pages exceeding the safety cap stay byte-identical
+ *    and surface actionable residual warnings at the step boundary.
  */
 final class SectionCopyDedupe
 {
@@ -45,7 +46,12 @@ final class SectionCopyDedupe
      *        sections of one page (hero excluded by the caller)
      * @param string $footerMarkup the shared footer part, read-only context;
      *        '' when the site has none
-     * @return array{markups:list<string>,notes:list<string>}
+     * @return array{
+     *     markups:list<string>,
+     *     notes:list<string>,
+     *     residuals:list<array{section:int,slug:string,excerpt:string,start:int}>,
+     *     removed:int
+     * }
      */
     public static function dedupe(array $sections, string $footerMarkup): array
     {
@@ -76,7 +82,7 @@ final class SectionCopyDedupe
                 }
                 if (self::duplicates($early, $late)) {
                     $removals[$b] = true;
-                    $notes[] = "section '{$late['slug']}': removed \"{$late['excerpt']}\" — repeats"
+                    $notes[$b] = "section '{$late['slug']}': removed \"{$late['excerpt']}\" — repeats"
                         . " \"{$early['excerpt']}\" from section '{$early['slug']}'";
                     break;
                 }
@@ -94,19 +100,31 @@ final class SectionCopyDedupe
             foreach ($footerCandidates as $canon) {
                 if (self::duplicates($canon, $late)) {
                     $removals[$b] = true;
-                    $notes[] = "section '{$late['slug']}': removed \"{$late['excerpt']}\" — repeats"
+                    $notes[$b] = "section '{$late['slug']}': removed \"{$late['excerpt']}\" — repeats"
                         . " the footer's \"{$canon['excerpt']}\" directly above it";
                     break;
                 }
             }
         }
 
+        $residuals = [];
         if (count($removals) > self::MAX_REMOVALS_PER_PAGE) {
-            $keep = array_slice(array_keys($removals), 0, self::MAX_REMOVALS_PER_PAGE);
-            $notes[] = 'removal cap reached: ' . (count($removals) - self::MAX_REMOVALS_PER_PAGE)
-                . ' further duplicate(s) left in place';
-            $removals = array_fill_keys($keep, true);
-            $notes = array_slice($notes, 0, self::MAX_REMOVALS_PER_PAGE + 1);
+            $keys = array_keys($removals);
+            // A partial first-four rewrite is not a fixed point: a second pass
+            // would see fewer duplicates and remove one that the first pass
+            // retained. Treat an exceeded cap as evidence that the matcher may
+            // be over-firing, preserve the whole page, and warn for every
+            // duplicate that remains.
+            foreach ($keys as $b) {
+                $residuals[] = [
+                    'section' => $candidates[$b]['section'],
+                    'slug'    => $candidates[$b]['slug'],
+                    'excerpt' => $candidates[$b]['excerpt'],
+                    'start'   => $candidates[$b]['start'],
+                ];
+            }
+            $removals = [];
+            $notes = [];
         }
 
         // Splice per section, later spans first so earlier offsets stay valid.
@@ -124,7 +142,12 @@ final class SectionCopyDedupe
             $markups[$s] = (string) preg_replace("/\n{3,}/", "\n\n", $markup);
         }
 
-        return ['markups' => $markups, 'notes' => $notes];
+        return [
+            'markups'   => $markups,
+            'notes'     => array_values($notes),
+            'residuals' => $residuals,
+            'removed'   => count($removals),
+        ];
     }
 
     /**
@@ -136,6 +159,13 @@ final class SectionCopyDedupe
     public static function candidates(string $markup): array
     {
         $doc = BlockMarkup::parse($markup);
+        if (
+            $doc->unclosedIndices() !== []
+            || $doc->hasMismatchedDelimiters()
+            || $doc->hasMalformedDelimiters()
+        ) {
+            throw new \RuntimeException('malformed block structure');
+        }
         $out = [];
         foreach ($doc->indices() as $i) {
             if (!$doc->isStructurallySafe($i)) {
@@ -177,7 +207,10 @@ final class SectionCopyDedupe
             $plain = trim(html_entity_decode(strip_tags($text), ENT_QUOTES | ENT_HTML5));
             $out[] = [
                 'kind'      => $kind,
-                'tokens'    => array_values(array_unique($tokens)),
+                // Quote matching needs the authored token sequence, including
+                // repetitions. Label containment applies set semantics at the
+                // comparison site below.
+                'tokens'    => $tokens,
                 'norm'      => $norm,
                 'excerpt'   => mb_strlen($plain) > 60 ? mb_substr($plain, 0, 57) . '…' : $plain,
                 'start'     => $doc->openingOffset($top),
@@ -216,11 +249,13 @@ final class SectionCopyDedupe
         // across the country" says more than a footer's "Buenos Aires" and
         // stays. Sharing an email domain or a city is not repetition either —
         // the overlap must dominate the shorter line AND be substantial.
-        $shorter = min(count($early['tokens']), count($late['tokens']));
-        if ($shorter < 3 || count($late['tokens']) > 2 * count($early['tokens'])) {
+        $earlyTokens = array_values(array_unique($early['tokens']));
+        $lateTokens = array_values(array_unique($late['tokens']));
+        $shorter = min(count($earlyTokens), count($lateTokens));
+        if ($shorter < 3 || count($lateTokens) > 2 * count($earlyTokens)) {
             return false;
         }
-        $shared = count(array_intersect($early['tokens'], $late['tokens']));
+        $shared = count(array_intersect($earlyTokens, $lateTokens));
         return $shared >= 3 && $shared / $shorter >= self::LABEL_CONTAINMENT;
     }
 

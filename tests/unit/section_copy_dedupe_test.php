@@ -97,6 +97,22 @@ test('paraphrased pullquotes sharing a long opening are collapsed to one', funct
     assert_true(!str_contains($result['markups'][1], 'unwrap it slowly'), 'paraphrased twin quote removed');
 });
 
+test('quote prefixes preserve repeated words in their authored order', function () {
+    $result = SectionCopyDedupe::dedupe([
+        dedupe_section('first', dedupe_pullquote(
+            'We are what we are in the moments before the doors open.',
+            'First speaker'
+        )),
+        dedupe_section('second', dedupe_pullquote(
+            'We are what we are in the choices we make together.',
+            'Second speaker'
+        )),
+    ], '');
+
+    assert_eq(1, $result['removed']);
+    assert_true(!str_contains($result['markups'][1], 'choices we make'), 'six-token repeated-word prefix matches');
+});
+
 test('a closing-section line duplicating the footer is removed on the page side', function () {
     $footer = "<!-- wp:group -->\n<div class=\"wp-block-group\">\n"
         . dedupe_kicker('Copenhagen, Denmark') . "\n"
@@ -217,4 +233,40 @@ test('a quote\'s inner paragraph never produces an overlapping removal', functio
     // pass; nothing is removed and the quote survives intact.
     assert_eq([], $result['notes']);
     assert_contains('Second inner line', $result['markups'][1]);
+});
+
+test('malformed block structure is rejected instead of partially edited', function () {
+    $malformed = dedupe_section('broken', dedupe_kicker('Open daily until late'))['markup']
+        . '<!-- /wp:paragraph -->';
+    $error = assert_throws(fn () => SectionCopyDedupe::dedupe([
+        dedupe_section('first', dedupe_kicker('Open daily until late')),
+        ['slug' => 'broken', 'markup' => $malformed],
+    ], ''));
+
+    assert_contains('malformed block structure', $error->getMessage());
+});
+
+test('exceeding the page safety cap preserves a fixed point and reports every residual', function () {
+    $sections = [];
+    foreach (range(1, 6) as $i) {
+        $sections[] = dedupe_section("section-{$i}", dedupe_kicker('Open daily until late'));
+    }
+    $result = SectionCopyDedupe::dedupe($sections, '');
+
+    assert_eq(0, $result['removed']);
+    assert_eq([], $result['notes']);
+    assert_eq(5, count($result['residuals']));
+    assert_eq('section-2', $result['residuals'][0]['slug']);
+    assert_eq('section-6', $result['residuals'][4]['slug']);
+    assert_eq(array_column($sections, 'markup'), $result['markups'], 'page stays byte-for-byte authored');
+
+    $again = SectionCopyDedupe::dedupe(
+        array_map(
+            static fn (array $section, string $markup): array => $section + ['markup' => $markup],
+            $sections,
+            $result['markups']
+        ),
+        ''
+    );
+    assert_eq($result, $again, 'cap degradation reaches a fixed point');
 });

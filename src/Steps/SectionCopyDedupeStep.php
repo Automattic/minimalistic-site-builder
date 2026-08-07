@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\SectionCopyDedupe;
 use Automattic\SiteBuild\Step;
@@ -51,35 +53,51 @@ final class SectionCopyDedupeStep implements Step
 
         $removals = 0;
         $warnings = [];
+        if ($footerMarkup !== '') {
+            try {
+                self::assertSafeMarkup($footerMarkup, 'theme/parts/footer.html');
+            } catch (\RuntimeException $e) {
+                $warnings[] = $e->getMessage()
+                    . '; footer-seam comparison skipped and authored seam values delivered unchanged';
+                $footerMarkup = '';
+            }
+        }
         foreach (SectionRhythmStep::pages($project) as $page) {
             $pageSlug = trim((string) ($page['slug'] ?? ''));
             try {
                 [$sections, $rels] = self::contentSections($project, $page);
+                if ($sections === []) {
+                    continue;
+                }
+                $result = SectionCopyDedupe::dedupe($sections, $footerMarkup);
             } catch (\RuntimeException $e) {
                 $warnings[] = "page '{$pageSlug}': copy dedupe skipped ({$e->getMessage()}); "
-                    . 'authored copy delivered';
+                    . 'all authored page copy delivered byte-for-byte';
                 continue;
             }
-            if ($sections === []) {
-                continue;
-            }
-            $result = SectionCopyDedupe::dedupe($sections, $footerMarkup);
             foreach ($result['markups'] as $i => $markup) {
                 if ($markup !== $sections[$i]['markup']) {
                     $project->writeText('theme/' . $rels[$i], $markup);
                 }
             }
             foreach ($result['notes'] as $note) {
-                echo "  [copy-dedupe] page '{$pageSlug}', {$note}\n";
+                Narrator::write("  [copy-dedupe] page '{$pageSlug}', {$note}\n");
             }
-            $removals += count($result['notes']);
+            foreach ($result['residuals'] as $residual) {
+                $path = 'theme/' . $rels[$residual['section']];
+                $warnings[] = "page '{$pageSlug}', file '{$path}', block byte {$residual['start']}: "
+                    . "authored value \"{$residual['excerpt']}\" delivered unchanged; disposition=duplicate "
+                    . 'retained because the four-removal page safety cap was exceeded; '
+                    . 'the page was preserved transactionally';
+            }
+            $removals += $result['removed'];
         }
         $project->addWarnings($this->id(), $warnings);
 
-        echo "  copy dedupe: {$removals} repeated line(s) removed\n";
+        Narrator::write("  copy dedupe: {$removals} repeated line(s) removed\n");
         if ($warnings !== []) {
-            echo '  [copy-dedupe] warning: ' . count($warnings)
-                . " page(s) skipped — see warnings.json\n";
+            Narrator::write('  [copy-dedupe] warning: ' . count($warnings)
+                . " degradation(s) recorded in warnings.json\n");
         }
     }
 
@@ -108,9 +126,24 @@ final class SectionCopyDedupeStep implements Step
             if ($slug === '' || !$project->exists('theme/' . $rel)) {
                 throw new \RuntimeException("missing generated section part {$rel}");
             }
-            $sections[] = ['slug' => $slug, 'markup' => $project->readText('theme/' . $rel)];
+            $markup = $project->readText('theme/' . $rel);
+            self::assertSafeMarkup($markup, 'theme/' . $rel);
+            $sections[] = ['slug' => $slug, 'markup' => $markup];
             $rels[] = $rel;
         }
         return [$sections, $rels];
+    }
+
+    /** Reject a generated part whose block boundaries cannot be edited safely. */
+    private static function assertSafeMarkup(string $markup, string $path): void
+    {
+        $doc = BlockMarkup::parse($markup);
+        if (
+            $doc->unclosedIndices() !== []
+            || $doc->hasMismatchedDelimiters()
+            || $doc->hasMalformedDelimiters()
+        ) {
+            throw new \RuntimeException("file '{$path}' has malformed block structure");
+        }
     }
 }
