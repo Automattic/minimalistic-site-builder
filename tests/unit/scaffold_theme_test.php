@@ -34,8 +34,8 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
 
     // The caption color hooks ContrastFix repairs unreadable figcaptions
     // through (the image block supports no textColor of its own, BIGR-784).
-    assert_contains('.caption-text-base figcaption { color: var(--wp--preset--color--base); }', $css);
-    assert_contains('.caption-text-contrast figcaption { color: var(--wp--preset--color--contrast); }', $css);
+    assert_contains('.caption-text-base > figcaption { color: var(--wp--preset--color--base); }', $css);
+    assert_contains('.caption-text-contrast > figcaption { color: var(--wp--preset--color--contrast); }', $css);
 
     // Flush list-thumb rows: the zeroed row padding must beat generated inline
     // padding, the row clips the bleeding thumb under its border radius, and

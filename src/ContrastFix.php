@@ -502,7 +502,7 @@ final class ContrastFix
 
     /**
      * Opt the figure into the theme stylesheet's caption color hook
-     * (`.caption-text-<slug> .wp-element-caption`), replacing any earlier one.
+     * (`.caption-text-<slug> > figcaption`), replacing any earlier one.
      */
     private function setCaptionClass(int $i, string $slug): void
     {

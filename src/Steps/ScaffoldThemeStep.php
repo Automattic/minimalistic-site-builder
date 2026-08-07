@@ -128,8 +128,8 @@ final class ScaffoldThemeStep implements Step
            (BIGR-784). The bare figcaption selector covers both caption class
            spellings the generator emits (wp-element-caption and the legacy
            wp-block-image__caption). Hooks mirror ContrastFix's candidates. */
-        .caption-text-base figcaption { color: var(--wp--preset--color--base); }
-        .caption-text-contrast figcaption { color: var(--wp--preset--color--contrast); }
+        .caption-text-base > figcaption { color: var(--wp--preset--color--base); }
+        .caption-text-contrast > figcaption { color: var(--wp--preset--color--contrast); }
 
         /* Equal-height, equal-width card rows (sections opt in via className="equal-cards"). */
         .equal-cards > .wp-block-column {
