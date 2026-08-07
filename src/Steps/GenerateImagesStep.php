@@ -235,20 +235,20 @@ final class GenerateImagesStep implements Step
     }
 
     /**
-     * Publish the dependency stamp only after every required operation succeeds.
-     * An image source that cannot resolve is a hard postcondition failure:
-     * without this gate an unrecognized placeholder shape — a raw AI_IMAGE spec,
-     * or a src the collector never saw — silently ships as a blank image even
-     * when the manifest was absent or empty.
+     * Publish the dependency stamp once generation has run. An unresolved image
+     * source — a raw AI_IMAGE spec, or a src the collector never saw — is a real
+     * defect, but degrade-don't-fail governs here: the build's sections are
+     * already paid for, so we deliver through with the defect recorded loudly in
+     * warnings.json rather than abort. This matches a failed-but-collected image
+     * (which keeps its placeholder and still completes) and the final validator,
+     * which reports the same problems as warnings. A blank/broken image ships,
+     * but it is surfaced, not silent.
      */
     private function markComplete(Project $project): void
     {
         $problems = ThemeValidator::unresolvedImageSourceProblems($project);
         if ($problems !== []) {
-            throw new \RuntimeException(
-                "generate-images: unresolved image source(s) remain after generation:\n- "
-                . implode("\n- ", $problems)
-            );
+            $project->addWarnings($this->id(), $problems);
         }
         $project->writeJson(self::COMPLETION_ARTIFACT, ['status' => 'completed']);
     }
