@@ -175,7 +175,10 @@ site, so a mediocre addition pollutes the generator permanently. Steps:
    compositions repeat across brands, which catalog is thinnest for its slot, what kind of brand is
    currently underserved (e.g. "all 5 hero recipes are image-led; a type-led brand has nowhere to go").
    A proposal that doesn't cite a concrete observed gap gets skipped, not invented.
-2. **Research current trends before designing.** Use WebSearch/WebFetch on curated galleries and current
+2. **Claim the work before researching or implementing.** Dedupe the gap against GitHub and Linear and
+   re-check that no variety PR opened after this invocation started. File or refresh its BIGR issue, move
+   it to **In Progress**, update fresh trunk as in phase 4, and create an appropriate BIGR-keyed branch.
+3. **Research current trends before designing.** Use WebSearch/WebFetch on curated galleries and current
    roundups — awwwards, siteinspire, godly.website, land-book, minimal.gallery, plus "web design trends
    <current year>" articles — and extract **structural, buildable ideas** (composition, grid usage, type
    scale treatment, image cropping, band rhythm), never vibe words. Note 2–3 reference sites per idea;
@@ -183,23 +186,23 @@ site, so a mediocre addition pollutes the generator permanently. Steps:
    expressible in the frozen WordPress block domain (no custom JS, nothing the block fixer strips — check
    `docs/` and existing fragments for known limits), must work with AI-generated imagery, must degrade
    gracefully with no image at all and at 390px, and must respect the standing taste constraints above.
-3. **Write the fragment in the house style.** Read at least two existing fragments in the target catalog
+4. **Write the fragment in the house style.** Read at least two existing fragments in the target catalog
    first and match their structure exactly — assigned-recipe framing, bounded values, blueprint defaults,
    seam/handoff language. Register the new entry wherever selection happens (PHP selector list,
    page-plan.md enumeration + description + variety rules). Distinctness check: if the new entry's
    one-line description could describe an existing entry, it's a variation, not an archetype — reject it.
-4. **Evidence: render it, don't describe it.** Force-select the new entry (find the selection mechanism's
+5. **Evidence: render it, don't describe it.** Force-select the new entry (find the selection mechanism's
    override, or pin it temporarily — never commit the pin) and build **at least 2 demos with different
    brand personalities** (e.g. one editorial like lumen, one loud like pulso), `--with-images`, desktop +
    `SHOT_WIDTH=390`. Judge every render against the full rubric: the proposal must score strongly on
    conviction/impact AND pass craft, hierarchy, and contrast — a stylish composition that clips text on
    mobile is a rejected proposal, not a caveat. Also render the nearest existing entry on one of the same
    brands and include it side by side, so the PR shows the new entry earns its slot.
-5. **PR.** File a BIGR issue, branch as usual. Description in plain language: the gap ("every generated
-   hero currently looks like X"), what the new archetype looks like (the renders carry this), the
-   inspiration credit, and confirmation of the mobile/no-image checks. Label the renders by demo brand.
-   At most ONE variety PR open at a time — these need human taste review more than defect fixes do, and
-   defect fixes always take precedence while craft/P0 findings exist.
+6. **Open the PR** using phase 6's title/body/state conventions. Describe in plain language: the gap
+   ("every generated hero currently looks like X"), what the new archetype looks like (the renders carry
+   this), the inspiration credit, and confirmation of the mobile/no-image checks. Label the renders by demo
+   brand. At most ONE variety PR may be open at a time — these need human taste review more than defect
+   fixes do, and defect fixes always take precedence while craft/P0 findings exist.
 
 ## Stop conditions
 
