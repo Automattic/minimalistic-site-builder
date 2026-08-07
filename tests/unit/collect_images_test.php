@@ -298,3 +298,299 @@ test('collect-images keeps subject pipes and parses the three trailing fields', 
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('collect-images renames a cross-part filename collision with a different subject (BIGR-793)', function () {
+    [$project, $tmp] = collect_fixture();
+    $project->writeText('theme/parts/page-home--about.html',
+        '<!-- wp:image --><figure class="wp-block-image"><img src="theme:./assets/street-doorway.jpg" '
+        . 'alt="AI_IMAGE: An aged stone doorway at dusk, door slightly ajar | about band photo | photorealistic | landscape"/></figure><!-- /wp:image -->'
+    );
+    $project->writeText('theme/parts/page-home--visit.html',
+        '<!-- wp:image --><figure class="wp-block-image"><img src="theme:./assets/street-doorway.jpg" '
+        . 'alt="AI_IMAGE: A weathered wooden door with iron studs in a plaster wall | location card photo | photorealistic | card-portrait"/></figure><!-- /wp:image -->'
+    );
+
+    (new CollectImagesStep())->run($project);
+
+    $images = $project->readJson('images.json');
+    assert_eq(2, count($images), 'the collision yields two independent specs');
+    $byName = array_column($images, null, 'filename');
+    assert_true(isset($byName['street-doorway.jpg']), 'first claimant keeps the name');
+    $variant = null;
+    foreach ($images as $img) {
+        if ($img['filename'] !== 'street-doorway.jpg') {
+            $variant = $img;
+        }
+    }
+    assert_true($variant !== null && str_starts_with($variant['filename'], 'street-doorway-'), 'newcomer renamed to a variant');
+    assert_contains('iron studs', $variant['subject']);
+    // The later part's markup follows its renamed asset.
+    $visit = $project->readText('theme/parts/page-home--visit.html');
+    assert_contains($variant['filename'], $visit);
+    assert_true(!str_contains($visit, '"theme:./assets/street-doorway.jpg"'), 'old reference rewritten');
+    $warnings = $project->readJson('warnings.json')['collect-images'] ?? [];
+    $joined = implode(' ', $warnings);
+    foreach ([
+        "file='theme/parts/page-home--visit.html'",
+        'block=',
+        'authored asset="street-doorway.jpg"',
+        'delivered asset=',
+        'disposition=',
+    ] as $context) {
+        assert_contains($context, $joined);
+    }
+
+    // Deterministic and fixed-point safe.
+    assert_eq($variant['filename'], CollectImagesStep::variantFilename('street-doorway.jpg', $variant['subject']));
+    $firstMarkup = $visit;
+    (new CollectImagesStep())->run($project);
+    assert_eq($firstMarkup, $project->readText('theme/parts/page-home--visit.html'));
+    assert_eq(array_column($images, 'filename'), array_column($project->readJson('images.json'), 'filename'));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images isolates different subjects within one part and preserves bare siblings', function () {
+    [$project, $tmp] = collect_fixture();
+    $project->writeText('theme/parts/page-home--gallery.html',
+        '<img src="theme:./assets/street-doorway.jpg" '
+        . 'alt="AI_IMAGE: An aged stone doorway | concept image | photorealistic | landscape"/>'
+        . '<img src="theme:./assets/street-doorway.jpg" alt="A reused reference with no placeholder"/>'
+        . '<img src="theme:./assets/street-doorway.jpg" '
+        . 'alt="AI_IMAGE: A painted steel doorway | location image | photorealistic | portrait"/>'
+    );
+
+    (new CollectImagesStep())->run($project);
+
+    $images = $project->readJson('images.json');
+    assert_eq(2, count($images), 'different subjects in one part receive independent specs');
+    $variant = $images[1]['filename'];
+    $markup = $project->readText('theme/parts/page-home--gallery.html');
+    assert_eq(2, substr_count($markup, 'theme:./assets/street-doorway.jpg'), 'first placeholder and bare sibling stay put');
+    assert_eq(1, substr_count($markup, 'theme:./assets/' . $variant), 'only the colliding placeholder is renamed');
+
+    (new CollectImagesStep())->run($project);
+    assert_eq($markup, $project->readText('theme/parts/page-home--gallery.html'), 'scoped rename reaches a fixed point');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images never overwrites an occupied variant filename', function () {
+    [$project, $tmp] = collect_fixture();
+    $newSubject = 'A painted steel doorway';
+    $occupied = CollectImagesStep::variantFilename('street-doorway.jpg', $newSubject);
+    $project->writeText('theme/parts/a-original.html',
+        '<img src="theme:./assets/street-doorway.jpg" '
+        . 'alt="AI_IMAGE: An aged stone doorway | concept | photorealistic | landscape"/>'
+    );
+    $project->writeText('theme/parts/b-occupied.html',
+        '<img src="theme:./assets/' . $occupied . '" '
+        . 'alt="AI_IMAGE: A carved timber gate | archive | photorealistic | landscape"/>'
+    );
+    $project->writeText('theme/parts/c-new.html',
+        '<img src="theme:./assets/street-doorway.jpg" '
+        . 'alt="AI_IMAGE: ' . $newSubject . ' | location | photorealistic | portrait"/>'
+    );
+
+    (new CollectImagesStep())->run($project);
+
+    $images = $project->readJson('images.json');
+    assert_eq(3, count($images), 'every subject survives the occupied variant');
+    $bySubject = array_column($images, 'filename', 'subject');
+    assert_eq($occupied, $bySubject['A carved timber gate'], 'the existing variant claimant is untouched');
+    assert_true($bySubject[$newSubject] !== $occupied, 'the newcomer receives another deterministic name');
+    assert_contains($bySubject[$newSubject], $project->readText('theme/parts/c-new.html'));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images retains and warns when a colliding recovered placeholder cannot be isolated', function () {
+    [$project, $tmp] = collect_fixture();
+    $rawRecovered = '<img src="AI_IMAGE:A painted steel doorway|ratio:portrait|role:location" alt=""/>';
+    $recoveredSpec = CollectImagesStep::parsePlaceholders($rawRecovered)[0];
+    $project->writeText('theme/parts/a-first.html',
+        '<img src="' . $recoveredSpec['src'] . '" '
+        . 'alt="AI_IMAGE: An aged stone doorway | concept | photorealistic | landscape"/>'
+    );
+    $project->writeText('theme/parts/b-recovered.html', $rawRecovered);
+
+    (new CollectImagesStep())->run($project);
+
+    assert_eq(1, count($project->readJson('images.json')), 'the existing manifest row is preserved');
+    $markup = $project->readText('theme/parts/b-recovered.html');
+    assert_contains($recoveredSpec['src'], $markup, 'the unsafe collision degrades to the existing image');
+    assert_true(!str_contains($markup, 'AI_IMAGE:'), 'raw source prompt still normalizes safely');
+    $warnings = implode(' ', $project->readJson('warnings.json')['collect-images'] ?? []);
+    assert_contains("file='theme/parts/b-recovered.html'", $warnings);
+    assert_contains('block=', $warnings);
+    assert_contains('authored asset=', $warnings);
+    assert_contains('delivered asset=', $warnings);
+    assert_contains('retained because', $warnings);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images still merges a genuinely shared same-subject asset', function () {
+    [$project, $tmp] = collect_fixture();
+    $tag = '<img src="theme:./assets/logo-mark.jpg" alt="AI_IMAGE: A clean ceramic mark | site logo | minimalist | square"/>';
+    $project->writeText('theme/parts/header.html', $tag);
+    $project->writeText('theme/parts/footer.html', $tag);
+
+    (new CollectImagesStep())->run($project);
+
+    $images = $project->readJson('images.json');
+    assert_eq(1, count($images));
+    assert_eq(2, count($images[0]['sources']));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images removes an image whose asset no placeholder declares (BIGR-787)', function () {
+    [$project, $tmp] = collect_fixture();
+    // The mangled-marker shape observed in the wild: a well-formed theme: src
+    // whose alt is not a parseable AI_IMAGE spec — nothing will generate it.
+    $project->writeText('theme/parts/page-home--visit.html',
+        '<!-- wp:group --><div class="wp-block-group">'
+        . '<!-- wp:image --><figure class="wp-block-image"><img src="theme:./assets/hero-dawn.jpg" '
+        . 'alt="AI_IMAGE: A misty valley at dawn | wide feature | photorealistic | landscape"/></figure><!-- /wp:image -->'
+        . '<!-- wp:image --><figure class="wp-block-image"><img src="theme:./assets/bakery-storefront.jpg" '
+        . 'alt="AI_IMATE_PLACEHOLDER"/></figure><!-- /wp:image -->'
+        . '<!-- wp:paragraph --><p>Copy that stays.</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->'
+    );
+
+    (new CollectImagesStep())->run($project);
+
+    $images = $project->readJson('images.json');
+    assert_eq(1, count($images));
+    assert_eq('hero-dawn.jpg', $images[0]['filename']);
+
+    $markup = $project->readText('theme/parts/page-home--visit.html');
+    assert_true(!str_contains($markup, 'bakery-storefront'), 'undeclared asset reference removed');
+    assert_true(!str_contains($markup, 'AI_IMATE_PLACEHOLDER'), 'mangled alt never ships');
+    assert_contains('hero-dawn.jpg', $markup);
+    assert_contains('Copy that stays.', $markup);
+
+    $warnings = $project->readJson('warnings.json');
+    $joined = implode(' ', $warnings['collect-images'] ?? []);
+    assert_contains('bakery-storefront.jpg', $joined);
+    assert_contains('delivered removed', $joined);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images keeps a cover but strips its undeclared image layer', function () {
+    [$project, $tmp] = collect_fixture();
+    $project->writeText('theme/parts/page-home--closing.html',
+        '<!-- wp:cover {"url":"theme:./assets/ghost-band.jpg","dimRatio":50} -->'
+        . '<div class="wp-block-cover"><img class="wp-block-cover__image-background" '
+        . 'src="theme:./assets/ghost-band.jpg" alt="AI IMAGE broken"/>'
+        . '<div class="wp-block-cover__inner-container">'
+        . '<!-- wp:heading --><h2 class="wp-block-heading">Retained headline</h2><!-- /wp:heading -->'
+        . '</div></div><!-- /wp:cover -->'
+    );
+
+    (new CollectImagesStep())->run($project);
+
+    $markup = $project->readText('theme/parts/page-home--closing.html');
+    assert_true(!str_contains($markup, 'ghost-band.jpg'), 'undeclared cover asset gone');
+    assert_contains('Retained headline', $markup);
+    assert_contains('wp:cover', $markup);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images leaves declared cross-part references alone', function () {
+    [$project, $tmp] = collect_fixture();
+    $project->writeText('theme/parts/header.html',
+        '<img src="theme:./assets/logo.jpg" alt="AI_IMAGE: A clean mark | site logo | minimalist | square"/>'
+    );
+    // A bare rendered reference to an asset another part declares is legal.
+    $project->writeText('theme/parts/footer.html',
+        '<!-- wp:image --><figure class="wp-block-image"><img src="theme:./assets/logo.jpg" alt=""/></figure><!-- /wp:image -->'
+    );
+
+    (new CollectImagesStep())->run($project);
+
+    assert_contains('logo.jpg', $project->readText('theme/parts/footer.html'));
+    assert_true(!$project->exists('warnings.json'), 'no warning for a declared cross-part reference');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images takes an orphaned caption with the undeclared image', function () {
+    [$project, $tmp] = collect_fixture();
+    $project->writeText('theme/parts/page-home--visit.html',
+        '<!-- wp:group --><div class="wp-block-group">'
+        . '<!-- wp:image --><figure class="wp-block-image"><img src="theme:./assets/ghost.jpg" '
+        . 'alt="AI_IMATE_PLACEHOLDER"/></figure><!-- /wp:image -->'
+        . "\n\n"
+        . '<!-- wp:paragraph {"fontSize": "caption"} -->'
+        . '<p>The corner shopfront, mid-morning.</p>'
+        . '<!-- /wp:paragraph -->'
+        . '<!-- wp:paragraph --><p>Ordinary prose stays.</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->'
+    );
+
+    (new CollectImagesStep())->run($project);
+
+    $markup = $project->readText('theme/parts/page-home--visit.html');
+    assert_true(!str_contains($markup, 'ghost.jpg'), 'undeclared image removed');
+    assert_true(!str_contains($markup, 'corner shopfront'), 'caption removed with its image');
+    assert_contains('Ordinary prose stays.', $markup);
+
+    $warnings = implode(' ', $project->readJson('warnings.json')['collect-images'] ?? []);
+    assert_contains('authored caption="The corner shopfront, mid-morning."', $warnings);
+    assert_contains('delivered removed', $warnings);
+    assert_contains('orphaned description', $warnings);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images preserves an undeclared source inside an unclosed image block', function () {
+    [$project, $tmp] = collect_fixture();
+    $original = '<!-- wp:image --><figure class="wp-block-image">'
+        . '<img src="theme:./assets/unsafe.jpg" alt="AI_IMATE_PLACEHOLDER">';
+    $project->writeText('theme/parts/page-home--unsafe.html', $original);
+
+    (new CollectImagesStep())->run($project);
+
+    assert_eq($original, $project->readText('theme/parts/page-home--unsafe.html'));
+    $warnings = implode(' ', $project->readJson('warnings.json')['collect-images'] ?? []);
+    assert_contains('unsafe.jpg', $warnings);
+    assert_contains('delivered retained in unsafe markup', $warnings);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images removes an undeclared CSS-only cover image without losing its copy', function () {
+    [$project, $tmp] = collect_fixture();
+    $project->writeText(
+        'theme/parts/page-home--band.html',
+        '<!-- wp:cover --><div class="wp-block-cover" '
+            . 'style="background-image:url(theme:./assets/ghost-css.jpg);color:white">'
+            . '<!-- wp:heading --><h2>Copy survives</h2><!-- /wp:heading -->'
+            . '</div><!-- /wp:cover -->'
+    );
+
+    (new CollectImagesStep())->run($project);
+
+    $markup = $project->readText('theme/parts/page-home--band.html');
+    assert_true(!str_contains($markup, 'ghost-css.jpg'), 'CSS-only source removed');
+    assert_contains('color:white', $markup);
+    assert_contains('Copy survives', $markup);
+    $warnings = implode(' ', $project->readJson('warnings.json')['collect-images'] ?? []);
+    assert_contains('delivered removed', $warnings);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('unresolvable source scan ignores path-shaped prose with no media reference', function () {
+    assert_eq(
+        [],
+        CollectImagesStep::unresolvableSources(
+            '<!-- wp:paragraph --><p>Diagnostic: theme:./assets/missing.jpg</p><!-- /wp:paragraph -->',
+            []
+        )
+    );
+});

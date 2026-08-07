@@ -432,6 +432,35 @@ test('generate-images marks failed and removes only its media block on error', f
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('generate-images records caption text removed with a failed image', function () {
+    $tmp = sys_get_temp_dir() . '/builder_gi_caption_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeText(
+        'theme/parts/content.html',
+        '<!-- wp:group --><div class="wp-block-group">'
+            . '<!-- wp:image --><figure class="wp-block-image">'
+            . '<img src="theme:./assets/failed.jpg" '
+            . 'alt="AI_IMAGE: A failed scene | content image | photorealistic | landscape">'
+            . '</figure><!-- /wp:image -->'
+            . '<!-- wp:paragraph {"fontSize": "caption"} -->'
+            . '<p>The unavailable scene at dawn.</p><!-- /wp:paragraph -->'
+            . '</div><!-- /wp:group -->'
+    );
+    (new CollectImagesStep())->run($project);
+
+    (new GenerateImagesStep(new FakeImageClient('', true)))->run($project);
+
+    $markup = $project->readText('theme/parts/content.html');
+    assert_true(!str_contains($markup, 'failed.jpg'));
+    assert_true(!str_contains($markup, 'unavailable scene'));
+    $warnings = implode(' ', $project->readJson('warnings.json')['generate-images'] ?? []);
+    assert_contains('authored caption "The unavailable scene at dawn."', $warnings);
+    assert_contains('delivered removed', $warnings);
+    assert_contains('orphaned description', $warnings);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('generate-images removal keeps failed-image siblings byte-for-byte intact', function () {
     $tmp = sys_get_temp_dir() . '/builder_gi_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
