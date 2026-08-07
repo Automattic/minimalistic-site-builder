@@ -325,7 +325,6 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         $theme['version'] = 3;
         $theme = self::disableCoreDefaultPresets($theme);
         $theme = self::normalizeSpacingSettings($theme);
-        $theme = self::normalizeRootPadding($theme);
 
         // A default vertical rhythm between sibling blocks: without it, per-block
         // "blockGap" the parts set (e.g. the branded-lockup header's zero-gap
@@ -358,6 +357,9 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $theme['styles']['spacing'] = [];
         }
         $theme['styles']['spacing']['blockGap'] ??= 'var:preset|spacing|md';
+        // After the shape repairs above so a malformed styles.spacing records
+        // its warning before normalizeRootPadding's silent guard repairs it.
+        $theme = self::normalizeRootPadding($theme);
 
         // Missing required slugs are filled deterministically instead of
         // aborting the build: the direction's committed hexes first, neutral
@@ -490,7 +492,11 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      * Normalize the root padding stanza the model reliably copies from
      * published themes but never gets quite right:
      *
-     * - A theme that sets root left/right padding MUST also opt into
+     * - Left/right root padding is the only viewport gutter constrained
+     *   content gets on mobile, so a missing or zero side is synthesized to
+     *   the md preset: without it every section that doesn't bring its own
+     *   padding renders text flush against the 390px screen edge.
+     * - A theme with root left/right padding MUST also opt into
      *   root-padding-aware alignments: without the flag WordPress puts the
      *   padding on <body>, where no block can escape it, so every align:full
      *   hero/footer renders inset by a page-background gutter.
@@ -499,26 +505,37 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      *   and the vertical rhythm belongs to the header/sections/footer, which
      *   all bring their own padding.
      *
-     * Pure — unit-testable.
+     * Pure and total — malformed styles/styles.spacing shapes are repaired
+     * here too (silently; writeTheme's earlier shape repairs own the warning),
+     * so no caller order can fatal.
      *
      * @param array<mixed> $theme
      * @return array<mixed>
      */
     public static function normalizeRootPadding(array $theme): array
     {
+        if (!is_array($theme['styles'] ?? null)) {
+            $theme['styles'] = [];
+        }
+        if (!is_array($theme['styles']['spacing'] ?? null)) {
+            $theme['styles']['spacing'] = [];
+        }
         $padding = $theme['styles']['spacing']['padding'] ?? null;
         if (!is_array($padding)) {
-            return $theme;
+            $padding = [];
         }
-        $theme['styles']['spacing']['padding']['top'] = '0';
-        $theme['styles']['spacing']['padding']['bottom'] = '0';
+        $normalized = ['top' => '0', 'bottom' => '0'];
         foreach (['left', 'right'] as $side) {
-            $value = trim((string) ($padding[$side] ?? ''));
-            if ($value !== '' && preg_match('/^0(?:[a-z%]+)?$/i', $value) !== 1) {
-                $theme['settings']['useRootPaddingAwareAlignments'] = true;
-                return $theme;
-            }
+            $value = $padding[$side] ?? '';
+            // Only scalar CSS-length candidates survive; arrays/objects/bools
+            // would serialize as garbage in theme.json.
+            $usable = (is_string($value) || is_int($value) || is_float($value))
+                && trim((string) $value) !== ''
+                && preg_match('/^0(?:[a-z%]+)?$/i', trim((string) $value)) !== 1;
+            $normalized[$side] = $usable ? $value : 'var:preset|spacing|md';
         }
+        $theme['styles']['spacing']['padding'] = $normalized;
+        $theme['settings']['useRootPaddingAwareAlignments'] = true;
         return $theme;
     }
 
