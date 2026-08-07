@@ -191,7 +191,16 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
             'hero_copy_capacity' => 'compact',
         ],
     );
-    $builder->pipeline()->runThrough($project);
+    // The queued fixture responses script a cinematic-safe-zone build, but
+    // the cover+compact constraint pool now holds two recipes (BIGR-775
+    // downgraded layered-poster to compact) and the stable identifier is a
+    // uniqid temp path — pin the recipe so selection stays deterministic.
+    putenv('HERO_RECIPE=cinematic-safe-zone');
+    try {
+        $builder->pipeline()->runThrough($project);
+    } finally {
+        putenv('HERO_RECIPE');
+    }
 
     $problems = ThemeValidator::validate($project);
     assert_eq([], $problems, 'theme should validate; problems: ' . implode('; ', $problems));

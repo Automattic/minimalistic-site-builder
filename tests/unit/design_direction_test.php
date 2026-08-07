@@ -1010,7 +1010,7 @@ test('HERO_RECIPE is exact, persisted, and isolated to one recipe fragment', fun
     $llm->queueJson(['seeds' => designdir_seeds()]);
     $llm->queueJson(['direction' => designdir_direction()]);
 
-    putenv('HERO_RECIPE=panorama-rail');
+    putenv('HERO_RECIPE=focal-subject-stage');
     try {
         (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
     } finally {
@@ -1018,11 +1018,11 @@ test('HERO_RECIPE is exact, persisted, and isolated to one recipe fragment', fun
     }
 
     $direction = $project->readJson('designDirection.json');
-    assert_eq('panorama-rail', $direction['hero_blueprint']['recipe']);
+    assert_eq('focal-subject-stage', $direction['hero_blueprint']['recipe']);
     assert_eq('foreground-image', $direction['hero_blueprint']['media_mode']);
-    assert_contains('panorama-rail', $llm->calls[1]['prompt']);
+    assert_contains('focal-subject-stage', $llm->calls[1]['prompt']);
     foreach (HeroComposition::RECIPES as $recipe) {
-        if ($recipe !== 'panorama-rail') {
+        if ($recipe !== 'focal-subject-stage') {
             assert_true(!str_contains($llm->calls[1]['prompt'], $recipe), "{$recipe} is not exposed");
         }
     }

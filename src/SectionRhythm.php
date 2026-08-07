@@ -139,6 +139,12 @@ final class SectionRhythm
             $nextBackground = $next['background'] ?? ($i === count($normalized) - 1 ? $followingBackground : null);
             $sharedSeam = is_string($nextBackground)
                 && self::sharesContinuousSurface($entry['background'], $nextBackground);
+            // The opening hero never fully collapses its bottom seam
+            // (BIGR-775 follow-up): with a shared surface the section below
+            // owned the whole gap, and its compact top read as the hero
+            // crowding the next band (lumen9/atlas9). The hero keeps a `lg`
+            // floor; every other shared seam still collapses to 0.
+            $bottomFloor = $sharedSeam && $i === 0 && self::isHeroRoot($entry['markup']) ? 'lg' : null;
 
             [$markup, $changed, $degradation] = self::rewriteOne(
                 $entry['markup'],
@@ -147,10 +153,11 @@ final class SectionRhythm
                 $entry['background'],
                 $entry['label'],
                 $topPreset,
+                $bottomFloor,
             );
             $markups[] = $markup;
 
-            $bottom = $sharedSeam ? '0' : $preset;
+            $bottom = $sharedSeam ? ($bottomFloor ?? '0') : $preset;
             $degradationRecord = null;
             if ($degradation !== null) {
                 $message = "{$entry['label']}: planned image background degraded to solid-band rhythm"
@@ -198,36 +205,60 @@ final class SectionRhythm
      * media sits tight under the header (hero.md caps it at `sm`; audited
      * density-mapped `xl` tops opened a dead band that pushed the rail or
      * copy below the fold), and a copy-led hero keeps breathing room but
-     * never more than `md`. Non-hero openers keep the plain density map.
+     * never more than `lg` (BIGR-775 follow-up: the earlier `md` cap sat
+     * solid split heroes ~1.5rem under the header — lumen9/atlas9 read as
+     * cramped, not tight). Non-hero openers keep the plain density map.
      * The bottom edge and every later section are untouched, so the page's
      * internal rhythm stays exactly as planned.
      */
     private static function openingTopPreset(string $markup, string $preset): string
     {
+        if (!self::isHeroRoot($markup)) {
+            return $preset;
+        }
+        if (self::heroLeadsWithMedia($markup)) {
+            return 'sm';
+        }
+        return in_array($preset, ['xl', 'xxl'], true) ? 'lg' : $preset;
+    }
+
+    /** Whether a section root carries a hero recipe marker. */
+    private static function isHeroRoot(string $markup): bool
+    {
         try {
             $document = BlockMarkup::parse($markup);
         } catch (\Throwable) {
-            return $preset;
+            return false;
         }
         $root = $document->topLevel();
         if ($root === null) {
-            return $preset;
+            return false;
         }
-        $rootClass = (string) (($document->attrs($root) ?? [])['className'] ?? '');
-        if (!str_contains($rootClass, 'hero-composition--')) {
-            return $preset;
+        return str_contains(
+            (string) (($document->attrs($root) ?? [])['className'] ?? ''),
+            'hero-composition--'
+        );
+    }
+
+    /** Whether a hero root's first visual child is its media band/cover. */
+    private static function heroLeadsWithMedia(string $markup): bool
+    {
+        try {
+            $document = BlockMarkup::parse($markup);
+        } catch (\Throwable) {
+            return false;
+        }
+        $root = $document->topLevel();
+        if ($root === null) {
+            return false;
         }
         $children = $document->children($root);
-        $mediaLed = $children !== []
+        return $children !== []
             && in_array($document->name($children[0]), ['image', 'cover'], true)
             && str_contains(
                 (string) (($document->attrs($children[0]) ?? [])['className'] ?? ''),
                 'hero-composition__media'
             );
-        if ($mediaLed) {
-            return 'sm';
-        }
-        return in_array($preset, ['lg', 'xl', 'xxl'], true) ? 'md' : $preset;
     }
 
     /**
@@ -255,6 +286,7 @@ final class SectionRhythm
         string $background,
         string $label,
         ?string $topPreset = null,
+        ?string $bottomFloor = null,
     ): array {
         $topPreset ??= $preset;
         $originalMarkup = $markup;
@@ -277,7 +309,11 @@ final class SectionRhythm
             $openingLength,
             'wp:group',
             $spacingBackground === 'image' ? '0' : self::presetRef($topPreset),
-            $spacingBackground === 'image' || $sharedSeam ? '0' : self::presetRef($preset),
+            match (true) {
+                $spacingBackground === 'image' => '0',
+                $sharedSeam => $bottomFloor === null ? '0' : self::presetRef($bottomFloor),
+                default => self::presetRef($preset),
+            },
             $label,
             $label,
             'style',

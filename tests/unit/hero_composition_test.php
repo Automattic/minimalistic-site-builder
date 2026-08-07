@@ -5,7 +5,7 @@ use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
 
 test('hero catalog entries own complete metadata, defaults, prompts, and unique hooks', function () {
-    assert_eq(6, count(HeroComposition::RECIPES));
+    assert_eq(5, count(HeroComposition::RECIPES));
     $hooks = [];
     foreach (HeroComposition::RECIPES as $recipe) {
         $meta = HeroComposition::metadata($recipe);
@@ -115,7 +115,7 @@ test('structured selector fixture corpus exercises eligibility and media distrib
             $mediaModes[$mode] = true;
         }
     }
-    assert_true(count($selected) >= 6, 'objective fixture set exercises broad catalog selection');
+    assert_true(count($selected) >= 5, 'objective fixture set exercises broad catalog selection');
     foreach (['cover-image', 'foreground-image'] as $mode) {
         assert_true(isset($mediaModes[$mode]), "fixture selections cover {$mode}");
     }
@@ -146,4 +146,37 @@ test('hero recipe inspection keeps cover and aspect drift actionable at their ex
     assert_contains('recipe image aspect', $aspectWarnings[0]);
     assert_contains('portrait', $aspectWarnings[0]);
     assert_contains('landscape', $aspectWarnings[0]);
+});
+
+test('hero copy budget and headline punctuation overruns warn without hiding valid heroes (BIGR-775)', function () {
+    $media = '<!-- wp:group {"className":"hero-composition__media"} --><div class="wp-block-group hero-composition__media">'
+        . '<img src="theme:./assets/subject.jpg" alt="AI_IMAGE: Subject | foreground slot | photorealistic | landscape" />'
+        . '</div><!-- /wp:group -->';
+    $overBudget = '<!-- wp:group --><div class="wp-block-group">' . $media
+        . '<!-- wp:group {"className":"hero-composition__copy"} --><div class="wp-block-group hero-composition__copy">'
+        . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">One subject</h1><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>A standfirst.</p><!-- /wp:paragraph -->'
+        . '<!-- wp:paragraph --><p>A second line.</p><!-- /wp:paragraph -->'
+        . '<!-- wp:paragraph --><p>A third caption line.</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group --></div><!-- /wp:group -->';
+    // focal-subject-stage is compact: the H1 plus one paragraph is the budget.
+    $warnings = HeroComposition::markupWarnings($overBudget, 'focal-subject-stage', 'page-home--hero');
+    $budget = array_values(array_filter($warnings, fn (string $w): bool => str_contains($w, 'hero copy budget')));
+    assert_eq(1, count($budget));
+    assert_contains('max_text_blocks', $budget[0]);
+
+    $inBudget = '<!-- wp:group --><div class="wp-block-group">' . $media
+        . '<!-- wp:group {"className":"hero-composition__copy"} --><div class="wp-block-group hero-composition__copy">'
+        . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">One subject — staged</h1><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>A standfirst.</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group --></div><!-- /wp:group -->';
+    $warnings = HeroComposition::markupWarnings($inBudget, 'focal-subject-stage', 'page-home--hero');
+    assert_eq([], array_values(array_filter($warnings, fn (string $w): bool => str_contains($w, 'hero copy budget'))));
+    // The em dash inside the H1 is its own advisory.
+    $dash = array_values(array_filter($warnings, fn (string $w): bool => str_contains($w, 'hero headline punctuation')));
+    assert_eq(1, count($dash));
+
+    $cleanHeadline = str_replace('One subject — staged', 'One subject staged', $inBudget);
+    $warnings = HeroComposition::markupWarnings($cleanHeadline, 'focal-subject-stage', 'page-home--hero');
+    assert_eq([], array_values(array_filter($warnings, fn (string $w): bool => str_contains($w, 'hero headline punctuation'))));
 });

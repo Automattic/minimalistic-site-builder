@@ -135,6 +135,20 @@ test('header fallback is readable and exactly marked in stacked and overlay mode
     }
 });
 
+test('header fallback delivers a dynamic tagline whenever the contract promises one', function () {
+    $contract = hero_fallback_contract('stacked');
+    $contract['header']['displays_tagline'] = true;
+    $contract['header']['tagline_text'] = 'Handmade ceramic lamps from Copenhagen';
+    $contract['header']['text_rows'] = 2;
+
+    $result = HeaderFallback::render([], $contract, 'bad header');
+    $facts = AboveFoldPartFacts::headerFacts($result->markup);
+
+    assert_eq(1, $facts['site_tagline_blocks']);
+    assert_eq(0, $facts['invalid_site_tagline_topology']);
+    assert_eq(1, substr_count($result->markup, '<!-- wp:site-tagline'));
+});
+
 test('interior opening fallback uses the real page title and no hero recipe context', function () {
     $input = [
         'page' => ['slug' => 'about', 'title' => 'About the Studio', 'front' => false],

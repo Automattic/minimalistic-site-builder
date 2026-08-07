@@ -26,7 +26,7 @@ final class HeroBlueprint
     public const CTA_TREATMENTS = ['quiet', 'prominent'];
     public const MOBILE_TRANSFORMATIONS = [
         'retain-media-overlay', 'stack-copy-first', 'stack-media-first',
-        'rail-below', 'flatten-layers',
+        'flatten-layers',
     ];
 
     /**

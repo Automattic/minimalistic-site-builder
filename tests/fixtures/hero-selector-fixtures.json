@@ -26,11 +26,12 @@
         "hero_copy_capacity": "compact"
       },
       "eligible": [
-        "cinematic-safe-zone"
+        "cinematic-safe-zone",
+        "layered-poster"
       ]
     },
     {
-      "id": "standard-cover",
+      "id": "compact-cover-poster",
       "stable_identifier": "layer-house",
       "concept_seed": "Controlled paper layers frame one image and bold type.",
       "constraints": {
@@ -38,9 +39,10 @@
           "cover-image"
         ],
         "max_hero_images": 1,
-        "hero_copy_capacity": "standard"
+        "hero_copy_capacity": "compact"
       },
       "eligible": [
+        "cinematic-safe-zone",
         "layered-poster"
       ]
     },
@@ -89,7 +91,6 @@
         "hero_copy_capacity": "compact"
       },
       "eligible": [
-        "panorama-rail",
         "focal-subject-stage"
       ]
     },
@@ -106,7 +107,6 @@
         "hero_copy_capacity": "compact"
       },
       "eligible": [
-        "panorama-rail",
         "focal-subject-stage"
       ]
     },
@@ -138,7 +138,6 @@
         "hero_copy_capacity": "compact"
       },
       "eligible": [
-        "panorama-rail",
         "focal-subject-stage"
       ]
     }
