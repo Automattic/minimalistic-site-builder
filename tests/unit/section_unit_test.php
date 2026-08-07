@@ -63,6 +63,22 @@ test('section prompt keeps unbreakable contact tokens out of display type', func
     assert_true(!str_contains($prompt, 'inquiries@alcortaph'), 'malformed cohort identity copy is excluded');
 });
 
+test('centered-stack prompts keep wrapping copy aligned to the writing-direction start', function () {
+    $section = (string) file_get_contents(repo_path('prompts/section.md'));
+    $composition = (string) file_get_contents(repo_path('prompts/section-composition.md'));
+    $pagePlan = (string) file_get_contents(repo_path('prompts/page-plan.md'));
+
+    assert_contains('center display type only', $section, 'short display lines may remain centered');
+    assert_contains('writing direction\'s start edge', $section, 'reading copy follows language direction');
+    assert_contains('`"align":"left"` for LTR', $section, 'LTR Gutenberg mapping is explicit');
+    assert_contains('`"align":"right"` for RTL', $section, 'RTL Gutenberg mapping is explicit');
+    foreach ([$composition, $pagePlan] as $centeredStackContract) {
+        assert_contains('start-aligned', $centeredStackContract);
+        assert_contains('left for LTR', $centeredStackContract);
+        assert_contains('right for RTL', $centeredStackContract);
+    }
+});
+
 test('SectionUnit generates normalized markup from self-contained input', function () {
     $llm = new FakeLlm();
     $llm->queueText(
