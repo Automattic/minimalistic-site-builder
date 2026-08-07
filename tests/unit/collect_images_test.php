@@ -298,3 +298,100 @@ test('collect-images keeps subject pipes and parses the three trailing fields', 
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('collect-images removes an image whose asset no placeholder declares (BIGR-787)', function () {
+    [$project, $tmp] = collect_fixture();
+    // The mangled-marker shape observed in the wild: a well-formed theme: src
+    // whose alt is not a parseable AI_IMAGE spec — nothing will generate it.
+    $project->writeText('theme/parts/page-home--visit.html',
+        '<!-- wp:group --><div class="wp-block-group">'
+        . '<!-- wp:image --><figure class="wp-block-image"><img src="theme:./assets/hero-dawn.jpg" '
+        . 'alt="AI_IMAGE: A misty valley at dawn | wide feature | photorealistic | landscape"/></figure><!-- /wp:image -->'
+        . '<!-- wp:image --><figure class="wp-block-image"><img src="theme:./assets/bakery-storefront.jpg" '
+        . 'alt="AI_IMATE_PLACEHOLDER"/></figure><!-- /wp:image -->'
+        . '<!-- wp:paragraph --><p>Copy that stays.</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->'
+    );
+
+    (new CollectImagesStep())->run($project);
+
+    $images = $project->readJson('images.json');
+    assert_eq(1, count($images));
+    assert_eq('hero-dawn.jpg', $images[0]['filename']);
+
+    $markup = $project->readText('theme/parts/page-home--visit.html');
+    assert_true(!str_contains($markup, 'bakery-storefront'), 'undeclared asset reference removed');
+    assert_true(!str_contains($markup, 'AI_IMATE_PLACEHOLDER'), 'mangled alt never ships');
+    assert_contains('hero-dawn.jpg', $markup);
+    assert_contains('Copy that stays.', $markup);
+
+    $warnings = $project->readJson('warnings.json');
+    $joined = implode(' ', $warnings['collect-images'] ?? []);
+    assert_contains('bakery-storefront.jpg', $joined);
+    assert_contains('delivered removed', $joined);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images keeps a cover but strips its undeclared image layer', function () {
+    [$project, $tmp] = collect_fixture();
+    $project->writeText('theme/parts/page-home--closing.html',
+        '<!-- wp:cover {"url":"theme:./assets/ghost-band.jpg","dimRatio":50} -->'
+        . '<div class="wp-block-cover"><img class="wp-block-cover__image-background" '
+        . 'src="theme:./assets/ghost-band.jpg" alt="AI IMAGE broken"/>'
+        . '<div class="wp-block-cover__inner-container">'
+        . '<!-- wp:heading --><h2 class="wp-block-heading">Retained headline</h2><!-- /wp:heading -->'
+        . '</div></div><!-- /wp:cover -->'
+    );
+
+    (new CollectImagesStep())->run($project);
+
+    $markup = $project->readText('theme/parts/page-home--closing.html');
+    assert_true(!str_contains($markup, 'ghost-band.jpg'), 'undeclared cover asset gone');
+    assert_contains('Retained headline', $markup);
+    assert_contains('wp:cover', $markup);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images leaves declared cross-part references alone', function () {
+    [$project, $tmp] = collect_fixture();
+    $project->writeText('theme/parts/header.html',
+        '<img src="theme:./assets/logo.jpg" alt="AI_IMAGE: A clean mark | site logo | minimalist | square"/>'
+    );
+    // A bare rendered reference to an asset another part declares is legal.
+    $project->writeText('theme/parts/footer.html',
+        '<!-- wp:image --><figure class="wp-block-image"><img src="theme:./assets/logo.jpg" alt=""/></figure><!-- /wp:image -->'
+    );
+
+    (new CollectImagesStep())->run($project);
+
+    assert_contains('logo.jpg', $project->readText('theme/parts/footer.html'));
+    assert_true(!$project->exists('warnings.json'), 'no warning for a declared cross-part reference');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images takes an orphaned caption with the undeclared image', function () {
+    [$project, $tmp] = collect_fixture();
+    $project->writeText('theme/parts/page-home--visit.html',
+        '<!-- wp:group --><div class="wp-block-group">'
+        . '<!-- wp:image --><figure class="wp-block-image"><img src="theme:./assets/ghost.jpg" '
+        . 'alt="AI_IMATE_PLACEHOLDER"/></figure><!-- /wp:image -->'
+        . "\n\n"
+        . '<!-- wp:paragraph {"fontSize":"caption"} -->'
+        . '<p class="has-caption-font-size">The corner shopfront, mid-morning.</p>'
+        . '<!-- /wp:paragraph -->'
+        . '<!-- wp:paragraph --><p>Ordinary prose stays.</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->'
+    );
+
+    (new CollectImagesStep())->run($project);
+
+    $markup = $project->readText('theme/parts/page-home--visit.html');
+    assert_true(!str_contains($markup, 'ghost.jpg'), 'undeclared image removed');
+    assert_true(!str_contains($markup, 'corner shopfront'), 'caption removed with its image');
+    assert_contains('Ordinary prose stays.', $markup);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

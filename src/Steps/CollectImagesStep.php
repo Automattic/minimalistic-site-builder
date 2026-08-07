@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\GeminiImage;
+use Automattic\SiteBuild\MediaReferenceRemoval;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Step;
@@ -112,8 +113,62 @@ final class CollectImagesStep implements Step
             }
         }
 
+        // A part can reference a theme asset that no placeholder declares —
+        // typically a mangled marker ("AI_IMATE_PLACEHOLDER") on an otherwise
+        // well-shaped theme: src (BIGR-787). Nothing will ever generate that
+        // file, so the reference would ship as a broken image with its raw alt
+        // visible. Degrade exactly like a failed generation: remove the owning
+        // media block where structurally safe, warn either way.
+        foreach ($this->themeHtmlFiles($project) as $rel) {
+            $content = $project->readText('theme/' . $rel);
+            $updated = $content;
+            foreach (self::unresolvableSources($updated, $byFilename) as $source) {
+                $candidate = MediaReferenceRemoval::removeSource($updated, $source);
+                if (MediaReferenceRemoval::position($candidate, $source) !== null) {
+                    $warnings[] = "file='theme/{$rel}'; asset=" . Warnings::value($source)
+                        . '; delivered retained in unsafe markup; disposition=no placeholder declares '
+                        . 'this asset and no safe media isolation was available';
+                    continue;
+                }
+                $updated = $candidate;
+                $warnings[] = "file='theme/{$rel}'; asset=" . Warnings::value($source)
+                    . '; delivered removed; disposition=referenced theme asset has no AI_IMAGE '
+                    . 'placeholder (malformed or missing spec), so nothing would ever generate it; '
+                    . 'its media block was removed instead of shipping a broken image';
+            }
+            if ($updated !== $content) {
+                $project->writeText('theme/' . $rel, $updated);
+            }
+        }
+
         $project->writeJson('images.json', array_values($byFilename));
         $project->addWarnings($this->id(), $warnings);
+    }
+
+    /**
+     * Theme asset sources referenced in this markup that no collected
+     * placeholder declares — the set nothing will ever generate.
+     *
+     * @param array<string,array<string,mixed>> $byFilename collected specs
+     * @return list<string> unique "theme:./assets/<file>" sources
+     */
+    public static function unresolvableSources(string $content, array $byFilename): array
+    {
+        if (!preg_match_all(
+            '/theme:\.\/assets\/([a-z0-9-]+\.(?:jpe?g|png))/i',
+            $content,
+            $matches,
+            PREG_SET_ORDER
+        )) {
+            return [];
+        }
+        $sources = [];
+        foreach ($matches as $match) {
+            if (!isset($byFilename[$match[1]])) {
+                $sources[$match[0]] = true;
+            }
+        }
+        return array_keys($sources);
     }
 
     /** Theme-relative paths of every markup file that may hold image placeholders. */
