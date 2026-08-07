@@ -975,3 +975,53 @@ test('generate-images re-run copies an already-completed content image to the pl
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('generate-images synthesizes the stage-texture spec painted after collect-images (BIGR-776)', function () {
+    // The default graph order: collect-images writes images.json, THEN
+    // HeaderHeroStep paints the canonical texture path onto the header and
+    // hero roots. The generator must synthesize the code-owned spec for the
+    // reference it finds in markup, generate the tile, and rewrite the URL.
+    [$project, $tmp] = generate_fixture();
+    $texturedHeader = '<!-- wp:group {"backgroundColor":"base","style":{"background":{'
+        . '"backgroundImage":{"url":"theme:./assets/hero-backdrop-texture.jpg"},'
+        . '"backgroundSize":"420px","backgroundRepeat":"repeat","backgroundAttachment":"fixed"}},'
+        . '"layout":{"type":"constrained"}} -->' . "\n"
+        . '<div class="wp-block-group has-base-background-color has-background" '
+        . 'style="background-image:url(theme:./assets/hero-backdrop-texture.jpg);background-position:50% 50%;'
+        . 'background-repeat:repeat;background-size:420px;background-attachment:fixed">'
+        . '<!-- wp:site-title /--></div>' . "\n" . '<!-- /wp:group -->';
+    $project->writeText('theme/parts/header.html', $texturedHeader);
+
+    $images = new FakeImageClient('JPEGDATA');
+    (new GenerateImagesStep($images))->run($project);
+
+    assert_true(
+        $project->exists('theme/assets/hero-backdrop-texture.jpg'),
+        'the texture tile is generated from the synthesized spec',
+    );
+    $specs = $project->readJson('images.json');
+    $texture = array_values(array_filter(
+        $specs,
+        static fn (array $spec): bool => ($spec['filename'] ?? '') === 'hero-backdrop-texture.jpg',
+    ));
+    assert_eq(1, count($texture), 'exactly one synthesized texture spec');
+    assert_eq('completed', $texture[0]['status']);
+    assert_eq(['parts/header.html'], $texture[0]['sources']);
+
+    $header = $project->readText('theme/parts/header.html');
+    assert_contains('/wp-content/themes/demo/assets/hero-backdrop-texture.jpg', $header);
+    assert_true(
+        !str_contains($header, 'theme:./assets/hero-backdrop-texture.jpg'),
+        'no unresolved texture placeholder remains in the header',
+    );
+
+    // A re-run with the spec now on file must not duplicate it.
+    (new GenerateImagesStep(new FakeImageClient('JPEGDATA')))->run($project);
+    $again = array_values(array_filter(
+        $project->readJson('images.json'),
+        static fn (array $spec): bool => ($spec['filename'] ?? '') === 'hero-backdrop-texture.jpg',
+    ));
+    assert_eq(1, count($again), 'backstop is idempotent');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

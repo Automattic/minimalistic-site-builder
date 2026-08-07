@@ -125,23 +125,38 @@ final class CollectImagesStep implements Step
         // prompt-composition time like every other asset.
         $textureFilename = basename(GeneratedMarkup::STAGE_TEXTURE_ASSET);
         if ($textureSources !== [] && !isset($byFilename[$textureFilename])) {
-            $byFilename[$textureFilename] = [
-                'filename' => $textureFilename,
-                'src' => GeneratedMarkup::STAGE_TEXTURE_ASSET,
-                'subject' => 'A seamless repeating tone-on-tone surface texture — subtle paper grain, plaster,'
-                    . ' linen, or stone — extremely low contrast, near-uniform tone, no objects, no lettering,'
-                    . ' no distinct shapes, no vignette',
-                'pageContext' => 'tiled page-canvas texture running behind the site header and the hero copy;'
-                    . ' it must stay quiet enough that readable text sits directly on it',
-                'style' => 'photorealistic',
-                'aspectRatio' => 'square',
-                'sources' => $textureSources,
-                'status' => 'pending',
-            ];
+            $byFilename[$textureFilename] = self::stageTextureSpec($textureSources);
         }
 
         $project->writeJson('images.json', array_values($byFilename));
         $project->addWarnings($this->id(), $warnings);
+    }
+
+    /**
+     * The code-owned generation spec for the textured stage canvas (BIGR-776).
+     * Shared with GenerateImagesStep's backstop: HeaderHeroStep paints the
+     * canonical texture path AFTER this step has written images.json on a
+     * first full-pipeline run, so the generator synthesizes the same spec
+     * when it finds the reference in markup with no spec on file.
+     *
+     * @param list<string> $sources theme-relative markup paths referencing the texture
+     * @return array<string,mixed>
+     */
+    public static function stageTextureSpec(array $sources): array
+    {
+        return [
+            'filename' => basename(GeneratedMarkup::STAGE_TEXTURE_ASSET),
+            'src' => GeneratedMarkup::STAGE_TEXTURE_ASSET,
+            'subject' => 'A seamless repeating tone-on-tone surface texture — subtle paper grain, plaster,'
+                . ' linen, or stone — extremely low contrast, near-uniform tone, no objects, no lettering,'
+                . ' no distinct shapes, no vignette',
+            'pageContext' => 'tiled page-canvas texture running behind the site header and the hero copy;'
+                . ' it must stay quiet enough that readable text sits directly on it',
+            'style' => 'photorealistic',
+            'aspectRatio' => 'square',
+            'sources' => $sources,
+            'status' => 'pending',
+        ];
     }
 
     /** Theme-relative paths of every markup file that may hold image placeholders. */

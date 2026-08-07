@@ -17,6 +17,7 @@ use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\ThemeValidator;
+use Automattic\SiteBuild\Units\GeneratedMarkup;
 
 /**
  * Step (opt-in, networked): generate the images collected by CollectImagesStep
@@ -119,6 +120,34 @@ final class GenerateImagesStep implements Step
         }
 
         $specs = $project->readJson('images.json');
+
+        // Textured stage canvas backstop (BIGR-776): in the default graph
+        // HeaderHeroStep paints the canonical texture path onto the header
+        // and hero roots AFTER collect-images has written images.json, so a
+        // first full-pipeline run reaches this step with the reference in
+        // markup but no spec on file. Synthesize the same code-owned spec so
+        // the tile actually generates; a later re-collect owns it as usual.
+        $textureFilename = basename(GeneratedMarkup::STAGE_TEXTURE_ASSET);
+        $hasTextureSpec = false;
+        foreach ($specs as $spec) {
+            if (($spec['filename'] ?? null) === $textureFilename) {
+                $hasTextureSpec = true;
+                break;
+            }
+        }
+        if (!$hasTextureSpec) {
+            $textureSources = [];
+            foreach ($project->themeFiles() as $rel) {
+                if (str_contains($project->readText('theme/' . $rel), GeneratedMarkup::STAGE_TEXTURE_ASSET)) {
+                    $textureSources[] = $rel;
+                }
+            }
+            if ($textureSources !== []) {
+                $specs[] = CollectImagesStep::stageTextureSpec($textureSources);
+                $project->writeJson('images.json', $specs);
+            }
+        }
+
         if ($specs === []) {
             $this->markComplete($project);
             return;
