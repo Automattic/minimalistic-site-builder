@@ -423,6 +423,61 @@ test('sections persists the deterministic plan repairs back into pages.json', fu
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('sections persists ambiguous list-thumb warnings and delivers that row unchanged', function () {
+    [$project, $tmp] = sections_fixture();
+    $ambiguousRow = trim(<<<'HTML'
+<!-- wp:columns {"className":"list-thumb-flush"} -->
+<div class="wp-block-columns list-thumb-flush">
+<!-- wp:column {"width":"18%"} -->
+<div class="wp-block-column" style="flex-basis:18%">
+<!-- wp:image {"className":"card-media-thumb"} -->
+<figure class="wp-block-image card-media-thumb"><img src="thumb.jpg" alt=""/></figure>
+<!-- /wp:image -->
+</div>
+<!-- /wp:column -->
+<!-- wp:column {"width":"72%"} -->
+<div class="wp-block-column" style="flex-basis:72%">
+<!-- wp:heading {"level":3} --><h3 class="wp-block-heading">Row title</h3><!-- /wp:heading -->
+<!-- wp:paragraph --><p>One concise line.</p><!-- /wp:paragraph -->
+</div>
+<!-- /wp:column -->
+<!-- wp:column {"width":"10%"} -->
+<div class="wp-block-column" style="flex-basis:10%">
+<!-- wp:paragraph --><p>Unexpected.</p><!-- /wp:paragraph -->
+</div>
+<!-- /wp:column -->
+</div>
+<!-- /wp:columns -->
+HTML);
+
+    $llm = new FakeLlm();
+    $llm->queueText('OK');
+    $llm->queueText('<!-- wp:group --><!-- wp:site-title /--><!-- /wp:group -->');
+    $llm->queueText('<!-- wp:group --><!-- wp:paragraph --><p>Footer</p><!-- /wp:paragraph --><!-- /wp:group -->');
+    $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
+    $llm->queueText($ambiguousRow);
+
+    (new SectionsStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    assert_eq(
+        $ambiguousRow . "\n",
+        $project->readText('theme/parts/page-home--about.html'),
+        'the ambiguous row is delivered byte-for-byte apart from the project file terminator',
+    );
+    assert_contains('<h2>Hero</h2>', $project->readText('theme/parts/page-home--hero.html'));
+    $warnings = implode("\n", $project->readJson('warnings.json')['sections'] ?? []);
+    foreach ([
+        "file='theme/parts/page-home--about.html'",
+        "block='wp:columns[0]'",
+        '3 direct columns and 3 direct blocks instead of exactly two columns',
+        'delivered=unchanged',
+        'disposition=',
+    ] as $context) {
+        assert_contains($context, $warnings);
+    }
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('sections degrades a permanent generation batch failure at each unit boundary', function () {
     [$project, $tmp] = sections_fixture();
     $pages = $project->readJson('pages.json');

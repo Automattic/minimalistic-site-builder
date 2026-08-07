@@ -2,6 +2,8 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\BlockSerializer\Json\JsonObject;
+use Automattic\SiteBuild\BlockSerializer\Json\JsonValue;
 
 test('parse builds the block tree with attributes', function () {
     $doc = BlockMarkup::parse(
@@ -238,6 +240,24 @@ test('attribute edits preserve sourced empty object and empty array identity', f
     $attrs = $doc->attrs(0);
     $attrs['tagName'] = 'main';
     $doc->setAttrs(0, $attrs);
+
+    $out = $doc->render();
+    assert_contains('"metadata":{}', $out);
+    assert_contains('"allowedBlocks":[]', $out);
+    assert_contains('"numericObject":{"0":"zero"}', $out);
+    assert_contains('"tagName":"main"', $out);
+});
+
+test('typed attribute edits preserve JSON object and array identity', function () {
+    $src = '<!-- wp:group {"metadata":{},"allowedBlocks":[],"numericObject":{"0":"zero"},'
+        . '"tagName":"section"} -->'
+        . '<section class="wp-block-group"></section><!-- /wp:group -->';
+    $doc = BlockMarkup::parse($src);
+    $attrs = JsonValue::parse(
+        '{"metadata":{},"allowedBlocks":[],"numericObject":{"0":"zero"},"tagName":"main"}',
+    );
+    assert_true($attrs instanceof JsonObject);
+    $doc->setTypedAttrs(0, $attrs);
 
     $out = $doc->render();
     assert_contains('"metadata":{}', $out);
