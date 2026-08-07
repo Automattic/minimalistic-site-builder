@@ -167,23 +167,43 @@ final class CollectImagesStep implements Step
      * when it finds the reference in markup with no spec on file.
      *
      * @param list<string> $sources theme-relative markup paths referencing the texture
+     * @param int $attempt 0 for the first generation; retries pass 1, 2, … to
+     *        rotate to the next material, since both the recitation filter and
+     *        the busyness gate reject stochastically per material
      * @return array<string,mixed>
      */
-    public static function stageTextureSpec(array $sources, ?string $targetColor = null): array
+    public static function stageTextureSpec(array $sources, ?string $targetColor = null, int $attempt = 0): array
     {
         $targetColor = is_string($targetColor) && preg_match('/^#[0-9a-f]{6}$/i', $targetColor) === 1
             ? strtoupper($targetColor)
             : null;
         $tone = $targetColor === null
-            ? 'Keep the whole tile within one narrow, pale neutral tonal range.'
-            : "Use {$targetColor}, the actual delivered hero surface color, as the dominant and average visible tone; "
-                . 'deviate from it only enough for extremely fine material grain.';
+            ? 'a single quiet pale neutral tone'
+            : "a single quiet tone of {$targetColor}, the actual delivered hero surface color";
+        // One concrete material per site, not a menu, and no stock-texture
+        // vocabulary: a "seamless tone-on-tone surface texture" prompt is
+        // stock-photo title language and trips the image model's
+        // IMAGE_RECITATION filter, while a specific flat-lit head-on surface
+        // generates reliably and still passes the busyness gate.
+        // (Macro/close-up wording is deliberately absent too — it invites
+        // deep relief and oblique shadows that fail the gate.) The pick keys
+        // on the delivered surface color so reruns stay stable.
+        $materials = [
+            ['handmade cold-pressed paper', 'flattened fiber grain'],
+            ['finely troweled lime plaster', 'fine trowel marks'],
+            ['tightly woven natural linen', 'flat even weave'],
+            ['smoothly honed limestone', 'soft mineral speckle'],
+        ];
+        [$material, $grain] = $materials[(crc32($targetColor ?? '') + $attempt) % count($materials)];
         return [
             'filename' => basename(GeneratedMarkup::STAGE_TEXTURE_ASSET),
             'src' => GeneratedMarkup::STAGE_TEXTURE_ASSET,
-            'subject' => 'A seamless repeating tone-on-tone surface texture — subtle paper grain, plaster,'
-                . ' linen, or stone — extremely low contrast, near-uniform tone, no objects, no lettering,'
-                . " no distinct shapes, no vignette. {$tone}",
+            'subject' => "A flat expanse of {$material} photographed head-on in perfectly even"
+                . ' diffuse light, one continuous unbroken surface filling the entire frame and'
+                . " continuing uniformly past every edge. The whole surface is {$tone}, its"
+                . " {$grain} soft but clearly visible: gentle low-contrast material grain that"
+                . ' readable text can sit directly on. No deep relief, no cast shadows, no'
+                . ' objects, no lettering, no folds, no cracks, no stains, no vignette.',
             'pageContext' => 'tiled page-canvas texture running behind the site header and the hero copy;'
                 . ' it must stay quiet enough that readable text sits directly on it',
             'style' => 'photorealistic',

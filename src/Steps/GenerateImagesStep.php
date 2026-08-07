@@ -50,6 +50,14 @@ final class GenerateImagesStep implements Step
     /** Written only once this step has completed all generation and rewrites. */
     public const COMPLETION_ARTIFACT = 'images.generated.json';
 
+    /**
+     * Total generation attempts for the stage texture (the batch attempt
+     * plus retryStageTexture's material rotations). Probed per-material
+     * delivery is roughly 50-85%, so three rotated attempts put combined
+     * delivery in the high nineties without unbounded API spend.
+     */
+    private const STAGE_TEXTURE_ATTEMPTS = 3;
+
     /** Web-artifact wording is a design-comp cue, not subject matter. */
     private const WEB_ARTIFACT_CONTEXT = '/\b(?:web[- ]?sites?|web[- ]?pages?|home[- ]?pages?'
         . '|landing[- ]?(?:pages?|sites?)|(?:one|single)[- ]page\s+sites?'
@@ -253,10 +261,11 @@ final class GenerateImagesStep implements Step
                             $this->assertDeliveryMime($bytes, $mime);
                             self::assertStageTextureDelivery($spec, $bytes);
                         } catch (\Throwable $error) {
+                            // The retry ladder regenerates failed textures and
+                            // warns only its own final failure.
                             $specs[$i]['status'] = 'failed';
                             $specs[$i]['error'] = $error->getMessage();
                             unset($specs[$i]['url']);
-                            $this->warnFailure($project, $specs[$i], $i, $mime, $error->getMessage());
                             continue;
                         }
                     }
@@ -294,12 +303,21 @@ final class GenerateImagesStep implements Step
             // else finishes and persists immediately, so progress survives an
             // interruption while the rest of the batch is still generating.
             $this->drainBatch($batchSpecs, function (int $pos, array $result) use (
-                $project, &$specs, $indices, $batchSpecs, $imageGrade, &$resolved, &$repairs
+                $project, &$specs, $indices, $batchSpecs, $imageGrade, &$resolved, &$repairs, $textureSources
             ): void {
                 $i = $indices[$pos];
                 $filename = (string) $specs[$i]['filename'];
+                $isStageTexture = CollectImagesStep::isStageTextureSpec($specs[$i]);
 
-                if ($this->llm !== null && !($result['ok'] ?? false) && ($result['filtered'] ?? false)) {
+                // The stage texture's prompt is code-owned and its failures
+                // (recitation filter, busyness gate) are stochastic per
+                // material, so it gets the material-rotation retry ladder
+                // below instead of an LLM subject rewrite — and only the
+                // ladder's final failure is warned.
+                if (
+                    $this->llm !== null && !($result['ok'] ?? false) && ($result['filtered'] ?? false)
+                    && !$isStageTexture
+                ) {
                     $error = (string) ($result['error'] ?? 'safety-filtered');
                     Narrator::write("    FILTERED {$filename}: {$error}\n");
                     ImageLogger::log($filename, $this->requestLog($specs[$i], $batchSpecs[$pos], $imageGrade), [], $error);
@@ -307,7 +325,16 @@ final class GenerateImagesStep implements Step
                     return;
                 }
 
-                $this->finish($project, $specs, $i, $batchSpecs[$pos], $result, $resolved, $imageGrade);
+                $this->finish(
+                    $project,
+                    $specs,
+                    $i,
+                    $batchSpecs[$pos],
+                    $result,
+                    $resolved,
+                    $imageGrade,
+                    warnOnFailure: !($isStageTexture && $textureSources !== []),
+                );
                 $project->writeJsonAtomic('images.json', $specs);
             });
 
@@ -315,6 +342,8 @@ final class GenerateImagesStep implements Step
                 $this->repairFiltered($project, $specs, $repairs, $siteContext, $imageGrade, $resolved);
             }
         }
+
+        $this->retryStageTexture($project, $specs, $textureSources, $siteContext, $imageGrade, $resolved);
 
         // A failed asset reference is dead UI. Remove only the safe media block
         // that contains each failed source (or a bare matching img tag), leaving
@@ -1215,21 +1244,38 @@ final class GenerateImagesStep implements Step
                 if ($inherited !== null) {
                     $colors[$inherited] = true;
                 }
-                $subtree = [$index];
-                for ($cursor = 0; $cursor < count($subtree); $cursor++) {
-                    array_push($subtree, ...$document->children($subtree[$cursor]));
-                }
-                foreach ($subtree as $candidate) {
+                // Collect only the text that actually sits ON the stage
+                // texture. A descendant painting its own opaque surface —
+                // a button, chip or nested banded group — hosts its text on
+                // that surface, so it and its whole subtree are skipped:
+                // demanding the light texture contrast against, say, a cream
+                // button label on a dark button makes every texture for the
+                // palette impossible. The textured root itself always carries
+                // the background being replaced and is never pruned.
+                $stack = [$index];
+                while ($stack !== []) {
+                    $candidate = array_pop($stack);
                     $candidateAttrs = $document->attrs($candidate);
-                    if (!is_array($candidateAttrs)) {
-                        continue;
-                    }
+                    $candidateAttrs = is_array($candidateAttrs) ? $candidateAttrs : [];
                     $candidateStyle = is_array($candidateAttrs['style'] ?? null)
                         ? $candidateAttrs['style']
                         : [];
                     $candidateColor = is_array($candidateStyle['color'] ?? null)
                         ? $candidateStyle['color']
                         : [];
+                    $candidateBackground = is_array($candidateStyle['background'] ?? null)
+                        ? $candidateStyle['background']
+                        : [];
+                    if ($candidate !== $index && (
+                        ($candidateAttrs['backgroundColor'] ?? null) !== null
+                        || ($candidateAttrs['gradient'] ?? null) !== null
+                        || ($candidateColor['background'] ?? null) !== null
+                        || ($candidateColor['gradient'] ?? null) !== null
+                        || ($candidateBackground['backgroundImage'] ?? null) !== null
+                    )) {
+                        continue;
+                    }
+                    array_push($stack, ...$document->children($candidate));
                     $elements = is_array($candidateStyle['elements'] ?? null)
                         ? $candidateStyle['elements']
                         : [];
@@ -1270,6 +1316,184 @@ final class GenerateImagesStep implements Step
     }
 
     /**
+     * Bounded regeneration ladder for a failed stage texture (BIGR-776).
+     * Both failure modes are stochastic per material — the model's
+     * IMAGE_RECITATION filter rejects the most stock-texture-like subjects,
+     * and the busyness gate rejects an occasional loud render — so each
+     * retry rotates the code-owned subject to the next material instead of
+     * resubmitting the same prompt or rewriting it with an LLM. Warnings
+     * stay quiet until the ladder's last attempt: earlier failures are
+     * ImageLogger-logged but a delivered texture must not leave a stale
+     * "texture rejected" warning behind.
+     *
+     * @param array<int,array<string,mixed>> $specs images.json rows, mutated in place
+     * @param list<string> $textureSources markup paths carrying the canonical texture contract
+     * @param array<string,string> $resolved theme: src => served URL, mutated in place
+     */
+    private function retryStageTexture(
+        Project $project,
+        array &$specs,
+        array $textureSources,
+        string $siteContext,
+        string $imageGrade,
+        array &$resolved
+    ): void {
+        if ($textureSources === []) {
+            return;
+        }
+        foreach ($specs as $i => $spec) {
+            if (!is_array($spec) || !CollectImagesStep::isStageTextureSpec($spec)) {
+                continue;
+            }
+            if (($spec['status'] ?? '') !== 'failed') {
+                return;
+            }
+            $targetColor = is_string($spec['targetColor'] ?? null) ? $spec['targetColor'] : null;
+            if (ContrastMath::hexToRgb((string) $targetColor) === null) {
+                return; // already warned as unresolvable; no retry can fix it
+            }
+            $sources = array_values(array_filter(
+                array_map('strval', (array) ($spec['sources'] ?? [])),
+                static fn (string $value): bool => $value !== '',
+            ));
+            for ($attempt = 1; $attempt < self::STAGE_TEXTURE_ATTEMPTS; $attempt++) {
+                $rotated = CollectImagesStep::stageTextureSpec(
+                    $sources === [] ? $textureSources : $sources,
+                    $targetColor,
+                    $attempt,
+                );
+                $specs[$i]['subject'] = $rotated['subject'];
+                $specs[$i]['status'] = 'pending';
+                unset($specs[$i]['error']);
+                Narrator::write(sprintf(
+                    "    retrying stage texture (attempt %d of %d)…\n",
+                    $attempt + 1,
+                    self::STAGE_TEXTURE_ATTEMPTS,
+                ));
+                $genSpec = self::generationSpec($specs[$i], $siteContext, $imageGrade);
+                $this->drainBatch([$genSpec], function (int $pos, array $result) use (
+                    $project, &$specs, $i, $genSpec, &$resolved, $imageGrade
+                ): void {
+                    $this->finish(
+                        $project,
+                        $specs,
+                        $i,
+                        $genSpec,
+                        $result,
+                        $resolved,
+                        $imageGrade,
+                        warnOnFailure: false,
+                    );
+                    $project->writeJsonAtomic('images.json', $specs);
+                });
+                if (($specs[$i]['status'] ?? '') === 'completed') {
+                    return;
+                }
+            }
+            $this->deliverSynthesizedStageTexture($project, $specs, $i, $targetColor, $resolved);
+            return;
+        }
+    }
+
+    /**
+     * Last resort after every model generation attempt failed: synthesize
+     * the tile procedurally — the delivered surface color carrying faint
+     * attenuated grain — so a committed texture blueprint still ships when
+     * the image model's recitation filter or output quality won't cooperate
+     * (both are stochastic; see retryStageTexture). The synthesized bytes
+     * face the SAME delivery gate as generated ones; only if they too are
+     * rejected does the texture degrade to the solid-cleanup path, warned
+     * with the last recorded failure.
+     *
+     * @param array<int,array<string,mixed>> $specs images.json rows, mutated in place
+     * @param array<string,string> $resolved theme: src => served URL, mutated in place
+     */
+    private function deliverSynthesizedStageTexture(
+        Project $project,
+        array &$specs,
+        int $i,
+        string $targetColor,
+        array &$resolved
+    ): void {
+        $filename = (string) ($specs[$i]['filename'] ?? '');
+        $lastError = (string) ($specs[$i]['error'] ?? 'generation failed');
+        $logRequest = [
+            'model'             => 'code-synthesized',
+            'prompt'            => "procedural tone-on-tone tile at {$targetColor}",
+            'aspect_ratio'      => '1:1',
+            'sample_image_size' => '',
+            'mime'              => 'image/jpeg',
+            'subject'           => (string) ($specs[$i]['subject'] ?? ''),
+            'page_context'      => '',
+            'style'             => '',
+            'image_grade'       => '',
+        ];
+        try {
+            $bytes = self::synthesizeStageTextureBytes($targetColor);
+            $this->assertDeliveryMime($bytes, 'image/jpeg');
+            self::assertStageTextureDelivery($specs[$i], $bytes);
+        } catch (\Throwable $error) {
+            Narrator::write("    FAILED {$filename}: synthesized fallback rejected: {$error->getMessage()}\n");
+            ImageLogger::log($filename, $logRequest, [], $error->getMessage());
+            $this->warnFailure($project, $specs[$i], $i, 'image/jpeg', $lastError);
+            return;
+        }
+        $project->writeText('theme/assets/' . $filename, $bytes);
+        $specs[$i]['status'] = 'completed';
+        $specs[$i]['url']    = $this->servedUrl($project, $filename);
+        unset($specs[$i]['error']);
+        $resolved[$specs[$i]['src']] = $specs[$i]['url'];
+        Narrator::write("    synthesized {$filename} procedurally after generation attempts failed\n");
+        ImageLogger::log($filename, $logRequest, [
+            'path'  => 'theme/assets/' . $filename,
+            'bytes' => strlen($bytes),
+        ]);
+        $project->addWarnings($this->id(), [
+            "file='designDirection.json'; path=\"hero_blueprint.stage_backdrop\"; "
+                . "block='theme/assets/{$filename}'; authored=\"texture\"; "
+                . 'delivered="code-synthesized tone-on-tone tile"; '
+                . 'disposition=every model generation attempt failed (last: ' . $lastError . '); '
+                . 'the procedural fallback passed the same stage-texture delivery gate',
+        ]);
+        $project->writeJsonAtomic('images.json', $specs);
+    }
+
+    /**
+     * A whisper-quiet procedural tile: the target surface color with faint
+     * blurred grain, contrast-compressed hard toward the target so every
+     * delivery-gate bound (drift, spread, chroma, foreground contrast where
+     * satisfiable) holds by construction.
+     */
+    private static function synthesizeStageTextureBytes(string $targetColor): string
+    {
+        if (!extension_loaded('imagick')) {
+            throw new \RuntimeException('procedural stage texture needs Imagick');
+        }
+        $target = ContrastMath::hexToRgb($targetColor);
+        if ($target === null) {
+            throw new \RuntimeException('procedural stage texture needs a resolvable target color');
+        }
+        $image = new \Imagick();
+        $image->newImage(512, 512, new \ImagickPixel($targetColor));
+        $image->addNoiseImage(\Imagick::NOISE_GAUSSIAN);
+        $image->blurImage(0, 0.7);
+        $quantum = (float) (\Imagick::getQuantumRange()['quantumRangeLong'] ?? 65535);
+        $keep = 0.20; // grain amplitude retained around the target tone
+        $channels = [\Imagick::CHANNEL_RED, \Imagick::CHANNEL_GREEN, \Imagick::CHANNEL_BLUE];
+        foreach ($channels as $c => $channel) {
+            $image->evaluateImage(\Imagick::EVALUATE_MULTIPLY, $keep, $channel);
+            $image->evaluateImage(
+                \Imagick::EVALUATE_ADD,
+                (float) $target[$c] / 255.0 * $quantum * (1.0 - $keep),
+                $channel,
+            );
+        }
+        $image->setImageFormat('jpeg');
+        $image->setImageCompressionQuality(92);
+        return (string) $image->getImageBlob();
+    }
+
+    /**
      * Turn one images.json row into the generation spec the client sends:
      * the composed prompt plus the structured parameters. $subject overrides
      * the row's subject (the repair pass regenerates with a rewritten one).
@@ -1285,10 +1509,16 @@ final class GenerateImagesStep implements Step
         // alpha), and key that background out after generation.
         $mime = GeminiImage::mimeForFilename((string) ($spec['filename'] ?? ''));
         $isStageTexture = CollectImagesStep::isStageTextureSpec($spec);
+        // The stage texture's subject is its complete render instruction. The
+        // page/site context and grade all describe pictorial SCENES — the
+        // composed guidance renders as "editorial photograph … negative
+        // space", which fights the flat tone-on-tone tile and trips the
+        // busyness gate (assertStageTextureDelivery) — so none of them are
+        // sent for the texture spec.
         return [
             'prompt'            => ImagePromptComposer::compose(
                 $subject ?? (string) ($spec['subject'] ?? ''),
-                (string) ($spec['pageContext'] ?? ''),
+                $isStageTexture ? '' : (string) ($spec['pageContext'] ?? ''),
                 (string) ($spec['style'] ?? ''),
                 $isStageTexture ? '' : $siteContext,
                 $isStageTexture ? '' : $imageGrade,
@@ -1323,7 +1553,9 @@ final class GenerateImagesStep implements Step
             'sample_image_size' => $genSpec['sample_image_size'],
             'mime'              => $genSpec['mime'],
             'subject'           => $subject ?? (string) ($spec['subject'] ?? ''),
-            'page_context'      => (string) ($spec['pageContext'] ?? ''),
+            'page_context'      => CollectImagesStep::isStageTextureSpec($spec)
+                ? ''
+                : (string) ($spec['pageContext'] ?? ''),
             'style'             => (string) ($spec['style'] ?? ''),
             'image_grade'       => CollectImagesStep::isStageTextureSpec($spec) ? '' : $imageGrade,
         ];
@@ -1348,7 +1580,8 @@ final class GenerateImagesStep implements Step
         array $result,
         array &$resolved,
         string $imageGrade,
-        ?string $subject = null
+        ?string $subject = null,
+        bool $warnOnFailure = true
     ): void {
         $filename = (string) $specs[$i]['filename'];
         $logRequest = $this->requestLog($specs[$i], $genSpec, $imageGrade, $subject);
@@ -1363,6 +1596,7 @@ final class GenerateImagesStep implements Step
             $bytes = (string) $result['bytes'];
             $this->assertDeliveryMime($bytes, $genSpec['mime']);
             if (CollectImagesStep::isStageTextureSpec($specs[$i])) {
+                $bytes = self::alignStageTextureTone($specs[$i], $bytes);
                 self::assertStageTextureDelivery($specs[$i], $bytes);
             }
             if ($genSpec['mime'] === 'image/png') {
@@ -1379,7 +1613,9 @@ final class GenerateImagesStep implements Step
             $specs[$i]['error']  = $e->getMessage();
             Narrator::write("    FAILED {$filename}: {$e->getMessage()}\n");
             ImageLogger::log($filename, $logRequest, [], $e->getMessage());
-            $this->warnFailure($project, $specs[$i], $i, $genSpec['mime'], $e->getMessage());
+            if ($warnOnFailure) {
+                $this->warnFailure($project, $specs[$i], $i, $genSpec['mime'], $e->getMessage());
+            }
             return;
         }
 
@@ -1551,6 +1787,61 @@ final class GenerateImagesStep implements Step
     }
 
     /**
+     * Shift a generated stage tile's mean onto the delivered surface color
+     * before gating (BIGR-776). The image model reliably renders the texture
+     * CHARACTER but often lands the average tone a hair off the requested
+     * hex — near-miss drifts just past assertStageTextureDelivery's bound —
+     * and a uniform per-channel shift corrects exactly that without touching
+     * the grain. Corrections stay bounded: a mean further than 48/255 per
+     * channel means the model ignored the color request, and clipping a
+     * large shift could flatten real busyness past the gate, so those bytes
+     * are returned unchanged for the gate to judge as delivered. Any
+     * inspection problem also returns the original bytes — the gate remains
+     * the single authority on acceptance.
+     *
+     * @param array<string,mixed> $spec one images.json row
+     */
+    private static function alignStageTextureTone(array $spec, string $bytes): string
+    {
+        $target = ContrastMath::hexToRgb((string) ($spec['targetColor'] ?? ''));
+        if ($target === null || !extension_loaded('imagick')) {
+            return $bytes;
+        }
+        try {
+            $image = new \Imagick();
+            $image->readImageBlob($bytes);
+            $image->setIteratorIndex(0);
+            $image->transformImageColorspace(\Imagick::COLORSPACE_SRGB);
+            $quantum = (float) (\Imagick::getQuantumRange()['quantumRangeLong'] ?? 65535);
+            $channels = [\Imagick::CHANNEL_RED, \Imagick::CHANNEL_GREEN, \Imagick::CHANNEL_BLUE];
+            $deltas = [];
+            foreach ($channels as $c => $channel) {
+                $mean = $image->getImageChannelMean($channel);
+                if (!is_array($mean)) {
+                    return $bytes;
+                }
+                $deltas[$c] = (float) $target[$c] - 255.0 * (float) $mean['mean'] / $quantum;
+            }
+            $drift = max(array_map('abs', $deltas));
+            // Below the gate's own 20-channel drift bound the tile passes
+            // as-is: keep the model's exact bytes rather than re-encoding.
+            // Beyond 48 the model ignored the color request entirely.
+            if ($drift <= 20.0 || $drift > 48.0) {
+                return $bytes;
+            }
+            foreach ($channels as $c => $channel) {
+                $image->evaluateImage(\Imagick::EVALUATE_ADD, $deltas[$c] / 255.0 * $quantum, $channel);
+            }
+            $image->setImageFormat('jpeg');
+            $image->setImageCompressionQuality(92);
+            $aligned = (string) $image->getImageBlob();
+            return $aligned === '' ? $bytes : $aligned;
+        } catch (\Throwable) {
+            return $bytes;
+        }
+    }
+
+    /**
      * The texture is opaque paint directly beneath header/hero copy, so a
      * syntactically valid JPEG is not sufficient. Bound its palette drift,
      * tonal spread and contrast against the foregrounds actually delivered in
@@ -1607,7 +1898,11 @@ final class GenerateImagesStep implements Step
         if ($pixels === []) {
             throw new \RuntimeException('stage texture decoded with no inspectable pixels');
         }
-        if ($sourceChannelSpread > 0.28 || $sourceChannelDeviation > 0.08) {
+        // The full-res max-minus-min spread is a pre-filter for loud tiles;
+        // one dark fleck on an otherwise quiet surface spans it, so it sits
+        // a step wider than the thumbnail bounds below, which average flecks
+        // away and are the perceptual authority on busyness.
+        if ($sourceChannelSpread > 0.36 || $sourceChannelDeviation > 0.08) {
             throw new \RuntimeException(sprintf(
                 'stage texture source pixels are too visually busy (channel spread %.3f, deviation %.3f)',
                 $sourceChannelSpread,

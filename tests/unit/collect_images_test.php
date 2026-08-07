@@ -336,7 +336,7 @@ test('collect-images synthesizes the code-owned stage-texture spec from style re
     assert_eq('pending', $images[0]['status']);
     assert_eq(CollectImagesStep::STAGE_TEXTURE_PURPOSE, $images[0]['purpose']);
     assert_eq('#F4EFE7', $images[0]['targetColor']);
-    assert_contains('seamless', $images[0]['subject']);
+    assert_contains('photographed head-on', $images[0]['subject']);
     assert_contains('no lettering', $images[0]['subject']);
     assert_contains('#F4EFE7', $images[0]['subject']);
     assert_eq(['parts/header.html', 'parts/page-home--hero.html'], $images[0]['sources']);
@@ -378,7 +378,7 @@ test('collect-images keeps ordinary similarly named media independent from the c
     assert_eq(['parts/content.html'], $ordinary[0]['sources']);
     assert_eq(1, count($stage));
     assert_eq('stage_backdrop-texture.jpg', $stage[0]['filename']);
-    assert_contains('extremely low contrast', $stage[0]['subject']);
+    assert_contains('clearly visible', $stage[0]['subject']);
     assert_eq(['parts/header.html', 'parts/page-home--hero.html'], $stage[0]['sources']);
     $content = $project->readText('theme/parts/content.html');
     assert_contains($ordinary[0]['src'], $content, 'ordinary reserved-name media is deterministically renamed');
