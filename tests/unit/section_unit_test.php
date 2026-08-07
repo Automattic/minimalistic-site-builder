@@ -102,6 +102,32 @@ test('SectionUnit generates normalized markup from self-contained input', functi
     assert_eq($result->toArray(), json_decode((string) json_encode($result), true));
 });
 
+test('SectionUnit deterministically normalizes list-thumb delivery', function () {
+    $llm = new FakeLlm();
+    $llm->queueText(
+        '<!-- wp:columns {"className":"list-thumb-flush"} -->'
+        . '<div class="wp-block-columns list-thumb-flush">'
+        . '<!-- wp:column {"width":"18%"} --><div class="wp-block-column" style="flex-basis:18%">'
+        . '<!-- wp:image {"className":"card-media-thumb"} -->'
+        . '<figure class="wp-block-image card-media-thumb"><img src="thumb.jpg" alt=""/></figure>'
+        . '<!-- /wp:image --></div><!-- /wp:column -->'
+        . '<!-- wp:column {"width":"82%"} --><div class="wp-block-column" style="flex-basis:82%">'
+        . '<!-- wp:heading {"level":3} --><h3 class="wp-block-heading">Item</h3><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>One line.</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:column -->'
+        . '</div><!-- /wp:columns -->',
+    );
+    $unit = new SectionUnit($llm, new PromptRenderer(repo_path('prompts')));
+
+    $result = $unit->generate(section_unit_input());
+
+    assert_contains('"isStackedOnMobile":false', $result->markup);
+    assert_contains('is-not-stacked-on-mobile', $result->markup);
+    assert_contains('"blockGap":"var:preset|spacing|xs"', $result->markup);
+    assert_true(in_array('list-thumb-row-normalized', array_column($result->repairs, 'code'), true));
+    assert_eq([], $result->warnings);
+});
+
 test('SectionUnit rejects a response without block markup', function () {
     $llm = new FakeLlm();
     $llm->queueText('plain text');
@@ -176,6 +202,30 @@ test('SectionUnit documents the nested flush-card body contract', function () {
         $prompt,
         'framed geometry remains deterministic enough for the delivery contract to verify',
     );
+});
+
+test('SectionUnit documents the complete list-thumb delivery contract', function () {
+    $request = (new SectionUnit(
+        new FakeLlm(),
+        new PromptRenderer(repo_path('prompts')),
+    ))->request(section_unit_input());
+    $prompt = section_unit_request_text($request);
+
+    assert_contains(
+        'One `wp:columns` per row with `"isStackedOnMobile":false`',
+        $prompt,
+        'the dense two-column row is kept horizontal at Core\'s mobile breakpoint',
+    );
+    assert_contains(
+        '`isStackedOnMobile:false` is MANDATORY for BOTH flush and framed rows',
+        $prompt,
+    );
+    assert_contains(
+        '`"style":{"spacing":{"blockGap":"var:preset|spacing|xs"}}`',
+        $prompt,
+        'the text column owns a tight intra-row rhythm',
+    );
+    assert_contains('`"className":"list-thumb-flush"`', $prompt);
 });
 
 test('SectionUnit gives standalone requests the authoritative machine card style', function () {

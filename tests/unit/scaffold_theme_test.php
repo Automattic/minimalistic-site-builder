@@ -19,15 +19,83 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     assert_contains('Description: {{DESCRIPTION}}', $css);
 
     // The card-cropping class hooks the section recipes reference (they keep
-    // card sizing out of inline CSS, which fix-blocks would strip). Card media
-    // crops by aspect ratio, not fixed pixel heights, so proportions survive
-    // 2/3/4-column layouts (BIGR-771); only the tiny list thumb stays px-based.
+    // card sizing out of inline CSS, which fix-blocks would strip). All card
+    // media crops by aspect ratio, not fixed pixel heights, so proportions
+    // survive 2/3/4-column layouts and viewports (BIGR-771); the list thumb's
+    // fixed 110px height letterboxed its square image at whatever ratio the
+    // column width produced (BIGR-777).
     assert_contains('.card-media img', $css);
     assert_contains('.card-media img { aspect-ratio: 3 / 2; height: auto; }', $css);
     assert_contains('.card-media-tall img { aspect-ratio: 4 / 5; height: auto; }', $css);
-    assert_contains('.card-media-thumb img { height: 110px; }', $css);
+    assert_contains('.card-media-thumb img { aspect-ratio: 1 / 1; height: auto; }', $css);
+    assert_true(!str_contains($css, 'height: 110px'), 'fixed thumb crop height is gone');
     assert_true(!str_contains($css, 'height: 200px'), 'fixed card crop heights are gone');
     assert_true(!str_contains($css, 'height: 320px'), 'fixed tall crop heights are gone');
+
+    // Flush list-thumb rows: the zeroed row padding must beat generated inline
+    // padding, the row clips the bleeding thumb under its border radius, and
+    // the thumb releases its square crop to stretch to the text-driven row
+    // height (BIGR-777). The zeroed column gap keeps the text column's own
+    // left padding as the whole image-to-text distance — the default md gap
+    // would stack with it and push the text farther from its own thumb than
+    // the md rhythm separating rows. Column-level align-self pins the stretch
+    // against generator-authored verticalAlignment:center. The row also stays
+    // horizontal when generated isStackedOnMobile:false attributes drift.
+    assert_contains(
+        ".wp-block-columns.list-thumb-flush {\n"
+            . "    overflow: hidden;\n"
+            . "    padding: 0 !important;\n"
+            . "    align-items: stretch;\n"
+            . "    flex-wrap: nowrap !important;\n"
+            . "    gap: 0;\n"
+            . '}',
+        $css,
+    );
+    assert_contains(
+        ".wp-block-columns.list-thumb-flush > .wp-block-column {\n"
+            . "    align-self: stretch;\n"
+            . '}',
+        $css,
+    );
+    // Core forces ordinary columns to 100% at its <=781px stacking breakpoint.
+    // The behavior hook restores the recipe's 18/82 split even if the model
+    // omitted isStackedOnMobile:false.
+    assert_contains(
+        "@media (max-width: 781px) {\n"
+            . "    .wp-block-columns.list-thumb-flush > .wp-block-column:first-child {\n"
+            . "        flex-basis: 18% !important;\n"
+            . "    }\n"
+            . "    .wp-block-columns.list-thumb-flush > .wp-block-column:last-child {\n"
+            . "        flex-basis: 82% !important;\n"
+            . "    }\n"
+            . '}',
+        $css,
+    );
+    // When the square thumb out-measures a short text stack the row takes the
+    // thumb's height; the text column centers its copy in the extra space.
+    assert_contains(
+        ".wp-block-columns.list-thumb-flush > .wp-block-column:not(:has(figure.card-media-thumb)) {\n"
+            . "    display: flex;\n"
+            . "    flex-direction: column;\n"
+            . "    justify-content: center;\n"
+            . '}',
+        $css,
+    );
+    assert_contains(
+        ".list-thumb-flush > .wp-block-column > figure.wp-block-image.card-media-thumb {\n"
+            . "    height: 100%;\n"
+            . "    margin: 0;\n"
+            . '}',
+        $css,
+    );
+    assert_contains(
+        ".list-thumb-flush .card-media-thumb img {\n"
+            . "    aspect-ratio: auto;\n"
+            . "    height: 100%;\n"
+            . "    border-radius: 0 !important;\n"
+            . '}',
+        $css,
+    );
 
     // Card media fills the card's content box even though the equal-cards card
     // is a flex column (core's constrained-layout auto margins would otherwise
