@@ -123,7 +123,8 @@ final class CollectImagesStep implements Step
             $content = $project->readText('theme/' . $rel);
             $updated = $content;
             foreach (self::unresolvableSources($updated, $byFilename) as $source) {
-                $candidate = MediaReferenceRemoval::removeSource($updated, $source);
+                $removal = MediaReferenceRemoval::removeSourceWithReport($updated, $source);
+                $candidate = $removal['markup'];
                 if (MediaReferenceRemoval::position($candidate, $source) !== null) {
                     $warnings[] = "file='theme/{$rel}'; asset=" . Warnings::value($source)
                         . '; delivered retained in unsafe markup; disposition=no placeholder declares '
@@ -135,6 +136,12 @@ final class CollectImagesStep implements Step
                     . '; delivered removed; disposition=referenced theme asset has no AI_IMAGE '
                     . 'placeholder (malformed or missing spec), so nothing would ever generate it; '
                     . 'its media block was removed instead of shipping a broken image';
+                foreach ($removal['removedCaptions'] as $caption) {
+                    $warnings[] = "file='theme/{$rel}'; block='wp:paragraph at byte {$caption['start']}'; asset="
+                        . Warnings::value($source) . '; authored caption=' . Warnings::value($caption['text'])
+                        . '; delivered removed; disposition=caption removed with its unavailable image '
+                        . 'instead of shipping an orphaned description';
+                }
             }
             if ($updated !== $content) {
                 $project->writeText('theme/' . $rel, $updated);
@@ -164,7 +171,10 @@ final class CollectImagesStep implements Step
         }
         $sources = [];
         foreach ($matches as $match) {
-            if (!isset($byFilename[$match[1]])) {
+            if (
+                !isset($byFilename[$match[1]])
+                && MediaReferenceRemoval::position($content, $match[0]) !== null
+            ) {
                 $sources[$match[0]] = true;
             }
         }

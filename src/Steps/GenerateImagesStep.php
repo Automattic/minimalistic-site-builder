@@ -3,7 +3,6 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
-use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\ImageClient;
 use Automattic\SiteBuild\ImageLogger;
 use Automattic\SiteBuild\GeminiImage;
@@ -18,6 +17,7 @@ use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\ThemeValidator;
+use Automattic\SiteBuild\Warnings;
 
 /**
  * Step (opt-in, networked): generate the images collected by CollectImagesStep
@@ -673,7 +673,8 @@ final class GenerateImagesStep implements Step
             $content = $project->readText($relative);
             $updated = $content;
             foreach (array_keys($sources) as $source) {
-                $candidate = MediaReferenceRemoval::removeSource($updated, $source);
+                $removal = MediaReferenceRemoval::removeSourceWithReport($updated, $source);
+                $candidate = $removal['markup'];
                 if (MediaReferenceRemoval::position($candidate, $source) !== null) {
                     // The source sits in malformed/unclosed markup without a
                     // safe block span. Keep this source's pre-cleanup bytes and
@@ -685,6 +686,13 @@ final class GenerateImagesStep implements Step
                     continue;
                 }
                 $updated = $candidate;
+                foreach ($removal['removedCaptions'] as $caption) {
+                    $project->addWarnings($this->id(), [
+                        "{$relative}: block wp:paragraph at byte {$caption['start']}; authored caption "
+                        . Warnings::value($caption['text']) . "; delivered removed; disposition: caption "
+                        . "removed with unavailable media source {$source} instead of shipping an orphaned description",
+                    ]);
+                }
             }
             if ($updated !== $content) {
                 $project->writeText($relative, $updated);

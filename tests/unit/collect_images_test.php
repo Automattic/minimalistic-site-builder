@@ -379,8 +379,8 @@ test('collect-images takes an orphaned caption with the undeclared image', funct
         . '<!-- wp:image --><figure class="wp-block-image"><img src="theme:./assets/ghost.jpg" '
         . 'alt="AI_IMATE_PLACEHOLDER"/></figure><!-- /wp:image -->'
         . "\n\n"
-        . '<!-- wp:paragraph {"fontSize":"caption"} -->'
-        . '<p class="has-caption-font-size">The corner shopfront, mid-morning.</p>'
+        . '<!-- wp:paragraph {"fontSize": "caption"} -->'
+        . '<p>The corner shopfront, mid-morning.</p>'
         . '<!-- /wp:paragraph -->'
         . '<!-- wp:paragraph --><p>Ordinary prose stays.</p><!-- /wp:paragraph -->'
         . '</div><!-- /wp:group -->'
@@ -393,5 +393,58 @@ test('collect-images takes an orphaned caption with the undeclared image', funct
     assert_true(!str_contains($markup, 'corner shopfront'), 'caption removed with its image');
     assert_contains('Ordinary prose stays.', $markup);
 
+    $warnings = implode(' ', $project->readJson('warnings.json')['collect-images'] ?? []);
+    assert_contains('authored caption="The corner shopfront, mid-morning."', $warnings);
+    assert_contains('delivered removed', $warnings);
+    assert_contains('orphaned description', $warnings);
+
     exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images preserves an undeclared source inside an unclosed image block', function () {
+    [$project, $tmp] = collect_fixture();
+    $original = '<!-- wp:image --><figure class="wp-block-image">'
+        . '<img src="theme:./assets/unsafe.jpg" alt="AI_IMATE_PLACEHOLDER">';
+    $project->writeText('theme/parts/page-home--unsafe.html', $original);
+
+    (new CollectImagesStep())->run($project);
+
+    assert_eq($original, $project->readText('theme/parts/page-home--unsafe.html'));
+    $warnings = implode(' ', $project->readJson('warnings.json')['collect-images'] ?? []);
+    assert_contains('unsafe.jpg', $warnings);
+    assert_contains('delivered retained in unsafe markup', $warnings);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images removes an undeclared CSS-only cover image without losing its copy', function () {
+    [$project, $tmp] = collect_fixture();
+    $project->writeText(
+        'theme/parts/page-home--band.html',
+        '<!-- wp:cover --><div class="wp-block-cover" '
+            . 'style="background-image:url(theme:./assets/ghost-css.jpg);color:white">'
+            . '<!-- wp:heading --><h2>Copy survives</h2><!-- /wp:heading -->'
+            . '</div><!-- /wp:cover -->'
+    );
+
+    (new CollectImagesStep())->run($project);
+
+    $markup = $project->readText('theme/parts/page-home--band.html');
+    assert_true(!str_contains($markup, 'ghost-css.jpg'), 'CSS-only source removed');
+    assert_contains('color:white', $markup);
+    assert_contains('Copy survives', $markup);
+    $warnings = implode(' ', $project->readJson('warnings.json')['collect-images'] ?? []);
+    assert_contains('delivered removed', $warnings);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('unresolvable source scan ignores path-shaped prose with no media reference', function () {
+    assert_eq(
+        [],
+        CollectImagesStep::unresolvableSources(
+            '<!-- wp:paragraph --><p>Diagnostic: theme:./assets/missing.jpg</p><!-- /wp:paragraph -->',
+            []
+        )
+    );
 });

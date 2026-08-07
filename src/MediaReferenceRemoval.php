@@ -20,6 +20,20 @@ final class MediaReferenceRemoval
     /** Remove every safely isolated occurrence of one asset source. */
     public static function removeSource(string $markup, string $source): string
     {
+        return self::removeSourceWithReport($markup, $source)['markup'];
+    }
+
+    /**
+     * Remove a source and report any adjacent caption blocks removed with it.
+     *
+     * @return array{
+     *     markup:string,
+     *     removedCaptions:list<array{start:int,text:string}>
+     * }
+     */
+    public static function removeSourceWithReport(string $markup, string $source): array
+    {
+        $removedCaptions = [];
         while (($position = self::position($markup, $source)) !== null) {
             $document = BlockMarkup::parse($markup);
             $best = null;
@@ -106,7 +120,14 @@ final class MediaReferenceRemoval
                     // A caption-styled paragraph directly under the removed
                     // image describes that image; without it the caption is an
                     // orphaned line about a photo the visitor cannot see.
-                    $best['length'] = self::spanWithTrailingCaption($document, $markup, $best);
+                    $caption = self::trailingCaption($document, $markup, $best);
+                    if ($caption !== null) {
+                        $best['length'] = $caption['end'] - $best['start'];
+                        $removedCaptions[] = [
+                            'start' => $caption['start'],
+                            'text'  => $caption['text'],
+                        ];
+                    }
                 }
                 $markup = substr_replace(
                     $markup,
@@ -119,23 +140,29 @@ final class MediaReferenceRemoval
 
             // Recovered placeholders can be bare HTML with no Gutenberg block.
             // Remove only an img whose src attribute is this exact source.
+            // A tag inside an unsafe block is not bare: mutating it would leave
+            // a half-edited malformed wrapper, so preserve the complete input.
+            if (self::insideUnsafeBlock($document, $position)) {
+                break;
+            }
             $withoutImage = self::removeMatchingImageTags($markup, $source);
             if ($withoutImage === $markup) {
                 break; // unsafe/unrecognized context: preserve the file bytes
             }
             $markup = $withoutImage;
         }
-        return $markup;
+        return ['markup' => $markup, 'removedCaptions' => $removedCaptions];
     }
 
     /**
-     * The removal length for an image block, extended over an immediately
-     * following caption-styled sibling paragraph (only whitespace between
-     * them, same parent). Ordinary prose siblings keep their bytes.
+     * An immediately following caption-styled sibling paragraph (only
+     * whitespace between it and the image, same parent). Ordinary prose
+     * siblings do not qualify.
      *
      * @param array{index:int,start:int,length:int} $best
+     * @return array{start:int,end:int,text:string}|null
      */
-    private static function spanWithTrailingCaption(BlockMarkup $document, string $markup, array $best): int
+    private static function trailingCaption(BlockMarkup $document, string $markup, array $best): ?array
     {
         $end = $best['start'] + $best['length'];
         foreach ($document->indices() as $index) {
@@ -150,14 +177,32 @@ final class MediaReferenceRemoval
                 continue;
             }
             $captionEnd = $document->endOffset($index);
-            $opening = $document->openingComment($index);
-            $isCaption = str_contains($opening, '"fontSize":"caption"')
+            $attrs = $document->attrs($index);
+            $isCaption = (is_array($attrs) && ($attrs['fontSize'] ?? null) === 'caption')
                 || str_contains($document->ownHtml($index), 'has-caption-font-size');
-            return $captionEnd !== null && $isCaption
-                ? $captionEnd - $best['start']
-                : $best['length'];
+            if ($captionEnd === null || !$isCaption) {
+                return null;
+            }
+            $text = trim(html_entity_decode(strip_tags($document->innerHtml($index)), ENT_QUOTES | ENT_HTML5));
+            return ['start' => $start, 'end' => $captionEnd, 'text' => $text];
         }
-        return $best['length'];
+        return null;
+    }
+
+    /** Whether a source position falls inside any structurally unsafe block. */
+    private static function insideUnsafeBlock(BlockMarkup $document, int $position): bool
+    {
+        foreach ($document->indices() as $index) {
+            $start = $document->openingOffset($index);
+            $end = $document->endOffset($index);
+            if ($start > $position || ($end !== null && $position >= $end)) {
+                continue;
+            }
+            if (!$document->isStructurallySafe($index)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Remove bare/rendered img tags whose src is this exact source. */
@@ -186,6 +231,7 @@ final class MediaReferenceRemoval
         $patterns = [
             '/"(?:url|src)"\s*:\s*"' . $quoted . '"/i',
             '/\bsrc\s*=\s*(?:(["\'])' . $quoted . '\1|' . $quoted . '(?=\s|\/?>))/i',
+            '/\burl\(\s*(["\']?)' . $quoted . '\1\s*\)/i',
         ];
         $positions = [];
         foreach ($patterns as $pattern) {
