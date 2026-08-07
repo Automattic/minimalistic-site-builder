@@ -222,6 +222,7 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
         'framed-portrait',
         'focal-subject-stage',
         'layered-poster',
+        'statement-type',
     ] as $recipe) {
         assert_contains('.hero-composition--' . $recipe, $css);
     }

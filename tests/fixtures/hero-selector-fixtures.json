@@ -140,6 +140,21 @@
       "eligible": [
         "focal-subject-stage"
       ]
+    },
+    {
+      "id": "compact-typographic",
+      "stable_identifier": "letterpress-house",
+      "concept_seed": "A statement wall of type with one quiet action beneath.",
+      "constraints": {
+        "hero_copy_capacity": "compact",
+        "hero_canvas": "framed"
+      },
+      "eligible": [
+        "cinematic-safe-zone",
+        "focal-subject-stage",
+        "layered-poster",
+        "statement-type"
+      ]
     }
   ]
 }

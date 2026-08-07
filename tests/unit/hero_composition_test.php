@@ -5,7 +5,7 @@ use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
 
 test('hero catalog entries own complete metadata, defaults, prompts, and unique hooks', function () {
-    assert_eq(5, count(HeroComposition::RECIPES));
+    assert_eq(6, count(HeroComposition::RECIPES));
     $hooks = [];
     foreach (HeroComposition::RECIPES as $recipe) {
         $meta = HeroComposition::metadata($recipe);

@@ -340,6 +340,12 @@ final class ScaffoldThemeStep implements Step
         .hero-composition--layered-poster {
             overflow: hidden;
         }
+        /* The type-led recipe has no media to balance the composition, so
+           the statement itself must set well: balance the rag of its two-to
+           four-line headline. Inert for every other recipe. */
+        .hero-composition--statement-type .wp-block-heading {
+            text-wrap: balance;
+        }
         /* A display word that cannot fit its measure must hyphenate at a
            language break as a last resort, never snap mid-word; the prompts
            size headline presets so this rule stays dormant. */

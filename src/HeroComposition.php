@@ -19,6 +19,7 @@ final class HeroComposition
         'framed-portrait',
         'focal-subject-stage',
         'layered-poster',
+        'statement-type',
     ];
 
     // Caller-constraint enum. Every cataloged recipe now carries an image;
@@ -178,6 +179,37 @@ final class HeroComposition
                 'focal_region' => 'end', 'text_safe_region' => 'start',
                 'height_profile' => 'immersive', 'cta_treatment' => 'prominent',
                 'mobile_transformation' => 'flatten-layers',
+            ],
+        ],
+        'statement-type' => [
+            'canvases' => ['full-bleed', 'framed'],
+            // BIGR-803: the one type-led entry — no media slot at all, so a
+            // brand whose identity is typographic gets a designed first
+            // screen instead of an image-led recipe's no-image degradation.
+            'media_modes' => ['none'],
+            'min_images' => 0,
+            'max_images' => 0,
+            'backgrounds' => ['contrast', 'tinted', 'base'],
+            'default_background' => 'contrast',
+            'fallback_background' => 'base',
+            'header_modes' => ['stacked'],
+            'copy_capacity' => 'compact',
+            // A single type column reflows on its own; copy-first is the
+            // documented no-op (there is no media region to order against).
+            'mobile_transformations' => ['stack-copy-first'],
+            'layout_archetype' => 'centered-stack',
+            'fallback_family' => 'typographic',
+            'root_hook' => '.hero-composition--statement-type',
+            'prompt' => 'hero-compositions/statement-type.md',
+            'headline_registers' => ['display', 'poster'],
+            'height_profiles' => ['standard', 'immersive'],
+            'defaults' => [
+                'media_mode' => 'none', 'headline_register' => 'poster',
+                'text_anchor' => 'center-start',
+                'headline_line_target' => ['desktop' => [2, 4], 'mobile' => [3, 6]],
+                'focal_region' => 'none', 'text_safe_region' => 'full',
+                'height_profile' => 'standard', 'cta_treatment' => 'prominent',
+                'mobile_transformation' => 'stack-copy-first',
             ],
         ],
     ];

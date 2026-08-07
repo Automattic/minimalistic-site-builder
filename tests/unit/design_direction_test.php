@@ -1201,16 +1201,34 @@ test('legacy signature-device fields are dropped from the normalized direction',
     assert_true(!array_key_exists('signature_device_use', $direction['hero_blueprint']));
 });
 
-test('every cataloged hero recipe bears an image (the image-free poster is retired)', function () {
+test('statement-type is the one image-free recipe; every other hero bears an image', function () {
+    // The layered typographic-poster was retired with BIGR-755 for inviting
+    // ornamental layer noise; statement-type (BIGR-803) re-serves the
+    // type-led gap with bare type on a bare surface and no ornament channel.
     foreach (Automattic\SiteBuild\HeroComposition::RECIPES as $recipe) {
         $meta = Automattic\SiteBuild\HeroComposition::metadata($recipe);
+        if ($recipe === 'statement-type') {
+            assert_eq(0, (int) $meta['min_images']);
+            assert_eq(0, (int) $meta['max_images']);
+            assert_eq(['none'], $meta['media_modes']);
+            continue;
+        }
         assert_true((int) $meta['min_images'] >= 1, "{$recipe} carries at least one image");
     }
-    // Automatic selection therefore always lands on an image-bearing recipe.
+    // Callers demanding imagery can never receive the type-led recipe: the
+    // requestable media-mode enum still excludes 'none'.
+    foreach ([['cover-image'], ['foreground-image'], ['cover-image', 'foreground-image']] as $modes) {
+        assert_true(!in_array(
+            'statement-type',
+            Automattic\SiteBuild\HeroComposition::compatible(['allowed_hero_media_modes' => $modes]),
+            true,
+        ));
+    }
+    // Automatic selection stays inside the catalog and never warns.
     foreach (range(1, 16) as $i) {
         $w = [];
         $recipe = DesignDirectionStep::selectHeroRecipe([], "gate-site-{$i}", 'Committed seed', $w);
-        assert_true((int) Automattic\SiteBuild\HeroComposition::metadata($recipe)['min_images'] >= 1);
+        assert_true(in_array($recipe, Automattic\SiteBuild\HeroComposition::RECIPES, true));
         assert_eq([], $w);
     }
 });
