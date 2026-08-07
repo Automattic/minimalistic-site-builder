@@ -27,10 +27,7 @@ require_once __DIR__ . '/../src/bootstrap.php';
 $slug = $argv[1] ?? null;
 if ($slug === null || trim($slug) === '') {
     fwrite(STDERR, "Usage: php bin/images.php <slug>\n");
-    fwrite(STDERR, "Available projects:\n");
-    foreach (glob(repo_path('projects/*/theme/style.css')) ?: [] as $f) {
-        fwrite(STDERR, '  - ' . basename(dirname(dirname($f))) . "\n");
-    }
+    print_built_projects(STDERR);
     exit(1);
 }
 
