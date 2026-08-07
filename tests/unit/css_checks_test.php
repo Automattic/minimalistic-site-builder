@@ -352,6 +352,21 @@ test('bare declaration-list scanning is quote function escape and block aware', 
     assert_eq(str_replace('border\\2d radius: 1rem;', '', $css), $repaired);
 });
 
+test('declaration priority splitting recognizes comments and escaped important identifiers', function () {
+    assert_eq(
+        ['value' => 'right', 'important' => true],
+        CssChecks::splitDeclarationPriority(' right ! /* priority */ \\69mportant '),
+    );
+    assert_eq(
+        ['value' => 'center', 'important' => true],
+        CssChecks::splitDeclarationPriority('center!important'),
+    );
+    assert_eq(
+        ['value' => 'right!urgent', 'important' => false],
+        CssChecks::splitDeclarationPriority('right!urgent'),
+    );
+});
+
 test('dropDeclarations is byte-identical when its predicate selects nothing', function () {
     $css = "\n/* keep { ; } */\n.target { content: \"; border-radius: 2rem\"; color: inherit; }\n";
     [$repaired, $dropped] = CssChecks::dropDeclarations($css, static fn (array $declaration): bool => false);

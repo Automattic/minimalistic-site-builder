@@ -7,15 +7,8 @@ use Automattic\SiteBuild\BlockFixer;
 use Automattic\SiteBuild\BlockFixerOutcome;
 use Automattic\SiteBuild\BlockSerializer\AlignmentClassLoss;
 use Automattic\SiteBuild\BlockSerializer\AlignmentClassLossDetector;
-use Automattic\SiteBuild\BlockSerializer\Json\JsJsonEncoder;
-use Automattic\SiteBuild\BlockSerializer\Json\JsonObject;
-use Automattic\SiteBuild\BlockSerializer\Json\JsonString;
-use Automattic\SiteBuild\BlockSerializer\JsString;
-use Automattic\SiteBuild\BlockSerializer\Parser\BlockNode;
-use Automattic\SiteBuild\BlockSerializer\Parser\DefaultParser;
-use Automattic\SiteBuild\BlockSerializer\Parser\FreeformNode;
-use Automattic\SiteBuild\BlockSerializer\Serializer;
 use Automattic\SiteBuild\LayoutFixer;
+use Automattic\SiteBuild\PhpBlockFixer;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ShapeMarkup;
 use Automattic\SiteBuild\Step;
@@ -55,10 +48,15 @@ final class FixBlocksStep implements Step
         return new StepDeclaration(
             id: $this->id(),
             label: $this->label(),
-            // Templates are only scanned when they exist; in the default graph
-            // they are written by assemble-pages, which runs after this step.
-            reads: ['designDirection.json', 'theme/theme.json', 'theme/parts/*'],
-            writes: ['theme/parts/*', 'warnings.json'],
+            // Templates/pages are only scanned when they already exist; in the
+            // default graph assemble-pages writes them after this step, so an
+            // optional page cannot be declared as a required upstream read.
+            reads: [
+                'designDirection.json',
+                'theme/theme.json',
+                'theme/parts/*',
+            ],
+            writes: ['theme/parts/*', 'theme/pages/*', 'warnings.json'],
             concurrent: false,
         );
     }
@@ -234,18 +232,35 @@ final class FixBlocksStep implements Step
                 $paragraphAlignmentRepairs,
             ),
         ));
-        // A dropped has-text-align-* class on reading copy is deterministic
-        // to repair: the direction is known from the authored class, and
-        // style.typography.textAlign is the canonical shape every pinned
-        // save() derives the class from. Attempt the repair before warning —
-        // only losses the repair could not heal stay durable.
-        if ($alignmentLosses !== []) {
-            $alignmentRepairRows = self::repairAlignmentLosses($project, $alignmentLosses);
+        // The built-in fixer's frozen serializer intentionally mirrors the
+        // pinned runtime, including a few HTML-only paragraph/heading classes
+        // that its final save strands. Repair only those proven final losses,
+        // and only when the built-in fixer owns the preceding transaction.
+        // TextAlignmentRepairer serializes each target block in isolation,
+        // verifies that alignment is the sole change, then atomically replaces
+        // the containing file. Custom fixers keep their own output untouched
+        // and any loss stays in warnings.json.
+        if ($alignmentLosses !== [] && $this->fixer instanceof PhpBlockFixer) {
+            try {
+                $alignmentRepairRows = $this->fixer->repairTextAlignmentLosses(
+                    $project->themePath(),
+                    $alignmentLosses,
+                );
+            } catch (\RuntimeException $error) {
+                // The optional repair is still part of this public step's
+                // transaction. Its writer keeps each replacement atomic, but
+                // a later I/O failure must not strand earlier layout/fixer or
+                // alignment writes as a partially committed step.
+                self::restoreThemeFiles($project, $beforeInitialPass);
+                $summary .= "\n[alignment] text-alignment repair transaction failed; "
+                    . "restored step-entry bytes:\n  "
+                    . str_replace("\n", "\n  ", $error->getMessage());
+                $project->writeText('logs/' . self::LOG_FILE, $summary . "\n");
+                throw $error;
+            }
             if ($alignmentRepairRows !== []) {
                 $summary .= "\n[alignment] REPAIR: dropped text alignment re-expressed as "
                     . "style.typography.textAlign:\n  " . implode("\n  ", $alignmentRepairRows);
-                echo '  [alignment] ' . count($alignmentRepairRows)
-                    . " dropped text alignment(s) repaired\n";
                 $alignmentLosses = array_values(array_filter(
                     self::alignmentLosses($project, $alignmentBaselines, $failedPaths),
                     static fn (array $entry): bool => !self::alignmentLossAlreadyWarned(
@@ -398,6 +413,13 @@ final class FixBlocksStep implements Step
 
         $changes = [];
         foreach ($snapshot as $rel => $markup) {
+            if (!str_starts_with($rel, 'parts/') && !str_starts_with($rel, 'templates/')) {
+                // Optional pages participate in the block-fixer transaction,
+                // but normalizeShapes intentionally follows themeFiles() and
+                // never touches them. Do not claim a page shape repair was
+                // rolled back when that repair was never attempted.
+                continue;
+            }
             foreach (ShapeMarkup::normalize($markup, $shape)['changes'] as $change) {
                 $changes[] = ['file' => $rel] + $change;
             }
@@ -615,20 +637,101 @@ final class FixBlocksStep implements Step
         $failed = array_fill_keys($failedPaths, true);
         $delivered = [];
         $lossesByKey = [];
-        foreach ($baselines as $baseline) {
+        $keysByProvenance = [];
+        foreach ($baselines as $baselineIndex => $baseline) {
             foreach ($baseline as $file => $before) {
                 if (isset($failed[$file])) {
                     continue;
                 }
                 $delivered[$file] ??= $project->readText('theme/' . $file);
                 foreach ($detector->detect($before, $delivered[$file]) as $loss) {
-                    $key = implode("\0", [
+                    $provenanceKey = implode("\0", [
                         $file,
                         $loss->blockPath,
                         $loss->blockName,
                         $loss->authoredClass,
                     ]);
+                    $key = implode("\0", [
+                        $provenanceKey,
+                        $loss->authoredClassOnSavedRoot ? 'root' : 'owned-descendant',
+                        $loss->authoredElementPath ?? 'saved-root',
+                    ]);
+                    $previous = $lossesByKey[$key][1] ?? null;
+                    $sameScope = $previous instanceof AlignmentClassLoss;
+                    if (!$sameScope && $baselineIndex !== 0) {
+                        // A scope that appears only after the first baseline
+                        // is an intermediate transformation artifact, not a
+                        // second authored defect. Fold it into the earliest
+                        // row so warnings.json does not invite a later repair
+                        // to promote that temporary root/descendant state.
+                        // The element path remains part of the primary key so
+                        // two authored descendant occurrences are never
+                        // collapsed merely because they carry the same class.
+                        foreach ($keysByProvenance[$provenanceKey] ?? [] as $candidateKey) {
+                            $candidate = $lossesByKey[$candidateKey][1] ?? null;
+                            if ($candidate instanceof AlignmentClassLoss
+                                && $candidate->authoredClassOnSavedRoot
+                                    !== $loss->authoredClassOnSavedRoot
+                            ) {
+                                $key = $candidateKey;
+                                $previous = $candidate;
+                                break;
+                            }
+                        }
+                    }
+                    if ($previous instanceof AlignmentClassLoss) {
+                        // A later fixer baseline must not upgrade evidence
+                        // that was unsafe in an earlier authored snapshot.
+                        // In particular, a descendant class temporarily moved
+                        // onto a root is still not ours to promote to block
+                        // typography. Replacement evidence is also combined
+                        // conservatively so any observed alternative keeps the
+                        // target out of the deterministic-repair path.
+                        $loss = new AlignmentClassLoss(
+                            blockPath: $loss->blockPath,
+                            blockName: $loss->blockName,
+                            authoredClass: $loss->authoredClass,
+                            deliveredClasses: $sameScope
+                                ? array_values(array_unique(array_merge(
+                                    $previous->deliveredClasses,
+                                    $loss->deliveredClasses,
+                                )))
+                                : $previous->deliveredClasses,
+                            authoredClassOnSavedRoot: $previous->authoredClassOnSavedRoot,
+                            authoredClassIsSafeRootTextAlignment:
+                                $previous->authoredClassIsSafeRootTextAlignment
+                                && $loss->authoredClassIsSafeRootTextAlignment
+                                && $sameScope,
+                            deliveredBlockPath: $sameScope
+                                ? $loss->deliveredBlockPath
+                                : $previous->deliveredBlockPath,
+                            authoredElementPath: $previous->authoredElementPath,
+                        );
+                    } elseif ($baselineIndex !== 0 && $loss->authoredClassOnSavedRoot) {
+                        // Repair eligibility requires positive root proof from
+                        // the earliest authored baseline. A structural rewrite
+                        // can make that snapshot non-comparable, or move a
+                        // descendant token onto a later root; absence of
+                        // contrary evidence is not proof that promotion is
+                        // semantics-safe.
+                        $loss = new AlignmentClassLoss(
+                            blockPath: $loss->blockPath,
+                            blockName: $loss->blockName,
+                            authoredClass: $loss->authoredClass,
+                            deliveredClasses: $loss->deliveredClasses,
+                            authoredClassOnSavedRoot: true,
+                            authoredClassIsSafeRootTextAlignment: false,
+                            deliveredBlockPath: $loss->deliveredBlockPath,
+                            authoredElementPath: $loss->authoredElementPath,
+                        );
+                    }
                     $lossesByKey[$key] = [$file, $loss];
+                    if (!isset($keysByProvenance[$provenanceKey])) {
+                        $keysByProvenance[$provenanceKey] = [];
+                    }
+                    if (!in_array($key, $keysByProvenance[$provenanceKey], true)) {
+                        $keysByProvenance[$provenanceKey][] = $key;
+                    }
                 }
             }
         }
@@ -668,153 +771,6 @@ final class FixBlocksStep implements Step
         return $covered;
     }
 
-    /**
-     * Repair dropped has-text-align-* classes on reading-copy blocks by
-     * folding the authored direction into style.typography.textAlign in the
-     * delivered comment JSON and re-serializing the file. The pinned
-     * adapters already preserve most authored alignment shapes; this pass
-     * only fires on the residue the whole transaction still lost, so no
-     * reviewed byte contract changes for cases that already worked. A block
-     * whose delivered family kept a DIFFERENT alignment, whose containers
-     * are malformed, or that already carries a typography.textAlign is left
-     * alone — those stay durable warnings. Serializer::transform is
-     * idempotent on delivered output, so untouched sibling blocks keep
-     * their exact bytes.
-     *
-     * @param list<array{0:string,1:AlignmentClassLoss}> $losses
-     * @return list<string> one human log row per repaired block
-     */
-    private static function repairAlignmentLosses(Project $project, array $losses): array
-    {
-        $byFile = [];
-        foreach ($losses as [$file, $loss]) {
-            if (!in_array($loss->blockName, ['core/paragraph', 'core/heading'], true)
-                || $loss->deliveredClasses !== []
-                || preg_match('/^has-text-align-(left|center|right)$/', $loss->authoredClass, $match) !== 1
-            ) {
-                continue;
-            }
-            $byFile[$file][$loss->blockPath] = $match[1];
-        }
-
-        $rows = [];
-        foreach ($byFile as $file => $targets) {
-            $delivered = $project->readText('theme/' . $file);
-            $patch = self::textAlignPatchedMarkup($delivered, $targets);
-            if ($patch === null) {
-                continue;
-            }
-            [$patched, $patchedPaths] = $patch;
-            try {
-                $transformed = (new Serializer())->transform($patched)->html;
-            } catch (\Throwable) {
-                // Deliver the pre-repair bytes and keep the durable warning.
-                continue;
-            }
-            $project->writeText('theme/' . $file, $transformed);
-            foreach ($patchedPaths as $blockPath => $direction) {
-                $rows[] = "{$file} block {$blockPath}: \"has-text-align-{$direction}\" "
-                    . 're-expressed as style.typography.textAlign';
-            }
-        }
-        return $rows;
-    }
-
-    /**
-     * Splice style.typography.textAlign into the comment delimiters of the
-     * targeted blocks. Paths mirror AlignmentClassLossDetector: top-level
-     * indices count blocks and nonblank freeform, child indices are local to
-     * innerBlocks.
-     *
-     * @param array<string,string> $targets blockPath => direction
-     * @return array{0:string,1:array<string,string>}|null patched bytes and
-     *     the targets actually patched, or null when nothing was patchable
-     */
-    private static function textAlignPatchedMarkup(string $markup, array $targets): ?array
-    {
-        try {
-            $document = DefaultParser::parse($markup);
-        } catch (\InvalidArgumentException | \RuntimeException) {
-            return null;
-        }
-
-        $byPath = [];
-        $index = 0;
-        foreach ($document->nodes() as $node) {
-            if ($node instanceof FreeformNode) {
-                if (JsString::trim($node->content) !== '') {
-                    $index++;
-                }
-                continue;
-            }
-            if ($node instanceof BlockNode) {
-                self::collectBlocksByPath($node, (string) $index, $byPath);
-                $index++;
-            }
-        }
-
-        $splices = [];
-        $patchedPaths = [];
-        foreach ($targets as $blockPath => $direction) {
-            $block = $byPath[$blockPath] ?? null;
-            if ($block === null) {
-                continue;
-            }
-            $attributes = $block->attributes ?? new JsonObject();
-            $style = $attributes->get('style');
-            if ($style !== null && !$style instanceof JsonObject) {
-                continue;
-            }
-            $typography = $style?->get('typography');
-            if ($typography !== null && !$typography instanceof JsonObject) {
-                continue;
-            }
-            if ($typography?->has('textAlign') === true) {
-                continue;
-            }
-            if ($style === null) {
-                $style = new JsonObject();
-                $attributes->set('style', $style);
-            }
-            if ($typography === null) {
-                $typography = new JsonObject();
-                $style->set('typography', $typography);
-            }
-            $typography->set('textAlign', new JsonString($direction));
-
-            $shortName = str_starts_with($block->name, 'core/')
-                ? substr($block->name, strlen('core/')) : $block->name;
-            $encoded = JsJsonEncoder::stringify($attributes);
-            if ($encoded === null) {
-                continue;
-            }
-            $splices[] = [
-                $block->openingStart,
-                $block->openingEnd,
-                '<!-- wp:' . $shortName . ' ' . $encoded . ' -->',
-            ];
-            $patchedPaths[$blockPath] = $direction;
-        }
-        if ($splices === []) {
-            return null;
-        }
-
-        usort($splices, static fn (array $a, array $b): int => $b[0] <=> $a[0]);
-        foreach ($splices as [$start, $end, $replacement]) {
-            $markup = substr($markup, 0, $start) . $replacement . substr($markup, $end);
-        }
-        return [$markup, $patchedPaths];
-    }
-
-    /** @param array<string,BlockNode> $byPath */
-    private static function collectBlocksByPath(BlockNode $block, string $path, array &$byPath): void
-    {
-        $byPath[$path] = $block;
-        foreach ($block->innerBlocks as $index => $child) {
-            self::collectBlocksByPath($child, $path . '/' . $index, $byPath);
-        }
-    }
-
     /** @param array<string,true> $paragraphAlignmentRepairs */
     private static function alignmentLossAlreadyWarned(
         string $file,
@@ -822,6 +778,7 @@ final class FixBlocksStep implements Step
         array $paragraphAlignmentRepairs,
     ): bool {
         return $loss->blockName === 'core/paragraph'
+            && $loss->authoredClassOnSavedRoot
             && str_starts_with($loss->authoredClass, 'has-text-align-')
             && isset($paragraphAlignmentRepairs[$file . "\0" . $loss->blockPath]);
     }
@@ -830,19 +787,34 @@ final class FixBlocksStep implements Step
     {
         $authored = self::quoted($loss->authoredClass);
         $delivered = self::deliveredAlignmentValue($loss);
+        $scope = $loss->authoredClassOnSavedRoot
+            ? 'the saved root'
+            : 'owned descendant element ' . ($loss->authoredElementPath ?? 'unknown');
+        $deliveredPath = $loss->deliveredBlockPath !== null
+            && $loss->deliveredBlockPath !== $loss->blockPath
+            ? "; semantic match moved to delivered block {$loss->deliveredBlockPath}"
+            : '';
         $disposition = $loss->deliveredClasses === []
-            ? 'authored class removed; block uses its default alignment'
-            : 'authored class removed; final block keeps other alignment in the same family';
+            ? 'authored class removed; no same-scope alignment class remains'
+            : 'authored class removed; same scope keeps other alignment in the same family';
         return "{$file} block {$loss->blockPath} ({$loss->blockName}): alignment class {$authored} "
-            . "could not be preserved (authored {$authored}; delivered {$delivered}; "
+            . "could not be preserved on {$scope}{$deliveredPath} (authored {$authored}; delivered {$delivered}; "
             . "disposition: {$disposition}); "
             . 'deterministic final output delivered — see logs/' . self::LOG_FILE;
     }
 
     private static function alignmentSummary(string $file, AlignmentClassLoss $loss): string
     {
+        $scope = $loss->authoredClassOnSavedRoot
+            ? 'root'
+            : 'owned descendant ' . ($loss->authoredElementPath ?? 'unknown');
+        $deliveredPath = $loss->deliveredBlockPath !== null
+            && $loss->deliveredBlockPath !== $loss->blockPath
+            ? " (moved to {$loss->deliveredBlockPath})"
+            : '';
         return "{$file} block {$loss->blockPath} ({$loss->blockName}): "
-            . self::quoted($loss->authoredClass) . ' -> ' . self::deliveredAlignmentValue($loss);
+            . self::quoted($loss->authoredClass) . " [{$scope}]{$deliveredPath} -> "
+            . self::deliveredAlignmentValue($loss);
     }
 
     private static function deliveredAlignmentValue(AlignmentClassLoss $loss): string
@@ -970,7 +942,11 @@ final class FixBlocksStep implements Step
     private static function snapshotThemeFiles(Project $project): array
     {
         $snapshot = [];
-        foreach ($project->themeFiles() as $relative) {
+        $files = $project->themeFiles();
+        foreach (glob($project->themePath('pages/*.html')) ?: [] as $absolute) {
+            $files[] = 'pages/' . basename($absolute);
+        }
+        foreach (array_values(array_unique($files)) as $relative) {
             $snapshot[$relative] = $project->readText('theme/' . $relative);
         }
         return $snapshot;
