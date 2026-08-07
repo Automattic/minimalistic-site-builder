@@ -409,6 +409,17 @@ final class ScaffoldThemeStep implements Step
                 background: var(--wp--preset--color--contrast);
                 color: var(--wp--preset--color--base);
             }
+            /* The transform above swaps the copy's surface from dimmed image
+               to solid contrast, so it must own the copy color too: authored
+               inline/preset colors were picked for the overlay surface and can
+               land light-on-light on this panel (invisible H1, BIGR-788).
+               base-on-contrast is the palette's maximum-contrast pair. Buttons
+               and links keep their own chrome. */
+            .hero-composition--cinematic-safe-zone.hero-mobile--stack-media-first
+                .wp-block-cover__inner-container
+                :is(h1, h2, h3, h4, h5, h6, p, cite):not(.wp-block-button__link) {
+                color: var(--wp--preset--color--base) !important;
+            }
             .hero-mobile--flatten-layers .hero-composition__layers,
             .hero-mobile--flatten-layers .hero-composition__copy,
             .hero-mobile--flatten-layers .hero-composition__media {
