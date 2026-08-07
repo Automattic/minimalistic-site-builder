@@ -46,7 +46,9 @@ Keep the current backlog in that state file with per-finding status
 (`new / filed BIGR-XXX / pr-open #NN / merged / rejected`), which cohort it came from, and what the next
 iteration should do. Update it last thing, every iteration. Commit a fix/variety update on that iteration's
 PR branch; never push a state-only commit directly to trunk and never assume an unmerged branch's update is
-already present there.
+already present there. When a Cohort or Triage iteration opens no PR, keep its update in the working tree
+for the next local invocation, carry it onto the next related PR branch, and do not discard it during the
+fresh-trunk transition.
 
 ### Phase 1 — Build the cohort
 
@@ -63,7 +65,10 @@ SHOT_WIDTH=390 php bin/screenshot.php <slug> --out=projects/<slug>/logs/home-mob
 ```
 
 `screenshot.php` boots and tears down Playground itself; do not use `build-demos.php --serve` for this pass.
-If a build fails or a screenshot is blank, that itself is a P0 finding — file it.
+If a build fails or a screenshot is blank, reproduce it and inspect the logs before classifying it. A defect
+in generated output or the builder is a P0 finding; auth/API/rate-limit, browser/Playground, environment, or
+I/O failure is operational — stop and report it without filing a false design finding, then retry when the
+dependency is healthy.
 
 Cohorts are expensive (7 sites × full LLM graph × image generation). Reuse the current cohort as the
 "before" evidence for as many findings as possible; only build a fresh cohort when the backlog is exhausted
@@ -72,9 +77,10 @@ or so many fixes have merged that the old cohort no longer represents trunk.
 ### Phase 2 — Critique every section of every site
 
 For each site: read the generated front page markup (`projects/<slug>/theme/…`) to enumerate its sections
-(header, hero, each content band, footer). Crop `home.png` into per-section images (Python/PIL or
-ImageMagick, into the scratchpad) so each judgment looks at one section at actual size — plus one pass on
-the full page for overall composition. Look at the crops; do not critique from markup alone.
+(header, hero, each content band, footer). Crop both `home.png` and `home-mobile.png` into per-section images
+(Python/PIL or ImageMagick, into the scratchpad) so each judgment looks at one section at actual size — plus
+one full-page pass at each viewport for overall composition. Look at every crop; do not critique from
+markup alone.
 
 Score each section AND the whole page against this rubric. For every failure, record: site, section,
 dimension, one plain sentence describing what a visitor sees wrong, the crop path, and a first guess at
@@ -134,14 +140,22 @@ generated-content defect fatal.
 
 ### Phase 5 — Evidence (the gate for opening a PR)
 
-The change must be **evident in the screenshots**, and the evidence protocol depends on the fix class:
+Run the automated checks appropriate to the touched files after the final change. Use targeted tests while
+iterating, run `php tests/run.php` for PHP/pipeline changes, and run relevant integration or asset checks
+when their code paths changed. Rerun the gate after any evidence-driven edit. Screenshots do not replace
+automated tests. Record the exact commands and results for the PR.
 
-- **Deterministic fix** (CSS/fixer/theme step): rebuild ONE affected demo (`--only=<slug>`, with
-  `--with-images` only if imagery is involved) on the branch; pair its section crop with the same section
-  crop from the cohort build. Same site, same section, defect visibly gone.
+The change must also be **evident in the screenshots**, and the evidence protocol depends on the fix class:
+
+- **Deterministic fix** (CSS/fixer/theme step): hold generated content constant. Copy ONE affected cohort
+  project byte-for-byte, replay only the changed fixer/step or replace only the changed code-owned asset,
+  then capture the same site and section. Use a fresh `--only=<slug>` build as secondary regression coverage
+  when useful, never as the sole before/after proof because new LLM output changes the comparison.
 - **Prompt fix** (stochastic): one before/after pair proves nothing. Rebuild **at least 3 affected demos**
   on the branch and report incidence: "before: defect in 5/7 cohort sites (crops attached); after: 0/3
   rebuilds". If the defect still appears in any rebuild, the fix isn't done — iterate before opening a PR.
+- Capture the failing viewport. For a 390px finding, use phase 1's full mobile command and distinct
+  `home-mobile.png` output for every after-project.
 - Crop both images to the affected section so the diff is unmissable; place them side by side or stacked
   under **Before** / **After** headings. If the change is subtle at full-page zoom, the crop is the
   evidence and the full pages go in a collapsed `<details>`.
@@ -192,15 +206,15 @@ site, so a mediocre addition pollutes the generator permanently. Steps:
    seam/handoff language. Register the new entry wherever selection happens (PHP selector list,
    page-plan.md enumeration + description + variety rules). Distinctness check: if the new entry's
    one-line description could describe an existing entry, it's a variation, not an archetype — reject it.
-5. **Evidence: render it, don't describe it.** Force-select the new entry (find the selection mechanism's
-   override, or pin it temporarily — never commit the pin) and build **at least 2 demos with different
-   brand personalities** (e.g. one editorial like lumen, one loud like pulso), `--with-images`, desktop,
-   and mobile. For every mobile render, reuse phase 1's complete `SHOT_WIDTH=390` command, including its
-   distinct `--out=projects/<slug>/logs/home-mobile.png` path. Judge every render against the full rubric:
-   the proposal must score strongly on conviction/impact AND pass craft, hierarchy, and contrast — a
-   stylish composition that clips text on mobile is a rejected proposal, not a caveat. Also render the
-   nearest existing entry on one of the same brands and include it side by side, so the PR shows the new
-   entry earns its slot.
+5. **Evidence: render it, don't describe it.** Run phase 5's automated-test gate, then force-select the new
+   entry (find the selection mechanism's override, or pin it temporarily — never commit the pin) and build
+   **at least 2 demos with different brand personalities** (e.g. one editorial like lumen, one loud like
+   pulso), `--with-images`, desktop, and mobile. For every mobile render, reuse phase 1's complete
+   `SHOT_WIDTH=390` command, including its distinct `--out=projects/<slug>/logs/home-mobile.png` path. Judge
+   every render against the full rubric: the proposal must score strongly on conviction/impact AND pass
+   craft, hierarchy, and contrast — a stylish composition that clips text on mobile is a rejected proposal,
+   not a caveat. Also render the nearest existing entry on one of the same brands and include it side by
+   side, so the PR shows the new entry earns its slot.
 6. **Open the PR** using phase 6's title/body/state conventions. Describe in plain language: the gap
    ("every generated hero currently looks like X"), what the new archetype looks like (the renders carry
    this), the inspiration credit, and confirmation of the mobile/no-image checks. Label the renders by demo
