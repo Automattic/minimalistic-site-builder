@@ -14,42 +14,56 @@ namespace Automattic\SiteBuild;
  * dictionaries — a broken first screen (BIGR-798).
  *
  * This pass runs where both facts are finally known (the delivered hero
- * markup and theme.json): it estimates the widest single word of every
- * display-size hero heading with a per-glyph advance table, and when that
- * word cannot fit the heading's constrained measure at the preset's
- * maximum, it pins the heading to
+ * markup and theme.json): it estimates the widest word of every
+ * display-size heading against the measure its layout chain implies, and
+ * when that word cannot fit at the preset's maximum, pins the heading to
  * `min(var(--wp--preset--font-size--display), <cap>px)` — fluid behaviour
- * below the cap is untouched, and headings whose words already fit are
- * left byte-identical. The estimate is deliberately a little wide, so a
- * real font that is narrower than the table only makes the fit safer; the
- * CSS hyphenation guard remains the last resort for fonts wider than any
- * table can anticipate.
+ * below the cap is untouched, and headings whose words already fit are left
+ * byte-identical.
+ *
+ * Two deliberate limits:
+ *
+ * - The width estimate is a character count times one generous per-character
+ *   advance, not a per-glyph table. Real families vary far too much for
+ *   per-glyph precision to mean anything (a condensed display face runs
+ *   ~0.45em/char, an extended slab ~0.9em), so the estimate only separates
+ *   "comfortably fits" from "cannot possibly fit", and the CSS guard stays
+ *   the last resort for the faces it misjudges.
+ * - The measure comes from the block tree, never from CSS. A container query
+ *   (`cqi`) would read the true column width at runtime, but `container-type`
+ *   zeroes a contained box's intrinsic contribution, and hero copy regions
+ *   routinely sit inside content-sized ancestors — a cover with a custom
+ *   `contentPosition` gets `width: auto` on its inner container — where that
+ *   collapses the whole column to nothing (measured: portfolio4/pulso5,
+ *   2026-08-10). A too-wide measure merely under-protects; a collapsed hero
+ *   is a broken site, so this stays arithmetic on the markup.
  */
 final class HeroHeadlineFit
 {
     /**
-     * Generic grotesque advance widths in em (slightly wide of most text
-     * faces so estimates err toward fitting).
+     * Generous per-character advance in em: uppercase runs wider than mixed
+     * case, and both sit above a normal grotesque so the common families
+     * land inside the estimate.
      */
-    private const UPPER = [
-        'A' => .70, 'B' => .70, 'C' => .72, 'D' => .74, 'E' => .64, 'F' => .60,
-        'G' => .78, 'H' => .74, 'I' => .28, 'J' => .52, 'K' => .70, 'L' => .58,
-        'M' => .86, 'N' => .74, 'O' => .78, 'P' => .66, 'Q' => .78, 'R' => .70,
-        'S' => .66, 'T' => .62, 'U' => .72, 'V' => .68, 'W' => .96, 'X' => .66,
-        'Y' => .66, 'Z' => .62,
-    ];
-    private const LOWER = [
-        'a' => .56, 'b' => .58, 'c' => .52, 'd' => .58, 'e' => .56, 'f' => .30,
-        'g' => .58, 'h' => .56, 'i' => .24, 'j' => .24, 'k' => .52, 'l' => .24,
-        'm' => .86, 'n' => .56, 'o' => .58, 'p' => .58, 'q' => .58, 'r' => .36,
-        's' => .50, 't' => .30, 'u' => .56, 'v' => .50, 'w' => .74, 'x' => .50,
-        'y' => .50, 'z' => .50,
-    ];
-    private const DIGIT_EM = .58;
-    private const OTHER_EM = .60;
+    private const UPPERCASE_EM = 0.70;
+    private const MIXED_CASE_EM = 0.58;
+
+    /** Non-em letter spacing means "spacing exists"; only widening counts. */
+    private const UNKNOWN_SPACING_EM = 0.03;
 
     /** The measure keeps a small margin for the copy wrapper's own padding. */
     private const MEASURE_SAFETY = 0.96;
+
+    /** Below this a pin is worse than the CSS guard; leave the guard to it. */
+    private const MINIMUM_CAP_PX = 32;
+
+    /**
+     * The stylesheet's hyphenation hook (ScaffoldThemeStep). Hero headlines
+     * wrap whole words by default — blanket `hyphens: auto` hyphenates
+     * ordinary words at ordinary line breaks — so hyphenation is opted into
+     * per heading, only where no pinnable size fits.
+     */
+    private const HYPHENATE_CLASS = 'headline-hyphenate';
 
     /** @return array{markup:string, notes:list<string>} */
     public static function apply(string $markup, array $theme): array
@@ -80,35 +94,48 @@ final class HeroHeadlineFit
                 // also makes the pass idempotent.
                 continue;
             }
-            $text = trim(html_entity_decode(strip_tags($doc->innerHtml($i)), ENT_QUOTES | ENT_HTML5));
-            if ($text === '') {
+            $word = self::longestWord($doc->innerHtml($i));
+            if ($word === null) {
+                continue;
+            }
+            $measure = self::measurePx($doc, $i, $theme);
+            if ($measure === null) {
                 continue;
             }
             $level = is_numeric($attrs['level'] ?? null) ? (int) $attrs['level'] : 2;
             $uppercase = self::effectiveTransform($attrs, $theme, $level) === 'uppercase';
             $spacingEm = self::effectiveLetterSpacingEm($attrs, $theme, $level);
-            $measure = self::constrainedMeasurePx($doc, $i, $theme);
-            if ($measure === null) {
-                continue;
-            }
-
-            $widest = null;
-            foreach (preg_split('/\s+/u', $text, -1, PREG_SPLIT_NO_EMPTY) ?: [] as $word) {
-                $em = self::wordEm($uppercase ? mb_strtoupper($word) : $word, $spacingEm);
-                if ($widest === null || $em > $widest['em']) {
-                    $widest = ['word' => $word, 'em' => $em];
-                }
-            }
-            if ($widest === null || $widest['em'] <= 0) {
+            $chars = mb_strlen($word);
+            $wordEm = $chars * ($uppercase ? self::UPPERCASE_EM : self::MIXED_CASE_EM)
+                + max(0, $chars - 1) * $spacingEm;
+            if ($wordEm <= 0) {
                 continue;
             }
 
             $available = $measure * self::MEASURE_SAFETY;
-            if ($displayMax * $widest['em'] <= $available) {
+            if ($displayMax * $wordEm <= $available) {
                 continue;
             }
-            $cap = (int) floor($available / $widest['em']);
-            if ($cap < 1) {
+            $cap = (int) floor($available / $wordEm);
+            if ($cap < self::MINIMUM_CAP_PX) {
+                // A word this long in a measure this narrow has no size worth
+                // pinning. This is the one case where a hyphen beats a bare
+                // mid-word snap, so opt this heading — and only this heading —
+                // into the stylesheet's hyphenation hook.
+                $classes = self::classes($attrs);
+                if (!in_array(self::HYPHENATE_CLASS, $classes, true)) {
+                    $classes[] = self::HYPHENATE_CLASS;
+                    $attrs['className'] = implode(' ', $classes);
+                    $doc->setAttrs($i, $attrs);
+                    $notes[] = sprintf(
+                        "headline word-fit: '%s' (%d chars) fits no size above %dpx in the %dpx measure; "
+                            . 'heading opted into hyphenation instead of a pinned size',
+                        $word,
+                        $chars,
+                        self::MINIMUM_CAP_PX,
+                        (int) round($measure),
+                    );
+                }
                 continue;
             }
             // The preset class must go with the preset attr: WordPress
@@ -121,13 +148,14 @@ final class HeroHeadlineFit
             $doc->setAttrs($i, $attrs);
             $doc->removeClassTokenInOwnHtml($i, 'has-display-font-size');
             $notes[] = sprintf(
-                "headline word-fit: '%s' (~%.2fem%s) cannot fit the %dpx measure at the display maximum "
-                    . '%dpx; heading pinned to min(display, %dpx)',
-                $widest['word'],
-                $widest['em'],
+                "headline word-fit: '%s' (%d chars%s, ~%.2fem) cannot fit the %dpx measure at the display "
+                    . 'maximum %dpx; heading pinned to min(display, %dpx)',
+                $word,
+                $chars,
                 $uppercase ? ', uppercase' : '',
-                $measure,
-                $displayMax,
+                $wordEm,
+                (int) round($measure),
+                (int) round($displayMax),
                 $cap,
             );
         }
@@ -135,21 +163,26 @@ final class HeroHeadlineFit
         return ['markup' => $doc->isMutated() ? $doc->render() : $markup, 'notes' => $notes];
     }
 
-    /** Estimated advance width of one word in em, including letter spacing. */
-    private static function wordEm(string $word, float $spacingEm): float
+    /** @return list<string> the block's own class tokens */
+    private static function classes(array $attrs): array
     {
-        $chars = preg_split('//u', $word, -1, PREG_SPLIT_NO_EMPTY) ?: [];
-        $em = 0.0;
-        foreach ($chars as $char) {
-            $em += self::UPPER[$char]
-                ?? self::LOWER[$char]
-                ?? (ctype_digit($char) ? self::DIGIT_EM : self::OTHER_EM);
+        return preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+    }
+
+    /** The heading's longest word, or null when it has no text. */
+    private static function longestWord(string $innerHtml): ?string
+    {
+        // A line break is a word boundary: stripping it bare would fuse the
+        // words on either side into one impossibly long token.
+        $text = preg_replace('/<br\s*\/?>/i', ' ', $innerHtml) ?? $innerHtml;
+        $text = trim(html_entity_decode(strip_tags($text), ENT_QUOTES | ENT_HTML5));
+        $longest = null;
+        foreach (preg_split('/\s+/u', $text, -1, PREG_SPLIT_NO_EMPTY) ?: [] as $word) {
+            if ($longest === null || mb_strlen($word) > mb_strlen($longest)) {
+                $longest = $word;
+            }
         }
-        $count = count($chars);
-        if ($count > 1) {
-            $em += ($count - 1) * $spacingEm;
-        }
-        return $em;
+        return $longest;
     }
 
     /** The display preset's largest resolvable size in px, or null. */
@@ -173,6 +206,13 @@ final class HeroHeadlineFit
             $terms = self::splitTopLevel($m[1]);
             return count($terms) === 3 ? self::cssMaxPx($terms[2]) : null;
         }
+        return self::lengthPx($value);
+    }
+
+    /** A bare px/rem length in px, or null for anything else. */
+    private static function lengthPx(string $value): ?float
+    {
+        $value = trim($value);
         if (preg_match('/^([\d.]+)px$/i', $value, $m)) {
             return (float) $m[1];
         }
@@ -207,27 +247,62 @@ final class HeroHeadlineFit
     }
 
     /**
-     * The nearest constrained ancestor's px contentSize, else the theme's
-     * global content size; null when neither resolves to px.
+     * The width the headline actually gets, walked outward from the heading:
+     * the innermost box that states a width in px wins, narrowed by every
+     * percentage column between it and the heading. Falls back to the theme's
+     * global content size; null when nothing resolves.
+     *
+     * A group's own `flexSize` counts: it is the copy width the composition
+     * asked for, and it still describes the intended column even where core
+     * only honours it inside a flex parent.
      */
-    private static function constrainedMeasurePx(BlockMarkup $doc, int $heading, array $theme): ?float
+    private static function measurePx(BlockMarkup $doc, int $heading, array $theme): ?float
     {
+        $share = 1.0;
         for ($i = $doc->parent($heading); $i !== null; $i = $doc->parent($i)) {
             $attrs = $doc->attrs($i) ?? [];
+            $name = $doc->name($i);
+
             $layout = $attrs['layout'] ?? null;
-            if (!is_array($layout) || ($layout['type'] ?? null) !== 'constrained') {
-                continue;
+            if (is_array($layout) && ($layout['type'] ?? null) === 'constrained') {
+                $size = $layout['contentSize'] ?? null;
+                $px = is_string($size) ? self::lengthPx($size) : null;
+                if ($px !== null) {
+                    return $px * $share;
+                }
             }
-            $size = $layout['contentSize'] ?? null;
-            if (is_string($size) && preg_match('/^([\d.]+)px$/i', trim($size), $m)) {
-                return (float) $m[1];
+
+            $flexSize = $attrs['style']['layout']['flexSize'] ?? null;
+            $px = is_string($flexSize) ? self::lengthPx($flexSize) : null;
+            if ($px !== null) {
+                return $px * $share;
+            }
+
+            if ($name === 'column') {
+                $width = $attrs['width'] ?? null;
+                if (is_string($width)) {
+                    $px = self::lengthPx($width);
+                    if ($px !== null) {
+                        return $px * $share;
+                    }
+                    if (preg_match('/^([\d.]+)%$/', trim($width), $m) && (float) $m[1] > 0) {
+                        $share *= (float) $m[1] / 100.0;
+                    }
+                }
+            } elseif ($name === 'media-text') {
+                // The copy half of a media-text: core's default split is 50%,
+                // and mediaWidth names the media side's percentage.
+                $mediaWidth = $attrs['mediaWidth'] ?? null;
+                $media = is_numeric($mediaWidth) ? (float) $mediaWidth : 50.0;
+                if ($media > 0 && $media < 100) {
+                    $share *= (100.0 - $media) / 100.0;
+                }
             }
         }
+
         $global = $theme['settings']['layout']['contentSize'] ?? null;
-        if (is_string($global) && preg_match('/^([\d.]+)px$/i', trim($global), $m)) {
-            return (float) $m[1];
-        }
-        return null;
+        $px = is_string($global) ? self::lengthPx($global) : null;
+        return $px === null ? null : $px * $share;
     }
 
     private static function effectiveTransform(array $attrs, array $theme, int $level): ?string
@@ -255,13 +330,18 @@ final class HeroHeadlineFit
             if (!is_string($value) || trim($value) === '') {
                 continue;
             }
-            if (preg_match('/^(-?[\d.]+)em$/i', trim($value), $m)) {
-                return (float) $m[1];
+            $value = trim($value);
+            if (preg_match('/^(-?[\d.]+)em$/i', $value, $m)) {
+                // Tighter tracking only helps the fit; never widen for it.
+                return max(0.0, (float) $m[1]);
+            }
+            if (str_starts_with($value, '-')) {
+                return 0.0;
             }
             // A non-em unit (px on a fluid heading is authoring noise) still
             // means "spacing exists": estimate conservatively rather than
             // treating it as zero.
-            return 0.03;
+            return self::UNKNOWN_SPACING_EM;
         }
         return 0.0;
     }

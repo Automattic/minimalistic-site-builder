@@ -337,8 +337,8 @@ final class HeaderHeroStep implements Step
             array_push($warnings, ...$actionResult['warnings']);
 
             // With the hero copy final, guarantee its longest headline word
-            // fits the copy measure at the display preset's maximum — the
-            // CSS mid-word break guard must stay dormant (BIGR-798).
+            // fits the measure its layout chain implies — the CSS mid-word
+            // break guard must stay dormant (BIGR-798).
             $fit = HeroHeadlineFit::apply($writes[$heroRel], $theme);
             $writes[$heroRel] = $fit['markup'];
             foreach ($fit['notes'] as $note) {
