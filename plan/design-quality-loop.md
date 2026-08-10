@@ -1,7 +1,7 @@
 # Design-quality loop state
 
 ## Iteration counter
-- **22** (2026-08-10, Fix iteration — BIGR-799; user relaunched the loop a second time over the 3-open-PR stop, read as a standing keep-working directive; this fix's evidence shares no code path with the open PRs). NOTE: Linear MCP token EXPIRED — BIGR-799 could not be moved to In Progress; needs /mcp re-auth, then reconcile Linear statuses.
+- **22** (2026-08-10, Fix iteration — BIGR-799; user relaunched the loop a second time over the 3-open-PR stop, read as a standing keep-working directive; this fix's evidence shares no code path with the open PRs). BIGR-799 moved to In Progress during PR review.
 - **21** (2026-08-07, VARIETY iteration — user relaunched the loop overriding the 3-open-PR stop). Proposal **statement-type** (BIGR-803): the one type-led hero recipe (media_modes ['none']) re-serving the gap the retired typographic-poster left, with the ornament channel welded shut (bare type on a bare surface; ornament = objective failure). Built + registered + tested (1869/1869) on branch `feat/bigr-803-type-led-hero`; renders lumen5 + pulso3 (desktop/mobile clean, no-image trivially clean) — gist d0a61db2be4011c175bbf1d1f78f956c. **PARKED on BIGR-803** (slot occupied by #228): go recommendation, one observed stochastic flaw (pulso3 H1 restated the site title; register rule added to the fragment, unproven until the next rebuild). NO PR opened. Requestable constraint enums still exclude 'none' — callers demanding imagery can never receive statement-type.
 
 ## Next iteration (21 — deferred VARIETY CADENCE TURN) — but loop STOPPED on the 3-open-PR condition

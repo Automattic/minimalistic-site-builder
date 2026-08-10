@@ -1086,6 +1086,16 @@ test('headerFacts reads overlay mode from the classes delivery actually emits (B
         . '<!-- /wp:group -->';
     assert_eq('stacked', AboveFoldPartFacts::headerFacts($stacked)['mode']);
 
+    // A stacked sticky header can render transparently at rest after earning
+    // the separate treatment hook. That `header-top-transparent` token must
+    // not be confused with overlay's `header-start-transparent` surface.
+    $transparentSticky = str_replace(
+        'header-foreground-contrast',
+        'header-foreground-contrast header-top-transparent header-scrolled-glass',
+        $stacked,
+    );
+    assert_eq('stacked', AboveFoldPartFacts::headerFacts($transparentSticky)['mode']);
+
     // And the behavior-class-free static delivery stays stacked too.
     $static = '<!-- wp:group {"className":"header-archetype--minimal-columns","backgroundColor":"base",'
         . '"layout":{"type":"constrained"}} -->'
