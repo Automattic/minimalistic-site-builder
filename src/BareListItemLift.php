@@ -31,30 +31,42 @@ use Automattic\SiteBuild\BlockSerializer\Json\JsonObject;
  */
 final class BareListItemLift
 {
-    /** @return array{markup:string, notes:list<string>, warnings:list<string>} */
+    private const PROPER_ITEM_PATTERN = '<!-- wp:list-item(?=\s)(?:(?!-->)[\s\S])*-->'
+        . '[\s\S]*?<!-- \/wp:list-item -->';
+
+    /** @return array{markup:string, notes:list<string>, warnings:list<string>, blocked:list<string>} */
     public static function fix(string $markup): array
     {
         if (!str_contains($markup, '<!-- wp:list')) {
-            return ['markup' => $markup, 'notes' => [], 'warnings' => []];
+            return ['markup' => $markup, 'notes' => [], 'warnings' => [], 'blocked' => []];
         }
 
         $notes = [];
         $warnings = [];
+        $blocked = [];
         $ordinal = -1;
         $fixed = preg_replace_callback(
             '/(<!-- wp:list(?=\s)(?:(?!-->)[\s\S])*-->)([\s\S]*?)(<!-- \/wp:list -->)/',
-            function (array $block) use (&$notes, &$warnings, &$ordinal): string {
+            function (array $block) use (&$notes, &$warnings, &$blocked, &$ordinal): string {
                 $ordinal++;
                 $list = self::flatListBody($block[2]);
-                if ($list === null
-                    || preg_match('/<(?:ul|ol)\b/i', $list['items']) === 1
+                if ($list === null) {
+                    self::recordBlockedBareItems($blocked, $ordinal, $block[2]);
+                    return $block[0];
+                }
+                if (preg_match('/<(?:ul|ol)\b/i', $list['items']) === 1
                     || preg_match('/<!-- wp:list(?=\s)/', $list['items']) === 1
                 ) {
+                    self::recordBlockedBareItems($blocked, $ordinal, $list['items']);
                     return $block[0];
                 }
 
                 $items = self::liftItems($list['items'], $ordinal);
-                if ($items === null || ($items['lifted'] === 0 && $items['removed'] === 0)) {
+                if ($items === null) {
+                    self::recordBlockedBareItems($blocked, $ordinal, $list['items']);
+                    return $block[0];
+                }
+                if ($items['lifted'] === 0 && $items['removed'] === 0) {
                     return $block[0];
                 }
 
@@ -66,8 +78,7 @@ final class BareListItemLift
                     $mirrored,
                 );
                 if ($opener === null) {
-                    // Invalid comment JSON is outside this bounded repair. The
-                    // block fixer will isolate the file and retain its bytes.
+                    self::recordBlockedBareItems($blocked, $ordinal, $list['items']);
                     return $block[0];
                 }
 
@@ -93,7 +104,12 @@ final class BareListItemLift
             $markup,
         );
 
-        return ['markup' => $fixed ?? $markup, 'notes' => $notes, 'warnings' => $warnings];
+        return [
+            'markup' => $fixed ?? $markup,
+            'notes' => $notes,
+            'warnings' => $warnings,
+            'blocked' => $blocked,
+        ];
     }
 
     /**
@@ -131,10 +147,8 @@ final class BareListItemLift
      */
     private static function liftItems(string $items, int $listOrdinal): ?array
     {
-        $proper = '<!-- wp:list-item(?=\s)(?:(?!-->)[\s\S])*-->'
-            . '[\s\S]*?<!-- \/wp:list-item -->';
         $bare = '<li(?=[\s>])(?<attributes>(?:\s[^>]*)?)>(?<content>[\s\S]*?)<\/li>';
-        $pattern = '/(?<proper>' . $proper . ')|(?<bare>' . $bare . ')/i';
+        $pattern = '/(?<proper>' . self::PROPER_ITEM_PATTERN . ')|(?<bare>' . $bare . ')/i';
         if (preg_match_all($pattern, $items, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE) < 1) {
             return null;
         }
@@ -149,7 +163,7 @@ final class BareListItemLift
             $itemOrdinal++;
             $start = $match[0][1];
             $gap = substr($items, $cursor, $start - $cursor);
-            if (trim($gap) !== '') {
+            if (!self::isInsignificantGap($gap)) {
                 return null;
             }
             $markup .= $gap;
@@ -179,7 +193,7 @@ final class BareListItemLift
         }
 
         $tail = substr($items, $cursor);
-        if (trim($tail) !== '') {
+        if (!self::isInsignificantGap($tail)) {
             return null;
         }
         $markup .= $tail;
@@ -190,6 +204,27 @@ final class BareListItemLift
             'removed' => $removed,
             'warnings' => $warnings,
         ];
+    }
+
+    private static function isInsignificantGap(string $gap): bool
+    {
+        $withoutComments = preg_replace('/<!--(?:(?!-->)[\s\S])*-->/', '', $gap);
+        return $withoutComments !== null && HtmlBlockContext::isInsignificant($withoutComments);
+    }
+
+    /** @param list<string> $blocked */
+    private static function recordBlockedBareItems(array &$blocked, int $listOrdinal, string $items): void
+    {
+        $outsideBlocks = preg_replace('/' . self::PROPER_ITEM_PATTERN . '/i', '', $items);
+        if ($outsideBlocks === null || preg_match('/<li(?=[\s>])/i', $outsideBlocks) !== 1) {
+            return;
+        }
+        $authored = preg_match('/<li(?=[\s>])[\s\S]*?(?:<\/li>|$)/i', $outsideBlocks, $item) === 1
+            ? $item[0]
+            : $outsideBlocks;
+        $blocked[] = "wp:list[{$listOrdinal}]: authored bare list HTML " . Warnings::value($authored)
+            . ' could not be lifted without structural ambiguity; delivered pre-step file bytes unchanged; '
+            . 'disposition: skipped all fix-blocks mutations for this file';
     }
 
     private static function hasMeaningfulContent(string $content): bool

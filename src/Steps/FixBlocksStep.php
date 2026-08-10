@@ -80,13 +80,28 @@ final class FixBlocksStep implements Step
             $listReport = self::liftBareListItems($project);
             $listNotes = $listReport['notes'];
             $listWarnings = $listReport['warnings'];
+            $listBlocked = $listReport['blocked'];
             $layoutNotes = self::normalizeLayouts($project);
             $shapeChanges = self::normalizeShapes($project, $shape);
             $alignmentBaselines[] = self::snapshotThemeFiles($project);
-            $initialOutcome = BlockFixerOutcome::run($this->fixer, $project->themePath());
+            $blockedFailures = [];
+            foreach ($listBlocked as $blocked) {
+                $blockedFailures[$blocked['file']] = isset($blockedFailures[$blocked['file']])
+                    ? $blockedFailures[$blocked['file']] . '; ' . $blocked['reason']
+                    : $blocked['reason'];
+            }
+            $initialOutcome = BlockFixerOutcome::run($this->fixer, $project->themePath())
+                ->withFailures($blockedFailures);
             $outcomes[] = $initialOutcome;
             $summary = $initialOutcome->formatted;
             self::appendFailures($failedFiles, $initialOutcome);
+            // A legacy fixer exposes only a formatted string, so retain the
+            // pre-pass abandonments in the step's own transaction ledger.
+            if ($initialOutcome->typed === null) {
+                foreach ($blockedFailures as $file => $reason) {
+                    $failedFiles[$file] = [$file, $reason];
+                }
+            }
             self::restoreFailedThemeFiles($project, $beforeInitialPass, self::failurePaths($failedFiles));
             $layoutNotes = self::withoutFailedLayoutNotes($layoutNotes, self::failurePaths($failedFiles));
             $listNotes = self::withoutFailedLayoutNotes($listNotes, self::failurePaths($failedFiles));
@@ -335,12 +350,17 @@ final class FixBlocksStep implements Step
      *
      * @param list<string> $excluded fixer-relative paths whose step
      *        transaction has already been abandoned
-     * @return array{notes:list<string>,warnings:list<string>}
+     * @return array{
+     *     notes:list<string>,
+     *     warnings:list<string>,
+     *     blocked:list<array{file:string,reason:string}>
+     * }
      */
     public static function liftBareListItems(Project $project, array $excluded = []): array
     {
         $notes = [];
         $warnings = [];
+        $blocked = [];
         $excluded = array_fill_keys($excluded, true);
         foreach ($project->themeFiles() as $rel) {
             if (isset($excluded[$rel])) {
@@ -357,8 +377,11 @@ final class FixBlocksStep implements Step
             foreach ($result['warnings'] as $warning) {
                 $warnings[] = "{$rel}: {$warning}";
             }
+            foreach ($result['blocked'] as $reason) {
+                $blocked[] = ['file' => $rel, 'reason' => $reason];
+            }
         }
-        return ['notes' => $notes, 'warnings' => $warnings];
+        return ['notes' => $notes, 'warnings' => $warnings, 'blocked' => $blocked];
     }
 
     /**

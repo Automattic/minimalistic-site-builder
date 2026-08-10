@@ -90,6 +90,17 @@ test('mixed proper and bare list items retain both items in source order', funct
     assert_eq([], $second['warnings']);
 });
 
+test('inert comments and model whitespace do not block a mixed-list repair', function () {
+    $proper = '<!-- wp:list-item --><li>Structured</li><!-- /wp:list-item -->';
+    $markup = "<!-- wp:list -->\n<ul class=\"wp-block-list\">{$proper}"
+        . "<!-- inert -->\xC2\xA0<li>Bare</li></ul>\n<!-- /wp:list -->";
+    $r = BareListItemLift::fix($markup);
+    assert_eq(2, substr_count($r['markup'], '<!-- wp:list-item -->'));
+    assert_contains('<!-- inert -->', $r['markup']);
+    assert_contains('Bare', $r['markup']);
+    assert_eq([], $r['blocked']);
+});
+
 test('the lift is idempotent and leaves proper lists byte-identical', function () {
     $lifted = BareListItemLift::fix(blil_bare_list())['markup'];
     $second = BareListItemLift::fix($lifted);
@@ -173,6 +184,39 @@ test('a failed file rolls back list repairs and warnings without affecting a sib
         $warnings = implode("\n", $project->readJson('warnings.json')['fix-blocks'] ?? []);
         assert_true(!str_contains($warnings, 'empty bare list item'), 'rolled-back removal warning is filtered');
         assert_contains('left parts/failed.html unmodified', $warnings);
+    } finally {
+        remove_tree($tmp);
+    }
+});
+
+test('an ambiguous nested bare list preserves the complete file and warns while a sibling repairs', function () {
+    $proper = '<!-- wp:list-item --><li>Structured</li><!-- /wp:list-item -->';
+    $ambiguous = "<!-- wp:list -->\n<ul class=\"wp-block-list\">{$proper}"
+        . '<li>Outer<ul><li>Nested</li></ul></li></ul>' . "\n<!-- /wp:list -->";
+    $tmp = sys_get_temp_dir() . '/fix-blocks-bare-li-ambiguous-' . uniqid();
+    $project = new Project($tmp);
+    $project->writeText('theme/parts/ambiguous.html', $ambiguous);
+    $project->writeText('theme/parts/sibling.html', blil_bare_list());
+
+    try {
+        (new FixBlocksStep(new PhpBlockFixer()))->run($project);
+
+        assert_eq(
+            $ambiguous,
+            $project->readText('theme/parts/ambiguous.html'),
+            'ambiguous file is delivered byte-for-byte instead of partially dropping content',
+        );
+        assert_contains('Entry to both nights', $project->readText('theme/parts/sibling.html'));
+        $warnings = implode("\n", $project->readJson('warnings.json')['fix-blocks'] ?? []);
+        assert_contains('parts/ambiguous.html', $warnings);
+        assert_contains('authored bare list HTML', $warnings);
+        assert_contains('delivered pre-step file bytes unchanged', $warnings);
+        assert_contains('disposition: skipped all fix-blocks mutations for this file', $warnings);
+        assert_contains(
+            '[fix-templates] 1/2 file(s) re-serialized',
+            $project->readText('logs/fix-blocks.log'),
+            'typed fixer report reflects the restored file transaction',
+        );
     } finally {
         remove_tree($tmp);
     }
