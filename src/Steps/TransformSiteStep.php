@@ -158,6 +158,12 @@ final class TransformSiteStep implements Step
                 throw new \RuntimeException("transform-site: required design artifact design/{$source} is absent");
             }
             $extracted = self::extractPage($html, "design/{$source}");
+            // The author stylesheet that the transformer must resolve fragment
+            // images against. extractPage strips each page's <style> blocks, so
+            // combine the shared site.css with this page's inline styles; without
+            // it, shape rules like `.hero-frame img { aspect-ratio; object-fit }`
+            // never reach HtmlTransformer and the hero crop is silently lost.
+            $pageCss = self::pageAuthorCss($siteCss, $html);
             if (!empty($page['front'])) {
                 foreach (['header', 'footer'] as $area) {
                     if (!is_array($extracted[$area] ?? null)) {
@@ -169,6 +175,7 @@ final class TransformSiteStep implements Step
                         'kind' => 'chrome',
                         'page_slug' => $slug,
                         'section_slug' => $area,
+                        'author_css' => $pageCss,
                         'output' => "theme/parts/{$area}.html",
                     ];
                     $chromeKeys[$area] = $key;
@@ -181,6 +188,7 @@ final class TransformSiteStep implements Step
                     'key' => $key,
                     'kind' => 'section',
                     'page_slug' => $slug,
+                    'author_css' => $pageCss,
                     'output' => 'theme/parts/' . SectionsStep::partSlug($slug, $sectionSlug) . '.html',
                 ];
                 $pageFragmentKeys[$pageIndex][] = $key;
@@ -314,6 +322,8 @@ final class TransformSiteStep implements Step
                 $result = (new ArtifactCompiler())->compileFragment(
                     (string) $fragment['html'],
                     (string) $fragment['source'],
+                    'html',
+                    ['static_css' => (string) ($fragment['author_css'] ?? '')],
                 );
             } catch (\InvalidArgumentException|\TypeError $error) {
                 throw $error;
@@ -731,6 +741,29 @@ final class TransformSiteStep implements Step
             }
         }
         return $merged;
+    }
+
+    /**
+     * Author stylesheet the transformer resolves fragment images against:
+     * the shared site.css plus this page's own inline <style> blocks (which
+     * extractPage strips out of the section markup). Threaded to compileFragment
+     * as `static_css` so descendant shape rules (`.hero-frame img`) survive as
+     * native block attributes.
+     */
+    private static function pageAuthorCss(string $siteCss, string $html): string
+    {
+        $parts = [];
+        if (trim($siteCss) !== '') {
+            $parts[] = $siteCss;
+        }
+        if (preg_match_all('#<style\b[^>]*>(.*?)</style>#is', $html, $matches)) {
+            foreach ($matches[1] as $block) {
+                if (trim($block) !== '') {
+                    $parts[] = $block;
+                }
+            }
+        }
+        return implode("\n", $parts);
     }
 
     /**

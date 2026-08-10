@@ -479,3 +479,47 @@ test('transform-site degrades scoped legacy generation failure without aborting 
     assert_eq('dropped', $report['dropped_fragments'][0]['disposition']);
     transform_site_cleanup($tmp);
 });
+
+test('transform-site threads inline <style> shape rules into image aspectRatio/scale', function () {
+    // The authored crop lives only in a `.hero-frame img` descendant rule inside
+    // the page's <style>, which extractPage strips. transform-site must still
+    // thread it through compileFragment so the image gains native block geometry.
+    [$project, $llm, $tmp] = transform_site_fixture(
+        '<!doctype html><html><head><style>'
+        . '.hero-frame img { aspect-ratio: 4 / 3; object-fit: cover; }'
+        . '</style></head><body>'
+        . '<header><p>Header</p></header>'
+        . '<section id="hero"><figure class="hero-figure"><div class="hero-frame">'
+        . '<img src="hero.jpg" alt="Hero portrait"></div></figure></section>'
+        . '<footer><p>Footer</p></footer>'
+        . '</body></html>',
+    );
+
+    transform_site_run($project, $llm);
+
+    $part = $project->readText('theme/parts/page-home--hero.html');
+    assert_contains('"aspectRatio":"4/3"', $part);
+    assert_contains('"scale":"cover"', $part);
+    transform_site_cleanup($tmp);
+});
+
+test('transform-site threads shared site.css shape rules into image aspectRatio/scale', function () {
+    // Same promotion, but the shape rule is carried by the shared design
+    // stylesheet (design/site.css) rather than the page's inline <style>.
+    [$project, $llm, $tmp] = transform_site_fixture(
+        '<!doctype html><html><body>'
+        . '<header><p>Header</p></header>'
+        . '<section id="hero"><figure class="hero-figure"><div class="hero-frame">'
+        . '<img src="hero.jpg" alt="Hero portrait"></div></figure></section>'
+        . '<footer><p>Footer</p></footer>'
+        . '</body></html>',
+    );
+    $project->writeText('design/site.css', ".hero-frame img { aspect-ratio: 3 / 2; object-fit: contain; }\n");
+
+    transform_site_run($project, $llm);
+
+    $part = $project->readText('theme/parts/page-home--hero.html');
+    assert_contains('"aspectRatio":"3/2"', $part);
+    assert_contains('"scale":"contain"', $part);
+    transform_site_cleanup($tmp);
+});
