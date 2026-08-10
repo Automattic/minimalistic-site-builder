@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\BareListItemLift;
 use Automattic\SiteBuild\BlockFixer;
 use Automattic\SiteBuild\BlockFixerOutcome;
 use Automattic\SiteBuild\BlockSerializer\AlignmentClassLoss;
@@ -76,15 +77,35 @@ final class FixBlocksStep implements Step
         $entryShapeChanges = self::shapeChangesInSnapshot($beforeInitialPass, $shape);
         $shapeChanges = [];
         try {
+            $listReport = self::liftBareListItems($project);
+            $listNotes = $listReport['notes'];
+            $listWarnings = $listReport['warnings'];
+            $listBlocked = $listReport['blocked'];
             $layoutNotes = self::normalizeLayouts($project);
             $shapeChanges = self::normalizeShapes($project, $shape);
             $alignmentBaselines[] = self::snapshotThemeFiles($project);
-            $initialOutcome = BlockFixerOutcome::run($this->fixer, $project->themePath());
+            $blockedFailures = [];
+            foreach ($listBlocked as $blocked) {
+                $blockedFailures[$blocked['file']] = isset($blockedFailures[$blocked['file']])
+                    ? $blockedFailures[$blocked['file']] . '; ' . $blocked['reason']
+                    : $blocked['reason'];
+            }
+            $initialOutcome = BlockFixerOutcome::run($this->fixer, $project->themePath())
+                ->withFailures($blockedFailures);
             $outcomes[] = $initialOutcome;
             $summary = $initialOutcome->formatted;
             self::appendFailures($failedFiles, $initialOutcome);
+            // A legacy fixer exposes only a formatted string, so retain the
+            // pre-pass abandonments in the step's own transaction ledger.
+            if ($initialOutcome->typed === null) {
+                foreach ($blockedFailures as $file => $reason) {
+                    $failedFiles[$file] = [$file, $reason];
+                }
+            }
             self::restoreFailedThemeFiles($project, $beforeInitialPass, self::failurePaths($failedFiles));
             $layoutNotes = self::withoutFailedLayoutNotes($layoutNotes, self::failurePaths($failedFiles));
+            $listNotes = self::withoutFailedLayoutNotes($listNotes, self::failurePaths($failedFiles));
+            $listWarnings = self::withoutFailedLayoutNotes($listWarnings, self::failurePaths($failedFiles));
         } catch (\RuntimeException $e) {
             self::restoreThemeFiles($project, $beforeInitialPass);
             $project->writeText('logs/' . self::LOG_FILE, $e->getMessage() . "\n");
@@ -115,6 +136,8 @@ final class FixBlocksStep implements Step
                 self::appendFailures($failedFiles, $followUpOutcome);
                 self::restoreFailedThemeFiles($project, $beforeInitialPass, self::failurePaths($failedFiles));
                 $layoutNotes = self::withoutFailedLayoutNotes($layoutNotes, self::failurePaths($failedFiles));
+                $listNotes = self::withoutFailedLayoutNotes($listNotes, self::failurePaths($failedFiles));
+                $listWarnings = self::withoutFailedLayoutNotes($listWarnings, self::failurePaths($failedFiles));
             }
         } catch (\RuntimeException $e) {
             // The public step is one transaction even though structural
@@ -129,6 +152,14 @@ final class FixBlocksStep implements Step
             }
             $project->writeText('logs/' . self::LOG_FILE, $summary . "\n");
             throw $e;
+        }
+        if ($listNotes !== []) {
+            $summary .= "\n[list] " . count($listNotes) . " bare list-item lift(s):\n  " . implode("\n  ", $listNotes);
+        }
+        if ($listWarnings !== []) {
+            $summary .= "\n[list] WARNING: " . count($listWarnings)
+                . " empty bare list item(s) removed (recorded in warnings.json):\n  "
+                . implode("\n  ", $listWarnings);
         }
         if ($layoutNotes !== []) {
             $summary .= "\n[layout] " . count($layoutNotes) . " width/rhythm fix(es):\n  " . implode("\n  ", $layoutNotes);
@@ -215,6 +246,7 @@ final class FixBlocksStep implements Step
         // durable for the later repair pass rather than hiding it in this log.
         $paragraphStyleWarnings = self::degradedParagraphStyles($deliveredSummary);
         $warnings = array_merge(
+            $listWarnings,
             $paragraphStyleWarnings,
             $shapeDeliveryWarnings,
             $shapeRollbackWarnings,
@@ -309,6 +341,47 @@ final class FixBlocksStep implements Step
         if ($layoutNotes !== []) {
             echo '  layout: ' . count($layoutNotes) . " width/rhythm fix(es) applied\n";
         }
+    }
+
+    /**
+     * Mirror bare `<li>` children of authored wp:list blocks into
+     * wp:list-item inner blocks before the fixer regenerates save output
+     * from block structure alone (which would drop every bare item).
+     *
+     * @param list<string> $excluded fixer-relative paths whose step
+     *        transaction has already been abandoned
+     * @return array{
+     *     notes:list<string>,
+     *     warnings:list<string>,
+     *     blocked:list<array{file:string,reason:string}>
+     * }
+     */
+    public static function liftBareListItems(Project $project, array $excluded = []): array
+    {
+        $notes = [];
+        $warnings = [];
+        $blocked = [];
+        $excluded = array_fill_keys($excluded, true);
+        foreach ($project->themeFiles() as $rel) {
+            if (isset($excluded[$rel])) {
+                continue;
+            }
+            $markup = $project->readText('theme/' . $rel);
+            $result = BareListItemLift::fix($markup);
+            if ($result['markup'] !== $markup) {
+                $project->writeText('theme/' . $rel, $result['markup']);
+            }
+            foreach ($result['notes'] as $note) {
+                $notes[] = "{$rel}: {$note}";
+            }
+            foreach ($result['warnings'] as $warning) {
+                $warnings[] = "{$rel}: {$warning}";
+            }
+            foreach ($result['blocked'] as $reason) {
+                $blocked[] = ['file' => $rel, 'reason' => $reason];
+            }
+        }
+        return ['notes' => $notes, 'warnings' => $warnings, 'blocked' => $blocked];
     }
 
     /**
