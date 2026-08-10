@@ -40,8 +40,12 @@ jobs:
           extensions: curl, json, mbstring, imagick
           coverage: none
 
-      # The package autoloads itself (autoload.php), so there is nothing to
-      # install for the suite proper.
+      # The transformer is now a Composer dependency (autoload.php prefers
+      # vendor/ when it is present); install it so the CSS/transform classes the
+      # suite exercises are available. No committed lock, so resolve fresh.
+      - name: Install Composer dependencies
+        run: composer update --no-interaction --no-progress
+
       - name: Lint every PHP file
         run: |
           find src bin tests -name '*.php' -print0 \
