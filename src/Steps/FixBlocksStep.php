@@ -77,7 +77,9 @@ final class FixBlocksStep implements Step
         $entryShapeChanges = self::shapeChangesInSnapshot($beforeInitialPass, $shape);
         $shapeChanges = [];
         try {
-            $listNotes = self::liftBareListItems($project);
+            $listReport = self::liftBareListItems($project);
+            $listNotes = $listReport['notes'];
+            $listWarnings = $listReport['warnings'];
             $layoutNotes = self::normalizeLayouts($project);
             $shapeChanges = self::normalizeShapes($project, $shape);
             $alignmentBaselines[] = self::snapshotThemeFiles($project);
@@ -88,6 +90,7 @@ final class FixBlocksStep implements Step
             self::restoreFailedThemeFiles($project, $beforeInitialPass, self::failurePaths($failedFiles));
             $layoutNotes = self::withoutFailedLayoutNotes($layoutNotes, self::failurePaths($failedFiles));
             $listNotes = self::withoutFailedLayoutNotes($listNotes, self::failurePaths($failedFiles));
+            $listWarnings = self::withoutFailedLayoutNotes($listWarnings, self::failurePaths($failedFiles));
         } catch (\RuntimeException $e) {
             self::restoreThemeFiles($project, $beforeInitialPass);
             $project->writeText('logs/' . self::LOG_FILE, $e->getMessage() . "\n");
@@ -119,6 +122,7 @@ final class FixBlocksStep implements Step
                 self::restoreFailedThemeFiles($project, $beforeInitialPass, self::failurePaths($failedFiles));
                 $layoutNotes = self::withoutFailedLayoutNotes($layoutNotes, self::failurePaths($failedFiles));
                 $listNotes = self::withoutFailedLayoutNotes($listNotes, self::failurePaths($failedFiles));
+                $listWarnings = self::withoutFailedLayoutNotes($listWarnings, self::failurePaths($failedFiles));
             }
         } catch (\RuntimeException $e) {
             // The public step is one transaction even though structural
@@ -136,6 +140,11 @@ final class FixBlocksStep implements Step
         }
         if ($listNotes !== []) {
             $summary .= "\n[list] " . count($listNotes) . " bare list-item lift(s):\n  " . implode("\n  ", $listNotes);
+        }
+        if ($listWarnings !== []) {
+            $summary .= "\n[list] WARNING: " . count($listWarnings)
+                . " empty bare list item(s) removed (recorded in warnings.json):\n  "
+                . implode("\n  ", $listWarnings);
         }
         if ($layoutNotes !== []) {
             $summary .= "\n[layout] " . count($layoutNotes) . " width/rhythm fix(es):\n  " . implode("\n  ", $layoutNotes);
@@ -222,6 +231,7 @@ final class FixBlocksStep implements Step
         // durable for the later repair pass rather than hiding it in this log.
         $paragraphStyleWarnings = self::degradedParagraphStyles($deliveredSummary);
         $warnings = array_merge(
+            $listWarnings,
             $paragraphStyleWarnings,
             $shapeDeliveryWarnings,
             $shapeRollbackWarnings,
@@ -319,28 +329,18 @@ final class FixBlocksStep implements Step
     }
 
     /**
-     * Apply LayoutFixer to every part/template, writing changed files back.
-     * Returns one "file: note" line per fix for the step log. The primary pass
-     * runs before the block fixer because LayoutFixer rewrites only comment
-     * attributes and the following re-serialization syncs the HTML with them.
-     * A post-repair pass handles markup that only became parseable afterwards.
-     *
-     * @param list<string> $excluded fixer-relative paths that have already
-     *        failed this step and must remain at their step-entry bytes
-     * @return string[]
-     */
-    /**
      * Mirror bare `<li>` children of authored wp:list blocks into
      * wp:list-item inner blocks before the fixer regenerates save output
      * from block structure alone (which would drop every bare item).
      *
      * @param list<string> $excluded fixer-relative paths whose step
      *        transaction has already been abandoned
-     * @return list<string>
+     * @return array{notes:list<string>,warnings:list<string>}
      */
     public static function liftBareListItems(Project $project, array $excluded = []): array
     {
         $notes = [];
+        $warnings = [];
         $excluded = array_fill_keys($excluded, true);
         foreach ($project->themeFiles() as $rel) {
             if (isset($excluded[$rel])) {
@@ -354,10 +354,24 @@ final class FixBlocksStep implements Step
             foreach ($result['notes'] as $note) {
                 $notes[] = "{$rel}: {$note}";
             }
+            foreach ($result['warnings'] as $warning) {
+                $warnings[] = "{$rel}: {$warning}";
+            }
         }
-        return $notes;
+        return ['notes' => $notes, 'warnings' => $warnings];
     }
 
+    /**
+     * Apply LayoutFixer to every part/template, writing changed files back.
+     * Returns one "file: note" line per fix for the step log. The primary pass
+     * runs before the block fixer because LayoutFixer rewrites only comment
+     * attributes and the following re-serialization syncs the HTML with them.
+     * A post-repair pass handles markup that only became parseable afterwards.
+     *
+     * @param list<string> $excluded fixer-relative paths that have already
+     *        failed this step and must remain at their step-entry bytes
+     * @return string[]
+     */
     public static function normalizeLayouts(Project $project, array $excluded = []): array
     {
         $notes = [];
