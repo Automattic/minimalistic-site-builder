@@ -851,6 +851,34 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             ];
         }
 
+        // A same-page fragment destination must name a section this plan
+        // actually contains. Authoring '#menu-signature' while never planning
+        // a menu section shipped a hero button whose label promised content
+        // the page cannot deliver (BIGR-800): the deterministic
+        // closing-section retarget keeps the button working but cannot repair
+        // the label's promise, so the plan gets its one repair round to
+        // reconcile sections, destination, and label together. The bare '#'
+        // placeholder intentionally stays valid — the retarget backstop owns
+        // it — and cross-page fragments are checked after every page settles.
+        foreach ($out as $section) {
+            $action = $section['primary_action'] ?? null;
+            if (!is_array($action)) {
+                continue;
+            }
+            $destination = trim((string) ($action['destination'] ?? ''));
+            if (!str_starts_with($destination, '#') || $destination === '#') {
+                continue;
+            }
+            $fragment = substr($destination, 1);
+            if (isset($seen[$fragment])) {
+                continue;
+            }
+            $errors[] = "page-plan: section '{$section['slug']}' primary_action.destination "
+                . "'{$destination}' names no section in this plan — plan that section, or point the "
+                . 'action (label AND destination together, so the label still describes where the '
+                . 'button goes) at a section this page really contains';
+        }
+
         // An interior page that opens with a full-viewport cover is a second
         // homepage, not an inner page (the prompt demands a COMPACT opening).
         // The escape hatch for a deliberately image-led opening is explicit:

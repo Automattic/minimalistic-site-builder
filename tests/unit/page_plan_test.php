@@ -1638,3 +1638,47 @@ test('PagePlanStep rewrites an invented external CTA URL to an anchor for the re
     $delivered = PagePlanStep::validatePrimaryActionAnchors($pages, $anchorWarnings);
     assert_eq('#signup', $delivered[0]['sections'][0]['primary_action']['destination']);
 });
+
+test('normalize rejects a same-page CTA fragment that names no planned section (BIGR-800)', function () {
+    // naturaleza cohort shape: the hero action promised '#menu-signature' but
+    // the plan never contained a menu section; the deterministic retarget kept
+    // the button working while its label kept promising a menu. The plan now
+    // fails validation so the single repair round can reconcile sections,
+    // destination, and label together with real language ability.
+    $sections = [
+        array_merge(plan_section(), ['primary_action' => [
+            'label' => 'Explore Our Menu',
+            'intent' => 'Guide the visitor to the signature dishes.',
+            'destination' => '#menu-signature',
+        ]]),
+        plan_section(['slug' => 'overview', 'title' => 'Overview', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'type' => 'content']),
+        plan_section(['slug' => 'closing', 'title' => 'Closing', 'layout_archetype' => 'offset-grid', 'background' => 'contrast', 'type' => 'closing']),
+    ];
+    $error = assert_throws(static fn () => PagePlanStep::normalize($sections, pageSlug: 'home'));
+    assert_contains("'#menu-signature' names no section in this plan", $error->getMessage());
+    assert_contains('label AND destination together', $error->getMessage());
+
+    // A fragment that names a planned section is accepted and survives intact,
+    // and re-normalizing the accepted plan stays a fixed point.
+    $sections[0]['primary_action']['destination'] = '#closing';
+    $accepted = PagePlanStep::normalize($sections, pageSlug: 'home');
+    assert_eq('#closing', $accepted[0]['primary_action']['destination']);
+    $again = PagePlanStep::normalize($accepted, pageSlug: 'home');
+    assert_eq(array_column($accepted, 'slug'), array_column($again, 'slug'));
+
+    // The bare '#' placeholder stays valid — the deterministic
+    // closing-section retarget backstop owns it, by reviewed design.
+    $sections[0]['primary_action']['destination'] = '#';
+    $placeholder = PagePlanStep::normalize($sections, pageSlug: 'home');
+    assert_eq('#', $placeholder[0]['primary_action']['destination']);
+
+    // Cross-page destinations are out of this check's scope (their fragments
+    // can only be validated after every page settles) and pass through.
+    $sections[0]['primary_action']['destination'] = '/menu/#signature';
+    $crossPage = PagePlanStep::normalize(
+        $sections,
+        actionContext: ['page_paths' => ['/' => true, '/menu/' => true], 'contact_destinations' => [], 'email_domains' => []],
+        pageSlug: 'home',
+    );
+    assert_eq('/menu/#signature', $crossPage[0]['primary_action']['destination']);
+});
