@@ -1044,3 +1044,52 @@ test('final header text-shape facts reflect whether the promised tagline was del
         implode("\n", AboveFoldContract::warningRows($residual)),
     );
 });
+
+test('headerFacts reads overlay mode from the classes delivery actually emits (BIGR-799)', function () {
+    // The canonical delivered overlay root, exactly as HeaderHeroStep ships it
+    // (2026-08-07 cohort portfolio6/pulso2): behavior classes present, the
+    // legacy bare `header-overlay` hook already stripped. The old detector
+    // looked only for that legacy token and misread EVERY such header as
+    // stacked, so warnings.json carried a false above-fold drift row on 4/7
+    // cohort sites while masking any real future downgrade.
+    $canonicalOverlay = '<!-- wp:group {"className":"header-archetype--minimal-overlay '
+        . 'header-behavior-overlay-to-solid header-start-transparent header-scrolled-contrast '
+        . 'header-foreground-base header-top-transparent","textColor":"base","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group header-archetype--minimal-overlay header-behavior-overlay-to-solid '
+        . 'header-start-transparent header-scrolled-contrast header-foreground-base header-top-transparent '
+        . 'has-base-color has-text-color"><!-- wp:site-title /--></div><!-- /wp:group -->';
+    $facts = AboveFoldPartFacts::headerFacts($canonicalOverlay);
+    assert_eq('overlay', $facts['mode']);
+    assert_eq('minimal-overlay', $facts['archetype']);
+
+    // The kit-scrim overlay variant keeps behavior + transparent start but has
+    // no earned header-top-transparent class; still overlay.
+    $scrimOverlay = str_replace(' header-top-transparent', '', $canonicalOverlay);
+    assert_eq('overlay', AboveFoldPartFacts::headerFacts($scrimOverlay)['mode']);
+
+    // HeaderFallback's overlay markup is deliberately behavior-class-free and
+    // still marks overlay with the bare legacy token.
+    $fallbackOverlay = '<!-- wp:group {"className":"header-overlay header-archetype--minimal-columns",'
+        . '"textColor":"base","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group header-overlay header-archetype--minimal-columns has-base-color '
+        . 'has-text-color"><!-- wp:site-title /--></div><!-- /wp:group -->';
+    assert_eq('overlay', AboveFoldPartFacts::headerFacts($fallbackOverlay)['mode']);
+
+    // A genuinely stacked sticky-soft delivery keeps reading as stacked — its
+    // start surface is a solid palette token, never transparent.
+    $stacked = '<!-- wp:group {"className":"header-archetype--minimal-columns '
+        . 'header-behavior-sticky-soft header-start-base header-scrolled-base header-foreground-contrast",'
+        . '"backgroundColor":"base","textColor":"contrast","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group header-archetype--minimal-columns header-behavior-sticky-soft '
+        . 'header-start-base header-scrolled-base header-foreground-contrast has-contrast-color '
+        . 'has-text-color has-base-background-color has-background"><!-- wp:site-title /--></div>'
+        . '<!-- /wp:group -->';
+    assert_eq('stacked', AboveFoldPartFacts::headerFacts($stacked)['mode']);
+
+    // And the behavior-class-free static delivery stays stacked too.
+    $static = '<!-- wp:group {"className":"header-archetype--minimal-columns","backgroundColor":"base",'
+        . '"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group header-archetype--minimal-columns has-base-background-color '
+        . 'has-background"><!-- wp:site-title /--></div><!-- /wp:group -->';
+    assert_eq('stacked', AboveFoldPartFacts::headerFacts($static)['mode']);
+});

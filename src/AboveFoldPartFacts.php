@@ -453,7 +453,16 @@ final class AboveFoldPartFacts
         }
         return [
             'present' => true,
-            'mode' => in_array('header-overlay', $classes, true) ? 'overlay' : 'stacked',
+            // A delivered overlay header speaks one of two vocabularies: the
+            // canonical HeaderBehavior root classes (the legacy bare
+            // `header-overlay` hook is stripped by HeaderHeroStep on this
+            // path), or HeaderFallback's deliberately behavior-class-free
+            // markup, which still marks overlay with the bare token.
+            'mode' => in_array('header-behavior-' . HeaderBehavior::OVERLAY_TO_SOLID, $classes, true)
+                || in_array('header-start-' . HeaderBehavior::TRANSPARENT, $classes, true)
+                || in_array('header-overlay', $classes, true)
+                ? 'overlay'
+                : 'stacked',
             'archetype' => $archetype,
             'background' => $attrs['backgroundColor'] ?? null,
             'gradient' => $attrs['gradient'] ?? null,
