@@ -1208,6 +1208,58 @@ test('page-plan repairs every invalid page in ONE batched round', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('page-plan sends a dead cross-page CTA fragment through semantic repair', function () {
+    $tmp = sys_get_temp_dir() . '/builder_pp_cross_anchor_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A restaurant']);
+    seed_test_design_direction($project);
+    $project->writeJson('siteSpec.json', plan_spec(['pages' => [
+        ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome', 'children' => []],
+        ['title' => 'Menu', 'slug' => 'menu', 'purpose' => 'See the menu', 'children' => []],
+    ]]));
+
+    $home = ['sections' => [
+        array_merge(plan_section(), ['primary_action' => [
+            'label' => 'Explore Our Signature Menu',
+            'intent' => 'Guide the visitor to signature dishes.',
+            'destination' => '/menu/#signature',
+        ]]),
+        plan_section(['slug' => 'story', 'layout_archetype' => 'centered-stack', 'background' => 'base']),
+        plan_section(['slug' => 'visit', 'layout_archetype' => 'offset-grid', 'background' => 'contrast']),
+    ]];
+    $menu = ['sections' => [
+        plan_section([
+            'slug' => 'menu-hero',
+            'layout_archetype' => 'centered-stack',
+            'background' => 'base',
+        ]),
+        plan_section([
+            'slug' => 'menu-closing',
+            'layout_archetype' => 'offset-grid',
+            'background' => 'contrast',
+        ]),
+    ]];
+    $fixedHome = $home;
+    $fixedHome['sections'][0]['primary_action'] = [
+        'label' => 'Visit the Menu Page',
+        'intent' => 'Guide the visitor to the menu page closing invitation.',
+        'destination' => '/menu/#menu-closing',
+    ];
+    $llm = new FakeLlm();
+    $llm->queueJson($home);
+    $llm->queueJson($menu);
+    $llm->queueJson($fixedHome);
+
+    (new PagePlanStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $pages = $project->readJson('pages.json')['pages'];
+    assert_eq('/menu/#menu-closing', $pages[0]['sections'][0]['primary_action']['destination']);
+    assert_eq('Visit the Menu Page', $pages[0]['sections'][0]['primary_action']['label']);
+    assert_eq(3, count($llm->calls));
+    assert_contains("'/menu/#signature' names no section in the planned page '/menu/'", $llm->calls[2]['prompt']);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('page-plan falls back to a mechanical fix when the repair still breaks a variety rule', function () {
     $tmp = sys_get_temp_dir() . '/builder_ppv_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
@@ -1317,6 +1369,53 @@ test('page-plan coerces a non-projection field the repair round could not fix, i
     // A changed delivered value is recorded durably, not just narrated.
     $warnings = $project->readJson('warnings.json');
     assert_contains('roomy', implode("\n", $warnings['page-plan']));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('page-plan keeps every section when the repair round repeats a dead CTA anchor', function () {
+    $tmp = sys_get_temp_dir() . '/builder_pp_anchor_recovery_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A restaurant']);
+    seed_test_design_direction($project);
+    $project->writeJson('siteSpec.json', plan_spec(['pages' => [
+        ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome', 'children' => []],
+    ]]));
+
+    $bad = ['sections' => [
+        array_merge(plan_section(), ['primary_action' => [
+            'label' => 'Explore Our Menu',
+            'intent' => 'Guide the visitor to the signature dishes.',
+            'destination' => '#menu-signature',
+        ]]),
+        plan_section([
+            'slug' => 'overview',
+            'title' => 'Overview',
+            'layout_archetype' => 'centered-stack',
+            'background' => 'base',
+            'type' => 'content',
+        ]),
+        plan_section([
+            'slug' => 'closing',
+            'title' => 'Closing',
+            'layout_archetype' => 'offset-grid',
+            'background' => 'contrast',
+            'type' => 'closing',
+        ]),
+    ]];
+    $llm = new FakeLlm();
+    $llm->queueJson($bad);
+    $llm->queueJson($bad);
+
+    (new PagePlanStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $sections = $project->readJson('pages.json')['pages'][0]['sections'];
+    assert_eq(['hero', 'overview', 'closing'], array_column($sections, 'slug'));
+    assert_eq('#closing', $sections[0]['primary_action']['destination']);
+    assert_eq(2, count($llm->calls), 'the language-level repair is still attempted exactly once');
+    $joined = implode("\n", $project->readJson('warnings.json')['page-plan'] ?? []);
+    assert_contains("authored='#menu-signature'", $joined);
+    assert_contains("delivered='#closing'", $joined);
+    assert_contains('preserved every authored page section', $joined);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -1442,6 +1541,65 @@ test('PagePlanStep::recoverSections coerces a mis-filled field through the mecha
     assert_contains('plaid', $warnings[0]);
     // Survives the validator that rejected the repair round.
     PagePlanStep::normalize($out, true);
+});
+
+test('PagePlanStep::recoverSections preserves the page when generated repair repeats a dead anchor', function () {
+    $raw = [
+        array_merge(plan_section(), ['primary_action' => [
+            'label' => 'Explore Our Menu',
+            'intent' => 'Guide the visitor to the signature dishes.',
+            'destination' => '#menu-signature',
+        ]]),
+        plan_section([
+            'slug' => 'overview',
+            'title' => 'Overview',
+            'layout_archetype' => 'centered-stack',
+            'background' => 'base',
+            'type' => 'content',
+        ]),
+        plan_section([
+            'slug' => 'closing',
+            'title' => 'Closing',
+            'layout_archetype' => 'offset-grid',
+            'background' => 'contrast',
+            'type' => 'closing',
+        ]),
+    ];
+    $warnings = [];
+    $out = PagePlanStep::recoverSections($raw, true, $warnings, 'home');
+
+    assert_eq(['hero', 'overview', 'closing'], array_column($out, 'slug'));
+    assert_eq('#closing', $out[0]['primary_action']['destination']);
+    assert_eq(1, count($warnings));
+    assert_contains("pages[slug='home'].sections[0].primary_action.destination", $warnings[0]);
+    assert_contains("authored='#menu-signature'", $warnings[0]);
+    assert_contains("delivered='#closing'", $warnings[0]);
+    assert_contains('preserved every authored page section', $warnings[0]);
+
+    $againWarnings = [];
+    assert_eq($out, PagePlanStep::recoverSections($out, true, $againWarnings, 'home'));
+    assert_eq([], $againWarnings, 'the smallest-unit backstop reaches a fixed point');
+
+    $raw[0]['primary_action']['destination'] = '/menu/#signature';
+    $crossWarnings = [];
+    $cross = PagePlanStep::recoverSections(
+        $raw,
+        true,
+        $crossWarnings,
+        'home',
+        actionContext: [
+            'page_paths' => ['/' => true, '/menu/' => true],
+            'contact_destinations' => [],
+            'email_domains' => [],
+            'planned_anchors' => [
+                '/menu/' => ['menu-hero' => true, 'menu-closing' => true],
+            ],
+        ],
+    );
+    assert_eq(['hero', 'overview', 'closing'], array_column($cross, 'slug'));
+    assert_eq('/menu/#menu-closing', $cross[0]['primary_action']['destination']);
+    assert_contains("authored='/menu/#signature'", $crossWarnings[0]);
+    assert_contains("delivered='/menu/#menu-closing'", $crossWarnings[0]);
 });
 
 test('PagePlanStep::recoverSections returns empty for an empty plan', function () {
@@ -1639,7 +1797,7 @@ test('PagePlanStep rewrites an invented external CTA URL to an anchor for the re
     assert_eq('#signup', $delivered[0]['sections'][0]['primary_action']['destination']);
 });
 
-test('normalize rejects a same-page CTA fragment that names no planned section (BIGR-800)', function () {
+test('normalize rejects every CTA fragment form that names no planned section (BIGR-800)', function () {
     // naturaleza cohort shape: the hero action promised '#menu-signature' but
     // the plan never contained a menu section; the deterministic retarget kept
     // the button working while its label kept promising a menu. The plan now
@@ -1664,7 +1822,24 @@ test('normalize rejects a same-page CTA fragment that names no planned section (
     $accepted = PagePlanStep::normalize($sections, pageSlug: 'home');
     assert_eq('#closing', $accepted[0]['primary_action']['destination']);
     $again = PagePlanStep::normalize($accepted, pageSlug: 'home');
-    assert_eq(array_column($accepted, 'slug'), array_column($again, 'slug'));
+    assert_eq($accepted, $again);
+
+    // A root-qualified fragment is still a same-page destination and gets the
+    // same semantic repair opportunity as its shorthand spelling.
+    $sections[0]['primary_action']['destination'] = '/#menu-signature';
+    $rootQualified = assert_throws(
+        static fn () => PagePlanStep::normalize(
+            $sections,
+            actionContext: [
+                'page_paths' => ['/' => true],
+                'contact_destinations' => [],
+                'email_domains' => [],
+                'planned_anchors' => [],
+            ],
+            pageSlug: 'home',
+        ),
+    );
+    assert_contains("'/#menu-signature' names no section in this plan", $rootQualified->getMessage());
 
     // The bare '#' placeholder stays valid — the deterministic
     // closing-section retarget backstop owns it, by reviewed design.
@@ -1672,13 +1847,25 @@ test('normalize rejects a same-page CTA fragment that names no planned section (
     $placeholder = PagePlanStep::normalize($sections, pageSlug: 'home');
     assert_eq('#', $placeholder[0]['primary_action']['destination']);
 
-    // Cross-page destinations are out of this check's scope (their fragments
-    // can only be validated after every page settles) and pass through.
+    // The batch-derived anchor map gives path-qualified cross-page fragments
+    // the same repair path. A real target survives unchanged.
+    $actionContext = [
+        'page_paths' => ['/' => true, '/menu/' => true],
+        'contact_destinations' => [],
+        'email_domains' => [],
+        'planned_anchors' => ['/menu/' => ['menu-hero' => true, 'closing' => true]],
+    ];
     $sections[0]['primary_action']['destination'] = '/menu/#signature';
-    $crossPage = PagePlanStep::normalize(
-        $sections,
-        actionContext: ['page_paths' => ['/' => true, '/menu/' => true], 'contact_destinations' => [], 'email_domains' => []],
-        pageSlug: 'home',
+    $crossPageError = assert_throws(
+        static fn () => PagePlanStep::normalize(
+            $sections,
+            actionContext: $actionContext,
+            pageSlug: 'home',
+        ),
     );
-    assert_eq('/menu/#signature', $crossPage[0]['primary_action']['destination']);
+    assert_contains("'/menu/#signature' names no section in the planned page '/menu/'", $crossPageError->getMessage());
+
+    $sections[0]['primary_action']['destination'] = '/menu/#closing';
+    $crossPage = PagePlanStep::normalize($sections, actionContext: $actionContext, pageSlug: 'home');
+    assert_eq('/menu/#closing', $crossPage[0]['primary_action']['destination']);
 });

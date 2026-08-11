@@ -254,7 +254,11 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         $pages = self::flattenPages($siteSpec);
         $blueprint = DesignDirectionStep::heroBlueprintFor($project);
         $frontProjection = HeroComposition::planProjection($blueprint);
-        $actionContext = self::primaryActionContext($siteSpec, $pages);
+        $actionContext = self::withPlannedSectionAnchors(
+            self::primaryActionContext($siteSpec, $pages),
+            $pages,
+            $results,
+        );
 
         // First pass: normalize what the model returned, collecting every page
         // that broke a rule so they can all be re-asked together below.
@@ -358,6 +362,11 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 throw new \RuntimeException("page-plan: repair returned unknown page '{$slug}'");
             }
         }
+        $repairActionContext = self::withPlannedSectionAnchors(
+            $actionContext,
+            $pages,
+            array_replace($results, $repairs),
+        );
         foreach ($rejected as $slug => $_rejection) {
             $slug = (string) $slug;
             $front = (bool) ($frontBySlug[$slug] ?? false);
@@ -369,7 +378,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                     'unusable generated repair JSON (' . $repairFailures[$slug] . ')',
                     'deterministic fallback substituted after the model repair remained unusable',
                     $front ? $frontProjection : null,
-                    $actionContext,
+                    $repairActionContext,
                 );
                 continue;
             }
@@ -382,7 +391,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                     'missing generated repair result',
                     'deterministic fallback substituted for the missing repair result',
                     $front ? $frontProjection : null,
-                    $actionContext,
+                    $repairActionContext,
                 );
                 continue;
             }
@@ -396,7 +405,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                     $warnings,
                     $slug,
                     $front ? $frontProjection : null,
-                    $actionContext,
+                    $repairActionContext,
                 );
                 continue;
             }
@@ -407,7 +416,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                     $rawSections,
                     $front,
                     $front ? $frontProjection : null,
-                    $actionContext,
+                    $repairActionContext,
                     $normalizationWarnings,
                     $slug,
                     $normalizationRepairs,
@@ -421,7 +430,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                     $warnings,
                     $slug,
                     $front ? $frontProjection : null,
-                    $actionContext,
+                    $repairActionContext,
                     $successfulRepairs,
                 );
             }
@@ -433,7 +442,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                     'empty repaired sections array',
                     'deterministic fallback substituted after the repair preserved no page-owned section',
                     $front ? $frontProjection : null,
-                    $actionContext,
+                    $repairActionContext,
                 );
             }
             $sectionsBySlug[$slug] = $sections;
@@ -851,32 +860,50 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             ];
         }
 
-        // A same-page fragment destination must name a section this plan
-        // actually contains. Authoring '#menu-signature' while never planning
+        // A fragment destination must name a section the generated plans
+        // actually contain. Authoring '#menu-signature' while never planning
         // a menu section shipped a hero button whose label promised content
         // the page cannot deliver (BIGR-800): the deterministic
         // closing-section retarget keeps the button working but cannot repair
         // the label's promise, so the plan gets its one repair round to
         // reconcile sections, destination, and label together. The bare '#'
         // placeholder intentionally stays valid — the retarget backstop owns
-        // it — and cross-page fragments are checked after every page settles.
+        // it. Primary actions belong only to the front page, whose current
+        // path is '/', while planned_anchors supplies every cross-page target.
         foreach ($out as $section) {
             $action = $section['primary_action'] ?? null;
             if (!is_array($action)) {
                 continue;
             }
             $destination = trim((string) ($action['destination'] ?? ''));
-            if (!str_starts_with($destination, '#') || $destination === '#') {
+            $target = self::anchorTarget($destination, '/');
+            if ($target === null || $destination === '#') {
                 continue;
             }
-            $fragment = substr($destination, 1);
-            if (isset($seen[$fragment])) {
+            [$targetPath, $fragment] = $target;
+            $plannedAnchors = is_array($actionContext['planned_anchors'] ?? null)
+                ? $actionContext['planned_anchors']
+                : [];
+            if ($targetPath === '/') {
+                $targetAnchors = $seen;
+                $targetDescription = 'this plan';
+            } elseif (array_key_exists($targetPath, $plannedAnchors)) {
+                $targetAnchors = is_array($plannedAnchors[$targetPath])
+                    ? $plannedAnchors[$targetPath]
+                    : [];
+                $targetDescription = "the planned page '{$targetPath}'";
+            } else {
+                // A missing/unusable sibling plan has its own fallback path.
+                // The final all-page validator will judge its delivered anchors.
+                continue;
+            }
+            if (isset($targetAnchors[$fragment])) {
                 continue;
             }
             $errors[] = "page-plan: section '{$section['slug']}' primary_action.destination "
-                . "'{$destination}' names no section in this plan — plan that section, or point the "
+                . "'{$destination}' names no section in {$targetDescription} — plan that section, or point the "
                 . 'action (label AND destination together, so the label still describes where the '
-                . 'button goes) at a section this page really contains';
+                . 'button goes) at a section the target page really contains';
         }
 
         // An interior page that opens with a full-viewport cover is a second
@@ -1153,7 +1180,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      *
      * @param array<mixed> $siteSpec
      * @param array<int,array<string,mixed>> $pages
-     * @return array{page_paths:array<string,true>,contact_destinations:array<string,true>,email_domains:array<string,true>}
+     * @return array{page_paths:array<string,true>,contact_destinations:array<string,true>,email_domains:array<string,true>,planned_anchors:array<string,array<string,true>>}
      */
     public static function primaryActionContext(array $siteSpec, array $pages): array
     {
@@ -1221,7 +1248,84 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             'page_paths' => $paths,
             'contact_destinations' => $contacts,
             'email_domains' => $emailDomains,
+            'planned_anchors' => [],
         ];
+    }
+
+    /**
+     * Add the section anchors visible across the generated page-plan batch.
+     * This is derived before per-page normalization so a front-page action can
+     * be semantically rejected in the same batched repair round when it names
+     * a missing section on another page. A repaired batch is projected again
+     * before repaired pages are normalized, so newly added target sections are
+     * immediately visible to the owning action.
+     *
+     * @param array<string,mixed> $context
+     * @param array<int,array<string,mixed>> $pages
+     * @param array<string,array<mixed>> $plans
+     * @return array<string,mixed>
+     */
+    private static function withPlannedSectionAnchors(
+        array $context,
+        array $pages,
+        array $plans,
+    ): array {
+        $anchors = [];
+        foreach ($pages as $page) {
+            if (!is_array($page)) {
+                continue;
+            }
+            $slug = (string) ($page['slug'] ?? '');
+            $plan = $plans[$slug] ?? null;
+            if (!is_array($plan) || !is_array($plan['sections'] ?? null)) {
+                continue;
+            }
+            $path = self::normalizePagePath((string) ($page['path'] ?? '/'));
+            $anchors[$path] = self::normalizedSectionSlugSet($plan['sections']);
+        }
+        $context['planned_anchors'] = $anchors;
+        return $context;
+    }
+
+    /**
+     * Derive the same unique, file-safe slug set normalize() will deliver,
+     * excluding template-owned footer sections before they can masquerade as
+     * page anchors.
+     *
+     * @param mixed $raw
+     * @return array<string,true>
+     */
+    private static function normalizedSectionSlugSet(mixed $raw): array
+    {
+        if (!is_array($raw)) {
+            return [];
+        }
+        $pageOwned = [];
+        foreach ($raw as $section) {
+            if (is_array($section) && FooterSectionIdentity::matches($section)) {
+                continue;
+            }
+            $pageOwned[] = $section;
+        }
+        $seen = [];
+        foreach ($pageOwned as $i => $section) {
+            if (!is_array($section)) {
+                continue;
+            }
+            $title = trim((string) ($section['title'] ?? ''));
+            $slug = ProjectStore::slugify((string) ($section['slug'] ?? $title ?: "section-{$i}"));
+            if ($slug === '') {
+                $slug = 'section-' . count($seen);
+            }
+            $base = $slug;
+            $n = 2;
+            while (isset($seen[$slug])) {
+                $slug = "{$base}-{$n}";
+                $n++;
+            }
+            $seen[$slug] = true;
+        }
+        return $seen;
     }
 
     /** @param array<string,mixed> $context */
@@ -1560,12 +1664,11 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     /**
      * Mechanical backstop after the LLM repair round still fails normalize().
      *
-     * Runs repairFields() then repairVariety(), then normalize(). Those two
-     * passes cover every rejection normalize() can raise today bar an empty
-     * section list. If a future normalize rule slips past both, the residual
-     * failure is recorded as a warning and the page gets a single known-good
-     * section instead of aborting the build — one thin page is better than no
-     * site after the rest of the pipeline has already been paid for.
+     * Runs repairFields(), repairVariety(), and the smallest-unit action-anchor
+     * backstop before normalize(). Those passes cover every rejection
+     * normalize() can raise today bar an empty section list. If a future rule
+     * slips past them, the residual failure is recorded as a warning and the
+     * page gets a single known-good section instead of aborting the build.
      *
      * Empty input still returns [] so the caller can record the loss and
      * synthesize a page-boundary fallback; inventing sections from nothing is
@@ -1604,6 +1707,13 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             $pageSlug,
             $repairs,
         );
+        $mechanically = self::repairUnresolvedPrimaryActionAnchor(
+            $mechanically,
+            $front,
+            $actionContext,
+            $warnings,
+            $pageSlug,
+        );
         if ($mechanically === []) {
             return [];
         }
@@ -1616,6 +1726,90 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             $actionContext,
             $repairs,
         );
+    }
+
+    /**
+     * Smallest-unit backstop when the generated repair repeats a dead action
+     * anchor. Retarget to the target page's final delivered/planned section
+     * when possible; otherwise remove only the action. The authored sections
+     * must not be replaced merely because language-level repair failed twice.
+     *
+     * @param array<int,array<string,mixed>> $sections
+     * @param array<string,mixed> $actionContext
+     * @param list<string> $warnings
+     * @return array<int,array<string,mixed>>
+     */
+    private static function repairUnresolvedPrimaryActionAnchor(
+        array $sections,
+        bool $front,
+        array $actionContext,
+        array &$warnings,
+        string $pageSlug,
+    ): array {
+        if (!$front || !isset($sections[0]) || !is_array($sections[0]['primary_action'] ?? null)) {
+            return $sections;
+        }
+        $action = $sections[0]['primary_action'];
+        $destination = trim((string) ($action['destination'] ?? ''));
+        $target = self::anchorTarget($destination, '/');
+        if ($target === null || $destination === '#') {
+            return $sections;
+        }
+        [$targetPath, $fragment] = $target;
+        $ownAnchors = self::normalizedSectionSlugSet($sections);
+        if ($targetPath === '/') {
+            $targetAnchors = $ownAnchors;
+        } else {
+            $plannedAnchors = is_array($actionContext['planned_anchors'] ?? null)
+                ? $actionContext['planned_anchors']
+                : [];
+            if (!array_key_exists($targetPath, $plannedAnchors)) {
+                return $sections;
+            }
+            $targetAnchors = is_array($plannedAnchors[$targetPath])
+                ? $plannedAnchors[$targetPath]
+                : [];
+        }
+        if (isset($targetAnchors[$fragment])) {
+            return $sections;
+        }
+
+        $ownerSlug = (string) array_key_first($ownAnchors);
+        $candidates = array_keys($targetAnchors);
+        if ($targetPath === '/') {
+            $candidates = array_values(array_filter(
+                $candidates,
+                static fn (string $slug): bool => $slug !== $ownerSlug,
+            ));
+        }
+        $retargetSlug = $candidates === [] ? null : $candidates[count($candidates) - 1];
+        $path = self::sectionPath($pageSlug, 0) . '.primary_action';
+        if ($retargetSlug === null) {
+            $sections[0]['primary_action'] = null;
+            $warnings[] = self::valueLossWarning(
+                $path,
+                self::warningValue($action),
+                'null',
+                "removed only the primary action after generated repair repeated unresolved target '{$destination}'",
+                valuesAlreadyRendered: true,
+            );
+            return $sections;
+        }
+
+        $prefix = $targetPath === '/'
+            ? (str_starts_with($destination, '/') ? '/' : '')
+            : rtrim($targetPath, '/') . '/';
+        $delivered = $prefix . '#' . $retargetSlug;
+        $sections[0]['primary_action']['destination'] = $delivered;
+        $warnings[] = self::valueLossWarning(
+            $path . '.destination',
+            "'{$destination}'",
+            "'{$delivered}'",
+            'retargeted only the unresolved primary action after generated repair repeated the dead anchor; '
+                . 'preserved every authored page section',
+            valuesAlreadyRendered: true,
+        );
+        return $sections;
     }
 
     /**
