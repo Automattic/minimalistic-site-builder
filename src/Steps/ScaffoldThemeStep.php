@@ -340,12 +340,22 @@ final class ScaffoldThemeStep implements Step
         .hero-composition--layered-poster {
             overflow: hidden;
         }
-        /* A display word that cannot fit its measure must hyphenate at a
-           language break as a last resort, never snap mid-word; the prompts
-           size headline presets so this rule stays dormant. */
+        /* Hero headlines wrap whole words. `hyphens: auto` was here to prefer
+           a language break over a mid-word snap, but it hyphenates at EVERY
+           line-break opportunity, not only the impossible ones: tbilisi5's
+           "A long ta-/ble in Old Town" split a word that would have sat whole
+           on the next line, on a browser that ships hyphenation dictionaries.
+           No one sets a display headline hyphenated, so it is off by default
+           and HeroHeadlineFit opts a heading in — via .headline-hyphenate —
+           only for a word no size it can pin will fit. break-word stays as the
+           final resort under both. */
         .hero-composition__copy .wp-block-heading,
         .hero-composition--layered-poster .wp-block-heading {
             overflow-wrap: break-word;
+            hyphens: manual;
+        }
+        .hero-composition__copy .wp-block-heading.headline-hyphenate,
+        .hero-composition--layered-poster .wp-block-heading.headline-hyphenate {
             hyphens: auto;
         }
 
