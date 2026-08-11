@@ -1750,9 +1750,26 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             return $sections;
         }
         $action = $sections[0]['primary_action'];
-        $destination = trim((string) ($action['destination'] ?? ''));
+        $path = self::sectionPath($pageSlug, 0) . '.primary_action';
+        $actionWarnings = [];
+        $normalizedAction = self::normalizePrimaryAction(
+            $action,
+            true,
+            $actionContext,
+            $actionWarnings,
+            $path,
+        );
+        if ($normalizedAction === null) {
+            // normalize() owns this invalid-action removal and its warning;
+            // do not narrate an intermediate anchor change that will not ship.
+            return $sections;
+        }
+        $authoredDestination = trim((string) ($action['destination'] ?? ''));
+        $destination = $normalizedAction['destination'];
+        $sections[0]['primary_action'] = $normalizedAction;
         $target = self::anchorTarget($destination, '/');
         if ($target === null || $destination === '#') {
+            $warnings = array_merge($warnings, $actionWarnings);
             return $sections;
         }
         [$targetPath, $fragment] = $target;
@@ -1771,6 +1788,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 : [];
         }
         if (isset($targetAnchors[$fragment])) {
+            $warnings = array_merge($warnings, $actionWarnings);
             return $sections;
         }
 
@@ -1783,7 +1801,6 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             ));
         }
         $retargetSlug = $candidates === [] ? null : $candidates[count($candidates) - 1];
-        $path = self::sectionPath($pageSlug, 0) . '.primary_action';
         if ($retargetSlug === null) {
             $sections[0]['primary_action'] = null;
             $warnings[] = self::valueLossWarning(
@@ -1803,7 +1820,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         $sections[0]['primary_action']['destination'] = $delivered;
         $warnings[] = self::valueLossWarning(
             $path . '.destination',
-            "'{$destination}'",
+            "'{$authoredDestination}'",
             "'{$delivered}'",
             'retargeted only the unresolved primary action after generated repair repeated the dead anchor; '
                 . 'preserved every authored page section',

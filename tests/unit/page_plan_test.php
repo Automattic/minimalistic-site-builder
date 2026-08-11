@@ -1600,6 +1600,21 @@ test('PagePlanStep::recoverSections preserves the page when generated repair rep
     assert_eq('/menu/#menu-closing', $cross[0]['primary_action']['destination']);
     assert_contains("authored='/menu/#signature'", $crossWarnings[0]);
     assert_contains("delivered='/menu/#menu-closing'", $crossWarnings[0]);
+
+    $raw[0]['primary_action'] = [
+        'label' => '<strong>Invalid</strong>',
+        'intent' => 'Guide the visitor to the signature dishes.',
+        'destination' => '#menu-signature',
+    ];
+    $invalidActionWarnings = [];
+    $invalidAction = PagePlanStep::recoverSections($raw, true, $invalidActionWarnings, 'home');
+    assert_eq(null, $invalidAction[0]['primary_action']);
+    $invalidJoined = implode("\n", $invalidActionWarnings);
+    assert_contains('removed invalid primary action', $invalidJoined);
+    assert_true(
+        !str_contains($invalidJoined, 'retargeted only the unresolved primary action'),
+        'warnings describe only the action removal that actually ships',
+    );
 });
 
 test('PagePlanStep::recoverSections returns empty for an empty plan', function () {
