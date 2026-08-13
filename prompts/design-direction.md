@@ -29,9 +29,10 @@ Examples of good grades: "monochrome documentary, visible 35mm grain, charcoal m
 ## Anti-Patterns — What to Avoid
 
 Do NOT produce a direction that feels like generic AI output:
-- **Generic palettes**: Purple gradients on white, safe blue-and-gray corporate schemes, arbitrary rainbow accents
-- **Generic fonts**: Inter, Roboto, Arial, Open Sans, system fonts — never mention these
+- **Generic palettes**: Purple gradients on white, safe blue-and-gray corporate schemes, arbitrary rainbow accents. Do not default every bakery/craft brief to warm cream + brass + espresso (`#F5F1EA`, `#FAF7F1`, `#B08947`, `#1A1714`) unless the brief names those colors — rotate the palette family.
+- **Generic fonts**: Inter, Roboto, Arial, Open Sans, system fonts — never mention these. Fraunces and Instrument Serif are not the creative default; use them only for heritage/editorial briefs or when the seed names the face.
 - **Topic-agnostic styles**: If you could swap the site topic and the direction still works unchanged, it's too generic
+- **Fake promises**: do not describe a texture, a third typeface, or a motif the structured fields do not commit. If it is not in `surface`, `type.accent`, or `device`, it will not ship.
 
 ## Output Format
 
@@ -40,10 +41,12 @@ Do NOT produce a direction that feels like generic AI output:
 Besides the vivid narrative, the direction commits to explicit structured fields. Downstream steps EXECUTE these fields verbatim instead of re-interpreting the prose, so they must agree with the description (same hexes, same font names).
 
 - `palette`: the five named hexes the theme will ship. `base` = page background, `contrast` = body text on it (strong contrast required), `primary` = main brand color, `secondary` = supporting color, `accent` = for CTAs/interaction only; never for body text, decorative motifs, or broad fills.
-- `type`: the heading and body typography as structured objects. Each `family` MUST be a real Google Fonts family spelled exactly (e.g. "Fraunces", "Source Serif 4", "Oswald"), and `weights` MUST list every 100-step weight the direction commits to using. Set `italic` to true only when the design calls for the family's real italic face. `axes` is either `{}` or an `opsz` range shaped exactly as `{ "opsz": { "min": 9, "max": 144 } }`; commit an optical-size range only when the chosen Google family supports it. Keep the visual rationale in `character` so downstream design prompts retain the typographic voice. The build deterministically unions these commitments with observed usage and enqueues them from Google Fonts; never name Druk, Canela, GT Sectra, or other unavailable foundry fonts.
+- `type`: heading, body, and optional `accent` typography as structured objects. Each `family` MUST be a real Google Fonts family spelled exactly (e.g. "Source Serif 4", "Oswald", "Caveat"), and `weights` MUST list every 100-step weight the direction commits to using. Set `italic` to true only when the design calls for the family's real italic face. `axes` is either `{}` or an `opsz` range shaped exactly as `{ "opsz": { "min": 9, "max": 144 } }`; commit an optical-size range only when the chosen Google family supports it. Keep the visual rationale in `character` so downstream design prompts retain the typographic voice. `type.accent` is OPTIONAL: a script, condensed, or mono face for flavor names, prices, folio, or numerals — never body copy. Leave `accent.family` as `""` when the seed does not need a third face. Do NOT default headings to Fraunces or Instrument Serif unless the brief is heritage/editorial or names that face. The build loads every committed family from Google Fonts; never name Druk, Canela, GT Sectra, or other unavailable foundry fonts.
 - `image_grade`: the one-sentence photographic treatment per the Image Grade section above.
 - `motion`: how the page MOVES — one of `"calm"`, `"energetic"`, `"dramatic"`, `"minimal"`, `"none"`. The theme ships fixed, hand-tuned motion families, not one animation at different speeds: `calm` = soft fades and gentle settling; `energetic` = quick diagonal arrivals, spring overshoot, and livelier hover; `dramatic` = long directional masks, a hero focus pull, and cinematic image movement; `minimal` = hover micro-interactions only, no scroll motion; `none` = completely static. Pick the movement language that serves the concept instead of defaulting to `calm` — a contemplative portfolio may want `calm`, a kids' brand `energetic`, a theatrical launch `dramatic`, and a brutalist manifesto perhaps `none`.
-- `motion_note`: ONE short line of motion art direction refining the profile (e.g. "let the hero image breathe; cards rise one by one"), or `""` when the profile alone says enough.
+- `motion_note`: ONE short line that names kit classes the profile can ship (e.g. "cards rise one by one", "hero image breathe", "labels press on with overshoot"), or `""` when the profile alone says enough. A note the kit cannot express is stripped.
+- `surface`: the page's physical ground — one of `"none"`, `"paper"`, `"concrete"`, `"film"`, `"fabric"`. The build ships a fixed overlay for the committed value. Pick `none` unless the concept needs a visible tooth. Do not describe kraft, concrete, or linen in the narrative unless this field is set.
+- `device`: an optional one-band CSS ornament — one of `"none"`, `"hairline-rule"`, `"section-numeral"`, `"stamp"`. The page plan may place it on at most one non-hero band. Leave `"none"` unless the concept needs that one mark. Twine, tape, and illustrated motifs are not devices.
 - `canvas`: `"full-bleed"` or `"framed"` — how the page meets the viewport edge. `full-bleed` (the default) lets heroes, image bands and color bands run edge-to-edge. Commit to `framed` ONLY when the concept genuinely calls for a contained, gallery-mat presentation (an art-book portfolio, a print-inspired editorial) — the page then keeps a visible mat of page background around every band below the fold, and the header can never float over the hero. The page-opening hero is always exempt from the mat: it runs edge-to-edge on every canvas (a hero stopped short of the viewport edge reads as a rendering bug, not a mat), and the frame begins with the second band. Don't pick `framed` as a hedge; an accidental frame reads as a rendering bug, not a design choice.
 - `card_style`: how the site's cards are constructed — one of `"flush"`, `"framed"`, `"overlap"`, `"borderless"`. `flush` (the default) bleeds card media to the card's edges with padding only around the text — the contemporary look; pick it unless the concept argues otherwise. `framed` insets the media behind padding on all sides — commit to it ONLY when the concept genuinely calls for that framing (a polaroid/print/scrapbook mood, an archival editorial); as an accidental default it reads dated. `overlap` rides the text panel up over the media's bottom edge — for layered, energetic, poster-like concepts. `borderless` drops the card box entirely — media above a plain text stack, whitespace as the only separator — for austere or gallery-minimal concepts.
 - `shape`: the corner language for contained media (`core/image`, `core/cover`, the media half of `core/media-text`) and buttons — `"sharp"`, `"soft"`, or `"round"`. One commitment for the whole site, executed literally by the build: `sharp` keeps contained media and buttons square; `soft` gives contained media a subtle radius and buttons a modest one; `round` gives contained media a decisive radius and buttons a pill shape. Full-bleed media always meets its edges square, whatever the shape. Generic card wrappers are outside this deterministic commitment, so do not promise their geometry from this field. This is a real decision with no safe value: read it off the concept's own visual world. A world of crisp, printed, or architectural geometry commits to `sharp`; a world of warm, organic, tactile, or playful geometry commits to `soft` or `round`. Both mismatches read as bugs — rounding that nothing in the direction motivates reads as template styling, and reflexive squareness on a concept whose world is genuinely rounded reads as an unfinished direction. Never pick any of the three as a hedge; the corner language must be one the description itself already speaks.
@@ -59,7 +62,7 @@ Respond with ONLY a JSON object. No explanation, no commentary, no text before o
 {
   "direction": {
     "title": "The chosen seed's title (refine it only if the expansion truly demands it)",
-    "description": "A rich, vivid paragraph describing the complete site-wide visual language: the color world (with specific hex codes), typography choices (specific font names and weights), spatial rhythm, mood, texture, image treatment, and distinctive design details. Write it like a creative brief that would inspire a designer — evocative yet concrete. This is a single cohesive narrative, not a list of attributes. Keep front-page hero topology entirely out of this narrative.",
+    "description": "A rich, vivid paragraph that narrates ONLY the committed fields: the five palette hexes, the heading/body/(optional accent) families, the image grade, canvas, card_style, shape, surface, device, and motion. Do not name a fourth typeface, a texture that is not the committed surface, a motif that is not the committed device, or a hex that is not in palette. Keep front-page hero topology entirely out of this narrative.",
     "palette": {
       "base": "#RRGGBB",
       "contrast": "#RRGGBB",
@@ -86,6 +89,13 @@ Respond with ONLY a JSON object. No explanation, no commentary, no text before o
         "italic": true,
         "axes": {},
         "character": "Warm, highly readable editorial text with true emphasis"
+      },
+      "accent": {
+        "family": "",
+        "weights": [],
+        "italic": false,
+        "axes": {},
+        "character": ""
       }
     },
     "image_grade": "One compact, concrete art-direction sentence applied to ALL of the site's imagery, per the Image Grade section above.",
@@ -94,6 +104,8 @@ Respond with ONLY a JSON object. No explanation, no commentary, no text before o
     "canvas": "One bounded canvas value chosen per the canvas field above.",
     "card_style": "One bounded card construction — flush, framed, overlap, or borderless — chosen per the card_style field above.",
     "shape": "One bounded corner commitment — sharp, soft, or round — read off the concept per the shape field above.",
+    "surface": "none",
+    "device": "none",
     "hero_blueprint": {
       "version": 1,
       "recipe": "Copy the exact assigned recipe id",

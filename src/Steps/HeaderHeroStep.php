@@ -2244,8 +2244,9 @@ final class HeaderHeroStep implements Step
             }
             $attrs = $doc->attrs($i) ?? [];
             $height = $attrs['minHeight'] ?? null;
+            $unit = (string) ($attrs['minHeightUnit'] ?? '');
             if (!is_numeric($height)
-                || (string) ($attrs['minHeightUnit'] ?? '') !== 'vh'
+                || !in_array($unit, ['vh', 'dvh'], true)
                 || (float) $height <= self::MAX_STACKED_COVER_VH) {
                 continue;
             }
@@ -2253,8 +2254,8 @@ final class HeaderHeroStep implements Step
             // until fix-blocks re-serializes the saved HTML from these attrs.
             $attrs['minHeight'] = self::STACKED_COVER_VH;
             $doc->setAttrs($i, $attrs);
-            $notes[] = "cover minHeight {$height}vh lowered to " . self::STACKED_COVER_VH . 'vh '
-                . '(an opaque header stacks above this page-opening section; together they must fit one viewport)';
+            $notes[] = "cover minHeight {$height}{$unit} lowered to " . self::STACKED_COVER_VH . $unit
+                . ' (an opaque header stacks above this page-opening section; together they must fit one viewport)';
         }
         return ['markup' => $doc->render(), 'notes' => $notes];
     }

@@ -105,6 +105,9 @@ final class ImagePromptComposer
         $pageContext = trim($pageContext);
         $siteContext = trim($siteContext);
         $imageGrade  = trim($imageGrade);
+        if ($imageGrade !== '' && !$transparent) {
+            $subject = self::stripCompetingGradeTokens($subject, $imageGrade);
+        }
 
         // Style is appended to the subject as a suffix; absent when no style.
         $styleClause = $style !== '' ? ". Style: {$style}" : '';
@@ -200,6 +203,33 @@ final class ImagePromptComposer
         // limit (sheds trailing context first — see class doc).
         $prompt = (string) preg_replace("/\n{3,}/", "\n\n", trim($prompt));
         return GeminiImage::fitToTokens($prompt, GeminiImage::MAX_PROMPT_TOKENS);
+    }
+
+    /**
+     * Drop subject tokens that fight the committed photographic grade so the
+     * appended grade clause is not contradicted by "studio white, no grain"
+     * on a Portra site. Transparent assets skip this: their isolation clause
+     * owns the backdrop.
+     */
+    public static function stripCompetingGradeTokens(string $subject, string $imageGrade): string
+    {
+        $grade = strtolower($imageGrade);
+        $fights = [];
+        if (preg_match('/\b(?:grain|portra|35mm|film|kodachrome|tri-?x)\b/i', $grade) === 1) {
+            $fights[] = '/\b(?:no[- ]grains?|grainless|digitally clean)\b/iu';
+        }
+        if (preg_match('/\b(?:grain|portra|35mm|film|kodachrome|warm|golden|available light)\b/i', $grade) === 1) {
+            $fights[] = '/\b(?:studio[- ]white|seamless white|cyclorama|flash[- ]hard|hard on-camera flash|catalog[- ]lit)\b/iu';
+        }
+        if (preg_match('/\b(?:charcoal|monochrome|black[- ]and[- ]white|b&w|desaturat)/i', $grade) === 1) {
+            $fights[] = '/\b(?:saturated neon|neon-soaked|hyper-saturated|vivid neon)\b/iu';
+        }
+        foreach ($fights as $pattern) {
+            $subject = (string) preg_replace($pattern, '', $subject);
+        }
+        $subject = trim((string) preg_replace('/[ \t]{2,}/', ' ', $subject));
+        $subject = trim((string) preg_replace('/\s+,/', ',', $subject));
+        return trim($subject, " \t,;");
     }
 
     /**

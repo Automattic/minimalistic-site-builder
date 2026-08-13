@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\HeaderBehavior;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Project;
@@ -10,6 +11,7 @@ use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\ShapeMarkup;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\Warnings;
 
 /**
@@ -78,6 +80,8 @@ final class FinalizeThemeStep implements Step
                 'theme/assets/motion/*',
                 'theme/assets/header/*',
                 'theme/assets/shape/*',
+                'theme/assets/surface/*',
+                'theme/assets/device/*',
                 'warnings.json',
             ],
             concurrent: false,
@@ -106,12 +110,24 @@ final class FinalizeThemeStep implements Step
         self::pruneHeaderKit($project, $header);
         $shape = DesignDirectionStep::shapeFor($project);
         $shapeKit = self::writeShapeKit($project, $shape);
+        $surface = DesignDirectionStep::surfaceFor($project);
+        $surfaceKit = self::writeOverlayKit(
+            $project,
+            'surface',
+            Surface::kitCss($surface, self::paletteBase($project)),
+        );
+        $device = DesignDirectionStep::deviceFor($project);
+        $deviceKit = self::writeOverlayKit(
+            $project,
+            'device',
+            Device::kitCss($device),
+        );
         if ($headerWarnings !== []) {
             $project->addWarnings($this->id(), $headerWarnings);
         }
         $project->writeText(
             'theme/functions.php',
-            self::functionsPhp($project->slug(), $motion, $header, $shapeKit),
+            self::functionsPhp($project->slug(), $motion, $header, $shapeKit, $surfaceKit, $deviceKit),
         );
         Narrator::write($motion === null
             ? "  motion: none (kit not shipped)\n"
@@ -122,6 +138,12 @@ final class FinalizeThemeStep implements Step
         Narrator::write($shapeKit
             ? "  shape: '{$shape}' corner kit enqueued\n"
             : '  shape: ' . ($shape ?? 'none committed') . " (kit not shipped)\n");
+        Narrator::write($surfaceKit
+            ? "  surface: '{$surface}' overlay enqueued\n"
+            : "  surface: {$surface} (kit not shipped)\n");
+        Narrator::write($deviceKit
+            ? "  device: '{$device}' utility enqueued\n"
+            : "  device: {$device} (kit not shipped)\n");
     }
 
     /**
@@ -146,6 +168,46 @@ final class FinalizeThemeStep implements Step
         @rmdir($project->themePath('assets/shape'));
         @rmdir($project->themePath('assets'));
         return false;
+    }
+
+    /**
+     * Write or prune a build-owned overlay/utility sheet (surface grain,
+     * signature device). Same shape as the corner kit: one CSS file, gone
+     * when the commitment is `none`.
+     */
+    private static function writeOverlayKit(Project $project, string $folder, ?string $css): bool
+    {
+        $rel = "theme/assets/{$folder}/{$folder}.css";
+        if ($css !== null) {
+            $project->writeText($rel, $css);
+            return true;
+        }
+        $file = $project->themePath("assets/{$folder}/{$folder}.css");
+        if (is_file($file)) {
+            unlink($file);
+        }
+        @rmdir($project->themePath("assets/{$folder}"));
+        @rmdir($project->themePath('assets'));
+        return false;
+    }
+
+    /** Page-background hex from the delivered theme, or null. */
+    private static function paletteBase(Project $project): ?string
+    {
+        if (!$project->exists('theme/theme.json')) {
+            return null;
+        }
+        try {
+            $theme = $project->readJson('theme/theme.json');
+        } catch (\RuntimeException) {
+            return null;
+        }
+        foreach ($theme['settings']['color']['palette'] ?? [] as $entry) {
+            if (is_array($entry) && ($entry['slug'] ?? '') === 'base' && is_string($entry['color'] ?? null)) {
+                return $entry['color'];
+            }
+        }
+        return null;
     }
 
     /**
@@ -294,6 +356,8 @@ final class FinalizeThemeStep implements Step
         ?string $motion,
         bool $header,
         bool $shapeKit,
+        bool $surfaceKit = false,
+        bool $deviceKit = false,
     ): string {
         $slug = ProjectStore::slugify($slug);
 
@@ -314,9 +378,9 @@ final class FinalizeThemeStep implements Step
         }
 
         $shapeEnqueues = '';
-        $editorStyles = "add_editor_style('style.css');";
+        $editorStyleList = ['style.css'];
         if ($shapeKit) {
-            $editorStyles = "add_editor_style(array('style.css', 'assets/shape/shape.css'));";
+            $editorStyleList[] = 'assets/shape/shape.css';
             $shapeEnqueues = <<<PHP
 
                 // Committed corner language for contained media surfaces theme.json
@@ -325,6 +389,28 @@ final class FinalizeThemeStep implements Step
                 wp_enqueue_style('{$slug}-shape', get_theme_file_uri('assets/shape/shape.css'), array('{$slug}-style'), \$ver);
             PHP;
         }
+        $surfaceEnqueues = '';
+        if ($surfaceKit) {
+            $editorStyleList[] = 'assets/surface/surface.css';
+            $surfaceEnqueues = <<<PHP
+
+                // Committed page surface: a fixed overlay, never on a scrolling
+                // container. Loads after generated style.css.
+                wp_enqueue_style('{$slug}-surface', get_theme_file_uri('assets/surface/surface.css'), array('{$slug}-style'), \$ver);
+            PHP;
+        }
+        $deviceEnqueues = '';
+        if ($deviceKit) {
+            $editorStyleList[] = 'assets/device/device.css';
+            $deviceEnqueues = <<<PHP
+
+                // Committed one-band CSS device. Loads after generated style.css.
+                wp_enqueue_style('{$slug}-device', get_theme_file_uri('assets/device/device.css'), array('{$slug}-style'), \$ver);
+            PHP;
+        }
+        $editorStyles = count($editorStyleList) === 1
+            ? "add_editor_style('style.css');"
+            : "add_editor_style(array('" . implode("', '", $editorStyleList) . "'));";
 
         $headerEnqueues = '';
         if ($header) {
@@ -349,7 +435,7 @@ final class FinalizeThemeStep implements Step
                 \$ver = wp_get_theme()->get('Version');{$motionEnqueues}
                 // Block themes do not load style.css automatically — without this
                 // enqueue its utility CSS (card layouts, layout utilities) never applies.
-                wp_enqueue_style('{$slug}-style', get_stylesheet_uri(), {$styleDeps}, \$ver);{$shapeEnqueues}{$headerEnqueues}
+                wp_enqueue_style('{$slug}-style', get_stylesheet_uri(), {$styleDeps}, \$ver);{$shapeEnqueues}{$surfaceEnqueues}{$deviceEnqueues}{$headerEnqueues}
             });
 
             // Mirror the theme stylesheets into the editor so previews match the front end.

@@ -308,7 +308,7 @@ final class FontsPhpStep implements Step
         array &$warnings,
     ): void {
         $type = is_array($direction['type'] ?? null) ? $direction['type'] : [];
-        foreach (['heading', 'body'] as $slot) {
+        foreach (['heading', 'body', 'accent'] as $slot) {
             $plan = is_array($type[$slot] ?? null) ? $type[$slot] : [];
             $authoredFamily = is_string($plan['family'] ?? null) ? trim($plan['family']) : '';
             if ($authoredFamily === '') {

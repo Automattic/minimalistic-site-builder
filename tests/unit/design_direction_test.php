@@ -107,7 +107,7 @@ test('design-direction expands a picked seed into structured designDirection.jso
     assert_contains('cozy neighborhood bakery', $llm->calls[1]['prompt']);
     assert_contains('Hearth & Crumb', $llm->calls[1]['prompt']);
     assert_contains('Seed ', $llm->calls[1]['prompt'], 'a seed reached the expansion prompt');
-    foreach (['palette', 'type', 'image_grade', 'card_style', 'hero_blueprint'] as $field) {
+    foreach (['palette', 'type', 'image_grade', 'card_style', 'hero_blueprint', 'surface', 'device'] as $field) {
         assert_contains($field, $llm->calls[1]['prompt']);
     }
     $assigned = $written['hero_blueprint']['recipe'];
@@ -972,13 +972,31 @@ test('normalize commits a motion profile: valid values pass, anything else defau
     assert_eq('calm', DesignDirectionStep::normalize(['description' => 'x'], 'cinematic-safe-zone')['motion'], 'missing → default');
     assert_eq('calm', DesignDirectionStep::normalize(['description' => 'x', 'motion' => 'bouncy'], 'cinematic-safe-zone')['motion'], 'unknown → default');
     assert_eq('calm', DesignDirectionStep::normalize(['description' => 'x', 'motion' => ['calm']], 'cinematic-safe-zone')['motion'], 'non-string → default');
-    assert_eq('a note', DesignDirectionStep::normalize(['description' => 'x', 'motion_note' => ' a note '], 'cinematic-safe-zone')['motion_note']);
+    $mapped = DesignDirectionStep::normalize(
+        ['description' => 'x', 'motion' => 'energetic', 'motion_note' => 'cards rise one by one'],
+        'cinematic-safe-zone',
+    );
+    assert_contains('stagger-children', $mapped['motion_note']);
+    $press = DesignDirectionStep::normalize(
+        ['description' => 'x', 'motion' => 'minimal', 'motion_note' => 'buttons press with a slight inset'],
+        'cinematic-safe-zone',
+    );
+    assert_contains('hover-lift', $press['motion_note']);
+    $stripped = DesignDirectionStep::normalize(
+        ['description' => 'x', 'motion_note' => 'labels spin with magnetic cursors'],
+        'cinematic-safe-zone',
+    );
+    assert_eq('', $stripped['motion_note']);
 });
 
 test('format renders the motion commitment with its executable meaning', function () {
-    $calm = DesignDirectionStep::format(['description' => 'x', 'motion' => 'calm', 'motion_note' => 'let the hero breathe']);
+    $calm = DesignDirectionStep::format([
+        'description' => 'x',
+        'motion' => 'calm',
+        'motion_note' => 'Use kit classes: ken-burns.',
+    ]);
     assert_contains('**Motion**: calm', $calm);
-    assert_contains('let the hero breathe', $calm);
+    assert_contains('ken-burns', $calm);
 
     $minimal = DesignDirectionStep::format(['description' => 'x', 'motion' => 'minimal']);
     assert_contains('hover-lift', $minimal, 'minimal names the only classes allowed');
@@ -1240,4 +1258,51 @@ test('directionFor returns nothing when no direction was committed', function ()
     } finally {
         exec('rm -rf ' . escapeshellarg($project->root));
     }
+});
+
+test('normalize commits optional accent type, surface, and device', function () {
+    $direction = DesignDirectionStep::normalize([
+        'description' => 'Caveat on flavor labels over a paper ground.',
+        'type' => [
+            'heading' => ['family' => 'Oswald', 'weights' => [700], 'italic' => false, 'axes' => [], 'character' => ''],
+            'body' => ['family' => 'Source Sans 3', 'weights' => [400], 'italic' => false, 'axes' => [], 'character' => ''],
+            'accent' => ['family' => 'Caveat', 'weights' => [400, 700], 'italic' => false, 'axes' => [], 'character' => 'hand labels'],
+        ],
+        'surface' => 'Paper',
+        'device' => 'stamp',
+    ], 'cinematic-safe-zone');
+
+    assert_eq('Caveat', $direction['type']['accent']['family']);
+    assert_eq([400, 700], $direction['type']['accent']['weights']);
+    assert_eq('paper', $direction['surface']);
+    assert_eq('stamp', $direction['device']);
+
+    $text = DesignDirectionStep::format($direction);
+    assert_contains('accent — Caveat', $text);
+    assert_contains('**Surface**: paper', $text);
+    assert_contains('device--stamp', $text);
+});
+
+test('normalize falls unknown surface and device back to none with a warning', function () {
+    $warnings = [];
+    $repairs = [];
+    $direction = DesignDirectionStep::normalize([
+        'description' => 'x',
+        'surface' => 'kraft',
+        'device' => 'twine',
+    ], 'cinematic-safe-zone', '', $repairs, $warnings);
+    assert_eq('none', $direction['surface']);
+    assert_eq('none', $direction['device']);
+    assert_true(count($warnings) >= 2);
+});
+
+test('normalize strips unbuildable motif phrases from the description', function () {
+    $warnings = [];
+    $repairs = [];
+    $direction = DesignDirectionStep::normalize([
+        'description' => 'Warm bakery with twine and tape corners on every card.',
+        'device' => 'none',
+    ], 'cinematic-safe-zone', '', $repairs, $warnings);
+    assert_true(!str_contains($direction['description'], 'twine'));
+    assert_true(!str_contains($direction['description'], 'tape corners'));
 });

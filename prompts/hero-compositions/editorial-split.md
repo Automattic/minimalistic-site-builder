@@ -21,3 +21,7 @@ into a generic equal half-and-half split or center every element.
   recipe's asymmetric-split width; never paint the root with the image.
 - Objective failure: equal columns, missing/extra images, a cover background,
   or copy/media helper regions merged into one generic centered stack fails.
+- not_for: a single cinematic cover, a type-only hero, or a brief that needs
+  the headline centered over a full-bleed photograph.
+- anti-patterns: 50/50 columns, centering every child, turning the image into
+  a cover background, a hairline rule between the H1 and the standfirst.

@@ -60,15 +60,16 @@ Hard requirements — follow exactly so downstream templates can rely on the slu
     "accent"    = CTAs / interaction
   Give each a human "name".
 - settings.color.gradients: a small array of named gradient presets (slug + name + gradient) built from the palette, for section backgrounds/atmosphere.
-- settings.shadow.presets: a small array of named shadow presets (slug + name + shadow) sections can apply for depth.
+- settings.shadow.presets: a small array of named shadow presets (slug + name + shadow) sections can apply for depth. Tint every shadow to the page hue (mix the contrast or primary RGB into the rgba) — never raw `rgba(0,0,0,…)`.
 - settings.typography.fluid: true.
 - settings.typography.fontSizes: the 6-step scale above (each entry { "slug", "name", "size" }) using EXACTLY the slugs caption / body / lead / heading / section-title / display — sections reference the steps by these exact slugs.
-- settings.typography.fontFamilies: an array with EXACTLY these two slugs:
+- settings.typography.fontFamilies: an array with slugs `heading` and `body`, plus `accent` ONLY when the DESIGN DIRECTION Type fact lists an accent family:
     "heading" — a real, characterful Google font that fits the brand, as the FIRST token in the stack, then web-safe fallbacks
     "body"    — a real, refined Google font that fits the brand, as the FIRST token in the stack, then web-safe fallbacks
+    "accent"  — only when the direction committed a third face; script/condensed/mono for flavor names, prices, folio, numerals
   Each entry: { "fontFamily": "<stack>", "name": "...", "slug": "..." }.
   Pick REAL Google Fonts families spelled exactly (e.g. "Cormorant Garamond", "Source Serif 4", "Oswald") — the build enqueues them from Google Fonts automatically by name, so no fontFace/src is needed here. Just make the FIRST family in each stack the exact Google font name.
-  Include EXACTLY these two fontFamilies and no others — do NOT add a third entry (e.g. a "mono" or "accent" family). Two families only: heading and body.
+  Execute the direction's Type families verbatim. Do not substitute Fraunces or Instrument Serif when the direction named something else. Without an accent Type fact, include EXACTLY heading and body — do NOT invent a third family.
 - settings.spacing: set `"blockGap": true` and include EXACTLY this bounded, responsive `spacingSizes` profile (the build normalizes it deterministically, so do not rename or rescale it):
     `xs` — Extra Small — `clamp(0.25rem, 0.5vw, 0.5rem)`
     `sm` — Small — `clamp(0.75rem, 1vw, 1rem)`

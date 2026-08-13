@@ -44,7 +44,7 @@ test('StepComposition default matches CLI step order and validates', function ()
         'theme-json+page-plan', 'sections', 'section-rhythm', 'copy-dedupe',
         'collect-images', 'normalize-layout', 'header-hero', 'contrast-fix', 'motion-sanity', 'fix-blocks',
         'assemble-pages', 'page-styles', 'custom-motion', 'bundle-fonts', 'fonts-php', 'finalize-theme',
-        'validate-theme',
+        'direction-fidelity', 'validate-theme',
     ], array_map(static fn (Step $s) => $s->id(), $steps));
 });
 

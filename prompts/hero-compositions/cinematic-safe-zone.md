@@ -30,3 +30,7 @@ variant whose safe region remains authored.
 - Objective failure: no direct cover, more than one image, missing copy region,
   corner-pinned or start-aligned copy, or copy placed over the image's subject
   violates this recipe.
+- not_for: split or columns heroes, type-only openings, a portrait crop, or any
+  brief that needs the headline in a side rail.
+- anti-patterns: pinning copy to a corner, a second image, a `display`-scale
+  headline on this restrained recipe, a `separator` in the copy stack.

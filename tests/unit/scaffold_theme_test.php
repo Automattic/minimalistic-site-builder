@@ -212,6 +212,13 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     assert_contains('@media (min-width: 600px) and (max-width: 719.98px)', $css);
     assert_contains('.wp-site-blocks .wp-block-navigation__responsive-container-open:not(.always-shown)', $css);
     assert_contains('.wp-site-blocks .wp-block-navigation__responsive-container:not(.hidden-by-default):not(.is-menu-open)', $css);
+    // Overlay panel uses the page pair, never core's white dialog, and
+    // does not inherit the desktop row justification (right-glued labels).
+    assert_contains('.wp-block-navigation__responsive-container.is-menu-open', $css);
+    assert_contains('background-color: var(--wp--preset--color--base) !important', $css);
+    assert_contains('--navigation-layout-justification-setting: flex-start', $css);
+    assert_contains('text-align: start !important', $css);
+    assert_contains('.wp-block-navigation__responsive-container-close', $css);
 
     // Hero topology and mobile behavior are code-owned. All recipe hooks ship
     // in the static stylesheet (unused hooks are inert), and the mobile rules
