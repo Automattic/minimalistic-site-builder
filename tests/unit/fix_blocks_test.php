@@ -76,6 +76,41 @@ test('FixBlocksStep delegates repair to the injected BlockFixer', function () {
     assert_eq($project->themePath(), $fake->calls[0], 'given the theme dir');
 });
 
+test('FixBlocksStep keeps a CSS-owned header nav on its authored inline axis', function () {
+    $fake = new class implements BlockFixer {
+        public function fix(string $themeDir): string
+        {
+            return '[fix-templates] 0/0 file(s) re-serialized';
+        }
+    };
+    $tmp = sys_get_temp_dir() . '/fix-blocks-css-owned-header-' . uniqid();
+    $project = new Project($tmp);
+    $css = ':root{--wide-size:1280px}header nav{width:100%;max-width:var(--wide-size);display:flex;flex-direction:row}';
+    $header = '<!-- wp:group {"tagName":"nav","className":"blocks-engine-css-owned-layout blocks-engine-css-owned-flow"} -->'
+        . '<nav class="wp-block-group blocks-engine-css-owned-layout blocks-engine-css-owned-flow">'
+        . '<!-- wp:paragraph --><p>Brand</p><!-- /wp:paragraph -->'
+        . '<!-- wp:list --><ul class="wp-block-list"><li>About</li></ul><!-- /wp:list -->'
+        . '</nav><!-- /wp:group -->';
+    $project->writeText('design/site.css', $css);
+    $project->writeText('theme/parts/header.html', $header);
+
+    try {
+        (new FixBlocksStep($fake))->run($project);
+
+        assert_eq($css, $project->readText('design/site.css'), 'carried inline-axis CSS stays byte-for-byte intact');
+        $delivered = $project->readText('theme/parts/header.html');
+        assert_contains('blocks-engine-css-owned-layout blocks-engine-css-owned-flow', $delivered);
+        assert_contains('<p>Brand</p>', $delivered);
+        assert_contains('<li>About</li>', $delivered);
+        assert_true(
+            !str_contains($delivered, '"layout":{"type":"constrained"}'),
+            'delivered nav must not ask core to re-cap its children at contentSize',
+        );
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
 test('FixBlocksStep declares its durable warnings artifact', function () {
     $writes = (new FixBlocksStep(new PhpBlockFixer()))->declaration()->writes;
     assert_true(in_array('warnings.json', $writes, true));
