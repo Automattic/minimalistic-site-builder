@@ -13,6 +13,11 @@ use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\Tests\FakeLlm;
 use Automattic\SiteBuild\ThemeValidator;
 
+const HTML_FIRST_RULELESS_TRANSFORMER_SIGNAL_CLASSES = [
+    // Consumed as a code signal by #259; the transformer intentionally ships no matching rule.
+    'blocks-engine-css-owned-layout',
+];
+
 function html_first_integration_builder(FakeLlm $llm, string $outputRoot): SiteBuilder
 {
     return new SiteBuilder(
@@ -123,7 +128,8 @@ function html_first_preview_document(string $marker = 'DESIGN-PREVIEW'): string
 function html_first_nav_defect_preview_document(): string
 {
     return str_replace(
-        '<header><nav aria-label="Primary"><a href="/">Home</a></nav></header>',
+        '<header class="site-header"><a class="brand" href="/">Hearth &amp; Crumb</a>'
+            . '<nav aria-label="Primary"><a href="/">Home</a></nav></header>',
         '<header><div class="header-shell"><nav aria-label="Primary">'
             . '<a class="brand" href="#hero">Hearth &amp; Crumb</a>'
             . '<a href="#hero">Home</a>'
@@ -424,7 +430,16 @@ test('G4 HTML-first output gives every transformer marker class matching final t
         assert_contains('blocks-engine-css-owned-flow', $deliveredMarkup, 'fixture emits a real css-owned-flow group');
         $markerClasses = html_first_transformer_marker_classes($deliveredMarkup);
         assert_true($markerClasses !== [], 'fixture emits transformer marker classes');
+        foreach (HTML_FIRST_RULELESS_TRANSFORMER_SIGNAL_CLASSES as $signalClass) {
+            assert_true(
+                in_array($signalClass, $markerClasses, true),
+                "markup retains ruleless transformer code signal {$signalClass}",
+            );
+        }
         foreach ($markerClasses as $class) {
+            if (in_array($class, HTML_FIRST_RULELESS_TRANSFORMER_SIGNAL_CLASSES, true)) {
+                continue;
+            }
             assert_true(
                 preg_match('/\.' . preg_quote($class, '/') . '(?![a-z0-9_-])/i', $style) === 1,
                 "transformer marker class {$class} has matching final theme CSS",

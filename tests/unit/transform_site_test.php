@@ -210,7 +210,7 @@ test('G1 engine-support families reach final theme CSS after transform-site and 
         'css-owned-flow paragraph' => ':where(.blocks-engine-css-owned-flow)>p{margin-top:0;margin-bottom:0}',
         'css-owned-flow direct children' => ':where(.wp-block-group.blocks-engine-css-owned-flow)>*{margin-block-start:0;margin-block-end:0}',
         'css-owned-grid' => ':where(.blocks-engine-css-owned-grid)>*{margin-block-start:0;margin-block-end:0}',
-        'css-owned-layout' => '.wp-block-group.blocks-engine-css-owned-layout>:where(:not(.alignleft):not(.alignright):not(.alignfull)){max-width:none!important;margin-left:0!important;margin-right:0!important}',
+        // blocks-engine-css-owned-layout was reverted in v0.4.17; site-builder #259 owns the fix instead.
         'css-owned-layout-item' => ':where(.wp-block-group.blocks-engine-css-owned-layout-item)>*{margin-block-start:0;margin-block-end:0}',
         'positioned-fragment-link-carrier' => ':where(.blocks-engine-positioned-fragment-link-carrier){display:contents!important}',
         'empty-flex-item' => ':where(.blocks-engine-empty-flex-item){flex:000!important;width:0!important;min-width:0!important;margin-left:0!important;margin-right:0!important}',
