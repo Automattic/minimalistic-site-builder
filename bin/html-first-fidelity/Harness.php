@@ -888,10 +888,7 @@ final class HtmlFirstFidelityFrozenGitTree
                     'archive and target maps differ',
                 );
             }
-            $installedTreeSha = hash(
-                'sha256',
-                json_encode($targetHashes, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
-            );
+            $installedTreeSha = self::treeMapSha256($targetHashes);
             $versionPath = $target . '/VERSION';
             $version = is_file($versionPath) ? trim((string) file_get_contents($versionPath)) : '';
             if ($version === '') {
@@ -932,6 +929,14 @@ final class HtmlFirstFidelityFrozenGitTree
         return $path . '@' . $commit
             . '#git-subtree=' . $subtreeOid
             . '&installed-tree-sha256=' . $installedTreeSha256;
+    }
+
+    public static function installedTreeSha256(string $root): string
+    {
+        if (!is_dir($root)) {
+            throw new RuntimeException("Installed transformer directory missing: {$root}");
+        }
+        return self::treeMapSha256(self::treeHashes($root));
     }
 
     /** @param list<string> $command */
@@ -1052,6 +1057,15 @@ final class HtmlFirstFidelityFrozenGitTree
         }
         ksort($hashes, SORT_STRING);
         return $hashes;
+    }
+
+    /** @param array<string,string> $hashes */
+    private static function treeMapSha256(array $hashes): string
+    {
+        return hash(
+            'sha256',
+            json_encode($hashes, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+        );
     }
 
     private static function removeTree(string $path): void
@@ -1242,7 +1256,6 @@ final class HtmlFirstFidelityRunner
     private const OVERLAY = '/Users/matt/projects/a8c/blocks-engine-wt-support-css/php-transformer';
     private const GALLERY = '/Users/matt/git/site-builder-eval/eval/html-first-fidelity';
     private const MUTEX = '/tmp/msb-gate.lock';
-    private const CONTROL_TRANSFORMER = '0.4.15';
 
     private string $repo;
     private string $tempRoot = '';
@@ -1289,6 +1302,80 @@ final class HtmlFirstFidelityRunner
             return true;
         }
         throw new RuntimeException('Usage: php bin/html-first-fidelity.php [--audit-mark-metric]');
+    }
+
+    /** @return list<string> */
+    public static function composerUpdateCommand(): array
+    {
+        return ['composer', 'update', '--no-interaction', '--no-progress', '--prefer-dist'];
+    }
+
+    /**
+     * @return array{transformer_label:string,transformer_reference:string,transformer_version:string,transformer_installed_tree_sha256:string}
+     */
+    public static function installedComposerTransformerProvenance(
+        string $side,
+        string $installedMetadataPath,
+        string $installedTransformerPath,
+    ): array {
+        if (!is_file($installedMetadataPath)) {
+            throw new RuntimeException(
+                "Provenance failure: side={$side}; path={$installedMetadataPath}; value=installed_metadata; file missing",
+            );
+        }
+        try {
+            $installed = json_decode(
+                (string) file_get_contents($installedMetadataPath),
+                true,
+                512,
+                JSON_THROW_ON_ERROR,
+            );
+        } catch (Throwable $error) {
+            throw new RuntimeException(
+                "Provenance failure: side={$side}; path={$installedMetadataPath}; value=installed_metadata; "
+                . $error->getMessage(),
+            );
+        }
+        if (!is_array($installed)) {
+            throw new RuntimeException(
+                "Provenance failure: side={$side}; path={$installedMetadataPath}; value=installed_metadata; expected object or list",
+            );
+        }
+        $packages = is_array($installed['packages'] ?? null) ? $installed['packages'] : $installed;
+        $version = '';
+        foreach ($packages as $package) {
+            if (!is_array($package) || ($package['name'] ?? null) !== 'automattic/blocks-engine-php-transformer') {
+                continue;
+            }
+            $prettyVersion = $package['pretty_version'] ?? null;
+            $normalizedVersion = $package['version'] ?? null;
+            if (is_string($prettyVersion) && trim($prettyVersion) !== '') {
+                $version = trim($prettyVersion);
+            } elseif (is_string($normalizedVersion) && trim($normalizedVersion) !== '') {
+                $version = trim($normalizedVersion);
+            }
+            break;
+        }
+        if ($version === '') {
+            throw new RuntimeException(
+                "Provenance failure: side={$side}; path={$installedMetadataPath}; "
+                . 'value=transformer_version; installed package metadata missing',
+            );
+        }
+        try {
+            $installedTreeSha256 = HtmlFirstFidelityFrozenGitTree::installedTreeSha256($installedTransformerPath);
+        } catch (Throwable $error) {
+            throw new RuntimeException(
+                "Provenance failure: side={$side}; path={$installedTransformerPath}; value=installed_bytes; "
+                . $error->getMessage(),
+            );
+        }
+        return [
+            'transformer_label' => $version . ' Composer install',
+            'transformer_reference' => 'composer:automattic/blocks-engine-php-transformer@' . $version,
+            'transformer_version' => $version,
+            'transformer_installed_tree_sha256' => $installedTreeSha256,
+        ];
     }
 
     /**
@@ -1362,6 +1449,11 @@ final class HtmlFirstFidelityRunner
             $this->mustRun(['git', 'worktree', 'add', '--detach', $this->controlRoot, 'origin/trunk'], $this->repo);
             $this->worktreeAdded = true;
             $this->installDependencies($this->controlRoot);
+            $controlTransformerProvenance = self::installedComposerTransformerProvenance(
+                'control transformer',
+                $this->controlRoot . '/vendor/composer/installed.json',
+                $this->controlRoot . '/vendor/automattic/blocks-engine-php-transformer',
+            );
             $this->installDependencies($this->repo);
             $this->overlayTreatmentTransformer();
             $this->installNodeDependencies($this->controlRoot);
@@ -1384,8 +1476,7 @@ final class HtmlFirstFidelityRunner
                     'source_projects' => self::SOURCE_PROJECTS,
                     'control' => [
                         ...$controlSiteBuilder,
-                        'transformer_label' => 'v' . self::CONTROL_TRANSFORMER,
-                        'transformer_reference' => 'composer:automattic/blocks-engine-php-transformer@' . self::CONTROL_TRANSFORMER,
+                        ...$controlTransformerProvenance,
                     ],
                     'treatment' => [
                         ...$treatmentSiteBuilder,
@@ -1512,23 +1603,7 @@ final class HtmlFirstFidelityRunner
     private function installDependencies(string $repo): void
     {
         Narrator::write("Installing dependencies in {$repo}\n");
-        $this->mustRun([
-            'composer', 'update',
-            '--with=automattic/blocks-engine-php-transformer:' . self::CONTROL_TRANSFORMER,
-            '--no-interaction', '--no-progress', '--prefer-dist',
-        ], $repo);
-        $installed = json_decode((string) file_get_contents($repo . '/vendor/composer/installed.json'), true, 512, JSON_THROW_ON_ERROR);
-        $packages = is_array($installed['packages'] ?? null) ? $installed['packages'] : (is_array($installed) ? $installed : []);
-        $version = null;
-        foreach ($packages as $package) {
-            if (is_array($package) && ($package['name'] ?? null) === 'automattic/blocks-engine-php-transformer') {
-                $version = ltrim((string) ($package['pretty_version'] ?? $package['version'] ?? ''), 'v');
-                break;
-            }
-        }
-        if ($version !== self::CONTROL_TRANSFORMER) {
-            throw new RuntimeException("Expected transformer " . self::CONTROL_TRANSFORMER . ", Composer installed " . ($version ?? 'nothing'));
-        }
+        $this->mustRun(self::composerUpdateCommand(), $repo);
     }
 
     private function overlayTreatmentTransformer(): void

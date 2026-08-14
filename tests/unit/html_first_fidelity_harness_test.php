@@ -40,6 +40,14 @@ test('html-first fidelity implementation matches frozen report schema enums', fu
         'transformer_label',
         'transformer_reference',
         'transformer_version',
+        'transformer_installed_tree_sha256',
+    ], $schema['$defs']['provenanceSide']['required']);
+    assert_eq([
+        'site_builder_ref',
+        'site_builder_sha',
+        'transformer_label',
+        'transformer_reference',
+        'transformer_version',
         'transformer_commit_sha',
         'transformer_git_subtree_oid',
         'transformer_installed_tree_sha256',
@@ -56,6 +64,96 @@ test('html-first fidelity implementation matches frozen report schema enums', fu
         HtmlFirstFidelityReport::MARK_METRIC_CORRECTED_DEFINITION,
         $schema['$defs']['markMetricTransitionAudit']['properties']['corrected_definition']['const'],
     );
+});
+
+test('html-first fidelity Composer update follows each worktree manifest without transformer override', function () {
+    $command = HtmlFirstFidelityRunner::composerUpdateCommand();
+    assert_eq([
+        'composer',
+        'update',
+        '--no-interaction',
+        '--no-progress',
+        '--prefer-dist',
+    ], $command);
+    $serialized = implode(' ', $command);
+    assert_true(!str_contains($serialized, '--with'));
+    assert_true(!str_contains($serialized, 'blocks-engine-php-transformer'));
+    assert_true(!str_contains($serialized, '0.4.15'));
+    assert_true(!defined(HtmlFirstFidelityRunner::class . '::CONTROL_TRANSFORMER'));
+});
+
+test('html-first fidelity installed byte tree hash uses stable relative path byte map', function () {
+    with_temp_dir('html-fidelity-installed-tree-', function (string $dir) {
+        $first = $dir . '/first';
+        $second = $dir . '/second';
+        mkdir($first . '/nested', 0777, true);
+        mkdir($second . '/nested', 0777, true);
+        file_put_contents($first . '/root.php', '<?php return 1;');
+        file_put_contents($first . '/nested/value.txt', 'same bytes');
+        file_put_contents($second . '/nested/value.txt', 'same bytes');
+        file_put_contents($second . '/root.php', '<?php return 1;');
+
+        $firstHash = HtmlFirstFidelityFrozenGitTree::installedTreeSha256($first);
+        $secondHash = HtmlFirstFidelityFrozenGitTree::installedTreeSha256($second);
+        assert_eq($firstHash, $secondHash);
+        assert_true(preg_match('/^[0-9a-f]{64}$/', $firstHash) === 1);
+
+        file_put_contents($second . '/nested/value.txt', 'changed bytes');
+        assert_true($firstHash !== HtmlFirstFidelityFrozenGitTree::installedTreeSha256($second));
+    });
+});
+
+test('html-first fidelity control provenance follows actual future Composer metadata and installed bytes', function () {
+    with_temp_dir('html-fidelity-control-provenance-', function (string $dir) {
+        $metadataPath = $dir . '/vendor/composer/installed.json';
+        $transformerPath = $dir . '/vendor/automattic/blocks-engine-php-transformer';
+        mkdir(dirname($metadataPath), 0777, true);
+        mkdir($transformerPath, 0777, true);
+        file_put_contents($transformerPath . '/Transformer.php', '<?php return "future";');
+        file_put_contents($metadataPath, json_encode([
+            'packages' => [[
+                'name' => 'automattic/blocks-engine-php-transformer',
+                'version' => '9.9.9.0',
+                'pretty_version' => 'v9.9.9-future',
+            ]],
+        ], JSON_THROW_ON_ERROR));
+
+        $provenance = HtmlFirstFidelityRunner::installedComposerTransformerProvenance(
+            'control transformer',
+            $metadataPath,
+            $transformerPath,
+        );
+        assert_eq('v9.9.9-future', $provenance['transformer_version']);
+        assert_eq('v9.9.9-future Composer install', $provenance['transformer_label']);
+        assert_eq(
+            'composer:automattic/blocks-engine-php-transformer@v9.9.9-future',
+            $provenance['transformer_reference'],
+        );
+        assert_eq(
+            HtmlFirstFidelityFrozenGitTree::installedTreeSha256($transformerPath),
+            $provenance['transformer_installed_tree_sha256'],
+        );
+
+        file_put_contents($metadataPath, json_encode([[
+            'name' => 'automattic/blocks-engine-php-transformer',
+            'version' => '10.0.0.0-next',
+        ]], JSON_THROW_ON_ERROR));
+        $future = HtmlFirstFidelityRunner::installedComposerTransformerProvenance(
+            'control transformer',
+            $metadataPath,
+            $transformerPath,
+        );
+        assert_eq('10.0.0.0-next', $future['transformer_version']);
+        assert_eq('10.0.0.0-next Composer install', $future['transformer_label']);
+        assert_eq(
+            'composer:automattic/blocks-engine-php-transformer@10.0.0.0-next',
+            $future['transformer_reference'],
+        );
+        assert_eq(
+            $provenance['transformer_installed_tree_sha256'],
+            $future['transformer_installed_tree_sha256'],
+        );
+    });
 });
 
 test('html-first fidelity design hashes cover only direct HTML and site CSS inputs', function () {
@@ -918,8 +1016,10 @@ function html_first_fidelity_report_fixture(): array
             'control' => [
                 'site_builder_ref' => 'origin/trunk',
                 'site_builder_sha' => $sha,
-                'transformer_label' => 'v0.4.15',
-                'transformer_reference' => 'composer:transformer@0.4.15',
+                'transformer_label' => 'v9.9.9-future Composer install',
+                'transformer_reference' => 'composer:automattic/blocks-engine-php-transformer@v9.9.9-future',
+                'transformer_version' => 'v9.9.9-future',
+                'transformer_installed_tree_sha256' => $sha256,
             ],
             'treatment' => [
                 'site_builder_ref' => 'integration/html-first-fidelity',
