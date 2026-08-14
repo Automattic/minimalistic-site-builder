@@ -19,33 +19,6 @@ test('html-first fidelity harness freezes exact projects and one re-run command'
         'azure-garden',
         'amber-ember',
     ], HtmlFirstFidelityReport::SLUGS);
-    assert_eq(
-        '920b16c417b8d6bc8edfb38a13967348b0f1b841',
-        HtmlFirstFidelityRunner::TREATMENT_TRANSFORMER_COMMIT,
-    );
-    assert_eq(
-        'c24e3394dcf1681347803c1f4c1b117092b3c4e9b9bc16244b5bec56767ceba9',
-        HtmlFirstFidelityRunner::TREATMENT_TRANSFORMER_TREE_SHA256,
-    );
-    assert_eq('0.4.17', HtmlFirstFidelityRunner::TREATMENT_TRANSFORMER_VERSION);
-    assert_eq(
-        '/Users/matt/projects/a8c/blocks-engine-wt-support-css/php-transformer'
-            . '@920b16c417b8d6bc8edfb38a13967348b0f1b841'
-            . '#tree-sha256=c24e3394dcf1681347803c1f4c1b117092b3c4e9b9bc16244b5bec56767ceba9',
-        HtmlFirstFidelityRunner::TREATMENT_TRANSFORMER_REFERENCE,
-    );
-    assert_eq([
-        'transformer_label' => 'v0.4.17 frozen source archive',
-        'transformer_reference' => '/Users/matt/projects/a8c/blocks-engine-wt-support-css/php-transformer'
-            . '@920b16c417b8d6bc8edfb38a13967348b0f1b841'
-            . '#tree-sha256=c24e3394dcf1681347803c1f4c1b117092b3c4e9b9bc16244b5bec56767ceba9',
-    ], HtmlFirstFidelityRunner::treatmentTransformerProvenance([
-        'commit' => '920b16c417b8d6bc8edfb38a13967348b0f1b841',
-        'tree_sha256' => 'c24e3394dcf1681347803c1f4c1b117092b3c4e9b9bc16244b5bec56767ceba9',
-        'reference' => '/Users/matt/projects/a8c/blocks-engine-wt-support-css/php-transformer'
-            . '@920b16c417b8d6bc8edfb38a13967348b0f1b841'
-            . '#tree-sha256=c24e3394dcf1681347803c1f4c1b117092b3c4e9b9bc16244b5bec56767ceba9',
-    ], '0.4.17'));
     assert_true(!HtmlFirstFidelityRunner::auditMarkMetricRequested([]));
     assert_true(HtmlFirstFidelityRunner::auditMarkMetricRequested(['--audit-mark-metric']));
     assert_throws(fn () => HtmlFirstFidelityRunner::auditMarkMetricRequested(['--unknown']));
@@ -61,6 +34,16 @@ test('html-first fidelity implementation matches frozen report schema enums', fu
     assert_eq(HtmlFirstFidelityReport::RERUN_COMMAND, $schema['properties']['rerun_command']['const']);
     assert_eq(HtmlFirstFidelityReport::SLUGS, $schema['$defs']['project']['properties']['slug']['enum']);
     assert_eq(HtmlFirstFidelityReport::ENGINE_MARKERS, $schema['$defs']['engineMarkers']['propertyNames']['enum']);
+    assert_eq([
+        'site_builder_ref',
+        'site_builder_sha',
+        'transformer_label',
+        'transformer_reference',
+        'transformer_version',
+        'transformer_commit_sha',
+        'transformer_git_subtree_oid',
+        'transformer_installed_tree_sha256',
+    ], $schema['$defs']['treatmentProvenanceSide']['required']);
     assert_eq(
         HtmlFirstFidelityReport::MARK_METRIC_CORRECTED_DEFINITION,
         $schema['$defs']['metrics']['properties']['marks_without_background_color']['description'],
@@ -442,8 +425,8 @@ test('html-first fidelity cleanup throws when preserved treatment project cannot
     });
 });
 
-test('html-first fidelity frozen Git archive ignores mutable live HEAD and worktree bytes', function () {
-    with_temp_dir('html-fidelity-frozen-git-', function (string $dir) {
+test('html-first fidelity overlay HEAD movement changes installed bytes and provenance', function () {
+    with_temp_dir('html-fidelity-runtime-git-', function (string $dir) {
         $repository = $dir . '/overlay-repository';
         mkdir($repository);
         mkdir($repository . '/php-transformer');
@@ -471,53 +454,178 @@ test('html-first fidelity frozen Git archive ignores mutable live HEAD and workt
         $run(['git', 'init', '--quiet'], $repository);
         $run(['git', 'config', 'user.name', 'Harness Test'], $repository);
         $run(['git', 'config', 'user.email', 'harness@example.com'], $repository);
-        file_put_contents($repository . '/php-transformer/value.txt', 'frozen bytes');
-        $run(['git', 'add', 'php-transformer/value.txt'], $repository);
-        $run(['git', 'commit', '--quiet', '-m', 'frozen'], $repository);
-        $frozenSha = $run(['git', 'rev-parse', 'HEAD'], $repository);
-
-        file_put_contents($repository . '/php-transformer/value.txt', 'new HEAD bytes');
-        $run(['git', 'add', 'php-transformer/value.txt'], $repository);
-        $run(['git', 'commit', '--quiet', '-m', 'new head'], $repository);
-        $mutableHead = $run(['git', 'rev-parse', 'HEAD'], $repository);
-        file_put_contents($repository . '/php-transformer/value.txt', 'dirty live worktree bytes');
+        file_put_contents($repository . '/php-transformer/VERSION', "0.4.17\n");
+        file_put_contents($repository . '/php-transformer/value.txt', 'first HEAD bytes');
+        $run(['git', 'add', 'php-transformer'], $repository);
+        $run(['git', 'commit', '--quiet', '-m', 'first'], $repository);
 
         $referencePath = $repository . '/php-transformer';
-        $frozen = HtmlFirstFidelityFrozenGitTree::install(
+        $first = HtmlFirstFidelityFrozenGitTree::installRevision(
+            side: 'treatment transformer',
             repository: $repository,
-            commit: $frozenSha,
+            revision: 'HEAD',
             subdirectory: 'php-transformer',
-            workRoot: $dir . '/archive-work',
-            target: $dir . '/installed-transformer',
+            workRoot: $dir . '/first-archive',
+            target: $dir . '/first-installed',
             referencePath: $referencePath,
         );
 
-        assert_true($mutableHead !== $frozenSha);
+        file_put_contents($repository . '/php-transformer/value.txt', 'second HEAD bytes');
+        $run(['git', 'add', 'php-transformer/value.txt'], $repository);
+        $run(['git', 'commit', '--quiet', '-m', 'second'], $repository);
+        file_put_contents($repository . '/php-transformer/value.txt', 'dirty live worktree bytes');
+
+        $second = HtmlFirstFidelityFrozenGitTree::installRevision(
+            side: 'treatment transformer',
+            repository: $repository,
+            revision: 'HEAD',
+            subdirectory: 'php-transformer',
+            workRoot: $dir . '/second-archive',
+            target: $dir . '/second-installed',
+            referencePath: $referencePath,
+        );
+
         assert_eq('dirty live worktree bytes', file_get_contents($repository . '/php-transformer/value.txt'));
-        assert_eq('frozen bytes', file_get_contents($dir . '/installed-transformer/value.txt'));
-        assert_eq($frozenSha, $frozen['commit']);
-        assert_contains($referencePath . '@' . $frozenSha . '#tree-sha256=', $frozen['reference']);
+        assert_eq('first HEAD bytes', file_get_contents($dir . '/first-installed/value.txt'));
+        assert_eq('second HEAD bytes', file_get_contents($dir . '/second-installed/value.txt'));
+        assert_true($first['commit_sha'] !== $second['commit_sha']);
+        assert_true($first['git_subtree_oid'] !== $second['git_subtree_oid']);
+        assert_true($first['installed_tree_sha256'] !== $second['installed_tree_sha256']);
+        assert_true($first['reference'] !== $second['reference']);
+        assert_eq('0.4.17', $second['version']);
+        assert_eq(
+            $run(['git', 'rev-parse', $second['commit_sha'] . ':php-transformer'], $repository),
+            $second['git_subtree_oid'],
+        );
 
         remove_tree($repository . '/php-transformer');
         assert_true(!file_exists($repository . '/php-transformer'));
-        $withoutLiveSubtree = HtmlFirstFidelityFrozenGitTree::install(
+        $withoutLiveSubtree = HtmlFirstFidelityFrozenGitTree::installRevision(
+            side: 'treatment transformer',
             repository: $repository,
-            commit: $frozenSha,
+            revision: 'HEAD',
             subdirectory: 'php-transformer',
             workRoot: $dir . '/archive-without-live-subtree',
             target: $dir . '/installed-without-live-subtree',
             referencePath: $referencePath,
         );
-        assert_eq('frozen bytes', file_get_contents($dir . '/installed-without-live-subtree/value.txt'));
-        assert_eq($frozen, $withoutLiveSubtree);
-        assert_throws(fn () => HtmlFirstFidelityFrozenGitTree::install(
+        assert_eq('second HEAD bytes', file_get_contents($dir . '/installed-without-live-subtree/value.txt'));
+        assert_eq($second, $withoutLiveSubtree);
+        $error = assert_throws(fn () => HtmlFirstFidelityFrozenGitTree::installRevision(
+            side: 'treatment transformer',
             repository: $repository,
-            commit: str_repeat('0', 40),
+            revision: 'missing-overlay-revision',
             subdirectory: 'php-transformer',
             workRoot: $dir . '/missing-work',
             target: $dir . '/missing-target',
             referencePath: $referencePath,
         ));
+        assert_contains('side=treatment transformer', $error->getMessage());
+        assert_contains("path={$repository}", $error->getMessage());
+        assert_contains('revision=missing-overlay-revision', $error->getMessage());
+        assert_contains('value=commit', $error->getMessage());
+    });
+});
+
+test('html-first fidelity rejects mismatched recorded transformer commit and tree provenance', function () {
+    $path = '/tmp/overlay/php-transformer';
+    $commit = str_repeat('a', 40);
+    $tree = str_repeat('b', 40);
+    $installed = str_repeat('c', 64);
+    $trusted = [
+        'commit_sha' => $commit,
+        'git_subtree_oid' => $tree,
+        'installed_tree_sha256' => $installed,
+        'version' => '0.4.17',
+        'reference' => HtmlFirstFidelityFrozenGitTree::reference($path, $commit, $tree, $installed),
+    ];
+    $recorded = [
+        'transformer_version' => '0.4.17',
+        'transformer_commit_sha' => $commit,
+        'transformer_git_subtree_oid' => $tree,
+        'transformer_installed_tree_sha256' => $installed,
+    ];
+    $provenance = HtmlFirstFidelityRunner::treatmentTransformerProvenance(
+        $trusted,
+        $recorded,
+        'treatment transformer',
+        $path,
+        'HEAD',
+    );
+    assert_eq('v0.4.17 runtime HEAD archive', $provenance['transformer_label']);
+    assert_eq($trusted['reference'], $provenance['transformer_reference']);
+    assert_eq($recorded, array_intersect_key($provenance, $recorded));
+
+    foreach ([
+        'transformer_version' => '9.9.9',
+        'transformer_commit_sha' => str_repeat('d', 40),
+        'transformer_git_subtree_oid' => str_repeat('e', 40),
+        'transformer_installed_tree_sha256' => str_repeat('f', 64),
+    ] as $field => $wrong) {
+        $mismatch = $recorded;
+        $mismatch[$field] = $wrong;
+        $error = assert_throws(fn () => HtmlFirstFidelityRunner::treatmentTransformerProvenance(
+            $trusted,
+            $mismatch,
+            'treatment transformer',
+            $path,
+            'HEAD',
+        ));
+        assert_contains('side=treatment transformer', $error->getMessage());
+        assert_contains("path={$path}", $error->getMessage());
+        assert_contains('revision=HEAD', $error->getMessage());
+        assert_contains("value={$field}", $error->getMessage());
+    }
+});
+
+test('html-first fidelity detached site-builder HEAD gets explicit label', function () {
+    with_temp_dir('html-fidelity-detached-git-', function (string $repository) {
+        $run = static function (array $command, string $cwd): string {
+            $process = proc_open($command, [
+                0 => ['file', '/dev/null', 'r'],
+                1 => ['pipe', 'w'],
+                2 => ['pipe', 'w'],
+            ], $pipes, $cwd);
+            if (!is_resource($process)) {
+                throw new RuntimeException('Could not start test Git command.');
+            }
+            $stdout = stream_get_contents($pipes[1]);
+            $stderr = stream_get_contents($pipes[2]);
+            fclose($pipes[1]);
+            fclose($pipes[2]);
+            $exit = proc_close($process);
+            if ($exit !== 0) {
+                throw new RuntimeException('Test Git command failed: ' . trim((string) $stderr));
+            }
+            return trim((string) $stdout);
+        };
+        $run(['git', 'init', '--quiet'], $repository);
+        $run(['git', 'config', 'user.name', 'Harness Test'], $repository);
+        $run(['git', 'config', 'user.email', 'harness@example.com'], $repository);
+        file_put_contents($repository . '/proof.txt', 'proof');
+        $run(['git', 'add', 'proof.txt'], $repository);
+        $run(['git', 'commit', '--quiet', '-m', 'proof'], $repository);
+        $sha = $run(['git', 'rev-parse', 'HEAD'], $repository);
+        $run(['git', 'checkout', '--quiet', '--detach', $sha], $repository);
+
+        $resolved = HtmlFirstFidelityFrozenGitTree::resolveRepositoryRevision(
+            'treatment site-builder',
+            $repository,
+            'HEAD',
+        );
+        assert_eq($sha, $resolved['site_builder_sha']);
+        assert_eq('detached HEAD @ ' . substr($sha, 0, 12), $resolved['site_builder_ref']);
+        assert_true($resolved['site_builder_ref'] !== '');
+
+        $error = assert_throws(fn () => HtmlFirstFidelityFrozenGitTree::resolveRepositoryRevision(
+            'control site-builder',
+            $repository,
+            'missing-control-ref',
+        ));
+        assert_contains('side=control site-builder', $error->getMessage());
+        assert_contains("path={$repository}", $error->getMessage());
+        assert_contains('revision=missing-control-ref', $error->getMessage());
+        assert_contains('value=commit', $error->getMessage());
     });
 });
 
@@ -768,6 +876,7 @@ test('html-first fidelity gallery renders aligned external three-column captures
 function html_first_fidelity_report_fixture(): array
 {
     $sha = str_repeat('a', 40);
+    $subtree = str_repeat('c', 40);
     $sha256 = str_repeat('b', 64);
     $hashes = ['design/home.html' => $sha256, 'design/site.css' => $sha256];
     $metrics = [
@@ -815,8 +924,17 @@ function html_first_fidelity_report_fixture(): array
             'treatment' => [
                 'site_builder_ref' => 'integration/html-first-fidelity',
                 'site_builder_sha' => $sha,
-                'transformer_label' => 'v0.4.17 frozen source archive',
-                'transformer_reference' => HtmlFirstFidelityRunner::TREATMENT_TRANSFORMER_REFERENCE,
+                'transformer_label' => 'v0.4.17 runtime HEAD archive',
+                'transformer_reference' => HtmlFirstFidelityFrozenGitTree::reference(
+                    '/overlay/php-transformer',
+                    $sha,
+                    $subtree,
+                    $sha256,
+                ),
+                'transformer_version' => '0.4.17',
+                'transformer_commit_sha' => $sha,
+                'transformer_git_subtree_oid' => $subtree,
+                'transformer_installed_tree_sha256' => $sha256,
             ],
         ],
         'projects' => $projects,
