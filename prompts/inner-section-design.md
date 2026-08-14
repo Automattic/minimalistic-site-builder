@@ -14,6 +14,11 @@ Two cached context layers precede this request: the established site CSS from th
 
 {{page_spec}}
 
+## Site pages
+
+SITE PAGES (the whole site, for internal links):
+{{site_pages}}
+
 ## Full page outline
 
 {{page_outline}}
@@ -46,7 +51,9 @@ Use only headings, paragraphs, lists, block quotes, code, tables, images, button
 
 There are no forms or form controls, no SVG, no custom elements, and no JavaScript. Do not emit `<form>`, `<input>`, `<textarea>`, `<select>`, `<button>` with scripted behavior, `<svg>`, inline event handlers, or `javascript:` URLs. Express layout, ornament, and interaction states with the established HTML classes only.
 
-Use `<button>` only for a real non-scripted action. Prefer an `<a>` link styled as a button for navigation or a CTA. Use real internal paths from the site spec when available; never invent a page path.
+Use `<button>` only for a real non-scripted action. Prefer an `<a>` link styled as a button for navigation or a CTA.
+
+- LINKS: when a button or link leads to another page of THIS site, use that page's path from SITE PAGES verbatim (e.g. `href="/menu/"`) — never a path that isn't in the list. A deep link to another page includes that owning page's path (e.g. `href="/page/#anchor"`). A bare `href="#anchor"` is valid only when that exact section ID exists in this page's full outline. Do not link the page to itself. An external link uses an exact URL supplied by the SITE SPEC; when none was supplied, omit the link or render its label as plain text. NEVER emit `href="#"`.
 
 Every image needs meaningful `alt` text written as a usable image-generation prompt: name subject, setting, composition, lighting, palette or grade, and framing. Keep readable words and brand names out of generated images; render them as HTML text.
 

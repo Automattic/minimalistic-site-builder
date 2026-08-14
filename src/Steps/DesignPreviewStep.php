@@ -79,11 +79,13 @@ final class DesignPreviewStep implements Step
                 throw new \RuntimeException('meta.json has no "prompt"');
             }
 
+            $siteSpecData = $project->readJson('siteSpec.json');
             $siteSpec = $project->readText('siteSpec.json');
             $designDirection = $project->readText('designDirection.json');
             $prompt = $this->renderer->render('design-preview.md', [
                 'brief' => $brief,
                 'site_spec' => $siteSpec,
+                'site_pages' => PagePlanStep::sitePagesList(PagePlanStep::flattenPages($siteSpecData)),
                 'design_direction' => $designDirection,
             ]);
 

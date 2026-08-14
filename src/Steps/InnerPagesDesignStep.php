@@ -121,12 +121,14 @@ final class InnerPagesDesignStep implements Step
             self::cacheLayer($previewHtml),
         ];
         $siteSpecContext = self::jsonContext($siteSpec);
+        $sitePagesContext = PagePlanStep::sitePagesList($allPages);
         $frontPage = $allPages[0];
 
         $requests = [];
         $units = [];
         $homePrompt = $this->renderer->render('home-body-design.md', [
             'site_spec'      => $siteSpecContext,
+            'site_pages'     => $sitePagesContext,
             'page_spec'      => self::jsonContext($frontPage),
             'site_css'       => '[cached prefix layer 1 contains the exact design/site.css bytes]',
             'design_preview' => '[cached prefix layer 2 contains the exact design preview bytes]',
@@ -164,6 +166,7 @@ final class InnerPagesDesignStep implements Step
             }
             $prompt = $this->renderer->render('inner-page-design.md', [
                 'site_spec'      => $siteSpecContext,
+                'site_pages'     => $sitePagesContext,
                 'page_spec'      => self::jsonContext($page),
                 'site_css'       => '[cached prefix layer 1 contains the exact design/site.css bytes]',
                 'design_preview' => '[cached prefix layer 2 contains the exact design preview bytes]',
@@ -378,6 +381,7 @@ final class InnerPagesDesignStep implements Step
             self::cacheLayer($previewHtml),
         ];
         $siteSpecContext = self::jsonContext($siteSpec);
+        $sitePagesContext = PagePlanStep::sitePagesList($allPages);
         $frontPage = $allPages[0];
 
         $artifactMap = [(string) $frontPage['slug'] => 'home'];
@@ -411,6 +415,7 @@ final class InnerPagesDesignStep implements Step
         $requests = [];
         $homePrompt = $this->renderer->render('home-body-design.md', [
             'site_spec'      => $siteSpecContext,
+            'site_pages'     => $sitePagesContext,
             'page_spec'      => self::jsonContext($frontPage),
             'site_css'       => '[cached prefix layer 1 contains the exact design/site.css bytes]',
             'design_preview' => '[cached prefix layer 2 contains the exact design preview bytes]',
@@ -441,6 +446,7 @@ final class InnerPagesDesignStep implements Step
                 }
                 $prompt = $this->renderer->render('inner-section-design.md', [
                     'site_spec'       => $siteSpecContext,
+                    'site_pages'      => $sitePagesContext,
                     'design_direction' => DesignDirectionStep::readFor($project),
                     'page_spec'       => self::jsonContext($page),
                     'page_outline'    => $outline,

@@ -116,6 +116,19 @@ function html_first_preview_document(string $marker = 'DESIGN-PREVIEW'): string
         . '</section></main></body></html>';
 }
 
+function html_first_nav_defect_preview_document(): string
+{
+    return str_replace(
+        '<header><nav aria-label="Primary"><a href="/">Home</a></nav></header>',
+        '<header><div class="header-shell"><nav aria-label="Primary">'
+            . '<a class="brand" href="#hero">Hearth &amp; Crumb</a>'
+            . '<a href="#hero">Home</a>'
+            . '<a href="#hero">About</a>'
+            . '</nav></div></header>',
+        html_first_preview_document('NAV-LINK-HERO'),
+    );
+}
+
 function html_first_queue_success(
     FakeLlm $llm,
     array $siteSpec,
@@ -406,6 +419,71 @@ test('HTML-first default builds and validates every single-page artifact', funct
         $previous === false
             ? putenv('SITE_BUILD_LEGACY')
             : putenv('SITE_BUILD_LEGACY=' . $previous);
+        if (is_dir($tmp)) {
+            exec('rm -rf ' . escapeshellarg($tmp));
+        }
+    }
+});
+
+test('G5 HTML-first build delivers only resolved header navigation destinations', function () {
+    $tmp = sys_get_temp_dir() . '/builder_html_first_nav_links_' . uniqid();
+    $previous = getenv('SITE_BUILD_LEGACY');
+    $previousHeaderArchetype = getenv('HEADER_ARCHETYPE');
+    putenv('SITE_BUILD_LEGACY');
+    putenv('HEADER_ARCHETYPE=standard-row');
+    try {
+        $pages = [
+            ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome visitors', 'children' => []],
+            ['title' => 'About', 'slug' => 'about', 'purpose' => 'Explain the bakery', 'children' => []],
+        ];
+        $llm = new FakeLlm();
+        html_first_queue_success(
+            $llm,
+            html_first_site_spec($pages),
+            html_first_home_body(),
+            html_first_nav_defect_preview_document(),
+        );
+        $llm->queueText(
+            '<main><section id="team"><h1>About</h1><p>HTML-FIRST-ABOUT</p></section></main>',
+        );
+
+        $builder = html_first_integration_builder($llm, $tmp);
+        $project = $builder->createProject(
+            'A neighborhood bakery',
+            'demo',
+            multiPage: true,
+            pages: $pages,
+        );
+        $meta = $project->readJson('meta.json');
+        $meta['design_candidates'] = 1;
+        $meta['critique_rounds'] = 1;
+        $project->writeJson('meta.json', $meta);
+
+        $builder->pipeline()->runThrough($project);
+
+        $header = $project->readText('theme/parts/header.html');
+        assert_contains('"url":"/#hero"', $header, 'brand deep link is rooted to its owning home page');
+        assert_contains('"url":"/about/"', $header, 'About label resolves to the site page path');
+
+        $emptyHrefCount = 0;
+        foreach ($project->markupFiles() as $file) {
+            $markup = (string) file_get_contents($file);
+            $emptyHrefCount += preg_match_all('/\bhref\s*=\s*(["\'])#\1/i', $markup);
+            assert_eq(0, preg_match_all('/"url"\s*:\s*"#"/i', $markup), 'delivered block URL "#" count');
+        }
+        $headerBareAnchorCount = preg_match_all(
+            '/\bhref\s*=\s*(["\'])#[^"\']+\1/i',
+            $header,
+        ) + preg_match_all('/"url"\s*:\s*"#[^"]+"/i', $header);
+        assert_eq(0, $emptyHrefCount, 'delivered markup href="#" count');
+        assert_eq(0, $headerBareAnchorCount, 'shared header bare #anchor count');
+    } finally {
+        $previous === false
+            ? putenv('SITE_BUILD_LEGACY')
+            : putenv('SITE_BUILD_LEGACY=' . $previous);
+        $previousHeaderArchetype === false
+            ? putenv('HEADER_ARCHETYPE')
+            : putenv('HEADER_ARCHETYPE=' . $previousHeaderArchetype);
         if (is_dir($tmp)) {
             exec('rm -rf ' . escapeshellarg($tmp));
         }
