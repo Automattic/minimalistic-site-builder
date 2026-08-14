@@ -1,0 +1,409 @@
+{
+  "schema": "minimalistic-site-builder/flex-vertical-alignment-baseline/v1",
+  "phase": "before",
+  "recorded_at": "2026-08-14T23:05:57.943Z",
+  "site_builder": {
+    "base_ref": "origin/trunk",
+    "base_sha": "b795a37c40bddbaac9ac9cdf38ac90bdbc9b5d53",
+    "build_commit": "5beb9ad"
+  },
+  "transformer": {
+    "package": "automattic/blocks-engine-php-transformer",
+    "version": "v0.4.17",
+    "commit_sha": "75088bdcbd2710ab865746229bb105b03aed7019"
+  },
+  "source_projects": {
+    "root": "/Users/matt/git/minimalistic-site-builder/projects",
+    "policy": "read-only copies",
+    "hash_method": "SHA-256 of sorted relative-path design/*.html and design/site.css SHA-256 records",
+    "hashes": {
+      "amber-ember": "cd8a2dc1d0d4bc31c7158c8bbe0967bbed6d180edcf853c1c0e291b118b76752",
+      "calm-lantern": "16bbe5804f1117bcb699531f864e9b1e246e074f1c4c8bedc4e89d33c84eba4b",
+      "sunny-ember": "c5608edb1934c723dca5cb38795e20e79f54e8d62db9c2707f22584c09f683c1",
+      "silver-summit": "c46f63fbc5db025dcc6e3878da4e5a91817c8fea1c1ea0d27784e37a3a5c3bf9"
+    }
+  },
+  "build": {
+    "detached_worktree": "/tmp/msb-flex-trunk.jkJkvY",
+    "command": "ANTHROPIC_API_KEY=flex-trunk-no-network LLM_PROVIDER=anthropic SITE_BUILD_LEGACY=0 php bin/build.php --slug=<slug> --from=transform-site --no-serve",
+    "llm_requests_per_project": 0
+  },
+  "reproduce": {
+    "playground": "php bin/playground.php <slug> --port=<port>",
+    "measure": "node bin/screenshot/measure-flex-vertical-alignment.js <case> http://127.0.0.1:<port>/"
+  },
+  "measurements": [
+    {
+      "schema": "minimalistic-site-builder/flex-vertical-alignment-measurement/v1",
+      "case": "amber-ember-nav",
+      "generated_at": "2026-08-14T23:05:57.913Z",
+      "url": "http://127.0.0.1:53210/",
+      "viewport": {
+        "width_px": 1366,
+        "height_px": 1000
+      },
+      "runtime": {
+        "chrome": "151.0.7922.138",
+        "playwright": "1.61.1",
+        "wordpress": "7.0.4"
+      },
+      "method": "zero-size inline-block baseline marker; marker bottom minus row top",
+      "row": {
+        "selector": "header nav.blocks-engine-css-owned-layout",
+        "display": "flex",
+        "align_items": "center",
+        "width_px": 1262,
+        "height_px": 94.969
+      },
+      "items": [
+        {
+          "label": "Home",
+          "baseline_from_row_top_px": 67.563,
+          "box_top_from_row_top_px": 51.969,
+          "box_bottom_from_row_top_px": 76.156,
+          "box_center_from_row_center_px": 16.578,
+          "direct_row_child": {
+            "tag": "div",
+            "class": "wp-block-group navlinks blocks-engine-css-owned-layout blocks-engine-css-owned-flow is-layout-flow wp-block-group-is-layout-flow",
+            "margin_block_start": "27.32px",
+            "margin_block_end": "0px",
+            "top_from_row_top_px": 27.313,
+            "bottom_from_row_top_px": 94.969
+          }
+        },
+        {
+          "label": "Services",
+          "baseline_from_row_top_px": 81.219,
+          "box_top_from_row_top_px": 65.625,
+          "box_bottom_from_row_top_px": 89.813,
+          "box_center_from_row_center_px": 30.234,
+          "direct_row_child": {
+            "tag": "div",
+            "class": "wp-block-group navlinks blocks-engine-css-owned-layout blocks-engine-css-owned-flow is-layout-flow wp-block-group-is-layout-flow",
+            "margin_block_start": "27.32px",
+            "margin_block_end": "0px",
+            "top_from_row_top_px": 27.313,
+            "bottom_from_row_top_px": 94.969
+          }
+        },
+        {
+          "label": "About",
+          "baseline_from_row_top_px": 81.219,
+          "box_top_from_row_top_px": 65.625,
+          "box_bottom_from_row_top_px": 89.813,
+          "box_center_from_row_center_px": 30.234,
+          "direct_row_child": {
+            "tag": "div",
+            "class": "wp-block-group navlinks blocks-engine-css-owned-layout blocks-engine-css-owned-flow is-layout-flow wp-block-group-is-layout-flow",
+            "margin_block_start": "27.32px",
+            "margin_block_end": "0px",
+            "top_from_row_top_px": 27.313,
+            "bottom_from_row_top_px": 94.969
+          }
+        },
+        {
+          "label": "Contact",
+          "baseline_from_row_top_px": 81.219,
+          "box_top_from_row_top_px": 65.625,
+          "box_bottom_from_row_top_px": 89.813,
+          "box_center_from_row_center_px": 30.234,
+          "direct_row_child": {
+            "tag": "div",
+            "class": "wp-block-group navlinks blocks-engine-css-owned-layout blocks-engine-css-owned-flow is-layout-flow wp-block-group-is-layout-flow",
+            "margin_block_start": "27.32px",
+            "margin_block_end": "0px",
+            "top_from_row_top_px": 27.313,
+            "bottom_from_row_top_px": 94.969
+          }
+        }
+      ],
+      "font_status": "loaded",
+      "summary": {
+        "baseline_spread_px": 13.656,
+        "box_center_range_px": [
+          16.578,
+          30.234
+        ]
+      }
+    },
+    {
+      "schema": "minimalistic-site-builder/flex-vertical-alignment-measurement/v1",
+      "case": "calm-lantern-nav",
+      "generated_at": "2026-08-14T23:05:57.758Z",
+      "url": "http://127.0.0.1:53211/",
+      "viewport": {
+        "width_px": 1366,
+        "height_px": 1000
+      },
+      "runtime": {
+        "chrome": "151.0.7922.138",
+        "playwright": "1.61.1",
+        "wordpress": "7.0.4"
+      },
+      "method": "zero-size inline-block baseline marker; marker bottom minus row top",
+      "row": {
+        "selector": "header nav.blocks-engine-css-owned-layout",
+        "display": "flex",
+        "align_items": "center",
+        "width_px": 860,
+        "height_px": 77.75
+      },
+      "items": [
+        {
+          "label": "Home",
+          "baseline_from_row_top_px": 40.875,
+          "box_top_from_row_top_px": 21.688,
+          "box_bottom_from_row_top_px": 56.875,
+          "box_center_from_row_center_px": 0.406,
+          "direct_row_child": {
+            "tag": "ul",
+            "class": "wp-block-list navlinks",
+            "margin_block_start": "0px",
+            "margin_block_end": "0px",
+            "top_from_row_top_px": 20.875,
+            "bottom_from_row_top_px": 56.875
+          }
+        },
+        {
+          "label": "Services",
+          "baseline_from_row_top_px": 40.875,
+          "box_top_from_row_top_px": 21.688,
+          "box_bottom_from_row_top_px": 56.875,
+          "box_center_from_row_center_px": 0.406,
+          "direct_row_child": {
+            "tag": "ul",
+            "class": "wp-block-list navlinks",
+            "margin_block_start": "0px",
+            "margin_block_end": "0px",
+            "top_from_row_top_px": 20.875,
+            "bottom_from_row_top_px": 56.875
+          }
+        },
+        {
+          "label": "About",
+          "baseline_from_row_top_px": 40.875,
+          "box_top_from_row_top_px": 21.688,
+          "box_bottom_from_row_top_px": 56.875,
+          "box_center_from_row_center_px": 0.406,
+          "direct_row_child": {
+            "tag": "ul",
+            "class": "wp-block-list navlinks",
+            "margin_block_start": "0px",
+            "margin_block_end": "0px",
+            "top_from_row_top_px": 20.875,
+            "bottom_from_row_top_px": 56.875
+          }
+        },
+        {
+          "label": "Contact",
+          "baseline_from_row_top_px": 40.875,
+          "box_top_from_row_top_px": 21.688,
+          "box_bottom_from_row_top_px": 56.875,
+          "box_center_from_row_center_px": 0.406,
+          "direct_row_child": {
+            "tag": "ul",
+            "class": "wp-block-list navlinks",
+            "margin_block_start": "0px",
+            "margin_block_end": "0px",
+            "top_from_row_top_px": 20.875,
+            "bottom_from_row_top_px": 56.875
+          }
+        },
+        {
+          "label": "Book a Call",
+          "baseline_from_row_top_px": 56.109,
+          "box_top_from_row_top_px": 37.516,
+          "box_bottom_from_row_top_px": 68.953,
+          "box_center_from_row_center_px": 14.359,
+          "direct_row_child": {
+            "tag": "div",
+            "class": "wp-block-buttons blocks-engine-control-08130211c50b-8 is-layout-flex wp-block-buttons-is-layout-flex",
+            "margin_block_start": "27.32px",
+            "margin_block_end": "0px",
+            "top_from_row_top_px": 36.109,
+            "bottom_from_row_top_px": 68.953
+          }
+        }
+      ],
+      "font_status": "loaded",
+      "summary": {
+        "baseline_spread_px": 15.234,
+        "box_center_range_px": [
+          0.406,
+          14.359
+        ]
+      }
+    },
+    {
+      "schema": "minimalistic-site-builder/flex-vertical-alignment-measurement/v1",
+      "case": "sunny-ember-nav",
+      "generated_at": "2026-08-14T23:05:57.943Z",
+      "url": "http://127.0.0.1:53212/",
+      "viewport": {
+        "width_px": 1366,
+        "height_px": 1000
+      },
+      "runtime": {
+        "chrome": "151.0.7922.138",
+        "playwright": "1.61.1",
+        "wordpress": "7.0.4"
+      },
+      "method": "zero-size inline-block baseline marker; marker bottom minus row top",
+      "row": {
+        "selector": "header nav.blocks-engine-css-owned-layout",
+        "display": "flex",
+        "align_items": "center",
+        "width_px": 1280,
+        "height_px": 81.906
+      },
+      "items": [
+        {
+          "label": "Home",
+          "baseline_from_row_top_px": 60.313,
+          "box_top_from_row_top_px": 40.313,
+          "box_bottom_from_row_top_px": 71.313,
+          "box_center_from_row_center_px": 14.859,
+          "direct_row_child": {
+            "tag": "ul",
+            "class": "wp-block-list navlinks",
+            "margin_block_start": "27.32px",
+            "margin_block_end": "0px",
+            "top_from_row_top_px": 39.313,
+            "bottom_from_row_top_px": 69.906
+          }
+        },
+        {
+          "label": "Services",
+          "baseline_from_row_top_px": 60.313,
+          "box_top_from_row_top_px": 40.313,
+          "box_bottom_from_row_top_px": 71.313,
+          "box_center_from_row_center_px": 14.859,
+          "direct_row_child": {
+            "tag": "ul",
+            "class": "wp-block-list navlinks",
+            "margin_block_start": "27.32px",
+            "margin_block_end": "0px",
+            "top_from_row_top_px": 39.313,
+            "bottom_from_row_top_px": 69.906
+          }
+        },
+        {
+          "label": "About",
+          "baseline_from_row_top_px": 60.313,
+          "box_top_from_row_top_px": 40.313,
+          "box_bottom_from_row_top_px": 71.313,
+          "box_center_from_row_center_px": 14.859,
+          "direct_row_child": {
+            "tag": "ul",
+            "class": "wp-block-list navlinks",
+            "margin_block_start": "27.32px",
+            "margin_block_end": "0px",
+            "top_from_row_top_px": 39.313,
+            "bottom_from_row_top_px": 69.906
+          }
+        },
+        {
+          "label": "Testimonials",
+          "baseline_from_row_top_px": 60.313,
+          "box_top_from_row_top_px": 40.313,
+          "box_bottom_from_row_top_px": 71.313,
+          "box_center_from_row_center_px": 14.859,
+          "direct_row_child": {
+            "tag": "ul",
+            "class": "wp-block-list navlinks",
+            "margin_block_start": "27.32px",
+            "margin_block_end": "0px",
+            "top_from_row_top_px": 39.313,
+            "bottom_from_row_top_px": 69.906
+          }
+        },
+        {
+          "label": "Book a session",
+          "baseline_from_row_top_px": 60.313,
+          "box_top_from_row_top_px": 40.313,
+          "box_bottom_from_row_top_px": 71.313,
+          "box_center_from_row_center_px": 14.859,
+          "direct_row_child": {
+            "tag": "ul",
+            "class": "wp-block-list navlinks",
+            "margin_block_start": "27.32px",
+            "margin_block_end": "0px",
+            "top_from_row_top_px": 39.313,
+            "bottom_from_row_top_px": 69.906
+          }
+        }
+      ],
+      "font_status": "loaded",
+      "summary": {
+        "baseline_spread_px": 0,
+        "box_center_range_px": [
+          14.859,
+          14.859
+        ]
+      }
+    },
+    {
+      "schema": "minimalistic-site-builder/flex-vertical-alignment-measurement/v1",
+      "case": "silver-summit-hero-ctas",
+      "generated_at": "2026-08-14T23:05:57.845Z",
+      "url": "http://127.0.0.1:53213/",
+      "viewport": {
+        "width_px": 1366,
+        "height_px": 1000
+      },
+      "runtime": {
+        "chrome": "151.0.7922.138",
+        "playwright": "1.61.1",
+        "wordpress": "7.0.4"
+      },
+      "method": "zero-size inline-block baseline marker; marker bottom minus row top",
+      "row": {
+        "selector": "#hero .actions.blocks-engine-css-owned-layout",
+        "display": "flex",
+        "align_items": "center",
+        "width_px": 523.484,
+        "height_px": 72.5
+      },
+      "items": [
+        {
+          "label": "Book a consultation",
+          "baseline_from_row_top_px": 39.656,
+          "box_top_from_row_top_px": 13.656,
+          "box_bottom_from_row_top_px": 58.844,
+          "box_center_from_row_center_px": 0,
+          "direct_row_child": {
+            "tag": "div",
+            "class": "wp-block-buttons blocks-engine-control-1bf623bcd877-6 is-layout-flex wp-block-buttons-is-layout-flex",
+            "margin_block_start": "0px",
+            "margin_block_end": "0px",
+            "top_from_row_top_px": 13.656,
+            "bottom_from_row_top_px": 58.844
+          }
+        },
+        {
+          "label": "The coaching approach",
+          "baseline_from_row_top_px": 53.313,
+          "box_top_from_row_top_px": 27.313,
+          "box_bottom_from_row_top_px": 72.5,
+          "box_center_from_row_center_px": 13.656,
+          "direct_row_child": {
+            "tag": "div",
+            "class": "wp-block-buttons blocks-engine-control-1bf623bcd877-7 is-layout-flex wp-block-buttons-is-layout-flex",
+            "margin_block_start": "27.32px",
+            "margin_block_end": "0px",
+            "top_from_row_top_px": 27.313,
+            "bottom_from_row_top_px": 72.5
+          }
+        }
+      ],
+      "font_status": "loaded",
+      "summary": {
+        "baseline_spread_px": 13.657,
+        "box_center_range_px": [
+          0,
+          13.656
+        ]
+      }
+    }
+  ]
+}

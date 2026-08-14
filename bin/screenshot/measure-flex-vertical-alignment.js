@@ -28,7 +28,7 @@ const CASES = Object.freeze({
   }),
   'calm-lantern-nav': Object.freeze({
     row: 'header nav.blocks-engine-css-owned-layout',
-    items: '.navlinks a, nav.blocks-engine-css-owned-layout > .wp-block-buttons:last-of-type .wp-block-button__link',
+    items: '.navlinks a, :scope > .wp-block-buttons:last-of-type .wp-block-button__link',
     expectedItems: 5,
   }),
   'sunny-ember-nav': Object.freeze({
@@ -38,7 +38,7 @@ const CASES = Object.freeze({
   }),
   'silver-summit-hero-ctas': Object.freeze({
     row: '#hero .actions.blocks-engine-css-owned-layout',
-    items: '#hero .actions.blocks-engine-css-owned-layout > .wp-block-buttons .wp-block-button__link',
+    items: ':scope > .wp-block-buttons .wp-block-button__link',
     expectedItems: 2,
   }),
 });
@@ -121,23 +121,25 @@ function summarizeMeasurements(items) {
   };
 }
 
-async function wordpressVersion(page, url) {
-  try {
-    const response = await page.request.get(new URL('/wp-admin/about.php', url).href);
-    const html = await response.text();
-    const match = html.match(/WordPress\s+(\d+\.\d+(?:\.\d+)?)/i)
-      || html.match(/version-([0-9]+(?:-[0-9]+){1,2})/i);
-    return match ? match[1].replaceAll('-', '.') : null;
-  } catch {
-    return null;
-  }
+async function wordpressVersion(page) {
+  return page.evaluate(() => {
+    const counts = new Map();
+    for (const entry of performance.getEntriesByType('resource')) {
+      const url = new URL(entry.name);
+      if (!url.pathname.includes('/wp-includes/') && !url.pathname.includes('/wp-admin/')) continue;
+      const version = url.searchParams.get('ver');
+      if (!version || !/^\d+\.\d+(?:\.\d+)?$/.test(version)) continue;
+      counts.set(version, (counts.get(version) || 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] || null;
+  });
 }
 
 async function measure(page, config) {
   return page.evaluate(({ rowSelector, itemSelector, expectedItems }) => {
     const row = document.querySelector(rowSelector);
     if (!(row instanceof HTMLElement)) throw new Error(`row not found: ${rowSelector}`);
-    const anchors = Array.from(document.querySelectorAll(itemSelector));
+    const anchors = Array.from(row.querySelectorAll(itemSelector));
     if (anchors.length !== expectedItems) {
       throw new Error(`expected ${expectedItems} items, found ${anchors.length}: ${itemSelector}`);
     }
@@ -233,7 +235,7 @@ async function main() {
       runtime: {
         chrome: browser.version(),
         playwright: playwrightVersion,
-        wordpress: await wordpressVersion(page, opts.url),
+        wordpress: await wordpressVersion(page),
       },
       method: 'zero-size inline-block baseline marker; marker bottom minus row top',
       ...measurements,

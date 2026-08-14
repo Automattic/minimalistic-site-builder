@@ -19,6 +19,8 @@ test('flex alignment measurer freezes four rendered cases and a 1366x1000 viewpo
   const opts = parseArgs(['amber-ember-nav', 'http://127.0.0.1:9400/']);
   assert.equal(opts.width, 1366);
   assert.equal(opts.height, 1000);
+  assert.match(CASES['calm-lantern-nav'].items, /:scope/);
+  assert.match(CASES['silver-summit-hero-ctas'].items, /:scope/);
 });
 
 test('flex alignment measurer accepts only positive integer viewport dimensions', () => {
