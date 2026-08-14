@@ -68,6 +68,16 @@ final class VisionUrlAnalyzer implements UrlAnalyzer
     private const MAX_TOKENS = 6144;
 
     /**
+     * Kept under ImageInput's ceilings, which it enforces by THROWING. The
+     * throw would land inside the batched vision call, where the blanket
+     * handler fails every URL in the batch — so one oversized slice from a
+     * host's own ScreenshotCapture would take down its siblings too. Screening
+     * here degrades that URL alone. The built-in capture stays well under both.
+     */
+    private const MAX_SLICE_BYTES = 3_700_000;
+    private const MAX_SLICES = 8;
+
+    /**
      * @param Llm               $llm     must honor the `images` request key
      * @param ScreenshotCapture $capture whatever this host can actually run
      * @param string|null       $model   vision model override; null uses the client default
@@ -316,8 +326,20 @@ final class VisionUrlAnalyzer implements UrlAnalyzer
         $images = [];
         foreach ($paths as $path) {
             $bytes = @file_get_contents($path);
-            if (is_string($bytes) && $bytes !== '') {
-                $images[] = ['bytes' => $bytes, 'mime' => 'image/png'];
+            if (!is_string($bytes) || $bytes === '') {
+                continue;
+            }
+            if (strlen($bytes) > self::MAX_SLICE_BYTES) {
+                Narrator::write(sprintf(
+                    "inspiration: %s is %d bytes, over the per-image limit; skipped\n",
+                    basename($path),
+                    strlen($bytes),
+                ));
+                continue;
+            }
+            $images[] = ['bytes' => $bytes, 'mime' => 'image/png'];
+            if (count($images) >= self::MAX_SLICES) {
+                break;
             }
         }
         return $images;

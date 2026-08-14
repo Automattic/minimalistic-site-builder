@@ -369,6 +369,82 @@ test('a host without a browser gets the same analyzer by implementing the captur
     });
 });
 
+/** A host capture that writes slices of caller-chosen sizes, keyed by URL. */
+final class SizedCapture implements ScreenshotCapture
+{
+    /** @param array<string,list<int>> $sizes slice byte counts per URL */
+    public function __construct(private string $dir, private array $sizes)
+    {
+    }
+
+    public function capture(array $urls): array
+    {
+        $out = [];
+        foreach (array_values(array_unique($urls)) as $index => $url) {
+            $slices = [];
+            foreach ($this->sizes[$url] ?? [16] as $n => $size) {
+                $path = $this->dir . '/sized-' . $index . '-' . $n . '.png';
+                file_put_contents($path, str_repeat('x', $size));
+                $slices[] = $path;
+            }
+            $out[$url] = ['slices' => $slices, 'error' => null];
+        }
+        return $out;
+    }
+}
+
+test('an oversized slice from a host capture degrades its own URL, not the batch', function () {
+    with_temp_dir('vision_url_analyzer_', function (string $dir) {
+        $llm = new FakeLlm();
+        $llm->queueJson(describe_response('First site'));
+        $llm->queueJson(describe_response('Second site'));
+        // ImageInput enforces its ceilings by THROWING, and the throw lands
+        // inside the batched vision call, so an unscreened oversized slice
+        // fails every sibling URL too.
+        $capture = new SizedCapture($dir, [
+            'https://a.com' => [3_800_000, 16],
+            'https://b.com' => [16, 16],
+        ]);
+
+        $result = (new VisionUrlAnalyzer($llm, $capture))->analyze(['https://a.com', 'https://b.com']);
+
+        assert_eq([], $result['failures'], 'the sibling must survive its neighbour’s bad slice');
+        assert_eq(['https://a.com', 'https://b.com'], array_keys($result['references']));
+        assert_eq(1, count($llm->calls[0]['opts']['images']), 'the oversized slice is dropped');
+        assert_eq(2, count($llm->calls[1]['opts']['images']));
+        foreach ($llm->calls as $call) {
+            ImageInput::normalize($call['opts']);
+        }
+    });
+});
+
+test('a capture that returns more slices than the transport accepts is capped', function () {
+    with_temp_dir('vision_url_analyzer_', function (string $dir) {
+        $llm = new FakeLlm();
+        $llm->queueJson(describe_response());
+        $capture = new SizedCapture($dir, ['https://a.com' => array_fill(0, 12, 16)]);
+
+        $result = (new VisionUrlAnalyzer($llm, $capture))->analyze(['https://a.com']);
+
+        assert_eq([], $result['failures']);
+        assert_eq(8, count($llm->calls[0]['opts']['images']), 'capped at ImageInput::MAX_IMAGES');
+        ImageInput::normalize($llm->calls[0]['opts']);
+    });
+});
+
+test('every slice being oversized fails only that URL', function () {
+    with_temp_dir('vision_url_analyzer_', function (string $dir) {
+        $llm = new FakeLlm();
+        $capture = new SizedCapture($dir, ['https://a.com' => [3_800_000]]);
+
+        $result = (new VisionUrlAnalyzer($llm, $capture))->analyze(['https://a.com']);
+
+        assert_eq([], $result['references']);
+        assert_eq('transport_error', $result['failures']['https://a.com']['kind']);
+        assert_eq(0, $llm->completeJsonBatchCalls, 'nothing left to send, so no call');
+    });
+});
+
 test('ChromeScreenshotCapture runs every URL in one concurrent wave and keys results by URL', function () {
     with_temp_dir('screenshot_capture_', function (string $dir) {
         $result = stub_capture($dir, "'ok'")->capture(['https://a.com', 'https://b.com', 'https://a.com']);
