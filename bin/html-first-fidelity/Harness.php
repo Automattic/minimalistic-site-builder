@@ -761,66 +761,187 @@ final class HtmlFirstFidelityReport
 /** Materialize one immutable subdirectory directly from a Git commit. */
 final class HtmlFirstFidelityFrozenGitTree
 {
-    public static function requireCommit(string $repository, string $commit): void
+    public static function resolveCommit(
+        string $side,
+        string $repository,
+        string $revision,
+    ): string
     {
-        if (preg_match('/^[0-9a-f]{40}$/', $commit) !== 1) {
-            throw new RuntimeException("Frozen Git commit must be a full SHA-1: {$commit}");
-        }
         if (!is_dir($repository)) {
-            throw new RuntimeException("Frozen Git repository missing: {$repository}");
+            throw self::provenanceError($side, $repository, $revision, 'repository', 'directory missing');
         }
-        self::mustRun(['git', 'cat-file', '-e', $commit . '^{commit}'], $repository);
+        $commit = trim(self::captureGit(
+            ['git', 'rev-parse', '--verify', $revision . '^{commit}'],
+            $side,
+            $repository,
+            $revision,
+            'commit',
+        ));
+        if (preg_match('/^[0-9a-f]{40}$/', $commit) !== 1) {
+            throw self::provenanceError($side, $repository, $revision, 'commit', "invalid full SHA: {$commit}");
+        }
+        return $commit;
+    }
+
+    /** @return array{site_builder_ref:string,site_builder_sha:string} */
+    public static function resolveRepositoryRevision(
+        string $side,
+        string $repository,
+        string $revision,
+    ): array {
+        $commit = self::resolveCommit($side, $repository, $revision);
+        $label = $revision;
+        if ($revision === 'HEAD') {
+            $branch = trim(self::captureGit(
+                ['git', 'branch', '--show-current'],
+                $side,
+                $repository,
+                $revision,
+                'label',
+            ));
+            $label = $branch !== '' ? $branch : 'detached HEAD @ ' . substr($commit, 0, 12);
+        }
+        if ($label === '') {
+            throw self::provenanceError($side, $repository, $revision, 'label', 'empty label');
+        }
+        return ['site_builder_ref' => $label, 'site_builder_sha' => $commit];
     }
 
     /**
-     * @return array{commit:string,tree_sha256:string,reference:string}
+     * @return array{commit_sha:string,git_subtree_oid:string,installed_tree_sha256:string,version:string,reference:string}
      */
-    public static function install(
+    public static function installRevision(
+        string $side,
         string $repository,
-        string $commit,
+        string $revision,
         string $subdirectory,
         string $workRoot,
         string $target,
         string $referencePath,
     ): array {
-        self::requireCommit($repository, $commit);
-        if ($subdirectory === '' || str_contains($subdirectory, '..') || str_starts_with($subdirectory, '/')) {
-            throw new RuntimeException("Unsafe frozen Git subdirectory: {$subdirectory}");
-        }
+        try {
+            $commit = self::resolveCommit($side, $repository, $revision);
+            if ($subdirectory === '' || str_contains($subdirectory, '..') || str_starts_with($subdirectory, '/')) {
+                throw self::provenanceError(
+                    $side,
+                    $repository,
+                    $revision,
+                    'subdirectory',
+                    "unsafe value: {$subdirectory}",
+                );
+            }
+            $subtreeRevision = $commit . ':' . $subdirectory;
+            $subtreeOid = trim(self::captureGit(
+                ['git', 'rev-parse', '--verify', $subtreeRevision],
+                $side,
+                $repository,
+                $revision,
+                'git_subtree_oid',
+            ));
+            $subtreeType = trim(self::captureGit(
+                ['git', 'cat-file', '-t', $subtreeOid],
+                $side,
+                $repository,
+                $revision,
+                'git_subtree_type',
+            ));
+            if (preg_match('/^[0-9a-f]{40}$/', $subtreeOid) !== 1 || $subtreeType !== 'tree') {
+                throw self::provenanceError(
+                    $side,
+                    $repository,
+                    $revision,
+                    'git_subtree_oid',
+                    "expected tree, got {$subtreeOid} ({$subtreeType})",
+                );
+            }
 
-        self::makeDirectory($workRoot);
-        $archive = $workRoot . '/frozen-tree.tar';
-        $extract = $workRoot . '/extract';
-        self::makeDirectory($extract);
-        self::mustRun([
-            'git', 'archive', '--format=tar', '--output=' . $archive, $commit, $subdirectory,
-        ], $repository);
-        self::mustRun(['tar', '-xf', $archive, '-C', $extract], $repository);
-        @unlink($archive);
+            self::makeDirectory($workRoot);
+            $archive = $workRoot . '/frozen-tree.tar';
+            $extract = $workRoot . '/extract';
+            self::makeDirectory($extract);
+            self::mustRun([
+                'git', 'archive', '--format=tar', '--output=' . $archive, $commit, $subdirectory,
+            ], $side, $repository, $revision, 'archive');
+            self::mustRun(
+                ['tar', '-xf', $archive, '-C', $extract],
+                $side,
+                $repository,
+                $revision,
+                'extract',
+            );
+            @unlink($archive);
 
-        $source = $extract . '/' . $subdirectory;
-        if (!is_dir($source)) {
-            throw new RuntimeException("Frozen Git archive omitted required directory: {$subdirectory}");
+            $source = $extract . '/' . $subdirectory;
+            if (!is_dir($source)) {
+                throw self::provenanceError($side, $repository, $revision, 'archive', "missing {$subdirectory}");
+            }
+            $sourceHashes = self::treeHashes($source);
+            self::removeTree($target);
+            self::copyTree($source, $target);
+            $targetHashes = self::treeHashes($target);
+            if ($sourceHashes !== $targetHashes) {
+                throw self::provenanceError(
+                    $side,
+                    $target,
+                    $revision,
+                    'installed_bytes',
+                    'archive and target maps differ',
+                );
+            }
+            $installedTreeSha = hash(
+                'sha256',
+                json_encode($targetHashes, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+            );
+            $versionPath = $target . '/VERSION';
+            $version = is_file($versionPath) ? trim((string) file_get_contents($versionPath)) : '';
+            if ($version === '') {
+                throw self::provenanceError($side, $versionPath, $revision, 'version', 'missing or empty VERSION');
+            }
+            return [
+                'commit_sha' => $commit,
+                'git_subtree_oid' => $subtreeOid,
+                'installed_tree_sha256' => $installedTreeSha,
+                'version' => $version,
+                'reference' => self::reference(
+                    $referencePath,
+                    $commit,
+                    $subtreeOid,
+                    $installedTreeSha,
+                ),
+            ];
+        } catch (Throwable $error) {
+            if (str_starts_with($error->getMessage(), 'Provenance failure:')) {
+                throw $error;
+            }
+            throw self::provenanceError(
+                $side,
+                $repository,
+                $revision,
+                'snapshot',
+                $error->getMessage(),
+            );
         }
-        $sourceHashes = self::treeHashes($source);
-        self::removeTree($target);
-        self::copyTree($source, $target);
-        if ($sourceHashes !== self::treeHashes($target)) {
-            throw new RuntimeException('Frozen Git archive bytes differ after treatment installation.');
-        }
-        $treeSha = hash(
-            'sha256',
-            json_encode($sourceHashes, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
-        );
-        return [
-            'commit' => $commit,
-            'tree_sha256' => $treeSha,
-            'reference' => $referencePath . '@' . $commit . '#tree-sha256=' . $treeSha,
-        ];
+    }
+
+    public static function reference(
+        string $path,
+        string $commit,
+        string $subtreeOid,
+        string $installedTreeSha256,
+    ): string {
+        return $path . '@' . $commit
+            . '#git-subtree=' . $subtreeOid
+            . '&installed-tree-sha256=' . $installedTreeSha256;
     }
 
     /** @param list<string> $command */
-    private static function mustRun(array $command, string $cwd): void
+    private static function mustRun(
+        array $command,
+        string $side,
+        string $cwd,
+        string $revision,
+        string $value,
+    ): void
     {
         $process = proc_open($command, [
             0 => ['file', '/dev/null', 'r'],
@@ -828,7 +949,7 @@ final class HtmlFirstFidelityFrozenGitTree
             2 => ['pipe', 'w'],
         ], $pipes, $cwd, is_array(getenv()) ? getenv() : null);
         if (!is_resource($process)) {
-            throw new RuntimeException('Could not start frozen Git command: ' . implode(' ', $command));
+            throw self::provenanceError($side, $cwd, $revision, $value, 'could not start command');
         }
         $stdout = stream_get_contents($pipes[1]);
         $stderr = stream_get_contents($pipes[2]);
@@ -837,11 +958,48 @@ final class HtmlFirstFidelityFrozenGitTree
         $exit = proc_close($process);
         if ($exit !== 0) {
             $detail = trim((string) $stderr) ?: trim((string) $stdout);
-            throw new RuntimeException(
-                'Frozen Git command failed (' . $exit . '): ' . implode(' ', $command)
-                . ($detail !== '' ? " — {$detail}" : ''),
-            );
+            throw self::provenanceError($side, $cwd, $revision, $value, "command exited {$exit}: {$detail}");
         }
+    }
+
+    /** @param list<string> $command */
+    private static function captureGit(
+        array $command,
+        string $side,
+        string $cwd,
+        string $revision,
+        string $value,
+    ): string {
+        $process = proc_open($command, [
+            0 => ['file', '/dev/null', 'r'],
+            1 => ['pipe', 'w'],
+            2 => ['pipe', 'w'],
+        ], $pipes, $cwd, is_array(getenv()) ? getenv() : null);
+        if (!is_resource($process)) {
+            throw self::provenanceError($side, $cwd, $revision, $value, 'could not start Git command');
+        }
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $exit = proc_close($process);
+        if ($exit !== 0) {
+            $detail = trim((string) $stderr) ?: trim((string) $stdout);
+            throw self::provenanceError($side, $cwd, $revision, $value, "Git exited {$exit}: {$detail}");
+        }
+        return (string) $stdout;
+    }
+
+    private static function provenanceError(
+        string $side,
+        string $path,
+        string $revision,
+        string $value,
+        string $detail,
+    ): RuntimeException {
+        return new RuntimeException(
+            "Provenance failure: side={$side}; path={$path}; revision={$revision}; value={$value}; {$detail}",
+        );
     }
 
     private static function makeDirectory(string $path): void
@@ -1085,10 +1243,6 @@ final class HtmlFirstFidelityRunner
     private const GALLERY = '/Users/matt/git/site-builder-eval/eval/html-first-fidelity';
     private const MUTEX = '/tmp/msb-gate.lock';
     private const CONTROL_TRANSFORMER = '0.4.15';
-    public const TREATMENT_TRANSFORMER_COMMIT = '920b16c417b8d6bc8edfb38a13967348b0f1b841';
-    public const TREATMENT_TRANSFORMER_TREE_SHA256 = 'c24e3394dcf1681347803c1f4c1b117092b3c4e9b9bc16244b5bec56767ceba9';
-    public const TREATMENT_TRANSFORMER_VERSION = '0.4.17';
-    public const TREATMENT_TRANSFORMER_REFERENCE = '/Users/matt/projects/a8c/blocks-engine-wt-support-css/php-transformer@920b16c417b8d6bc8edfb38a13967348b0f1b841#tree-sha256=c24e3394dcf1681347803c1f4c1b117092b3c4e9b9bc16244b5bec56767ceba9';
 
     private string $repo;
     private string $tempRoot = '';
@@ -1102,7 +1256,7 @@ final class HtmlFirstFidelityRunner
     private array $treatmentProjectBackups = [];
     /** @var list<int> */
     private array $usedPorts = [];
-    /** @var array{transformer_label:string,transformer_reference:string} */
+    /** @var array{transformer_label:string,transformer_reference:string,transformer_version:string,transformer_commit_sha:string,transformer_git_subtree_oid:string,transformer_installed_tree_sha256:string} */
     private array $overlayProvenance = [];
     /** @var list<array{slug:string,control:array{legacy:int,corrected:int},treatment:array{legacy:int,corrected:int}}> */
     private array $markMetricAuditRows = [];
@@ -1138,20 +1292,48 @@ final class HtmlFirstFidelityRunner
     }
 
     /**
-     * @param array{commit:string,tree_sha256:string,reference:string} $frozen
-     * @return array{transformer_label:string,transformer_reference:string}
+     * @param array{commit_sha:string,git_subtree_oid:string,installed_tree_sha256:string,version:string,reference:string} $trusted
+     * @param array{transformer_version:string,transformer_commit_sha:string,transformer_git_subtree_oid:string,transformer_installed_tree_sha256:string} $recorded
+     * @return array{transformer_label:string,transformer_reference:string,transformer_version:string,transformer_commit_sha:string,transformer_git_subtree_oid:string,transformer_installed_tree_sha256:string}
      */
-    public static function treatmentTransformerProvenance(array $frozen, string $version): array
-    {
-        if ($frozen['commit'] !== self::TREATMENT_TRANSFORMER_COMMIT
-            || $frozen['tree_sha256'] !== self::TREATMENT_TRANSFORMER_TREE_SHA256
-            || $frozen['reference'] !== self::TREATMENT_TRANSFORMER_REFERENCE
-            || $version !== self::TREATMENT_TRANSFORMER_VERSION) {
-            throw new RuntimeException('Frozen treatment transformer provenance differs from the required contract.');
+    public static function treatmentTransformerProvenance(
+        array $trusted,
+        array $recorded,
+        string $side,
+        string $path,
+        string $revision,
+    ): array {
+        $expected = [
+            'transformer_version' => $trusted['version'] ?? null,
+            'transformer_commit_sha' => $trusted['commit_sha'] ?? null,
+            'transformer_git_subtree_oid' => $trusted['git_subtree_oid'] ?? null,
+            'transformer_installed_tree_sha256' => $trusted['installed_tree_sha256'] ?? null,
+        ];
+        foreach ($expected as $field => $value) {
+            $actual = $recorded[$field] ?? null;
+            if (!is_string($value) || $value === '' || !is_string($actual) || $actual !== $value) {
+                throw new RuntimeException(
+                    "Provenance failure: side={$side}; path={$path}; revision={$revision}; value={$field}; "
+                    . 'trusted=' . var_export($value, true) . '; recorded=' . var_export($actual, true),
+                );
+            }
+        }
+        $reference = HtmlFirstFidelityFrozenGitTree::reference(
+            $path,
+            $expected['transformer_commit_sha'],
+            $expected['transformer_git_subtree_oid'],
+            $expected['transformer_installed_tree_sha256'],
+        );
+        if (($trusted['reference'] ?? null) !== $reference) {
+            throw new RuntimeException(
+                "Provenance failure: side={$side}; path={$path}; revision={$revision}; "
+                . "value=transformer_reference; trusted reference differs from structured fields",
+            );
         }
         return [
-            'transformer_label' => 'v' . self::TREATMENT_TRANSFORMER_VERSION . ' frozen source archive',
-            'transformer_reference' => self::TREATMENT_TRANSFORMER_REFERENCE,
+            'transformer_label' => 'v' . $expected['transformer_version'] . ' runtime HEAD archive',
+            'transformer_reference' => $reference,
+            ...$recorded,
         ];
     }
 
@@ -1166,12 +1348,16 @@ final class HtmlFirstFidelityRunner
             $this->controlRoot = $this->tempRoot . '/control';
             $this->stagingRoot = $this->publisher->createStaging(self::GALLERY);
 
-            $controlSha = trim($this->capture(['git', 'rev-parse', 'origin/trunk'], $this->repo));
-            $treatmentSha = trim($this->capture(['git', 'rev-parse', 'HEAD'], $this->repo));
-            $treatmentRef = trim($this->capture(['git', 'branch', '--show-current'], $this->repo));
-            if ($controlSha === '' || $treatmentSha === '' || $treatmentRef === '') {
-                throw new RuntimeException('Could not resolve control/treatment Git provenance.');
-            }
+            $controlSiteBuilder = HtmlFirstFidelityFrozenGitTree::resolveRepositoryRevision(
+                'control site-builder',
+                $this->repo,
+                'origin/trunk',
+            );
+            $treatmentSiteBuilder = HtmlFirstFidelityFrozenGitTree::resolveRepositoryRevision(
+                'treatment site-builder',
+                $this->repo,
+                'HEAD',
+            );
 
             $this->mustRun(['git', 'worktree', 'add', '--detach', $this->controlRoot, 'origin/trunk'], $this->repo);
             $this->worktreeAdded = true;
@@ -1197,16 +1383,13 @@ final class HtmlFirstFidelityRunner
                 'provenance' => [
                     'source_projects' => self::SOURCE_PROJECTS,
                     'control' => [
-                        'site_builder_ref' => 'origin/trunk',
-                        'site_builder_sha' => $controlSha,
+                        ...$controlSiteBuilder,
                         'transformer_label' => 'v' . self::CONTROL_TRANSFORMER,
                         'transformer_reference' => 'composer:automattic/blocks-engine-php-transformer@' . self::CONTROL_TRANSFORMER,
                     ],
                     'treatment' => [
-                        'site_builder_ref' => $treatmentRef,
-                        'site_builder_sha' => $treatmentSha,
-                        'transformer_label' => $this->overlayProvenance['transformer_label'],
-                        'transformer_reference' => $this->overlayProvenance['transformer_reference'],
+                        ...$treatmentSiteBuilder,
+                        ...$this->overlayProvenance,
                     ],
                 ],
                 'projects' => $projects,
@@ -1316,10 +1499,6 @@ final class HtmlFirstFidelityRunner
                 throw new RuntimeException("Required directory missing: {$dir}");
             }
         }
-        HtmlFirstFidelityFrozenGitTree::requireCommit(
-            dirname(self::OVERLAY),
-            self::TREATMENT_TRANSFORMER_COMMIT,
-        );
         if (!is_file($this->repo . '/bin/build.php') || !is_file($this->repo . '/bin/screenshot.php')) {
             throw new RuntimeException("Run harness from minimalistic-site-builder repository root.");
         }
@@ -1354,17 +1533,28 @@ final class HtmlFirstFidelityRunner
 
     private function overlayTreatmentTransformer(): void
     {
-        $frozen = HtmlFirstFidelityFrozenGitTree::install(
+        $trusted = HtmlFirstFidelityFrozenGitTree::installRevision(
+            side: 'treatment transformer',
             repository: dirname(self::OVERLAY),
-            commit: self::TREATMENT_TRANSFORMER_COMMIT,
+            revision: 'HEAD',
             subdirectory: basename(self::OVERLAY),
             workRoot: $this->tempRoot . '/frozen-treatment-transformer',
             target: $this->repo . '/vendor/automattic/blocks-engine-php-transformer',
             referencePath: self::OVERLAY,
         );
-        $versionPath = $this->repo . '/vendor/automattic/blocks-engine-php-transformer/VERSION';
-        $version = is_file($versionPath) ? trim((string) file_get_contents($versionPath)) : '';
-        $this->overlayProvenance = self::treatmentTransformerProvenance($frozen, $version);
+        $recorded = [
+            'transformer_version' => $trusted['version'],
+            'transformer_commit_sha' => $trusted['commit_sha'],
+            'transformer_git_subtree_oid' => $trusted['git_subtree_oid'],
+            'transformer_installed_tree_sha256' => $trusted['installed_tree_sha256'],
+        ];
+        $this->overlayProvenance = self::treatmentTransformerProvenance(
+            $trusted,
+            $recorded,
+            'treatment transformer',
+            self::OVERLAY,
+            'HEAD',
+        );
     }
 
     private function installNodeDependencies(string $repo): void
@@ -1557,28 +1747,6 @@ final class HtmlFirstFidelityRunner
             throw new RuntimeException('Could not start command: ' . self::formatCommand($command));
         }
         return proc_close($process);
-    }
-
-    /** @param list<string> $command */
-    private function capture(array $command, string $cwd): string
-    {
-        $process = proc_open($command, [
-            0 => ['file', '/dev/null', 'r'],
-            1 => ['pipe', 'w'],
-            2 => ['pipe', 'w'],
-        ], $pipes, $cwd, is_array(getenv()) ? getenv() : null);
-        if (!is_resource($process)) {
-            throw new RuntimeException('Could not start command: ' . self::formatCommand($command));
-        }
-        $stdout = stream_get_contents($pipes[1]);
-        $stderr = stream_get_contents($pipes[2]);
-        fclose($pipes[1]);
-        fclose($pipes[2]);
-        $exit = proc_close($process);
-        if ($exit !== 0) {
-            throw new RuntimeException(trim((string) $stderr) ?: 'Command failed: ' . self::formatCommand($command));
-        }
-        return (string) $stdout;
     }
 
     /** @param list<string> $command */
