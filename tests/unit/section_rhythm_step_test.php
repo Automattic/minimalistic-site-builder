@@ -156,3 +156,27 @@ test('section rhythm step skips invalid generated plan values per page', functio
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('section rhythm step leaves HTML-first parts untouched', function () {
+    $tmp = sys_get_temp_dir() . '/builder_rhythm_html_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('pages.json', ['pages' => [
+        ['slug' => 'home', 'front' => true, 'sections' => [
+            ['slug' => 'one', 'background' => 'base', 'vertical_density' => 'standard'],
+            ['slug' => 'two', 'background' => 'base', 'vertical_density' => 'standard'],
+        ]],
+    ]]);
+    $original = rhythm_step_part();
+    $project->writeText('theme/parts/page-home--one.html', $original);
+    $project->writeText('theme/parts/page-home--two.html', $original);
+
+    (new SectionRhythmStep(htmlFirst: true))->run($project);
+
+    assert_eq($original, $project->readText('theme/parts/page-home--one.html'));
+    assert_eq($original, $project->readText('theme/parts/page-home--two.html'));
+    $skipped = implode(' ', $project->readJson('warnings.json')['fixup_skipped'] ?? []);
+    assert_contains('step=section-rhythm', $skipped);
+    assert_contains('html-first', $skipped);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

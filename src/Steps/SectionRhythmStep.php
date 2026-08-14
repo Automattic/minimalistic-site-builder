@@ -26,6 +26,8 @@ use Automattic\SiteBuild\StepDeclaration;
  */
 final class SectionRhythmStep implements Step
 {
+    public function __construct(private bool $htmlFirst = false) {}
+
     public function id(): string
     {
         return 'section-rhythm';
@@ -49,6 +51,15 @@ final class SectionRhythmStep implements Step
 
     public function run(Project $project): void
     {
+        if ($this->htmlFirst) {
+            $project->addWarnings('fixup_skipped', [
+                'step=section-rhythm; signal=composition-mode:html-first; disposition=skipped; '
+                    . 'reason=carried design CSS owns section padding; collapsing same-surface '
+                    . 'bottom edges to 0 fights authored .section/.band padding',
+            ]);
+            return;
+        }
+
         // Rewrite the complete ordered set of EVERY page before writing any
         // file, so one malformed root cannot leave a half-normalized site.
         // Isolation is per page: a page whose plan or parts are malformed

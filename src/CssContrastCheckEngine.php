@@ -138,7 +138,17 @@ final class CssContrastCheckEngine
             }
 
             $fgDeclaration = self::winningDeclaration($matching, ['color'], $customProperties);
-            $bgDeclaration = self::winningDeclaration($matching, ['background', 'background-color'], $customProperties);
+            $bgDeclaration = self::winningDeclaration(
+                $matching,
+                ['background', 'background-color'],
+                $customProperties,
+            );
+            $ownBackground = $fgDeclaration === null
+                ? null
+                : self::backgroundOnSameRule($matching, $fgDeclaration, $customProperties);
+            if ($ownBackground !== null) {
+                $bgDeclaration = $ownBackground;
+            }
             $selector = $fgDeclaration['selector']
                 ?? $bgDeclaration['selector']
                 ?? $matching[count($matching) - 1]['rule']['selector'];
@@ -219,6 +229,81 @@ final class CssContrastCheckEngine
      *   important:bool,specificity:int,source_order:int
      * }|null
      */
+    /**
+     * If the winning color came from a rule that also sets a solid background,
+     * that is the authored pair. Mixing it with a page-fill background is how
+     * `.panel--mustard { color: var(--ink); background: var(--mustard) }` was
+     * judged against body ink (ratio ~1) and rewritten to mid-gray.
+     *
+     * @param list<array{rule:array<string,mixed>,parsed:array<string,mixed>,supported:bool,specificity:int,matched:bool}> $matching
+     * @param array<string,mixed> $fgDeclaration
+     * @param array<string,string> $customProperties
+     * @return array<string,mixed>|null
+     */
+    private static function backgroundOnSameRule(
+        array $matching,
+        array $fgDeclaration,
+        array $customProperties,
+    ): ?array {
+        $fgStart = $fgDeclaration['declaration']['value_start'] ?? null;
+        if (!is_int($fgStart)) {
+            return null;
+        }
+        foreach ($matching as $item) {
+            $ownsColor = false;
+            $background = null;
+            foreach ($item['rule']['declarations'] as $declaration) {
+                $resolved = self::resolvedDeclaration($item, $declaration, $customProperties);
+                if ($resolved === null) {
+                    continue;
+                }
+                if ($declaration['property'] === 'color'
+                    && ($declaration['value_start'] ?? null) === $fgStart
+                ) {
+                    $ownsColor = true;
+                }
+                if (in_array($declaration['property'], ['background', 'background-color'], true)) {
+                    $background = $resolved;
+                }
+            }
+            if ($ownsColor && $background !== null && $background['state'] === 'resolved') {
+                return $background;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * @param array{rule:array<string,mixed>,specificity:int} $item
+     * @param array<string,mixed> $declaration
+     * @param array<string,string> $customProperties
+     * @return array<string,mixed>|null
+     */
+    private static function resolvedDeclaration(array $item, array $declaration, array $customProperties): ?array
+    {
+        if (!in_array($declaration['property'], ['color', 'background', 'background-color'], true)) {
+            return null;
+        }
+        [$state, $color] = self::declarationColor(
+            $declaration['evaluation'],
+            $declaration['property'],
+            $customProperties,
+        );
+        if ($state === 'invalid') {
+            return null;
+        }
+        return [
+            'selector' => $item['rule']['selector'],
+            'state' => $state,
+            'color' => $color,
+            'value' => $declaration['value'],
+            'declaration' => $declaration,
+            'important' => $declaration['important'],
+            'specificity' => $item['specificity'],
+            'source_order' => $declaration['value_start'],
+        ];
+    }
+
     private static function winningDeclaration(array $matching, array $properties, array $customProperties): ?array
     {
         $winner = null;

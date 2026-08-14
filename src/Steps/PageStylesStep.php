@@ -130,6 +130,38 @@ CSS;
 }
 CSS;
 
+    /**
+     * HTML-first pages already author section padding and card grids. These
+     * rules only restore what convert + a same-surface rhythm pass take away.
+     */
+    public const HTML_FIRST_LAYOUT_CSS = <<<'CSS'
+.wp-block-group.section,
+.wp-block-group.band,
+.wp-block-group.agenda-hero,
+.wp-block-group.closing,
+.wp-block-group.page-head {
+  padding-top: clamp(2.5rem, 6vw, 4.5rem);
+  padding-bottom: clamp(2.5rem, 6vw, 4.5rem);
+}
+.duo { align-items: stretch; }
+.duo > .panel,
+.duo > .wp-block-group.panel { height: 100%; }
+.featured { align-items: stretch; }
+.featured-media,
+.featured-body { height: 100%; }
+.event .date mark,
+.event .date span {
+  display: block;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  font-size: 0.72rem;
+}
+.wp-block-group.panel--mustard {
+  background: var(--mustard, var(--wp--preset--color--primary));
+  color: var(--ink, var(--wp--preset--color--contrast));
+}
+CSS;
+
     /** Hard ceiling on the appendix size; the prompt asks for under 80 lines. */
     private const MAX_LINES = 100;
     private const LOG_FILE = 'page-styles.log';
@@ -337,7 +369,8 @@ CSS;
         );
         // Wrap policy first, so a design that deliberately hyphenates still
         // wins; it ships even when the design contributed no CSS at all.
-        $tail = self::WORD_WRAP_CSS . "\n" . self::TABLE_BORDER_RESET_CSS . "\n" . $design;
+        $tail = self::WORD_WRAP_CSS . "\n" . self::TABLE_BORDER_RESET_CSS . "\n"
+            . self::HTML_FIRST_LAYOUT_CSS . "\n" . $design;
         $style = $project->readText('theme/style.css');
         if (str_ends_with($style, $tail)) {
             Narrator::write("  deterministic page CSS already merged\n");

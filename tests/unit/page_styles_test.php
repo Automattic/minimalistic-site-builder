@@ -55,7 +55,8 @@ function ps_wrap(): string
 /** Foundation chunk shipped right after the wrap policy, before any design CSS. */
 function ps_table_reset(): string
 {
-    return PageStylesStep::TABLE_BORDER_RESET_CSS . "\n";
+    return PageStylesStep::TABLE_BORDER_RESET_CSS . "\n"
+        . PageStylesStep::HTML_FIRST_LAYOUT_CSS . "\n";
 }
 
 function ps_project(string $prefix): array

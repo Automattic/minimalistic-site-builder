@@ -715,6 +715,42 @@ final class ScaffoldThemeStep implements Step
             padding: 0;
             margin: 0;
         }
+        /* HTML-first sections already have padding in page CSS. Rhythm used
+           to zero the bottom edge between same-surface bands, which removed
+           the authored gap. These floors restore it when inline styles remain. */
+        .wp-block-group.section,
+        .wp-block-group.band,
+        .wp-block-group.agenda-hero,
+        .wp-block-group.closing,
+        .wp-block-group.page-head {
+            padding-top: clamp(2.5rem, 6vw, 4.5rem);
+            padding-bottom: clamp(2.5rem, 6vw, 4.5rem);
+        }
+        .duo {
+            align-items: stretch;
+        }
+        .duo > .panel,
+        .duo > .wp-block-group.panel {
+            height: 100%;
+        }
+        .featured {
+            align-items: stretch;
+        }
+        .featured-media,
+        .featured-body {
+            height: 100%;
+        }
+        .event .date mark,
+        .event .date span {
+            display: block;
+            font-weight: 500;
+            letter-spacing: 0.18em;
+            font-size: 0.72rem;
+        }
+        .wp-block-group.panel--mustard {
+            background: var(--mustard, var(--wp--preset--color--primary));
+            color: var(--ink, var(--wp--preset--color--contrast));
+        }
         .footer-inner {
             display: grid;
             gap: 1.5rem 2rem;

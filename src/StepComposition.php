@@ -154,7 +154,7 @@ final class StepComposition
                     $temps['sections'],
                 ),
             ),
-            new SectionRhythmStep(),
+            new SectionRhythmStep(htmlFirst: true),
             new SectionLayoutStep(),
             new CollectImagesStep(htmlFirst: true),
             new NormalizeLayoutStep(htmlFirst: true),

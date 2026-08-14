@@ -105,3 +105,17 @@ test('css contrast adjuster repairs a var()-expressed failing pair end to end', 
     $after = var_finding(CssContrastCheck::check($adjusted, $markup), '.x');
     assert_true($after !== null && $after['status'] === 'pass', 'repaired pair now passes');
 });
+
+test('css contrast judges a token pair against its own rule, not the page fill', function () {
+    $css = ':root{--ink:#0C0C0E;--paper:#F2EBDC;--mustard:#E4A11B}'
+        . 'body{background:var(--ink);color:var(--paper)}'
+        . '.panel--mustard{background:var(--mustard);color:var(--ink)}';
+    $markup = '<body><div class="panel panel--mustard"><p>Receba a semana</p></div></body>';
+
+    $finding = var_finding(CssContrastCheck::check($css, $markup), '.panel--mustard');
+    assert_true($finding !== null, 'the mustard panel must be evaluated');
+    assert_eq('pass', $finding['status'], 'ink on mustard is the authored pair');
+    assert_eq('var(--ink)', $finding['fg']);
+    assert_eq('var(--mustard)', $finding['bg']);
+    assert_true(is_float($finding['ratio']) && $finding['ratio'] >= ContrastMath::NORMAL_TEXT);
+});
