@@ -576,7 +576,8 @@ final class GeneratedMarkup
 
     /**
      * Ensure a header/footer top-level wp:group declares a constrained layout.
-     * An explicit layout is preserved.
+     * An explicit layout is preserved. A root whose carried CSS owns layout
+     * stays flow so WordPress does not re-constrain its children.
      */
     public static function constrainedPart(string $markup): string
     {
@@ -587,9 +588,23 @@ final class GeneratedMarkup
         if (!is_array($attrs) || isset($attrs['layout'])) {
             return $markup;
         }
+        if (self::hasCssOwnedLayoutMarker($attrs)) {
+            return $markup;
+        }
         $attrs['layout'] = ['type' => 'constrained'];
         $json = json_encode($attrs, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         return '<!-- wp:group ' . $json . ' -->' . substr($markup, strlen($m[0]));
+    }
+
+    /** Whether block attributes carry the exact marker for CSS-owned layout. */
+    public static function hasCssOwnedLayoutMarker(array|object $attrs): bool
+    {
+        $className = is_array($attrs) ? ($attrs['className'] ?? null) : ($attrs->className ?? null);
+        if (!is_string($className)) {
+            return false;
+        }
+        $tokens = preg_split('/[\x20\t\r\n\f]+/', trim($className), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        return in_array('blocks-engine-css-owned-layout', $tokens, true);
     }
 
     /**
