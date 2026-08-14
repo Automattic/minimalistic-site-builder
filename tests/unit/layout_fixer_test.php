@@ -60,6 +60,21 @@ test('layout fixer still constrains HTML-first header and footer roots', functio
     }
 });
 
+test('layout fixer leaves CSS-owned header and footer roots layout-less in both modes', function () {
+    $markup = '<!-- wp:group {"align":"full","className":"utility blocks-engine-css-owned-layout utility-end"} -->'
+        . '<div class="wp-block-group alignfull utility blocks-engine-css-owned-layout utility-end">'
+        . '</div><!-- /wp:group -->';
+    foreach ([LayoutFixer::ROLE_HEADER, LayoutFixer::ROLE_FOOTER] as $role) {
+        foreach ([true, false] as $htmlFirst) {
+            $r = LayoutFixer::fix($markup, $role, 840.0, [], $htmlFirst);
+            assert_true(
+                !str_contains($r['markup'], '"layout":{"type":"constrained"}'),
+                "{$role} CSS-owned root stays layout-less in " . ($htmlFirst ? 'HTML-first' : 'legacy') . ' mode',
+            );
+        }
+    }
+});
+
 test('layout fixer skips the HTML-first section width heuristics that assume theme width', function () {
     // freeGridsFromNarrowWrappers would force align:wide onto the grid; the
     // carried design CSS already sized it.

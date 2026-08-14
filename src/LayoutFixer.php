@@ -7,6 +7,7 @@ use Automattic\SiteBuild\BlockSerializer\Json\JsJsonEncoder;
 use Automattic\SiteBuild\BlockSerializer\Json\JsonDecoder;
 use Automattic\SiteBuild\BlockSerializer\Json\JsonObject;
 use Automattic\SiteBuild\BlockSerializer\Registry\BlockRegistry;
+use Automattic\SiteBuild\Units\GeneratedMarkup;
 
 /**
  * Deterministic width/rhythm normalization for generated block markup.
@@ -76,7 +77,9 @@ final class LayoutFixer
      * page width via contentSize. On the HTML-first path the carried design
      * CSS owns it, and the transformer deliberately emits no layout attribute
      * on section roots — stamping one back boxes full-bleed heroes. Header and
-     * footer keep every rule: their width still comes from the theme.
+     * footer keep every rule unless their root carries the exact marker that
+     * says delivered CSS owns layout; that marker suppresses only the missing
+     * root-layout injection.
      *
      * @return array{markup:string, notes:string[]} notes are human-readable
      *         descriptions of each change; empty notes means markup is
@@ -841,7 +844,8 @@ final class LayoutFixer
      * no centering, no global padding, so its align:wide children render
      * edge-to-edge at the viewport (tbilisi's "The Cuisine" band). Same
      * contract Units\GeneratedMarkup::constrainedPart enforces for header/footer,
-     * applied to every file's root groups.
+     * applied to every file's root groups. A root carrying the exact
+     * CSS-owned-layout marker stays layout-less; every other repair still runs.
      *
      * @param object[] $roots
      * @param string[] $notes
@@ -849,7 +853,10 @@ final class LayoutFixer
     private static function addMissingRootLayout(array $roots, array &$notes): void
     {
         foreach ($roots as $node) {
-            if (self::is($node, 'group') && !isset($node->attrs->layout)) {
+            if (self::is($node, 'group')
+                && !isset($node->attrs->layout)
+                && !GeneratedMarkup::hasCssOwnedLayoutMarker($node->attrs)
+            ) {
                 $node->attrs->layout = (object) ['type' => 'constrained'];
                 $node->dirty = true;
                 $notes[] = 'top-level wp:group had no "layout" — added {"type":"constrained"} so children get page gutters instead of rendering edge-to-edge';

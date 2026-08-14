@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\BareListItemLift;
 use Automattic\SiteBuild\BlockFixer;
 use Automattic\SiteBuild\BlockFixerOutcome;
+use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\BlockSerializer\AlignmentClassLoss;
 use Automattic\SiteBuild\BlockSerializer\AlignmentClassLossDetector;
 use Automattic\SiteBuild\LayoutFixer;
@@ -54,6 +55,7 @@ final class FixBlocksStep implements Step
             // optional page cannot be declared as a required upstream read.
             reads: [
                 'designDirection.json',
+                ...($this->htmlFirst ? ['design/site.css'] : []),
                 'theme/theme.json',
                 'theme/parts/*',
             ],
@@ -76,12 +78,15 @@ final class FixBlocksStep implements Step
         // rollback.
         $entryShapeChanges = self::shapeChangesInSnapshot($beforeInitialPass, $shape);
         $shapeChanges = [];
+        $wideClassTokens = $this->htmlFirst && $project->exists('design/site.css')
+            ? SectionLayoutStep::wideClassTokens($project->readText('design/site.css'))
+            : [];
         try {
             $listReport = self::liftBareListItems($project);
             $listNotes = $listReport['notes'];
             $listWarnings = $listReport['warnings'];
             $listBlocked = $listReport['blocked'];
-            $layoutNotes = self::normalizeLayouts($project, [], $this->htmlFirst);
+            $layoutNotes = self::normalizeLayouts($project, [], $this->htmlFirst, $wideClassTokens);
             $shapeChanges = self::normalizeShapes($project, $shape);
             $alignmentBaselines[] = self::snapshotThemeFiles($project);
             $blockedFailures = [];
@@ -122,6 +127,7 @@ final class FixBlocksStep implements Step
                 $project,
                 self::failurePaths($failedFiles),
                 $this->htmlFirst,
+                $wideClassTokens,
             );
             $postRepairShapeChanges = self::normalizeShapes(
                 $project,
@@ -399,9 +405,16 @@ final class FixBlocksStep implements Step
      *        failed this step and must remain at their step-entry bytes
      * @param bool $htmlFirst carried design CSS owns section width — see
      *        LayoutFixer::fix()
+     * @param list<string> $wideClassTokens CSS-derived footer carriers;
+     *        supplied only by FixBlocksStep, whose declaration owns that read
      * @return string[]
      */
-    public static function normalizeLayouts(Project $project, array $excluded = [], bool $htmlFirst = false): array
+    public static function normalizeLayouts(
+        Project $project,
+        array $excluded = [],
+        bool $htmlFirst = false,
+        array $wideClassTokens = [],
+    ): array
     {
         $notes = [];
         $excluded = array_fill_keys($excluded, true);
@@ -419,14 +432,84 @@ final class FixBlocksStep implements Step
                 $spacingSlugs,
                 $htmlFirst,
             );
-            if ($result['markup'] !== $markup) {
-                $project->writeText('theme/' . $rel, $result['markup']);
+            $normalized = $result['markup'];
+            if ($rel === 'parts/footer.html' && $wideClassTokens !== []) {
+                $wide = self::promoteOutermostWidePartCarrier($normalized, $wideClassTokens);
+                if ($wide !== $normalized) {
+                    $notes[] = "{$rel}: promoted outermost wide-size carrier to align:wide";
+                    $normalized = $wide;
+                }
+            }
+            if ($normalized !== $markup) {
+                $project->writeText('theme/' . $rel, $normalized);
             }
             foreach ($result['notes'] as $note) {
                 $notes[] = "{$rel}: {$note}";
             }
         }
         return $notes;
+    }
+
+    /**
+     * Add align:wide to the first block whose own element carries a class that
+     * design CSS measures against var(--wide-size). Explicit alignment wins.
+     *
+     * @param list<string> $wideClassTokens
+     */
+    private static function promoteOutermostWidePartCarrier(string $markup, array $wideClassTokens): string
+    {
+        $wideClasses = array_fill_keys($wideClassTokens, true);
+        $doc = BlockMarkup::parse($markup);
+        if ($doc->hasMalformedDelimiters()
+            || $doc->hasMismatchedDelimiters()
+            || $doc->unclosedIndices() !== []
+        ) {
+            return $markup;
+        }
+        foreach ($doc->indices() as $index) {
+            foreach (self::partElementClassTokens($doc, $index) as $token) {
+                if (!isset($wideClasses[$token])) {
+                    continue;
+                }
+                $attrs = $doc->attrs($index) ?? [];
+                if (!isset($attrs['align'])) {
+                    $attrs['align'] = 'wide';
+                    $doc->setAttrs($index, $attrs);
+                }
+                return $doc->render();
+            }
+        }
+        return $markup;
+    }
+
+    /** @return list<string> class tokens on a block's own wrapper, never descendants */
+    private static function partElementClassTokens(BlockMarkup $doc, int $index): array
+    {
+        $tokens = [];
+        $className = ($doc->attrs($index) ?? [])['className'] ?? null;
+        if (is_string($className)) {
+            $tokens = preg_split('/[\x20\t\r\n\f]+/', trim($className), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        }
+        if (preg_match('/<[a-zA-Z][a-zA-Z0-9-]*\b[^>]*>/s', $doc->ownHtml($index), $tag) === 1) {
+            $class = self::partTagAttribute($tag[0], 'class');
+            if ($class !== null && trim($class) !== '') {
+                $tokens = array_merge(
+                    $tokens,
+                    preg_split('/[\x20\t\r\n\f]+/', trim($class), -1, PREG_SPLIT_NO_EMPTY) ?: [],
+                );
+            }
+        }
+        return array_values(array_unique($tokens));
+    }
+
+    private static function partTagAttribute(string $tagHtml, string $name): ?string
+    {
+        $pattern = '/[\x20\t\r\n\f]' . preg_quote($name, '/')
+            . '\s*=\s*(?:"([^"]*)"|\'([^\']*)\')/i';
+        if (preg_match($pattern, $tagHtml, $match) !== 1) {
+            return null;
+        }
+        return array_key_exists(1, $match) && $match[1] !== '' ? $match[1] : ($match[2] ?? '');
     }
 
     /**

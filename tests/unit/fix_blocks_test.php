@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\BlockFixer;
+use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\BlockSerializer\DroppedValue;
 use Automattic\SiteBuild\BlockSerializer\FileReport;
 use Automattic\SiteBuild\BlockSerializer\FixerReport;
@@ -74,6 +75,81 @@ test('FixBlocksStep delegates repair to the injected BlockFixer', function () {
 
     assert_eq(1, count($fake->calls), 'an already-normalized file does not trigger a follow-up fix()');
     assert_eq($project->themePath(), $fake->calls[0], 'given the theme dir');
+});
+
+test('FixBlocksStep keeps a CSS-owned header nav on its authored inline axis', function () {
+    $fake = new class implements BlockFixer {
+        public function fix(string $themeDir): string
+        {
+            return '[fix-templates] 0/0 file(s) re-serialized';
+        }
+    };
+    $tmp = sys_get_temp_dir() . '/fix-blocks-css-owned-header-' . uniqid();
+    $project = new Project($tmp);
+    $css = ':root{--wide-size:1280px}header nav{width:100%;max-width:var(--wide-size);display:flex;flex-direction:row}';
+    $header = '<!-- wp:group {"tagName":"nav","className":"blocks-engine-css-owned-layout blocks-engine-css-owned-flow"} -->'
+        . '<nav class="wp-block-group blocks-engine-css-owned-layout blocks-engine-css-owned-flow">'
+        . '<!-- wp:paragraph --><p>Brand</p><!-- /wp:paragraph -->'
+        . '<!-- wp:list --><ul class="wp-block-list"><li>About</li></ul><!-- /wp:list -->'
+        . '</nav><!-- /wp:group -->';
+    $project->writeText('design/site.css', $css);
+    $project->writeText('theme/parts/header.html', $header);
+
+    try {
+        (new FixBlocksStep($fake, htmlFirst: true))->run($project);
+
+        assert_eq($css, $project->readText('design/site.css'), 'carried inline-axis CSS stays byte-for-byte intact');
+        $delivered = $project->readText('theme/parts/header.html');
+        assert_contains('blocks-engine-css-owned-layout blocks-engine-css-owned-flow', $delivered);
+        assert_contains('<p>Brand</p>', $delivered);
+        assert_contains('<li>About</li>', $delivered);
+        assert_true(
+            !str_contains($delivered, '"layout":{"type":"constrained"}'),
+            'delivered nav must not ask core to re-cap its children at contentSize',
+        );
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('FixBlocksStep promotes the real footer wide carrier inside its constrained root', function () {
+    $tmp = sys_get_temp_dir() . '/fix-blocks-wide-footer-' . uniqid();
+    $project = new Project($tmp);
+    $project->writeText(
+        'design/site.css',
+        ':root{--wide-size:1280px}.shell{width:100%;max-width:var(--wide-size);margin:0 auto}',
+    );
+    $project->writeText(
+        'theme/parts/footer.html',
+        '<!-- wp:group {"tagName":"footer","style":{"spacing":{"padding":{"top":"clamp(40px,6vw,72px)","right":"0","bottom":"clamp(28px,4vw,40px)","left":"0"}}},"layout":{"type":"constrained"}} -->'
+            . '<footer class="wp-block-group"><!-- wp:group {"className":"shell"} -->'
+            . '<div class="wp-block-group shell"><!-- wp:group {"className":"shell"} -->'
+            . '<div class="wp-block-group shell"><!-- wp:paragraph --><p>Footer</p><!-- /wp:paragraph --></div>'
+            . '<!-- /wp:group --></div><!-- /wp:group --></footer><!-- /wp:group -->',
+    );
+
+    try {
+        (new FixBlocksStep(new PhpBlockFixer(), htmlFirst: true))->run($project);
+
+        $doc = BlockMarkup::parse($project->readText('theme/parts/footer.html'));
+        $root = $doc->topLevel();
+        assert_true($root !== null, 'footer fixture keeps one root');
+        assert_eq(['type' => 'constrained'], ($doc->attrs($root) ?? [])['layout'] ?? null);
+        $shells = array_values(array_filter(
+            $doc->indices(),
+            static fn (int $index): bool => in_array(
+                'shell',
+                preg_split('/\s+/', trim((string) (($doc->attrs($index) ?? [])['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [],
+                true,
+            ),
+        ));
+        assert_eq(2, count($shells), 'fixture carries nested wide-size subjects');
+        assert_eq('wide', ($doc->attrs($shells[0]) ?? [])['align'] ?? null, 'outermost wide carrier promoted');
+        assert_contains('alignwide', $doc->ownHtml($shells[0]), 'serialized outermost carrier stays wide');
+        assert_true(!isset(($doc->attrs($shells[1]) ?? [])['align']), 'nested matching carrier stays untouched');
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
 });
 
 test('FixBlocksStep declares its durable warnings artifact', function () {
