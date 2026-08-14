@@ -79,6 +79,63 @@ function hh_theme_json(): array
 }
 
 
+test('fixHeader remaps a designed row header off centered-masthead', function () {
+    $markup = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<nav class="wp-block-group">'
+        . '<!-- wp:buttons --><div class="wp-block-buttons">'
+        . '<!-- wp:button --><div class="wp-block-button">'
+        . '<a class="wp-block-button__link" href="/"><span class="brand">BPP</span></a>'
+        . '</div><!-- /wp:button --></div><!-- /wp:buttons -->'
+        . '<!-- wp:navigation --><!-- wp:navigation-link {"label":"Visita","url":"/visita/"} /-->'
+        . '<!-- /wp:navigation -->'
+        . '</nav><!-- /wp:group -->';
+    $result = HeaderHeroStep::fixHeader(
+        $markup,
+        AboveFoldContract::MODE_STACKED,
+        'BPP',
+        ['Início', 'Visita'],
+        false,
+        'centered-masthead',
+    );
+    assert_contains('header-archetype--standard-row', $result['markup']);
+    assert_true(!str_contains($result['markup'], 'header-archetype--centered-masthead'));
+    assert_contains('remapped to standard-row', implode(' ', $result['notes']));
+});
+
+test('fixHeader writes behavior classes onto the saved header wrapper', function () {
+    $markup = hh_header('{"backgroundColor":"base","layout":{"type":"constrained"}}');
+    $behavior = [
+        'behavior' => HeaderBehavior::STICKY_SOFT,
+        'mode' => HeaderBehavior::MODE_STACKED,
+        'transition' => HeaderBehavior::TRANSITION_SMOOTH,
+        'topSurface' => 'base',
+        'scrolledSurface' => 'base',
+        'foreground' => 'contrast',
+        'topTreatment' => HeaderBehavior::TREATMENT_TRANSPARENT,
+        'scrolledTreatment' => HeaderBehavior::TREATMENT_GLASS,
+    ];
+    $result = HeaderHeroStep::fixHeader(
+        $markup,
+        AboveFoldContract::MODE_STACKED,
+        'Demo',
+        [],
+        false,
+        'standard-row',
+        'contrast',
+        'base',
+        $behavior,
+    );
+
+    assert_true(
+        (bool) preg_match(
+            '/<div class="[^"]*\bheader-behavior-sticky-soft\b[^"]*\bheader-top-transparent\b[^"]*\bheader-scrolled-glass\b/',
+            $result['markup'],
+        ),
+        'saved wrapper carries sticky/glass hooks, not only the comment JSON',
+    );
+    assert_contains('mirrored onto saved HTML', implode(' ', $result['notes']));
+});
+
 test('overlay-to-solid removes legacy inner positioning and wires closed state classes', function () {
     $markup = hh_header('{"backgroundColor":"base","style":{"position":{"type":"sticky","top":"0px"},"spacing":{"padding":{"top":"var:preset|spacing|sm"}}},"layout":{"type":"constrained"}}');
     $behavior = [
@@ -560,6 +617,52 @@ test('closed behavior artifact rejects extra fields and impossible tuples', func
     assert_eq('instant', HeaderBehavior::transitionFor('minimal'));
     assert_eq('instant', HeaderBehavior::transitionFor('none'));
     assert_eq('smooth', HeaderBehavior::transitionFor('calm'));
+});
+
+test('HTML-first keeps authored hero buttons when no planned primary_action exists', function () {
+    with_project('builder_hh_html_first_buttons_', function ($project) {
+        $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+        $project->writeJson('theme/theme.json', hh_theme_json());
+        $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'calm']);
+        $project->writeText('design/home.html', '<!doctype html><html><body><a class="btn" href="/visit/">Join</a></body></html>');
+        $section = [
+            'slug' => 'hero',
+            'role' => 'hero',
+            'layout_archetype' => 'centered-stack',
+            'background' => 'base',
+            'primary_action' => null,
+        ];
+        $project->writeJson('pages.json', ['pages' => [[
+            'slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section],
+        ]]]);
+        hh_above_fold($project, [[
+            'slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section],
+        ]], 'focal-subject-stage');
+        $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
+        $project->writeText(
+            'theme/parts/page-home--hero.html',
+            '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
+                . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage hero-mobile--stack-media-first">'
+                . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Hero</h1><!-- /wp:heading -->'
+                . '<!-- wp:buttons --><div class="wp-block-buttons">'
+                . '<!-- wp:button --><div class="wp-block-button">'
+                . '<a class="wp-block-button__link wp-element-button" href="/visit/">Join</a>'
+                . '</div><!-- /wp:button --></div><!-- /wp:buttons -->'
+                . '</div><!-- /wp:group -->',
+        );
+
+        putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
+        (new HeaderHeroStep())->run($project);
+
+        $hero = $project->readText('theme/parts/page-home--hero.html');
+        assert_contains('Join', $hero);
+        assert_contains('/visit/', $hero);
+        assert_contains('wp:button', $hero);
+        assert_contains(
+            'kept authored hero buttons',
+            $project->readText('logs/header-hero.txt'),
+        );
+    });
 });
 
 test('the step repairs parts, writes the behavior artifact, and keeps successful fixes out of warnings', function () {

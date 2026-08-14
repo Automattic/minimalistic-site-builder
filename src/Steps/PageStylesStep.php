@@ -13,6 +13,7 @@ use Automattic\SiteBuild\CssScrub;
 use Automattic\SiteBuild\Html;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
+use Automattic\SiteBuild\Motion;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
@@ -323,7 +324,7 @@ CSS;
         }
 
         $project->addWarnings('page-styles', $warnings);
-        $design = implode("\n", $chunks);
+        $design = Motion::stripAuthoredKitCss(implode("\n", $chunks));
         $markup = self::deliveredMarkup($project);
         // Contrast is a judgment on the DESIGN's colors: the wrap policy has
         // none, and including it would only add unverified-selector findings.

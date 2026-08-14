@@ -82,6 +82,12 @@ final class DeprecationAdapters
             // top-level key to style.typography.textAlign.
             'textAlign' => true,
         ],
+        'core/navigation-link' => [
+            // HTML-first convert writes the saved <a> class as this
+            // unregistered key. Folded into className before this drop, or
+            // discarded so fix-blocks can serialize the header.
+            'anchorClassName' => true,
+        ],
     ];
 
     /**

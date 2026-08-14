@@ -10,6 +10,7 @@ use Automattic\SiteBuild\ContrastFix;
 use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\HeaderBehavior;
 use Automattic\SiteBuild\HeaderFallback;
+use Automattic\SiteBuild\HeaderNavDestinations;
 use Automattic\SiteBuild\HeroFallback;
 use Automattic\SiteBuild\HeroHeadlineFit;
 use Automattic\SiteBuild\Narrator;
@@ -247,6 +248,11 @@ final class HeaderHeroStep implements Step
         foreach ($result['notes'] as $note) {
             $report[] = "[{$headerRel}] {$note}";
         }
+        [$headerNav, $navRepairs] = HeaderNavDestinations::rewrite($writes[$headerRel], $pages);
+        $writes[$headerRel] = $headerNav;
+        foreach ($navRepairs as $note) {
+            $report[] = "[{$headerRel}] {$note}";
+        }
 
         $headerFacts = AboveFoldPartFacts::headerFacts($writes[$headerRel]);
         if (($headerFacts['mode'] ?? null) === null) {
@@ -323,18 +329,27 @@ final class HeaderHeroStep implements Step
                     JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
                 );
             }
-            $actionResult = GeneratedMarkup::reconcilePrimaryAction(
-                $heroMarkup,
-                is_array($delivery['primary_action'] ?? null) ? $delivery['primary_action'] : null,
-                $heroPart,
-            );
-            $writes[$heroRel] = $actionResult['markup'];
-            foreach ($actionResult['repairs'] as $repair) {
-                $report[] = "[{$heroRel}] " . (is_string($repair)
-                    ? $repair
-                    : (string) json_encode($repair, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+            $action = is_array($delivery['primary_action'] ?? null) ? $delivery['primary_action'] : null;
+            // HTML-first authors the hero as a document. There is no planned
+            // primary_action to reconcile against; stripping those buttons
+            // leaves an empty first viewport.
+            if ($action === null && $project->exists('design/home.html')) {
+                $writes[$heroRel] = $heroMarkup;
+                $report[] = "[{$heroRel}] kept authored hero buttons (HTML-first design; no planned primary_action)";
+            } else {
+                $actionResult = GeneratedMarkup::reconcilePrimaryAction(
+                    $heroMarkup,
+                    $action,
+                    $heroPart,
+                );
+                $writes[$heroRel] = $actionResult['markup'];
+                foreach ($actionResult['repairs'] as $repair) {
+                    $report[] = "[{$heroRel}] " . (is_string($repair)
+                        ? $repair
+                        : (string) json_encode($repair, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+                }
+                array_push($warnings, ...$actionResult['warnings']);
             }
-            array_push($warnings, ...$actionResult['warnings']);
 
             // With the hero copy final, guarantee its longest headline word
             // fits the measure its layout chain implies — the CSS mid-word
@@ -555,6 +570,10 @@ final class HeaderHeroStep implements Step
         $notes = [];
 
         $top = $doc->topLevel();
+        if ($archetype === 'centered-masthead' && $top !== null && self::looksLikeRowHeader($doc, $top)) {
+            $archetype = 'standard-row';
+            $notes[] = 'header archetype remapped to standard-row (designed row: wordmark, nav, optional CTA)';
+        }
         if ($top !== null && $mode === AboveFoldContract::MODE_OVERLAY) {
             self::wireOverlay($doc, $top, $notes);
         } elseif ($top !== null) {
@@ -839,6 +858,28 @@ final class HeaderHeroStep implements Step
         }
         return is_string($value)
             && preg_match('/^[+-]?(?:0+(?:\.0*)?|\.0+)(?:[a-z%]+)?(?:\s*!important)?$/i', trim($value)) === 1;
+    }
+
+    /** Designed HTML-first headers are a brand + nav (+ CTA) row, not a stacked masthead. */
+    public static function looksLikeRowHeader(BlockMarkup $doc, int $top): bool
+    {
+        $hasNav = false;
+        $hasBrand = false;
+        foreach ($doc->children($top) as $child) {
+            $name = $doc->name($child);
+            if ($name === 'navigation') {
+                $hasNav = true;
+            }
+            if (in_array($name, ['site-title', 'buttons'], true)) {
+                $hasBrand = true;
+            }
+            $class = (string) (($doc->attrs($child) ?? [])['className'] ?? '');
+            $html = $doc->ownHtml($child);
+            if (str_contains($class, 'brand') || str_contains($html, 'class="brand"') || str_contains($html, "class='brand'")) {
+                $hasBrand = true;
+            }
+        }
+        return $hasNav && $hasBrand;
     }
 
     /**
@@ -1142,8 +1183,8 @@ final class HeaderHeroStep implements Step
     /**
      * Canonicalize the generated root's visual-state hooks. Stale tokens are
      * removed from both comment attrs and saved HTML so fix-blocks cannot
-     * resurrect an obsolete behavior; new tokens live in className and are
-     * serialized into HTML by that downstream pass.
+     * resurrect an obsolete behavior; new tokens are written to className
+     * and mirrored onto the saved wrapper in the same pass.
      *
      * @param array<mixed> $behavior
      */
@@ -1185,10 +1226,50 @@ final class HeaderHeroStep implements Step
                 }
             }
         }
-        if ($changed || $removedHtml !== []) {
+        $addedHtml = self::addSavedRootClasses($doc, $top, $expected);
+        if ($changed || $removedHtml !== [] || $addedHtml !== []) {
             $notes[] = "root behavior classes canonicalized for '{$behavior['behavior']}'"
-                . ($removedHtml === [] ? '' : '; removed stale saved-HTML tokens ' . implode(', ', $removedHtml));
+                . ($removedHtml === [] ? '' : '; removed stale saved-HTML tokens ' . implode(', ', $removedHtml))
+                . ($addedHtml === [] ? '' : '; mirrored onto saved HTML: ' . implode(', ', $addedHtml));
         }
+    }
+
+    /**
+     * Comment JSON is not enough: validate-theme and the header kit both
+     * read the saved wrapper. Mirror missing expected tokens onto the
+     * root's own class attribute so a later fix-blocks miss cannot leave
+     * sticky/glass hooks comment-only.
+     *
+     * @param list<string> $expected
+     * @return list<string>
+     */
+    private static function addSavedRootClasses(BlockMarkup $doc, int $top, array $expected): array
+    {
+        if ($expected === []) {
+            return [];
+        }
+        $own = $doc->ownHtml($top);
+        if (preg_match('/\bclass\s*=\s*(["\'])(.*?)\1/is', $own, $match) !== 1) {
+            return [];
+        }
+        $htmlTokens = preg_split('/\s+/', trim($match[2]), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $missing = [];
+        foreach ($expected as $class) {
+            if ($class !== '' && !in_array($class, $htmlTokens, true)) {
+                $missing[] = $class;
+            }
+        }
+        if ($missing === []) {
+            return [];
+        }
+        $anchor = in_array('wp-block-group', $htmlTokens, true)
+            ? 'wp-block-group'
+            : ($htmlTokens[0] ?? '');
+        if ($anchor === '') {
+            return [];
+        }
+        $doc->replaceClassTokenInOwnHtml($top, $anchor, $anchor . ' ' . implode(' ', $missing));
+        return $missing;
     }
 
     /** @param array<mixed> $behavior */

@@ -128,6 +128,16 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
         $css,
     );
 
+    assert_contains('.card-grid {', $css);
+    assert_contains('header nav .current-menu-item > a', $css);
+    assert_contains('.hero-actions > .wp-block-buttons', $css);
+    assert_contains(
+        'header nav.wp-block-group:is(.is-layout-constrained, .is-layout-flow, .is-layout-flex)',
+        $css,
+    );
+    assert_contains('header nav > .wp-block-navigation {', $css);
+    assert_contains('.footer-inner {', $css);
+
     // Width and constrained-layout margin resets apply to every marked card,
     // including ordinary staggered/editorial cards outside .equal-cards. The
     // overlap treatment then restores its deliberate one-rem side reveal.
@@ -204,6 +214,12 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     assert_contains('.wp-site-blocks .wp-block-pullquote {', $css);
     assert_contains('margin-block: 0;', $css);
     assert_contains('padding-block: var(--wp--preset--spacing--lg);', $css);
+    // Palette-tinted browser chrome the model never writes.
+    assert_contains('::selection', $css);
+    assert_contains('caret-color: var(--wp--preset--color--accent)', $css);
+    assert_contains('scrollbar-color:', $css);
+    assert_contains('text-underline-offset: 0.18em', $css);
+    assert_contains('font-variant-numeric: tabular-nums', $css);
 
     // The raised hamburger breakpoint (BIGR-735): core swaps to the inline nav
     // at 600px, but a tracked title/nav row that fits at 768px can still wrap
@@ -212,6 +228,13 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     assert_contains('@media (min-width: 600px) and (max-width: 719.98px)', $css);
     assert_contains('.wp-site-blocks .wp-block-navigation__responsive-container-open:not(.always-shown)', $css);
     assert_contains('.wp-site-blocks .wp-block-navigation__responsive-container:not(.hidden-by-default):not(.is-menu-open)', $css);
+    // Overlay panel uses the page pair, never core's white dialog, and
+    // does not inherit the desktop row justification (right-glued labels).
+    assert_contains('.wp-block-navigation__responsive-container.is-menu-open', $css);
+    assert_contains('background-color: var(--wp--preset--color--base) !important', $css);
+    assert_contains('--navigation-layout-justification-setting: flex-start', $css);
+    assert_contains('text-align: start !important', $css);
+    assert_contains('.wp-block-navigation__responsive-container-close', $css);
 
     // Hero topology and mobile behavior are code-owned. All recipe hooks ship
     // in the static stylesheet (unused hooks are inert), and the mobile rules

@@ -278,6 +278,32 @@ final class ScaffoldThemeStep implements Step
             padding-block: var(--wp--preset--spacing--lg);
         }
 
+        /* Browser surfaces the model never themes. Palette-tinted selection,
+           caret, scrollbar, focus, underline offset, and tabular numerals so
+           core defaults do not announce a template. */
+        ::selection {
+            color: var(--wp--preset--color--base);
+            background-color: var(--wp--preset--color--primary);
+        }
+        ::-moz-selection {
+            color: var(--wp--preset--color--base);
+            background-color: var(--wp--preset--color--primary);
+        }
+        html {
+            caret-color: var(--wp--preset--color--accent);
+            scrollbar-color: var(--wp--preset--color--secondary) var(--wp--preset--color--base);
+        }
+        .wp-site-blocks a {
+            text-underline-offset: 0.18em;
+        }
+        .wp-site-blocks :focus-visible {
+            outline: 2px solid var(--wp--preset--color--accent);
+            outline-offset: 3px;
+        }
+        .wp-site-blocks :is(.has-caption-font-size, .wp-element-caption, figcaption) {
+            font-variant-numeric: tabular-nums;
+        }
+
         /* Raise the navigation's hamburger breakpoint from core's 600px to 720px
            (BIGR-735). A tracked-uppercase title/nav row that fits comfortably at
            768px can still wrap or overflow in the 600-719px band, where core's
@@ -294,6 +320,95 @@ final class ScaffoldThemeStep implements Step
             .wp-site-blocks .wp-block-navigation__responsive-container:not(.hidden-by-default):not(.is-menu-open) {
                 display: none;
             }
+        }
+
+        /* Hamburger / overlay panel.
+           Color: core paints `:not(.has-background) .is-menu-open { #fff }`,
+           so contrast-colored labels on a dark canvas become cream-on-white.
+           Layout: the open modal inherits the desktop justification
+           (`items-justified-right` / --navigation-layout-justification-setting),
+           which glues the list to one viewport edge and clips labels. Reset
+           both here so every header — static or adaptive — gets a readable
+           stacked sheet. */
+        .wp-site-blocks .wp-block-navigation__responsive-container.is-menu-open {
+            --navigation-layout-justification-setting: flex-start;
+            --navigation-layout-justify: flex-start;
+            position: fixed !important;
+            inset: 0 !important;
+            z-index: 10000 !important;
+            width: 100% !important;
+            height: 100% !important;
+            max-width: none !important;
+            box-sizing: border-box !important;
+            padding: max(1.25rem, env(safe-area-inset-top, 0px))
+                max(1.25rem, env(safe-area-inset-right, 0px))
+                max(1.25rem, env(safe-area-inset-bottom, 0px))
+                max(1.25rem, env(safe-area-inset-left, 0px)) !important;
+            overflow: auto !important;
+            color: var(--wp--preset--color--contrast) !important;
+            background-color: var(--wp--preset--color--base) !important;
+            background-image: none !important;
+        }
+        .wp-site-blocks .wp-block-navigation__responsive-container.is-menu-open
+            .wp-block-navigation__responsive-dialog,
+        .wp-site-blocks .wp-block-navigation__responsive-container.is-menu-open
+            .wp-block-navigation__responsive-container-content {
+            width: 100% !important;
+            max-width: none !important;
+            margin: 0 !important;
+            color: inherit !important;
+            background-color: transparent !important;
+            background-image: none !important;
+        }
+        .wp-site-blocks .wp-block-navigation__responsive-container.is-menu-open
+            .wp-block-navigation__responsive-container-content {
+            align-items: stretch !important;
+            justify-content: flex-start !important;
+            text-align: start !important;
+            padding-block-start: 3.25rem !important;
+        }
+        .wp-site-blocks .wp-block-navigation__responsive-container.is-menu-open
+            :is(.wp-block-navigation__container, .wp-block-page-list) {
+            display: flex !important;
+            flex-direction: column !important;
+            align-items: stretch !important;
+            justify-content: flex-start !important;
+            gap: 0.15rem !important;
+            width: 100% !important;
+        }
+        .wp-site-blocks .wp-block-navigation__responsive-container.is-menu-open
+            .wp-block-navigation-item {
+            width: 100% !important;
+        }
+        .wp-site-blocks .wp-block-navigation__responsive-container.is-menu-open
+            .wp-block-navigation-item__content:not(.wp-element-button) {
+            display: block !important;
+            width: 100% !important;
+            box-sizing: border-box !important;
+            padding-block: 0.85rem !important;
+            text-align: start !important;
+            font-size: var(--wp--preset--font-size--heading, 1.5rem) !important;
+            line-height: 1.25 !important;
+            white-space: normal !important;
+            overflow-wrap: anywhere;
+            color: var(--wp--preset--color--contrast) !important;
+        }
+        .wp-site-blocks .wp-block-navigation__responsive-container.is-menu-open
+            :is(
+                .wp-block-navigation__responsive-container-close,
+                .wp-block-navigation__submenu-icon
+            ) {
+            color: var(--wp--preset--color--contrast) !important;
+        }
+        .wp-site-blocks .wp-block-navigation__responsive-container.is-menu-open
+            .wp-block-navigation__responsive-container-close {
+            top: max(1rem, env(safe-area-inset-top, 0px)) !important;
+            inset-inline-end: max(1rem, env(safe-area-inset-right, 0px)) !important;
+            inset-inline-start: auto !important;
+        }
+        .wp-site-blocks .wp-block-navigation__responsive-container.is-menu-open
+            .wp-block-navigation-item__content:not(.wp-element-button):is(:hover, :focus) {
+            color: var(--wp--preset--color--accent) !important;
         }
 
         /* The root block-gap margin would open a page-background band between every pair
@@ -449,6 +564,167 @@ final class ScaffoldThemeStep implements Step
             .hero-mobile--retain-media-overlay .hero-composition__copy {
                 max-width: min(88%, 32rem);
             }
+        }
+
+        /* HTML-first layout floor. Home-body may invent .section / .card-grid /
+           .footer-inner without a stylesheet (preview CSS is first-fold only).
+           These rules are inert when the classes are absent. */
+        .section,
+        .page-head {
+            padding-top: var(--wp--preset--spacing--xl, clamp(2.5rem, 6vw, 4.5rem));
+            padding-bottom: var(--wp--preset--spacing--xl, clamp(2.5rem, 6vw, 4.5rem));
+        }
+        .section-inner,
+        .page-head-inner,
+        .footer-inner {
+            box-sizing: border-box;
+            width: 100%;
+            max-width: var(--wp--style--global--wide-size, 1280px);
+            margin-left: auto;
+            margin-right: auto;
+            padding-left: clamp(1rem, 4vw, 2.5rem);
+            padding-right: clamp(1rem, 4vw, 2.5rem);
+        }
+        .card-grid {
+            display: grid;
+            gap: 1.25rem 1.5rem;
+            align-items: stretch;
+        }
+        @media (min-width: 40rem) {
+            .card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        }
+        @media (min-width: 64rem) {
+            .card-grid:has(> :nth-child(3)) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+            .card-grid:has(> :nth-child(4)) { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+        }
+        .card-grid > :is(.card, article, .wp-block-group) {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+        .hero-actions,
+        .hero-actions .wp-block-buttons {
+            display: flex;
+            flex-direction: row;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.9rem 1.4rem;
+        }
+        .hero-actions > .wp-block-buttons {
+            margin: 0;
+            width: auto;
+        }
+        .card-grid > :is(.card, article, .wp-block-group),
+        .grid-2 > :is(.card, article, .wp-block-group, .note-card),
+        .grid-3 > :is(.card, article, .wp-block-group, .note-card) {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+        .grid-2,
+        .grid-3 {
+            display: grid;
+            gap: 1.25rem 1.5rem;
+            align-items: stretch;
+        }
+        @media (min-width: 40rem) {
+            .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        }
+        @media (min-width: 64rem) {
+            .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        }
+        /* theme.json underlines every link. Nav items also draw a hover
+           border, which reads as two lines. Current page uses WP's
+           current-menu-item, not a hardcoded is-current. */
+        header nav a,
+        header nav .wp-block-navigation-item__content,
+        .nav-links a {
+            text-decoration: none;
+        }
+        header nav a:hover,
+        header nav .wp-block-navigation-item__content:hover,
+        .nav-links a:hover {
+            text-decoration: none;
+        }
+        header nav .current-menu-item > a,
+        header nav .current-menu-item > .wp-block-navigation-item__content,
+        .nav-links .current-menu-item > a {
+            color: var(--wp--preset--color--primary, inherit);
+            border-bottom: 2px solid var(--wp--preset--color--primary, currentColor);
+            text-decoration: none;
+        }
+        header nav > :is(.brand, p.brand) {
+            margin-block: 0;
+            display: flex;
+            align-items: center;
+        }
+        header nav .wp-block-navigation__responsive-container-open {
+            align-self: center;
+        }
+        figure.wp-block-table,
+        .wp-block-table figcaption,
+        .k-table-scroll {
+            margin-bottom: 1.5rem;
+        }
+        .k-section + .k-section,
+        .sec + .sec {
+            margin-top: 0.5rem;
+        }
+        /* Designed row headers become constrained groups after convert.
+           Core's is-layout-constrained beats `header nav { display:flex }`
+           and overlayMenu:always leaves the hamburger where the link list
+           was — between the wordmark and the CTA. Keep a start-aligned row
+           and park the nav (hamburger) at the inline end. */
+        header nav.wp-block-group:is(.is-layout-constrained, .is-layout-flow, .is-layout-flex) {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: flex-start;
+            gap: 0.75rem 1.5rem;
+            width: 100%;
+            max-width: var(--wp--style--global--wide-size, 1280px);
+            margin-inline: auto;
+        }
+        header nav > .wp-block-navigation {
+            margin-inline-start: auto;
+        }
+        header nav .wp-block-navigation__responsive-container-open {
+            margin-inline-start: auto;
+        }
+        .footer-inner {
+            display: grid;
+            gap: 1.5rem 2rem;
+            padding-top: clamp(2rem, 5vw, 3.5rem);
+            padding-bottom: clamp(1.5rem, 4vw, 2.5rem);
+        }
+        @media (min-width: 52rem) {
+            .footer-inner {
+                grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.6fr);
+                align-items: start;
+            }
+        }
+        .footer-nav {
+            display: grid;
+            gap: 1.25rem 2rem;
+        }
+        @media (min-width: 40rem) {
+            .footer-nav { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        }
+        .footer-word {
+            font-size: clamp(1.5rem, 1.2rem + 1vw, 2rem);
+            letter-spacing: -0.03em;
+            margin: 0 0 0.4rem;
+        }
+        .footer-head {
+            font-size: 0.75rem;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            margin: 0 0 0.6rem;
+        }
+        .footer-legal {
+            grid-column: 1 / -1;
+            margin: 0;
+            opacity: 0.72;
         }
 
         CSS;

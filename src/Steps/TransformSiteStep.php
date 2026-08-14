@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\BlocksEngine\PhpTransformer\ArtifactCompiler\ArtifactCompiler;
 use Automattic\BlocksEngine\PhpTransformer\Contract\TransformerResult;
 use Automattic\SiteBuild\DesignMarkupSanitizer;
+use Automattic\SiteBuild\DirectionUtilities;
 use Automattic\SiteBuild\HeroComposition;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
@@ -366,6 +367,20 @@ final class TransformSiteStep implements Step
                 $fallbackCodes[] = $code;
                 $warnings[] = self::dropWarning($fragment, $drop, 'transform emitted no materializable block markup');
                 continue;
+            }
+            [$markup, $restoreRows] = DirectionUtilities::restore(
+                (string) $fragment['html'],
+                $markup,
+                (string) $fragment['output'],
+            );
+            array_push($warnings, ...$restoreRows);
+            $buttonLoss = DirectionUtilities::buttonLossWarning(
+                (string) $fragment['html'],
+                $markup,
+                (string) $fragment['output'],
+            );
+            if ($buttonLoss !== null) {
+                $warnings[] = $buttonLoss;
             }
             $lostCarrier = self::lostCarrierClass($result->assets, $markup);
             if ($lostCarrier !== null) {

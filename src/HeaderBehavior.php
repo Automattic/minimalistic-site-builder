@@ -857,7 +857,7 @@ final class HeaderBehavior
         $best = null;
         $distance = PHP_FLOAT_MAX;
         foreach ($palette as $slug => $color) {
-            if ($slug === $top) {
+            if ($slug === $top || !self::isChromeBarColor($slug, $color)) {
                 continue;
             }
             $rgb = ContrastMath::hexToRgb($color);
@@ -876,6 +876,23 @@ final class HeaderBehavior
             }
         }
         return $best;
+    }
+
+    /**
+     * A header bar may only paint with a paper/ink token or a near-gray.
+     * Brand hues (terracotta, sage, grape, neon) as a full chrome surface
+     * read as a muddy wash on scroll.
+     */
+    public static function isChromeBarColor(string $slug, string $hex): bool
+    {
+        if ($slug === 'base' || $slug === 'contrast') {
+            return true;
+        }
+        $rgb = ContrastMath::hexToRgb($hex);
+        if ($rgb === null) {
+            return false;
+        }
+        return (max($rgb) - min($rgb)) / 255 < 0.12;
     }
 
     /**

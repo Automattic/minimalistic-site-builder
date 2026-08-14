@@ -117,7 +117,7 @@ test('smooth transition safety preserves readable mixed-channel hue changes', fu
         'base',
         'contrast',
     );
-    assert_eq('primary', $artifact['scrolledSurface'], 'safe hue transition is retained');
+    assert_eq('base', $artifact['scrolledSurface'], 'chromatic brand hues are not header bars');
 
     $foreground = ContrastMath::hexToRgb($palette['contrast']);
     $yellow = ContrastMath::hexToRgb($palette['base']);

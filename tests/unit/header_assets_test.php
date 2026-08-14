@@ -52,9 +52,12 @@ test('header CSS keeps positioning progressive and state changes paint-only', fu
         'html.header-state-js .site-header-shell--overlay-to-solid'
     );
     assert_contains('position: fixed', $enhanced, 'only the driver-owned scope fixes an overlay');
-    assert_true(
-        substr_count($css, 'position: fixed') === 1,
-        'no selector outside the driver scope fixes the header'
+    $modal = header_asset_css_block($css, '.wp-block-navigation__responsive-container.is-menu-open');
+    assert_contains('position: fixed', $modal, 'the open hamburger sheet is viewport-fixed, not header-trapped');
+    assert_eq(
+        2,
+        substr_count($css, 'position: fixed'),
+        'only the driver-owned overlay header and the open nav modal are fixed'
     );
 
     $state = header_asset_css_block($css, 'html.header-is-scrolled');
@@ -210,6 +213,7 @@ test('sticky treatment rules are driver-scoped, alpha-synced, and fail closed to
     // never inherit a treatment-aware (possibly translucent) surface.
     $modal = header_asset_css_block($css, '.wp-block-navigation__responsive-container.is-menu-open');
     assert_contains('background-color: var(--header-scrolled-solid) !important', $modal);
+    assert_contains('--navigation-layout-justification-setting: flex-start', $modal);
     assert_true(
         !str_contains($modal, '--header-scrolled-surface'),
         'the menu modal must never paint the treatment-aware surface',

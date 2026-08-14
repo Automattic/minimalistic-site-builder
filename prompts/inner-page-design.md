@@ -16,7 +16,13 @@ You are a senior web designer and front-end author. Design one finished inner pa
 
 {{design_preview}}
 
-Treat the cached site CSS and design preview as binding design authority. Reuse existing classes from the site CSS and follow the fold's composition, typography, palette, spacing rhythm, and visual language without copying its header or hero. Write specific visitor-facing copy from the page spec and keep it consistent with the site spec. Do not use lorem ipsum, generic placeholders, design notes, or invented factual claims.
+Treat the cached site CSS and design preview as binding design authority. Reuse existing classes from the site CSS and follow the fold's composition, typography, palette, spacing rhythm, and visual language without copying its header or hero. If the site CSS or direction commits an accent face or a `device--*` class, reuse those on this page the same way — accent on flavor/prices/folio only, device on at most one section. Reuse `card-style--*` and motion kit classes (`hover-lift`, `stagger-children`) the homepage already uses. Keep running copy in a 45–75ch measure. No gradient text. No thick colored side-border accent stripe. Write specific visitor-facing copy from the page spec and keep it consistent with the site spec. Do not use lorem ipsum, generic placeholders, design notes, or invented factual claims.
+
+BINDING FACTS: hours, loan terms, addresses, prices, and inboxes must match the site spec and the design preview character-for-character. If the spec has `loan_days` or `contact_email`, that is the only allowed value. Do not invent a conflicting number or a second general inbox.
+
+BINDING DESTINATIONS: a control's label and href must name the same action. A request / reserve / pedir-obra control goes to a request path or `mailto:` for that action, not the generic visit page. A subscribe control goes to a newsletter mailbox. Every other CTA href is a real page path from the site spec.
+
+Eyebrows and kickers are rationed — heading-first unless the kicker is genuine metadata the heading does not carry.
 
 ## Fragment contract
 

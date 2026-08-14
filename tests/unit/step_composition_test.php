@@ -43,7 +43,7 @@ test('StepComposition default matches CLI step order and validates', function ()
         'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
         'design-preview', 'theme-json', 'inner-pages-design', 'splice-home-design', 'assign-image-sources', 'transform-site', 'section-rhythm', 'section-layout',
         'collect-images', 'normalize-layout', 'header-hero', 'contrast-fix', 'motion-sanity', 'fix-blocks',
-        'assemble-pages', 'fix-pages', 'page-styles', 'custom-motion', 'fonts-php', 'finalize-theme', 'validate-theme',
+        'assemble-pages', 'fix-pages', 'page-styles', 'custom-motion', 'fonts-php', 'finalize-theme', 'direction-fidelity', 'validate-theme',
     ], array_map(static fn (Step $s) => $s->id(), $steps));
     StepGraph::validate($steps, $c->seeds());
 
@@ -85,7 +85,7 @@ test('StepComposition legacy env preserves the full legacy graph byte-for-byte',
             'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
             'theme-json+page-plan', 'sections', 'section-rhythm', 'copy-dedupe',
             'collect-images', 'normalize-layout', 'header-hero', 'contrast-fix', 'motion-sanity', 'fix-blocks',
-            'assemble-pages', 'page-styles', 'custom-motion', 'bundle-fonts', 'fonts-php', 'finalize-theme', 'validate-theme',
+            'assemble-pages', 'page-styles', 'custom-motion', 'bundle-fonts', 'fonts-php', 'finalize-theme', 'direction-fidelity', 'validate-theme',
         ], $ids);
         assert_true(!in_array('homepage-design', $ids, true));
         assert_true(!in_array('transform-site', $ids, true));

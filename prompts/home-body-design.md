@@ -28,7 +28,10 @@ Return one `<main>` fragment for content below the fold followed immediately by 
 - Include exactly one `<main>` and exactly one `<footer>`.
 - Return a bare <main> with no attributes. Put all classes and IDs on its child sections.
 - Do not add a second `h1`; the design preview owns the homepage heading.
-- Prefer established site classes from the site CSS and minimize new page-specific classes. Do not emit a `<style>` element.
+- Prefer established site classes from the site CSS and minimize new page-specific classes.
+- The established site CSS is first-fold only. If you invent a layout class it does not define (section bands, card grids, footer columns), put exactly one `<style data-page-css>` immediately before `<main>` implementing those classes: section vertical padding, a max-width inner measure, equal-height card grid, paired CTA row, and a styled footer band. Never put a style element inside `<main>` or `<footer>`.
+- Paired CTAs (primary + secondary) live in one `.hero-actions` row, flex, aligned. Do not stack two unrelated button groups.
+- `stagger-children` on at most one card row. Never on every section, and never on the hero copy stack. Do not write `@keyframes` or CSS for motion-kit classes (`stagger-children`, `hover-lift`, `reveal-*`) — the theme ships those.
 
 ## Supported HTML slice
 

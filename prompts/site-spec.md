@@ -39,6 +39,8 @@ Always include exactly these fixed properties:
 
 Beyond these fixed properties, **add any additional factual fields the user actually stated or strongly implied** — for example business hours, location/address, phone, email, a product or service list, price ranges, social links, founding year, tagline. Preserve them as structured data (strings, arrays, or nested objects) under clearly named keys. Only include facts that are grounded in the prompt; apart from the identity fields above, do NOT invent specifics, and do NOT add design fields (colors, typography, layout, imagery).
 
+If later pages will need an operational number or inbox the user did not state (loan term, opening hours, a general contact local-part), commit it **once** here as a named field (`hours`, `loan_days`, `contact_email`). There is exactly one general inbox (`contact_email` = one local-part at `email_domain`). Role mailboxes (`acervo@`, `agenda@`) may be listed separately; do not invent a second general inbox. Downstream pages must repeat these values, not invent parallel ones.
+
 Keep `visual_vibe` to a brief mood phrase. If the prompt is sparse, include only the fixed properties plus whatever facts are genuinely present.
 
 Output JSON only.
