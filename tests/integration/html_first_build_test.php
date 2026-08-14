@@ -109,9 +109,13 @@ function html_first_preview_document(string $marker = 'DESIGN-PREVIEW'): string
         . '<html lang="en"><head><meta charset="utf-8">'
         . '<meta name="viewport" content="width=device-width, initial-scale=1">'
         . '<style>:root { --content-size: 800px; --wide-size: 1280px; }'
-        . 'body { margin: 0; font-family: system-ui, sans-serif; }</style>'
-        . '</head><body><header><nav aria-label="Primary"><a href="/">Home</a></nav></header>'
+        . 'body { margin: 0; font-family: system-ui, sans-serif; }'
+        . '.site-header{display:flex;align-items:center;gap:1rem}.brand{font-weight:700;text-decoration:none}'
+        . '.maintenance-loop{display:grid}.maintenance-loop li > span{display:inline-block;width:10px;height:10px;border-radius:50%;background:#e08a3c}</style>'
+        . '</head><body><header class="site-header"><a class="brand" href="/">Hearth &amp; Crumb</a>'
+        . '<nav aria-label="Primary"><a href="/">Home</a></nav></header>'
         . '<main><section id="hero"><h1 class="has-display-font-size">' . $marker . '</h1>'
+        . '<ul class="maintenance-loop"><li><span>Fresh daily</span></li></ul>'
         . '<img alt="AI_IMAGE: A baker sliding a sourdough loaf into a stone oven, viewed from counter height | homepage hero beside the primary headline | photorealistic | landscape">'
         . '</section></main></body></html>';
 }
@@ -262,6 +266,61 @@ function html_first_design_html_hashes(Project $project): array
     return $hashes;
 }
 
+function html_first_delivered_markup(Project $project): string
+{
+    $chunks = [];
+    foreach (['plugin/pages', 'theme/parts'] as $directory) {
+        foreach (glob($project->path($directory) . '/*.html') ?: [] as $path) {
+            $chunks[] = file_get_contents($path) ?: '';
+        }
+    }
+    return implode("\n", $chunks);
+}
+
+/** @return list<string> */
+function html_first_transformer_marker_classes(string $markup): array
+{
+    preg_match_all('/\bclass=(["\'])(.*?)\1/s', $markup, $matches);
+    $classes = [];
+    foreach ($matches[2] ?? [] as $classList) {
+        foreach (preg_split('/\s+/', trim($classList)) ?: [] as $class) {
+            if (preg_match(
+                '/^(?:be-inline-geometry-[a-z0-9-]+'
+                    . '|blocks-engine-(?:synthetic-paragraph|synthetic-anchor-undecorated|inline-layout-carrier'
+                    . '|css-owned-flow|css-owned-grid|css-owned-layout|css-owned-layout-item'
+                    . '|positioned-fragment-link-carrier|empty-flex-item|list-navigation'
+                    . '|control-[a-z0-9-]+|specificity-class-[a-z0-9-]+))$/i',
+                $class,
+            ) === 1) {
+                $classes[$class] = true;
+            }
+        }
+    }
+    $classes = array_keys($classes);
+    sort($classes);
+    return $classes;
+}
+
+function html_first_unstyled_mark_count(string $markup, string $css): int
+{
+    preg_match_all('/<mark\b[^>]*>/i', $markup, $matches);
+    $normalizedCss = preg_replace('/\s+/', '', $css) ?? '';
+    $hasMarkerReset = str_contains(
+        $normalizedCss,
+        ':where(mark)[style*="--blocks-engine-richtext-marker:"]{background-color:transparent;color:inherit}',
+    );
+    $unstyled = 0;
+    foreach ($matches[0] ?? [] as $tag) {
+        $hasInlineBackground = preg_match('/\bstyle="[^"]*background-color\s*:/i', $tag) === 1
+            || preg_match("/\\bstyle='[^']*background-color\\s*:/i", $tag) === 1;
+        $hasMatchingReset = str_contains($tag, '--blocks-engine-richtext-marker:') && $hasMarkerReset;
+        if (!$hasInlineBackground && !$hasMatchingReset) {
+            $unstyled++;
+        }
+    }
+    return $unstyled;
+}
+
 test('--from resumes the deterministic tail against on-disk artifacts with no LLM', function () {
     $tmp = sys_get_temp_dir() . '/builder_html_first_resume_' . uniqid();
     $previous = getenv('SITE_BUILD_LEGACY');
@@ -321,7 +380,7 @@ test('--from resumes the deterministic tail against on-disk artifacts with no LL
     }
 });
 
-test('HTML-first default builds and validates every single-page artifact', function () {
+test('G4 HTML-first output gives every transformer marker class matching final theme CSS', function () {
     $tmp = sys_get_temp_dir() . '/builder_html_first_' . uniqid();
     $previous = getenv('SITE_BUILD_LEGACY');
     putenv('SITE_BUILD_LEGACY');
@@ -341,13 +400,38 @@ test('HTML-first default builds and validates every single-page artifact', funct
 
         $builder->pipeline()->runThrough($project);
 
+        $style = $project->readText('theme/style.css');
+        $deliveredMarkup = html_first_delivered_markup($project);
+        assert_contains('<mark', $deliveredMarkup, 'fixture emits a real richtext-marker mark');
+        assert_contains(
+            'blocks-engine-synthetic-paragraph',
+            $deliveredMarkup,
+            'fixture emits a real synthetic paragraph',
+        );
+        assert_contains('blocks-engine-css-owned-flow', $deliveredMarkup, 'fixture emits a real css-owned-flow group');
+        $markerClasses = html_first_transformer_marker_classes($deliveredMarkup);
+        assert_true($markerClasses !== [], 'fixture emits transformer marker classes');
+        foreach ($markerClasses as $class) {
+            assert_true(
+                preg_match('/\.' . preg_quote($class, '/') . '(?![a-z0-9_-])/i', $style) === 1,
+                "transformer marker class {$class} has matching final theme CSS",
+            );
+        }
+        assert_true(substr_count(strtolower($deliveredMarkup), '<mark') > 0, 'G5 control contains mark elements');
+        assert_eq(
+            0,
+            html_first_unstyled_mark_count($deliveredMarkup, $style),
+            'G5 mark elements without inline background-color or matching stylesheet reset',
+        );
+
         foreach ([
             'design/preview.html',
             'design/home-body.html',
             'design/home.html',
             'design/site.css',
             'design/transform-report.json',
-            'design/transformer-carried.css',
+            'design/transformer-carried-before-author.css',
+            'design/transformer-carried-after-author.css',
             'pages.json',
             'theme/theme.json',
             'theme/style.css',
@@ -393,7 +477,6 @@ test('HTML-first default builds and validates every single-page artifact', funct
         assert_contains($images[0]['src'], $home);
 
         assert_true(assert_html_first_page_sections_constrained($project, 'home') > 0);
-        $style = $project->readText('theme/style.css');
         assert_contains('hyphens: none;', $style);
         assert_eq(1, substr_count($style, 'Wrap at spaces only'), 'the wrap policy is merged exactly once');
         assert_true(!str_contains($style, 'break-all'), 'no mid-word break rule ships');

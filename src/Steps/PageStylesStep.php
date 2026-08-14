@@ -25,8 +25,9 @@ use Automattic\SiteBuild\TransformArtifacts;
  * legacy path.
  *
  * In explicit HTML-first composition mode, this step deterministically merges
- * scrubbed design/site.css bytes, each delivered nonfailed page artifact's
- * data-page-css contents, and optional scrubbed transformer-carried CSS. It
+ * optional scrubbed before-author transformer support CSS, scrubbed
+ * design/site.css bytes, each delivered nonfailed page artifact's data-page-css
+ * contents, and optional scrubbed after-author transformer support CSS. It
  * checks and adjusts only that merged tail against delivered markup before
  * appending it; existing scaffold CSS and all source artifacts stay untouched.
  * This path never asks the model.
@@ -281,9 +282,23 @@ CSS;
 
     private static function mergeDeterministicStyles(Project $project): void
     {
-        $chunks = [];
+        $beforeAuthorChunks = [];
+        $authorChunks = [];
+        $afterAuthorChunks = [];
         $warnings = [];
         $sectionRootIds = self::sectionRoots($project, $warnings);
+
+        if ($project->exists(TransformArtifacts::CARRIED_CSS_BEFORE_AUTHOR)) {
+            $beforeAuthorCss = self::scrubAndNeutralizeChunk(
+                $project->readText(TransformArtifacts::CARRIED_CSS_BEFORE_AUTHOR),
+                TransformArtifacts::CARRIED_CSS_BEFORE_AUTHOR,
+                $sectionRootIds,
+                $warnings,
+            );
+            if ($beforeAuthorCss !== '') {
+                $beforeAuthorChunks[] = $beforeAuthorCss;
+            }
+        }
 
         $siteCss = self::scrubAndNeutralizeChunk(
             $project->readText(TransformArtifacts::SITE_CSS),
@@ -292,7 +307,7 @@ CSS;
             $warnings,
         );
         if ($siteCss !== '') {
-            $chunks[] = $siteCss;
+            $authorChunks[] = $siteCss;
         }
 
         foreach (self::deliveredDesignSources($project) as $source) {
@@ -305,25 +320,29 @@ CSS;
                     $warnings,
                 );
                 if ($css !== '') {
-                    $chunks[] = $css;
+                    $authorChunks[] = $css;
                 }
             }
         }
 
-        if ($project->exists(TransformArtifacts::CARRIED_CSS)) {
-            $carriedCss = self::scrubAndNeutralizeChunk(
-                $project->readText(TransformArtifacts::CARRIED_CSS),
-                TransformArtifacts::CARRIED_CSS,
+        if ($project->exists(TransformArtifacts::CARRIED_CSS_AFTER_AUTHOR)) {
+            $afterAuthorCss = self::scrubAndNeutralizeChunk(
+                $project->readText(TransformArtifacts::CARRIED_CSS_AFTER_AUTHOR),
+                TransformArtifacts::CARRIED_CSS_AFTER_AUTHOR,
                 $sectionRootIds,
                 $warnings,
             );
-            if ($carriedCss !== '') {
-                $chunks[] = $carriedCss;
+            if ($afterAuthorCss !== '') {
+                $afterAuthorChunks[] = $afterAuthorCss;
             }
         }
 
         $project->addWarnings('page-styles', $warnings);
-        $design = implode("\n", $chunks);
+        $design = implode("\n", array_merge(
+            $beforeAuthorChunks,
+            $authorChunks,
+            $afterAuthorChunks,
+        ));
         $markup = self::deliveredMarkup($project);
         // Contrast is a judgment on the DESIGN's colors: the wrap policy has
         // none, and including it would only add unverified-selector findings.

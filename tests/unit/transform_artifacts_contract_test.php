@@ -5,7 +5,14 @@ use Automattic\SiteBuild\TransformArtifacts;
 
 test('transform artifact contract freezes shared paths and report keys', function (): void {
     assert_eq('design/site.css', TransformArtifacts::SITE_CSS);
-    assert_eq('design/transformer-carried.css', TransformArtifacts::CARRIED_CSS);
+    assert_eq(
+        'design/transformer-carried-before-author.css',
+        TransformArtifacts::CARRIED_CSS_BEFORE_AUTHOR,
+    );
+    assert_eq(
+        'design/transformer-carried-after-author.css',
+        TransformArtifacts::CARRIED_CSS_AFTER_AUTHOR,
+    );
     assert_eq('design/transform-report.json', TransformArtifacts::REPORT);
     assert_eq('eval/transform-site-report.schema.json', TransformArtifacts::REPORT_SCHEMA);
     assert_eq('fragment-repair.md', TransformArtifacts::REPAIR_PROMPT);
