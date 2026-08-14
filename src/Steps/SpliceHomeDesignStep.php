@@ -95,7 +95,7 @@ final class SpliceHomeDesignStep implements Step
 
     /**
      * @param array{main:array<string,int|string|null>,hero:array<string,int|string|null>,body:array<string,int|string|null>} $preview
-     * @param array{main:array<string,int|string|null>,footer:array<string,int|string|null>} $body
+     * @param array{main:array<string,int|string|null>,footer:array<string,int|string|null>,style:?array<string,int|string|null>} $body
      */
     private static function compose(string $previewHtml, string $bodyHtml, array $preview, array $body): string
     {
@@ -123,7 +123,7 @@ final class SpliceHomeDesignStep implements Step
         );
         $footerSource = substr($bodyHtml, $footer['start'], $footer['end'] - $footer['start']);
 
-        return substr($previewHtml, 0, $previewMain['start'])
+        $composed = substr($previewHtml, 0, $previewMain['start'])
             . $mainOpen
             . $heroSource
             . $belowFold
@@ -135,6 +135,17 @@ final class SpliceHomeDesignStep implements Step
             )
             . $footerSource
             . substr($previewHtml, $previewBody['close_start']);
+
+        $style = $body['style'] ?? null;
+        if (!is_array($style)) {
+            return $composed;
+        }
+        $styleSource = substr($bodyHtml, (int) $style['start'], (int) $style['end'] - (int) $style['start']);
+        $headClose = stripos($composed, '</head>');
+        if ($headClose === false || $styleSource === '') {
+            return $composed;
+        }
+        return substr($composed, 0, $headClose) . $styleSource . "\n" . substr($composed, $headClose);
     }
 
     /**
@@ -270,7 +281,7 @@ final class SpliceHomeDesignStep implements Step
     }
 
     /**
-     * @return array{main:array<string,int|string|null>,footer:array<string,int|string|null>}|null
+     * @return array{main:array<string,int|string|null>,footer:array<string,int|string|null>,style:?array<string,int|string|null>}|null
      */
     private static function bodyParts(string $html): ?array
     {
@@ -312,14 +323,17 @@ final class SpliceHomeDesignStep implements Step
             $elements,
             static fn (array $element): bool => $element['parent'] === null,
         ));
+        $rootNames = array_column($roots, 'name');
+        $style = $rootNames === ['style', 'main', 'footer'] ? $roots[0] : null;
         if (
             $mainAttributes === null
             || $mainAttributes !== []
             || $main['parent'] !== null
             || $footer['parent'] !== null
             || $main['start'] >= $footer['start']
-            || array_column($roots, 'name') !== ['main', 'footer']
-            || !self::isWhitespace(substr($html, 0, $main['start']))
+            || ($rootNames !== ['main', 'footer'] && $rootNames !== ['style', 'main', 'footer'])
+            || !self::isWhitespace(substr($html, 0, $roots[0]['start']))
+            || ($style !== null && !self::isPageCssStyle($html, $style, $main['start']))
             || !self::isWhitespace(substr(
                 $html,
                 $main['end'],
@@ -334,7 +348,21 @@ final class SpliceHomeDesignStep implements Step
                 return null;
             }
         }
-        return ['main' => $main, 'footer' => $footer];
+        return ['main' => $main, 'footer' => $footer, 'style' => $style];
+    }
+
+    /** @param array<string,int|string|null> $style */
+    private static function isPageCssStyle(string $html, array $style, int $nextStart): bool
+    {
+        $openEnd = (int) $style['open_end'];
+        $closeStart = (int) $style['close_start'];
+        $end = (int) $style['end'];
+        $opening = substr($html, (int) $style['start'], $openEnd - (int) $style['start']);
+        return preg_match(
+            '/(?:^|\s)data-page-css(?:\s*=\s*(?:"[^"]*"|\'[^\']*\'|[^\s>]+))?(?=\s|\/?>)/i',
+            $opening,
+        ) === 1
+            && self::isWhitespace(substr($html, $end, $nextStart - $end));
     }
 
     /**

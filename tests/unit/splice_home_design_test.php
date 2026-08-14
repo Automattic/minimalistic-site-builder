@@ -139,6 +139,26 @@ test('splice-home-design keeps malformed footer and main depth guards', function
     }
 });
 
+test('splice-home-design lifts home-body page CSS into the composed head', function () {
+    $body = '<style data-page-css>.band{padding:3rem 0}.footer-inner{display:grid}</style>'
+        . splice_home_body();
+    [$project, $tmp] = splice_home_fixture(splice_home_preview(), $body);
+    try {
+        splice_home_run($project);
+        $home = $project->readText('design/home.html');
+        assert_contains('style data-page-css', $home);
+        assert_contains('.band{padding:3rem 0}', $home);
+        assert_contains('HOME-BODY-STORY-5D2E', $home);
+        assert_contains('HOME-BODY-FOOTER-2B19', $home);
+        assert_true(
+            strpos($home, 'data-page-css') < strpos($home, '</head>'),
+            'page CSS lands in the document head so page-styles can lift it',
+        );
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
 test('splice and home-body validation agree on footer and main depth', function () {
     $bodyParts = new ReflectionMethod(SpliceHomeDesignStep::class, 'bodyParts');
     $bodyParts->setAccessible(true);
@@ -146,6 +166,7 @@ test('splice and home-body validation agree on footer and main depth', function 
     $isValidHomeBody->setAccessible(true);
     $cases = [
         'idiomatic nested attribution' => splice_home_body_with_nested_attributions(),
+        'optional page css' => '<style data-page-css>.band{padding:1rem}</style>' . splice_home_body(),
         'footer in footer' => '<main><p>Body</p></main><footer><footer>Nested</footer></footer>',
         'footer in address' => '<main><address><footer>Nested</footer></address></main><footer>Page</footer>',
         'two top-level footers' => '<main><p>Body</p></main><footer>One</footer><footer>Two</footer>',

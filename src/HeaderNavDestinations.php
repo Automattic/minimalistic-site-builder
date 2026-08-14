@@ -73,10 +73,120 @@ final class HeaderNavDestinations
         $rewritten = is_string($rewritten) ? $rewritten : $markup;
         [$rewritten, $classRepairs] = self::foldAnchorClassName($rewritten);
         array_push($repairs, ...$classRepairs);
+        [$rewritten, $liftRepairs] = self::liftBrandOutOfNavigation($rewritten);
+        array_push($repairs, ...$liftRepairs);
         [$rewritten, $brandRepairs] = self::ensureBrandHomeLink($rewritten, $byKey);
         array_push($repairs, ...$brandRepairs);
 
         return [$rewritten, $repairs];
+    }
+
+    /**
+     * Convert folds the designed wordmark into a navigation-link. overlayMenu
+     * then hides it with the rest of the list. Lift brand (and a nav-cta) out
+     * so the row still paints a logo when the hamburger owns the links.
+     *
+     * @return array{0:string,1:list<string>}
+     */
+    public static function liftBrandOutOfNavigation(string $markup): array
+    {
+        $repairs = [];
+        $rewritten = preg_replace_callback(
+            '/<!-- wp:navigation\s+(\{.*?\})\s+-->(.*?)<!-- \/wp:navigation -->/s',
+            static function (array $match) use (&$repairs): string {
+                $inner = $match[2];
+                if (preg_match_all(
+                    '/<!-- wp:navigation-link\s+(\{.*?\})\s+\/-->/s',
+                    $inner,
+                    $links,
+                    PREG_SET_ORDER,
+                ) === 0) {
+                    return $match[0];
+                }
+                $brand = [];
+                $cta = [];
+                $kept = [];
+                foreach ($links as $link) {
+                    try {
+                        $attrs = json_decode($link[1], true, 512, JSON_THROW_ON_ERROR);
+                    } catch (\JsonException) {
+                        $kept[] = $link[0];
+                        continue;
+                    }
+                    if (!is_array($attrs)) {
+                        $kept[] = $link[0];
+                        continue;
+                    }
+                    $class = is_string($attrs['className'] ?? null) ? $attrs['className'] : '';
+                    $label = is_string($attrs['label'] ?? null) ? $attrs['label'] : '';
+                    if (preg_match('/(^|\s)brand(\s|$)/', $class) === 1
+                        || str_contains($label, 'data-blocks-engine-richtext-marker')
+                        || str_contains($label, '<small')
+                    ) {
+                        $brand[] = $attrs;
+                        continue;
+                    }
+                    if (preg_match('/(^|\s)nav-cta(\s|$)/', $class) === 1) {
+                        $cta[] = $attrs;
+                        continue;
+                    }
+                    $kept[] = $link[0];
+                }
+                if ($brand === []) {
+                    return $match[0];
+                }
+                $prefix = self::brandParagraph($brand[0]);
+                $suffix = $cta === [] ? '' : self::ctaButtons($cta[0]);
+                $repairs[] = 'header brand lifted out of wp:navigation so overlayMenu cannot hide the wordmark';
+                return $prefix
+                    . '<!-- wp:navigation ' . $match[1] . ' -->'
+                    . implode('', $kept)
+                    . '<!-- /wp:navigation -->'
+                    . $suffix;
+            },
+            $markup,
+        );
+        return [is_string($rewritten) ? $rewritten : $markup, $repairs];
+    }
+
+    /** @param array<string,mixed> $attrs */
+    private static function brandParagraph(array $attrs): string
+    {
+        $url = is_string($attrs['url'] ?? null) && $attrs['url'] !== '' ? $attrs['url'] : '/';
+        $label = is_string($attrs['label'] ?? null) ? $attrs['label'] : '';
+        $label = html_entity_decode($label, ENT_QUOTES | ENT_HTML5);
+        $label = preg_replace(
+            '/<span[^>]*data-blocks-engine-richtext-marker[^>]*>(.*?)<\/span>/is',
+            '$1',
+            $label,
+        ) ?? $label;
+        $label = strip_tags($label, '<small>');
+        if (trim(strip_tags($label)) === '') {
+            $label = 'Home';
+        }
+        $href = htmlspecialchars($url, ENT_QUOTES);
+        return '<!-- wp:paragraph {"className":"brand"} -->'
+            . '<p class="brand"><a class="brand" href="' . $href . '">' . $label . '</a></p>'
+            . '<!-- /wp:paragraph -->';
+    }
+
+    /** @param array<string,mixed> $attrs */
+    private static function ctaButtons(array $attrs): string
+    {
+        $url = is_string($attrs['url'] ?? null) && $attrs['url'] !== '' ? $attrs['url'] : '/';
+        $label = is_string($attrs['label'] ?? null) ? $attrs['label'] : 'Menu';
+        $label = trim(html_entity_decode(strip_tags($label), ENT_QUOTES | ENT_HTML5));
+        if ($label === '') {
+            $label = 'Menu';
+        }
+        $href = htmlspecialchars($url, ENT_QUOTES);
+        $text = htmlspecialchars($label, ENT_QUOTES);
+        return '<!-- wp:buttons -->'
+            . '<div class="wp-block-buttons"><!-- wp:button {"className":"nav-cta"} -->'
+            . '<div class="wp-block-button nav-cta"><a class="wp-block-button__link wp-element-button" href="'
+            . $href . '">' . $text . '</a></div>'
+            . '<!-- /wp:button --></div>'
+            . '<!-- /wp:buttons -->';
     }
 
     /**

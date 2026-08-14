@@ -136,6 +136,8 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
         $css,
     );
     assert_contains('header nav > .wp-block-navigation {', $css);
+    assert_contains('header.site-header', $css);
+    assert_contains('.wp-block-page-list', $css);
     assert_contains('.footer-inner {', $css);
 
     // Width and constrained-layout margin resets apply to every marked card,

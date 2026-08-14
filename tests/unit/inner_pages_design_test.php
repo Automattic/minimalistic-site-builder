@@ -181,6 +181,21 @@ test('home-body accepts a nested attribution footer plus one page footer without
     }
 });
 
+test('home-body accepts an optional leading data-page-css style', function () {
+    $validate = new ReflectionMethod(InnerPagesDesignStep::class, 'isValidHomeBodyFragment');
+    $validate->setAccessible(true);
+    $plain = inner_pages_home_body();
+    $withCss = '<style data-page-css>.band{padding:2rem 0}.footer-inner{display:grid}</style>'
+        . $plain;
+    $bareStyle = '<style>.band{padding:2rem}</style>' . $plain;
+    $styleInside = '<main><style data-page-css>.x{color:red}</style><p>X</p></main><footer></footer>';
+
+    assert_true($validate->invoke(null, $plain), 'main+footer still valid');
+    assert_true($validate->invoke(null, $withCss), 'style+main+footer is the home-body page-css contract');
+    assert_true(!$validate->invoke(null, $bareStyle), 'style without data-page-css stays invalid');
+    assert_true(!$validate->invoke(null, $styleInside), 'style inside main stays invalid');
+});
+
 test('home-body footer depth change keeps top-level footer and all-depth main guards', function () {
     $validate = new ReflectionMethod(InnerPagesDesignStep::class, 'isValidHomeBodyFragment');
     $validate->setAccessible(true);

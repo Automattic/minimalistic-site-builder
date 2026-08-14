@@ -74,6 +74,31 @@ test('HeaderNavDestinations wraps a nested brand span as a home link', function 
     assert_true($repairs !== []);
 });
 
+test('HeaderNavDestinations lifts a convert-authored brand out of overlay navigation', function () {
+    $markup = '<!-- wp:group {"tagName":"header"} -->'
+        . '<header class="wp-block-group">'
+        . '<!-- wp:navigation {"overlayMenu":"always"} -->'
+        . '<!-- wp:navigation-link {"label":"\u003cspan data-blocks-engine-richtext-marker=\u0022x\u0022\u003eBiblioteca Pública\u003csmall\u003edo Paraná\u003c/small\u003e\u003c/span\u003e","url":"/","kind":"custom","className":"brand"} /-->'
+        . '<!-- wp:navigation-link {"label":"Visite","url":"/visit/","kind":"custom"} /-->'
+        . '<!-- wp:navigation-link {"label":"Carteirinha","url":"/visit/","kind":"custom","className":"nav-cta"} /-->'
+        . '<!-- /wp:navigation -->'
+        . '</header><!-- /wp:group -->';
+    [$out, $repairs] = HeaderNavDestinations::rewrite($markup, header_nav_pages());
+    assert_contains('<a class="brand" href="/">', $out);
+    assert_contains('Biblioteca Pública', $out);
+    assert_contains('<small>do Paraná</small>', $out);
+    assert_true(!str_contains($out, 'data-blocks-engine-richtext-marker'), 'convert marker is gone');
+    assert_contains('"overlayMenu":"always"', $out);
+    assert_contains('"label":"Visite"', $out);
+    assert_true(
+        preg_match('/wp:navigation-link[^>]*"className":"brand"/', $out) !== 1,
+        'brand is no longer a navigation-link',
+    );
+    assert_contains('nav-cta', $out);
+    assert_contains('Carteirinha', $out);
+    assert_true($repairs !== []);
+});
+
 test('HeaderNavDestinations leaves an already-linked brand alone', function () {
     $markup = '<a class="brand" href="/">Studio</a>';
     [$out, $repairs] = HeaderNavDestinations::rewrite($markup, header_nav_pages());

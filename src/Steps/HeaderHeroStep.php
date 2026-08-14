@@ -2360,7 +2360,8 @@ final class HeaderHeroStep implements Step
         foreach ($doc->indices() as $i) {
             $name = $doc->name($i);
             if ($name === 'navigation-link') {
-                $labels[] = (string) (($doc->attrs($i) ?? [])['label'] ?? '');
+                $raw = (string) (($doc->attrs($i) ?? [])['label'] ?? '');
+                $labels[] = trim(html_entity_decode(strip_tags($raw), ENT_QUOTES | ENT_HTML5));
             } elseif ($name === 'page-list') {
                 $hasPageList = true;
             } elseif ($name === 'site-title') {

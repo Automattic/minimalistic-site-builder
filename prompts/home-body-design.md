@@ -49,4 +49,4 @@ Every image needs meaningful `alt` text written as a usable image generation pro
 - Reuse its grid, flex, bounded content widths, responsive spacing, focus states, readable contrast, and reduced-motion behavior.
 - Keep images, navigation, tables, long words, and multi-column layouts usable on narrow screens.
 
-Return only the finished bare <main> with no attributes followed by `<footer>`.
+Return only the optional `<style data-page-css>` (if you invent layout classes), then the finished bare <main> with no attributes, then `<footer>`.

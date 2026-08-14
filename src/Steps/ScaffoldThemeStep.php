@@ -691,6 +691,30 @@ final class ScaffoldThemeStep implements Step
         header nav .wp-block-navigation__responsive-container-open {
             margin-inline-start: auto;
         }
+        header.site-header,
+        header.header-archetype--standard-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem 1.5rem;
+        }
+        header.site-header > .brand,
+        header.site-header > .wp-block-paragraph.brand {
+            margin: 0;
+            flex: 0 1 auto;
+        }
+        header.site-header > .wp-block-navigation {
+            margin-inline-start: auto;
+        }
+        .wp-block-page-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem 1.25rem;
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
         .footer-inner {
             display: grid;
             gap: 1.5rem 2rem;

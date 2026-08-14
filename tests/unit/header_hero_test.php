@@ -411,6 +411,22 @@ test('estimatedRowWidth charges a button its width plus the cluster gap', functi
     assert_eq(56 + 2 * 9 + 32, $with - $without);
 });
 
+test('estimatedRowWidth measures visible label text, not convert HTML', function () {
+    $plain = '<!-- wp:navigation-link {"label":"Biblioteca Pública"} /-->';
+    $html = '<!-- wp:navigation-link {"label":"'
+        . '<span data-blocks-engine-richtext-marker=\\"x\\">Biblioteca Pública</span>'
+        . '"} /-->';
+    $plainWidth = HeaderHeroStep::estimatedRowWidth(
+        BlockMarkup::parse(hh_header('{"layout":{"type":"constrained"}}', $plain)),
+        'Demo',
+    );
+    $htmlWidth = HeaderHeroStep::estimatedRowWidth(
+        BlockMarkup::parse(hh_header('{"layout":{"type":"constrained"}}', $html)),
+        'Demo',
+    );
+    assert_eq($plainWidth, $htmlWidth);
+});
+
 test('capCovers lowers a viewport-scale cover to 80vh and leaves the rest alone', function () {
     $result = HeaderHeroStep::capCovers(hh_cover('92'));
     assert_contains('"minHeight":80', $result['markup']);

@@ -88,6 +88,13 @@ final class DeprecationAdapters
             // discarded so fix-blocks can serialize the header.
             'anchorClassName' => true,
         ],
+        'core/page-list' => [
+            // Convert stamps this when a designed <ul> of site links becomes
+            // a page-list outside a navigation parent. The current schema
+            // has no such key; dropping it lets fix-blocks serialize the
+            // footer instead of abandoning the file.
+            'isNavigationChild' => true,
+        ],
     ];
 
     /**

@@ -275,8 +275,8 @@ final class InnerPagesDesignStep implements Step
             }
 
             $repairContract = $isHome
-                ? 'one closed bare <main> with no attributes for below-fold content, followed by one closed '
-                    . '<footer>; no header or hero'
+                ? 'an optional leading <style data-page-css> then one closed bare <main> with no attributes '
+                    . 'for below-fold content, followed by one closed <footer>; no header or hero'
                 : 'the full optional <style data-page-css> followed by one closed <main> fragment only';
             $repairPrompt = $unit['prompt']
                 . "\n\nThe previous response was empty or malformed. Repair it once. Return {$repairContract}.\n\n"
@@ -686,8 +686,9 @@ final class InnerPagesDesignStep implements Step
         }
 
         $repairPrompt = (string) $unit['prompt']
-            . "\n\nThe previous response was empty or malformed. Repair it once. Return one closed bare <main> "
-            . "with no attributes for below-fold content, followed by one closed <footer>; no header or hero.\n\n"
+            . "\n\nThe previous response was empty or malformed. Repair it once. Return an optional leading "
+            . "<style data-page-css> then one closed bare <main> with no attributes for below-fold content, "
+            . "followed by one closed <footer>; no header or hero.\n\n"
             . "<authored_fragment>\n{$authored}\n</authored_fragment>";
         try {
             $repair = ContinuationRecovery::completeToClose(
@@ -1320,9 +1321,11 @@ final class InnerPagesDesignStep implements Step
                 $opening = array_pop($stack);
                 if ($stack === []) {
                     $roots[] = [
-                        'name'  => $name,
-                        'start' => $opening['start'],
-                        'end'   => $token['end'],
+                        'name'        => $name,
+                        'start'       => $opening['start'],
+                        'open_end'    => $opening['end'],
+                        'close_start' => $token['start'],
+                        'end'         => $token['end'],
                     ];
                 }
                 continue;
@@ -1347,10 +1350,10 @@ final class InnerPagesDesignStep implements Step
             if ($name === 'h1' || self::openingTagAttribute($html, $token, 'id') === 'hero') {
                 return false;
             }
-            if ($name === 'style') {
+            if ($name === 'style' && $stack !== []) {
                 return false;
             }
-            if ($stack === [] && !in_array($name, ['main', 'footer'], true)) {
+            if ($stack === [] && !in_array($name, ['style', 'main', 'footer'], true)) {
                 return false;
             }
             if (!in_array($name, self::VOID_ELEMENTS, true)) {
@@ -1361,17 +1364,44 @@ final class InnerPagesDesignStep implements Step
         if ($stack !== [] || $mainCount !== 1 || $footerCount !== 1) {
             return false;
         }
-        if (array_column($roots, 'name') !== ['main', 'footer']) {
+        $names = array_column($roots, 'name');
+        if ($names !== ['main', 'footer'] && $names !== ['style', 'main', 'footer']) {
             return false;
         }
-        if ($roots[0]['start'] !== 0 || $roots[1]['end'] !== strlen($html)) {
+        if ($roots[0]['start'] !== 0 || $roots[count($roots) - 1]['end'] !== strlen($html)) {
+            return false;
+        }
+        $mainIndex = $names[0] === 'style' ? 1 : 0;
+        if ($names[0] === 'style' && !self::isAllowedPageCssStyle($html, $roots[0], $roots[1]['start'])) {
             return false;
         }
         return self::isHtmlWhitespace(substr(
             $html,
-            $roots[0]['end'],
-            $roots[1]['start'] - $roots[0]['end'],
+            $roots[$mainIndex]['end'],
+            $roots[$mainIndex + 1]['start'] - $roots[$mainIndex]['end'],
         ));
+    }
+
+    /**
+     * @param array{start:int,open_end:int,close_start:int,end:int} $style
+     */
+    private static function isAllowedPageCssStyle(string $html, array $style, int $nextStart): bool
+    {
+        $styleOpen = substr($html, $style['start'], $style['open_end'] - $style['start']);
+        return preg_match(
+            '/(?:^|\s)data-page-css(?:\s*=\s*(?:"[^"]*"|\'[^\']*\'|[^\s>]+))?(?=\s|\/?>)/i',
+            $styleOpen,
+        ) === 1
+            && strlen(substr(
+                $html,
+                $style['open_end'],
+                $style['close_start'] - $style['open_end'],
+            )) <= self::MAX_PAGE_CSS_BYTES
+            && self::isHtmlWhitespace(substr(
+                $html,
+                $style['end'],
+                $nextStart - $style['end'],
+            ));
     }
 
     /** @param array{type:string,start:int,end:int,name:string,closing:bool} $token */
