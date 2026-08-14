@@ -6,8 +6,10 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\InspirationBrief;
 use Automattic\SiteBuild\InspirationLogger;
 use Automattic\SiteBuild\InspirationUrls;
+use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\UrlAnalyzer;
@@ -58,13 +60,80 @@ final class InspirationStep implements Step
      */
     private const MAX_SCREENSHOTS = 6;
 
+    /** Kept under ImageInput's per-image ceiling so a big slice degrades instead of throwing. */
+    private const MAX_SCREENSHOT_BYTES = 3_700_000;
+
     private const OPEN = '--- BEGIN UNTRUSTED REFERENCE DATA ---';
     private const CLOSE = '--- END UNTRUSTED REFERENCE DATA ---';
 
     /** Exact case-sensitive prompt-role syntax removed anywhere after canonicalization. */
     private const ROLE_MARKERS = ['SYSTEM:', 'ASSISTANT:', 'USER:', '<|', '|>'];
 
-    public function __construct(private ?UrlAnalyzer $analyzer = null) {}
+    /**
+     * $llm and $renderer enable the intent filter over scanned URLs. Both
+     * absent (or either one) keeps every detected URL, which is what the
+     * host-supplied modes and most tests want.
+     */
+    public function __construct(
+        private ?UrlAnalyzer $analyzer = null,
+        private ?Llm $llm = null,
+        private ?PromptRenderer $renderer = null,
+        private ?string $model = null,
+    ) {}
+
+    /**
+     * Narrow the scanned URLs to the ones the brief actually points at as
+     * visual references.
+     *
+     * Detection is a syntax scan, so "do NOT copy example.com" yields the same
+     * URL as "like example.com". Adopting one is not free: it becomes the
+     * binding visual ground truth, is appended to every image prompt, and
+     * turns off seed variety. A cheap model reading the surrounding sentence
+     * is the only thing that can tell the two apart.
+     *
+     * Degrades to keeping every URL: a filter that cannot run must not silently
+     * discard references the author did ask for.
+     *
+     * @param  list<string> $urls
+     * @return list<string>
+     */
+    private function intended(string $brief, array $urls): array
+    {
+        if ($this->llm === null || $this->renderer === null || $urls === [] || trim($brief) === '') {
+            return $urls;
+        }
+
+        try {
+            $prompt = $this->renderer->render('inspiration-urls.md', [
+                'brief' => $brief,
+                'urls' => implode("\n", $urls),
+            ]);
+            $opts = $this->model === null ? [] : ['model' => $this->model];
+            $decoded = $this->llm->completeJson($prompt, $opts + ['log_label' => $this->id()]);
+        } catch (\Throwable $error) {
+            Narrator::write('inspiration: could not check reference intent (' . $error->getMessage() . "); using all\n");
+            return $urls;
+        }
+
+        $raw = $decoded['use'] ?? null;
+        if (!is_array($raw)) {
+            return $urls;
+        }
+        // Intersect rather than trust: the model returns strings, and only ones
+        // that came from the scan may proceed to be fetched.
+        $kept = array_values(array_filter(
+            $urls,
+            static fn (string $url): bool => in_array($url, array_map(
+                static fn (mixed $v): string => is_string($v) ? trim($v) : '',
+                $raw,
+            ), true),
+        ));
+
+        foreach (array_diff($urls, $kept) as $dropped) {
+            Narrator::write("inspiration: ignoring {$dropped} — not referenced as design inspiration\n");
+        }
+        return $kept;
+    }
 
     public function id(): string
     {
@@ -90,7 +159,7 @@ final class InspirationStep implements Step
     public function run(Project $project): void
     {
         $meta = $project->readJson('meta.json');
-        $project->writeJson(self::FILE, ['urls' => [], 'references' => []]);
+        $project->writeJsonAtomic(self::FILE, ['urls' => [], 'references' => []]);
 
         // Presence selects host-supplied mode. An explicit empty list means
         // "use no references", never "fall through and scan the prompt".
@@ -106,7 +175,7 @@ final class InspirationStep implements Step
                     'inspiration: using ' . self::countLabel($supplied['references']) . " supplied by the host\n",
                 );
             }
-            $project->writeJson(self::FILE, [
+            $project->writeJsonAtomic(self::FILE, [
                 'urls' => $supplied['urls'],
                 'references' => $supplied['references'],
             ]);
@@ -117,6 +186,16 @@ final class InspirationStep implements Step
         $urls = self::urlsFrom($meta);
         if ($urls === []) {
             return;
+        }
+
+        // Only scanned URLs go through the intent filter. A host that supplied
+        // URLs explicitly has already made this decision.
+        if (!array_key_exists('inspiration_urls', $meta)) {
+            $urls = $this->intended((string) ($meta['prompt'] ?? ''), $urls);
+            if ($urls === []) {
+                Narrator::write("inspiration: no URL in the brief asks for visual reference\n");
+                return;
+            }
         }
 
         $references = [];
@@ -168,7 +247,7 @@ final class InspirationStep implements Step
             }
         }
 
-        $project->writeJson(self::FILE, ['urls' => $urls, 'references' => $references]);
+        $project->writeJsonAtomic(self::FILE, ['urls' => $urls, 'references' => $references]);
         $project->addWarnings($this->id(), $warnings);
     }
 
@@ -182,7 +261,16 @@ final class InspirationStep implements Step
         if (!$project->exists(self::FILE)) {
             return [];
         }
-        $artifact = $project->readJson(self::FILE);
+        try {
+            $artifact = $project->readJson(self::FILE);
+        } catch (\Throwable) {
+            // A build killed mid-write can leave this unparseable. Three later
+            // steps read it, so throwing here would make every subsequent run
+            // — including --from resume — die on an artifact the user cannot
+            // repair. Inspiration is best-effort: proceed without references.
+            Narrator::write("inspiration: " . self::FILE . " is unreadable; continuing without references\n");
+            return [];
+        }
         $references = $artifact['references'] ?? [];
         return is_array($references) ? array_values(array_filter($references, 'is_array')) : [];
     }
@@ -303,15 +391,30 @@ final class InspirationStep implements Step
         }
 
         $images = [];
+        $recorded = 0;
         $depth = $perReference === [] ? 0 : max(array_map('count', $perReference));
         for ($index = 0; $index < $depth; $index++) {
             foreach ($perReference as $names) {
                 if (!isset($names[$index])) {
                     continue;
                 }
+                $recorded++;
                 $path = $dir . '/' . $names[$index];
                 $bytes = is_file($path) ? @file_get_contents($path) : false;
                 if (!is_string($bytes) || $bytes === '') {
+                    continue;
+                }
+                // ImageInput rejects an oversized image by THROWING, and it
+                // throws InvalidArgumentException, which the design steps'
+                // RuntimeException handlers do not catch. Inspiration must
+                // never abort a build, so screen it here instead of handing
+                // the transport something it will refuse.
+                if (strlen($bytes) > self::MAX_SCREENSHOT_BYTES) {
+                    Narrator::write(sprintf(
+                        "inspiration: %s is %d bytes, over the per-image limit; skipped\n",
+                        $names[$index],
+                        strlen($bytes),
+                    ));
                     continue;
                 }
                 $images[] = ['bytes' => $bytes, 'mime' => 'image/png'];
@@ -319,6 +422,17 @@ final class InspirationStep implements Step
                     return $images;
                 }
             }
+        }
+
+        // A reference that recorded screenshots but whose files have gone is the
+        // one way to lose half this feature without noticing: the brief still
+        // renders, so the build looks correct while the design steps quietly
+        // stop seeing the page. Say so rather than degrading in silence.
+        if ($images === [] && $recorded > 0) {
+            Narrator::write(
+                "inspiration: {$recorded} recorded screenshot(s) missing from {$dir}; "
+                . "design steps get the brief text only\n",
+            );
         }
         return $images;
     }

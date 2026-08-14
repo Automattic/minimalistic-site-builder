@@ -97,9 +97,13 @@ final class ImagePromptComposer
         string $style,
         string $siteContext = '',
         string $imageGrade = '',
-        string $referenceStyle = '',
         bool $transparent = false,
-        ?PromptRenderer $renderer = null
+        ?PromptRenderer $renderer = null,
+        // Appended rather than slotted next to the other strings: this is a
+        // public static on a vendored package, and inserting a parameter ahead
+        // of $transparent silently rerouted a positional `true` into this
+        // string while transparency reverted to false.
+        string $referenceStyle = '',
     ): string {
         $renderer ??= new PromptRenderer(Package::promptsDir());
 

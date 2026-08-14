@@ -124,10 +124,16 @@ final class InspirationUrls
     }
 
     /**
-     * Courtesy-filter literal and obvious local hosts before they reach wpcom.
-     * This is not the SSRF boundary: hostnames that resolve to private addresses
-     * still reach the analyze-url endpoint, whose wp_safe_remote_get call owns
-     * DNS-aware SSRF protection.
+     * Courtesy-filter literal and obvious local hosts. This is a syntax filter,
+     * NOT an SSRF boundary — it rejects IP literals and obvious local suffixes,
+     * but a public DNS name resolving to a private address passes, and a
+     * permitted URL may still redirect somewhere private.
+     *
+     * That gap used to be someone else's problem: the only analyzer posted the
+     * URL to a remote endpoint that did its own DNS-aware checking. The local
+     * analyzer fetches the URL from THIS host with a real browser, so on that
+     * path nothing downstream re-checks. Whoever runs a build for someone else
+     * owns that boundary and must add resolution-time filtering here.
      */
     private static function isPublicHost(string $host): bool
     {

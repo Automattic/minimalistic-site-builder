@@ -199,7 +199,21 @@ final class VisionUrlAnalyzer implements UrlAnalyzer
             return ['references' => [], 'failures' => $failures];
         }
 
-        $shots = $this->capture->capture($selected);
+        // ScreenshotCapture is documented as no-throw, but it is an extension
+        // point: a host's own implementation is exactly the code most likely to
+        // break that promise. Catching here keeps analyze()'s own contract and
+        // preserves per-URL failure reporting, which is lost if this escapes to
+        // the step's blanket handler.
+        try {
+            $shots = $this->capture->capture($selected);
+        } catch (\Throwable $e) {
+            $message = 'screenshot capture failed: ' . $e->getMessage();
+            foreach ($selected as $url) {
+                $failures[$url] = $this->failure($url, 'transport_error', $message);
+                $this->safeLog($url, ['stage' => 'screenshot'], [], $message);
+            }
+            return $this->result($urls, [], $failures);
+        }
 
         $requests = [];
         foreach ($selected as $url) {
@@ -232,6 +246,21 @@ final class VisionUrlAnalyzer implements UrlAnalyzer
 
         try {
             $decoded = $this->llm->completeJsonBatch($requests);
+        } catch (GeneratedJsonException $e) {
+            // One reference whose JSON is still malformed after repair must not
+            // take its siblings down: the exception carries the ones that
+            // decoded, and each failed key gets its own real reason instead of
+            // a message describing some other URL's problem.
+            $decoded = $e->partialResults;
+            foreach ($e->failures as $key => $reason) {
+                $url = (string) $key;
+                if (!isset($requests[$url])) {
+                    continue;
+                }
+                $message = 'vision response was unusable: ' . $reason;
+                $failures[$url] = $this->failure($url, 'malformed_response', $message);
+                $this->safeLog($url, ['stage' => 'vision'], [], $message);
+            }
         } catch (\Throwable $e) {
             foreach (array_keys($requests) as $url) {
                 $message = 'vision request failed: ' . $e->getMessage();
@@ -243,6 +272,11 @@ final class VisionUrlAnalyzer implements UrlAnalyzer
 
         $references = [];
         foreach (array_keys($requests) as $url) {
+            // A partial-batch failure already recorded this URL's real reason;
+            // the generic message below would replace it with a worse one.
+            if (isset($failures[$url])) {
+                continue;
+            }
             $body = $decoded[$url] ?? null;
             $requestLog = ['stage' => 'vision', 'url' => $url, 'slices' => count($requests[$url]['images'])];
             if (!is_array($body)) {

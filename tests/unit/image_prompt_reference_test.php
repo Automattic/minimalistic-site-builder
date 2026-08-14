@@ -24,16 +24,23 @@ function slice5_image_reference(): array
     ];
 }
 
-test('image composer puts reference style immediately before transparent', function () {
+test('image composer appends reference style last so positional callers stay correct', function () {
     $parameters = array_map(
         static fn (ReflectionParameter $parameter): string => $parameter->getName(),
         (new ReflectionMethod(ImagePromptComposer::class, 'compose'))->getParameters(),
     );
+
+    // compose() is a public static on a package other hosts vendor. Slotting a
+    // new string ahead of $transparent silently reroutes a positional `true`
+    // into it: the prompt gains "Visual reference character: 1." and the asset
+    // that should have been keyed out renders with a full background. New
+    // parameters go on the end.
+    assert_eq('referenceStyle', $parameters[count($parameters) - 1]);
     $reference = array_search('referenceStyle', $parameters, true);
     $transparent = array_search('transparent', $parameters, true);
     assert_true(
-        $reference !== false && $transparent !== false && $reference + 1 === $transparent,
-        'referenceStyle must immediately precede transparent',
+        $transparent !== false && $transparent < $reference,
+        'transparent must keep its original position ahead of referenceStyle',
     );
 });
 

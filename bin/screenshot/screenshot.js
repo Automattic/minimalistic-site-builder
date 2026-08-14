@@ -49,6 +49,9 @@ const { chromium } = require('playwright-core');
 /** Capture viewport height, and the height of one --slices slice. */
 const VIEWPORT_HEIGHT = 900;
 
+/** Below this, a trailing slice shows nothing worth a vision request. */
+const MIN_SLICE_HEIGHT = 120;
+
 function parseArgs(argv) {
   const positiveInteger = (raw) => {
     const value = Number(raw);
@@ -216,6 +219,7 @@ async function waitForImages(page, timeout) {
 async function capture(page, opts) {
   if (opts.slices === 1) {
     await page.screenshot({ path: opts.out, fullPage: true });
+    process.stdout.write(`${opts.out}\n`);
     return [opts.out];
   }
 
@@ -227,13 +231,18 @@ async function capture(page, opts) {
   const written = [];
   for (let i = 0; i < opts.slices; i++) {
     const y = i * VIEWPORT_HEIGHT;
-    if (i > 0 && y >= pageHeight) break;
+    // A trailing sliver is a legible-to-nobody strip that still costs a slot
+    // and vision tokens, so stop rather than emit one.
+    if (i > 0 && pageHeight - y < MIN_SLICE_HEIGHT) break;
     const out = `${stem}-${i + 1}${ext}`;
     await page.screenshot({
       path: out,
       fullPage: true,
       clip: { x: 0, y, width: opts.width, height: Math.min(VIEWPORT_HEIGHT, pageHeight - y) },
     });
+    // Announce each slice as it lands, not after the loop: a failure on a
+    // later slice would otherwise discard the ones already on disk.
+    process.stdout.write(`${out}\n`);
     written.push(out);
   }
   return written;
@@ -285,7 +294,6 @@ async function main() {
     }
 
     const written = await capture(page, opts);
-    for (const out of written) process.stdout.write(`${out}\n`);
     process.stderr.write(
       `Saved ${written.join(', ')}${opts.scroll ? '' : ' (lazy-load scroll skipped)'}\n`);
   } finally {

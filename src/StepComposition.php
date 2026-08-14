@@ -105,7 +105,14 @@ final class StepComposition
             new RefinePromptStep($llm, $renderer, $models['refine-prompt'], $temps['refine-prompt']),
             // Reference URLs in the brief become design briefs before anything
             // reads the prompt for design intent. No URLs means no cost.
-            ...($inspiration ? [new InspirationStep($urlAnalyzer)] : []),
+            // The llm/renderer pair is the intent filter: a URL merely mentioned
+            // in the brief must not become the site's binding visual reference.
+            ...($inspiration ? [new InspirationStep(
+                $urlAnalyzer,
+                $llm,
+                $renderer,
+                $models['inspiration'] ?? null,
+            )] : []),
             new SiteSpecStep($llm, $renderer, $models['site-spec'], $temps['site-spec']),
             new ApplyIdentityStep(),
             new DesignDirectionStep(
