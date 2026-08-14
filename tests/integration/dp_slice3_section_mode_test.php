@@ -142,9 +142,9 @@ test('TG5 section mode stitches whole-page HTML then real transform and assemble
     putenv('SITE_BUILD_LEGACY');
     try {
         assert_eq(
-            '7c43c61aa921b52dfb84f31f09e28ce4f62c434808a2c4b976b43c8671ae8d40',
+            'f7411abb1126b41311ae8a98f862a61d3303e8e544fd24f7d09847f2a7e29290',
             hash_file('sha256', repo_path('src/Steps/TransformSiteStep.php')),
-            'transform-site source stays frozen after transformer support CSS carry',
+            'transform-site source stays frozen after unknown support-placement warning',
         );
         assert_eq(
             'a13ab8e90cad1296319daeed773f810acdd848deaaba5fc86e472503b16a4ef8',
