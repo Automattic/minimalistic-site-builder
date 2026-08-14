@@ -247,6 +247,53 @@ test('G2 transformer author-css is excluded and repo author selector reaches fin
     transform_site_cleanup($tmp);
 });
 
+test('G6 unknown engine-support placement warns while known placements carry silently', function () {
+    $warnings = [];
+    $assets = [[
+        [
+            'kind' => 'css',
+            'source' => 'engine-support',
+            'stylesheet_placement' => 'before-author',
+            'path' => 'assets/css/engine-before.css',
+            'content' => ".engine-before{display:block}\n",
+        ],
+        [
+            'kind' => 'css',
+            'source' => 'engine-support',
+            'stylesheet_placement' => 'future-author',
+            'path' => 'assets/css/engine-future.css',
+            'content' => ".engine-future{display:block}\n",
+        ],
+        [
+            'kind' => 'css',
+            'source' => 'engine-support',
+            'stylesheet_placement' => 'after-author',
+            'path' => 'assets/css/engine-after.css',
+            'content' => ".engine-after{display:block}\n",
+        ],
+    ]];
+    $method = new ReflectionMethod(TransformSiteStep::class, 'carriedCss');
+    $method->setAccessible(true);
+    $args = [$assets, &$warnings];
+
+    $carried = $method->invokeArgs(null, $args);
+
+    assert_eq(".engine-before{display:block}\n", $carried['before-author']);
+    assert_eq(".engine-after{display:block}\n", $carried['after-author']);
+    assert_true(!str_contains(implode("\n", $carried), 'engine-future'));
+    assert_eq(1, count($warnings), 'known placements carry silently; unknown placement warns once');
+    $warning = $warnings[0];
+    foreach ([
+        'file="assets/css/engine-future.css"',
+        'block_path="transformer asset assets/css/engine-future.css"',
+        'authored_value={"stylesheet_placement":"future-author"}',
+        'delivered_value=removed',
+        'disposition=dropped',
+    ] as $context) {
+        assert_contains($context, $warning, "unknown-placement warning contains {$context}");
+    }
+});
+
 test('transform-site excludes design preview from the compiler bundle', function () {
     [$project, $llm, $tmp] = transform_site_fixture(
         '<!doctype html><html><body>'

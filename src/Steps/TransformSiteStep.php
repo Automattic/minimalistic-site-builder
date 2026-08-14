@@ -585,7 +585,7 @@ final class TransformSiteStep implements Step
             $project->writeText($heroRel, $heroMarkup);
         }
 
-        $carriedCss = self::carriedCss($assetSets);
+        $carriedCss = self::carriedCss($assetSets, $warnings);
         $project->writeText(TransformArtifacts::CARRIED_CSS_BEFORE_AUTHOR, $carriedCss['before-author']);
         $project->writeText(TransformArtifacts::CARRIED_CSS_AFTER_AUTHOR, $carriedCss['after-author']);
 
@@ -1037,9 +1037,10 @@ final class TransformSiteStep implements Step
 
     /**
      * @param list<array<int,array<string,mixed>>> $assetSets
+     * @param ?list<string> $warnings
      * @return array{'before-author':list<string>,'after-author':list<string>}
      */
-    private static function engineSupportContents(array $assetSets): array
+    private static function engineSupportContents(array $assetSets, ?array &$warnings = null): array
     {
         $contents = [
             'before-author' => [],
@@ -1061,6 +1062,9 @@ final class TransformSiteStep implements Step
                 }
                 $placement = $asset['stylesheet_placement'] ?? null;
                 if (!is_string($placement) || !array_key_exists($placement, $contents)) {
+                    if ($warnings !== null) {
+                        $warnings[] = self::unknownEngineSupportPlacementWarning($asset, $placement);
+                    }
                     continue;
                 }
                 $content = $asset['content'];
@@ -1076,15 +1080,16 @@ final class TransformSiteStep implements Step
 
     /**
      * @param list<array<int,array<string,mixed>>> $assetSets
+     * @param list<string> $warnings
      * @return array{'before-author':string,'after-author':string}
      */
-    private static function carriedCss(array $assetSets): array
+    private static function carriedCss(array $assetSets, array &$warnings): array
     {
         $carried = [
             'before-author' => '',
             'after-author' => '',
         ];
-        foreach (self::engineSupportContents($assetSets) as $placement => $contents) {
+        foreach (self::engineSupportContents($assetSets, $warnings) as $placement => $contents) {
             foreach ($contents as $content) {
                 $carried[$placement] .= $content;
                 if (!str_ends_with($content, "\n")) {
@@ -1093,6 +1098,27 @@ final class TransformSiteStep implements Step
             }
         }
         return $carried;
+    }
+
+    /** @param array<string,mixed> $asset */
+    private static function unknownEngineSupportPlacementWarning(array $asset, mixed $placement): string
+    {
+        $path = $asset['path'] ?? $asset['target_path'] ?? $asset['source_path'] ?? '(unknown transformer asset)';
+        $path = is_string($path) && trim($path) !== ''
+            ? self::oneLine($path)
+            : '(unknown transformer asset)';
+        $jsonFlags = JSON_UNESCAPED_SLASHES
+            | JSON_UNESCAPED_UNICODE
+            | JSON_INVALID_UTF8_SUBSTITUTE
+            | JSON_PARTIAL_OUTPUT_ON_ERROR;
+        $file = json_encode($path, $jsonFlags);
+        $authored = json_encode(['stylesheet_placement' => $placement], $jsonFlags);
+
+        return 'file=' . (is_string($file) ? $file : '"(unknown transformer asset)"')
+            . ' block_path="transformer asset ' . $path . '"'
+            . ' authored_value=' . (is_string($authored) ? $authored : '{"stylesheet_placement":null}')
+            . ' delivered_value=removed disposition=dropped'
+            . ' reason=unrecognized engine-support stylesheet placement';
     }
 
     /**
