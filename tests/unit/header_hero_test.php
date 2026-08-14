@@ -6,6 +6,7 @@ use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\HeaderBehavior;
 use Automattic\SiteBuild\HeroBlueprint;
+use Automattic\SiteBuild\HeroCopyBudget;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Steps\HeaderHeroStep;
 
@@ -1325,14 +1326,18 @@ test('dedupeAgainstHero removes only a duplicate button when its buttons wrapper
     );
     $action = ['label' => 'Reserve a Table', 'intent' => 'Invite a booking', 'destination' => '/visit/'];
 
-    $result = HeaderHeroStep::dedupeAgainstHero($header, '', $action);
+    $dedupe = HeaderHeroStep::dedupeAgainstHero($header, '', $action);
+    $cleanup = HeroCopyBudget::removeEmptyButtonsWrappers($dedupe['markup'], 'header');
+    $result = ['markup' => $cleanup['markup']];
 
     assert_true(!str_contains($result['markup'], 'Reserve a Table'), 'only the duplicate button is removed');
     assert_contains($survivor, $result['markup'], 'the non-button sibling survives byte-for-byte');
-    assert_contains('wp:buttons', $result['markup'], 'the still-populated wrapper survives');
-    assert_eq(1, count($result['notes']));
-    assert_eq(1, count($result['warnings']));
-    assert_contains('delivered=removed', $result['warnings'][0]);
+    assert_true(!str_contains($result['markup'], 'wp:buttons'), 'the zero-button wrapper is unwrapped');
+    assert_eq(1, count($dedupe['notes']));
+    assert_eq(1, count($dedupe['warnings']));
+    assert_contains('delivered=removed', $dedupe['warnings'][0]);
+    assert_eq(1, count($cleanup['warnings']));
+    assert_contains('delivered=unwrapped', $cleanup['warnings'][0]);
 
     $doc = BlockMarkup::parse($result['markup']);
     assert_eq([], $doc->unclosedIndices(), 'the surviving structure remains balanced');
@@ -1346,10 +1351,12 @@ test('dedupeAgainstHero removes only a duplicate button when its buttons wrapper
         count(array_filter($doc->indices(), static fn (int $i): bool => $doc->name($i) === 'paragraph')),
     );
 
-    $again = HeaderHeroStep::dedupeAgainstHero($result['markup'], '', $action);
-    assert_eq($result['markup'], $again['markup'], 'the isolated removal reaches a fixed point');
-    assert_eq([], $again['notes']);
-    assert_eq([], $again['warnings']);
+    $againDedupe = HeaderHeroStep::dedupeAgainstHero($result['markup'], '', $action);
+    $againCleanup = HeroCopyBudget::removeEmptyButtonsWrappers($againDedupe['markup'], 'header');
+    assert_eq($result['markup'], $againCleanup['markup'], 'the composed removal reaches a fixed point');
+    assert_eq([], $againDedupe['notes']);
+    assert_eq([], $againDedupe['warnings']);
+    assert_eq([], $againCleanup['warnings']);
 });
 
 test('the step repairs header and hero parts without promoting successful repairs to warnings', function () {
@@ -1649,5 +1656,209 @@ test('an unprovable clear resting state keeps the scrim veil and the delivered d
         assert_eq(HeaderBehavior::TREATMENT_GLASS, $artifact['topTreatment'], 'no proof, no clear state');
         assert_true(!str_contains($project->readText('theme/parts/header.html'), 'header-top-transparent'));
         assert_contains('"dimRatio":50', $project->readText('theme/parts/page-home--hero.html'));
+    });
+});
+
+/** Seed one contract-null hero fixture for HTML-first/legacy action reconciliation tests. */
+function hh_null_action_fixture($project, string $heroMarkup): void
+{
+    $pages = [[
+        'slug' => 'home',
+        'title' => 'Home',
+        'path' => '/',
+        'front' => true,
+        'sections' => [[
+            'slug' => 'hero',
+            'role' => 'hero',
+            'layout_archetype' => 'mixed-width-editorial',
+            'background' => 'base',
+            'primary_action' => null,
+        ]],
+    ]];
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    $project->writeJson('theme/theme.json', hh_theme_json());
+    $project->writeJson('pages.json', ['pages' => $pages]);
+    hh_above_fold($project, $pages);
+    $project->writeText(
+        'theme/parts/header.html',
+        hh_header('{"className":"header-archetype--standard-row","backgroundColor":"base","textColor":"contrast","layout":{"type":"constrained"}}'),
+    );
+    $project->writeText('theme/parts/page-home--hero.html', $heroMarkup);
+}
+
+/** Wrap authored hero children in the contract-required composition root. */
+function hh_authored_hero(string $children): string
+{
+    return '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
+        . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage hero-mobile--stack-media-first">'
+        . $children
+        . '</div><!-- /wp:group -->';
+}
+
+test('HTML-first HeaderHeroStep retains anchor-derived hero buttons when the contract action is null', function () {
+    with_project('builder_hh_html_first_actions_', function ($project) {
+        $heading = '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Build what matters</h1><!-- /wp:heading -->';
+        $primary = '<!-- wp:button {"backgroundColor":"accent"} --><div class="wp-block-button"><a class="wp-block-button__link has-accent-background-color has-background wp-element-button" href="#hero">Book a consultation</a></div><!-- /wp:button -->';
+        $secondary = '<!-- wp:button {"className":"is-style-outline"} --><div class="wp-block-button is-style-outline"><a class="wp-block-button__link wp-element-button" href="#hero">The coaching approach</a></div><!-- /wp:button -->';
+        $buttons = '<!-- wp:buttons --><div class="wp-block-buttons">' . $primary . $secondary . '</div><!-- /wp:buttons -->';
+        hh_null_action_fixture($project, hh_authored_hero($heading . $buttons));
+
+        (new HeaderHeroStep(htmlFirst: true))->run($project);
+
+        $delivered = $project->readText('theme/parts/page-home--hero.html');
+        assert_contains($primary, $delivered);
+        assert_contains($secondary, $delivered);
+        assert_contains($buttons, $delivered, 'authored action row survives byte-for-byte');
+        $document = BlockMarkup::parse($delivered);
+        assert_eq(2, count(array_filter(
+            $document->indices(),
+            static fn (int $index): bool => $document->name($index) === 'button',
+        )));
+    });
+});
+
+test('HeaderHeroStep leaves no zero-button wp:buttons wrapper after HTML-first or legacy pruning', function () {
+    foreach ([true, false] as $htmlFirst) {
+        with_project('builder_hh_empty_actions_', function ($project) use ($htmlFirst) {
+            $heading = '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Hero</h1><!-- /wp:heading -->';
+            $button = '<!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="/missing/">Missing section</a></div><!-- /wp:button -->';
+            $wrapper = '<!-- wp:buttons --><div class="wp-block-buttons">'
+                . ($htmlFirst ? '' : $button)
+                . '</div><!-- /wp:buttons -->';
+            hh_null_action_fixture($project, hh_authored_hero($heading . $wrapper));
+
+            (new HeaderHeroStep(htmlFirst: $htmlFirst))->run($project);
+
+            $delivered = $project->readText('theme/parts/page-home--hero.html');
+            assert_true(
+                preg_match('/<div class="wp-block-buttons[^"]*">\s*<\/div>/', $delivered) !== 1,
+                ($htmlFirst ? 'HTML-first' : 'legacy') . ' path must not leave an empty saved-HTML shell',
+            );
+            $document = BlockMarkup::parse($delivered);
+            foreach ($document->indices() as $index) {
+                if ($document->name($index) !== 'buttons') {
+                    continue;
+                }
+                assert_true(
+                    array_filter(
+                        $document->children($index),
+                        static fn (int $child): bool => $document->name($child) === 'button',
+                    ) !== [],
+                    ($htmlFirst ? 'HTML-first' : 'legacy') . ' path must not retain a zero-button wrapper',
+                );
+            }
+        });
+    }
+});
+
+test('legacy HeaderHeroStep still removes hero buttons for a null BIGR-800 action', function () {
+    with_project('builder_hh_bigr_800_guard_', function ($project) {
+        $sibling = '<!-- wp:paragraph --><p>Authorized sibling stays byte-for-byte.</p><!-- /wp:paragraph -->';
+        $button = '<!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="/missing/">Missing section</a></div><!-- /wp:button -->';
+        $wrapper = '<!-- wp:buttons --><div class="wp-block-buttons">' . $button . '</div><!-- /wp:buttons -->';
+        hh_null_action_fixture(
+            $project,
+            hh_authored_hero('<!-- wp:heading {"level":1} --><h1>Hero</h1><!-- /wp:heading -->' . $sibling . $wrapper),
+        );
+
+        (new HeaderHeroStep())->run($project);
+
+        $delivered = $project->readText('theme/parts/page-home--hero.html');
+        assert_contains($sibling, $delivered);
+        assert_true(!str_contains($delivered, $button));
+        assert_true(!str_contains($delivered, 'wp:buttons'));
+        $warnings = implode("\n", $project->readJson('warnings.json')['header-hero'] ?? []);
+        assert_contains('no primary action was assigned', $warnings);
+        assert_contains('delivered=removed', $warnings);
+    });
+});
+
+test('HeaderHeroStep unwraps a header action row emptied by duplicate CTA removal', function () {
+    with_project('builder_hh_header_action_cleanup_', function ($project) {
+        $action = [
+            'label' => 'Reserve a Table',
+            'intent' => 'Invite a booking',
+            'destination' => '#hero',
+        ];
+        $pages = [[
+            'slug' => 'home',
+            'title' => 'Home',
+            'path' => '/',
+            'front' => true,
+            'sections' => [[
+                'slug' => 'hero',
+                'role' => 'hero',
+                'layout_archetype' => 'mixed-width-editorial',
+                'background' => 'base',
+                'primary_action' => $action,
+            ]],
+        ]];
+        $headerButton = '<!-- wp:button --><div class="wp-block-button">'
+            . '<a class="wp-block-button__link wp-element-button" href="#hero">Reserve a Table</a>'
+            . '</div><!-- /wp:button -->';
+        $paragraph = '<!-- wp:paragraph {"fontSize":"caption"} -->'
+            . '<p class="has-caption-font-size">Walk-ins welcome after six.</p><!-- /wp:paragraph -->';
+        $nested = '<!-- wp:group {"className":"booking-note","layout":{"type":"constrained"}} -->'
+            . '<div class="wp-block-group booking-note">' . $paragraph . '</div><!-- /wp:group -->';
+        $raw = '<span class="raw-booking-note">Kitchen closes at ten.</span>';
+        $headerActions = '<!-- wp:buttons {"className":"header-actions"} -->'
+            . '<div class="wp-block-buttons header-actions">' . $headerButton . $nested . $raw . '</div>'
+            . '<!-- /wp:buttons -->';
+        $heroButton = '<!-- wp:button --><div class="wp-block-button">'
+            . '<a class="wp-block-button__link wp-element-button" href="#hero">Reserve a Table</a>'
+            . '</div><!-- /wp:button -->';
+        $heroActions = '<!-- wp:buttons --><div class="wp-block-buttons">'
+            . $heroButton . '</div><!-- /wp:buttons -->';
+
+        $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+        $project->writeJson('theme/theme.json', hh_theme_json());
+        $project->writeJson('pages.json', ['pages' => $pages]);
+        hh_above_fold($project, $pages);
+        $project->writeText(
+            'theme/parts/header.html',
+            hh_header(
+                '{"className":"header-archetype--standard-row","backgroundColor":"base","textColor":"contrast","layout":{"type":"constrained"}}',
+                $headerActions,
+            ),
+        );
+        $hero = hh_authored_hero(
+            '<!-- wp:heading {"level":1} --><h1>Join us tonight</h1><!-- /wp:heading -->' . $heroActions,
+        );
+        $project->writeText('theme/parts/page-home--hero.html', $hero);
+
+        (new HeaderHeroStep(htmlFirst: true))->run($project);
+
+        $deliveredHeader = $project->readText('theme/parts/header.html');
+        assert_true(!str_contains($deliveredHeader, $headerButton));
+        assert_true(!str_contains($deliveredHeader, 'wp:buttons'));
+        assert_true(!str_contains($deliveredHeader, 'wp-block-buttons'));
+        assert_contains($nested, $deliveredHeader);
+        assert_contains($paragraph, $deliveredHeader);
+        assert_contains($raw, $deliveredHeader);
+        assert_eq(1, substr_count($deliveredHeader, $nested));
+        assert_eq(1, substr_count($deliveredHeader, $raw));
+        assert_contains($heroButton, $project->readText('theme/parts/page-home--hero.html'));
+
+        $headerWarnings = array_values(array_filter(
+            $project->readJson('warnings.json')['header-hero'] ?? [],
+            static fn (string $warning): bool => str_contains($warning, "file='theme/parts/header.html'"),
+        ));
+        assert_eq(2, count($headerWarnings), 'button removal and wrapper unwrap warn once each');
+        assert_eq(1, count(array_filter(
+            $headerWarnings,
+            static fn (string $warning): bool => str_contains($warning, "block='wp:button[1]'"),
+        )));
+        assert_eq(1, count(array_filter(
+            $headerWarnings,
+            static fn (string $warning): bool => str_contains($warning, "block='wp:buttons[1]'")
+                && str_contains($warning, 'delivered=unwrapped'),
+        )));
+
+        $againDedupe = HeaderHeroStep::dedupeAgainstHero($deliveredHeader, $hero, $action);
+        $againCleanup = HeroCopyBudget::removeEmptyButtonsWrappers($againDedupe['markup'], 'header');
+        assert_eq($deliveredHeader, $againCleanup['markup']);
+        assert_eq([], $againDedupe['notes']);
+        assert_eq([], $againDedupe['warnings']);
+        assert_eq([], $againCleanup['warnings']);
     });
 });

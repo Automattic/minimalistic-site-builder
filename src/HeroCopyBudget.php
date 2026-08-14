@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild;
 
+use Automattic\SiteBuild\BlockSerializer\Html\HtmlFragment;
 use Automattic\SiteBuild\Units\GeneratedMarkup;
 
 /**
@@ -16,6 +17,108 @@ use Automattic\SiteBuild\Units\GeneratedMarkup;
  */
 final class HeroCopyBudget
 {
+    /**
+     * Remove or unwrap zero-action rows without applying the copy budget.
+     *
+     * Transformed HTML-first heroes are not generated against the legacy
+     * primary-action contract, but a prior repair may still leave a
+     * wp:buttons block with no direct wp:button child. A standard saved-HTML
+     * shell is removed while every child block and raw inner byte survives;
+     * an unprovable shell loses only its block-comment boundary.
+     *
+     * @return array{markup:string,warnings:list<string>}
+     */
+    public static function removeEmptyButtonsWrappers(string $markup, string $part): array
+    {
+        $warnings = [];
+        while (true) {
+            $document = BlockMarkup::parse($markup);
+            $candidate = null;
+            $ordinal = 0;
+            foreach ($document->indices() as $index) {
+                if ($document->name($index) !== 'buttons') {
+                    continue;
+                }
+                $ordinal++;
+                $end = $document->endOffset($index);
+                if ($end === null) {
+                    continue;
+                }
+                $children = $document->children($index);
+                if (array_filter(
+                    $children,
+                    static fn (int $child): bool => $document->name($child) === 'button',
+                ) !== []) {
+                    continue;
+                }
+
+                $inner = $document->innerHtml($index);
+                $unwrapped = self::unwrapSavedButtonsHtml($inner);
+                $replacement = $unwrapped ?? $inner;
+                $offset = $document->openingOffset($index);
+                $candidate = [
+                    'offset' => $offset,
+                    'end' => $end,
+                    'path' => "wp:buttons[{$ordinal}]",
+                    'markup' => substr($markup, $offset, $end - $offset),
+                    'replacement' => $replacement,
+                    'saved_wrapper_removed' => $unwrapped !== null,
+                ];
+                break;
+            }
+            if ($candidate === null) {
+                return ['markup' => $markup, 'warnings' => $warnings];
+            }
+
+            $markup = substr_replace(
+                $markup,
+                $candidate['replacement'],
+                $candidate['offset'],
+                $candidate['end'] - $candidate['offset'],
+            );
+            $warnings[] = self::zeroButtonWrapperWarning($candidate, $part);
+        }
+    }
+
+    /**
+     * Unwrap one proven closed saved-HTML div while preserving every inner
+     * and adjacent inert byte. Null means only block comments may be removed.
+     */
+    private static function unwrapSavedButtonsHtml(string $inner): ?string
+    {
+        $element = null;
+        foreach (HtmlFragment::parse($inner)->children() as $node) {
+            if ($node->isElement()) {
+                if ($element !== null) {
+                    return null;
+                }
+                $element = $node;
+                continue;
+            }
+            if ($node->isText() && trim($node->rawHtml()) !== '') {
+                return null;
+            }
+        }
+        if ($element === null || $element->tagName() !== 'div') {
+            return null;
+        }
+        $classes = preg_split('/\s+/', trim($element->attribute('class') ?? '')) ?: [];
+        if (!in_array('wp-block-buttons', $classes, true)) {
+            return null;
+        }
+        $closing = substr(
+            $inner,
+            $element->innerEndOffset(),
+            $element->endOffset() - $element->innerEndOffset(),
+        );
+        if (preg_match('~\A</\s*div\s*>\z~i', $closing) !== 1) {
+            return null;
+        }
+        return substr($inner, 0, $element->startOffset())
+            . $element->rawInnerHtml()
+            . substr($inner, $element->endOffset());
+    }
+
     /**
      * @param array{label:string,intent:string,destination:string}|null $primaryAction
      * @return array{markup:string,warnings:list<string>}
@@ -306,14 +409,7 @@ final class HeroCopyBudget
                 . 'preserving its siblings';
         }
         foreach ($buttonWrappers as $wrapper) {
-            $disposition = $wrapper['covered_button_indices'] === []
-                ? 'the generated wp:buttons container was already empty and could only render dead layout space'
-                : 'the generated wp:buttons container became empty after its excess action block(s) were removed '
-                    . 'in the same transaction and could only render dead layout space';
-            $warnings[] = "file='theme/parts/{$part}.html'; block='{$wrapper['path']}'; authored="
-                . self::value($wrapper['markup'])
-                . "; delivered=removed; disposition={$disposition}, so its complete boundary was removed while "
-                . 'sibling blocks were preserved';
+            $warnings[] = self::emptyButtonWrapperWarning($wrapper, $part);
         }
         foreach ($textWrappers as $wrapper) {
             $warnings[] = "file='theme/parts/{$part}.html'; block='{$wrapper['path']}'; authored="
@@ -327,6 +423,41 @@ final class HeroCopyBudget
             $warnings[] = $headlineWarning;
         }
         return ['markup' => $markup, 'warnings' => $warnings];
+    }
+
+    /** @param array{path:string,markup:string,covered_button_indices:list<int>} $wrapper */
+    private static function emptyButtonWrapperWarning(array $wrapper, string $part): string
+    {
+        $disposition = $wrapper['covered_button_indices'] === []
+            ? 'the generated wp:buttons container was already empty and could only render dead layout space'
+            : 'the generated wp:buttons container became empty after its excess action block(s) were removed '
+                . 'in the same transaction and could only render dead layout space';
+        return "file='theme/parts/{$part}.html'; block='{$wrapper['path']}'; authored="
+            . self::value($wrapper['markup'])
+            . "; delivered=removed; disposition={$disposition}, so its complete boundary was removed while "
+            . 'sibling blocks were preserved';
+    }
+
+    /** @param array{path:string,markup:string,replacement:string,saved_wrapper_removed:bool} $wrapper */
+    private static function zeroButtonWrapperWarning(array $wrapper, string $part): string
+    {
+        if (trim($wrapper['replacement']) === '') {
+            return "file='theme/parts/{$part}.html'; block='{$wrapper['path']}'; authored="
+                . self::value($wrapper['markup'])
+                . '; delivered=removed; disposition=the wp:buttons container had no direct core/button child '
+                . 'and no visible payload, so its complete boundary was removed as dead layout space';
+        }
+        if (!$wrapper['saved_wrapper_removed']) {
+            return "file='theme/parts/{$part}.html'; block='{$wrapper['path']}'; authored="
+                . self::value($wrapper['markup'])
+                . '; delivered=unwrapped; disposition=the wp:buttons block had no direct core/button child, '
+                . 'so its block-comment boundary was removed; its unprovable saved HTML and all raw/child '
+                . 'payload were retained byte-for-byte rather than risking content loss';
+        }
+        return "file='theme/parts/{$part}.html'; block='{$wrapper['path']}'; authored="
+            . self::value($wrapper['markup'])
+            . '; delivered=unwrapped; disposition=the wp:buttons container had no direct core/button child, '
+            . 'so its invalid wrapper boundary was removed while all raw payload and child block bytes were retained';
     }
 
     /** Report a residual missing/empty level-1 headline against delivered bytes. */
