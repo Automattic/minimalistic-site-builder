@@ -51,7 +51,7 @@
       "type": "object",
       "minProperties": 2,
       "propertyNames": {
-        "pattern": "^(?:[^/]+/)*[^/]+(?:\\.html|site\\.css)$"
+        "pattern": "^(?:[^/]+/)*(?:[^/]+\\.html|site\\.css)$"
       },
       "additionalProperties": {
         "$ref": "#/$defs/sha256"
