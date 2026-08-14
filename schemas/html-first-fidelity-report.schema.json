@@ -67,7 +67,9 @@
         "site_builder_ref",
         "site_builder_sha",
         "transformer_label",
-        "transformer_reference"
+        "transformer_reference",
+        "transformer_version",
+        "transformer_installed_tree_sha256"
       ],
       "properties": {
         "site_builder_ref": {
@@ -84,6 +86,14 @@
         "transformer_reference": {
           "type": "string",
           "minLength": 1
+        },
+        "transformer_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "transformer_installed_tree_sha256": {
+          "description": "SHA-256 of the installed control transformer relative-path-to-byte-SHA map.",
+          "$ref": "#/$defs/sha256"
         }
       }
     },
