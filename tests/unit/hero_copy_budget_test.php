@@ -458,3 +458,49 @@ test('hero copy budget removes a pre-existing empty buttons wrapper actionably',
     assert_contains('delivered=removed', $first['warnings'][0]);
     assert_eq([], HeroCopyBudget::enforce($first['markup'], null, 'page-home--hero')['warnings']);
 });
+
+test('empty hero buttons repair removes only zero-button wrappers and reaches a fixed point', function () {
+    $button = '<!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="/work/">Explore work</a></div><!-- /wp:button -->';
+    $kept = '<!-- wp:buttons --><div class="wp-block-buttons">' . $button . '</div><!-- /wp:buttons -->';
+    $empty = '<!-- wp:buttons {"className":"design-actions"} --><div class="wp-block-buttons design-actions"></div><!-- /wp:buttons -->';
+    $markup = '<!-- wp:group --><div class="wp-block-group">' . $kept . $empty . '</div><!-- /wp:group -->';
+
+    $first = HeroCopyBudget::removeEmptyButtonsWrappers($markup, 'page-home--hero');
+
+    assert_contains($kept, $first['markup']);
+    assert_true(!str_contains($first['markup'], $empty));
+    assert_eq(1, count($first['warnings']));
+    foreach (["block='wp:buttons[2]'", 'design-actions', 'delivered=removed', 'dead layout space'] as $context) {
+        assert_contains($context, $first['warnings'][0]);
+    }
+    assert_eq(
+        ['markup' => $first['markup'], 'warnings' => []],
+        HeroCopyBudget::removeEmptyButtonsWrappers($first['markup'], 'page-home--hero'),
+    );
+});
+
+test('zero-button hero wrapper unwraps non-button children without losing their bytes', function () {
+    $paragraph = '<!-- wp:paragraph {"className":"keep-me"} --><p class="keep-me">Visible raw sibling stays.</p><!-- /wp:paragraph -->';
+    $raw = '<span class="raw-note">Raw payload stays too.</span>';
+    $wrapper = '<!-- wp:buttons {"className":"wrong-container"} -->'
+        . '<div class="wp-block-buttons wrong-container">' . $paragraph . $raw . '</div>'
+        . '<!-- /wp:buttons -->';
+    $markup = '<!-- wp:group --><div class="wp-block-group">' . $wrapper . '</div><!-- /wp:group -->';
+
+    $first = HeroCopyBudget::removeEmptyButtonsWrappers($markup, 'page-home--hero');
+
+    assert_true(!str_contains($first['markup'], 'wp:buttons'));
+    assert_true(!str_contains($first['markup'], 'wp-block-buttons'));
+    assert_contains($paragraph, $first['markup']);
+    assert_contains($raw, $first['markup']);
+    assert_eq(1, substr_count($first['markup'], $paragraph));
+    assert_eq(1, substr_count($first['markup'], $raw));
+    assert_eq(1, count($first['warnings']));
+    foreach (["block='wp:buttons[1]'", 'wrong-container', 'delivered=unwrapped', 'child block bytes were retained'] as $context) {
+        assert_contains($context, $first['warnings'][0]);
+    }
+    assert_eq(
+        ['markup' => $first['markup'], 'warnings' => []],
+        HeroCopyBudget::removeEmptyButtonsWrappers($first['markup'], 'page-home--hero'),
+    );
+});

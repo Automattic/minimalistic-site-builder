@@ -10,6 +10,7 @@ use Automattic\SiteBuild\ContrastFix;
 use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\HeaderBehavior;
 use Automattic\SiteBuild\HeaderFallback;
+use Automattic\SiteBuild\HeroCopyBudget;
 use Automattic\SiteBuild\HeroFallback;
 use Automattic\SiteBuild\HeroHeadlineFit;
 use Automattic\SiteBuild\Narrator;
@@ -110,6 +111,11 @@ final class HeaderHeroStep implements Step
     private const LOGO_GAP_PX = 16;
     private const CLUSTER_GAP_PX = 32;
     private const GUTTERS_PX = 64;
+
+    public function __construct(
+        private readonly bool $htmlFirst = false,
+    ) {
+    }
 
     public function id(): string
     {
@@ -323,18 +329,21 @@ final class HeaderHeroStep implements Step
                     JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
                 );
             }
-            $actionResult = GeneratedMarkup::reconcilePrimaryAction(
-                $heroMarkup,
-                is_array($delivery['primary_action'] ?? null) ? $delivery['primary_action'] : null,
-                $heroPart,
-            );
-            $writes[$heroRel] = $actionResult['markup'];
+            $primaryAction = is_array($delivery['primary_action'] ?? null)
+                ? $delivery['primary_action']
+                : null;
+            $actionResult = $this->htmlFirst && $primaryAction === null
+                ? ['markup' => $heroMarkup, 'repairs' => [], 'warnings' => [], 'delivered' => false]
+                : GeneratedMarkup::reconcilePrimaryAction($heroMarkup, $primaryAction, $heroPart);
             foreach ($actionResult['repairs'] as $repair) {
                 $report[] = "[{$heroRel}] " . (is_string($repair)
                     ? $repair
                     : (string) json_encode($repair, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
             }
             array_push($warnings, ...$actionResult['warnings']);
+            $emptyActions = HeroCopyBudget::removeEmptyButtonsWrappers($actionResult['markup'], $heroPart);
+            $writes[$heroRel] = $emptyActions['markup'];
+            array_push($warnings, ...$emptyActions['warnings']);
 
             // With the hero copy final, guarantee its longest headline word
             // fits the measure its layout chain implies — the CSS mid-word
@@ -376,6 +385,15 @@ final class HeaderHeroStep implements Step
             array_push($warnings, ...$dedupe['warnings']);
         }
 
+        // Duplicate-CTA isolation may leave a wp:buttons block containing
+        // only unrelated header siblings. Unwrap that invalid action row
+        // without losing any surviving child or raw bytes.
+        $emptyHeaderActions = HeroCopyBudget::removeEmptyButtonsWrappers(
+            $writes[$headerRel],
+            'header',
+        );
+        $writes[$headerRel] = $emptyHeaderActions['markup'];
+        array_push($warnings, ...$emptyHeaderActions['warnings']);
 
         $partBytes = self::partBytes($project, $writes);
         $facts = $withOverlayEvidence(AboveFoldPartFacts::inspect($pages, $partBytes, $delivery));
@@ -482,8 +500,10 @@ final class HeaderHeroStep implements Step
                     $delivery['primary_action'],
                     $heroPart,
                 );
-                $writes[$heroRel] = $removedAction['markup'];
                 array_push($warnings, ...$removedAction['warnings']);
+                $emptyActions = HeroCopyBudget::removeEmptyButtonsWrappers($removedAction['markup'], $heroPart);
+                $writes[$heroRel] = $emptyActions['markup'];
+                array_push($warnings, ...$emptyActions['warnings']);
             }
             $pages = self::withoutFrontPrimaryAction($pages, $warnings);
         }

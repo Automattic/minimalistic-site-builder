@@ -157,7 +157,7 @@ final class StepComposition
             new SectionLayoutStep(),
             new CollectImagesStep(htmlFirst: true),
             new NormalizeLayoutStep(htmlFirst: true),
-            new HeaderHeroStep(),
+            new HeaderHeroStep(htmlFirst: true),
             new ContrastFixStep(htmlFirst: true),
             new MotionSanityStep(htmlFirst: true),
             new FixBlocksStep($blockFixer, htmlFirst: true),

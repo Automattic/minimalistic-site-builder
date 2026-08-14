@@ -398,6 +398,16 @@ test('HTML-first default builds and validates every single-page artifact', funct
         assert_eq(1, substr_count($style, 'Wrap at spaces only'), 'the wrap policy is merged exactly once');
         assert_true(!str_contains($style, 'break-all'), 'no mid-word break rule ships');
 
+        $emptyButtonShellCount = 0;
+        foreach (glob($project->path('plugin/pages') . '/*.html') ?: [] as $pagePath) {
+            $pageMarkup = $project->readText('plugin/pages/' . basename($pagePath));
+            $matchCount = preg_match_all('/<div class="wp-block-buttons[^"]*"><\/div>/', $pageMarkup);
+            assert_true($matchCount !== false, 'empty wp:buttons shell count regex is valid');
+            $emptyButtonShellCount += $matchCount;
+        }
+        assert_eq(0, $emptyButtonShellCount, 'integration output contains no empty wp:buttons shells');
+        echo "G4 count: {$emptyButtonShellCount}\n";
+
         assert_eq([], ThemeValidator::validate($project));
         assert_eq([], ThemeValidator::layoutWarnings($project, true));
         assert_eq("Final theme validation passed.\n", $project->readText('logs/validate-theme.log'));
