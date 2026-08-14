@@ -8,6 +8,11 @@ You are a senior web designer and front-end author. Design one finished inner pa
 
 {{page_spec}}
 
+## Site pages
+
+SITE PAGES (the whole site, for internal links):
+{{site_pages}}
+
 ## Established site CSS
 
 {{site_css}}
@@ -26,6 +31,7 @@ Return one `<main>` fragment and nothing else. Return only the fragment: no prea
 - The `<main>` must contain only this page's content and have one clear `h1`.
 - Prefer established site classes from the site CSS. Page-specific CSS is a last resort and must stay minimal and well under 16 KB.
 - When page-specific CSS is essential, put exactly one `<style data-page-css>` immediately before `<main>`. Never put a style element inside `<main>`.
+- LINKS: when a button or link leads to another page of THIS site, use that page's path from SITE PAGES verbatim (e.g. `href="/menu/"`) — never a path that isn't in the list. A deep link to another page includes that owning page's path (e.g. `href="/page/#anchor"`). A bare `href="#anchor"` is valid only when that exact section ID exists in this page's own content. Do not link the page to itself. An external link uses an exact URL supplied by the SITE SPEC; when none was supplied, omit the link or render its label as plain text. NEVER emit `href="#"`.
 
 ## Supported HTML slice
 

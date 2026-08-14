@@ -242,6 +242,43 @@ test('design-preview makes one configured text call and writes exact preview and
     design_preview_cleanup($wiredTmp);
 });
 
+test('G4 design-preview renders a labelled SITE PAGES list and shared-header link contract', function () {
+    [$project, $llm, $tmp] = design_preview_fixture();
+    $project->writeJson('siteSpec.json', [
+        'name' => 'Hearth & Crumb',
+        'description' => 'Neighborhood bread and pastry studio',
+        'pages' => [
+            [
+                'slug' => 'home',
+                'title' => 'Home',
+                'path' => '/',
+                'front' => true,
+                'purpose' => 'Welcome visitors',
+            ],
+            [
+                'slug' => 'classes',
+                'title' => 'Classes',
+                'path' => '/classes/',
+                'front' => false,
+                'purpose' => 'Explain bread classes',
+            ],
+        ],
+    ]);
+    $llm->queueText(design_preview_document());
+
+    design_preview_run($project, $llm);
+
+    $prompt = $llm->calls[0]['prompt'];
+    assert_contains('SITE PAGES (the whole site', $prompt);
+    assert_contains('- "Home" — / (front page): Welcome visitors', $prompt);
+    assert_contains('- "Classes" — /classes/: Explain bread classes', $prompt);
+    assert_contains('page links use the SITE PAGES paths verbatim', $prompt);
+    assert_contains('href="/#anchor"', $prompt);
+    assert_contains('NEVER a bare `href="#anchor"`', $prompt);
+    assert_contains('No `href="#"` placeholders', $prompt);
+    design_preview_cleanup($tmp);
+});
+
 test('design-preview freezes the first-fold shape and prompt contract', function () {
     [$project, $llm, $tmp] = design_preview_fixture();
     $llm->queueText(design_preview_document());

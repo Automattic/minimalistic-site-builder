@@ -8,6 +8,11 @@ You are a senior web designer and front-end author. Design the finished homepage
 
 {{page_spec}}
 
+## Site pages
+
+SITE PAGES (the whole site — shared footer navigation uses these exact paths):
+{{site_pages}}
+
 ## Established site CSS
 
 {{site_css}}
@@ -29,6 +34,8 @@ Return one `<main>` fragment for content below the fold followed immediately by 
 - Return a bare <main> with no attributes. Put all classes and IDs on its child sections.
 - Do not add a second `h1`; the design preview owns the homepage heading.
 - Prefer established site classes from the site CSS and minimize new page-specific classes. Do not emit a `<style>` element.
+- Inside `<main>`, when a button or link leads to another page of THIS site, use that page's path from SITE PAGES verbatim (e.g. `href="/menu/"`) — never a path that isn't in the list. A deep link to another page includes that owning page's path (e.g. `href="/page/#anchor"`). A bare `href="#anchor"` is valid only when that exact section ID exists in the homepage `<main>`. Do not link the page to itself. An external link uses an exact URL supplied by the SITE SPEC; when none was supplied, omit the link or render its label as plain text. NEVER emit `href="#"`.
+- The footer renders on EVERY page, so each link must resolve everywhere: page links use the SITE PAGES paths verbatim, and a link to a homepage section is root-relative — `href="/#anchor"`, NEVER a bare `href="#anchor"`, which is dead on every page except the homepage itself. No `href="#"` placeholders. External links use only an exact URL present in the SITE SPEC; otherwise omit the link or render its label as plain text.
 
 ## Supported HTML slice
 
