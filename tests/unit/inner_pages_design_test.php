@@ -139,6 +139,90 @@ test('inner-pages-design batches home body and every inner page against exact fo
     inner_pages_cleanup($tmp);
 });
 
+test('G4 page and section design prompts render labelled SITE PAGES lists and link contracts', function () {
+    $pages = [
+        [
+            'slug' => 'home',
+            'title' => 'Home',
+            'path' => '/',
+            'front' => true,
+            'purpose' => 'Welcome visitors',
+        ],
+        [
+            'slug' => 'about',
+            'title' => 'About',
+            'path' => '/about/',
+            'front' => false,
+            'purpose' => 'Explain the studio',
+        ],
+    ];
+    [$project, $llm, $tmp] = inner_pages_fixture($pages);
+    $llm->queueText(inner_pages_home_body());
+    $llm->queueText('<main><h1>About</h1></main>');
+
+    inner_pages_run($project, $llm);
+
+    foreach ([$llm->calls[0]['prompt'], $llm->calls[1]['prompt']] as $prompt) {
+        assert_contains('SITE PAGES (the whole site', $prompt);
+        assert_contains('- "Home" — / (front page): Welcome visitors', $prompt);
+        assert_contains('- "About" — /about/: Explain the studio', $prompt);
+    }
+    assert_contains('page links use the SITE PAGES paths verbatim', $llm->calls[0]['prompt']);
+    assert_contains('href="/#anchor"', $llm->calls[0]['prompt']);
+    assert_contains('NEVER a bare `href="#anchor"`', $llm->calls[0]['prompt']);
+    assert_contains('No `href="#"` placeholders', $llm->calls[0]['prompt']);
+    assert_contains('Inside `<main>`', $llm->calls[0]['prompt']);
+    assert_contains('path from SITE PAGES verbatim', $llm->calls[0]['prompt']);
+    assert_contains('href="/page/#anchor"', $llm->calls[0]['prompt']);
+    assert_contains('exists in the homepage `<main>`', $llm->calls[0]['prompt']);
+    assert_contains("path from SITE PAGES verbatim", $llm->calls[1]['prompt']);
+    assert_contains('href="/page/#anchor"', $llm->calls[1]['prompt']);
+    assert_contains('bare `href="#anchor"`', $llm->calls[1]['prompt']);
+    assert_contains('NEVER emit `href="#"`', $llm->calls[1]['prompt']);
+    inner_pages_cleanup($tmp);
+
+    [$sectionProject, $sectionLlm, $sectionTmp] = inner_pages_fixture($pages);
+    $sectionProject->writeJson('meta.json', ['prompt' => 'A neighborhood design studio']);
+    seed_test_design_direction($sectionProject);
+    $sectionLlm->queueJson(['sections' => [[
+        'slug' => 'about-story',
+        'title' => 'Our story',
+        'type' => 'content',
+        'purpose' => 'Tell the studio story',
+        'content_notes' => 'Ground the story in the site spec.',
+        'layout_archetype' => 'centered-stack',
+        'background' => 'base',
+        'vertical_density' => 'standard',
+        'handoff' => 'Close with the next step.',
+    ]]]);
+    $sectionLlm->queueText(inner_pages_home_body());
+    $sectionLlm->queueText('<section id="about-story"><h1>Our story</h1></section>');
+    $previousMode = getenv('SITE_BUILD_GEN_UNIT');
+    putenv('SITE_BUILD_GEN_UNIT=section');
+    try {
+        inner_pages_run($sectionProject, $sectionLlm);
+    } finally {
+        $previousMode === false
+            ? putenv('SITE_BUILD_GEN_UNIT')
+            : putenv('SITE_BUILD_GEN_UNIT=' . $previousMode);
+    }
+
+    $generationCalls = array_values(array_filter(
+        $sectionLlm->calls,
+        static fn (array $call): bool => !isset($call['opts']['json_schema']),
+    ));
+    assert_eq(2, count($generationCalls), 'home body plus one inner section');
+    $sectionPrompt = $generationCalls[1]['prompt'];
+    assert_contains('SITE PAGES (the whole site', $sectionPrompt);
+    assert_contains('- "Home" — / (front page): Welcome visitors', $sectionPrompt);
+    assert_contains('- "About" — /about/: Explain the studio', $sectionPrompt);
+    assert_contains('path from SITE PAGES verbatim', $sectionPrompt);
+    assert_contains('href="/page/#anchor"', $sectionPrompt);
+    assert_contains('bare `href="#anchor"`', $sectionPrompt);
+    assert_contains('NEVER emit `href="#"`', $sectionPrompt);
+    inner_pages_cleanup($sectionTmp);
+});
+
 test('inner-pages-design with no inner pages still generates one home body in one batch', function () {
     [$project, $llm, $tmp] = inner_pages_fixture([
         inner_page('home', 'Home', 'One-page site'),

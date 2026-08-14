@@ -17,7 +17,7 @@ test('SiteBuilder pipeline exposes the default step order and stop ids', functio
 
     assert_eq([
         'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
-        'design-preview', 'theme-json', 'inner-pages-design', 'splice-home-design', 'assign-image-sources', 'transform-site', 'section-rhythm', 'section-layout',
+        'design-preview', 'theme-json', 'inner-pages-design', 'splice-home-design', 'assign-image-sources', 'transform-site', 'resolve-nav-links', 'section-rhythm', 'section-layout',
         // normalize-layout MUST precede contrast-fix and motion-sanity: the
         // attribute repair can activate previously-inert color/motion
         // attributes, which those policy passes must be able to see.

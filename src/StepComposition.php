@@ -23,6 +23,7 @@ use Automattic\SiteBuild\Steps\NormalizeLayoutStep;
 use Automattic\SiteBuild\Steps\PagePlanStep;
 use Automattic\SiteBuild\Steps\PageStylesStep;
 use Automattic\SiteBuild\Steps\RefinePromptStep;
+use Automattic\SiteBuild\Steps\ResolveNavLinksStep;
 use Automattic\SiteBuild\Steps\ScaffoldPluginStep;
 use Automattic\SiteBuild\Steps\ScaffoldThemeStep;
 use Automattic\SiteBuild\Steps\SectionCopyDedupeStep;
@@ -153,6 +154,11 @@ final class StepComposition
                     $temps['sections'],
                 ),
             ),
+            // The real page list and transformed shared header first coexist
+            // here. Resolve navigation before later passes re-serialize or
+            // assemble page parts, so every downstream consumer sees final
+            // rooted destinations.
+            new ResolveNavLinksStep(),
             new SectionRhythmStep(),
             new SectionLayoutStep(),
             new CollectImagesStep(htmlFirst: true),
