@@ -8,6 +8,7 @@ use Automattic\SiteBuild\Narrator;
  * Re-run complete HTML-first control-versus-treatment fidelity harness.
  *
  *   php bin/html-first-fidelity.php
+ *   php bin/html-first-fidelity.php --audit-mark-metric
  *
  * Holds /tmp/msb-gate.lock, creates a detached origin/trunk control worktree,
  * copies six read-only source projects to both sides, resumes deterministic
@@ -19,7 +20,8 @@ require_once __DIR__ . '/../src/bootstrap.php';
 require_once __DIR__ . '/html-first-fidelity/Harness.php';
 
 try {
-    $exit = (new HtmlFirstFidelityRunner(dirname(__DIR__)))->run();
+    $auditMarkMetric = HtmlFirstFidelityRunner::auditMarkMetricRequested(array_slice($argv, 1));
+    $exit = (new HtmlFirstFidelityRunner(dirname(__DIR__), auditMarkMetric: $auditMarkMetric))->run();
 } catch (Throwable $error) {
     Narrator::write("HTML-first fidelity cleanup failed: {$error->getMessage()}\n");
     $exit = 1;

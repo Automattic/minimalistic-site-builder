@@ -14,6 +14,8 @@ use Throwable;
 final class HtmlFirstFidelityReport
 {
     public const RERUN_COMMAND = 'php bin/html-first-fidelity.php';
+    public const MARK_METRIC_LEGACY_DEFINITION = 'Count <mark> start tags whose inline style has no background-color declaration.';
+    public const MARK_METRIC_CORRECTED_DEFINITION = 'Count <mark> start tags whose inline style has no background-color declaration unless the tag carries --blocks-engine-richtext-marker:<token> and matching engine marker CSS declares background-color.';
 
     /** @var list<string> */
     public const SLUGS = [
@@ -74,6 +76,31 @@ final class HtmlFirstFidelityReport
     /** @return array<string,mixed> */
     public static function measureProject(string $projectPath): array
     {
+        [$markup, $css] = self::projectMarkupAndCss($projectPath);
+
+        $themeJsonPath = $projectPath . '/theme/theme.json';
+        $themeJsonBytes = file_get_contents($themeJsonPath);
+        if (!is_string($themeJsonBytes)) {
+            throw new RuntimeException("Could not read theme.json: {$themeJsonPath}");
+        }
+        $themeJson = json_decode($themeJsonBytes, true, 512, JSON_THROW_ON_ERROR);
+        if (!is_array($themeJson)) {
+            throw new RuntimeException("theme.json is not an object: {$themeJsonPath}");
+        }
+
+        return self::measureBytes($markup, $css, $themeJson);
+    }
+
+    /** @return array{legacy:int,corrected:int} */
+    public static function measureMarkMetricProject(string $projectPath): array
+    {
+        [$markup, $css] = self::projectMarkupAndCss($projectPath);
+        return self::markMetricCounts($markup, $css);
+    }
+
+    /** @return array{0:string,1:string} */
+    private static function projectMarkupAndCss(string $projectPath): array
+    {
         $pageFiles = glob($projectPath . '/plugin/pages/*.html') ?: [];
         sort($pageFiles, SORT_STRING);
         if ($pageFiles === []) {
@@ -98,32 +125,14 @@ final class HtmlFirstFidelityReport
             }
             $css .= $bytes . "\n";
         }
-
-        $themeJsonPath = $projectPath . '/theme/theme.json';
-        $themeJsonBytes = file_get_contents($themeJsonPath);
-        if (!is_string($themeJsonBytes)) {
-            throw new RuntimeException("Could not read theme.json: {$themeJsonPath}");
-        }
-        $themeJson = json_decode($themeJsonBytes, true, 512, JSON_THROW_ON_ERROR);
-        if (!is_array($themeJson)) {
-            throw new RuntimeException("theme.json is not an object: {$themeJsonPath}");
-        }
-
-        return self::measureBytes($markup, $css, $themeJson);
+        return [$markup, $css];
     }
 
     /** @param array<string,mixed> $themeJson @return array<string,mixed> */
     public static function measureBytes(string $markup, string $css, array $themeJson): array
     {
         preg_match_all('~<div class="wp-block-buttons[^"]*"></div>~', $markup, $emptyButtons);
-        preg_match_all('~<mark\b[^>]*>~i', $markup, $markTags);
-        $marksWithoutBackground = 0;
-        foreach ($markTags[0] as $tag) {
-            if (preg_match('~\bstyle\s*=\s*(["\'])(.*?)\1~is', $tag, $style) !== 1
-                || preg_match('~(?:^|;)\s*background-color\s*:~i', $style[2]) !== 1) {
-                $marksWithoutBackground++;
-            }
-        }
+        $markMetric = self::markMetricCounts($markup, $css);
 
         $layout = $themeJson['settings']['layout'] ?? [];
         if (!is_array($layout)) {
@@ -133,15 +142,152 @@ final class HtmlFirstFidelityReport
 
         return [
             'empty_buttons' => count($emptyButtons[0]),
-            'marks_without_background_color' => $marksWithoutBackground,
+            'marks_without_background_color' => $markMetric['corrected'],
             'align_wide' => substr_count($markup, '"align":"wide"'),
             'layout' => [
                 'content_size' => self::layoutValue($layout['contentSize'] ?? null),
                 'wide_size' => self::layoutValue($layout['wideSize'] ?? null),
             ],
-            'unmatched_engine_markers' => $unmatched,
+            'unmatched_engine_markers' => $unmatched === [] ? (object) [] : $unmatched,
             'unmatched_engine_marker_occurrences' => array_sum($unmatched),
         ];
+    }
+
+    /** @return array{legacy:int,corrected:int} */
+    public static function markMetricCounts(string $markup, string $css): array
+    {
+        preg_match_all('~<mark\b[^>]*>~i', $markup, $markTags);
+        $legacy = 0;
+        $corrected = 0;
+        foreach ($markTags[0] as $tag) {
+            $style = self::inlineStyle($tag);
+            if ($style !== null && self::declarationsHaveBackgroundColor($style)) {
+                continue;
+            }
+            $legacy++;
+            $marker = $style === null ? null : self::richTextMarkerFromStyle($style);
+            if ($marker === null || !self::cssHasMarkBackgroundRule($css, $marker)) {
+                $corrected++;
+            }
+        }
+        return ['legacy' => $legacy, 'corrected' => $corrected];
+    }
+
+    public static function cssHasMarkBackgroundRule(string $css, string $marker): bool
+    {
+        foreach (self::cssRules($css) as $rule) {
+            if (!self::declarationsHaveBackgroundColor($rule['declarations'])) {
+                continue;
+            }
+            $broad = '~^\s*:where\(\s*mark\s*\)\s*\[\s*style\s*\*=\s*(["\'])'
+                . '--blocks-engine-richtext-marker:\1\s*\]\s*$~i';
+            $specific = '~^\s*:where\(\s*mark\s*\[\s*style\s*\*=\s*(["\'])'
+                . '--blocks-engine-richtext-marker:' . preg_quote($marker, '~') . '\1\s*\]'
+                . '(?:\s*,\s*span\s*\[\s*data-blocks-engine-richtext-marker\s*=\s*(["\'])'
+                . preg_quote($marker, '~') . '\2\s*\])?\s*\)'
+                . '(?::not\(\s*(?:blocks-engine-specificity-[a-f0-9]+-\d+'
+                . '|\.blocks-engine-specificity-class-[a-f0-9]+-\d+'
+                . '|#blocks-engine-specificity-id-[a-f0-9]+-\d+)\s*\))*'
+                . '(?::(?:hover|focus|active|visited))*\s*$~i';
+            foreach (self::splitCssSelectorList($rule['selector']) as $selector) {
+                if (preg_match($broad, $selector) === 1 || preg_match($specific, $selector) === 1) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /** @return list<string> */
+    private static function splitCssSelectorList(string $selectorList): array
+    {
+        $selectors = [];
+        $buffer = '';
+        $quote = null;
+        $escaped = false;
+        $parentheses = 0;
+        $brackets = 0;
+        $length = strlen($selectorList);
+        for ($i = 0; $i < $length; $i++) {
+            $char = $selectorList[$i];
+            if ($escaped) {
+                $buffer .= $char;
+                $escaped = false;
+                continue;
+            }
+            if ($char === '\\') {
+                $buffer .= $char;
+                $escaped = true;
+                continue;
+            }
+            if ($quote !== null) {
+                $buffer .= $char;
+                if ($char === $quote) {
+                    $quote = null;
+                }
+                continue;
+            }
+            if ($char === '"' || $char === "'") {
+                $quote = $char;
+                $buffer .= $char;
+                continue;
+            }
+            if ($char === '(') {
+                $parentheses++;
+            } elseif ($char === ')') {
+                $parentheses = max(0, $parentheses - 1);
+            } elseif ($char === '[') {
+                $brackets++;
+            } elseif ($char === ']') {
+                $brackets = max(0, $brackets - 1);
+            } elseif ($char === ',' && $parentheses === 0 && $brackets === 0) {
+                $selector = trim($buffer);
+                if ($selector !== '') {
+                    $selectors[] = $selector;
+                }
+                $buffer = '';
+                continue;
+            }
+            $buffer .= $char;
+        }
+        $selector = trim($buffer);
+        if ($selector !== '') {
+            $selectors[] = $selector;
+        }
+        return $selectors;
+    }
+
+    /**
+     * @param list<array{slug:string,control:array{legacy:int,corrected:int},treatment:array{legacy:int,corrected:int}}> $rows
+     * @return array<string,mixed>
+     */
+    public static function markMetricTransitionAudit(array $rows): array
+    {
+        $totals = [
+            'control' => ['legacy' => 0, 'corrected' => 0],
+            'treatment' => ['legacy' => 0, 'corrected' => 0],
+        ];
+        foreach ($rows as $row) {
+            foreach (['control', 'treatment'] as $side) {
+                $totals[$side]['legacy'] += $row[$side]['legacy'];
+                $totals[$side]['corrected'] += $row[$side]['corrected'];
+            }
+        }
+        return [
+            'legacy_definition' => self::MARK_METRIC_LEGACY_DEFINITION,
+            'corrected_definition' => self::MARK_METRIC_CORRECTED_DEFINITION,
+            'projects' => $rows,
+            'totals' => $totals,
+        ];
+    }
+
+    /** @param array<string,mixed> $report @param list<array<string,mixed>> $rows @return array<string,mixed> */
+    public static function withMarkMetricTransitionAudit(array $report, array $rows, bool $enabled): array
+    {
+        if ($enabled) {
+            $report['mark_metric_transition_audit'] = self::markMetricTransitionAudit($rows);
+        }
+        return $report;
     }
 
     /** @return array{value:string|int|float|null,unitless:bool} */
@@ -253,15 +399,88 @@ final class HtmlFirstFidelityReport
         return $counts;
     }
 
+    private static function inlineStyle(string $tag): ?string
+    {
+        if (preg_match('~\bstyle\s*=\s*(["\'])(.*?)\1~is', $tag, $style) !== 1) {
+            return null;
+        }
+        return $style[2];
+    }
+
+    private static function richTextMarkerFromStyle(string $style): ?string
+    {
+        if (preg_match(
+            '~(?:^|;)\s*--blocks-engine-richtext-marker\s*:\s*(blocks-engine-richtext-[a-zA-Z0-9_-]+)~i',
+            $style,
+            $marker,
+        ) !== 1) {
+            return null;
+        }
+        return $marker[1];
+    }
+
+    private static function declarationsHaveBackgroundColor(string $declarations): bool
+    {
+        $withoutComments = self::stripCssComments($declarations);
+        $withoutStrings = preg_replace('~(["\'])(?:\\\\.|(?!\1).)*\1~s', '', $withoutComments) ?? $withoutComments;
+        return preg_match('~(?:^|;)\s*background-color\s*:~i', $withoutStrings) === 1;
+    }
+
+    private static function stripCssComments(string $css): string
+    {
+        $result = '';
+        $quote = null;
+        $escaped = false;
+        $length = strlen($css);
+        for ($i = 0; $i < $length; $i++) {
+            $char = $css[$i];
+            if ($quote !== null) {
+                $result .= $char;
+                if ($escaped) {
+                    $escaped = false;
+                } elseif ($char === '\\') {
+                    $escaped = true;
+                } elseif ($char === $quote) {
+                    $quote = null;
+                }
+                continue;
+            }
+            if ($char === '"' || $char === "'") {
+                $quote = $char;
+                $result .= $char;
+                continue;
+            }
+            if ($char === '/' && $i + 1 < $length && $css[$i + 1] === '*') {
+                $i += 2;
+                while ($i < $length && !($css[$i] === '*' && $i + 1 < $length && $css[$i + 1] === '/')) {
+                    $i++;
+                }
+                if ($i < $length) {
+                    $i++;
+                }
+                continue;
+            }
+            $result .= $char;
+        }
+        return $result;
+    }
+
     /** @return list<string> selector text before each ordinary CSS rule */
     private static function cssSelectorPreludes(string $css): array
     {
-        $css = preg_replace('~/\*.*?\*/~s', '', $css) ?? $css;
-        $preludes = [];
+        return array_column(self::cssRules($css), 'selector');
+    }
+
+    /** @return list<array{selector:string,declarations:string}> */
+    private static function cssRules(string $css): array
+    {
+        $css = self::stripCssComments($css);
+        $rules = [];
         $buffer = '';
         $quote = null;
         $escaped = false;
-        $depth = 0;
+        /** @var list<array{ordinary:bool,selector:string,start:int}> $stack */
+        $stack = [];
         $length = strlen($css);
 
         for ($i = 0; $i < $length; $i++) {
@@ -284,25 +503,38 @@ final class HtmlFirstFidelityReport
             }
             if ($char === '{') {
                 $prelude = trim($buffer);
-                if ($prelude !== '' && $prelude[0] !== '@') {
-                    $preludes[] = $prelude;
-                }
-                $depth++;
+                $ordinary = $prelude !== '' && $prelude[0] !== '@';
+                $stack[] = ['ordinary' => $ordinary, 'selector' => $prelude, 'start' => $i + 1];
                 $buffer = '';
                 continue;
             }
             if ($char === '}') {
-                $depth = max(0, $depth - 1);
+                $opened = array_pop($stack);
+                if (is_array($opened) && $opened['ordinary']) {
+                    $rules[] = [
+                        'selector' => $opened['selector'],
+                        'declarations' => substr($css, $opened['start'], $i - $opened['start']),
+                    ];
+                }
                 $buffer = '';
                 continue;
             }
-            if ($char === ';' && $depth === 0) {
-                $buffer = '';
-                continue;
+            if ($char === ';') {
+                $insideOrdinaryRule = false;
+                foreach ($stack as $opened) {
+                    if ($opened['ordinary']) {
+                        $insideOrdinaryRule = true;
+                        break;
+                    }
+                }
+                if (!$insideOrdinaryRule) {
+                    $buffer = '';
+                    continue;
+                }
             }
             $buffer .= $char;
         }
-        return $preludes;
+        return $rules;
     }
 
     /** @param array<string,mixed> $metrics @return array<string,int> */
@@ -853,9 +1085,10 @@ final class HtmlFirstFidelityRunner
     private const GALLERY = '/Users/matt/git/site-builder-eval/eval/html-first-fidelity';
     private const MUTEX = '/tmp/msb-gate.lock';
     private const CONTROL_TRANSFORMER = '0.4.15';
-    public const TREATMENT_TRANSFORMER_COMMIT = '5d1b8bf549000334778648c1dc7ec543d640c963';
-    public const TREATMENT_TRANSFORMER_TREE_SHA256 = '9c69c95f77b1edf6ec9b3b68b78d35045f27cb6e2f1f6ac9064e3fbf98313290';
-    public const TREATMENT_TRANSFORMER_REFERENCE = '/Users/matt/projects/a8c/blocks-engine-wt-support-css/php-transformer@5d1b8bf549000334778648c1dc7ec543d640c963#tree-sha256=9c69c95f77b1edf6ec9b3b68b78d35045f27cb6e2f1f6ac9064e3fbf98313290';
+    public const TREATMENT_TRANSFORMER_COMMIT = '920b16c417b8d6bc8edfb38a13967348b0f1b841';
+    public const TREATMENT_TRANSFORMER_TREE_SHA256 = 'c24e3394dcf1681347803c1f4c1b117092b3c4e9b9bc16244b5bec56767ceba9';
+    public const TREATMENT_TRANSFORMER_VERSION = '0.4.17';
+    public const TREATMENT_TRANSFORMER_REFERENCE = '/Users/matt/projects/a8c/blocks-engine-wt-support-css/php-transformer@920b16c417b8d6bc8edfb38a13967348b0f1b841#tree-sha256=c24e3394dcf1681347803c1f4c1b117092b3c4e9b9bc16244b5bec56767ceba9';
 
     private string $repo;
     private string $tempRoot = '';
@@ -871,9 +1104,16 @@ final class HtmlFirstFidelityRunner
     private array $usedPorts = [];
     /** @var array{transformer_label:string,transformer_reference:string} */
     private array $overlayProvenance = [];
+    /** @var list<array{slug:string,control:array{legacy:int,corrected:int},treatment:array{legacy:int,corrected:int}}> */
+    private array $markMetricAuditRows = [];
+    private bool $auditMarkMetric;
     private bool $cleaned = false;
 
-    public function __construct(string $repo, ?HtmlFirstFidelityPublisher $publisher = null)
+    public function __construct(
+        string $repo,
+        ?HtmlFirstFidelityPublisher $publisher = null,
+        bool $auditMarkMetric = false,
+    )
     {
         $real = realpath($repo);
         if (!is_string($real)) {
@@ -881,22 +1121,36 @@ final class HtmlFirstFidelityRunner
         }
         $this->repo = $real;
         $this->publisher = $publisher ?? new HtmlFirstFidelityPublisher();
+        $this->auditMarkMetric = $auditMarkMetric;
         $this->composerLockExisted = is_file($this->repo . '/composer.lock');
+    }
+
+    /** @param list<string> $arguments */
+    public static function auditMarkMetricRequested(array $arguments): bool
+    {
+        if ($arguments === []) {
+            return false;
+        }
+        if ($arguments === ['--audit-mark-metric']) {
+            return true;
+        }
+        throw new RuntimeException('Usage: php bin/html-first-fidelity.php [--audit-mark-metric]');
     }
 
     /**
      * @param array{commit:string,tree_sha256:string,reference:string} $frozen
      * @return array{transformer_label:string,transformer_reference:string}
      */
-    public static function treatmentTransformerProvenance(array $frozen): array
+    public static function treatmentTransformerProvenance(array $frozen, string $version): array
     {
         if ($frozen['commit'] !== self::TREATMENT_TRANSFORMER_COMMIT
             || $frozen['tree_sha256'] !== self::TREATMENT_TRANSFORMER_TREE_SHA256
-            || $frozen['reference'] !== self::TREATMENT_TRANSFORMER_REFERENCE) {
+            || $frozen['reference'] !== self::TREATMENT_TRANSFORMER_REFERENCE
+            || $version !== self::TREATMENT_TRANSFORMER_VERSION) {
             throw new RuntimeException('Frozen treatment transformer provenance differs from the required contract.');
         }
         return [
-            'transformer_label' => 'frozen source archive',
+            'transformer_label' => 'v' . self::TREATMENT_TRANSFORMER_VERSION . ' frozen source archive',
             'transformer_reference' => self::TREATMENT_TRANSFORMER_REFERENCE,
         ];
     }
@@ -962,6 +1216,12 @@ final class HtmlFirstFidelityRunner
                     'delta' => HtmlFirstFidelityReport::delta($controlTotals, $treatmentTotals),
                 ],
             ];
+
+            $report = HtmlFirstFidelityReport::withMarkMetricTransitionAudit(
+                $report,
+                $this->markMetricAuditRows,
+                $this->auditMarkMetric,
+            );
 
             $paths = HtmlFirstFidelityPublisher::artifactPaths($this->stagingRoot, HtmlFirstFidelityReport::SLUGS[0]);
             self::writeFileAtomically(
@@ -1102,7 +1362,9 @@ final class HtmlFirstFidelityRunner
             target: $this->repo . '/vendor/automattic/blocks-engine-php-transformer',
             referencePath: self::OVERLAY,
         );
-        $this->overlayProvenance = self::treatmentTransformerProvenance($frozen);
+        $versionPath = $this->repo . '/vendor/automattic/blocks-engine-php-transformer/VERSION';
+        $version = is_file($versionPath) ? trim((string) file_get_contents($versionPath)) : '';
+        $this->overlayProvenance = self::treatmentTransformerProvenance($frozen, $version);
     }
 
     private function installNodeDependencies(string $repo): void
@@ -1164,6 +1426,19 @@ final class HtmlFirstFidelityRunner
 
         $controlMetrics = HtmlFirstFidelityReport::measureProject($controlProject);
         $treatmentMetrics = HtmlFirstFidelityReport::measureProject($treatmentProject);
+        if ($this->auditMarkMetric) {
+            $controlAudit = HtmlFirstFidelityReport::measureMarkMetricProject($controlProject);
+            $treatmentAudit = HtmlFirstFidelityReport::measureMarkMetricProject($treatmentProject);
+            if ($controlAudit['corrected'] !== $controlMetrics['marks_without_background_color']
+                || $treatmentAudit['corrected'] !== $treatmentMetrics['marks_without_background_color']) {
+                throw new RuntimeException("Mark metric audit differs from canonical measurement for {$slug}.");
+            }
+            $this->markMetricAuditRows[] = [
+                'slug' => $slug,
+                'control' => $controlAudit,
+                'treatment' => $treatmentAudit,
+            ];
+        }
         $controlCounts = HtmlFirstFidelityReport::countTotals($controlMetrics);
         $treatmentCounts = HtmlFirstFidelityReport::countTotals($treatmentMetrics);
 
