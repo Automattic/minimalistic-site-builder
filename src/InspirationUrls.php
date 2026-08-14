@@ -109,7 +109,11 @@ final class InspirationUrls
         if ($parts === false || !isset($parts['host'])) {
             return null;
         }
-        $host = strtolower($parts['host']);
+        // Strip the root-zone dot before anything reads the host: "localhost."
+        // and "127.0.0.1." resolve exactly like their dotless twins, and the
+        // empty final label they leave defeats both checks in isPublicHost.
+        // Canonicalizing here also keeps "a.com." and "a.com" one dedupe key.
+        $host = rtrim(strtolower($parts['host']), '.');
         if (!self::isPublicHost($host)) {
             return null;
         }
@@ -137,7 +141,9 @@ final class InspirationUrls
      */
     private static function isPublicHost(string $host): bool
     {
-        $host = trim($host, '[]');
+        // Trailing dots again, so this predicate is sound for any caller and not
+        // only for normalize(), which already canonicalizes them away.
+        $host = rtrim(trim($host, '[]'), '.');
         if ($host === '' || $host === 'localhost' || str_ends_with($host, '.localhost')) {
             return false;
         }

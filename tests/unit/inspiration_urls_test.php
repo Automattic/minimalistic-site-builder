@@ -78,6 +78,27 @@ test('detect rejects loopback and private literals', function () {
     assert_eq([], InspirationUrls::detect('http://localhost:8080 http://127.0.0.1 http://192.168.1.5'));
 });
 
+test('detect rejects loopback and private literals with a root-zone dot', function () {
+    // A trailing dot is a legal FQDN that curl and Chrome resolve normally. The
+    // empty last label it leaves used to defeat both the IP-literal check and
+    // the all-numeric-labels check, so every one of these passed the filter.
+    assert_eq([], InspirationUrls::detect('http://localhost./'));
+    assert_eq([], InspirationUrls::detect('http://127.0.0.1./admin'));
+    assert_eq([], InspirationUrls::detect('http://127.1./'));
+    assert_eq([], InspirationUrls::detect('https://169.254.169.254./latest/meta-data/'));
+    assert_eq([], InspirationUrls::detect('http://[::1]./'));
+    assert_eq([], InspirationUrls::detect('http://box.local./'));
+});
+
+test('detect canonicalizes a root-zone dot on a public host', function () {
+    assert_eq(['https://gumroad.com/x'], InspirationUrls::detect('https://gumroad.com./x'));
+    assert_eq(
+        ['https://gumroad.com'],
+        InspirationUrls::detect('blend https://gumroad.com. and https://gumroad.com'),
+        'a trailing dot must not open a second dedupe key for one host',
+    );
+});
+
 test('detect rejects prose that looks like a host', function () {
     assert_eq([], InspirationUrls::detect('e.g. a bakery, version 1.2.3, see fig.4'));
 });
