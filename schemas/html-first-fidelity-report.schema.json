@@ -87,6 +87,53 @@
         }
       }
     },
+    "treatmentProvenanceSide": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "site_builder_ref",
+        "site_builder_sha",
+        "transformer_label",
+        "transformer_reference",
+        "transformer_version",
+        "transformer_commit_sha",
+        "transformer_git_subtree_oid",
+        "transformer_installed_tree_sha256"
+      ],
+      "properties": {
+        "site_builder_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "site_builder_sha": {
+          "$ref": "#/$defs/sha"
+        },
+        "transformer_label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "transformer_reference": {
+          "type": "string",
+          "minLength": 1
+        },
+        "transformer_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "transformer_commit_sha": {
+          "description": "Full overlay repository commit resolved from HEAD for this run.",
+          "$ref": "#/$defs/sha"
+        },
+        "transformer_git_subtree_oid": {
+          "description": "Git tree object ID for php-transformer at transformer_commit_sha.",
+          "$ref": "#/$defs/sha"
+        },
+        "transformer_installed_tree_sha256": {
+          "description": "SHA-256 of the installed php-transformer relative-path-to-byte-SHA map.",
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
     "provenance": {
       "type": "object",
       "additionalProperties": false,
@@ -104,7 +151,7 @@
           "$ref": "#/$defs/provenanceSide"
         },
         "treatment": {
-          "$ref": "#/$defs/provenanceSide"
+          "$ref": "#/$defs/treatmentProvenanceSide"
         }
       }
     },
