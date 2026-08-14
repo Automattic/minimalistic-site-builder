@@ -26,9 +26,31 @@
  *   --no-scroll      Skip the lazy-load scroll/wait (reproduces the old bug).
  *   --chrome=<path>  Chrome/Chromium executable (or set CHROME/CHROME_BIN).
  *   --timeout=<ms>   Per-image load wait budget (default 15000).
+ *   --nav-timeout=<ms>  Navigation budget (default 60000).
+ *   --idle-timeout=<ms> How long to let the network settle after navigating
+ *                    (default 15000). Exceeding it captures the painted page
+ *                    rather than failing — many sites never go idle at all.
+ *   --scale=<f>      Device scale factor (default 1). Below 1 the page still
+ *                    lays out at --width CSS pixels but the bitmap shrinks, so
+ *                    desktop breakpoints still apply. Vision cost scales with
+ *                    pixel AREA, so --scale=0.5 is a 4x saving.
+ *   --slices=<n>     Instead of one full-page image, write up to n viewport-tall
+ *                    slices from the top as <out>-1.png … <out>-n.png. Vision
+ *                    models downscale to a fixed long edge, so a 1280x14641
+ *                    full-page strip arrives ~137px wide and illegible; slices
+ *                    stay under the limit and keep their detail. Default 1,
+ *                    which writes exactly <out> full-page as before.
+ *
+ * Every written path is echoed to stdout, one per line.
  */
 
 const { chromium } = require('playwright-core');
+
+/** Capture viewport height, and the height of one --slices slice. */
+const VIEWPORT_HEIGHT = 900;
+
+/** Below this, a trailing slice shows nothing worth a vision request. */
+const MIN_SLICE_HEIGHT = 120;
 
 function parseArgs(argv) {
   const positiveInteger = (raw) => {
@@ -40,6 +62,10 @@ function parseArgs(argv) {
     width: envWidth ?? 1366,
     scroll: true,
     timeout: 15000,
+    navTimeout: 60000,
+    idleTimeout: 15000,
+    scale: 1,
+    slices: 1,
     chrome: process.env.CHROME || process.env.CHROME_BIN,
   };
   const positional = [];
@@ -48,6 +74,23 @@ function parseArgs(argv) {
     else if (a.startsWith('--width=')) {
       opts.width = positiveInteger(a.slice(8));
       if (opts.width === null) throw new Error(`--width must be a positive integer: ${a}`);
+    }
+    else if (a.startsWith('--slices=')) {
+      opts.slices = positiveInteger(a.slice(9));
+      if (opts.slices === null) throw new Error(`--slices must be a positive integer: ${a}`);
+    }
+    else if (a.startsWith('--nav-timeout=')) {
+      opts.navTimeout = positiveInteger(a.slice(14));
+      if (opts.navTimeout === null) throw new Error(`--nav-timeout must be a positive integer (ms): ${a}`);
+    }
+    else if (a.startsWith('--idle-timeout=')) {
+      opts.idleTimeout = positiveInteger(a.slice(15));
+      if (opts.idleTimeout === null) throw new Error(`--idle-timeout must be a positive integer (ms): ${a}`);
+    }
+    else if (a.startsWith('--scale=')) {
+      const value = Number(a.slice(8));
+      if (!Number.isFinite(value) || value <= 0) throw new Error(`--scale must be a positive number: ${a}`);
+      opts.scale = value;
     }
     else if (a.startsWith('--chrome=')) opts.chrome = a.slice(9);
     else if (a.startsWith('--timeout=')) {
@@ -102,11 +145,13 @@ function findChrome(explicit) {
 }
 
 /**
- * Scroll the whole document so lazy-loaders fire for every section, then return
- * the viewport to the top. Runs inside the page.
+ * Scroll the document so lazy-loaders fire for every section, then return the
+ * viewport to the top. Runs inside the page. maxY of 0 means the whole page;
+ * a positive value stops there, so slicing the top of a very long page does
+ * not pay to scroll through the rest of it.
  */
-async function autoScroll(page, step = 600, pause = 150) {
-  await page.evaluate(async ({ step, pause }) => {
+async function autoScroll(page, step = 600, pause = 150, maxY = 0) {
+  await page.evaluate(async ({ step, pause, maxY }) => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const root = document.documentElement;
     const body = document.body;
@@ -122,6 +167,7 @@ async function autoScroll(page, step = 600, pause = 150) {
         window.scrollTo(0, y);
         await sleep(pause);
         const height = document.documentElement.scrollHeight;
+        if (maxY > 0 && y >= maxY) break;
         if (y + window.innerHeight >= height) {
           // Reached the bottom, but lazy content may have grown the page. Do
           // one more loop if the height changed, otherwise stop.
@@ -134,7 +180,7 @@ async function autoScroll(page, step = 600, pause = 150) {
       root.style.scrollBehavior = previousRootScrollBehavior;
       if (body) body.style.scrollBehavior = previousBodyScrollBehavior;
     }
-  }, { step, pause });
+  }, { step, pause, maxY });
 }
 
 /**
@@ -165,12 +211,49 @@ async function waitForImages(page, timeout) {
   }, timeout);
 }
 
+/**
+ * Write the capture(s) and return every path written. One full-page image by
+ * default; with --slices=n, up to n viewport-tall clips from the top, stopping
+ * early once the page runs out of content.
+ */
+async function capture(page, opts) {
+  if (opts.slices === 1) {
+    await page.screenshot({ path: opts.out, fullPage: true });
+    process.stdout.write(`${opts.out}\n`);
+    return [opts.out];
+  }
+
+  const path = require('path');
+  const ext = path.extname(opts.out);
+  const stem = ext ? opts.out.slice(0, -ext.length) : opts.out;
+  const pageHeight = await page.evaluate(() => document.documentElement.scrollHeight);
+
+  const written = [];
+  for (let i = 0; i < opts.slices; i++) {
+    const y = i * VIEWPORT_HEIGHT;
+    // A trailing sliver is a legible-to-nobody strip that still costs a slot
+    // and vision tokens, so stop rather than emit one.
+    if (i > 0 && pageHeight - y < MIN_SLICE_HEIGHT) break;
+    const out = `${stem}-${i + 1}${ext}`;
+    await page.screenshot({
+      path: out,
+      fullPage: true,
+      clip: { x: 0, y, width: opts.width, height: Math.min(VIEWPORT_HEIGHT, pageHeight - y) },
+    });
+    // Announce each slice as it lands, not after the loop: a failure on a
+    // later slice would otherwise discard the ones already on disk.
+    process.stdout.write(`${out}\n`);
+    written.push(out);
+  }
+  return written;
+}
+
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
   if (!opts.url || !opts.out) {
     process.stderr.write(
       'Usage: node bin/screenshot/screenshot.js <url> <outfile.png> ' +
-      '[--width=1366] [--no-scroll] [--chrome=<path>] [--timeout=15000]\n');
+      '[--width=1366] [--no-scroll] [--chrome=<path>] [--timeout=15000] [--slices=1]\n');
     process.exit(1);
   }
 
@@ -184,19 +267,35 @@ async function main() {
     // (assets/motion/motion.css) serves reduced-motion visitors a fully
     // static, fully visible page, so the capture can never race a scroll
     // reveal and photograph opacity:0 sections or mid-flight transforms.
+    // deviceScaleFactor, not a smaller viewport: the page still lays out at
+    // opts.width CSS pixels (so desktop breakpoints apply) and only the output
+    // bitmap shrinks. Capturing at a narrow width would analyze a phone layout.
     const page = await browser.newPage({
-      viewport: { width: opts.width, height: 900 },
+      viewport: { width: opts.width, height: VIEWPORT_HEIGHT },
+      deviceScaleFactor: opts.scale,
       reducedMotion: 'reduce',
     });
-    await page.goto(opts.url, { waitUntil: 'networkidle', timeout: 60000 });
+    // Third-party pages routinely never go idle — analytics beacons, chat
+    // widgets and polling keep a request in flight forever — so waiting for
+    // networkidle as a navigation condition fails on sites that painted fine
+    // seconds earlier. Navigate first, then give the network a bounded chance
+    // to settle. The scroll and image waits below are the real safety net.
+    await page.goto(opts.url, { waitUntil: 'domcontentloaded', timeout: opts.navTimeout });
+    await page.waitForLoadState('networkidle', { timeout: opts.idleTimeout }).catch(() => {
+      process.stderr.write('network never went idle; capturing the painted page\n');
+    });
 
     if (opts.scroll) {
-      await autoScroll(page);
+      // Slicing only captures the top of the page, so only trip the
+      // lazy-loaders that far — one extra screenful for safety.
+      const scrollTo = opts.slices === 1 ? 0 : (opts.slices + 1) * VIEWPORT_HEIGHT;
+      await autoScroll(page, 600, 150, scrollTo);
       await waitForImages(page, opts.timeout);
     }
 
-    await page.screenshot({ path: opts.out, fullPage: true });
-    process.stderr.write(`Saved ${opts.out}${opts.scroll ? '' : ' (lazy-load scroll skipped)'}\n`);
+    const written = await capture(page, opts);
+    process.stderr.write(
+      `Saved ${written.join(', ')}${opts.scroll ? '' : ' (lazy-load scroll skipped)'}\n`);
   } finally {
     await browser.close();
   }

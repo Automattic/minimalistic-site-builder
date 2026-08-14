@@ -219,6 +219,15 @@ final class LlmLogger
                         $kind = is_array($src) ? (string) ($src['media_type'] ?? $src['type'] ?? 'image') : 'image';
                         $rendered = "[image: {$kind}]";
                         break;
+                    // The OpenAI-compatible shape. Without this the data URI
+                    // falls through to json_encode below and writes the whole
+                    // base64 payload — megabytes per transcript, unopenable.
+                    case 'image_url':
+                        $url = $block['image_url'] ?? [];
+                        $uri = is_array($url) ? (string) ($url['url'] ?? '') : (string) $url;
+                        $kind = preg_match('#^data:([^;,]+)#i', $uri, $m) === 1 ? $m[1] : 'image';
+                        $rendered = "[image_url: {$kind}]";
+                        break;
                     case 'tool_use':
                         $name = (string) ($block['name'] ?? '');
                         $input = json_encode($block['input'] ?? null, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);

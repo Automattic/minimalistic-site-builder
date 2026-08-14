@@ -61,12 +61,15 @@ final class GenerateImagesStep implements Step
      *        null falls back to the Llm client's default model
      * @param ?PromptRenderer $renderer renders the repair prompt; null falls
      *        back to the package's prompts/ dir
+     * @param bool $useInspiration whether this separately constructed step reads
+     *        the optional InspirationStep artifact
      */
     public function __construct(
         private ImageClient $images,
         private ?Llm $llm = null,
         private ?string $repairModel = null,
         private ?PromptRenderer $renderer = null,
+        private bool $useInspiration = true,
     ) {
         $this->renderer ??= new PromptRenderer(Package::promptsDir());
     }
@@ -83,19 +86,27 @@ final class GenerateImagesStep implements Step
 
     public function declaration(): StepDeclaration
     {
+        $reads = [
+            'images.json',
+            'siteSpec.json',
+            'designDirection.json',
+        ];
+        if ($this->useInspiration) {
+            // Enabled compositions must include InspirationStep first; StepGraph enforces it.
+            $reads[] = InspirationStep::FILE;
+        }
+        array_push(
+            $reads,
+            'plugin/images.json',
+            'theme/parts/*',
+            'theme/templates/*',
+            // After assemble-pages, multipage section covers live here.
+            'plugin/pages/*',
+        );
         return new StepDeclaration(
             id: $this->id(),
             label: $this->label(),
-            reads: [
-                'images.json',
-                'siteSpec.json',
-                'designDirection.json',
-                'plugin/images.json',
-                'theme/parts/*',
-                'theme/templates/*',
-                // After assemble-pages, multipage section covers live here.
-                'plugin/pages/*',
-            ],
+            reads: $reads,
             writes: [
                 'images.json',
                 self::COMPLETION_ARTIFACT,
@@ -142,6 +153,9 @@ final class GenerateImagesStep implements Step
         // so the independently generated images read as one photographic series.
         $imageGrade = DesignDirectionStep::imageGradeFor($project);
 
+        // Sanitized once per run, then shared by every opaque image prompt.
+        $referenceStyle = $this->useInspiration ? InspirationStep::styleFor($project) : '';
+
         $assetDir = $project->themePath('assets');
         if (!is_dir($assetDir) && !mkdir($assetDir, 0775, true) && !is_dir($assetDir)) {
             throw new \RuntimeException("Could not create assets directory: {$assetDir}");
@@ -171,7 +185,12 @@ final class GenerateImagesStep implements Step
             // Map original images.json indices to generation specs (order kept).
             $indices = array_keys($pending);
             $batchSpecs = array_map(
-                fn (array $spec): array => self::generationSpec($spec, $siteContext, $imageGrade),
+                fn (array $spec): array => self::generationSpec(
+                    spec: $spec,
+                    siteContext: $siteContext,
+                    imageGrade: $imageGrade,
+                    referenceStyle: $referenceStyle,
+                ),
                 array_values($pending)
             );
 
@@ -202,7 +221,15 @@ final class GenerateImagesStep implements Step
             });
 
             if ($repairs !== []) {
-                $this->repairFiltered($project, $specs, $repairs, $siteContext, $imageGrade, $resolved);
+                $this->repairFiltered(
+                    $project,
+                    $specs,
+                    $repairs,
+                    $siteContext,
+                    $imageGrade,
+                    $referenceStyle,
+                    $resolved,
+                );
             }
         }
 
@@ -351,7 +378,13 @@ final class GenerateImagesStep implements Step
      * @param array<string,mixed> $spec one images.json row
      * @return array{prompt:string,aspect_ratio:string,sample_image_size:string,mime:string}
      */
-    private static function generationSpec(array $spec, string $siteContext, string $imageGrade, ?string $subject = null): array
+    private static function generationSpec(
+        array $spec,
+        string $siteContext,
+        string $imageGrade,
+        string $referenceStyle,
+        ?string $subject = null,
+    ): array
     {
         $ratio = GeminiImage::aspectRatio((string) ($spec['aspectRatio'] ?? 'landscape'));
         // A .png placeholder is a transparent-background asset: request PNG
@@ -360,12 +393,13 @@ final class GenerateImagesStep implements Step
         $mime = GeminiImage::mimeForFilename((string) ($spec['filename'] ?? ''));
         return [
             'prompt'            => ImagePromptComposer::compose(
-                $subject ?? (string) ($spec['subject'] ?? ''),
-                (string) ($spec['pageContext'] ?? ''),
-                (string) ($spec['style'] ?? ''),
-                $siteContext,
-                $imageGrade,
-                $mime === 'image/png',
+                subject: $subject ?? (string) ($spec['subject'] ?? ''),
+                pageContext: (string) ($spec['pageContext'] ?? ''),
+                style: (string) ($spec['style'] ?? ''),
+                siteContext: $siteContext,
+                imageGrade: $imageGrade,
+                referenceStyle: $referenceStyle,
+                transparent: $mime === 'image/png',
             ),
             'aspect_ratio'      => $ratio,
             // Wide images are the full-bleed ones (heroes, banners) — render
@@ -487,6 +521,7 @@ final class GenerateImagesStep implements Step
         array $repairs,
         string $siteContext,
         string $imageGrade,
+        string $referenceStyle,
         array &$resolved
     ): void {
         Narrator::write(sprintf(
@@ -548,7 +583,13 @@ final class GenerateImagesStep implements Step
                 continue;
             }
             $subjects[$i] = $subject;
-            $regenSpecs[$i] = self::generationSpec($specs[$i], $siteContext, $imageGrade, $subject);
+            $regenSpecs[$i] = self::generationSpec(
+                spec: $specs[$i],
+                siteContext: $siteContext,
+                imageGrade: $imageGrade,
+                referenceStyle: $referenceStyle,
+                subject: $subject,
+            );
         }
         if ($regenSpecs === []) {
             return;

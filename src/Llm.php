@@ -8,13 +8,19 @@ namespace Automattic\SiteBuild;
  * return the model's text. Keeping this an interface lets steps depend on the
  * contract while tests inject a fake and production injects the real transport
  * (AnthropicClient or OpenAiCompatibleClient via make_llm() / LLM_PROVIDER).
+ *
+ * `images` sends raw bytes (not base64 — implementations encode) alongside the
+ * prompt, rendered as content blocks ahead of it. ImageInput owns validation
+ * and the per-provider block shapes. Both shipped clients honor it; a fake that
+ * ignores it answers the prompt without ever seeing the picture, so a test
+ * asserting vision behavior must use a fake that reads the key.
  */
 interface Llm
 {
     /**
      * Send one prompt, return the assistant's text.
      *
-     * @param array{system?:string,model?:string,max_tokens?:int,temperature?:float,json_schema?:array{name:string,schema:array<string,mixed>},cached_prefixes?:list<string>,tolerate_empty?:bool} $opts
+     * @param array{system?:string,model?:string,max_tokens?:int,temperature?:float,json_schema?:array{name:string,schema:array<string,mixed>},cached_prefixes?:list<string>,images?:list<array{bytes:string,mime:string}>,tolerate_empty?:bool} $opts
      *        cached_prefixes are ordered reusable text layers prepended before
      *        the varying prompt; blank layers are ignored and callers may
      *        provide at most three non-blank layers. Anthropic clients mark each
@@ -34,7 +40,7 @@ interface Llm
      * Send one prompt that must return a JSON value, decode and return it.
      * Tolerates ```json fenced blocks.
      *
-     * @param array{system?:string,model?:string,max_tokens?:int,temperature?:float,json_schema?:array{name:string,schema:array<string,mixed>},cached_prefixes?:list<string>} $opts
+     * @param array{system?:string,model?:string,max_tokens?:int,temperature?:float,json_schema?:array{name:string,schema:array<string,mixed>},cached_prefixes?:list<string>,images?:list<array{bytes:string,mime:string}>} $opts
      *        cached_prefixes are ordered reusable text layers prepended before
      *        the varying prompt; blank layers are ignored and callers may
      *        provide at most three non-blank layers. Anthropic clients mark each
@@ -55,7 +61,7 @@ interface Llm
      * is how the pipeline parallelises independent LLM work (theme.json beside
      * the section plan; every landing-page section at once).
      *
-     * @param array<array-key,array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float,json_schema?:array{name:string,schema:array<string,mixed>},cached_prefixes?:list<string>}> $requests
+     * @param array<array-key,array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float,json_schema?:array{name:string,schema:array<string,mixed>},cached_prefixes?:list<string>,images?:list<array{bytes:string,mime:string}>}> $requests
      *        cached_prefixes are ordered reusable text layers prepended before
      *        the varying prompt; blank layers are ignored and callers may
      *        provide at most three non-blank layers per request. Anthropic
@@ -84,7 +90,7 @@ interface Llm
      * rather than aborting the batch. Its keyed degradation note lets callers
      * persist a warning only if that member survives structural salvage.
      *
-     * @param array<array-key,array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float,json_schema?:array{name:string,schema:array<string,mixed>},cached_prefixes?:list<string>}> $requests
+     * @param array<array-key,array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float,json_schema?:array{name:string,schema:array<string,mixed>},cached_prefixes?:list<string>,images?:list<array{bytes:string,mime:string}>}> $requests
      *        cached_prefixes are ordered reusable text layers prepended before
      *        the varying prompt; blank layers are ignored and callers may
      *        provide at most three non-blank layers per request. Anthropic

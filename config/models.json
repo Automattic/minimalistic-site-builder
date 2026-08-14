@@ -22,6 +22,7 @@
     },
     "step_tiers": {
         "refine-prompt": "small",
+        "inspiration": "small",
         "site-spec": "small",
         "design-direction-seeds": "small",
         "design-direction": "large",
