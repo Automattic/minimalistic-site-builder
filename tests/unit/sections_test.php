@@ -692,9 +692,65 @@ test('constrainedPart adds a missing layout to a part top-level group', function
     assert_contains('"layout":{"type":"constrained"}', $out);
 });
 
+test('constrainedPart leaves a CSS-owned part root without injected layout', function () {
+    $in = '<!-- wp:group {"tagName":"nav","className":"header-shell blocks-engine-css-owned-layout sticky"} -->' . "\n"
+        . '<nav class="wp-block-group header-shell blocks-engine-css-owned-layout sticky">'
+        . '<!-- wp:paragraph --><p>Brand</p><!-- /wp:paragraph -->'
+        . '</nav>' . "\n"
+        . '<!-- /wp:group -->';
+
+    assert_eq($in, GeneratedMarkup::constrainedPart($in));
+});
+
+test('constrainedPart still constrains real unmarked footer and section root shapes', function () {
+    // Minimized from the delivered silver-summit and sunny-ember artifacts.
+    // Only the injected layout pair is removed; root attributes and saved-HTML
+    // shape stay representative of the production subjects for this boundary.
+    $cases = [
+        'silver-summit footer' => [
+            '<!-- wp:group {"tagName":"footer","style":{"spacing":{"padding":{"top":"clamp(40px,6vw,72px)","right":"0","bottom":"clamp(28px,4vw,40px)","left":"0"}}}} -->',
+            '<!-- wp:group {"tagName":"footer","style":{"spacing":{"padding":{"top":"clamp(40px,6vw,72px)","right":"0","bottom":"clamp(28px,4vw,40px)","left":"0"}}},"layout":{"type":"constrained"}} -->',
+            '<footer class="wp-block-group"><!-- wp:group {"className":"shell blocks-engine-css-owned-layout"} -->'
+                . '<div class="wp-block-group shell blocks-engine-css-owned-layout"></div><!-- /wp:group -->'
+                . '</footer><!-- /wp:group -->',
+        ],
+        'sunny-ember footer' => [
+            '<!-- wp:group {"className":"hero-inner","style":{"spacing":{"margin":{"top":"0","right":"auto","bottom":"0","left":"auto"}}}} -->',
+            '<!-- wp:group {"className":"hero-inner","style":{"spacing":{"margin":{"top":"0","right":"auto","bottom":"0","left":"auto"}}},"layout":{"type":"constrained"}} -->',
+            '<div class="wp-block-group hero-inner"><!-- wp:group {"className":"blocks-engine-css-owned-layout"} -->'
+                . '<div class="wp-block-group blocks-engine-css-owned-layout"></div><!-- /wp:group -->'
+                . '</div><!-- /wp:group -->',
+        ],
+        'silver-summit section' => [
+            '<!-- wp:group {"tagName":"section","className":"page-head is-layout-constrained","style":{"spacing":{"padding":{"top":"var:preset|spacing|xl","bottom":"0"},"margin":{"top":"0","bottom":"0"}}}} -->',
+            '<!-- wp:group {"tagName":"section","className":"page-head is-layout-constrained","style":{"spacing":{"padding":{"top":"var:preset|spacing|xl","bottom":"0"},"margin":{"top":"0","bottom":"0"}}},"layout":{"type":"constrained"}} -->',
+            '<section class="wp-block-group page-head is-layout-constrained">'
+                . '<!-- wp:group {"className":"head-grid blocks-engine-css-owned-layout blocks-engine-css-owned-grid"} -->'
+                . '<div class="wp-block-group head-grid blocks-engine-css-owned-layout blocks-engine-css-owned-grid"></div><!-- /wp:group -->'
+                . '</section><!-- /wp:group -->',
+        ],
+        'sunny-ember section' => [
+            '<!-- wp:group {"tagName":"section","className":"page-head is-layout-constrained","style":{"spacing":{"padding":{"top":"clamp(2.25rem,1.5rem + 4vw,4.5rem)","bottom":"clamp(2.25rem,1.75rem + 3vw,4rem)"}}}} -->',
+            '<!-- wp:group {"tagName":"section","className":"page-head is-layout-constrained","style":{"spacing":{"padding":{"top":"clamp(2.25rem,1.5rem + 4vw,4.5rem)","bottom":"clamp(2.25rem,1.75rem + 3vw,4rem)"}}},"layout":{"type":"constrained"}} -->',
+            '<section class="wp-block-group page-head is-layout-constrained">'
+                . '<!-- wp:group {"className":"hero-media blocks-engine-css-owned-layout"} -->'
+                . '<div class="wp-block-group hero-media blocks-engine-css-owned-layout"></div><!-- /wp:group -->'
+                . '</section><!-- /wp:group -->',
+        ],
+    ];
+
+    foreach ($cases as $subject => [$opening, $expectedOpening, $body]) {
+        assert_eq($expectedOpening . $body, GeneratedMarkup::constrainedPart($opening . $body), $subject);
+    }
+});
+
 test('constrainedPart leaves an explicit layout and non-group markup alone', function () {
     $flex = '<!-- wp:group {"layout":{"type":"flex","justifyContent":"space-between"}} --><div class="wp-block-group"></div><!-- /wp:group -->';
     assert_eq($flex, GeneratedMarkup::constrainedPart($flex));
+
+    $cssOwned = '<!-- wp:group {"className":"blocks-engine-css-owned-layout","layout":{"type":"constrained","wideSize":"77rem"}} -->'
+        . '<div class="wp-block-group blocks-engine-css-owned-layout"></div><!-- /wp:group -->';
+    assert_eq($cssOwned, GeneratedMarkup::constrainedPart($cssOwned));
 
     $cover = '<!-- wp:cover {"align":"full"} --><div class="wp-block-cover"></div><!-- /wp:cover -->';
     assert_eq($cover, GeneratedMarkup::constrainedPart($cover));
