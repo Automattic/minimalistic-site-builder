@@ -36,6 +36,9 @@
     },
     "totals": {
       "$ref": "#/$defs/comparison"
+    },
+    "mark_metric_transition_audit": {
+      "$ref": "#/$defs/markMetricTransitionAudit"
     }
   },
   "$defs": {
@@ -218,6 +221,7 @@
           "minimum": 0
         },
         "marks_without_background_color": {
+          "description": "Count <mark> start tags whose inline style has no background-color declaration unless the tag carries --blocks-engine-richtext-marker:<token> and matching engine marker CSS declares background-color.",
           "type": "integer",
           "minimum": 0
         },
@@ -280,6 +284,7 @@
           "type": "integer"
         },
         "marks_without_background_color": {
+          "description": "Corrected marker-aware mark defect count; totals and deltas use the same semantics as metrics.marks_without_background_color.",
           "type": "integer"
         },
         "align_wide": {
@@ -287,6 +292,96 @@
         },
         "unmatched_engine_marker_occurrences": {
           "type": "integer"
+        }
+      }
+    },
+    "markMetricCountPair": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "legacy",
+        "corrected"
+      ],
+      "properties": {
+        "legacy": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "corrected": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "markMetricTransitionProject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slug",
+        "control",
+        "treatment"
+      ],
+      "properties": {
+        "slug": {
+          "enum": [
+            "silver-summit",
+            "swift-grove",
+            "sunny-ember",
+            "calm-lantern",
+            "azure-garden",
+            "amber-ember"
+          ]
+        },
+        "control": {
+          "$ref": "#/$defs/markMetricCountPair"
+        },
+        "treatment": {
+          "$ref": "#/$defs/markMetricCountPair"
+        }
+      }
+    },
+    "markMetricTransitionTotals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "control",
+        "treatment"
+      ],
+      "properties": {
+        "control": {
+          "$ref": "#/$defs/markMetricCountPair"
+        },
+        "treatment": {
+          "$ref": "#/$defs/markMetricCountPair"
+        }
+      }
+    },
+    "markMetricTransitionAudit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "legacy_definition",
+        "corrected_definition",
+        "projects",
+        "totals"
+      ],
+      "properties": {
+        "legacy_definition": {
+          "const": "Count <mark> start tags whose inline style has no background-color declaration."
+        },
+        "corrected_definition": {
+          "const": "Count <mark> start tags whose inline style has no background-color declaration unless the tag carries --blocks-engine-richtext-marker:<token> and matching engine marker CSS declares background-color."
+        },
+        "projects": {
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "$ref": "#/$defs/markMetricTransitionProject"
+          }
+        },
+        "totals": {
+          "$ref": "#/$defs/markMetricTransitionTotals"
         }
       }
     },
