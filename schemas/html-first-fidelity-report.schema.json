@@ -1,0 +1,349 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://automattic.com/schemas/html-first-fidelity-report.schema.json",
+  "title": "HTML-first control-versus-treatment fidelity report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "generated_at",
+    "rerun_command",
+    "provenance",
+    "projects",
+    "totals"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "rerun_command": {
+      "const": "php bin/html-first-fidelity.php"
+    },
+    "provenance": {
+      "$ref": "#/$defs/provenance"
+    },
+    "projects": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": {
+        "$ref": "#/$defs/project"
+      }
+    },
+    "totals": {
+      "$ref": "#/$defs/comparison"
+    }
+  },
+  "$defs": {
+    "sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "hashMap": {
+      "type": "object",
+      "minProperties": 2,
+      "propertyNames": {
+        "pattern": "^(?:[^/]+/)*[^/]+(?:\\.html|site\\.css)$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/sha256"
+      }
+    },
+    "provenanceSide": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "site_builder_ref",
+        "site_builder_sha",
+        "transformer_label",
+        "transformer_reference"
+      ],
+      "properties": {
+        "site_builder_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "site_builder_sha": {
+          "$ref": "#/$defs/sha"
+        },
+        "transformer_label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "transformer_reference": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_projects",
+        "control",
+        "treatment"
+      ],
+      "properties": {
+        "source_projects": {
+          "type": "string",
+          "minLength": 1
+        },
+        "control": {
+          "$ref": "#/$defs/provenanceSide"
+        },
+        "treatment": {
+          "$ref": "#/$defs/provenanceSide"
+        }
+      }
+    },
+    "designInputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "control_before",
+        "treatment_before",
+        "control_after",
+        "treatment_after",
+        "identical_before",
+        "control_unchanged",
+        "treatment_unchanged"
+      ],
+      "properties": {
+        "control_before": {
+          "$ref": "#/$defs/hashMap"
+        },
+        "treatment_before": {
+          "$ref": "#/$defs/hashMap"
+        },
+        "control_after": {
+          "$ref": "#/$defs/hashMap"
+        },
+        "treatment_after": {
+          "$ref": "#/$defs/hashMap"
+        },
+        "identical_before": {
+          "type": "boolean"
+        },
+        "control_unchanged": {
+          "type": "boolean"
+        },
+        "treatment_unchanged": {
+          "type": "boolean"
+        }
+      }
+    },
+    "resume": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "exit_code",
+        "llm_requests"
+      ],
+      "properties": {
+        "exit_code": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "llm_requests": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "layoutValue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "value",
+        "unitless"
+      ],
+      "properties": {
+        "value": {
+          "type": [
+            "string",
+            "number",
+            "null"
+          ]
+        },
+        "unitless": {
+          "type": "boolean"
+        }
+      }
+    },
+    "engineMarkers": {
+      "type": "object",
+      "propertyNames": {
+        "enum": [
+          "blocks-engine-synthetic-paragraph",
+          "blocks-engine-synthetic-anchor-undecorated",
+          "blocks-engine-inline-layout-carrier",
+          "blocks-engine-css-owned-flow",
+          "blocks-engine-css-owned-grid",
+          "blocks-engine-css-owned-layout",
+          "blocks-engine-css-owned-layout-item",
+          "blocks-engine-empty-flex-item",
+          "blocks-engine-control",
+          "blocks-engine-list-navigation",
+          "richtext-marker"
+        ]
+      },
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 1
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "empty_buttons",
+        "marks_without_background_color",
+        "align_wide",
+        "layout",
+        "unmatched_engine_markers",
+        "unmatched_engine_marker_occurrences"
+      ],
+      "properties": {
+        "empty_buttons": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "marks_without_background_color": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "align_wide": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "layout": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "content_size",
+            "wide_size"
+          ],
+          "properties": {
+            "content_size": {
+              "$ref": "#/$defs/layoutValue"
+            },
+            "wide_size": {
+              "$ref": "#/$defs/layoutValue"
+            }
+          }
+        },
+        "unmatched_engine_markers": {
+          "$ref": "#/$defs/engineMarkers"
+        },
+        "unmatched_engine_marker_occurrences": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "side": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "resume",
+        "metrics"
+      ],
+      "properties": {
+        "resume": {
+          "$ref": "#/$defs/resume"
+        },
+        "metrics": {
+          "$ref": "#/$defs/metrics"
+        }
+      }
+    },
+    "countTotals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "empty_buttons",
+        "marks_without_background_color",
+        "align_wide",
+        "unmatched_engine_marker_occurrences"
+      ],
+      "properties": {
+        "empty_buttons": {
+          "type": "integer"
+        },
+        "marks_without_background_color": {
+          "type": "integer"
+        },
+        "align_wide": {
+          "type": "integer"
+        },
+        "unmatched_engine_marker_occurrences": {
+          "type": "integer"
+        }
+      }
+    },
+    "comparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "control",
+        "treatment",
+        "delta"
+      ],
+      "properties": {
+        "control": {
+          "$ref": "#/$defs/countTotals"
+        },
+        "treatment": {
+          "$ref": "#/$defs/countTotals"
+        },
+        "delta": {
+          "$ref": "#/$defs/countTotals"
+        }
+      }
+    },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slug",
+        "design_inputs",
+        "control",
+        "treatment",
+        "delta"
+      ],
+      "properties": {
+        "slug": {
+          "enum": [
+            "silver-summit",
+            "swift-grove",
+            "sunny-ember",
+            "calm-lantern",
+            "azure-garden",
+            "amber-ember"
+          ]
+        },
+        "design_inputs": {
+          "$ref": "#/$defs/designInputs"
+        },
+        "control": {
+          "$ref": "#/$defs/side"
+        },
+        "treatment": {
+          "$ref": "#/$defs/side"
+        },
+        "delta": {
+          "$ref": "#/$defs/countTotals"
+        }
+      }
+    }
+  }
+}
