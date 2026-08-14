@@ -14,7 +14,7 @@ namespace Automattic\SiteBuild;
  * Works with any OpenAI-compatible host. Defaults target OpenAI; for xAI set
  * baseUrl to https://api.x.ai/v1 (see make_llm() LLM_PROVIDER=xai).
  */
-final class OpenAiCompatibleClient implements Llm
+final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporting
 {
     /** K3's default max-effort reasoning shares this budget with its answer. */
     private const KIMI_K3_MIN_MAX_TOKENS = 65536;
@@ -44,6 +44,8 @@ final class OpenAiCompatibleClient implements Llm
     private int $inputTokens = 0;
     private int $outputTokens = 0;
     private string $endpoint;
+    private ?string $lastFinishReason = null;
+    private ?\Closure $singleTransport;
 
     /**
      * @param string $apiKey            Bearer token (OPENAI_API_KEY / XAI_API_KEY)
@@ -56,6 +58,7 @@ final class OpenAiCompatibleClient implements Llm
      *                                   See maxTokensParam().
      * @param int    $timeoutSeconds    Hard timeout for one streamed request
      * @param int    $maxConcurrency    Most simultaneous requests in one batch
+     * @param ?callable $singleTransport Optional single-request transport seam for tests
      */
     public function __construct(
         private string $apiKey,
@@ -65,14 +68,23 @@ final class OpenAiCompatibleClient implements Llm
         private string $provider = 'openai',
         private int $timeoutSeconds = 600,
         private int $maxConcurrency = 10,
+        ?callable $singleTransport = null,
     ) {
         $this->endpoint = rtrim($baseUrl, '/') . '/chat/completions';
+        $this->singleTransport = $singleTransport === null
+            ? null
+            : \Closure::fromCallable($singleTransport);
     }
 
     /** Resolved chat-completions URL (for tests / diagnostics). */
     public function endpoint(): string
     {
         return $this->endpoint;
+    }
+
+    public function lastFinishReason(): ?string
+    {
+        return $this->lastFinishReason;
     }
 
     /**
@@ -116,6 +128,7 @@ final class OpenAiCompatibleClient implements Llm
      */
     public function complete(string $prompt, array $opts = []): string
     {
+        $this->lastFinishReason = null;
         $body = self::bodyFor(['prompt' => $prompt] + $opts, $this->model, $this->defaultMaxTokens, $this->provider);
 
         $label = (string) ($opts['log_label'] ?? 'request');
@@ -139,6 +152,10 @@ final class OpenAiCompatibleClient implements Llm
         if (!$tolerateEmpty && trim($res['text']) === '') {
             throw new \RuntimeException('No text content in streamed response');
         }
+        $stopReason = $res['stop_reason'] ?? null;
+        $this->lastFinishReason = is_string($stopReason) && trim($stopReason) !== ''
+            ? trim($stopReason)
+            : null;
         return $res['text'];
     }
 
@@ -767,9 +784,12 @@ final class OpenAiCompatibleClient implements Llm
     private function requestWithRetry(array &$body, bool $tolerateEmpty = false): array
     {
         $retryAfterDeadline = null;
-        $transport = function (array $requestBody) use (&$retryAfterDeadline): array {
-            return $this->streamRequest($requestBody, $retryAfterDeadline);
-        };
+        $transport = $this->singleTransport;
+        if ($transport === null) {
+            $transport = function (array $requestBody) use (&$retryAfterDeadline): array {
+                return $this->streamRequest($requestBody, $retryAfterDeadline);
+            };
+        }
         $retryDelay = null;
         if ($this->provider === 'openrouter') {
             $retryDelay = static function (int $fallback) use (&$retryAfterDeadline): int {
@@ -787,6 +807,8 @@ final class OpenAiCompatibleClient implements Llm
             $tolerateEmpty,
             $this->provider === 'openrouter',
             $retryDelay,
+            null,
+            $this->provider === 'openrouter' && !$tolerateEmpty,
         );
     }
 
@@ -805,6 +827,8 @@ final class OpenAiCompatibleClient implements Llm
      * @param null|callable(int):int $retryDelay Resolve a provider-specific
      *        wait from the configured fallback after a transient failure.
      * @param null|callable(int):void $sleeper Test seam; defaults to sleep().
+     * @param bool $surfaceTruncatedPartial Return a non-empty truncated result
+     *        so caller-owned continuation recovery can append to it.
      * @return array{text:string,input:int,output:int,time:float,stop_reason?:?string}
      */
     public static function retrySingleRequest(
@@ -815,6 +839,7 @@ final class OpenAiCompatibleClient implements Llm
         bool $recoverTerminalReasons = false,
         ?callable $retryDelay = null,
         ?callable $sleeper = null,
+        bool $surfaceTruncatedPartial = false,
     ): array
     {
         $sleeper ??= static function (int $seconds): void {
@@ -832,6 +857,12 @@ final class OpenAiCompatibleClient implements Llm
                 $terminationError = $recoverTerminalReasons
                     ? StopReasons::terminationError($stopReason)
                     : null;
+                if ($surfaceTruncatedPartial
+                    && !$empty
+                    && TextBatchRecovery::isTruncation($stopReason)
+                ) {
+                    return $result;
+                }
                 if ($terminationError !== null && !($tolerateEmpty && $probeReachedOutputLimit)) {
                     if ($probeReachedOutputLimit && !$retriedTruncation) {
                         $newBudget = self::prepareSingleTruncationRetry($body);

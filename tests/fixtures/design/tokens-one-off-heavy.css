@@ -1,0 +1,19 @@
+body {
+    color: #111111;
+    background: #222222;
+    border-color: #333333;
+    outline-color: #444444;
+    text-decoration-color: #555555;
+    caret-color: #666666;
+    column-rule-color: #777777;
+    fill: #888888;
+    stroke: #999999;
+    accent-color: #AAAAAA;
+    font-family: "IBM Plex Sans", sans-serif;
+    padding: 1rem;
+}
+
+.extra-a { color: #BBBBBB; }
+.extra-b { color: #CCCCCC; }
+.repeat-a { color: #111; }
+.repeat-b { background-color: rgb(17, 17, 17); }

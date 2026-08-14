@@ -38,6 +38,7 @@ $args = parse_cli_args($argv, [
     '--out'        => 'value',
     '--timeout'    => 'value',
     '--workers'    => 'value',
+    '--route'      => 'value',
     '--keep-alive' => 'bool',
 ], maxPositionals: 1);
 if ($args['unknown'] !== null) {
@@ -51,6 +52,9 @@ $out = $flags['--out'] ?? null;
 $timeout = (int) ($flags['--timeout'] ?? 240);
 $keepAlive = $flags['--keep-alive'] ?? false;
 $workers = $flags['--workers'] ?? null;
+// Normalize the route to a single leading slash so it appends cleanly to the
+// Playground base URL (which already ends in "/"). Default "/" captures home.
+$route = '/' . ltrim($flags['--route'] ?? '/', '/');
 
 if ($slug === null) {
     usage();
@@ -124,6 +128,10 @@ while (time() < $deadline) {
     $log = is_file($serverLog) ? (string) file_get_contents($serverLog) : '';
     $baseUrl = playground_ready_url($log);
     if ($baseUrl !== null) {
+        // playground_ready_url returns a URL with a trailing slash; append the
+        // requested route (default "/") without doubling the slash so inner
+        // pages can be captured, not just the homepage.
+        $baseUrl = rtrim($baseUrl, '/') . $route;
         break;
     }
     usleep(500_000);

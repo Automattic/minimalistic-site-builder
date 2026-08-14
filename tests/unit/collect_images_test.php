@@ -299,6 +299,22 @@ test('collect-images keeps subject pipes and parses the three trailing fields', 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('collect-images collects an assigned short AI_IMAGE alt from a theme part', function () {
+    [$project, $tmp] = collect_fixture();
+    $project->writeText('theme/parts/page-contact--details.html',
+        '<img src="theme:./assets/plate-iv-abcd1234.jpg" alt="AI_IMAGE: a studio desk"/>'
+    );
+
+    (new CollectImagesStep(true))->run($project);
+
+    $images = $project->readJson('images.json');
+    assert_eq(1, count($images));
+    assert_eq('plate-iv-abcd1234.jpg', $images[0]['filename']);
+    assert_eq('a studio desk', $images[0]['subject']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('collect-images renames a cross-part filename collision with a different subject (BIGR-793)', function () {
     [$project, $tmp] = collect_fixture();
     $project->writeText('theme/parts/page-home--about.html',
@@ -350,6 +366,25 @@ test('collect-images renames a cross-part filename collision with a different su
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('collect-images keeps canonical fields for an assigned four-field AI_IMAGE alt', function () {
+    [$project, $tmp] = collect_fixture();
+    $project->writeText('theme/parts/page-home--hero.html',
+        '<img src="theme:./assets/canonical-hero.jpg" '
+        . 'alt="AI_IMAGE: Dawn over a quiet valley | full-bleed homepage hero | Photorealistic | Landscape"/>'
+    );
+
+    (new CollectImagesStep(true))->run($project);
+
+    $images = $project->readJson('images.json');
+    assert_eq(1, count($images));
+    assert_eq('Dawn over a quiet valley', $images[0]['subject']);
+    assert_eq('full-bleed homepage hero', $images[0]['pageContext']);
+    assert_eq('photorealistic', $images[0]['style']);
+    assert_eq('landscape', $images[0]['aspectRatio']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('collect-images isolates different subjects within one part and preserves bare siblings', function () {
     [$project, $tmp] = collect_fixture();
     $project->writeText('theme/parts/page-home--gallery.html',
@@ -371,6 +406,23 @@ test('collect-images isolates different subjects within one part and preserves b
 
     (new CollectImagesStep())->run($project);
     assert_eq($markup, $project->readText('theme/parts/page-home--gallery.html'), 'scoped rename reaches a fixed point');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images records one source when canonical and assigned parsing find the same image', function () {
+    [$project, $tmp] = collect_fixture();
+    $source = 'parts/page-home--hero.html';
+    $project->writeText('theme/' . $source,
+        '<img src="theme:./assets/shared-hero.jpg" '
+        . 'alt="AI_IMAGE: Dawn over a quiet valley | full-bleed homepage hero | photorealistic | square"/>'
+    );
+
+    (new CollectImagesStep(true))->run($project);
+
+    $images = $project->readJson('images.json');
+    assert_eq(1, count($images));
+    assert_eq([$source], $images[0]['sources']);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -404,6 +456,31 @@ test('collect-images never overwrites an occupied variant filename', function ()
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('collect-images upgrades an earlier assigned image when a later file is canonical', function () {
+    [$project, $tmp] = collect_fixture();
+    $earlySource = 'parts/page-a--lead.html';
+    $laterSource = 'parts/page-z--hero.html';
+    $project->writeText('theme/' . $earlySource,
+        '<img src="theme:./assets/shared-scene.jpg" alt="AI_IMAGE: generic fallback scene"/>'
+    );
+    $project->writeText('theme/' . $laterSource,
+        '<img src="theme:./assets/shared-scene.jpg" '
+        . 'alt="AI_IMAGE: Sunrise over a mountain lake | homepage hero backdrop | cinematic | 21:9"/>'
+    );
+
+    (new CollectImagesStep(true))->run($project);
+
+    $images = $project->readJson('images.json');
+    assert_eq(1, count($images));
+    assert_eq('Sunrise over a mountain lake', $images[0]['subject']);
+    assert_eq('homepage hero backdrop', $images[0]['pageContext']);
+    assert_eq('cinematic', $images[0]['style']);
+    assert_eq('21:9', $images[0]['aspectRatio']);
+    assert_eq([$earlySource, $laterSource], $images[0]['sources']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('collect-images retains and warns when a colliding recovered placeholder cannot be isolated', function () {
     [$project, $tmp] = collect_fixture();
     $rawRecovered = '<img src="AI_IMAGE:A painted steel doorway|ratio:portrait|role:location" alt=""/>';
@@ -426,6 +503,22 @@ test('collect-images retains and warns when a colliding recovered placeholder ca
     assert_contains('authored asset=', $warnings);
     assert_contains('delivered asset=', $warnings);
     assert_contains('retained because', $warnings);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images keeps plain prose assigned image subjects unchanged', function () {
+    [$project, $tmp] = collect_fixture();
+    $subject = 'Studio flat lay with sketchbooks, pencils, and warm window light';
+    $project->writeText('theme/parts/page-work--gallery.html',
+        '<img src="theme:./assets/studio-flat-lay.jpg" alt="' . $subject . '"/>'
+    );
+
+    (new CollectImagesStep(true))->run($project);
+
+    $images = $project->readJson('images.json');
+    assert_eq(1, count($images));
+    assert_eq($subject, $images[0]['subject']);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -475,6 +568,29 @@ test('collect-images removes an image whose asset no placeholder declares (BIGR-
     $joined = implode(' ', $warnings['collect-images'] ?? []);
     assert_contains('bakery-storefront.jpg', $joined);
     assert_contains('delivered removed', $joined);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images lets canonical fields win when assigned parsing finds the same filename', function () {
+    [$project, $tmp] = collect_fixture();
+    $tag = '<img src="theme:./assets/canonical-wins.jpg" '
+        . 'alt="AI_IMAGE: Coffee | tea | pastries on a table | menu item card | flat-design | square"/>';
+    $project->writeText('theme/parts/page-home--menu.html', $tag);
+
+    $assigned = CollectImagesStep::parseAssignedImages($tag, 'parts/page-home--menu.html');
+    assert_eq(1, count($assigned));
+    assert_eq('Coffee', $assigned[0]['subject']);
+
+    (new CollectImagesStep(true))->run($project);
+
+    $images = $project->readJson('images.json');
+    assert_eq(1, count($images));
+    assert_eq('canonical-wins.jpg', $images[0]['filename']);
+    assert_eq('Coffee | tea | pastries on a table', $images[0]['subject']);
+    assert_eq('menu item card', $images[0]['pageContext']);
+    assert_eq('flat-design', $images[0]['style']);
+    assert_eq('square', $images[0]['aspectRatio']);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

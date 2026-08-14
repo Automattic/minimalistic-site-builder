@@ -178,8 +178,84 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
 
     public function requests(Project $project): array
     {
+        return $this->requestsForPages(
+            $project,
+            self::flattenPages($project->readJson('siteSpec.json')),
+        );
+    }
+
+    /**
+     * Render legacy page-plan requests for only the named pages. Used by the
+     * HTML-first mixed fallback after an inner-page design writes a .failed
+     * marker. Request keys remain page slugs, matching the ordinary batch.
+     *
+     * @param list<string> $slugs
+     * @return array<string,array<string,mixed>>
+     */
+    public function requestsForSlugs(Project $project, array $slugs): array
+    {
+        $wanted = array_fill_keys($slugs, true);
+        $sitePages = self::flattenPages($project->readJson('siteSpec.json'));
+        $pages = array_values(array_filter(
+            $sitePages,
+            static fn (array $page): bool => isset($wanted[(string) $page['slug']]),
+        ));
+        return $this->requestsForPages($project, $pages, $sitePages);
+    }
+
+    /**
+     * Run the legacy planner for only the named pages and return their planned
+     * entries without replacing pages.json. Generated-output failures degrade
+     * to the deterministic one-section plan; missing build inputs still fail
+     * while requests are rendered before the guarded LLM call.
+     *
+     * @param list<string> $slugs
+     * @return array<int,array<string,mixed>>
+     */
+    public function runForSlugs(Project $project, array $slugs): array
+    {
+        $wanted = array_fill_keys($slugs, true);
+        $sitePages = self::flattenPages($project->readJson('siteSpec.json'));
+        $pages = array_values(array_filter(
+            $sitePages,
+            static fn (array $page): bool => isset($wanted[(string) $page['slug']]),
+        ));
+        if ($pages === []) {
+            return [];
+        }
+
+        $requests = $this->requestsForPages($project, $pages, $sitePages);
+        try {
+            $results = $this->llm->completeJsonBatch($requests);
+        } catch (\RuntimeException $error) {
+            $warnings = [];
+            foreach ($pages as &$page) {
+                $slug = (string) $page['slug'];
+                $page['sections'] = self::fallbackSections((bool) $page['front']);
+                $reason = trim((string) preg_replace('/\s+/', ' ', $error->getMessage()));
+                $warnings[] = "file pages.json block_path pages[slug={$slug}].sections "
+                    . "authored_value scoped legacy plan unavailable: {$reason} "
+                    . 'delivered_value deterministic fallback section disposition degraded';
+            }
+            unset($page);
+            $project->addWarnings($this->id(), $warnings);
+            return $pages;
+        }
+        return $this->plannedPages($project, $pages, $results);
+    }
+
+    /**
+     * Render the page-plan requests for an explicit page list, resolving the
+     * shared SITE PAGES context from $sitePages (the full delivered site) so a
+     * scoped subset request still sees every sibling page.
+     *
+     * @param array<int,array<string,mixed>> $pages
+     * @param array<int,array<string,mixed>>|null $sitePages
+     * @return array<string,array<string,mixed>>
+     */
+    private function requestsForPages(Project $project, array $pages, ?array $sitePages = null): array
+    {
         $meta = $project->readJson('meta.json');
-        $pages = self::flattenPages($project->readJson('siteSpec.json'));
         $blueprint = DesignDirectionStep::heroBlueprintFor($project);
         $projection = HeroComposition::planProjection($blueprint);
 
@@ -188,7 +264,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             'site_spec'        => $project->readText('siteSpec.json'),
             'language'         => SiteSpecStep::languageOf($project),
             'design_direction' => DesignDirectionStep::readFor($project),
-            'site_pages'       => self::sitePagesList($pages),
+            'site_pages'       => self::sitePagesList($sitePages ?? $pages),
         ];
 
         $requests = [];
@@ -493,6 +569,63 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         // recorded in the report above instead.
         $project->addWarnings($this->id(), $warnings);
         $project->writeJson('pages.json', ['pages' => $out]);
+    }
+
+    /**
+     * Normalize model results for a page SUBSET (HTML-first mixed fallback) and
+     * return complete entries in the given order, without writing pages.json or
+     * running the whole-site front/contract finalization. Subset pages are
+     * interior, so front-hero projection never applies; a broken plan degrades
+     * mechanically via recoverSections rather than aborting.
+     *
+     * @param array<int,array<string,mixed>> $pages
+     * @param array<array-key,array<mixed>> $results
+     * @return array<int,array<string,mixed>>
+     */
+    private function plannedPages(Project $project, array $pages, array $results): array
+    {
+        $siteSpec = $project->readJson('siteSpec.json');
+        $actionContext = self::primaryActionContext($siteSpec, $pages);
+        $warnings = [];
+        $repairs = [];
+        $out = [];
+        foreach ($pages as $page) {
+            $slug = (string) $page['slug'];
+            $front = (bool) $page['front'];
+            $projection = $front
+                ? HeroComposition::planProjection(DesignDirectionStep::heroBlueprintFor($project))
+                : null;
+            $plan = $results[$slug] ?? null;
+            if (!is_array($plan)) {
+                $page['sections'] = self::fallbackAfterGeneratedPlanLoss(
+                    $front,
+                    $warnings,
+                    $slug,
+                    'missing generated page-plan result',
+                    'deterministic fallback substituted for the missing page result',
+                    $projection,
+                    $actionContext,
+                );
+                $out[] = $page;
+                continue;
+            }
+            $rawSections = self::removeTemplateFooterSections($plan['sections'] ?? null, $warnings, $slug);
+            try {
+                $sections = self::normalize($rawSections, $front, $projection, $actionContext, $warnings, $slug, $repairs);
+                if ($sections === []) {
+                    throw new \RuntimeException("page-plan: page '{$slug}' has no sections");
+                }
+            } catch (\RuntimeException $e) {
+                $sections = self::recoverSections($rawSections, $front, $warnings, $slug, $projection, $actionContext, $repairs);
+                if ($sections === []) {
+                    $sections = self::fallbackSections($front, $projection, $actionContext);
+                }
+            }
+            $page['sections'] = $sections;
+            $out[] = $page;
+        }
+        $project->addWarnings($this->id(), $warnings);
+        return $out;
     }
 
     public function consumeGeneratedJsonFailure(

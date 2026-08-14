@@ -21,6 +21,11 @@ use Automattic\SiteBuild\Warnings;
  *         plus in-place normalization of malformed AI_IMAGE url/src values to
  *         canonical theme asset paths.
  *
+ * On the HTML-first path the design prompts never learned that convention, so
+ * a second form is collected too (see parseAssignedImages): an <img> carrying
+ * the theme asset path assign-image-sources gave it and the design's prose
+ * alt, which is the generation subject as-is.
+ *
  * Placeholders follow the telex convention: an <img> whose src is a theme-relative
  * "theme:./assets/<name>.jpg" path (".png" for transparent-background assets)
  * and whose alt is "AI_IMAGE: subject | page-context
@@ -43,6 +48,15 @@ use Automattic\SiteBuild\Warnings;
  */
 final class CollectImagesStep implements Step
 {
+    /**
+     * @param bool $htmlFirst also collect the plain "<img src=theme:./assets/…
+     *        alt=prose>" form assign-image-sources produces. The HTML-first
+     *        design prompts never learned the AI_IMAGE alt convention — the
+     *        prose alt IS the subject. The AI_IMAGE parse stays on because the
+     *        legacy chrome/page prompts still run as that path's fallbacks.
+     */
+    public function __construct(private bool $htmlFirst = false) {}
+
     public function id(): string
     {
         return 'collect-images';
@@ -72,13 +86,43 @@ final class CollectImagesStep implements Step
     {
         /** @var array<string,array<string,mixed>> $byFilename keyed by filename, deduped */
         $byFilename = [];
+        /** @var array<string,bool> $canonicalByFilename keyed by filename */
+        $canonicalByFilename = [];
         $warnings = [];
 
         foreach ($this->themeHtmlFiles($project) as $rel) {
             $content = $project->readText('theme/' . $rel);
             $parsed = self::parseAndNormalize($content);
             $updated = $parsed['content'];
-            foreach ($parsed['images'] as $img) {
+
+            // parseAndNormalize returns four-field canonical entries first,
+            // followed by recovery fallbacks. Preserve that parser provenance:
+            // assigned rows also carry a non-empty derived pageContext, so the
+            // fields alone cannot identify a canonical entry.
+            $canonicalCount = count(self::parseCanonicalPlaceholders($parsed['content']));
+            $images = [];
+            foreach ($parsed['images'] as $index => $image) {
+                $fromCanonicalParser = $index < $canonicalCount;
+                $images[] = [
+                    'image' => $image,
+                    'canonical' => $fromCanonicalParser && (
+                        $image['pageContext'] !== ''
+                        || $image['style'] !== ''
+                        || $image['aspectRatio'] !== 'landscape'
+                    ),
+                    'assigned' => false,
+                ];
+            }
+            if ($this->htmlFirst) {
+                foreach (self::parseAssignedImages($parsed['content'], $rel) as $image) {
+                    // An assigned row is a re-detection of an <img> that already
+                    // carries a theme asset path, so it is never an independent
+                    // placeholder and must never trigger a collision rename.
+                    $images[] = ['image' => $image, 'canonical' => false, 'assigned' => true];
+                }
+            }
+            foreach ($images as $entry) {
+                $img = $entry['image'];
                 $cappedForFooter = false;
                 $authoredRatio = $img['aspectRatio'] ?? null;
                 if ($rel === 'parts/footer.html'
@@ -93,20 +137,34 @@ final class CollectImagesStep implements Step
                         . 'disposition=portrait-oriented footer image capped after placeholder recovery '
                         . 'so it cannot stretch the footer band';
                 }
-
                 $filename = $img['filename'];
                 if (isset($byFilename[$filename])) {
                     $sameSubject = self::normalizeSubject((string) $img['subject'])
                         === self::normalizeSubject((string) $byFilename[$filename]['subject']);
-                    if ($sameSubject) {
-                        // The same asset genuinely shared — just record the
-                        // source once, even when one part renders it twice.
+                    // A canonical AI_IMAGE occurrence upgrades a spec first seen
+                    // as a non-canonical fallback for the same filename, so the
+                    // richer four-field description wins even when the fallback's
+                    // provisional subject differed.
+                    $upgradesFallback = $entry['canonical'] && !$canonicalByFilename[$filename];
+                    if ($sameSubject || $entry['assigned'] || $upgradesFallback) {
+                        // The same asset genuinely shared, a re-detected assigned
+                        // duplicate of a placeholder already collected here, or a
+                        // canonical row upgrading a stored fallback — record the
+                        // source once and never split.
                         if (!in_array($rel, $byFilename[$filename]['sources'], true)) {
                             $byFilename[$filename]['sources'][] = $rel;
                         }
+                        if ($upgradesFallback) {
+                            foreach (['subject', 'pageContext', 'style', 'aspectRatio'] as $field) {
+                                $byFilename[$filename][$field] = $img[$field];
+                            }
+                            $canonicalByFilename[$filename] = true;
+                        }
                         if ($cappedForFooter) {
                             // A shared asset must use the footer-safe shape even
-                            // if a non-footer source introduced it first.
+                            // if an earlier non-footer source (or a canonical row
+                            // above) set a portrait ratio, so the footer band
+                            // can't be stretched.
                             $byFilename[$filename]['aspectRatio'] = 'square';
                         }
                         continue;
@@ -167,6 +225,7 @@ final class CollectImagesStep implements Step
                 $img['sources'] = [$rel];
                 $img['status']  = 'pending';
                 $byFilename[$filename] = $img;
+                $canonicalByFilename[$filename] = $entry['canonical'];
             }
             if ($updated !== $content) {
                 $project->writeText('theme/' . $rel, $updated);
@@ -241,14 +300,93 @@ final class CollectImagesStep implements Step
         return array_keys($sources);
     }
 
-    /** Theme-relative paths of every markup file that may hold image placeholders. */
+    /**
+     * Theme-relative paths of every markup file that may hold image
+     * placeholders. Templates are scanned only when they already exist: in
+     * the default graph assemble-pages writes them after this step, so on a
+     * normal build the section parts are the whole story.
+     */
     private function themeHtmlFiles(Project $project): array
     {
         $files = [];
         foreach (glob($project->themePath('parts/*.html')) ?: [] as $abs) {
             $files[] = 'parts/' . basename($abs);
         }
+        if (!$this->htmlFirst) {
+            return $files;
+        }
+        foreach (glob($project->themePath('templates/*.html')) ?: [] as $abs) {
+            $files[] = 'templates/' . basename($abs);
+        }
         return $files;
+    }
+
+    /**
+     * Parse the HTML-first form: an <img> whose src is the theme asset path
+     * assign-image-sources gave it and whose alt is the design's prose
+     * description. That alt is the whole generation brief, so it becomes the
+     * subject verbatim; the page-context comes from the part path and style
+     * stays empty (the composer already folds in the design's image grade).
+     * The ratio defaults to landscape like every other recovered placeholder —
+     * the design markup carries no reliable shape hint.
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    public static function parseAssignedImages(string $content, string $source = ''): array
+    {
+        preg_match_all('/<img\b[^>]*>/i', $content, $matches);
+
+        $images = [];
+        foreach ($matches[0] as $tag) {
+            // The lookbehind keeps data-src/data-alt from standing in for the
+            // real attributes.
+            if (!preg_match('/(?<![-\w])src=(["\'])(theme:\.\/assets\/([a-z0-9-]+\.(?:jpe?g|png)))\1/i', $tag, $src)) {
+                continue;
+            }
+            if (!preg_match('/(?<![-\w])alt=(["\'])(.*?)\1/is', $tag, $alt)) {
+                continue;
+            }
+            $subject = trim((string) preg_replace(
+                '/\s+/',
+                ' ',
+                html_entity_decode($alt[2], ENT_QUOTES | ENT_HTML5),
+            ));
+            if (str_starts_with($subject, 'AI_IMAGE:')) {
+                $subject = trim(explode('|', substr($subject, strlen('AI_IMAGE:')), 2)[0]);
+            }
+            $context = self::pageContextFor($source);
+            // A decorative image the design left undescribed still has an
+            // assigned path: generate something on-brand for its slot rather
+            // than ship a reference nothing ever writes a file for.
+            $subject = $subject !== '' ? $subject : $context;
+            if ($subject === '') {
+                continue;
+            }
+
+            $images[] = [
+                'filename'    => $src[3],
+                'src'         => $src[2],
+                'subject'     => $subject,
+                'pageContext' => $context,
+                'style'       => '',
+                'aspectRatio' => 'landscape',
+            ];
+        }
+
+        return $images;
+    }
+
+    /** Where an image is used, read off the part path assemble-pages keys on. */
+    private static function pageContextFor(string $source): string
+    {
+        $base = preg_replace('/\.html$/', '', basename($source)) ?? '';
+        if ($base === 'header' || $base === 'footer') {
+            return "site {$base}";
+        }
+        if (preg_match('/^page-(.+?)--(.+)$/', $base, $m) !== 1) {
+            return '';
+        }
+        return str_replace('-', ' ', $m[2]) . ' section of the ' . str_replace('-', ' ', $m[1]) . ' page';
     }
 
     /**

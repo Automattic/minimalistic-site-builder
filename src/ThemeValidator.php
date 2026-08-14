@@ -387,11 +387,20 @@ final class ThemeValidator
     /**
      * Raw AI_IMAGE specs still occupying URL/source fields in generated markup.
      *
-     * The documented AI_IMAGE value belongs in an img alt until collect-images
-     * records it, so a blanket marker scan would reject valid canonical markup
-     * even after its src was resolved. This check is deliberately contextual:
-     * only block-JSON url/src values and rendered HTML src attributes can ship
-     * the prompt as an image URL.
+     * Two shapes. The first is a raw AI_IMAGE spec still occupying a URL/source
+     * field. The documented AI_IMAGE value belongs in an img alt until
+     * collect-images records it, so a blanket marker scan would reject valid
+     * canonical markup even after its src was resolved. That check is
+     * deliberately contextual: only block-JSON url/src values and rendered HTML
+     * src attributes can ship the prompt as an image URL.
+     *
+     * The second is an image reference collect-images never recorded — a bare
+     * "hero.jpg" the design invented, or an empty src. Those 404 (or render
+     * nothing) no matter how image generation goes, and before this check they
+     * were invisible: a page full of them let generate-images report success
+     * with zero images. A reference IS judged resolvable when images.json
+     * carries it, whatever its status — generation deliberately leaves a
+     * failed image's placeholder in place rather than abort the build.
      *
      * The ordinary final validator reports these as warnings for builds that
      * skip optional image generation. GenerateImagesStep also calls this helper
@@ -403,6 +412,7 @@ final class ThemeValidator
     {
         $problems = [];
         $root = rtrim($project->root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
+        $known = self::recordedImageSources($project);
 
         foreach ($project->markupFiles() as $file) {
             $markup = (string) file_get_contents($file);
@@ -413,16 +423,99 @@ final class ThemeValidator
             if (preg_match('/\bsrc\s*=\s*(?:(?:["\'])\s*AI_IMAGE:|AI_IMAGE:)/i', $markup)) {
                 $contexts[] = 'HTML src';
             }
-            if ($contexts === []) {
-                continue;
-            }
 
-            $rel = str_starts_with($file, $root) ? substr($file, strlen($root)) : $file;
-            $problems[] = str_replace(DIRECTORY_SEPARATOR, '/', $rel)
-                . ': contains unresolved AI_IMAGE: in ' . implode(' and ', $contexts);
+            $rel = str_replace(
+                DIRECTORY_SEPARATOR,
+                '/',
+                str_starts_with($file, $root) ? substr($file, strlen($root)) : $file,
+            );
+            if ($contexts !== []) {
+                $problems[] = "{$rel}: contains unresolved AI_IMAGE: in " . implode(' and ', $contexts);
+            }
+            foreach (self::danglingImageSources($markup, $known) as $source) {
+                $problems[] = "{$rel}: image source {$source} resolves to nothing and was never collected for generation";
+            }
         }
 
         return $problems;
+    }
+
+    /**
+     * Every image source collect-images recorded, by its markup spelling.
+     * Null means images.json is absent — collection never ran for this project
+     * (theme-only fixtures, hosts with their own image pipeline), so nothing
+     * can be called dangling.
+     *
+     * @return array<string,true>|null
+     */
+    private static function recordedImageSources(Project $project): ?array
+    {
+        if (!$project->exists('images.json')) {
+            return null;
+        }
+        $known = [];
+        foreach ((array) $project->readJson('images.json') as $spec) {
+            if (is_array($spec) && is_string($spec['src'] ?? null) && $spec['src'] !== '') {
+                $known[$spec['src']] = true;
+            }
+        }
+        return $known;
+    }
+
+    /**
+     * Image references in one file that neither the browser nor the image
+     * pipeline can resolve. Only relative/custom-scheme values that name an
+     * image are judged, so a "#" social link or an absolute URL never trips it.
+     *
+     * @param array<string,true>|null $known
+     * @return list<string>
+     */
+    private static function danglingImageSources(string $markup, ?array $known): array
+    {
+        if ($known === null) {
+            return [];
+        }
+
+        $found = [];
+        preg_match_all('/<img\b[^>]*>/i', $markup, $tags);
+        foreach ($tags[0] as $tag) {
+            if (preg_match('/(?<![-\w])src\s*=\s*(["\'])(.*?)\1/is', $tag, $m) === 1) {
+                $found[] = trim(html_entity_decode($m[2], ENT_QUOTES | ENT_HTML5));
+            }
+        }
+        // wp:cover paints its background from the block attribute alone when
+        // the overlay renders as a div, so the JSON is the only reference.
+        preg_match_all('/<!--\s*wp:(?:image|cover)\s(?:(?!-->).)*?"url"\s*:\s*"((?:[^"\\\\]|\\\\.)*)"/is', $markup, $urls);
+        foreach ($urls[1] as $url) {
+            $decoded = json_decode('"' . $url . '"');
+            $found[] = trim(is_string($decoded) ? $decoded : $url);
+        }
+
+        $problems = [];
+        foreach (array_unique($found) as $source) {
+            if (isset($known[$source]) || !self::isDanglingImageSource($source)) {
+                continue;
+            }
+            $problems[] = $source === '' ? '(empty)' : $source;
+        }
+        return $problems;
+    }
+
+    /**
+     * A source the browser cannot fetch: empty, or a relative/custom-scheme
+     * path naming an image file. Root-relative, absolute, protocol-relative,
+     * and data: values all resolve on their own and are left alone.
+     */
+    private static function isDanglingImageSource(string $source): bool
+    {
+        if ($source === '') {
+            return true;
+        }
+        if (preg_match('#^(?:/|//|https?:|data:|mailto:|tel:|\#)#i', $source) === 1) {
+            return false;
+        }
+        return str_starts_with($source, 'theme:')
+            || preg_match('/\.(?:jpe?g|png|gif|webp|avif|svg)(?:[?\#]|$)/i', $source) === 1;
     }
 
     /**
@@ -780,9 +873,11 @@ final class ThemeValidator
      * anything reported here means generated markup drifted past the
      * deterministic normalization (or an old project predates it).
      *
+     * @param bool $htmlFirst must match the flag the build's fix-blocks pass
+     *        used, or the linter reports rules that path deliberately skips
      * @return string[] list of warnings (empty means widths follow the contract)
      */
-    public static function layoutWarnings(Project $project): array
+    public static function layoutWarnings(Project $project, bool $htmlFirst = false): array
     {
         $warnings = [];
         $contentSize = Steps\FixBlocksStep::themeContentSize($project);
@@ -792,7 +887,8 @@ final class ThemeValidator
                 $project->readText('theme/' . $rel),
                 LayoutFixer::roleFor($rel),
                 $contentSize,
-                $spacingSlugs
+                $spacingSlugs,
+                $htmlFirst
             );
             foreach ($result['notes'] as $note) {
                 $warnings[] = "{$rel}: {$note}";

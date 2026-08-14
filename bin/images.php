@@ -5,6 +5,8 @@ use Automattic\SiteBuild\BlockFixers;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Steps\CollectImagesStep;
 use Automattic\SiteBuild\Steps\CoverContrastStep;
+use Automattic\SiteBuild\Steps\GenerateImagesStep;
+use Automattic\SiteBuild\TransformArtifacts;
 
 /**
  * Generate (or regenerate) the AI images for an already-built project.
@@ -38,7 +40,9 @@ echo "Generating images for '{$project->slug()}'\n";
 
 // Use the durable record from the pipeline; only collect if it's absent.
 if (!$project->exists('images.json')) {
-    (new CollectImagesStep())->run($project);
+    // The transform report is only written by the HTML-first pipeline, and it
+    // is what tells the collector to read prose alts as image subjects.
+    (new CollectImagesStep(htmlFirst: $project->exists(TransformArtifacts::REPORT)))->run($project);
 }
 $specs = $project->readJson('images.json');
 $pending = array_filter($specs, static fn ($img) => ($img['status'] ?? 'pending') !== 'completed');

@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\CssTokenExtractor;
 use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\GeneratedJsonFallbackStep;
 use Automattic\SiteBuild\CssChecks;
@@ -28,6 +29,9 @@ use Automattic\SiteBuild\Warnings;
  * slugs are filled from the design direction's committed values, then neutral
  * defaults, with every fill recorded in warnings.json — a missing slug never
  * aborts the build.
+ *
+ * HTML-first composition mode declares and consumes design/site.css token
+ * evidence. Legacy mode ignores any stale design artifact from an earlier run.
  */
 final class ThemeJsonStep implements GeneratedJsonFallbackStep
 {
@@ -227,6 +231,13 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         ],
     ];
     /**
+     * The provisioned root inline gutter, from the canonical spacing scale.
+     * md is a component-level inset (~1.5–2rem), matching the ~1rem-per-side
+     * page gutter the designs author on their outermost container.
+     */
+    private const ROOT_GUTTER = 'var:preset|spacing|md';
+
+    /**
      * The image-corner radius each committed corner language wires onto
      * core/image (WordPress applies the block's border support to the inner
      * img, so contained figures, card crops and gallery items all pick it
@@ -257,6 +268,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         private PromptRenderer $renderer,
         private ?string $model = null,
         private ?float $temperature = null,
+        private bool $htmlFirst = false,
     ) {}
 
     public function id(): string
@@ -271,10 +283,15 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
 
     public function declaration(): StepDeclaration
     {
+        $reads = ['meta.json', 'siteSpec.json', 'designDirection.json'];
+        if ($this->htmlFirst) {
+            $reads[] = 'design/site.css';
+        }
+
         return new StepDeclaration(
             id: $this->id(),
             label: $this->label(),
-            reads: ['meta.json', 'siteSpec.json', 'designDirection.json'],
+            reads: $reads,
             writes: ['theme/theme.json', 'logs/' . self::SHAPE_REPORT_FILE, 'warnings.json'],
             concurrent: false,
         );
@@ -283,11 +300,38 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     public function requests(Project $project): array
     {
         $meta = $project->readJson('meta.json');
+        $designDirection = DesignDirectionStep::readFor($project);
+        if ($this->htmlFirst) {
+            $tokens = CssTokenExtractor::extract($project->readText('design/site.css'));
+            if ($tokens['palette'] !== [] && $tokens['fonts'] !== []) {
+                $designDirection .= "\n\n"
+                    . "DESIGN CSS TOKENS (authoritative evidence from design/site.css):\n"
+                    . "Use these actual design colors, font stacks, and spacing values when naming "
+                    . "the required theme.json slots. Usage count ranks palette importance. Do not "
+                    . "invent replacements for representable extracted values.\n"
+                    . 'Palette: ' . implode(', ', array_map(
+                        static fn (array $entry): string => "{$entry['color']} ({$entry['count']} uses)",
+                        $tokens['palette'],
+                    )) . "\n"
+                    . "Fonts:\n- " . implode("\n- ", $tokens['fonts']) . "\n"
+                    . 'Spacing: ' . ($tokens['spacing'] === [] ? '(none)' : implode(', ', $tokens['spacing']));
+            } else {
+                $project->addWarnings($this->id(), [
+                    'design/site.css at stylesheet root: sparse_tokens; authored '
+                        . json_encode([
+                            'palette_count' => count($tokens['palette']),
+                            'font_count' => count($tokens['fonts']),
+                            'spacing_count' => count($tokens['spacing']),
+                        ], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)
+                        . '; delivered design-direction values; disposition sparse token evidence omitted',
+                ]);
+            }
+        }
         $heroBlueprint = DesignDirectionStep::heroBlueprintFor($project);
         $rendered = $this->renderer->render('theme-json.md', [
             'user_prompt'      => (string) ($meta['prompt'] ?? ''),
             'site_spec'        => $project->readText('siteSpec.json'),
-            'design_direction' => DesignDirectionStep::readFor($project),
+            'design_direction' => $designDirection,
             'hero_sizing_context' => DesignDirectionStep::formatHeroBlueprint($heroBlueprint),
         ]);
 
@@ -359,6 +403,13 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         $theme['styles']['spacing']['blockGap'] ??= 'var:preset|spacing|md';
         // After the shape repairs above so a malformed styles.spacing records
         // its warning before normalizeRootPadding's silent guard repairs it.
+        $theme = self::normalizeRootPadding($theme);
+
+        // Guarantee a root inline gutter so useRootPaddingAwareAlignments gives
+        // constrained/wide content a side inset. SectionLayoutStep strips each
+        // section's own inline left/right padding expecting this root gutter to
+        // own the inline axis; without it constrained sections butt the edge.
+        $theme = self::provisionRootGutter($theme);
         $theme = self::normalizeRootPadding($theme);
 
         // Missing required slugs are filled deterministically instead of
@@ -536,6 +587,35 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         }
         $theme['styles']['spacing']['padding'] = $normalized;
         $theme['settings']['useRootPaddingAwareAlignments'] = true;
+        return $theme;
+    }
+
+    /**
+     * Ensure the theme carries a root inline gutter. Fills only an absent or
+     * zero left/right side, so a real model-authored gutter is preserved and
+     * sections (whose own inline padding SectionLayoutStep strips) never
+     * double-pad. Vertical sides and the aware-alignment flag are settled by
+     * normalizeRootPadding, which runs immediately after. Pure — unit-testable.
+     *
+     * @param array<mixed> $theme
+     * @return array<mixed>
+     */
+    public static function provisionRootGutter(array $theme): array
+    {
+        if (!isset($theme['styles']['spacing']) || !is_array($theme['styles']['spacing'])) {
+            $theme['styles']['spacing'] = [];
+        }
+        $padding = $theme['styles']['spacing']['padding'] ?? null;
+        if (!is_array($padding)) {
+            $padding = [];
+        }
+        foreach (['left', 'right'] as $side) {
+            $value = is_string($padding[$side] ?? null) ? trim($padding[$side]) : '';
+            if ($value === '' || preg_match('/^0(?:[a-z%]+)?$/i', $value) === 1) {
+                $padding[$side] = self::ROOT_GUTTER;
+            }
+        }
+        $theme['styles']['spacing']['padding'] = $padding;
         return $theme;
     }
 

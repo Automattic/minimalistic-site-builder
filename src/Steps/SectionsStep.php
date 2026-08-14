@@ -321,6 +321,154 @@ final class SectionsStep implements Step
         }
     }
 
+    /**
+     * Generate legacy section parts for only the supplied pages (HTML-first
+     * mixed fallback after an inner page's design failed). Header, footer,
+     * pages.json, aboveFold.json and sibling parts are left untouched. The
+     * whole-site above-fold contract is resolved from $sitePages (the full
+     * delivered site) so opening sections still get the correct header
+     * relation, but it is not re-finalized here. A permanent batch failure
+     * degrades to dropping the scoped sections. Returns the surviving page
+     * plans (dropped sections pruned) in the given order.
+     *
+     * @param array<int,array<string,mixed>> $pages
+     * @param array<int,array<string,mixed>>|null $sitePages full delivered-site context for prompts/header seam
+     * @return array<int,array<string,mixed>>
+     */
+    public function runForPages(Project $project, array $pages, ?array $sitePages = null): array
+    {
+        if ($pages === []) {
+            return [];
+        }
+        $context = $sitePages ?? $pages;
+        $wanted = array_fill_keys(
+            array_map(static fn (array $p): string => (string) ($p['slug'] ?? ''), $pages),
+            true,
+        );
+        $warnings = [];
+        $repairs = [];
+        $pages = self::repairedPages($pages, $repairs);
+        $jobPlan = $this->jobPlan($project, $repairs, $context);
+        $initialContract = $jobPlan['contract'];
+        // Only the requested pages' section jobs — never chrome or siblings.
+        $jobs = array_filter(
+            $jobPlan['jobs'],
+            static fn (array $job): bool => isset($job['input']['page']['slug'])
+                && isset($wanted[(string) $job['input']['page']['slug']]),
+        );
+        if ($jobs === []) {
+            return $pages;
+        }
+        $requests = self::requestsFor($jobs);
+        $this->warmSectionCache($requests);
+        try {
+            $batch = $this->llm->completeBatch($requests);
+        } catch (\RuntimeException $error) {
+            $reason = str_replace(["\r", "\n"], ' ', $error->getMessage());
+            foreach ($pages as $page) {
+                $slug = (string) ($page['slug'] ?? '');
+                foreach ((array) ($page['sections'] ?? []) as $section) {
+                    if (!is_array($section)) {
+                        continue;
+                    }
+                    $sectionSlug = (string) ($section['slug'] ?? '');
+                    $path = 'theme/parts/' . self::partSlug($slug, $sectionSlug) . '.html';
+                    $warnings[] = "file {$path} "
+                        . "block_path pages[slug={$slug}].sections[slug={$sectionSlug}] "
+                        . "authored_value scoped legacy section batch unavailable: {$reason} "
+                        . 'delivered_value removed disposition dropped';
+                }
+            }
+            $project->addWarnings($this->id(), $warnings);
+            return [];
+        }
+        $parts = $batch->texts;
+        $files = [];
+        $dropped = [];
+        foreach ($jobs as $key => $job) {
+            try {
+                if (!array_key_exists($key, $parts) || !is_string($parts[$key])) {
+                    throw new \RuntimeException('the batch returned no result');
+                }
+                $result = $job['unit']->finish($parts[$key], $job['input']);
+                if (($job['opening'] ?? false) === true) {
+                    self::assertOpeningRoot($result->markup, $key);
+                }
+                $files[$job['file']] = $result->markup;
+                array_push($repairs, ...$result->repairs);
+                array_push(
+                    $warnings,
+                    ...$result->warnings,
+                    ...self::batchWarnings($job['file'], $batch->notesFor($key)),
+                );
+            } catch (\RuntimeException $e) {
+                $authoredFailure = Warnings::value($e->getMessage());
+                $warningContext = "file='theme/{$job['file']}'; block='part root'; authored={$authoredFailure}; ";
+                if (($job['opening'] ?? false) === true) {
+                    $fallback = PageOpeningFallback::render($job['input'], $initialContract, $e->getMessage());
+                    $files[$job['file']] = $fallback->markup;
+                    array_push($repairs, ...$fallback->repairs);
+                    array_push($warnings, ...$fallback->warnings);
+                } else {
+                    $dropped[$key] = true;
+                    $warnings[] = "part '{$key}': unusable generated markup; {$warningContext}"
+                        . 'delivered=removed; disposition=only the unusable section part was removed and pruned '
+                        . 'from pages.json';
+                }
+                Narrator::write("    (part '{$key}': unusable generated markup — {$e->getMessage()})\n");
+            }
+        }
+        $pages = self::pruneDroppedSections($pages, $dropped, $warnings);
+        $pages = self::repairedPages($pages, $repairs);
+        foreach ($files as $rel => $markup) {
+            $project->writeText('theme/' . $rel, $markup . "\n");
+        }
+        $project->addWarnings($this->id(), $warnings);
+        return $pages;
+    }
+
+    /**
+     * Resolve the delivery-phase above-fold contract for an already-delivered
+     * page set + theme/parts. The HTML-first path generates sections through
+     * the transformer instead of this step's run(), so it has no in-flight
+     * contract; this rebuilds the same delivery-phase contract from the
+     * delivered pages and part bytes so HeaderHeroStep consumes an identical
+     * artifact in both paths. Legacy run() writes the phase inline.
+     *
+     * @param array<int,array<string,mixed>> $pages
+     * @return array<string,mixed>
+     */
+    public static function deliveryContract(Project $project, array $pages): array
+    {
+        $siteSpec = $project->readText('siteSpec.json');
+        $siteSpecData = $project->readJson('siteSpec.json');
+        $designDirection = DesignDirectionStep::readFor($project);
+        $blueprint = DesignDirectionStep::heroBlueprintFor($project);
+        $footerArchetype = self::footerArchetype($pages, $siteSpec, $designDirection);
+        $contract = AboveFoldContract::resolve(
+            pages: $pages,
+            blueprint: $blueprint,
+            canvas: DesignDirectionStep::canvasFor($project),
+            themeContext: $project->readJson('theme/theme.json'),
+            siteContext: [
+                'stable_id' => (string) ($siteSpecData['slug'] ?? $project->slug()),
+                'writing_direction' => (string) ($siteSpecData['writing_direction'] ?? 'ltr'),
+                'page_count' => count($pages),
+            ],
+            footerContext: [
+                'archetype' => $footerArchetype,
+                'surface' => FooterComposition::surface($footerArchetype),
+            ],
+            forcedHeaderArchetype: Env::get(AboveFoldContract::HEADER_ARCHETYPE_ENV),
+        );
+        $partBytes = [];
+        foreach (glob($project->themePath('parts/*.html')) ?: [] as $abs) {
+            $partBytes[substr(basename($abs), 0, -strlen('.html'))] = (string) file_get_contents($abs);
+        }
+        $facts = AboveFoldPartFacts::inspect($pages, $partBytes, $contract);
+        return AboveFoldContract::finalizeDelivery($contract, $pages, $facts);
+    }
+
     private static function assertOpeningRoot(string $markup, string $part): void
     {
         $document = BlockMarkup::parse($markup);

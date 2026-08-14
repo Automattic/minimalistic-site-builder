@@ -33,6 +33,19 @@ function make_integration_builder(FakeLlm $llm, string $outputRoot): SiteBuilder
     );
 }
 
+function legacy_integration_pipeline(SiteBuilder $builder): \Automattic\SiteBuild\BuildPipeline
+{
+    $previous = getenv('SITE_BUILD_LEGACY');
+    putenv('SITE_BUILD_LEGACY=1');
+    try {
+        return $builder->pipeline();
+    } finally {
+        $previous === false
+            ? putenv('SITE_BUILD_LEGACY')
+            : putenv('SITE_BUILD_LEGACY=' . $previous);
+    }
+}
+
 test('full pipeline produces a structurally valid theme and content plugin', function () {
     $tmp = sys_get_temp_dir() . '/builder_int_' . uniqid();
     $llm = new FakeLlm();
@@ -191,13 +204,14 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
             'hero_copy_capacity' => 'compact',
         ],
     );
+    $project->writeText('design/site.css', '/* STALE-HTML-FIRST-CSS */');
     // The queued fixture responses script a cinematic-safe-zone build, but
     // the cover+compact constraint pool now holds two recipes (BIGR-775
     // downgraded layered-poster to compact) and the stable identifier is a
     // uniqid temp path — pin the recipe so selection stays deterministic.
     putenv('HERO_RECIPE=cinematic-safe-zone');
     try {
-        $builder->pipeline()->runThrough($project);
+        legacy_integration_pipeline($builder)->runThrough($project);
     } finally {
         putenv('HERO_RECIPE');
     }
@@ -209,6 +223,16 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
 
     // Identity propagated end to end — theme AND content plugin.
     assert_contains('Theme Name: Hearth & Crumb', $project->readText('theme/style.css'));
+    assert_true(
+        !str_contains($project->readText('theme/style.css'), 'STALE-HTML-FIRST-CSS'),
+        'SITE_BUILD_LEGACY=1 ignores stale HTML-first CSS',
+    );
+    assert_true($project->exists('logs/contrast-report.txt'), 'legacy contrast fix still runs');
+    assert_true($project->exists('logs/motion-sanity.txt'), 'legacy motion fix still runs');
+    assert_true(
+        !isset(($project->readJson('warnings.json'))['fixup_skipped']),
+        'legacy fixups never inherit stale HTML-first skip mode',
+    );
     assert_contains('Plugin Name: Hearth & Crumb Content', $project->readText('plugin/site-content.php'));
     assert_eq(3, $project->readJson('theme/theme.json')['version']);
 
@@ -441,5 +465,17 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     assert_contains("get_theme_file_uri('assets/header/header.js')", $functions);
     assert_true(!str_contains($functions, 'googleapis'), 'nothing hotlinks Google');
 
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('pipeline step order is correct', function () {
+    $tmp = sys_get_temp_dir() . '/builder_int_order_' . uniqid();
+    $ids = legacy_integration_pipeline(make_integration_builder(new FakeLlm(), $tmp))->stepIds();
+    assert_eq([
+        'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
+        'theme-json+page-plan', 'sections', 'section-rhythm', 'copy-dedupe',
+        'collect-images', 'normalize-layout', 'header-hero', 'contrast-fix', 'motion-sanity', 'fix-blocks', 'assemble-pages', 'page-styles', 'custom-motion',
+        'bundle-fonts', 'fonts-php', 'finalize-theme', 'validate-theme',
+    ], $ids);
     exec('rm -rf ' . escapeshellarg($tmp));
 });

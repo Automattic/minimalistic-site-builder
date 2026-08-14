@@ -831,6 +831,51 @@ test('theme-json forces useRootPaddingAwareAlignments when root side padding is 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('theme-json provisions a root inline gutter when the model omits root padding', function () {
+    // SectionLayoutStep strips each section's own inline left/right padding on
+    // the expectation that the theme root gutter owns the inline axis. Without a
+    // provisioned gutter, useRootPaddingAwareAlignments stays off and every
+    // constrained section butts the viewport edge with no side inset.
+    $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project);
+
+    $llm = new FakeLlm();
+    $llm->queueJson(valid_theme_payload()); // no styles.spacing.padding anywhere
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $theme = $project->readJson('theme/theme.json');
+    $padding = $theme['styles']['spacing']['padding'] ?? [];
+    assert_eq('var:preset|spacing|md', $padding['left'] ?? null, 'left gutter provisioned from the spacing scale');
+    assert_eq('var:preset|spacing|md', $padding['right'] ?? null, 'right gutter provisioned from the spacing scale');
+    assert_eq('0', $padding['top'] ?? null, 'root vertical padding stays zero — sections own the rhythm');
+    assert_eq('0', $padding['bottom'] ?? null, 'root vertical padding stays zero — sections own the rhythm');
+    assert_eq(true, $theme['settings']['useRootPaddingAwareAlignments'], 'the provisioned gutter is aware-aligned');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json keeps a model-authored root gutter instead of double-padding it', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project);
+
+    $payload = valid_theme_payload();
+    $payload['styles'] = ['spacing' => ['padding' => ['left' => '3rem', 'right' => '3rem']]];
+
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $padding = $project->readJson('theme/theme.json')['styles']['spacing']['padding'] ?? [];
+    assert_eq('3rem', $padding['left'] ?? null, 'a real authored gutter is preserved');
+    assert_eq('3rem', $padding['right'] ?? null, 'a real authored gutter is preserved');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('normalizeRootPadding synthesizes side gutters when the model omits them', function () {
     // No styles at all — md gutters synthesized, flag on. Without this, every
     // section without its own padding renders flush to the 390px screen edge.
@@ -1059,6 +1104,22 @@ function theme_json_preset(array $presets, string $slug): array
 test('theme-json declares every artifact it writes', function () {
     $step = new ThemeJsonStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
     assert_eq(['theme/theme.json', 'logs/theme-json-shape.txt', 'warnings.json'], $step->declaration()->writes);
+});
+
+test('theme-json declares design CSS only for the HTML-first graph', function () {
+    $llm = new FakeLlm();
+    $renderer = new PromptRenderer(repo_path('prompts'));
+
+    assert_eq(
+        ['meta.json', 'siteSpec.json', 'designDirection.json'],
+        (new ThemeJsonStep($llm, $renderer))->declaration()->reads,
+        'legacy graph declaration stays byte-for-byte unchanged',
+    );
+    assert_eq(
+        ['meta.json', 'siteSpec.json', 'designDirection.json', 'design/site.css'],
+        (new ThemeJsonStep($llm, $renderer, htmlFirst: true))->declaration()->reads,
+        'HTML-first graph declares the CSS token source produced by design-preview',
+    );
 });
 
 test('theme-json font-size repair preserves model sizes and fills each omission', function () {
@@ -1478,6 +1539,29 @@ test('theme-json sends no json_schema', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('theme-json prompt carries authoritative tokens extracted from design CSS', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_css_tokens_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A cold-water swim club']);
+    $project->writeJson('siteSpec.json', ['name' => 'Teal Valley']);
+    seed_test_design_direction($project);
+    $project->writeText(
+        'design/site.css',
+        file_get_contents(repo_path('tests/fixtures/design/tokens-rich.css')) ?: '',
+    );
+
+    $request = (new ThemeJsonStep(
+        new FakeLlm(),
+        new PromptRenderer(repo_path('prompts')),
+        htmlFirst: true,
+    ))->requests($project)['theme-json'];
+
+    assert_contains('#123456', $request['prompt']);
+    assert_contains('"Source Sans 3", Arial, sans-serif', $request['prompt']);
+    assert_contains('2rem', $request['prompt']);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('theme-json receives the front hero blueprint as focused sizing context', function () {
     $tmp = sys_get_temp_dir() . '/builder_tj_hero_context_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
@@ -1497,6 +1581,147 @@ test('theme-json receives the front hero blueprint as focused sizing context', f
     assert_eq(1, substr_count($prompt, 'cinematic-safe-zone'), 'recipe appears only in focused context');
     assert_true(!str_contains($prompt, 'hero_composition'), 'removed prose field is not a sizing source');
 
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json absent CSS prompt matches the recorded legacy bytes', function () {
+    $expectation = json_decode(
+        file_get_contents(repo_path('tests/fixtures/theme-json/legacy-prompt-expectation.json')) ?: '',
+        true,
+        512,
+        JSON_THROW_ON_ERROR,
+    );
+    $tmp = sys_get_temp_dir() . '/builder_tj_legacy_prompt_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', $expectation['meta']);
+    $project->writeJson('siteSpec.json', $expectation['siteSpec']);
+    seed_test_design_direction($project);
+
+    $prompt = (new ThemeJsonStep(
+        new FakeLlm(),
+        new PromptRenderer(repo_path('prompts')),
+    ))->requests($project)['theme-json']['prompt'];
+
+    assert_eq($expectation['bytes'], strlen($prompt));
+    assert_eq($expectation['sha256'], hash('sha256', $prompt));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json legacy mode ignores stale design CSS bytes', function () {
+    $expectation = json_decode(
+        file_get_contents(repo_path('tests/fixtures/theme-json/legacy-prompt-expectation.json')) ?: '',
+        true,
+        512,
+        JSON_THROW_ON_ERROR,
+    );
+    $tmp = sys_get_temp_dir() . '/builder_tj_legacy_stale_css_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', $expectation['meta']);
+    $project->writeJson('siteSpec.json', $expectation['siteSpec']);
+    seed_test_design_direction($project);
+    $project->writeText(
+        'design/site.css',
+        '.stale { color: #C0FFEE; font-family: "Stale Font", sans-serif; padding: 2rem; }',
+    );
+
+    $prompt = (new ThemeJsonStep(
+        new FakeLlm(),
+        new PromptRenderer(repo_path('prompts')),
+    ))->requests($project)['theme-json']['prompt'];
+
+    assert_eq($expectation['bytes'], strlen($prompt));
+    assert_eq($expectation['sha256'], hash('sha256', $prompt));
+    assert_true(!str_contains($prompt, '#C0FFEE'));
+    assert_true(!str_contains($prompt, 'Stale Font'));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json sparse CSS keeps direction prompt and writes actionable warning', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_sparse_tokens_' . uniqid();
+    $store = new ProjectStore($tmp);
+    $legacy = $store->create('legacy');
+    $sparse = $store->create('sparse');
+    $direction = [
+        'concept' => 'Polar editorial',
+        'palette' => [
+            'base' => '#F5FBFF',
+            'contrast' => '#061A24',
+            'primary' => '#0C5B78',
+            'secondary' => '#315D6D',
+            'accent' => '#B63A1E',
+        ],
+        'type_pairing' => 'Fraunces with Source Sans 3',
+        'hero_blueprint' => \Automattic\SiteBuild\HeroBlueprint::defaultFor('cinematic-safe-zone'),
+    ];
+    foreach ([$legacy, $sparse] as $project) {
+        $project->writeJson('meta.json', ['prompt' => 'A cold-water swim club']);
+        $project->writeJson('siteSpec.json', ['name' => 'Teal Valley']);
+        $project->writeJson('designDirection.json', $direction);
+    }
+    $sparse->writeText(
+        'design/site.css',
+        file_get_contents(repo_path('tests/fixtures/design/tokens-sparse.css')) ?: '',
+    );
+    $legacyStep = new ThemeJsonStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    $htmlFirstStep = new ThemeJsonStep(
+        new FakeLlm(),
+        new PromptRenderer(repo_path('prompts')),
+        htmlFirst: true,
+    );
+
+    $legacyPrompt = $legacyStep->requests($legacy)['theme-json']['prompt'];
+    $sparsePrompt = $htmlFirstStep->requests($sparse)['theme-json']['prompt'];
+
+    assert_eq($legacyPrompt, $sparsePrompt, 'sparse extraction uses unchanged design-direction prompt');
+    $warnings = implode(' ', $sparse->readJson('warnings.json')['theme-json'] ?? []);
+    assert_contains('sparse_tokens', $warnings);
+    assert_contains('design/site.css', $warnings);
+    assert_contains('authored', $warnings);
+    assert_contains('delivered design-direction values', $warnings);
+    assert_contains('disposition', $warnings);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json invalid UTF-8 CSS keeps direction prompt and writes sparse warning', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_invalid_utf8_tokens_' . uniqid();
+    $store = new ProjectStore($tmp);
+    $legacy = $store->create('legacy');
+    $invalid = $store->create('invalid');
+    $direction = [
+        'concept' => 'Polar editorial',
+        'palette' => [
+            'base' => '#F5FBFF',
+            'contrast' => '#061A24',
+            'primary' => '#0C5B78',
+            'secondary' => '#315D6D',
+            'accent' => '#B63A1E',
+        ],
+        'type_pairing' => 'Fraunces with Source Sans 3',
+        'hero_blueprint' => \Automattic\SiteBuild\HeroBlueprint::defaultFor('cinematic-safe-zone'),
+    ];
+    foreach ([$legacy, $invalid] as $project) {
+        $project->writeJson('meta.json', ['prompt' => 'A cold-water swim club']);
+        $project->writeJson('siteSpec.json', ['name' => 'Teal Valley']);
+        $project->writeJson('designDirection.json', $direction);
+    }
+    $invalid->writeText(
+        'design/site.css',
+        "body { color: #112233; font-family: \"Bad\xC3\", serif; padding: 1rem; }",
+    );
+    $legacyStep = new ThemeJsonStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    $htmlFirstStep = new ThemeJsonStep(
+        new FakeLlm(),
+        new PromptRenderer(repo_path('prompts')),
+        htmlFirst: true,
+    );
+
+    $legacyPrompt = $legacyStep->requests($legacy)['theme-json']['prompt'];
+    $invalidPrompt = $htmlFirstStep->requests($invalid)['theme-json']['prompt'];
+
+    assert_eq($legacyPrompt, $invalidPrompt, 'invalid token bytes use unchanged design-direction prompt');
+    $warnings = implode(' ', $invalid->readJson('warnings.json')['theme-json'] ?? []);
+    assert_contains('sparse_tokens', $warnings);
+    assert_contains('design/site.css', $warnings);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

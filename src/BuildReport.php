@@ -164,6 +164,12 @@ final class BuildReport
         return $this->totalInputTokens() + $this->totalOutputTokens();
     }
 
+    /** @return list<array{id:string,secs:float,in:int,out:int}> */
+    public function steps(): array
+    {
+        return $this->rows;
+    }
+
     /**
      * The model label for one step id, looked up in the step => model map.
      *

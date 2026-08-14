@@ -3,15 +3,16 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Tests;
 
-use Automattic\SiteBuild\Llm;
+use Automattic\SiteBuild\FinishReasonAwareLlm;
+use Automattic\SiteBuild\UsageReporting;
 
 /**
  * Test double for Llm. Returns queued canned responses (FIFO) and records the
  * prompts/options it received so tests can assert on what a step sent.
  */
-final class FakeLlm implements Llm
+final class FakeLlm implements FinishReasonAwareLlm, UsageReporting
 {
-    /** @var string[] */
+    /** @var list<array{text:string,finish_reason:?string}> */
     private array $textQueue = [];
     /** @var array<int,array<mixed>> */
     private array $jsonQueue = [];
@@ -21,6 +22,10 @@ final class FakeLlm implements Llm
     public int $completeJsonCalls = 0;
     public int $completeBatchCalls = 0;
     public int $completeJsonBatchCalls = 0;
+    private int $usageRequests = 0;
+    private int $usageInputTokens = 0;
+    private int $usageOutputTokens = 0;
+    private ?string $lastFinishReason = null;
     /** @var array<array-key,list<string>> keyed notes returned with the next raw-text batch */
     public array $batchNotes = [];
 
@@ -34,9 +39,9 @@ final class FakeLlm implements Llm
      */
     public array $failPromptSubstrings = [];
 
-    public function queueText(string $text): void
+    public function queueText(string $text, ?string $finishReason = null): void
     {
-        $this->textQueue[] = $text;
+        $this->textQueue[] = ['text' => $text, 'finish_reason' => $finishReason];
     }
 
     /** @param array<mixed> $data */
@@ -45,8 +50,20 @@ final class FakeLlm implements Llm
         $this->jsonQueue[] = $data;
     }
 
+    /** @return array{requests:int,input_tokens:int,output_tokens:int,total_tokens:int} */
+    public function usageTotals(): array
+    {
+        return [
+            'requests' => $this->usageRequests,
+            'input_tokens' => $this->usageInputTokens,
+            'output_tokens' => $this->usageOutputTokens,
+            'total_tokens' => $this->usageInputTokens + $this->usageOutputTokens,
+        ];
+    }
+
     public function complete(string $prompt, array $opts = []): string
     {
+        $this->lastFinishReason = null;
         $this->completeCalls++;
         $this->calls[] = ['prompt' => $prompt, 'opts' => $opts];
         if ($this->shouldFail($prompt)) {
@@ -55,7 +72,15 @@ final class FakeLlm implements Llm
         if ($this->textQueue === []) {
             throw new \RuntimeException('FakeLlm: no queued text response');
         }
-        return array_shift($this->textQueue);
+        $response = array_shift($this->textQueue);
+        $this->lastFinishReason = $response['finish_reason'];
+        $this->recordUsage($prompt, $response['text']);
+        return $response['text'];
+    }
+
+    public function lastFinishReason(): ?string
+    {
+        return $this->lastFinishReason;
     }
 
     public function completeJson(string $prompt, array $opts = []): array
@@ -68,7 +93,9 @@ final class FakeLlm implements Llm
         if ($this->jsonQueue === []) {
             throw new \RuntimeException('FakeLlm: no queued json response');
         }
-        return array_shift($this->jsonQueue);
+        $response = array_shift($this->jsonQueue);
+        $this->recordUsage($prompt, self::jsonUsageText($response));
+        return $response;
     }
 
     /**
@@ -95,7 +122,9 @@ final class FakeLlm implements Llm
             if ($this->jsonQueue === []) {
                 throw new \RuntimeException('FakeLlm: no queued json response');
             }
-            $out[$key] = array_shift($this->jsonQueue);
+            $response = array_shift($this->jsonQueue);
+            $this->recordUsage((string) $req['prompt'], self::jsonUsageText($response));
+            $out[$key] = $response;
         }
         return $out;
     }
@@ -125,11 +154,32 @@ final class FakeLlm implements Llm
             if ($this->textQueue === []) {
                 throw new \RuntimeException('FakeLlm: no queued text response');
             }
-            $out[$key] = array_shift($this->textQueue);
+            $response = array_shift($this->textQueue)['text'];
+            $this->recordUsage((string) $req['prompt'], $response);
+            $out[$key] = $response;
         }
         $notes = $this->batchNotes;
         $this->batchNotes = [];
         return new \Automattic\SiteBuild\TextBatchResult($out, $notes);
+    }
+
+    private function recordUsage(string $prompt, string $response): void
+    {
+        $this->usageRequests++;
+        $this->usageInputTokens += self::syntheticTokenCount($prompt);
+        $this->usageOutputTokens += self::syntheticTokenCount($response);
+    }
+
+    private static function syntheticTokenCount(string $text): int
+    {
+        return max(1, (int) ceil(strlen($text) / 4));
+    }
+
+    /** @param array<mixed> $response */
+    private static function jsonUsageText(array $response): string
+    {
+        $encoded = json_encode($response, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        return is_string($encoded) ? $encoded : '';
     }
 
     /** Unconsumed queued responses (text + json), so tests can assert a drained queue. */

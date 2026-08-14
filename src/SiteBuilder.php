@@ -14,8 +14,9 @@ namespace Automattic\SiteBuild;
  * extend or slim it without forking this facade. Pipeline construction
  * validates the graph via StepGraph (seed: meta.json from createProject()).
  *
- * Run at most one build per process: LlmLogger is process-global and
- * Pipeline::runThrough() points it at the current project's logs/.
+ * Production hosts should run at most one build per process: LlmLogger and
+ * Narrator are process-global. The network-free matrix harness may run fresh
+ * FakeLlm builds sequentially only because it resets both globals per cell.
  *
  * @param array<string,string>  $models       step id => model id overrides
  * @param array<string,?float>  $temperatures step id => temperature overrides
@@ -38,21 +39,43 @@ final class SiteBuilder
     ) {}
 
     /**
-     * Assemble the full site-creation pipeline in order. Fresh Pipeline each
-     * call. Pass a custom StepComposition to use a host-tuned graph.
+     * Assemble the full site-creation pipeline in order. Fresh runner each
+     * call. Pass a custom StepComposition to use a host-tuned fixed graph.
      */
-    public function pipeline(?StepComposition $composition = null): Pipeline
+    public function pipeline(?StepComposition $composition = null): BuildPipeline
     {
-        $composition ??= StepComposition::default(
+        if ($composition !== null) {
+            return new Pipeline($composition->steps(), $composition->seeds());
+        }
+
+        $renderer = new PromptRenderer($this->promptsDir);
+        $composition = StepComposition::default(
             llm: $this->llm,
-            renderer: new PromptRenderer($this->promptsDir),
+            renderer: $renderer,
+            models: $this->models,
+            temperatures: $this->temperatures,
+            blockFixer: $this->blockFixer,
+            fontFetcher: $this->fontFetcher,
+        );
+        $primary = new Pipeline($composition->steps(), $composition->seeds());
+
+        if (Env::get('SITE_BUILD_LEGACY') === '1') {
+            return $primary;
+        }
+
+        $legacyTail = StepComposition::legacyTail(
+            llm: $this->llm,
+            renderer: $renderer,
             models: $this->models,
             temperatures: $this->temperatures,
             blockFixer: $this->blockFixer,
             fontFetcher: $this->fontFetcher,
         );
 
-        return new Pipeline($composition->steps(), $composition->seeds());
+        return new FallbackBuildPipeline(
+            $primary,
+            new Pipeline($legacyTail->steps(), $legacyTail->seeds()),
+        );
     }
 
     public function store(): ProjectStore

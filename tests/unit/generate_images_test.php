@@ -932,7 +932,10 @@ test('generate-images publishes completion when the image manifest is absent', f
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('generate-images refuses completion when an uncollected AI_IMAGE source remains', function () {
+test('generate-images degrades, not fails, when an uncollected AI_IMAGE source remains', function () {
+    // Degrade-don't-fail: an unresolved source is a real defect, but the build
+    // (its sections already paid for) must deliver through with a loud warning
+    // rather than abort. The completion stamp is still written.
     $tmp = sys_get_temp_dir() . '/builder_gi_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeText(
@@ -941,12 +944,44 @@ test('generate-images refuses completion when an uncollected AI_IMAGE source rem
     );
     $images = new FakeImageClient();
 
-    assert_throws(
-        fn () => (new GenerateImagesStep($images))->run($project),
-        'empty/absent manifests must not bypass the final source gate',
-    );
+    (new GenerateImagesStep($images))->run($project);
+
     assert_eq([], $images->calls);
-    assert_true(!$project->exists(GenerateImagesStep::COMPLETION_ARTIFACT));
+    assert_eq(
+        ['status' => 'completed'],
+        $project->readJson(GenerateImagesStep::COMPLETION_ARTIFACT),
+    );
+    $warnings = $project->readJson('warnings.json')['generate-images'] ?? [];
+    assert_true($warnings !== [], 'unresolved source recorded as a warning');
+    assert_contains('AI_IMAGE', implode(' ', $warnings));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images degrades, not fails, when a design src was never collected', function () {
+    // The HTML-first silent failure this once threw on: the design invented
+    // "hero.jpg", nothing matched the AI_IMAGE marker. Now the build completes
+    // with the defect surfaced as a warning (no longer silent, no longer fatal).
+    $tmp = sys_get_temp_dir() . '/builder_gi_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('images.json', []);
+    $project->writeText(
+        'plugin/pages/home.html',
+        '<!-- wp:image --><figure class="wp-block-image">'
+        . '<img src="hero.jpg" alt="A roaster tilting a cooling tray"/></figure><!-- /wp:image -->'
+    );
+    $images = new FakeImageClient();
+
+    (new GenerateImagesStep($images))->run($project);
+
+    assert_eq([], $images->calls);
+    assert_eq(
+        ['status' => 'completed'],
+        $project->readJson(GenerateImagesStep::COMPLETION_ARTIFACT),
+    );
+    $warnings = $project->readJson('warnings.json')['generate-images'] ?? [];
+    assert_true($warnings !== [], 'uncollected design src recorded as a warning');
+    assert_contains('hero.jpg', implode(' ', $warnings));
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

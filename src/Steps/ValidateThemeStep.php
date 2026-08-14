@@ -32,6 +32,8 @@ final class ValidateThemeStep implements Step
         'theme/assets/header/header.js',
     ];
 
+    public function __construct(private bool $htmlFirst = false) {}
+
     public function id(): string
     {
         return 'validate-theme';
@@ -74,7 +76,7 @@ final class ValidateThemeStep implements Step
     {
         $problems = array_merge(
             ThemeValidator::validate($project),
-            ThemeValidator::layoutWarnings($project),
+            ThemeValidator::layoutWarnings($project, $this->htmlFirst),
             ThemeValidator::spacingWarnings($project),
             ThemeValidator::typographyWarnings($project),
             ThemeValidator::planWarnings($project),

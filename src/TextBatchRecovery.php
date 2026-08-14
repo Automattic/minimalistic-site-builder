@@ -33,6 +33,17 @@ namespace Automattic\SiteBuild;
 final class TextBatchRecovery
 {
     /**
+     * Shared provider-neutral output-limit classifier for raw-text recovery.
+     *
+     * Single-completion recovery uses this same entry point so batch and single
+     * paths cannot drift onto different finish-reason vocabularies.
+     */
+    public static function isTruncation(mixed $reason): bool
+    {
+        return JsonBatchRecovery::isTruncation($reason);
+    }
+
+    /**
      * @param array<array-key,array<string,mixed>> $requests
      * @param callable(array<array-key,array<string,mixed>>):array<array-key,array<string,mixed>|string> $send
      * @return TextBatchResult raw text and keyed degradation notes, ordered as the input

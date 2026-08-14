@@ -321,6 +321,15 @@ final class ScaffoldThemeStep implements Step
         .hero-composition--layered-poster > .wp-block-cover {
             overflow: hidden;
         }
+        /* cinematic-safe-zone overlays copy on a full-bleed image and reserves
+           image room with a right-side percentage inset. When the copy is
+           authored as columns, the constrained layout otherwise caps it at
+           contentSize while the inset resolves against the wider hero — the two
+           collide and starve the copy. Let the copy span the hero's full width
+           so the inset leaves its intended measure. */
+        .hero-composition--cinematic-safe-zone .wp-block-columns {
+            max-width: none;
+        }
         .hero-composition--editorial-split .wp-block-columns,
         .hero-composition--framed-portrait .wp-block-columns,
         .hero-composition--focal-subject-stage .wp-block-columns {

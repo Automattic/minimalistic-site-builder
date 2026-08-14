@@ -66,6 +66,23 @@ test('site-spec rejects a malformed explicit supplied input instead of invoking 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+/** @return list<string> */
+function site_spec_tree_slugs(array $pages): array
+{
+    $slugs = [];
+    foreach ($pages as $page) {
+        if (!is_array($page)) {
+            continue;
+        }
+        $slugs[] = (string) ($page['slug'] ?? '');
+        $slugs = array_merge(
+            $slugs,
+            site_spec_tree_slugs(is_array($page['children'] ?? null) ? $page['children'] : []),
+        );
+    }
+    return $slugs;
+}
+
 test('site-spec writes a factual, normalized siteSpec.json', function () {
     [$project, $llm, $tmp] = make_sitespec_fixture();
     $llm->queueJson([
@@ -307,6 +324,38 @@ test('site-spec normalizes the pages tree: slugs slugified and globally unique',
     assert_eq('Hours and address', $pages[2]['purpose']);
 
     exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec reserves preview artifact slug in model and caller-fixed page trees', function () {
+    $modelPages = SiteSpecStep::normalizePages([
+        ['title' => 'Home', 'slug' => 'home'],
+        ['title' => 'Work', 'slug' => 'work', 'children' => [
+            ['title' => 'Preview', 'slug' => 'preview'],
+            ['title' => 'Archive', 'slug' => 'archive', 'children' => [
+                ['title' => 'Another Preview', 'slug' => 'preview'],
+            ]],
+        ]],
+    ], [], true);
+    assert_eq(
+        ['home', 'work', 'preview-2', 'archive', 'preview-3'],
+        site_spec_tree_slugs($modelPages),
+        'model tree cannot claim design/preview.html',
+    );
+
+    $requestedPages = SiteSpecStep::requestedPages([
+        ['title' => 'Home', 'slug' => 'home'],
+        ['title' => 'Work', 'slug' => 'work', 'children' => [
+            ['title' => 'Preview', 'slug' => 'preview'],
+            ['title' => 'Archive', 'slug' => 'archive', 'children' => [
+                ['title' => 'Another Preview', 'slug' => 'preview'],
+            ]],
+        ]],
+    ]);
+    assert_eq(
+        ['home', 'work', 'preview-2', 'archive', 'preview-3'],
+        site_spec_tree_slugs($requestedPages),
+        'caller-fixed tree cannot claim design/preview.html',
+    );
 });
 
 test('site-spec without multi_page cuts the tree to the homepage and asks for one page', function () {

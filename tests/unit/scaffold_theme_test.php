@@ -225,6 +225,10 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     ] as $recipe) {
         assert_contains('.hero-composition--' . $recipe, $css);
     }
+    // cinematic-safe-zone reserves image room with a percentage inset; a
+    // columns copy container must span full width or the constrained-layout
+    // contentSize cap collides with the inset and starves the copy.
+    assert_contains('.hero-composition--cinematic-safe-zone .wp-block-columns {', $css);
     assert_contains('@media (max-width: 781.98px)', $css);
     foreach ([
         'stack-copy-first',

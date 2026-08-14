@@ -205,7 +205,7 @@ final class SupportDomainGuard
 
     /** @var array<string,list<string>> */
     private const LAYOUT_VALUES = [
-        'type' => ['constrained', 'flex', 'default'],
+        'type' => ['constrained', 'flex', 'default', 'grid'],
         'orientation' => ['horizontal', 'vertical'],
         'justifyContent' => ['left', 'center', 'right', 'space-between'],
         'verticalAlignment' => ['top', 'center', 'bottom', 'stretch'],
@@ -225,6 +225,17 @@ final class SupportDomainGuard
     private const LAYOUT_STRING_KEYS = [
         'contentSize' => true,
         'wideSize' => true,
+        // Grid layout track sizing: repeat(auto-fill, minmax(<W>, 1fr)).
+        'minimumColumnWidth' => true,
+    ];
+
+    /**
+     * Grid layout keys whose value is a positive integer (grid columnCount).
+     *
+     * @var array<string,true>
+     */
+    private const LAYOUT_INT_KEYS = [
+        'columnCount' => true,
     ];
 
     /** @param array<string,mixed> $attributes */
@@ -247,6 +258,18 @@ final class SupportDomainGuard
             foreach ($layout as $key => $value) {
                 if (is_string($key) && isset(self::LAYOUT_STRING_KEYS[$key])) {
                     if (!is_string($value) || $value === '') {
+                        $encoded = is_scalar($value) ? (string) $value : get_debug_type($value);
+                        throw new \RuntimeException(
+                            "Unsupported block-support layout value '{$encoded}' for {$name} at {$blockPath} layout.{$key}"
+                        );
+                    }
+                    continue;
+                }
+                if (is_string($key) && isset(self::LAYOUT_INT_KEYS[$key])) {
+                    $positiveInt = is_int($value)
+                        ? $value >= 1
+                        : (is_string($value) && ctype_digit($value) && (int) $value >= 1);
+                    if (!$positiveInt) {
                         $encoded = is_scalar($value) ? (string) $value : get_debug_type($value);
                         throw new \RuntimeException(
                             "Unsupported block-support layout value '{$encoded}' for {$name} at {$blockPath} layout.{$key}"

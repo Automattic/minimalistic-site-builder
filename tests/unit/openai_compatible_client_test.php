@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\AnthropicClient;
+use Automattic\SiteBuild\FinishReasonAwareLlm;
 use Automattic\SiteBuild\JsonBatchRecovery;
 use Automattic\SiteBuild\OpenAiCompatibleClient;
 use Automattic\SiteBuild\TextBatchRecovery;
@@ -18,6 +19,136 @@ test('OpenAiCompatibleClient endpoint joins baseUrl and /chat/completions', func
 
     $c = new OpenAiCompatibleClient('key', 'gpt-4o', 'https://api.openai.com/v1');
     assert_eq('https://api.openai.com/v1/chat/completions', $c->endpoint());
+});
+
+test('OpenAiCompatibleClient implements the frozen finish-reason capability', function () {
+    $client = new OpenAiCompatibleClient('key', 'gpt-4o');
+
+    assert_true(
+        $client instanceof FinishReasonAwareLlm,
+        'single-completion clients implement the frozen finish-reason capability',
+    );
+    assert_eq(null, $client->lastFinishReason(), 'finish reason starts unknown');
+});
+
+test('OpenAiCompatibleClient has no client-local truncation classifier', function () {
+    assert_true(
+        !method_exists(OpenAiCompatibleClient::class, 'isTruncationStopReason'),
+        'single and batch paths must share TextBatchRecovery::isTruncation()',
+    );
+});
+
+test('OpenAiCompatibleClient single complete exposes the transport finish reason', function () {
+    $client = new OpenAiCompatibleClient(
+        'key',
+        'gpt-4o',
+        singleTransport: fn (array $requestBody): array => [
+            'text' => 'complete response',
+            'input' => 12,
+            'output' => 3,
+            'time' => 0.01,
+            'stop_reason' => 'stop',
+        ],
+    );
+
+    assert_eq('complete response', $client->complete('Generate the page.'));
+    assert_eq('stop', $client->lastFinishReason());
+});
+
+test('OpenRouter single complete returns a truncated partial without regenerating from scratch', function () {
+    $requests = [];
+    $client = new OpenAiCompatibleClient(
+        'key',
+        'openai/gpt-5.5',
+        'https://openrouter.ai/api/v1',
+        16000,
+        'openrouter',
+        singleTransport: function (array $requestBody) use (&$requests): array {
+            $requests[] = $requestBody;
+            return [
+                'text' => '<!-- wp:group {"tagName":"main"} -->',
+                'input' => 100,
+                'output' => 16000,
+                'time' => 0.01,
+                'stop_reason' => 'length',
+            ];
+        },
+    );
+
+    assert_eq(
+        '<!-- wp:group {"tagName":"main"} -->',
+        $client->complete('Generate the page.'),
+        'caller receives the paid-for partial so ContinuationRecovery can stitch it',
+    );
+    assert_eq('length', $client->lastFinishReason());
+    assert_eq(1, count($requests), 'single completion does not use the old from-scratch regeneration');
+    assert_true(
+        !str_contains(
+            (string) $requests[0]['messages'][1]['content'],
+            'Regenerate the COMPLETE response from scratch',
+        ),
+        'request remains the authored prompt',
+    );
+});
+
+test('OpenRouter single complete keeps refusal and filter finish reasons fatal', function () {
+    foreach (['refusal', 'content_filter', 'safety'] as $stopReason) {
+        $calls = 0;
+        $client = new OpenAiCompatibleClient(
+            'key',
+            'openai/gpt-5.5',
+            'https://openrouter.ai/api/v1',
+            16000,
+            'openrouter',
+            singleTransport: function (array $requestBody) use (&$calls, $stopReason): array {
+                $calls++;
+                return [
+                    'text' => 'partial response',
+                    'input' => 100,
+                    'output' => 1,
+                    'time' => 0.01,
+                    'stop_reason' => $stopReason,
+                ];
+            },
+        );
+
+        assert_throws(
+            fn () => $client->complete('Generate the page.'),
+            "{$stopReason}: refusal/filter remains fatal",
+        );
+        assert_eq(1, $calls, "{$stopReason}: failed terminal response is not retried");
+        assert_eq(null, $client->lastFinishReason(), "{$stopReason}: failed attempt exposes no stale finish reason");
+    }
+});
+
+test('OpenAiCompatibleClient clears the last finish reason before a failed complete attempt', function () {
+    $attempt = 0;
+    $client = new OpenAiCompatibleClient(
+        'key',
+        'gpt-4o',
+        singleTransport: function (array $requestBody) use (&$attempt): array {
+            $attempt++;
+            if ($attempt === 1) {
+                return [
+                    'text' => 'first response',
+                    'input' => 1,
+                    'output' => 1,
+                    'time' => 0.01,
+                    'stop_reason' => 'stop',
+                ];
+            }
+            throw new RuntimeException('injected transport failure');
+        },
+    );
+
+    assert_eq('first response', $client->complete('First prompt.'));
+    assert_eq('stop', $client->lastFinishReason());
+
+    assert_throws(
+        fn () => $client->complete('Second prompt.'),
+        'injected transport failure stays fatal',
+    );
+    assert_eq(null, $client->lastFinishReason(), 'failed attempt clears prior successful finish reason');
 });
 
 test('bodyFor builds OpenAI chat messages with system preamble and stream_options', function () {

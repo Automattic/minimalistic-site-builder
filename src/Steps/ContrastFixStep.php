@@ -34,6 +34,9 @@ use Automattic\SiteBuild\StepDeclaration;
  * The header part is linted but never repaired: it commonly floats
  * transparently over the hero image, so judging it against the `base` page
  * background would produce confidently wrong "fixes".
+ *
+ * HTML-first composition mode skips this legacy attribute-level pass. Mode is
+ * injected by StepComposition; stale design artifacts never choose behavior.
  */
 final class ContrastFixStep implements Step
 {
@@ -41,6 +44,8 @@ final class ContrastFixStep implements Step
 
     /** base↔contrast should be comfortably readable, not borderline. */
     private const PALETTE_TARGET = 7.0;
+
+    public function __construct(private bool $htmlFirst = false) {}
 
     public function id(): string
     {
@@ -67,6 +72,14 @@ final class ContrastFixStep implements Step
 
     public function run(Project $project): void
     {
+        if ($this->htmlFirst) {
+            $project->addWarnings('fixup_skipped', [
+                'step=contrast-fix; signal=composition-mode:html-first; disposition=skipped; '
+                    . 'reason=new CSS path uses CSS-aware contrast handling',
+            ]);
+            return;
+        }
+
         $themeJson = $project->readJson('theme/theme.json');
         $palette = self::paletteMap($themeJson);
         $gradients = self::gradientMap($themeJson);

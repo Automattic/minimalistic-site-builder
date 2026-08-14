@@ -45,10 +45,15 @@ use Automattic\SiteBuild\StepDeclaration;
  * found there are judged exactly like comment-JSON ones, and every stripped
  * token is removed from the block's own class="…" HTML (tokenized, so odd
  * whitespace can't shelter one) so the fixer can't resurrect it.
+ *
+ * HTML-first composition mode skips this legacy class pass. Mode is injected
+ * by StepComposition; stale design artifacts never choose behavior.
  */
 final class MotionSanityStep implements Step
 {
     private const REPORT_FILE = 'motion-sanity.txt';
+
+    public function __construct(private bool $htmlFirst = false) {}
 
     public function id(): string
     {
@@ -75,6 +80,14 @@ final class MotionSanityStep implements Step
 
     public function run(Project $project): void
     {
+        if ($this->htmlFirst) {
+            $project->addWarnings('fixup_skipped', [
+                'step=motion-sanity; signal=composition-mode:html-first; disposition=skipped; '
+                    . 'reason=new CSS path does not use legacy motion fixup',
+            ]);
+            return;
+        }
+
         $profile = DesignDirectionStep::motionProfileFor($project);
         $report = [];
 
