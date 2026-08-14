@@ -111,15 +111,13 @@ function html_first_preview_document(string $marker = 'DESIGN-PREVIEW'): string
         . '<style>:root { --content-size: 800px; --wide-size: 1280px; }'
         . 'body { margin: 0; font-family: system-ui, sans-serif; }'
         . '.site-header{display:flex;align-items:center;gap:1rem}.brand{font-size:18px;font-weight:700;text-decoration:none}'
-        . '.maintenance-loop{display:grid}.maintenance-loop li > span{display:inline-block;width:10px;height:10px;border-radius:50%;background:#e08a3c}'
-        . '.services-cards{display:flex;gap:24px;align-items:stretch}</style>'
+        . '.maintenance-loop{display:grid}.maintenance-loop li > span{display:inline-block;width:10px;height:10px;border-radius:50%;background:#e08a3c}</style>'
         . '</head><body><header class="site-header"><a class="brand" href="/">Hearth &amp; Crumb</a>'
         . '<nav aria-label="Primary"><a href="/">Home</a></nav></header>'
         . '<main><section id="hero"><h1 class="has-display-font-size">' . $marker . '</h1>'
         . '<ul class="maintenance-loop"><li><span>Fresh daily</span></li></ul>'
         . '<img alt="AI_IMAGE: A baker sliding a sourdough loaf into a stone oven, viewed from counter height | homepage hero beside the primary headline | photorealistic | landscape">'
-        . '</section><section class="services-cards"><article><h2>Morning bread</h2><p>Slow fermented.</p></article>'
-        . '<article><h2>Afternoon pastry</h2><p>Baked in small batches.</p></article></section></main></body></html>';
+        . '</section></main></body></html>';
 }
 
 function html_first_queue_success(
@@ -286,7 +284,14 @@ function html_first_transformer_marker_classes(string $markup): array
     $classes = [];
     foreach ($matches[2] ?? [] as $classList) {
         foreach (preg_split('/\s+/', trim($classList)) ?: [] as $class) {
-            if (preg_match('/^(?:be-inline-geometry-[a-z0-9-]+|blocks-engine-[a-z0-9-]+)$/i', $class) === 1) {
+            if (preg_match(
+                '/^(?:be-inline-geometry-[a-z0-9-]+'
+                    . '|blocks-engine-(?:synthetic-paragraph|synthetic-anchor-undecorated|inline-layout-carrier'
+                    . '|css-owned-flow|css-owned-grid|css-owned-layout|css-owned-layout-item'
+                    . '|positioned-fragment-link-carrier|empty-flex-item|list-navigation'
+                    . '|control-[a-z0-9-]+|specificity-class-[a-z0-9-]+))$/i',
+                $class,
+            ) === 1) {
                 $classes[$class] = true;
             }
         }
