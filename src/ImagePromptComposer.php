@@ -79,6 +79,8 @@ final class ImagePromptComposer
      *        wordmarks stand in for (BIGR-768)
      * @param string             $imageGrade  the project-wide photographic grade
      *        from the design direction, applied to every image
+     * @param string             $referenceStyle sanitized character of the user's
+     *        visual references, applied to opaque images only
      * @param bool               $transparent whether the asset needs a transparent
      *        background (a `.png` placeholder — decorative flourishes, ornaments,
      *        logo marks). the image model cannot render real transparency, so the prompt
@@ -95,6 +97,7 @@ final class ImagePromptComposer
         string $style,
         string $siteContext = '',
         string $imageGrade = '',
+        string $referenceStyle = '',
         bool $transparent = false,
         ?PromptRenderer $renderer = null
     ): string {
@@ -105,6 +108,7 @@ final class ImagePromptComposer
         $pageContext = trim($pageContext);
         $siteContext = trim($siteContext);
         $imageGrade  = trim($imageGrade);
+        $referenceStyle = trim($referenceStyle);
 
         // Style is appended to the subject as a suffix; absent when no style.
         $styleClause = $style !== '' ? ". Style: {$style}" : '';
@@ -117,6 +121,17 @@ final class ImagePromptComposer
         $gradeClause = ($imageGrade !== '' && !$transparent)
             ? 'Art direction for all site imagery: ' . rtrim($imageGrade, '.') . '.'
             : '';
+
+        // The reference's character sits beside the shared grade. Transparent
+        // assets skip both whole-scene treatments because the keying pass needs
+        // one isolated subject on a flat background.
+        $referenceClause = ($referenceStyle !== '' && !$transparent)
+            ? 'Visual reference character: ' . rtrim($referenceStyle, '.') . '.'
+            : '';
+        $artDirectionClause = implode("\n\n", array_filter(
+            [$gradeClause, $referenceClause],
+            static fn (string $clause): bool => $clause !== '',
+        ));
 
         // Like the grade, this is a render instruction: it sits before the
         // guidance so end-trimming under token pressure never sheds it. The model
@@ -189,7 +204,7 @@ final class ImagePromptComposer
         $prompt = $renderer->render('image-prompt.md', [
             'subject'             => $subject,
             'style_clause'        => $styleClause,
-            'grade_clause'        => $gradeClause,
+            'grade_clause'        => $artDirectionClause,
             'transparency_clause' => $transparencyClause,
             'lettering_clause'    => $letteringClause,
             'guidance'            => $guidance,

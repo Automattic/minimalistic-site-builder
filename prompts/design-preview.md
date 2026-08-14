@@ -10,7 +10,7 @@ You are a senior web designer and front-end author. Create one static, self-cont
 
 ## Committed design direction
 
-{{design_direction}}
+{{design_direction}}{{inspiration}}
 
 Treat design direction as binding. Write specific, finished visitor-facing copy grounded in brief and site spec. Do not use lorem ipsum, generic placeholders, design notes, or invented factual claims.
 

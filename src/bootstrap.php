@@ -8,9 +8,11 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\AnthropicClient;
 use Automattic\SiteBuild\BlockFixers;
+use Automattic\SiteBuild\ChromeScreenshotCapture;
 use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\ImageClient;
 use Automattic\SiteBuild\Llm;
+use Automattic\SiteBuild\VisionUrlAnalyzer;
 use Automattic\SiteBuild\ModelConfig;
 use Automattic\SiteBuild\OpenAiCompatibleClient;
 use Automattic\SiteBuild\Package;
@@ -18,7 +20,9 @@ use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\SiteBuilder;
 use Automattic\SiteBuild\StepDefaults;
 use Automattic\SiteBuild\Steps\GenerateImagesStep;
+use Automattic\SiteBuild\UrlAnalyzer;
 use Automattic\SiteBuild\WpcomImageClient;
+use Automattic\SiteBuild\WpcomUrlAnalyzer;
 
 require_once dirname(__DIR__) . '/autoload.php';
 
@@ -181,6 +185,7 @@ function make_site_builder(Llm $llm): SiteBuilder
         outputRoot: repo_path('projects'),
         blockFixer: BlockFixers::default(),
         models: step_models(),
+        urlAnalyzer: make_url_analyzer($llm),
     );
 }
 
@@ -191,6 +196,37 @@ function make_image_client(): ImageClient
         apiToken: Env::getRequired('GOOGLE_VERTEX_API_TOKEN'),
         model:    Env::get('IMAGE_MODEL', 'gemini-3.1-flash-image'),
     );
+}
+
+/**
+ * Reference-site analyzer.
+ *
+ * Two implementations, because hosts differ in what they can reach. This
+ * factory serves the CLI, which screenshots with Chrome and runs its own vision
+ * call; the remote endpoint is not generally reachable from here. A host that
+ * builds its own composition injects whichever analyzer suits it.
+ *
+ * INSPIRATION_ANALYZER forces one: "wpcom" needs WPCOM_API_TOKEN and returns
+ * null without it, "off" disables inspiration entirely. Anything else, or
+ * nothing, gets the screenshot-and-vision analyzer.
+ */
+function make_url_analyzer(Llm $llm): ?UrlAnalyzer
+{
+    $choice = strtolower(trim((string) Env::get('INSPIRATION_ANALYZER', 'local')));
+
+    if ($choice === 'off') {
+        return null;
+    }
+
+    if ($choice === 'wpcom') {
+        // Env::get, not getRequired: a missing token disables inspiration, it
+        // does not stop a build. The Vertex token is NOT usable here — it is
+        // scoped to the ai-api-proxy route, which analyze-url is not behind.
+        $token = Env::get('WPCOM_API_TOKEN');
+        return ($token === null || $token === '') ? null : new WpcomUrlAnalyzer(apiToken: $token);
+    }
+
+    return new VisionUrlAnalyzer($llm, new ChromeScreenshotCapture(), Env::get('VISION_MODEL'));
 }
 
 /**

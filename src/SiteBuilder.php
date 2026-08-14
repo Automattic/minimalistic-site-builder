@@ -36,11 +36,14 @@ final class SiteBuilder
         private array $models = [],
         private array $temperatures = [],
         private ?FontFetcher $fontFetcher = null,
+        private ?UrlAnalyzer $urlAnalyzer = null,
     ) {}
 
     /**
      * Assemble the full site-creation pipeline in order. Fresh runner each
      * call. Pass a custom StepComposition to use a host-tuned fixed graph.
+     * A custom composition owns its UrlAnalyzer wiring; this builder's injected
+     * analyzer is passed only to the default composition assembled below.
      */
     public function pipeline(?StepComposition $composition = null): BuildPipeline
     {
@@ -56,6 +59,7 @@ final class SiteBuilder
             temperatures: $this->temperatures,
             blockFixer: $this->blockFixer,
             fontFetcher: $this->fontFetcher,
+            urlAnalyzer: $this->urlAnalyzer,
         );
         $primary = new Pipeline($composition->steps(), $composition->seeds());
 
@@ -113,10 +117,14 @@ final class SiteBuilder
      * $designConstraints is the optional caller-owned hero capability object;
      * it is validated before a project directory is claimed. $writingDirection
      * is the optional explicit logical direction and accepts only ltr|rtl.
+     * $inspirationUrls lets a host name the reference sites itself instead of
+     * relying on the prompt scan. Recorded in meta.json as `inspiration_urls`;
+     * [] records nothing, so a pre-seeded value survives the merge.
      *
      * @param array<int,string|array<string,mixed>> $pages
      * @param array<string,mixed>|null              $siteSpec
      * @param array<string,mixed>                   $designConstraints
+     * @param list<string>                          $inspirationUrls
      */
     public function createProject(
         string $prompt,
@@ -126,6 +134,7 @@ final class SiteBuilder
         ?array $siteSpec = null,
         array $designConstraints = [],
         ?string $writingDirection = null,
+        array $inspirationUrls = [],
     ): Project {
         if ($multiPage === false && $pages !== []) {
             throw new \InvalidArgumentException('A fixed page list requires multiPage to be true or omitted');
@@ -171,6 +180,9 @@ final class SiteBuilder
         }
         if ($designConstraints !== []) {
             $seed['design_constraints'] = $designConstraints;
+        }
+        if ($inspirationUrls !== []) {
+            $seed['inspiration_urls'] = array_values($inspirationUrls);
         }
         if ($writingDirection !== null) {
             $seed['writing_direction'] = $writingDirection;

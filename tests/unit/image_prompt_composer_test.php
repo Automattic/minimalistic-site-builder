@@ -337,7 +337,7 @@ test('compose protects transparent text carriers without adding scene instructio
         'illustration',
         '',
         '',
-        true
+        transparent: true,
     );
     assert_contains('plain, unmarked material surface', $out);
     assert_true(!str_contains($out, 'quiet set dressing'), 'transparent asset has no scene to dress');
@@ -392,7 +392,7 @@ test('compose asks for a flat white background for transparent assets', function
         'illustration',
         'A neighborhood bakery.',
         '',
-        true
+        transparent: true,
     );
 
     // The image model cannot render alpha, so the prompt asks for the keyable isolation
@@ -418,7 +418,7 @@ test('compose omits the photographic grade for transparent assets', function () 
         'illustration',
         '',
         'warm chiaroscuro color, candlelit low-key lighting, deep shadow falloff',
-        true
+        transparent: true,
     );
 
     // The grade describes lighting/backdrop treatment, which the image model paints in
@@ -440,7 +440,7 @@ test('compose sheds the site context under token pressure but keeps transparency
         'illustration',
         str_repeat('blurb context word ', 2000), // far over budget — gets shed
         '',
-        true
+        transparent: true,
     );
 
     assert_true(GeminiImage::estimateTokens($out) <= GeminiImage::MAX_PROMPT_TOKENS, 'within token cap');

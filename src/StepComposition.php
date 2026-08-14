@@ -18,6 +18,7 @@ use Automattic\SiteBuild\Steps\FixPagesStep;
 use Automattic\SiteBuild\Steps\FontsPhpStep;
 use Automattic\SiteBuild\Steps\HeaderHeroStep;
 use Automattic\SiteBuild\Steps\InnerPagesDesignStep;
+use Automattic\SiteBuild\Steps\InspirationStep;
 use Automattic\SiteBuild\Steps\MotionSanityStep;
 use Automattic\SiteBuild\Steps\NormalizeLayoutStep;
 use Automattic\SiteBuild\Steps\PagePlanStep;
@@ -75,6 +76,10 @@ final class StepComposition
      *
      * @param array<string, string> $models       step id => model id overrides
      * @param array<string, ?float> $temperatures step id => temperature overrides
+     * @param bool                  $inspiration  governs only steps constructed by this
+     *        composition: false omits InspirationStep and disables its direction/preview
+     *        consumers. A separately constructed GenerateImagesStep needs its own
+     *        `useInspiration: false`; do not use without('inspiration') for this mode.
      */
     public static function default(
         Llm $llm,
@@ -83,6 +88,8 @@ final class StepComposition
         array $temperatures = [],
         ?BlockFixer $blockFixer = null,
         ?FontFetcher $fontFetcher = null,
+        ?UrlAnalyzer $urlAnalyzer = null,
+        bool $inspiration = true,
     ): self {
         if (Env::get('SITE_BUILD_LEGACY') === '1') {
             return self::legacy($llm, $renderer, $models, $temperatures, $blockFixer, $fontFetcher);
@@ -96,6 +103,9 @@ final class StepComposition
             new ScaffoldThemeStep(),
             new ScaffoldPluginStep(),
             new RefinePromptStep($llm, $renderer, $models['refine-prompt'], $temps['refine-prompt']),
+            // Reference URLs in the brief become design briefs before anything
+            // reads the prompt for design intent. No URLs means no cost.
+            ...($inspiration ? [new InspirationStep($urlAnalyzer)] : []),
             new SiteSpecStep($llm, $renderer, $models['site-spec'], $temps['site-spec']),
             new ApplyIdentityStep(),
             new DesignDirectionStep(
@@ -104,12 +114,14 @@ final class StepComposition
                 $models['design-direction'],
                 $temps['design-direction'],
                 $models['design-direction-seeds'],
+                useInspiration: $inspiration,
             ),
             new DesignPreviewStep(
                 $llm,
                 $renderer,
                 $models['design-preview'] ?? null,
                 $temps['design-preview'] ?? null,
+                useInspiration: $inspiration,
             ),
             new ThemeJsonStep(
                 llm: $llm,
@@ -218,7 +230,14 @@ final class StepComposition
             // Tradeoff: this is an extra serial LLM round-trip on the critical path
             // (the concurrent group now depends on its output) — a deliberate cost
             // we pay for design variety; tune via LLM_MODEL_DESIGN_DIRECTION.
-            new DesignDirectionStep($llm, $renderer, $models['design-direction'], $temps['design-direction'], $models['design-direction-seeds']),
+            new DesignDirectionStep(
+                $llm,
+                $renderer,
+                $models['design-direction'],
+                $temps['design-direction'],
+                $models['design-direction-seeds'],
+                useInspiration: false,
+            ),
             // theme.json and the page plan both derive from the prompt + siteSpec +
             // the design direction, so run them concurrently. Design decisions are
             // made inline, steered by designDirection.json.

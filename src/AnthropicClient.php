@@ -306,8 +306,12 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting
         if (count($cachedPrefixes) > 3) {
             throw new \RuntimeException('Anthropic requests support at most three cached_prefixes');
         }
+        // Images precede the prompt: the model reads the picture, then the
+        // question about it. They sit after any cached prefix so a varying
+        // image never invalidates a reused prefix.
+        $images = ImageInput::normalize($req);
         $content = (string) $req['prompt'];
-        if ($cachedPrefixes !== []) {
+        if ($cachedPrefixes !== [] || $images !== []) {
             $content = [];
             foreach ($cachedPrefixes as $prefix) {
                 $content[] = [
@@ -315,6 +319,9 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting
                     'text' => (string) $prefix,
                     'cache_control' => ['type' => 'ephemeral'],
                 ];
+            }
+            foreach (ImageInput::anthropicBlocks($images) as $block) {
+                $content[] = $block;
             }
             $content[] = ['type' => 'text', 'text' => (string) $req['prompt']];
         }

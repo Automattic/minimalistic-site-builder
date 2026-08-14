@@ -5,7 +5,7 @@ You are a senior design director at a top creative agency. Your task: expand a c
 
 ## Site Spec
 Factual info about the site (JSON — no design guidance). Use it to ground the direction in the site's real topic, audience, and offering:
-{{site_spec}}
+{{site_spec}}{{inspiration}}
 
 ## Chosen Concept Seed
 

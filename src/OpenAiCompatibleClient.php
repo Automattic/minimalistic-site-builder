@@ -308,9 +308,16 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporti
         }
         $userPrompt .= (string) $req['prompt'];
 
+        // An image request sends the user turn as content blocks instead of a
+        // plain string: pictures first, then the question about them.
+        $images = ImageInput::normalize($req);
+        $userContent = $images === []
+            ? $userPrompt
+            : [...ImageInput::openAiBlocks($images), ['type' => 'text', 'text' => $userPrompt]];
+
         $messages = [
             ['role' => 'system', 'content' => $system],
-            ['role' => 'user', 'content' => $userPrompt],
+            ['role' => 'user', 'content' => $userContent],
         ];
 
         $maxTokens = self::effectiveMaxTokens($req, $model, $defaultMaxTokens, $provider);
@@ -923,16 +930,33 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporti
         if (is_array($messages)) {
             foreach (array_reverse(array_keys($messages)) as $key) {
                 $message = $body['messages'][$key] ?? null;
-                if (!is_array($message)
-                    || ($message['role'] ?? null) !== 'user'
-                    || !is_string($message['content'] ?? null)
-                ) {
+                if (!is_array($message) || ($message['role'] ?? null) !== 'user') {
                     continue;
                 }
-                $body['messages'][$key]['content'] = rtrim($message['content'])
-                    . "\n\nYOUR PREVIOUS RESPONSE WAS CUT OFF BY THE OUTPUT LENGTH LIMIT. "
+                $nudge = "\n\nYOUR PREVIOUS RESPONSE WAS CUT OFF BY THE OUTPUT LENGTH LIMIT. "
                     . 'Regenerate the COMPLETE response from scratch, as compactly as the instructions above allow, '
                     . 'and return nothing else.';
+                $content = $message['content'] ?? null;
+                if (is_string($content)) {
+                    $body['messages'][$key]['content'] = rtrim($content) . $nudge;
+                    break;
+                }
+                // An image request sends blocks, not a string. Append to its
+                // last text block so vision calls get the same retry nudge.
+                if (!is_array($content)) {
+                    continue;
+                }
+                $textKey = null;
+                foreach ($content as $blockKey => $block) {
+                    if (is_array($block) && ($block['type'] ?? null) === 'text' && is_string($block['text'] ?? null)) {
+                        $textKey = $blockKey;
+                    }
+                }
+                if ($textKey === null) {
+                    continue;
+                }
+                $body['messages'][$key]['content'][$textKey]['text']
+                    = rtrim($content[$textKey]['text']) . $nudge;
                 break;
             }
         }

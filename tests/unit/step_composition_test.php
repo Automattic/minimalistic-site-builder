@@ -40,7 +40,7 @@ test('StepComposition default matches CLI step order and validates', function ()
     );
     $steps = $c->steps();
     assert_eq([
-        'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
+        'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'inspiration', 'site-spec', 'apply-identity', 'design-direction',
         'design-preview', 'theme-json', 'inner-pages-design', 'splice-home-design', 'assign-image-sources', 'transform-site', 'section-rhythm', 'section-layout',
         'collect-images', 'normalize-layout', 'header-hero', 'contrast-fix', 'motion-sanity', 'fix-blocks',
         'assemble-pages', 'fix-pages', 'page-styles', 'custom-motion', 'fonts-php', 'finalize-theme', 'validate-theme',
@@ -67,18 +67,61 @@ test('StepComposition default matches CLI step order and validates', function ()
     assert_eq($byId['section-layout']['index'] + 1, $byId['collect-images']['index']);
 });
 
+test('StepComposition default can omit inspiration and disable its owned consumers', function () {
+    $d = composition_deps();
+    $disabled = StepComposition::default(
+        llm: $d['llm'],
+        renderer: $d['renderer'],
+        blockFixer: $d['blockFixer'],
+        inspiration: false,
+    );
+    StepGraph::validate($disabled->steps(), $disabled->seeds());
+
+    $disabledById = [];
+    foreach ($disabled->steps() as $step) {
+        $disabledById[$step->id()] = $step;
+    }
+    assert_eq(false, isset($disabledById['inspiration']));
+    foreach (['design-direction', 'design-preview'] as $id) {
+        assert_eq(
+            false,
+            in_array('inspiration.json', $disabledById[$id]->declaration()->reads, true),
+            "{$id} must not declare inspiration when its producer is omitted",
+        );
+    }
+
+    $enabled = StepComposition::default(
+        llm: $d['llm'],
+        renderer: $d['renderer'],
+        blockFixer: $d['blockFixer'],
+    );
+    StepGraph::validate($enabled->steps(), $enabled->seeds());
+    $enabledById = [];
+    foreach ($enabled->steps() as $step) {
+        $enabledById[$step->id()] = $step;
+    }
+    assert_true(isset($enabledById['inspiration']));
+    foreach (['design-direction', 'design-preview'] as $id) {
+        assert_true(
+            in_array('inspiration.json', $enabledById[$id]->declaration()->reads, true),
+            "{$id} must declare inspiration in the enabled default graph",
+        );
+    }
+});
+
 test('StepComposition legacy env preserves the full legacy graph byte-for-byte', function () {
     $previous = getenv('SITE_BUILD_LEGACY');
     putenv('SITE_BUILD_LEGACY=1');
     try {
         $d = composition_deps();
+        $steps = StepComposition::default(
+            llm: $d['llm'],
+            renderer: $d['renderer'],
+            blockFixer: $d['blockFixer'],
+        )->steps();
         $ids = array_map(
             static fn (Step $step): string => $step->id(),
-            StepComposition::default(
-                llm: $d['llm'],
-                renderer: $d['renderer'],
-                blockFixer: $d['blockFixer'],
-            )->steps(),
+            $steps,
         );
 
         assert_eq([
@@ -89,6 +132,15 @@ test('StepComposition legacy env preserves the full legacy graph byte-for-byte',
         ], $ids);
         assert_true(!in_array('homepage-design', $ids, true));
         assert_true(!in_array('transform-site', $ids, true));
+        $direction = array_values(array_filter(
+            $steps,
+            static fn (Step $step): bool => $step->id() === 'design-direction',
+        ))[0];
+        assert_eq(
+            false,
+            in_array('inspiration.json', $direction->declaration()->reads, true),
+            'legacy design-direction must not declare the disabled inspiration read',
+        );
     } finally {
         $previous === false
             ? putenv('SITE_BUILD_LEGACY')
