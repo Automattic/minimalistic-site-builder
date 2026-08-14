@@ -6,6 +6,7 @@ use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Steps\AssemblePagesStep;
 use Automattic\SiteBuild\Steps\PagePlanStep;
+use Automattic\SiteBuild\Steps\PageStylesStep;
 use Automattic\SiteBuild\Steps\TransformSiteStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
 use Automattic\SiteBuild\TransformArtifacts;
@@ -70,13 +71,43 @@ function transform_site_outputs(Project $project): array
         $rel = 'theme/parts/' . basename($path);
         $out[$rel] = $project->readText($rel);
     }
-    foreach (['design/transformer-carried.css', 'design/transform-report.json', 'pages.json'] as $rel) {
+    foreach ([
+        TransformArtifacts::CARRIED_CSS_BEFORE_AUTHOR,
+        TransformArtifacts::CARRIED_CSS_AFTER_AUTHOR,
+        'design/transform-report.json',
+        'pages.json',
+    ] as $rel) {
         if ($project->exists($rel)) {
             $out[$rel] = $project->readText($rel);
         }
     }
     ksort($out);
     return $out;
+}
+
+function transform_site_carried_css(Project $project): string
+{
+    $css = '';
+    foreach ([
+        TransformArtifacts::CARRIED_CSS_BEFORE_AUTHOR,
+        TransformArtifacts::CARRIED_CSS_AFTER_AUTHOR,
+    ] as $path) {
+        if ($project->exists($path)) {
+            $css .= $project->readText($path);
+        }
+    }
+    return $css;
+}
+
+function transform_site_finish_styles(Project $project): string
+{
+    $project->writeText('theme/style.css', "/*\nTheme Name: Demo\n*/\n");
+    (new PageStylesStep(
+        new FakeLlm(),
+        new PromptRenderer(repo_path('prompts')),
+        htmlFirst: true,
+    ))->run($project);
+    return $project->readText('theme/style.css');
 }
 
 test('transform-site writes exact legacy part names and AssemblePagesStep accepts pages.json unchanged', function () {
@@ -112,12 +143,107 @@ test('transform-site writes exact legacy part names and AssemblePagesStep accept
     assert_eq([true, false, false], array_column($plan['pages'], 'front'));
     assert_eq([0, 10, 20], array_column($plan['pages'], 'menu_order'));
     assert_eq([null, null, 'about'], array_column($plan['pages'], 'parent'));
-    assert_contains('.be-inline-geometry-', $project->readText(TransformArtifacts::CARRIED_CSS));
+    assert_contains('.be-inline-geometry-', transform_site_carried_css($project));
 
     $before = $project->readText('pages.json');
     (new AssemblePagesStep())->run($project);
     assert_eq($before, $project->readText('pages.json'), 'reader does not rewrite transform plan');
     assert_eq(['home', 'about', 'team'], array_column($project->readJson('plugin/pages.json')['pages'], 'slug'));
+    transform_site_cleanup($tmp);
+});
+
+test('G1 engine-support families reach final theme CSS after transform-site and page-styles', function () {
+    $html = '<!doctype html><html><body>'
+        . '<header class="site-header"><a class="brand" href="/">Verified Artifact</a>'
+        . '<nav class="desktop-nav"><ul><li><a href="/">Home</a></li><li><a href="/about">About</a></li></ul></nav>'
+        . '<div class="mobile-nav"><nav><ul><li><a href="/">Home</a></li><li><a href="/about">About</a></li></ul></nav></div>'
+        . '<div class="site-utils"><span class="provider-search"><form id="provider-search" action="/apps/search" method="get">'
+        . '<input type="text" name="q" placeholder="Search"></form></span>'
+        . '<button class="search-icon"><svg width="12px" height="13px" viewBox="0 0 12 13"><path d="M1 1"></path></svg></button>'
+        . '<button class="search-close">close</button></div>'
+        . '<script>document.querySelector(".search-icon").classList.add("visible")</script></header><main>'
+        . '<section id="geometry"><p id="target" style="width:30rem">Geometry</p></section>'
+        . '<section id="richtext"><ul class="maintenance-loop"><li><span>Build</span></li></ul></section>'
+        . '<section id="layout"><div class="hero-visual"><div class="artifact-card"><span class="card-label">Input</span>'
+        . '<strong>index.html</strong><span>styles.css</span><span>assets/</span></div></div></section>'
+        . '<section id="flow"><div class="services-cards"><article><h2>One</h2><p>First service.</p></article>'
+        . '<article><h2>Two</h2><p>Second service.</p></article></div></section>'
+        . '<section id="positioned"><a class="skip-link" href="#content">Skip to content</a><div id="content">Content</div></section>'
+        . '<section id="empty"><div class="utils"><span>Action</span><div class="placeholder"></div></div></section>'
+        . '<section id="native-button"><div style="text-align:center"><a class="cta highlight" href="/learn">'
+        . '<span class="cta-inner">Learn more</span></a></div></section>'
+        . '<section id="direct-flex"><div class="stack"><a class="row" href="/product">'
+        . '<span class="row__name">Product</span><span>$25</span></a></div></section>'
+        . '<section id="full-width"><a class="btn btn--full selector-submit" href="/submit">Submit</a></section>'
+        . '</main><footer><span>Portable input.</span></footer></body></html>';
+
+    [$project, $llm, $tmp] = transform_site_fixture($html);
+    $project->writeText('design/site.css', implode('', [
+        '.contract-author-only{color:#123456}',
+        '#target{width:12rem}',
+        '.maintenance-loop{display:grid}.maintenance-loop li > span{display:inline-block;width:10px;height:10px;border-radius:50%;background:#e8a020}',
+        'p{margin:0}.site-header{display:flex;align-items:center}.brand{font-size:18px;font-weight:700}',
+        '.desktop-nav a{color:#fff}@media(max-width:700px){.desktop-nav{display:none}.mobile-nav{background:rgba(0,0,0,.9)}}',
+        '.artifact-card{display:grid;grid-template-columns:1fr auto}.artifact-card > span:not(.card-label){grid-column:2}',
+        '.artifact-card > strong{display:block;grid-column:1;margin:12px 0 4.8px}',
+        '.artifact-card .card-label{display:block;grid-column:1 / -1;color:#6040cc;margin:2px 0}',
+        '.hero-visual{display:grid;gap:2rem}',
+        '.services-cards{display:flex;gap:24px;align-items:stretch}',
+        '.skip-link{position:fixed;top:-200px;left:0;padding:12px 18px;background:#135e96;color:#fff;border-radius:999px}.skip-link:focus{top:0}',
+        '.utils{display:flex}.placeholder{visibility:hidden;height:80px}',
+        '.search-icon{display:none;height:80px}.search-icon.visible{display:block}',
+        '.cta{display:inline-block;border:1px solid #000}.cta .cta-inner{display:inline-block;min-width:170px;padding:22px 26px;background-color:#00ff8e;color:#000;font-size:16px;line-height:1;font-weight:700}.highlight .cta-inner{background:#fff;color:#000}',
+        '.stack{display:flex;flex-direction:column;gap:2rem}.row{display:flex;align-items:center;gap:1rem;padding:1rem;background:#123456}.row__name{flex:1}',
+        '.btn{display:inline-flex;align-items:center;padding:1rem;background:#123456}.btn--full{width:100%}',
+    ]) . "\n");
+
+    transform_site_run($project, $llm);
+    $css = preg_replace('/\s+/', '', transform_site_finish_styles($project));
+    assert_true(is_string($css));
+
+    foreach ([
+        'be-inline-geometry' => '.be-inline-geometry-',
+        'richtext-marker reset' => ':where(mark)[style*="--blocks-engine-richtext-marker:"]{background-color:transparent;color:inherit}',
+        'synthetic-paragraph' => ':where(.blocks-engine-synthetic-paragraph){margin-top:0;margin-bottom:0}',
+        'synthetic-anchor-undecorated' => 'blocks-engine-synthetic-anchor-undecorated',
+        'inline-layout-carrier' => ':where(p.blocks-engine-inline-layout-carrier){display:contents;margin:0!important;padding:0!important;border:0!important}',
+        'css-owned-flow paragraph' => ':where(.blocks-engine-css-owned-flow)>p{margin-top:0;margin-bottom:0}',
+        'css-owned-flow direct children' => ':where(.wp-block-group.blocks-engine-css-owned-flow)>*{margin-block-start:0;margin-block-end:0}',
+        'css-owned-grid' => ':where(.blocks-engine-css-owned-grid)>*{margin-block-start:0;margin-block-end:0}',
+        'css-owned-layout' => '.wp-block-group.blocks-engine-css-owned-layout>:where(:not(.alignleft):not(.alignright):not(.alignfull)){max-width:none!important;margin-left:0!important;margin-right:0!important}',
+        'css-owned-layout-item' => ':where(.wp-block-group.blocks-engine-css-owned-layout-item)>*{margin-block-start:0;margin-block-end:0}',
+        'positioned-fragment-link-carrier' => ':where(.blocks-engine-positioned-fragment-link-carrier){display:contents!important}',
+        'empty-flex-item' => ':where(.blocks-engine-empty-flex-item){flex:000!important;width:0!important;min-width:0!important;margin-left:0!important;margin-right:0!important}',
+        'list-navigation base' => '.wp-block-navigation.blocks-engine-list-navigation.wp-block-navigation-item.wp-block-navigation-link{display:list-item;font:inherit}',
+        'list-navigation host' => '.wp-block-navigation.blocks-engine-list-navigation{display:flex!important}',
+        'list-navigation mobile overlay' => '.wp-block-navigation.blocks-engine-list-navigation.wp-block-navigation__responsive-container.is-menu-open{background:rgba(0,0,0,.9)!important}',
+        'nativeSearchTrigger' => 'flex:0024px!important;width:24px!important;height:80px!important',
+        'nativeButton' => 'background-color:#fff!important;color:#000!important',
+        'directFlexButton' => '.wp-block-buttons){display:block!important;gap:0!important;min-width:0;width:100%!important}',
+        'fullWidthButton' => '.wp-block-buttons){display:block!important;gap:0!important;width:100%!important}',
+    ] as $family => $needle) {
+        assert_contains($needle, $css, "missing engine-support family {$family}");
+    }
+
+    transform_site_cleanup($tmp);
+});
+
+test('G2 transformer author-css is excluded and repo author selector reaches final theme CSS once', function () {
+    [$project, $llm, $tmp] = transform_site_fixture(
+        '<!doctype html><html><body><header><p>Header</p></header><main>'
+        . '<section id="contract"><p class="contract-author-only" style="width:30rem">Contract</p></section>'
+        . '</main><footer><p>Footer</p></footer></body></html>',
+    );
+    $project->writeText('design/site.css', ".contract-author-only{color:#123456}\n");
+
+    transform_site_run($project, $llm);
+    assert_true(
+        !str_contains(transform_site_carried_css($project), '.contract-author-only'),
+        'rewritten transformer author-css absent from both carried artifacts',
+    );
+    $style = transform_site_finish_styles($project);
+    assert_eq(1, substr_count($style, '.contract-author-only'), 'repo author selector appears exactly once');
+
     transform_site_cleanup($tmp);
 });
 
@@ -146,7 +272,7 @@ test('transform-site excludes design preview from the compiler bundle', function
     assert_eq([], $project->readJson(TransformArtifacts::REPORT)['fallback_codes']);
     assert_true(!str_contains($report, $cssMarker), 'preview CSS marker absent from report');
     assert_true(
-        !str_contains($project->readText(TransformArtifacts::CARRIED_CSS), $cssMarker),
+        !str_contains(transform_site_carried_css($project), $cssMarker),
         'preview CSS marker absent from carried CSS',
     );
     $outputs = implode("\n", transform_site_outputs($project));
@@ -317,7 +443,7 @@ test('transform-site is byte-identical and same-tag sibling reorder cannot mis-t
 
     assert_eq(transform_site_outputs($first), transform_site_outputs($second));
     foreach ([$first, $swapped] as $project) {
-        $css = $project->readText(TransformArtifacts::CARRIED_CSS);
+        $css = transform_site_carried_css($project);
         $part = $project->readText('theme/parts/page-home--order.html');
         assert_true(!str_contains($css, 'nth-of-type'));
         foreach (['Alpha' => '111px', 'Beta' => '222px'] as $text => $width) {
