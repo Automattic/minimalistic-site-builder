@@ -103,7 +103,7 @@ test('html-first fidelity installed byte tree hash uses stable relative path byt
     });
 });
 
-test('html-first fidelity control provenance follows actual future Composer metadata and installed bytes', function () {
+test('html-first fidelity control provenance canonicalizes numeric Composer versions and installed bytes', function () {
     with_temp_dir('html-fidelity-control-provenance-', function (string $dir) {
         $metadataPath = $dir . '/vendor/composer/installed.json';
         $transformerPath = $dir . '/vendor/automattic/blocks-engine-php-transformer';
@@ -113,8 +113,8 @@ test('html-first fidelity control provenance follows actual future Composer meta
         file_put_contents($metadataPath, json_encode([
             'packages' => [[
                 'name' => 'automattic/blocks-engine-php-transformer',
-                'version' => '9.9.9.0',
-                'pretty_version' => 'v9.9.9-future',
+                'version' => '0.4.17.0',
+                'pretty_version' => 'v0.4.17',
             ]],
         ], JSON_THROW_ON_ERROR));
 
@@ -123,10 +123,10 @@ test('html-first fidelity control provenance follows actual future Composer meta
             $metadataPath,
             $transformerPath,
         );
-        assert_eq('v9.9.9-future', $provenance['transformer_version']);
-        assert_eq('v9.9.9-future Composer install', $provenance['transformer_label']);
+        assert_eq('0.4.17', $provenance['transformer_version']);
+        assert_eq('0.4.17 Composer install', $provenance['transformer_label']);
         assert_eq(
-            'composer:automattic/blocks-engine-php-transformer@v9.9.9-future',
+            'composer:automattic/blocks-engine-php-transformer@0.4.17',
             $provenance['transformer_reference'],
         );
         assert_eq(
@@ -134,25 +134,44 @@ test('html-first fidelity control provenance follows actual future Composer meta
             $provenance['transformer_installed_tree_sha256'],
         );
 
-        file_put_contents($metadataPath, json_encode([[
+        file_put_contents($metadataPath, json_encode(['packages' => [[
             'name' => 'automattic/blocks-engine-php-transformer',
-            'version' => '10.0.0.0-next',
-        ]], JSON_THROW_ON_ERROR));
+            'version' => '10.0.0.0',
+            'pretty_version' => 'v10.0.0-future',
+        ]]], JSON_THROW_ON_ERROR));
         $future = HtmlFirstFidelityRunner::installedComposerTransformerProvenance(
             'control transformer',
             $metadataPath,
             $transformerPath,
         );
-        assert_eq('10.0.0.0-next', $future['transformer_version']);
-        assert_eq('10.0.0.0-next Composer install', $future['transformer_label']);
+        assert_eq('10.0.0-future', $future['transformer_version']);
+        assert_eq('10.0.0-future Composer install', $future['transformer_label']);
         assert_eq(
-            'composer:automattic/blocks-engine-php-transformer@10.0.0.0-next',
+            'composer:automattic/blocks-engine-php-transformer@10.0.0-future',
             $future['transformer_reference'],
         );
         assert_eq(
             $provenance['transformer_installed_tree_sha256'],
             $future['transformer_installed_tree_sha256'],
         );
+
+        foreach (['dev-main', 'vNext'] as $nonNumericVersion) {
+            file_put_contents($metadataPath, json_encode(['packages' => [[
+                'name' => 'automattic/blocks-engine-php-transformer',
+                'pretty_version' => $nonNumericVersion,
+            ]]], JSON_THROW_ON_ERROR));
+            $nonNumeric = HtmlFirstFidelityRunner::installedComposerTransformerProvenance(
+                'control transformer',
+                $metadataPath,
+                $transformerPath,
+            );
+            assert_eq($nonNumericVersion, $nonNumeric['transformer_version']);
+            assert_eq($nonNumericVersion . ' Composer install', $nonNumeric['transformer_label']);
+            assert_eq(
+                'composer:automattic/blocks-engine-php-transformer@' . $nonNumericVersion,
+                $nonNumeric['transformer_reference'],
+            );
+        }
     });
 });
 
@@ -1016,9 +1035,9 @@ function html_first_fidelity_report_fixture(): array
             'control' => [
                 'site_builder_ref' => 'origin/trunk',
                 'site_builder_sha' => $sha,
-                'transformer_label' => 'v9.9.9-future Composer install',
-                'transformer_reference' => 'composer:automattic/blocks-engine-php-transformer@v9.9.9-future',
-                'transformer_version' => 'v9.9.9-future',
+                'transformer_label' => '9.9.9-future Composer install',
+                'transformer_reference' => 'composer:automattic/blocks-engine-php-transformer@9.9.9-future',
+                'transformer_version' => '9.9.9-future',
                 'transformer_installed_tree_sha256' => $sha256,
             ],
             'treatment' => [

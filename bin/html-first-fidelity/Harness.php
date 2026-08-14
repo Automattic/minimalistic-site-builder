@@ -1362,6 +1362,9 @@ final class HtmlFirstFidelityRunner
                 . 'value=transformer_version; installed package metadata missing',
             );
         }
+        if (preg_match('/^v(?=\d)/', $version) === 1) {
+            $version = substr($version, 1);
+        }
         try {
             $installedTreeSha256 = HtmlFirstFidelityFrozenGitTree::installedTreeSha256($installedTransformerPath);
         } catch (Throwable $error) {
