@@ -74,6 +74,29 @@ test('css contrast adjuster preserves sunny ember white text and moves its orang
     assert_true(($delivered[0]['ratio'] ?? 0.0) >= ContrastMath::NORMAL_TEXT);
 });
 
+test('css contrast adjuster repairs every duplicate selector occurrence identically', function () {
+    $rule = '.copy { color: #fff; background: #F26522; }';
+    $css = $rule . "\n" . $rule . "\n";
+    $markup = '<p class="copy">Repeated selector</p>';
+    $findings = CssContrastCheck::check($css, $markup);
+    assert_eq(1, count($findings), 'identical failing findings are intentionally deduplicated');
+    assert_eq('fail', $findings[0]['status']);
+    $root = sys_get_temp_dir() . '/css-contrast-duplicate-selector-' . bin2hex(random_bytes(8));
+    $project = new Project($root);
+
+    $adjusted = CssContrastAdjuster::apply($project, 'theme/style.css', $css, $markup, $findings);
+
+    assert_eq(2, substr_count($adjusted, 'color: #fff'), 'both authored foregrounds survive');
+    assert_eq(0, substr_count($adjusted, 'background: #F26522'), 'both failing backgrounds move');
+    preg_match_all('/\.copy \{ color: #fff; background: (#[0-9A-F]{6}); \}/', $adjusted, $rules);
+    assert_eq(2, count($rules[1] ?? []), 'both selector copies remain present');
+    assert_eq($rules[1][0], $rules[1][1], 'both selector copies receive the same background');
+    $warnings = $project->readJson('warnings.json')['css_contrast'] ?? [];
+    assert_eq(1, count($warnings), 'one selector emits one background disposition');
+    assert_contains('disposition=adjusted', $warnings[0]);
+    assert_true(!str_contains($warnings[0], 'authored=#fff delivered='));
+});
+
 test('css contrast adjuster rewrites only the failing background and records actionable warning', function () {
     $css = ".panel > .copy {\n  color: #fff;\n  background: #F26522;\n  padding: 1rem;\n}\n";
     $markup = '<section class="panel"><p class="copy">Low contrast</p></section>';

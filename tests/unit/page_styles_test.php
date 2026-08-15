@@ -484,6 +484,45 @@ test('site CSS path adjusts only the merged tail against delivered markup and re
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('site CSS resume reconciles duplicate repaired selectors and replaces stale contrast receipts', function () {
+    [$project, $tmp] = ps_project('builder_ps_contrast_resume_');
+    $project->writeText(
+        'theme/style.css',
+        ":root { --surface: #F26522; }\n.copy { color: #2A2A2A; background: var(--surface); }\n",
+    );
+    $project->writeText(
+        TransformArtifacts::SITE_CSS,
+        ":root { --surface: #F26522; }\n.copy { color: #fff; background: var(--surface); }\n",
+    );
+    $project->writeJson('warnings.json', ['css_contrast' => [
+        'file=theme/style.css selector=.copy authored=#fff delivered=#2A2A2A disposition=adjusted ratio=3.1531 threshold=4.5',
+    ]]);
+    $project->writeJson('pages.json', ['pages' => [[
+        'slug' => 'home',
+        'front' => true,
+    ]]]);
+    $project->writeText('design/home.html', '<main>Source</main>');
+    $project->writeText('plugin/pages/home.html', '<p class="copy">Repeated selector</p>');
+
+    ps_html_first_step(new FakeLlm())->run($project);
+
+    $style = $project->readText('theme/style.css');
+    preg_match_all('/\.copy \{ color: (#[0-9A-Fa-f]{3,6}); background: (?:var\(--surface\)|(#[0-9A-F]{6})); \}/', $style, $rules);
+    assert_eq(2, count($rules[0] ?? []), 'the resumed stylesheet retains both selector copies');
+    assert_eq($rules[0][0], $rules[0][1], 'both selector copies deliver the same repaired rule');
+    assert_eq('#fff', $rules[1][0]);
+    assert_true(($rules[2][0] ?? '') !== '', 'the shared local background moved to a literal');
+    $selectorWarnings = array_values(array_filter(
+        $project->readJson('warnings.json')['css_contrast'] ?? [],
+        static fn (string $warning): bool => str_contains($warning, 'selector=.copy'),
+    ));
+    assert_eq(1, count($selectorWarnings), 'the selector has one current disposition');
+    assert_contains('authored_fg=#fff', $selectorWarnings[0]);
+    assert_contains('reason=background-moved-within-perceptual-cap', $selectorWarnings[0]);
+    assert_true(!str_contains($selectorWarnings[0], 'authored=#fff delivered=#2A2A2A'));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('site CSS path skips a source HTML file when its page has a failed marker', function () {
     [$project, $tmp] = ps_project('builder_ps_failed_source_');
     $base = $project->readText('theme/style.css') . ps_wrap() . ps_table_reset();
