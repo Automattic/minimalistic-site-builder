@@ -364,6 +364,16 @@ test('estimatedRowWidth measures rich navigation labels by visible text', functi
     assert_eq(64 + 14 * 11 + 28, HeaderHeroStep::estimatedRowWidth($doc, ''));
 });
 
+test('estimatedRowWidth decodes entities in navigation labels before counting', function () {
+    $label = 'Tools &amp; Advice';
+    $attrs = json_encode(['label' => $label], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+    $doc = BlockMarkup::parse('<!-- wp:navigation-link ' . $attrs . ' /-->');
+
+    assert_eq(18, mb_strlen($label));
+    assert_eq(14, mb_strlen(html_entity_decode($label, ENT_QUOTES | ENT_HTML5, 'UTF-8')));
+    assert_eq(64 + 14 * 11 + 28, HeaderHeroStep::estimatedRowWidth($doc, ''));
+});
+
 test('capCovers lowers a viewport-scale cover to 80vh and leaves the rest alone', function () {
     $result = HeaderHeroStep::capCovers(hh_cover('92'));
     assert_contains('"minHeight":80', $result['markup']);
