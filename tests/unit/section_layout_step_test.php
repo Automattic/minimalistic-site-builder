@@ -14,6 +14,13 @@ function section_layout_group(array $attrs, string $inner, string $wrapperAttrs 
         . '<div class="wp-block-group"' . $wrapperAttrs . '>' . $inner . '</div><!-- /wp:group -->';
 }
 
+/** @param array<mixed> $attrs */
+function section_layout_section(array $attrs, string $inner, string $wrapperClasses = ''): string
+{
+    return BlockMarkup::serializeComment('group', $attrs, false)
+        . '<section class="wp-block-group' . $wrapperClasses . '">' . $inner . '</section><!-- /wp:group -->';
+}
+
 /** @return array{0:Project,1:string} */
 function section_layout_project(array $pages): array
 {
@@ -65,6 +72,63 @@ function section_layout_block_axis(string $markup): array
         'html' => $matches[0] ?? [],
     ];
 }
+
+test('section layout leaves CSS-owned roots layout-less while preserving the unmarked foundation inset', function () {
+    [$project, $tmp] = section_layout_project([[
+        'slug' => 'home',
+        'sections' => [
+            ['slug' => 'hero', 'background' => 'image', 'vertical_density' => 'standard'],
+            ['slug' => 'story', 'background' => 'base', 'vertical_density' => 'compact'],
+        ],
+    ]]);
+    try {
+        $marker = 'blocks-engine-css-owned-layout';
+        $heroInner = '<!-- wp:paragraph --><p>Hero copy</p><!-- /wp:paragraph -->';
+        $storyInner = '<!-- wp:paragraph --><p>Story copy</p><!-- /wp:paragraph -->';
+        $marked = section_layout_section(
+            ['tagName' => 'section', 'anchor' => 'hero', 'className' => $marker],
+            $heroInner,
+            " {$marker}",
+        );
+        $markedAttrs = section_layout_root_attrs($marked);
+        assert_eq($marker, $markedAttrs['className'] ?? null, 'fixture carries the exact CSS-owned marker');
+        assert_true(!isset($markedAttrs['layout']), 'fixture starts without a layout attribute');
+
+        $project->writeText('theme/parts/page-home--hero.html', $marked);
+        $project->writeText(
+            'theme/parts/page-home--story.html',
+            section_layout_section(
+                ['tagName' => 'section', 'anchor' => 'story', 'className' => 'story'],
+                $storyInner,
+                ' story',
+            ),
+        );
+
+        (new SectionLayoutStep())->run($project);
+
+        $hero = $project->readText('theme/parts/page-home--hero.html');
+        $heroAttrs = section_layout_root_attrs($hero);
+        assert_true(!isset($heroAttrs['layout']), 'CSS-owned section root stays layout-less');
+        assert_eq($marker, $heroAttrs['className'] ?? null, 'CSS-owned marker stays byte-identical');
+        assert_true(!str_contains($hero, 'is-layout-constrained'), 'CSS-owned section emits no constrained class');
+        assert_contains($heroInner, $hero, 'CSS-owned section child bytes survive');
+
+        $story = $project->readText('theme/parts/page-home--story.html');
+        assert_eq(
+            [
+                'tagName' => 'section',
+                'anchor' => 'story',
+                'className' => 'story is-layout-constrained',
+                'layout' => ['type' => 'constrained'],
+            ],
+            section_layout_root_attrs($story),
+            'unmarked section keeps the exact foundation-inset attributes',
+        );
+        assert_contains($storyInner, $story, 'unmarked section child bytes stay byte-identical');
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
 
 test('section layout constrains every planned section root and leaves nested layout alone', function () {
     [$project, $tmp] = section_layout_project([
