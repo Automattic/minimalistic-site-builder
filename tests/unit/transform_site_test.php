@@ -110,6 +110,118 @@ function transform_site_finish_styles(Project $project): string
     return $project->readText('theme/style.css');
 }
 
+/** Remove :where(...) functions, whose selector-list arguments add zero specificity. */
+function transform_site_without_zero_specificity_where(string $selector): string
+{
+    $result = '';
+    $length = strlen($selector);
+    for ($index = 0; $index < $length; $index++) {
+        if (strncasecmp(substr($selector, $index, 7), ':where(', 7) !== 0) {
+            $result .= $selector[$index];
+            continue;
+        }
+        $index += 7;
+        $depth = 1;
+        $quote = null;
+        for (; $index < $length && $depth > 0; $index++) {
+            $char = $selector[$index];
+            if ($quote !== null) {
+                if ($char === $quote && ($selector[$index - 1] ?? '') !== '\\') {
+                    $quote = null;
+                }
+                continue;
+            }
+            if ($char === '"' || $char === "'") {
+                $quote = $char;
+            } elseif ($char === '(') {
+                $depth++;
+            } elseif ($char === ')') {
+                $depth--;
+            }
+        }
+        $index--;
+    }
+    return $result;
+}
+
+/**
+ * The competing WordPress flow selector has one pseudo-class from :root.
+ * Equal specificity is sufficient because carried theme CSS loads later.
+ */
+function transform_site_layout_reset_beats_wordpress_flow(string $selector): bool
+{
+    $outsideWhere = transform_site_without_zero_specificity_where($selector);
+    if (preg_match('/#[A-Za-z0-9_-]+/', $outsideWhere) === 1) {
+        return true;
+    }
+    return preg_match(
+        '/\.[A-Za-z0-9_-]+|\[[^\]]+\]|:(?!:)(?!where\b|is\b|not\b|has\b)[A-Za-z_-][A-Za-z0-9_-]*/i',
+        $outsideWhere,
+    ) === 1;
+}
+
+function transform_site_flow_reset_targets_direct_children(string $selector): bool
+{
+    $selector = preg_replace('/\s+/', ' ', trim($selector));
+    if (!is_string($selector)) {
+        return false;
+    }
+    return preg_match(
+        '/^(?:(?::root|html|body)\s+)*'
+            . '(?::where\([^)]*\.blocks-engine-css-owned-flow[^)]*\)'
+            . '|(?=[^>+~]*\.blocks-engine-css-owned-flow)[^>+~]+)\s*>\s*\*$/i',
+        $selector,
+    ) === 1;
+}
+
+/** @return array{zero:bool,important:bool} */
+function transform_site_block_start_reset(string $declarations): array
+{
+    foreach (explode(';', $declarations) as $declaration) {
+        if (!str_contains($declaration, ':')) {
+            continue;
+        }
+        [$property, $value] = array_map('trim', explode(':', $declaration, 2));
+        $property = strtolower($property);
+        if (!in_array($property, ['margin-block-start', 'margin-block', 'margin-top', 'margin'], true)) {
+            continue;
+        }
+        $important = preg_match('/\s*!important\s*$/i', $value) === 1;
+        $value = trim((string) preg_replace('/\s*!important\s*$/i', '', $value));
+        $first = preg_split('/\s+/', $value)[0] ?? '';
+        if (preg_match('/^0(?:[a-z%]+)?$/i', $first) === 1) {
+            return ['zero' => true, 'important' => $important];
+        }
+    }
+    return ['zero' => false, 'important' => false];
+}
+
+function transform_site_assert_flow_reset_wins(string $css, string $context): void
+{
+    preg_match_all('/([^{}]+)\{([^{}]+)\}/', $css, $rules, PREG_SET_ORDER);
+    $matching = [];
+    foreach ($rules as $rule) {
+        $selector = trim($rule[1]);
+        $reset = transform_site_block_start_reset($rule[2]);
+        if (!$reset['zero'] || !transform_site_flow_reset_targets_direct_children($selector)) {
+            continue;
+        }
+        $matching[] = $selector;
+        assert_true(
+            !$reset['important'],
+            "{$context}: layout reset must not use !important",
+        );
+        if (transform_site_layout_reset_beats_wordpress_flow($selector)) {
+            return;
+        }
+    }
+    assert_true(
+        false,
+        "{$context}: carried layout reset must match or beat :root flow specificity; got "
+            . json_encode($matching, JSON_UNESCAPED_SLASHES),
+    );
+}
+
 test('transform-site writes exact legacy part names and AssemblePagesStep accepts pages.json unchanged', function () {
     [$project, $llm, $tmp] = transform_site_fixture(
         '<!doctype html><html><body>'
@@ -224,6 +336,63 @@ test('G1 engine-support families reach final theme CSS after transform-site and 
     ] as $family => $needle) {
         assert_contains($needle, $css, "missing engine-support family {$family}");
     }
+
+    transform_site_cleanup($tmp);
+});
+
+test('G2 CSS-owned flex nav items beat WordPress flow margins without important', function () {
+    [$project, $llm, $tmp] = transform_site_fixture(
+        '<!doctype html><html><body><header><nav class="site-nav">'
+        . '<a class="brand" href="/">Northstar</a><div class="navlinks">'
+        . '<a class="active" href="/">Home</a><a href="/services">Services</a>'
+        . '<a href="/about">About</a><a href="/contact">Contact</a>'
+        . '</div></nav></header><main><section id="hero"><h1>Welcome</h1></section></main>'
+        . '<footer><p>Footer</p></footer></body></html>',
+    );
+    $project->writeText(
+        'design/site.css',
+        '.site-nav,.navlinks{display:flex;align-items:center}.navlinks{gap:2rem}'
+            . '.navlinks a{display:block;padding:.35rem 0;text-decoration:none}',
+    );
+
+    transform_site_run($project, $llm);
+    $header = $project->readText('theme/parts/header.html');
+    assert_contains('navlinks blocks-engine-css-owned-layout blocks-engine-css-owned-flow', $header);
+    assert_eq(4, substr_count($header, '<p class="blocks-engine-synthetic-paragraph'));
+    $style = transform_site_finish_styles($project);
+    assert_contains('.navlinks{display:flex;align-items:center}', preg_replace('/\s+/', '', $style));
+    transform_site_assert_flow_reset_wins(
+        $style,
+        'G2 nav synthetic paragraph flex items',
+    );
+
+    transform_site_cleanup($tmp);
+});
+
+test('G3 sibling core/buttons blocks in one authored action row beat WordPress flow margins without important', function () {
+    [$project, $llm, $tmp] = transform_site_fixture(
+        '<!doctype html><html><body><header><p>Header</p></header><main>'
+        . '<section id="hero"><h1>Welcome</h1><div class="actions">'
+        . '<a class="primary" href="/book">Book now</a>'
+        . '<a class="secondary" href="/about">Explore</a>'
+        . '</div></section></main><footer><p>Footer</p></footer></body></html>',
+    );
+    $project->writeText(
+        'design/site.css',
+        '.actions{display:flex;align-items:center;gap:1rem}'
+            . '.actions a{display:inline-flex;padding:1rem;background:#000;color:#fff}',
+    );
+
+    transform_site_run($project, $llm);
+    $hero = $project->readText('theme/parts/page-home--hero.html');
+    assert_contains('actions blocks-engine-css-owned-layout blocks-engine-css-owned-flow', $hero);
+    assert_eq(2, substr_count($hero, '<div class="wp-block-buttons'));
+    $style = transform_site_finish_styles($project);
+    assert_contains('.actions{display:flex;align-items:center;gap:1rem}', preg_replace('/\s+/', '', $style));
+    transform_site_assert_flow_reset_wins(
+        $style,
+        'G3 sibling core/buttons flex items',
+    );
 
     transform_site_cleanup($tmp);
 });
