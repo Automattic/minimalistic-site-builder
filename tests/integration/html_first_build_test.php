@@ -116,7 +116,7 @@ function html_first_preview_document(string $marker = 'DESIGN-PREVIEW'): string
         . '<style>:root { --content-size: 800px; --wide-size: 1280px; }'
         . 'body { margin: 0; font-family: system-ui, sans-serif; }'
         . '.site-header{display:flex;align-items:center;gap:1rem}.brand{font-weight:700;text-decoration:none}'
-        . '.maintenance-loop{display:grid}.maintenance-loop li > span{display:inline-block;width:10px;height:10px;border-radius:50%;background:#e08a3c}</style>'
+        . '.maintenance-loop{display:grid}.maintenance-loop li > span{display:inline-block;width:10px;max-width:10px;height:10px;border-radius:50%;background:#e08a3c}</style>'
         . '</head><body><header class="site-header"><a class="brand" href="/">Hearth &amp; Crumb</a>'
         . '<nav aria-label="Primary"><a href="/">Home</a></nav></header>'
         . '<main><section id="hero"><h1 class="has-display-font-size">' . $marker . '</h1>'
