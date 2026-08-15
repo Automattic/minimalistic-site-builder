@@ -436,7 +436,7 @@ test('page-styles declares HTML-first design and delivered markup reads only whe
 test('site CSS path adjusts only the merged tail against delivered markup and reaches a fixed point', function () {
     [$project, $tmp] = ps_project('builder_ps_contrast_tail_');
     $base = ".scaffold { color: #777777; background: #ffffff; }\n";
-    $tail = ".copy { color: #777777; background: #ffffff; }\n"
+    $tail = ".copy { color: #fff; background: #F26522; }\n"
         . ".panel .inherited { color: #777777; }\n";
     $markup = '<div class="scaffold">Scaffold</div>'
         . '<p class="copy">Tail</p>'
@@ -462,8 +462,15 @@ test('site CSS path adjusts only the merged tail against delivered markup and re
 
     $once = $project->readText('theme/style.css');
     assert_contains($base, $once, 'pre-existing scaffold bytes stay untouched');
-    assert_eq(1, substr_count($once, '#777777; background: #ffffff'), 'only scaffold retains failing pair');
-    assert_contains('color: ' . $failed[0]['suggested'], $once, 'tail text color adjusted');
+    assert_contains('color: #fff', $once, 'tail authored text colour stays untouched');
+    assert_true(!str_contains($once, 'background: #F26522'), 'tail background moves');
+    $delivered = CssContrastCheck::check(substr($once, strlen($base)), $markup);
+    $copy = array_values(array_filter(
+        $delivered,
+        static fn (array $finding): bool => $finding['selector'] === '.copy',
+    ));
+    assert_eq('pass', $copy[0]['status']);
+    assert_eq('#fff', $copy[0]['fg']);
     $warnings = $project->readJson('warnings.json')['css_contrast'] ?? [];
     assert_eq(2, count($warnings), 'adjusted and unverified findings both remain durable');
     assert_contains('disposition=adjusted', implode("\n", $warnings));

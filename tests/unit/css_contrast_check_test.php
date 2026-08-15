@@ -74,8 +74,8 @@ test('css contrast adjuster preserves sunny ember white text and moves its orang
     assert_true(($delivered[0]['ratio'] ?? 0.0) >= ContrastMath::NORMAL_TEXT);
 });
 
-test('css contrast adjuster rewrites only the failing color value and records actionable warning', function () {
-    $css = ".panel > .copy {\n  color: #777777;\n  background: #ffffff;\n  padding: 1rem;\n}\n";
+test('css contrast adjuster rewrites only the failing background and records actionable warning', function () {
+    $css = ".panel > .copy {\n  color: #fff;\n  background: #F26522;\n  padding: 1rem;\n}\n";
     $markup = '<section class="panel"><p class="copy">Low contrast</p></section>';
     $findings = CssContrastCheck::check($css, $markup);
     $root = sys_get_temp_dir() . '/css-contrast-adjuster-' . bin2hex(random_bytes(8));
@@ -83,18 +83,21 @@ test('css contrast adjuster rewrites only the failing color value and records ac
 
     $adjusted = CssContrastAdjuster::apply($project, 'theme/style.css', $css, $markup, $findings);
 
-    assert_eq(
-        str_replace('#777777', $findings[0]['suggested'], $css),
-        $adjusted,
-        'only the authored text color value changes',
-    );
+    $delivered = CssContrastCheck::check($adjusted, $markup);
+    assert_eq('pass', $delivered[0]['status']);
+    assert_eq(str_replace('#F26522', $delivered[0]['bg'], $css), $adjusted);
+    assert_contains('color: #fff', $adjusted, 'authored foreground stays byte-identical');
     $warnings = $project->readJson('warnings.json')['css_contrast'] ?? [];
     assert_eq(1, count($warnings));
     assert_contains('file=theme/style.css', $warnings[0]);
     assert_contains('selector=.panel > .copy', $warnings[0]);
-    assert_contains('authored=#777777', $warnings[0]);
-    assert_contains('delivered=' . $findings[0]['suggested'], $warnings[0]);
+    assert_contains('authored_fg=#fff', $warnings[0]);
+    assert_contains('authored_bg=#F26522', $warnings[0]);
+    assert_contains('delivered_bg=' . $delivered[0]['bg'], $warnings[0]);
+    assert_contains('ratio_before=3.1531', $warnings[0]);
+    assert_contains('ratio_after=', $warnings[0]);
     assert_contains('disposition=adjusted', $warnings[0]);
+    assert_contains('reason=background-moved-within-perceptual-cap', $warnings[0]);
 });
 
 test('complex inherited contrast stays unverified and adjustment preserves CSS bytes', function () {
@@ -129,10 +132,96 @@ test('complex inherited contrast stays unverified and adjustment preserves CSS b
     assert_eq(2, count($warnings));
     foreach ($warnings as $warning) {
         assert_contains('file=theme/style.css', $warning);
-        assert_contains('authored=unresolved', $warning);
-        assert_contains('delivered=unchanged', $warning);
+        assert_contains('authored_fg=', $warning);
+        assert_contains('authored_bg=', $warning);
+        assert_contains('delivered_bg=', $warning);
+        assert_contains('ratio_before=unresolved', $warning);
+        assert_contains('ratio_after=unresolved', $warning);
         assert_contains('disposition=unverified', $warning);
+        assert_contains('reason=selector-or-color-context-unresolved', $warning);
     }
+});
+
+test('css contrast adjuster leaves image backgrounds and authored colours unchanged', function () {
+    $css = '.copy { color: #fff; background: #222 url("texture.png"); }';
+    $markup = '<p class="copy">Image surface</p>';
+    $findings = CssContrastCheck::check($css, $markup);
+    $root = sys_get_temp_dir() . '/css-contrast-image-' . bin2hex(random_bytes(8));
+    $project = new Project($root);
+
+    assert_eq($css, CssContrastAdjuster::apply($project, 'theme/style.css', $css, $markup, $findings));
+    $warning = ($project->readJson('warnings.json')['css_contrast'] ?? [])[0] ?? '';
+    assert_contains('authored_fg=#fff', $warning);
+    assert_contains('authored_bg=#222 url("texture.png")', $warning);
+    assert_contains('disposition=unverified', $warning);
+    assert_contains('reason=background-image', $warning);
+});
+
+test('css contrast adjuster leaves gradient backgrounds and authored colours unchanged', function () {
+    $css = '.copy { color: #fff; background: linear-gradient(#777, #999); }';
+    $markup = '<p class="copy">Gradient surface</p>';
+    $findings = CssContrastCheck::check($css, $markup);
+    $root = sys_get_temp_dir() . '/css-contrast-gradient-' . bin2hex(random_bytes(8));
+    $project = new Project($root);
+
+    assert_eq($css, CssContrastAdjuster::apply($project, 'theme/style.css', $css, $markup, $findings));
+    $warning = ($project->readJson('warnings.json')['css_contrast'] ?? [])[0] ?? '';
+    assert_contains('authored_fg=#fff', $warning);
+    assert_contains('authored_bg=linear-gradient(#777, #999)', $warning);
+    assert_contains('disposition=unverified', $warning);
+    assert_contains('reason=background-gradient', $warning);
+});
+
+test('css contrast adjuster leaves unresolved variable backgrounds and authored colours unchanged', function () {
+    $css = '.copy { color: #fff; background: var(--missing-surface); }';
+    $markup = '<p class="copy">Unknown surface</p>';
+    $findings = CssContrastCheck::check($css, $markup);
+    $root = sys_get_temp_dir() . '/css-contrast-variable-' . bin2hex(random_bytes(8));
+    $project = new Project($root);
+
+    assert_eq($css, CssContrastAdjuster::apply($project, 'theme/style.css', $css, $markup, $findings));
+    $warning = ($project->readJson('warnings.json')['css_contrast'] ?? [])[0] ?? '';
+    assert_contains('authored_fg=#fff', $warning);
+    assert_contains('authored_bg=var(--missing-surface)', $warning);
+    assert_contains('disposition=unverified', $warning);
+    assert_contains('reason=background-unresolved-variable', $warning);
+});
+
+test('css contrast adjuster leaves authored colours unchanged when the perceptual cap is hit', function () {
+    $css = '.copy { color: #777; background: #888; }';
+    $markup = '<p class="copy">Close greys</p>';
+    $findings = CssContrastCheck::check($css, $markup);
+    assert_eq('fail', $findings[0]['status']);
+    $root = sys_get_temp_dir() . '/css-contrast-cap-' . bin2hex(random_bytes(8));
+    $project = new Project($root);
+
+    assert_eq($css, CssContrastAdjuster::apply($project, 'theme/style.css', $css, $markup, $findings));
+    $warning = ($project->readJson('warnings.json')['css_contrast'] ?? [])[0] ?? '';
+    assert_contains('authored_fg=#777', $warning);
+    assert_contains('authored_bg=#888', $warning);
+    assert_contains('delivered_bg=#888', $warning);
+    assert_contains('disposition=unchanged', $warning);
+    assert_contains('reason=perceptual-shift-cap-exceeded', $warning);
+});
+
+test('css contrast adjuster scopes resolved variables without rewriting root tokens', function () {
+    $css = ":root { --surface: #F26522; }\n.copy { color: #fff; background: var(--surface); }";
+    $markup = '<p class="copy">Scoped token</p>';
+    $findings = CssContrastCheck::check($css, $markup);
+    $root = sys_get_temp_dir() . '/css-contrast-scoped-var-' . bin2hex(random_bytes(8));
+    $project = new Project($root);
+
+    $adjusted = CssContrastAdjuster::apply($project, 'theme/style.css', $css, $markup, $findings);
+
+    assert_contains(':root { --surface: #F26522; }', $adjusted);
+    assert_contains('.copy { color: #fff; background: #', $adjusted);
+    assert_true(!str_contains($adjusted, '.copy { color: #fff; background: var(--surface); }'));
+    $delivered = array_values(array_filter(
+        CssContrastCheck::check($adjusted, $markup),
+        static fn (array $finding): bool => $finding['selector'] === '.copy',
+    ));
+    assert_eq('pass', $delivered[0]['status']);
+    assert_eq('#fff', $delivered[0]['fg']);
 });
 
 test('malformed CSS degrades to an unverified row without throwing', function () {
@@ -221,7 +310,7 @@ test('css contrast ignores an invalid winning declaration and uses the valid fal
 });
 
 test('css contrast adjuster repairs only the declaration that wins the cascade', function () {
-    $css = ".copy { color: #000000; background: #ffffff; }\n.copy { color: #777777; }\n";
+    $css = ".copy { color: #fff; background: #000000; }\n.copy { background: #F26522; }\n";
     $markup = '<p class="copy">Duplicate selector</p>';
     $findings = CssContrastCheck::check($css, $markup);
     $root = sys_get_temp_dir() . '/css-contrast-target-' . bin2hex(random_bytes(8));
@@ -229,41 +318,40 @@ test('css contrast adjuster repairs only the declaration that wins the cascade',
 
     $adjusted = CssContrastAdjuster::apply($project, 'theme/style.css', $css, $markup, $findings);
 
-    assert_eq(
-        ".copy { color: #000000; background: #ffffff; }\n.copy { color: {$findings[0]['suggested']}; }\n",
-        $adjusted,
-    );
     $after = CssContrastCheck::check($adjusted, $markup);
     assert_eq(1, count($after));
     assert_eq('pass', $after[0]['status']);
-    assert_eq($findings[0]['suggested'], $after[0]['fg']);
+    assert_eq('#fff', $after[0]['fg']);
+    assert_eq(
+        ".copy { color: #fff; background: #000000; }\n.copy { background: {$after[0]['bg']}; }\n",
+        $adjusted,
+    );
 });
 
-test('css contrast adjuster leaves a shared declaration untouched when rendered contexts need different repairs', function () {
+test('css contrast adjuster rejects a background move that breaks another authored foreground', function () {
     $css = <<<'CSS'
-.copy { color: #777777; }
-.light > .copy { background: #ffffff; }
-.mid > .copy { background: #888888; }
+.surface { background: #777777; }
+.light { color: rgba(255, 255, 255, 0.95); }
+.dark { color: #000000; }
 CSS;
-    $markup = '<div class="light"><p class="copy">Light</p></div>'
-        . '<div class="mid"><p class="copy">Mid</p></div>';
+    $markup = '<p class="surface light">Light</p><p class="surface dark">Dark</p>';
     $findings = CssContrastCheck::check($css, $markup);
     assert_eq(2, count($findings));
     assert_eq('fail', $findings[0]['status']);
-    assert_eq('fail', $findings[1]['status']);
-    assert_true($findings[0]['suggested'] !== $findings[1]['suggested']);
-    $root = sys_get_temp_dir() . '/css-contrast-ambiguous-' . bin2hex(random_bytes(8));
+    assert_eq('pass', $findings[1]['status']);
+    $root = sys_get_temp_dir() . '/css-contrast-shared-bg-' . bin2hex(random_bytes(8));
     $project = new Project($root);
 
     $adjusted = CssContrastAdjuster::apply($project, 'theme/style.css', $css, $markup, $findings);
 
     assert_eq($css, $adjusted);
     $warnings = $project->readJson('warnings.json')['css_contrast'] ?? [];
-    assert_eq(2, count($warnings));
-    foreach ($warnings as $warning) {
-        assert_contains('delivered=unchanged', $warning);
-        assert_contains('reason=text-color-declaration-target-ambiguous', $warning);
-    }
+    assert_eq(1, count($warnings));
+    assert_contains('authored_fg=rgba(255, 255, 255, 0.95)', $warnings[0]);
+    assert_contains('authored_bg=#777777', $warnings[0]);
+    assert_contains('delivered_bg=#777777', $warnings[0]);
+    assert_contains('disposition=unchanged', $warnings[0]);
+    assert_contains('reason=shared-background-conflict', $warnings[0]);
 });
 
 test('css contrast warnings scrub invalid UTF-8 before durable JSON writes', function () {
@@ -321,43 +409,41 @@ test('css contrast check preserves the caller libxml error queue exactly', funct
 });
 
 test('css contrast cascade ignores comments between declarations and repairs the real winner', function () {
-    $css = '.copy{color:#000000;/* generated */ color:#777777;background:#ffffff}';
+    $css = '.copy{color:#fff;background:#000000;/* generated */ background:#F26522}';
     $markup = '<p class="copy">Commented cascade</p>';
 
     $findings = CssContrastCheck::check($css, $markup);
 
     assert_eq(1, count($findings));
     assert_eq('fail', $findings[0]['status']);
-    assert_eq('#777777', $findings[0]['fg']);
+    assert_eq('#fff', $findings[0]['fg']);
     $root = sys_get_temp_dir() . '/css-contrast-comments-' . bin2hex(random_bytes(8));
     $project = new Project($root);
     $adjusted = CssContrastAdjuster::apply($project, 'theme/style.css', $css, $markup, $findings);
-    assert_eq(
-        '.copy{color:#000000;/* generated */ color:' . $findings[0]['suggested'] . ';background:#ffffff}',
-        $adjusted,
-    );
+    $after = CssContrastCheck::check($adjusted, $markup);
+    assert_eq('pass', $after[0]['status']);
+    assert_eq('.copy{color:#fff;background:#000000;/* generated */ background:' . $after[0]['bg'] . '}', $adjusted);
 });
 
 test('css contrast cascade recognizes important split by a comment', function () {
-    $css = '.copy{color:#777777 !/**/important;color:#000000;background:#ffffff}';
+    $css = '.copy{color:#fff;background:#F26522 !/**/important;background:#000000}';
     $markup = '<p class="copy">Commented important</p>';
 
     $findings = CssContrastCheck::check($css, $markup);
 
     assert_eq(1, count($findings));
     assert_eq('fail', $findings[0]['status']);
-    assert_eq('#777777', $findings[0]['fg']);
+    assert_eq('#fff', $findings[0]['fg']);
     $root = sys_get_temp_dir() . '/css-contrast-important-comment-' . bin2hex(random_bytes(8));
     $project = new Project($root);
     $adjusted = CssContrastAdjuster::apply($project, 'theme/style.css', $css, $markup, $findings);
-    assert_eq(
-        '.copy{color:' . $findings[0]['suggested'] . ' !/**/important;color:#000000;background:#ffffff}',
-        $adjusted,
-    );
+    $after = CssContrastCheck::check($adjusted, $markup);
+    assert_eq('pass', $after[0]['status']);
+    assert_eq('.copy{color:#fff;background:' . $after[0]['bg'] . ' !/**/important;background:#000000}', $adjusted);
 });
 
 test('css contrast comment handling keeps comment tokens inside strings byte-identical', function () {
-    $css = '.copy{--note:"literal /* generated */ token";color:#777777;background:#ffffff}';
+    $css = '.copy{--note:"literal /* generated */ token";color:#fff;background:#F26522}';
     $markup = '<p class="copy">String token</p>';
     $findings = CssContrastCheck::check($css, $markup);
     $root = sys_get_temp_dir() . '/css-contrast-string-comment-' . bin2hex(random_bytes(8));
@@ -366,10 +452,9 @@ test('css contrast comment handling keeps comment tokens inside strings byte-ide
     $adjusted = CssContrastAdjuster::apply($project, 'theme/style.css', $css, $markup, $findings);
 
     assert_contains('--note:"literal /* generated */ token"', $adjusted);
-    assert_eq(
-        str_replace('color:#777777', 'color:' . $findings[0]['suggested'], $css),
-        $adjusted,
-    );
+    $after = CssContrastCheck::check($adjusted, $markup);
+    assert_eq('pass', $after[0]['status']);
+    assert_eq(str_replace('background:#F26522', 'background:' . $after[0]['bg'], $css), $adjusted);
 });
 
 test('css contrast resolves modern space rgb and opaque alpha hex instead of stale fallbacks', function () {
@@ -411,7 +496,8 @@ test('valid unresolved background shorthand wins cascade and stays untouched wit
     $warnings = $project->readJson('warnings.json')['css_contrast'] ?? [];
     assert_eq(1, count($warnings));
     assert_contains('disposition=unverified', $warnings[0]);
-    assert_contains('delivered=unchanged', $warnings[0]);
+    assert_contains('delivered_bg=#ffffff none', $warnings[0]);
+    assert_contains('reason=selector-or-color-context-unresolved', $warnings[0]);
 });
 
 test('position-only background shorthands win over stale background colors as unverified', function () {
