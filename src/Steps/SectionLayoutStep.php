@@ -429,7 +429,18 @@ final class SectionLayoutStep implements Step
             return [];
         }
         $tokens = [];
+        $outOfFlowTokens = [];
         if (preg_match_all('/([^{}]+)\{([^{}]*)\}/s', $stripped, $rules, PREG_SET_ORDER)) {
+            foreach ($rules as $rule) {
+                if (!self::positionsOutOfFlow($rule[2])) {
+                    continue;
+                }
+                if (preg_match_all('/\.(-?[A-Za-z_][A-Za-z0-9_-]*)/', $rule[1], $classes) > 0) {
+                    foreach ($classes[1] as $class) {
+                        $outOfFlowTokens[$class] = true;
+                    }
+                }
+            }
             foreach ($rules as $rule) {
                 if (preg_match(
                     '/(?<!:)(?:::(?:before|after|first-line|first-letter|marker|selection|placeholder)|:(?:before|after))\b/i',
@@ -444,7 +455,7 @@ final class SectionLayoutStep implements Step
                 }
             }
         }
-        return array_keys($tokens);
+        return array_keys(array_diff_key($tokens, $outOfFlowTokens));
     }
 
     /** Whether a rule body's max-width or width references var(--wide-size). */
@@ -483,6 +494,21 @@ final class SectionLayoutStep implements Step
             }
         }
         return $paintsBackground;
+    }
+
+    /** Whether a rule takes its selected element out of normal flow. */
+    private static function positionsOutOfFlow(string $body): bool
+    {
+        foreach (explode(';', $body) as $declaration) {
+            $colon = strpos($declaration, ':');
+            if ($colon === false || strtolower(trim(substr($declaration, 0, $colon))) !== 'position') {
+                continue;
+            }
+            if (preg_match('/\A\s*(?:absolute|fixed)\b/i', substr($declaration, $colon + 1)) === 1) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
