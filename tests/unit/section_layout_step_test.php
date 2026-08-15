@@ -298,6 +298,23 @@ test('section layout full-bleed parser ignores pseudo-element backgrounds', func
     );
 });
 
+test('section layout full-bleed parser excludes out-of-flow classes across split rules', function () {
+    $css = '.absolute{position:absolute}'
+        . '.absolute{background:red}'
+        . '.fixed{position:fixed}'
+        . '.fixed{background-color:red}'
+        . '.relative{position:relative}'
+        . '.relative{background:red}'
+        . '.sticky{position:sticky}'
+        . '.sticky{background:red}';
+
+    assert_eq(
+        ['relative', 'sticky'],
+        SectionLayoutStep::fullBleedClassTokens($css),
+        'out-of-flow positioning in any rule disqualifies the class',
+    );
+});
+
 test('section layout removes only root inline padding and reaches a fixed point', function () {
     [$project, $tmp] = section_layout_project([[
         'slug' => 'home',
