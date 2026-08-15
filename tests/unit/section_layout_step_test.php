@@ -73,7 +73,7 @@ function section_layout_block_axis(string $markup): array
     ];
 }
 
-test('section layout leaves CSS-owned roots layout-less while preserving the unmarked foundation inset', function () {
+test('section layout constrains CSS-owned roots and exempts only their direct out-of-flow children', function () {
     [$project, $tmp] = section_layout_project([[
         'slug' => 'home',
         'sections' => [
@@ -83,7 +83,21 @@ test('section layout leaves CSS-owned roots layout-less while preserving the unm
     ]]);
     try {
         $marker = 'blocks-engine-css-owned-layout';
-        $heroInner = '<!-- wp:paragraph --><p>Hero copy</p><!-- /wp:paragraph -->';
+        $project->writeText(
+            'design/site.css',
+            '.hero-media{position:absolute;inset:0}'
+                . '.scrim{background:black}.scrim{position:fixed;inset:0}'
+                . '.in-flow{position:relative}'
+                . '.nested-layer{position:absolute;inset:0}'
+                . '.story-layer{position:absolute;inset:0}',
+        );
+        $heroInner = section_layout_group(['className' => 'hero-media'], 'Hero image')
+            . section_layout_group(['className' => 'scrim'], 'Scrim')
+            . section_layout_group(['className' => 'in-flow'], 'Hero copy')
+            . section_layout_group(
+                ['className' => 'wrapper'],
+                section_layout_group(['className' => 'nested-layer'], 'Nested image'),
+            );
         $storyInner = '<!-- wp:paragraph --><p>Story copy</p><!-- /wp:paragraph -->';
         $marked = section_layout_section(
             ['tagName' => 'section', 'anchor' => 'hero', 'className' => $marker],
@@ -99,7 +113,7 @@ test('section layout leaves CSS-owned roots layout-less while preserving the unm
             'theme/parts/page-home--story.html',
             section_layout_section(
                 ['tagName' => 'section', 'anchor' => 'story', 'className' => 'story'],
-                $storyInner,
+                section_layout_group(['className' => 'story-layer'], $storyInner),
                 ' story',
             ),
         );
@@ -108,10 +122,30 @@ test('section layout leaves CSS-owned roots layout-less while preserving the unm
 
         $hero = $project->readText('theme/parts/page-home--hero.html');
         $heroAttrs = section_layout_root_attrs($hero);
-        assert_true(!isset($heroAttrs['layout']), 'CSS-owned section root stays layout-less');
-        assert_eq($marker, $heroAttrs['className'] ?? null, 'CSS-owned marker stays byte-identical');
-        assert_true(!str_contains($hero, 'is-layout-constrained'), 'CSS-owned section emits no constrained class');
-        assert_contains($heroInner, $hero, 'CSS-owned section child bytes survive');
+        assert_eq(['type' => 'constrained'], $heroAttrs['layout'] ?? null, 'CSS-owned root keeps the foundation inset');
+        assert_eq(
+            "{$marker} is-layout-constrained",
+            $heroAttrs['className'] ?? null,
+            'CSS-owned root keeps its marker and constrained context',
+        );
+        assert_contains('Hero image', $hero, 'absolute child content survives');
+        assert_contains('Scrim', $hero, 'fixed child content survives');
+        assert_contains('Hero copy', $hero, 'in-flow child content survives');
+        assert_contains('Nested image', $hero, 'nested child content survives');
+
+        $heroDoc = BlockMarkup::parse($hero);
+        $attrsByClass = [];
+        foreach ($heroDoc->indices() as $index) {
+            $attrs = $heroDoc->attrs($index) ?? [];
+            $className = $attrs['className'] ?? '';
+            if (is_string($className)) {
+                $attrsByClass[$className] = $attrs;
+            }
+        }
+        assert_eq('full', $attrsByClass['hero-media']['align'] ?? null, 'direct absolute child escapes the content cap');
+        assert_eq('full', $attrsByClass['scrim']['align'] ?? null, 'direct fixed child escapes the content cap');
+        assert_true(!isset($attrsByClass['in-flow']['align']), 'relative child stays constrained');
+        assert_true(!isset($attrsByClass['nested-layer']['align']), 'nested out-of-flow child stays outside this boundary');
 
         $story = $project->readText('theme/parts/page-home--story.html');
         assert_eq(
@@ -125,6 +159,16 @@ test('section layout leaves CSS-owned roots layout-less while preserving the unm
             'unmarked section keeps the exact foundation-inset attributes',
         );
         assert_contains($storyInner, $story, 'unmarked section child bytes stay byte-identical');
+        $storyDoc = BlockMarkup::parse($story);
+        $storyRoot = (int) $storyDoc->topLevel();
+        $storyChildren = $storyDoc->children($storyRoot);
+        assert_eq(1, count($storyChildren));
+        assert_true(!isset(($storyDoc->attrs($storyChildren[0]) ?? [])['align']), 'unmarked child is not promoted');
+
+        $step = new SectionLayoutStep();
+        $step->run($project);
+        assert_eq($hero, $project->readText('theme/parts/page-home--hero.html'), 'second pass is byte-stable');
+        assert_eq($story, $project->readText('theme/parts/page-home--story.html'), 'unmarked sibling is byte-stable');
     } finally {
         exec('rm -rf ' . escapeshellarg($tmp));
     }
