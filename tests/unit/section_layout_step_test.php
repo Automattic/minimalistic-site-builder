@@ -91,7 +91,7 @@ test('section layout constrains every planned section root and leaves nested lay
         $step = new SectionLayoutStep();
         assert_eq('section-layout', $step->id());
         assert_eq(
-            ['pages.json', 'theme/parts/*', 'theme/theme.json', 'design/site.css'],
+            ['pages.json', 'theme/parts/*', 'theme/theme.json', 'design/site.css', 'design/home.html'],
             $step->declaration()->reads,
         );
         assert_eq(['theme/parts/*', 'theme/theme.json', 'warnings.json'], $step->declaration()->writes);
@@ -685,7 +685,7 @@ test('section layout isolates malformed header width repair and still promotes h
     }
 });
 
-test('section layout reconciles copied theme widths in the deterministic tail', function () {
+test('section layout ignores dead content token without final markup and normalizes copied wide width', function () {
     [$project, $tmp] = section_layout_project([[
         'slug' => 'home',
         'sections' => [['slug' => 'story', 'background' => 'base', 'vertical_density' => 'standard']],
@@ -705,7 +705,7 @@ test('section layout reconciles copied theme widths in the deterministic tail', 
         $step = new SectionLayoutStep();
         $step->run($project);
         assert_eq(
-            ['contentSize' => '800px', 'wideSize' => '1280px'],
+            ['contentSize' => '860px', 'wideSize' => '1280px'],
             $project->readJson('theme/theme.json')['settings']['layout'] ?? null,
         );
         $once = $project->readText('theme/theme.json');

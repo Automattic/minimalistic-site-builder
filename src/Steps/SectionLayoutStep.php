@@ -47,7 +47,7 @@ final class SectionLayoutStep implements Step
         return new StepDeclaration(
             id: $this->id(),
             label: $this->label(),
-            reads: ['pages.json', 'theme/parts/*', 'theme/theme.json', 'design/site.css'],
+            reads: ['pages.json', 'theme/parts/*', 'theme/theme.json', 'design/site.css', 'design/home.html'],
             writes: ['theme/parts/*', 'theme/theme.json', 'warnings.json'],
             concurrent: false,
         );
@@ -66,6 +66,7 @@ final class SectionLayoutStep implements Step
             [$normalizedTheme, $themeWarnings] = ThemeJsonStep::normalizeLayoutWidths(
                 $authoredTheme,
                 $project->readText('design/site.css'),
+                $project->exists('design/home.html') ? $project->readText('design/home.html') : null,
             );
             array_push($warnings, ...$themeWarnings);
             if ($normalizedTheme !== $authoredTheme) {

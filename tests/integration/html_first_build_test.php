@@ -641,7 +641,7 @@ test('HTML-first multi-page build adopts one declared inset system in markup and
         $builder->pipeline($composition)->runThrough($project);
 
         $theme = $project->readJson('theme/theme.json');
-        assert_eq('800px', $theme['settings']['layout']['contentSize'] ?? null);
+        assert_eq('1366px', $theme['settings']['layout']['contentSize'] ?? null);
         assert_eq('1280px', $theme['settings']['layout']['wideSize'] ?? null);
         assert_eq(true, $theme['settings']['useRootPaddingAwareAlignments'] ?? null);
         assert_eq(

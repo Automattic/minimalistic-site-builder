@@ -1937,7 +1937,7 @@ test('W6 theme-json normalizes unitless layout widths', function () {
     }
 });
 
-test('W6 theme-json reconciles HTML-first widths to design custom properties', function () {
+test('W6 theme-json keeps content width pending final markup and reconciles wide custom property', function () {
     $tmp = sys_get_temp_dir() . '/builder_tj_design_width_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
     try {
@@ -1961,7 +1961,7 @@ test('W6 theme-json reconciles HTML-first widths to design custom properties', f
         ))->run($project);
 
         assert_eq(
-            ['contentSize' => '800px', 'wideSize' => '1280px'],
+            ['contentSize' => '860px', 'wideSize' => '1280px'],
             $project->readJson('theme/theme.json')['settings']['layout'] ?? null,
         );
     } finally {
@@ -2041,17 +2041,17 @@ $themeLayoutWidthCases = [
         null,
     ],
     [
-        'design root overrides both widths',
+        'design root overrides wide width but not dead content token without markup',
         ['settings' => ['layout' => ['contentSize' => '860px', 'wideSize' => '1320px']]],
         '/* tokens */ :root { --content-size: 800px; --wide-size: 1280px; }',
-        ['contentSize' => '800px', 'wideSize' => '1280px'],
+        ['contentSize' => '860px', 'wideSize' => '1280px'],
         null,
     ],
     [
-        'partial design root ignores an invalid unitless value',
+        'partial design root ignores dead content and invalid unitless wide values',
         ['settings' => ['layout' => ['contentSize' => '860px', 'wideSize' => '1320px']]],
         ':root{--content-size:810px;--wide-size:1260}',
-        ['contentSize' => '810px', 'wideSize' => '1320px'],
+        ['contentSize' => '860px', 'wideSize' => '1320px'],
         null,
     ],
 ];
