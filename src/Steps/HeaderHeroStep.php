@@ -2320,7 +2320,11 @@ final class HeaderHeroStep implements Step
             $width += mb_strlen($siteName) * self::TITLE_CHAR_PX + self::CLUSTER_GAP_PX;
         }
         foreach ($labels as $label) {
-            $width += mb_strlen(trim($label)) * self::NAV_CHAR_PX + self::NAV_GAP_PX;
+            $lineLengths = array_map(
+                static fn (string $line): int => mb_strlen(trim($line)),
+                preg_split('/\R/u', trim($label)) ?: [],
+            );
+            $width += ($lineLengths === [] ? 0 : max($lineLengths)) * self::NAV_CHAR_PX + self::NAV_GAP_PX;
         }
         if ($hasButton) {
             $width += self::CLUSTER_GAP_PX;
