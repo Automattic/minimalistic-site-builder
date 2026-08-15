@@ -50,6 +50,37 @@ test('nav link resolver maps the azure garden navigation labels to every site pa
     assert_eq([], $result['warnings']);
 });
 
+test('nav link resolver roots an unmatched brand sharing the front page placeholder', function () {
+    $resolver = new DeterministicNavLinkResolver();
+    $pages = [
+        ['label' => 'Home', 'path' => '/', 'anchors' => ['hero']],
+        ['label' => 'Coaching Philosophy', 'path' => '/coaching-philosophy/', 'anchors' => []],
+    ];
+    $input = '<nav>'
+        . '<a href="#hero"><strong>Acme Coaching</strong></a>'
+        . '<a href="#hero">Home</a>'
+        . '<a href="#hero">Philosophy</a>'
+        . '</nav>';
+
+    $result = $resolver->resolve($input, $pages, 'theme/parts/header.html', null);
+
+    assert_eq(
+        '<nav>'
+            . '<a href="/"><strong>Acme Coaching</strong></a>'
+            . '<a href="/">Home</a>'
+            . '<a href="/coaching-philosophy/">Philosophy</a>'
+            . '</nav>',
+        $result['markup'],
+    );
+    assert_eq(3, count($result['repairs']));
+    assert_eq([], $result['warnings']);
+
+    $pageOwned = $resolver->resolve($input, $pages, 'design/home.html', '/');
+    assert_eq($input, $pageOwned['markup']);
+    assert_eq([], $pageOwned['repairs']);
+    assert_eq([], $pageOwned['warnings']);
+});
+
 test('nav link resolver leaves an ambiguous partial label untouched and names every candidate', function () {
     $resolver = new DeterministicNavLinkResolver();
     $pages = [
@@ -92,6 +123,10 @@ test('nav link resolver matches a navigation label against a page slug', functio
 
 test('nav link resolver gives slashless and trailing-slash page paths the same valid verdict', function () {
     $resolver = new DeterministicNavLinkResolver();
+    $pages = [
+        ['label' => 'Home', 'path' => '/', 'anchors' => ['hero']],
+        ['label' => 'Services', 'path' => '/services/', 'anchors' => []],
+    ];
     $slashless = '<nav><a href="/services">Services</a></nav>';
     $trailing = '<!-- wp:navigation -->'
         . '<!-- wp:navigation-link {"label":"Services","url":"/services/"} /-->'
@@ -99,13 +134,13 @@ test('nav link resolver gives slashless and trailing-slash page paths the same v
 
     $slashlessResult = $resolver->resolve(
         $slashless,
-        nav_link_pages(),
+        $pages,
         'theme/parts/footer.html',
         null,
     );
     $trailingResult = $resolver->resolve(
         $trailing,
-        nav_link_pages(),
+        $pages,
         'theme/parts/header.html',
         null,
     );
@@ -346,6 +381,37 @@ test('resolve-nav-links step persists repairs and actionable isolated-loss warni
         $report = $project->readJson('reports/nav-links.json');
         assert_eq(2, count($report['repairs']));
         assert_eq(1, count($report['warnings']));
+    });
+});
+
+test('resolve-nav-links step replaces stale warnings from an earlier resumed run', function () {
+    with_project('resolve_nav_stale_warnings_', function (Project $project): void {
+        $project->writeJson('pages.json', ['pages' => [[
+            'slug' => 'home',
+            'title' => 'Home',
+            'path' => '/',
+            'sections' => [['slug' => 'hero']],
+        ]]]);
+        $project->writeText(
+            'theme/parts/page-home--hero.html',
+            '<section id="hero"><h1>Home</h1></section>',
+        );
+        $project->writeText(
+            'theme/parts/header.html',
+            '<header><nav><a href="/">Home</a></nav></header>',
+        );
+        $project->writeJson('warnings.json', [
+            'resolve-nav-links' => ['stale removed link warning'],
+            'other-step' => ['current unrelated warning'],
+        ]);
+
+        (new ResolveNavLinksStep())->run($project);
+
+        assert_eq(
+            ['other-step' => ['current unrelated warning']],
+            $project->readJson('warnings.json'),
+        );
+        assert_eq([], $project->readJson('reports/nav-links.json')['warnings']);
     });
 });
 

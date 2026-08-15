@@ -22,6 +22,9 @@ final class DeterministicNavLinkResolver implements NavLinkResolver
     ): array {
         $normalizedPages = $this->normalizedPages($pages);
         $links = $this->navigationLinks($markup);
+        $literalFrontPageDestinations = $currentPagePath === null
+            ? $this->literalFrontPageDestinations($markup, $links, $normalizedPages)
+            : [];
         $edits = [];
         $repairs = [];
         $warnings = [];
@@ -32,21 +35,45 @@ final class DeterministicNavLinkResolver implements NavLinkResolver
             $childBytes = $link['closeStart'] === null
                 ? ''
                 : substr($markup, $link['end'], $link['closeStart'] - $link['end']);
+            $label = $this->label($childBytes);
             $authored = $href === null
                 ? null
                 : html_entity_decode($href['value'], ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $ambiguousPages = [];
             $target = $this->target(
                 $authored,
-                $this->label($childBytes),
+                $label,
                 $normalizedPages,
                 $currentPagePath,
+                $ambiguousPages,
             );
+            $inheritedFrontPageTarget = $this->inheritedFrontPageTarget(
+                $link['nav'],
+                $authored,
+                $label,
+                $normalizedPages,
+                $literalFrontPageDestinations,
+            );
+            if ($ambiguousPages === [] && $inheritedFrontPageTarget !== null) {
+                $target = $inheritedFrontPageTarget;
+            }
 
+            $block = sprintf('nav[%d]/a[%d]', $link['nav'], $link['link']);
+            if ($ambiguousPages !== []) {
+                $warnings[] = $this->contextRow(
+                    $file,
+                    $block,
+                    $authored ?? 'missing',
+                    $authored ?? 'missing',
+                    'left ambiguous internal navigation link unchanged; '
+                        . $this->candidateSummary($ambiguousPages),
+                );
+                continue;
+            }
             if ($authored !== null && $target === $authored) {
                 continue;
             }
 
-            $block = sprintf('nav[%d]/a[%d]', $link['nav'], $link['link']);
             if ($target !== null) {
                 $encodedTarget = htmlspecialchars(
                     $target,
@@ -100,22 +127,50 @@ final class DeterministicNavLinkResolver implements NavLinkResolver
             );
         }
 
-        foreach ($this->navigationBlockLinks($markup) as $link) {
+        $blockLinks = $this->navigationBlockLinks($markup);
+        $blockFrontPageDestinations = $currentPagePath === null
+            ? $this->blockFrontPageDestinations($blockLinks, $normalizedPages)
+            : [];
+        foreach ($blockLinks as $link) {
+            $label = $this->label($link['label']);
+            $ambiguousPages = [];
             $target = $this->target(
                 $link['url'],
-                $this->label($link['label']),
+                $label,
                 $normalizedPages,
                 $currentPagePath,
+                $ambiguousPages,
             );
-            if ($link['url'] !== null && $target === $link['url']) {
-                continue;
+            $inheritedFrontPageTarget = $this->inheritedFrontPageTarget(
+                $link['nav'],
+                $link['url'],
+                $label,
+                $normalizedPages,
+                $blockFrontPageDestinations,
+            );
+            if ($ambiguousPages === [] && $inheritedFrontPageTarget !== null) {
+                $target = $inheritedFrontPageTarget;
             }
-
             $block = sprintf(
                 'navigation[%d]/navigation-link[%d]',
                 $link['nav'],
                 $link['link'],
             );
+            if ($ambiguousPages !== []) {
+                $warnings[] = $this->contextRow(
+                    $file,
+                    $block,
+                    $link['url'] ?? 'missing',
+                    $link['url'] ?? 'missing',
+                    'left ambiguous navigation-link block URL unchanged; '
+                        . $this->candidateSummary($ambiguousPages),
+                );
+                continue;
+            }
+            if ($link['url'] !== null && $target === $link['url']) {
+                continue;
+            }
+
             if ($target !== null) {
                 $encoded = json_encode(
                     $target,
@@ -216,13 +271,16 @@ final class DeterministicNavLinkResolver implements NavLinkResolver
 
     /**
      * @param list<array{label:string,path:string,anchors:list<string>}> $pages
+     * @param-out list<array{label:string,path:string,anchors:list<string>}> $ambiguousPages
      */
     private function target(
         ?string $href,
         string $label,
         array $pages,
         ?string $currentPagePath,
+        array &$ambiguousPages,
     ): ?string {
+        $ambiguousPages = [];
         if ($href !== null && $this->isNonSiteDestination($href)) {
             return $href;
         }
@@ -245,7 +303,9 @@ final class DeterministicNavLinkResolver implements NavLinkResolver
             && $currentPagePath !== null
         ) {
             foreach ($pages as $page) {
-                if ($page['path'] === $currentPagePath && $this->hasAnchor($page, $fragment)) {
+                if ($this->samePagePath($page['path'], $currentPagePath)
+                    && $this->hasAnchor($page, $fragment)
+                ) {
                     return $href;
                 }
             }
@@ -253,9 +313,15 @@ final class DeterministicNavLinkResolver implements NavLinkResolver
 
         $labelKey = $this->normalizedLabel($label);
         if ($labelKey !== '') {
-            foreach ($pages as $page) {
-                if ($this->normalizedLabel($page['label']) !== $labelKey) {
-                    continue;
+            $matchingPages = $this->matchingPages($labelKey, $pages);
+            if (count($matchingPages) > 1) {
+                $ambiguousPages = $matchingPages;
+                return null;
+            }
+            if ($matchingPages !== []) {
+                $page = $matchingPages[0];
+                if ($this->samePagePath($page['path'], '/')) {
+                    return $page['path'];
                 }
                 return $fragment !== null && $this->hasAnchor($page, $fragment)
                     ? $this->deepLink($page['path'], $fragment)
@@ -273,7 +339,7 @@ final class DeterministicNavLinkResolver implements NavLinkResolver
         }
 
         $owner = $owners[0];
-        if ($currentPagePath !== null && $owner['path'] === $currentPagePath) {
+        if ($currentPagePath !== null && $this->samePagePath($owner['path'], $currentPagePath)) {
             return '#' . $fragment;
         }
         return $this->deepLink($owner['path'], $fragment);
@@ -307,7 +373,7 @@ final class DeterministicNavLinkResolver implements NavLinkResolver
             return null;
         }
         foreach ($pages as $page) {
-            if ($page['path'] === $path) {
+            if ($this->samePagePath($page['path'], $path)) {
                 return $page;
             }
         }
@@ -347,8 +413,146 @@ final class DeterministicNavLinkResolver implements NavLinkResolver
     private function normalizedLabel(string $label): string
     {
         $decoded = html_entity_decode($label, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-        $collapsed = preg_replace('/\s+/u', ' ', trim($decoded));
+        $words = preg_replace('/[^\p{L}\p{N}]+/u', ' ', trim($decoded));
+        $collapsed = preg_replace('/\s+/u', ' ', trim($words ?? $decoded));
         return mb_strtolower($collapsed ?? trim($decoded), 'UTF-8');
+    }
+
+    /**
+     * @param list<array{label:string,path:string,anchors:list<string>}> $pages
+     * @return list<array{label:string,path:string,anchors:list<string>}>
+     */
+    private function matchingPages(string $labelKey, array $pages): array
+    {
+        $matches = [];
+        foreach ($pages as $page) {
+            $titleKey = $this->normalizedLabel($page['label']);
+            $slugKey = $this->normalizedLabel(rawurldecode(trim($page['path'], '/')));
+            if ($this->containsPhrase($titleKey, $labelKey)
+                || $this->containsPhrase($slugKey, $labelKey)
+            ) {
+                $matches[] = $page;
+            }
+        }
+        return $matches;
+    }
+
+    private function containsPhrase(string $candidate, string $label): bool
+    {
+        return $candidate !== ''
+            && $label !== ''
+            && str_contains(' ' . $candidate . ' ', ' ' . $label . ' ');
+    }
+
+    private function samePagePath(string $left, string $right): bool
+    {
+        return $this->comparablePagePath($left) === $this->comparablePagePath($right);
+    }
+
+    private function comparablePagePath(string $path): string
+    {
+        $path = trim($path);
+        return $path === '/' ? '/' : rtrim($path, '/');
+    }
+
+    /** @param list<array{label:string,path:string,anchors:list<string>}> $pages */
+    private function candidateSummary(array $pages): string
+    {
+        $candidates = array_map(
+            static function (array $page): string {
+                $label = json_encode($page['label'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                $path = json_encode($page['path'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                return (is_string($label) ? $label : $page['label'])
+                    . ' (' . (is_string($path) ? $path : $page['path']) . ')';
+            },
+            $pages,
+        );
+        return 'candidates: ' . implode(', ', $candidates);
+    }
+
+    /**
+     * @param list<array{start:int,end:int,closeStart:?int,closeEnd:?int,nav:int,link:int}> $links
+     * @param list<array{label:string,path:string,anchors:list<string>}> $pages
+     * @return array<int,array<string,string>>
+     */
+    private function literalFrontPageDestinations(string $markup, array $links, array $pages): array
+    {
+        $destinations = [];
+        foreach ($links as $link) {
+            $opening = substr($markup, $link['start'], $link['end'] - $link['start']);
+            $href = $this->hrefAttribute($opening);
+            if ($href === null) {
+                continue;
+            }
+            $childBytes = $link['closeStart'] === null
+                ? ''
+                : substr($markup, $link['end'], $link['closeStart'] - $link['end']);
+            $authored = html_entity_decode($href['value'], ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $target = $this->frontPageTarget($authored, $this->label($childBytes), $pages);
+            if ($target !== null) {
+                $destinations[$link['nav']][$authored] = $target;
+            }
+        }
+        return $destinations;
+    }
+
+    /**
+     * @param list<array{
+     *   start:int,end:int,valueStart:?int,valueEnd:?int,insertAt:int,
+     *   label:string,url:?string,nav:int,link:int
+     * }> $links
+     * @param list<array{label:string,path:string,anchors:list<string>}> $pages
+     * @return array<int,array<string,string>>
+     */
+    private function blockFrontPageDestinations(array $links, array $pages): array
+    {
+        $destinations = [];
+        foreach ($links as $link) {
+            if ($link['url'] === null) {
+                continue;
+            }
+            $target = $this->frontPageTarget(
+                $link['url'],
+                $this->label($link['label']),
+                $pages,
+            );
+            if ($target !== null) {
+                $destinations[$link['nav']][$link['url']] = $target;
+            }
+        }
+        return $destinations;
+    }
+
+    /** @param list<array{label:string,path:string,anchors:list<string>}> $pages */
+    private function frontPageTarget(string $authored, string $label, array $pages): ?string
+    {
+        $ambiguousPages = [];
+        $target = $this->target($authored, $label, $pages, null, $ambiguousPages);
+        return $ambiguousPages === []
+            && $target !== null
+            && $this->samePagePath($target, '/')
+                ? $target
+                : null;
+    }
+
+    /**
+     * @param list<array{label:string,path:string,anchors:list<string>}> $pages
+     * @param array<int,array<string,string>> $frontPageDestinations
+     */
+    private function inheritedFrontPageTarget(
+        int $nav,
+        ?string $authored,
+        string $label,
+        array $pages,
+        array $frontPageDestinations,
+    ): ?string {
+        if ($authored === null
+            || !isset($frontPageDestinations[$nav][$authored])
+            || $this->matchingPages($this->normalizedLabel($label), $pages) !== []
+        ) {
+            return null;
+        }
+        return $frontPageDestinations[$nav][$authored];
     }
 
     /**

@@ -87,7 +87,7 @@ final class ResolveNavLinksStep implements Step
             'repairs' => $repairs,
             'warnings' => $warningRows,
         ]);
-        $project->addWarnings($this->id(), array_map(self::warningMessage(...), $warningRows));
+        $project->replaceWarnings($this->id(), array_map(self::warningMessage(...), $warningRows));
 
         Narrator::write(sprintf(
             "  navigation links: %d repaired, %d warning(s)\n",
