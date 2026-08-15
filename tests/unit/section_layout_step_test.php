@@ -278,6 +278,26 @@ test('section layout promotes only direct CSS background bands without max-width
     }
 });
 
+test('section layout full-bleed parser ignores pseudo-element backgrounds', function () {
+    $css = '.before::before{background:red}'
+        . '.after::after{background-color:red}'
+        . '.first-line::first-line{background:red}'
+        . '.first-letter::first-letter{background:red}'
+        . '.marker::marker{background:red}'
+        . '.selection::selection{background:red}'
+        . '.placeholder::placeholder{background:red}'
+        . '.legacy-before:before{background:red}'
+        . '.legacy-after:after{background:red}'
+        . '.hover:hover{background:red}'
+        . '.band{background:var(--primary)}';
+
+    assert_eq(
+        ['hover', 'band'],
+        SectionLayoutStep::fullBleedClassTokens($css),
+        'only backgrounds painted on the selected element qualify',
+    );
+});
+
 test('section layout removes only root inline padding and reaches a fixed point', function () {
     [$project, $tmp] = section_layout_project([[
         'slug' => 'home',
