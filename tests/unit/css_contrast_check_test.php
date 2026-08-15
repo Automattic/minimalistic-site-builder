@@ -52,6 +52,28 @@ test('css contrast check suggests the smallest passing black-or-white nudge for 
     );
 });
 
+test('css contrast adjuster preserves sunny ember white text and moves its orange background', function () {
+    $css = '.eyebrow { color: #fff; background: #F26522; }';
+    $markup = '<p class="eyebrow">Confidence coaching</p>';
+    $findings = CssContrastCheck::check($css, $markup);
+    assert_eq(1, count($findings));
+    assert_eq('fail', $findings[0]['status'], 'control pair must begin below the threshold');
+    assert_eq('3.1531', number_format($findings[0]['ratio'] ?? 0.0, 4, '.', ''));
+
+    $root = sys_get_temp_dir() . '/css-contrast-background-' . bin2hex(random_bytes(8));
+    $project = new Project($root);
+    $adjusted = CssContrastAdjuster::apply($project, 'theme/style.css', $css, $markup, $findings);
+
+    assert_true($adjusted !== $css, 'repair must be non-vacuous');
+    assert_contains('color: #fff', $adjusted, 'authored text colour must survive unchanged');
+    assert_true(!str_contains($adjusted, 'background: #F26522'), 'background must move');
+    $delivered = CssContrastCheck::check($adjusted, $markup);
+    assert_eq(1, count($delivered));
+    assert_eq('pass', $delivered[0]['status']);
+    assert_eq('#fff', $delivered[0]['fg']);
+    assert_true(($delivered[0]['ratio'] ?? 0.0) >= ContrastMath::NORMAL_TEXT);
+});
+
 test('css contrast adjuster rewrites only the failing color value and records actionable warning', function () {
     $css = ".panel > .copy {\n  color: #777777;\n  background: #ffffff;\n  padding: 1rem;\n}\n";
     $markup = '<section class="panel"><p class="copy">Low contrast</p></section>';
