@@ -86,7 +86,8 @@ final class TransformSiteStep implements Step
                 'theme/parts/*',
                 'pages.json',
                 'aboveFold.json',
-                TransformArtifacts::CARRIED_CSS,
+                TransformArtifacts::CARRIED_CSS_BEFORE_AUTHOR,
+                TransformArtifacts::CARRIED_CSS_AFTER_AUTHOR,
                 TransformArtifacts::REPORT,
                 'warnings.json',
             ],
@@ -584,8 +585,9 @@ final class TransformSiteStep implements Step
             $project->writeText($heroRel, $heroMarkup);
         }
 
-        $allMarkup = implode("\n", $outputs);
-        $project->writeText(TransformArtifacts::CARRIED_CSS, self::carriedCss($assetSets, $allMarkup));
+        $carriedCss = self::carriedCss($assetSets, $warnings);
+        $project->writeText(TransformArtifacts::CARRIED_CSS_BEFORE_AUTHOR, $carriedCss['before-author']);
+        $project->writeText(TransformArtifacts::CARRIED_CSS_AFTER_AUTHOR, $carriedCss['after-author']);
 
         $fallbackCodes = array_values(array_unique(array_filter($fallbackCodes)));
         sort($fallbackCodes);
@@ -1008,7 +1010,24 @@ final class TransformSiteStep implements Step
     /** @param array<int,array<string,mixed>> $assets */
     private static function lostCarrierClass(array $assets, string $markup): ?string
     {
-        foreach (self::carrierRules([$assets]) as $class => $_rule) {
+        $classes = [];
+        foreach (self::engineSupportContents([$assets]) as $contents) {
+            foreach ($contents as $content) {
+                if (!preg_match_all(
+                    '/\\.(be-inline-geometry-[a-z0-9-]+)\\{[^{}]*\\}/i',
+                    $content,
+                    $matches,
+                    PREG_SET_ORDER,
+                )) {
+                    continue;
+                }
+                foreach ($matches as $match) {
+                    $classes[$match[1]] = true;
+                }
+            }
+        }
+        ksort($classes);
+        foreach ($classes as $class => $_present) {
             if (!str_contains($markup, $class)) {
                 return $class;
             }
@@ -1018,42 +1037,88 @@ final class TransformSiteStep implements Step
 
     /**
      * @param list<array<int,array<string,mixed>>> $assetSets
-     * @return array<string,string>
+     * @param ?list<string> $warnings
+     * @return array{'before-author':list<string>,'after-author':list<string>}
      */
-    private static function carrierRules(array $assetSets): array
+    private static function engineSupportContents(array $assetSets, ?array &$warnings = null): array
     {
-        $rules = [];
+        $contents = [
+            'before-author' => [],
+            'after-author' => [],
+        ];
+        $seen = [
+            'before-author' => [],
+            'after-author' => [],
+        ];
         foreach ($assetSets as $assets) {
             foreach ($assets as $asset) {
-                if (!is_array($asset) || !is_string($asset['content'] ?? null)) {
+                if (!is_array($asset)
+                    || ($asset['kind'] ?? null) !== 'css'
+                    || ($asset['source'] ?? null) !== 'engine-support'
+                    || !is_string($asset['content'] ?? null)
+                    || trim($asset['content']) === ''
+                ) {
                     continue;
                 }
-                if (preg_match_all(
-                    '/\\.(be-inline-geometry-[a-z0-9-]+)\\{[^{}]*\\}/i',
-                    $asset['content'],
-                    $matches,
-                    PREG_SET_ORDER,
-                )) {
-                    foreach ($matches as $match) {
-                        $rules[$match[1]] = $match[0];
+                $placement = $asset['stylesheet_placement'] ?? null;
+                if (!is_string($placement) || !array_key_exists($placement, $contents)) {
+                    if ($warnings !== null) {
+                        $warnings[] = self::unknownEngineSupportPlacementWarning($asset, $placement);
                     }
+                    continue;
+                }
+                $content = $asset['content'];
+                if (isset($seen[$placement][$content])) {
+                    continue;
+                }
+                $seen[$placement][$content] = true;
+                $contents[$placement][] = $content;
+            }
+        }
+        return $contents;
+    }
+
+    /**
+     * @param list<array<int,array<string,mixed>>> $assetSets
+     * @param list<string> $warnings
+     * @return array{'before-author':string,'after-author':string}
+     */
+    private static function carriedCss(array $assetSets, array &$warnings): array
+    {
+        $carried = [
+            'before-author' => '',
+            'after-author' => '',
+        ];
+        foreach (self::engineSupportContents($assetSets, $warnings) as $placement => $contents) {
+            foreach ($contents as $content) {
+                $carried[$placement] .= $content;
+                if (!str_ends_with($content, "\n")) {
+                    $carried[$placement] .= "\n";
                 }
             }
         }
-        ksort($rules);
-        return $rules;
+        return $carried;
     }
 
-    /** @param list<array<int,array<string,mixed>>> $assetSets */
-    private static function carriedCss(array $assetSets, string $markup): string
+    /** @param array<string,mixed> $asset */
+    private static function unknownEngineSupportPlacementWarning(array $asset, mixed $placement): string
     {
-        $kept = [];
-        foreach (self::carrierRules($assetSets) as $class => $rule) {
-            if (str_contains($markup, $class)) {
-                $kept[] = $rule;
-            }
-        }
-        return $kept === [] ? '' : implode("\n", $kept) . "\n";
+        $path = $asset['path'] ?? $asset['target_path'] ?? $asset['source_path'] ?? '(unknown transformer asset)';
+        $path = is_string($path) && trim($path) !== ''
+            ? self::oneLine($path)
+            : '(unknown transformer asset)';
+        $jsonFlags = JSON_UNESCAPED_SLASHES
+            | JSON_UNESCAPED_UNICODE
+            | JSON_INVALID_UTF8_SUBSTITUTE
+            | JSON_PARTIAL_OUTPUT_ON_ERROR;
+        $file = json_encode($path, $jsonFlags);
+        $authored = json_encode(['stylesheet_placement' => $placement], $jsonFlags);
+
+        return 'file=' . (is_string($file) ? $file : '"(unknown transformer asset)"')
+            . ' block_path="transformer asset ' . $path . '"'
+            . ' authored_value=' . (is_string($authored) ? $authored : '{"stylesheet_placement":null}')
+            . ' delivered_value=removed disposition=dropped'
+            . ' reason=unrecognized engine-support stylesheet placement';
     }
 
     /**

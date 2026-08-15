@@ -516,7 +516,8 @@ test('site CSS path merges exact safe bytes in deterministic source and document
         . '<style data-page-css="page">.alpha-two{padding:2rem;}</style>';
     $zeta = '<style class="ignored">.ignored{display:none;}</style>'
         . '<style data-page-css>.zeta{gap:3rem;}</style>';
-    $carried = ".be-inline-geometry-1{width:42%;}\n";
+    $carriedBefore = ".be-inline-geometry-1{width:42%;}\n";
+    $carriedAfter = ".blocks-engine-after-author{display:block!important;}\n";
     $project->writeText('theme/style.css', $base);
     $project->writeText(TransformArtifacts::SITE_CSS, $siteCss);
     $project->writeJson('pages.json', ['pages' => [
@@ -525,12 +526,14 @@ test('site CSS path merges exact safe bytes in deterministic source and document
     ]]);
     $project->writeText('design/zeta.html', $zeta);
     $project->writeText('design/home.html', $home);
-    $project->writeText(TransformArtifacts::CARRIED_CSS, $carried);
+    $project->writeText(TransformArtifacts::CARRIED_CSS_BEFORE_AUTHOR, $carriedBefore);
+    $project->writeText(TransformArtifacts::CARRIED_CSS_AFTER_AUTHOR, $carriedAfter);
     $sourceBytes = [
         TransformArtifacts::SITE_CSS    => $project->readText(TransformArtifacts::SITE_CSS),
         'design/home.html'              => $project->readText('design/home.html'),
         'design/zeta.html'              => $project->readText('design/zeta.html'),
-        TransformArtifacts::CARRIED_CSS => $project->readText(TransformArtifacts::CARRIED_CSS),
+        TransformArtifacts::CARRIED_CSS_BEFORE_AUTHOR => $project->readText(TransformArtifacts::CARRIED_CSS_BEFORE_AUTHOR),
+        TransformArtifacts::CARRIED_CSS_AFTER_AUTHOR => $project->readText(TransformArtifacts::CARRIED_CSS_AFTER_AUTHOR),
     ];
     $llm = new FakeLlm();
     $step = ps_html_first_step($llm);
@@ -542,14 +545,16 @@ test('site CSS path merges exact safe bytes in deterministic source and document
         $base
         . ps_wrap()
         . ps_table_reset()
+        . $carriedBefore
+        . "\n"
         . $siteCss
         . "\n\n.alpha-one { margin: 1rem; }\n"
         . "\n.alpha-two{padding:2rem;}"
         . "\n.zeta{gap:3rem;}"
         . "\n"
-        . $carried,
+        . $carriedAfter,
         $once,
-        'site, sorted design files, document order, then carried CSS'
+        'before-author carry, site, sorted design files, document order, then after-author carry'
     );
     assert_eq([], $llm->calls, 'deterministic path makes zero LLM calls');
     assert_eq(0, $llm->completeCalls, 'deterministic path skips legacy complete');
@@ -565,6 +570,31 @@ test('site CSS path merges exact safe bytes in deterministic source and document
 
     assert_eq($once, $project->readText('theme/style.css'), 'second run is byte-identical');
     assert_eq([], $llm->calls, 'second deterministic run still makes zero LLM calls');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('G3 stylesheet placement brackets repo author CSS in final theme stylesheet', function () {
+    [$project, $tmp] = ps_project('builder_ps_support_placement_');
+    $before = '.engine-before-author{margin:0;}';
+    $author = '.repo-author-marker{color:#123456;}';
+    $after = '.engine-after-author{display:block!important;}';
+    $project->writeText(TransformArtifacts::CARRIED_CSS_BEFORE_AUTHOR, $before);
+    $project->writeText(TransformArtifacts::SITE_CSS, $author);
+    $project->writeText(TransformArtifacts::CARRIED_CSS_AFTER_AUTHOR, $after);
+    $project->writeJson('pages.json', ['pages' => [['slug' => 'home', 'front' => true]]]);
+    $project->writeText('design/home.html', '<main><p>Home</p></main>');
+
+    ps_html_first_step(new FakeLlm())->run($project);
+
+    $style = $project->readText('theme/style.css');
+    $beforeAt = strpos($style, $before);
+    $authorAt = strpos($style, $author);
+    $afterAt = strpos($style, $after);
+    assert_true(is_int($beforeAt), 'before-author rule reaches final theme CSS');
+    assert_true(is_int($authorAt), 'repo author rule reaches final theme CSS');
+    assert_true(is_int($afterAt), 'after-author rule reaches final theme CSS');
+    assert_true($beforeAt < $authorAt && $authorAt < $afterAt, 'before-author < repo author < after-author');
+
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
