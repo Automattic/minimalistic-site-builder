@@ -436,7 +436,7 @@ test('page-styles declares HTML-first design and delivered markup reads only whe
 test('site CSS path adjusts only the merged tail against delivered markup and reaches a fixed point', function () {
     [$project, $tmp] = ps_project('builder_ps_contrast_tail_');
     $base = ".scaffold { color: #777777; background: #ffffff; }\n";
-    $tail = ".copy { color: #777777; background: #ffffff; }\n"
+    $tail = ".copy { color: #fff; background: #F26522; }\n"
         . ".panel .inherited { color: #777777; }\n";
     $markup = '<div class="scaffold">Scaffold</div>'
         . '<p class="copy">Tail</p>'
@@ -462,8 +462,15 @@ test('site CSS path adjusts only the merged tail against delivered markup and re
 
     $once = $project->readText('theme/style.css');
     assert_contains($base, $once, 'pre-existing scaffold bytes stay untouched');
-    assert_eq(1, substr_count($once, '#777777; background: #ffffff'), 'only scaffold retains failing pair');
-    assert_contains('color: ' . $failed[0]['suggested'], $once, 'tail text color adjusted');
+    assert_contains('color: #fff', $once, 'tail authored text colour stays untouched');
+    assert_true(!str_contains($once, 'background: #F26522'), 'tail background moves');
+    $delivered = CssContrastCheck::check(substr($once, strlen($base)), $markup);
+    $copy = array_values(array_filter(
+        $delivered,
+        static fn (array $finding): bool => $finding['selector'] === '.copy',
+    ));
+    assert_eq('pass', $copy[0]['status']);
+    assert_eq('#fff', $copy[0]['fg']);
     $warnings = $project->readJson('warnings.json')['css_contrast'] ?? [];
     assert_eq(2, count($warnings), 'adjusted and unverified findings both remain durable');
     assert_contains('disposition=adjusted', implode("\n", $warnings));
@@ -474,6 +481,45 @@ test('site CSS path adjusts only the merged tail against delivered markup and re
     assert_eq($once, $project->readText('theme/style.css'), 'second run preserves final CSS bytes');
     assert_eq($warnings, $project->readJson('warnings.json')['css_contrast'] ?? [], 'warnings deduplicate');
     assert_eq([], $llm->calls, 'deterministic path makes zero LLM calls');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site CSS resume reconciles duplicate repaired selectors and replaces stale contrast receipts', function () {
+    [$project, $tmp] = ps_project('builder_ps_contrast_resume_');
+    $project->writeText(
+        'theme/style.css',
+        ":root { --surface: #F26522; }\n.copy { color: #2A2A2A; background: var(--surface); }\n",
+    );
+    $project->writeText(
+        TransformArtifacts::SITE_CSS,
+        ":root { --surface: #F26522; }\n.copy { color: #fff; background: var(--surface); }\n",
+    );
+    $project->writeJson('warnings.json', ['css_contrast' => [
+        'file=theme/style.css selector=.copy authored=#fff delivered=#2A2A2A disposition=adjusted ratio=3.1531 threshold=4.5',
+    ]]);
+    $project->writeJson('pages.json', ['pages' => [[
+        'slug' => 'home',
+        'front' => true,
+    ]]]);
+    $project->writeText('design/home.html', '<main>Source</main>');
+    $project->writeText('plugin/pages/home.html', '<p class="copy">Repeated selector</p>');
+
+    ps_html_first_step(new FakeLlm())->run($project);
+
+    $style = $project->readText('theme/style.css');
+    preg_match_all('/\.copy \{ color: (#[0-9A-Fa-f]{3,6}); background: (?:var\(--surface\)|(#[0-9A-F]{6})); \}/', $style, $rules);
+    assert_eq(2, count($rules[0] ?? []), 'the resumed stylesheet retains both selector copies');
+    assert_eq($rules[0][0], $rules[0][1], 'both selector copies deliver the same repaired rule');
+    assert_eq('#fff', $rules[1][0]);
+    assert_true(($rules[2][0] ?? '') !== '', 'the shared local background moved to a literal');
+    $selectorWarnings = array_values(array_filter(
+        $project->readJson('warnings.json')['css_contrast'] ?? [],
+        static fn (string $warning): bool => str_contains($warning, 'selector=.copy'),
+    ));
+    assert_eq(1, count($selectorWarnings), 'the selector has one current disposition');
+    assert_contains('authored_fg=#fff', $selectorWarnings[0]);
+    assert_contains('reason=background-moved-within-perceptual-cap', $selectorWarnings[0]);
+    assert_true(!str_contains($selectorWarnings[0], 'authored=#fff delivered=#2A2A2A'));
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

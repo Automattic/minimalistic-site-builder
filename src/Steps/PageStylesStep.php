@@ -346,24 +346,45 @@ CSS;
         $markup = self::deliveredMarkup($project);
         // Contrast is a judgment on the DESIGN's colors: the wrap policy has
         // none, and including it would only add unverified-selector findings.
+        $findings = CssContrastCheck::check($design, $markup);
+        $style = CssContrastAdjuster::restoreSupersededForegrounds(
+            $project,
+            'theme/style.css',
+            $project->readText('theme/style.css'),
+            $findings,
+        );
         $design = CssContrastAdjuster::apply(
             $project,
             'theme/style.css',
             $design,
             $markup,
-            CssContrastCheck::check($design, $markup),
+            $findings,
         );
         // Wrap policy first, so a design that deliberately hyphenates still
         // wins; it ships even when the design contributed no CSS at all.
         $tail = self::WORD_WRAP_CSS . "\n" . self::TABLE_BORDER_RESET_CSS . "\n" . $design;
-        $style = $project->readText('theme/style.css');
         if (str_ends_with($style, $tail)) {
+            $reconciled = CssContrastAdjuster::reconcileHandledBackgroundCopies(
+                $style,
+                $design,
+                $markup,
+                $findings,
+            );
+            if ($reconciled !== $style) {
+                $project->writeText('theme/style.css', $reconciled);
+            }
             Narrator::write("  deterministic page CSS already merged\n");
             return;
         }
 
         $separator = $style !== '' && !str_ends_with($style, "\n") ? "\n" : '';
-        $project->writeText('theme/style.css', $style . $separator . $tail);
+        $merged = CssContrastAdjuster::reconcileHandledBackgroundCopies(
+            $style . $separator . $tail,
+            $design,
+            $markup,
+            $findings,
+        );
+        $project->writeText('theme/style.css', $merged);
         Narrator::write("  merged deterministic page CSS\n");
     }
 

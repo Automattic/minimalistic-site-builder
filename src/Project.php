@@ -183,6 +183,28 @@ final class Project
         $this->writeJson('warnings.json', $warnings);
     }
 
+    /**
+     * Replace one reporting step's warnings while preserving every other
+     * step. Use this when a resumable deterministic pass owns the complete
+     * current set and prior receipts would describe bytes no longer shipped.
+     *
+     * @param list<string> $messages
+     */
+    public function replaceWarnings(string $stepId, array $messages): void
+    {
+        $exists = $this->exists('warnings.json');
+        $warnings = $exists ? $this->readJson('warnings.json') : [];
+        if ($messages === []) {
+            unset($warnings[$stepId]);
+        } else {
+            $warnings[$stepId] = array_values(array_unique($messages));
+        }
+        if (!$exists && $warnings === []) {
+            return;
+        }
+        $this->writeJson('warnings.json', $warnings);
+    }
+
     /** @return array<mixed> */
     public function readJson(string $rel): array
     {

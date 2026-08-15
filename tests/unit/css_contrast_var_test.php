@@ -87,7 +87,7 @@ test('css contrast keeps a passing literal pair unchanged when unrelated tokens 
 });
 
 test('css contrast adjuster repairs a var()-expressed failing pair end to end', function () {
-    $css = ":root{--ink:#777777}\n.x{color:var(--ink);background:#ffffff}\n";
+    $css = ":root{--ink:#fff;--surface:#F26522}\n.x{color:var(--ink);background:var(--surface)}\n";
     $markup = '<p class="x">Token repair</p>';
     $findings = CssContrastCheck::check($css, $markup);
     $finding = var_finding($findings, '.x');
@@ -97,11 +97,12 @@ test('css contrast adjuster repairs a var()-expressed failing pair end to end', 
     $project = new Project($root);
     $adjusted = CssContrastAdjuster::apply($project, 'theme/style.css', $css, $markup, $findings);
 
-    // Only the var(--ink) reference at the point of use is rewritten.
-    assert_eq(
-        ":root{--ink:#777777}\n.x{color:{$finding['suggested']};background:#ffffff}\n",
-        $adjusted,
-    );
     $after = var_finding(CssContrastCheck::check($adjusted, $markup), '.x');
     assert_true($after !== null && $after['status'] === 'pass', 'repaired pair now passes');
+    assert_eq('var(--ink)', $after['fg']);
+    assert_eq(
+        ":root{--ink:#fff;--surface:#F26522}\n.x{color:var(--ink);background:{$after['bg']}}\n",
+        $adjusted,
+        'root tokens and the foreground reference survive; only the local background binding moves',
+    );
 });
