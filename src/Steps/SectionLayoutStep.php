@@ -15,9 +15,9 @@ use Automattic\SiteBuild\StepDeclaration;
  * SectionRhythmStep owns the root group's block-axis spacing. This sibling
  * pass runs immediately afterwards and owns only the inline axis: every
  * section root becomes constrained, root-authored horizontal padding is
- * removed, and direct cover children opt into full bleed while carrying the
- * constrained-layout class bridge their inner container needs. Nested blocks
- * stay outside this ownership boundary.
+ * removed, and direct cover children or CSS-authored background bands opt into
+ * full bleed. Covers also carry the constrained-layout class bridge their inner
+ * container needs. Nested blocks stay outside this ownership boundary.
  *
  * Rewrites are transactional per page. A malformed generated section keeps
  * that page's pre-transformation bytes, records one durable warning, and does
@@ -59,6 +59,7 @@ final class SectionLayoutStep implements Step
         $adjustments = 0;
         $warnings = [];
         $wideClasses = self::wideClassSet($project);
+        $fullBleedClasses = self::fullBleedClassSet($project);
 
         foreach (SectionRhythmStep::pages($project) as $page) {
             $pageSlug = trim((string) ($page['slug'] ?? ''));
@@ -74,6 +75,7 @@ final class SectionLayoutStep implements Step
                         $entry['markup'],
                         "page '{$pageSlug}', section '{$entry['slug']}'",
                         $wideClasses,
+                        $fullBleedClasses,
                     );
                     $pageWrites[$currentPath] = $rewritten;
                     if ($rewritten !== $entry['markup']) {
@@ -105,8 +107,16 @@ final class SectionLayoutStep implements Step
         }
     }
 
-    /** @param array<string,true> $wideClasses class token => true from design/site.css */
-    private static function rewriteSection(string $markup, string $label, array $wideClasses = []): string
+    /**
+     * @param array<string,true> $wideClasses class token => true from design/site.css
+     * @param array<string,true> $fullBleedClasses class token => true from design/site.css
+     */
+    private static function rewriteSection(
+        string $markup,
+        string $label,
+        array $wideClasses = [],
+        array $fullBleedClasses = [],
+    ): string
     {
         $doc = self::validatedDocument($markup, $label);
         $root = (int) $doc->topLevel();
@@ -127,6 +137,22 @@ final class SectionLayoutStep implements Step
             $coverAttrs['layout'] = ['type' => 'constrained'];
             self::constrainCommentClass($coverAttrs, "{$label}, direct cover");
             $doc->setAttrs($covers[0], $coverAttrs);
+        }
+
+        if ($fullBleedClasses !== []) {
+            foreach ($doc->children($root) as $child) {
+                foreach (self::elementClassTokens($doc, $child) as $token) {
+                    if (!isset($fullBleedClasses[$token])) {
+                        continue;
+                    }
+                    $childAttrs = $doc->attrs($child) ?? [];
+                    if (!isset($childAttrs['align'])) {
+                        $childAttrs['align'] = 'full';
+                        $doc->setAttrs($child, $childAttrs);
+                    }
+                    break;
+                }
+            }
         }
 
         // A constrained layout re-caps its children at contentSize unless the
@@ -344,6 +370,19 @@ final class SectionLayoutStep implements Step
         return $set;
     }
 
+    /** The full-bleed class lookup set from the design stylesheet. @return array<string,true> */
+    private static function fullBleedClassSet(Project $project): array
+    {
+        if (!$project->exists('design/site.css')) {
+            return [];
+        }
+        $set = [];
+        foreach (self::fullBleedClassTokens($project->readText('design/site.css')) as $token) {
+            $set[$token] = true;
+        }
+        return $set;
+    }
+
     /**
      * Class selectors in a stylesheet whose horizontal measure references the
      * literal var(--wide-size) token. Token-based only: a max-width/width that
@@ -375,6 +414,50 @@ final class SectionLayoutStep implements Step
         return array_keys($tokens);
     }
 
+    /**
+     * Class selectors whose rule paints a background without declaring a
+     * max-width. Such a class on a direct section child identifies a band whose
+     * own background should span the viewport while its descendants own insets.
+     * Comment-stripped; malformed or absent rules yield []. Pure — unit-testable.
+     *
+     * @return list<string>
+     */
+    public static function fullBleedClassTokens(string $css): array
+    {
+        $stripped = preg_replace('~/\*.*?\*/~s', '', $css);
+        if (!is_string($stripped)) {
+            return [];
+        }
+        $tokens = [];
+        $outOfFlowTokens = [];
+        if (preg_match_all('/([^{}]+)\{([^{}]*)\}/s', $stripped, $rules, PREG_SET_ORDER)) {
+            foreach ($rules as $rule) {
+                if (!self::positionsOutOfFlow($rule[2])) {
+                    continue;
+                }
+                if (preg_match_all('/\.(-?[A-Za-z_][A-Za-z0-9_-]*)/', $rule[1], $classes) > 0) {
+                    foreach ($classes[1] as $class) {
+                        $outOfFlowTokens[$class] = true;
+                    }
+                }
+            }
+            foreach ($rules as $rule) {
+                if (preg_match(
+                    '/(?<!:)(?:::(?:before|after|first-line|first-letter|marker|selection|placeholder)|:(?:before|after))\b/i',
+                    $rule[1],
+                ) === 1 || !self::paintsUnboundedBackground($rule[2])) {
+                    continue;
+                }
+                if (preg_match_all('/\.(-?[A-Za-z_][A-Za-z0-9_-]*)/', $rule[1], $classes) > 0) {
+                    foreach ($classes[1] as $class) {
+                        $tokens[$class] = true;
+                    }
+                }
+            }
+        }
+        return array_keys(array_diff_key($tokens, $outOfFlowTokens));
+    }
+
     /** Whether a rule body's max-width or width references var(--wide-size). */
     private static function measuresWideSize(string $body): bool
     {
@@ -387,6 +470,41 @@ final class SectionLayoutStep implements Step
             if (($property === 'max-width' || $property === 'width')
                 && preg_match('/var\(\s*--wide-size\s*\)/i', substr($declaration, $colon + 1)) === 1
             ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Whether a rule paints a background and leaves its horizontal measure unbounded. */
+    private static function paintsUnboundedBackground(string $body): bool
+    {
+        $paintsBackground = false;
+        foreach (explode(';', $body) as $declaration) {
+            $colon = strpos($declaration, ':');
+            if ($colon === false) {
+                continue;
+            }
+            $property = strtolower(trim(substr($declaration, 0, $colon)));
+            if ($property === 'max-width') {
+                return false;
+            }
+            if ($property === 'background' || $property === 'background-color') {
+                $paintsBackground = true;
+            }
+        }
+        return $paintsBackground;
+    }
+
+    /** Whether a rule takes its selected element out of normal flow. */
+    private static function positionsOutOfFlow(string $body): bool
+    {
+        foreach (explode(';', $body) as $declaration) {
+            $colon = strpos($declaration, ':');
+            if ($colon === false || strtolower(trim(substr($declaration, 0, $colon))) !== 'position') {
+                continue;
+            }
+            if (preg_match('/\A\s*(?:absolute|fixed)\b/i', substr($declaration, $colon + 1)) === 1) {
                 return true;
             }
         }

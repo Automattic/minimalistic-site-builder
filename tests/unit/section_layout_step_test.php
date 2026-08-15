@@ -223,6 +223,98 @@ test('section layout bleeds only a direct cover and never nested or ordinary ima
     }
 });
 
+test('section layout promotes only direct CSS background bands without max-width to align:full', function () {
+    [$project, $tmp] = section_layout_project([[
+        'slug' => 'home',
+        'sections' => [['slug' => 'band', 'background' => 'base', 'vertical_density' => 'standard']],
+    ]]);
+    try {
+        $project->writeText(
+            'design/site.css',
+            '.statement{background:var(--primary);padding:4rem 0}'
+                . '.accent{background-color:#123456}'
+                . '.bounded{background:#fff;max-width:40rem}'
+                . '.nested-band{background:#000}',
+        );
+        $project->writeText(
+            'theme/parts/page-home--band.html',
+            section_layout_group(
+                ['tagName' => 'section'],
+                section_layout_group(['className' => 'statement'], 'Statement')
+                    . section_layout_group(['className' => 'accent'], 'Accent')
+                    . section_layout_group(['className' => 'bounded'], 'Bounded')
+                    . section_layout_group(
+                        ['className' => 'wrapper'],
+                        section_layout_group(['className' => 'nested-band'], 'Nested'),
+                    ),
+            ),
+        );
+
+        $step = new SectionLayoutStep();
+        $step->run($project);
+        $once = $project->readText('theme/parts/page-home--band.html');
+        $doc = BlockMarkup::parse($once);
+        $attrsByClass = [];
+        foreach ($doc->indices() as $index) {
+            $attrs = $doc->attrs($index) ?? [];
+            $className = $attrs['className'] ?? '';
+            if (!is_string($className)) {
+                continue;
+            }
+            foreach (preg_split('/[\x20\t\r\n\f]+/', trim($className), -1, PREG_SPLIT_NO_EMPTY) ?: [] as $class) {
+                $attrsByClass[$class] = $attrs;
+            }
+        }
+
+        assert_eq('full', $attrsByClass['statement']['align'] ?? null, 'background shorthand band bleeds');
+        assert_eq('full', $attrsByClass['accent']['align'] ?? null, 'background-color band bleeds');
+        assert_true(!isset($attrsByClass['bounded']['align']), 'a max-width keeps the band constrained');
+        assert_true(!isset($attrsByClass['nested-band']['align']), 'nested bands stay outside the section-root boundary');
+
+        $step->run($project);
+        assert_eq($once, $project->readText('theme/parts/page-home--band.html'), 'promotion reaches a fixed point');
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('section layout full-bleed parser ignores pseudo-element backgrounds', function () {
+    $css = '.before::before{background:red}'
+        . '.after::after{background-color:red}'
+        . '.first-line::first-line{background:red}'
+        . '.first-letter::first-letter{background:red}'
+        . '.marker::marker{background:red}'
+        . '.selection::selection{background:red}'
+        . '.placeholder::placeholder{background:red}'
+        . '.legacy-before:before{background:red}'
+        . '.legacy-after:after{background:red}'
+        . '.hover:hover{background:red}'
+        . '.band{background:var(--primary)}';
+
+    assert_eq(
+        ['hover', 'band'],
+        SectionLayoutStep::fullBleedClassTokens($css),
+        'only backgrounds painted on the selected element qualify',
+    );
+});
+
+test('section layout full-bleed parser excludes out-of-flow classes across split rules', function () {
+    $css = '.absolute{position:absolute}'
+        . '.absolute{background:red}'
+        . '.fixed{position:fixed}'
+        . '.fixed{background-color:red}'
+        . '.relative{position:relative}'
+        . '.relative{background:red}'
+        . '.sticky{position:sticky}'
+        . '.sticky{background:red}';
+
+    assert_eq(
+        ['relative', 'sticky'],
+        SectionLayoutStep::fullBleedClassTokens($css),
+        'out-of-flow positioning in any rule disqualifies the class',
+    );
+});
+
 test('section layout removes only root inline padding and reaches a fixed point', function () {
     [$project, $tmp] = section_layout_project([[
         'slug' => 'home',
