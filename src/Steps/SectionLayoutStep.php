@@ -8,16 +8,18 @@ use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\Units\GeneratedMarkup;
 
 /**
  * Deterministically give every transformed section one inline-axis owner.
  *
  * SectionRhythmStep owns the root group's block-axis spacing. This sibling
- * pass runs immediately afterwards and owns only the inline axis: every
- * section root becomes constrained, root-authored horizontal padding is
- * removed, and direct cover children or CSS-authored background bands opt into
- * full bleed. Covers also carry the constrained-layout class bridge their inner
- * container needs. Nested blocks stay outside this ownership boundary.
+ * pass runs immediately afterwards and owns only the inline axis: section roots
+ * become constrained, root-authored horizontal padding is removed, and direct
+ * cover children, CSS-authored background bands, or CSS-owned out-of-flow
+ * children opt into full bleed. Covers also carry the constrained-layout class
+ * bridge their inner container needs. Nested blocks stay outside this ownership
+ * boundary.
  *
  * Rewrites are transactional per page. A malformed generated section keeps
  * that page's pre-transformation bytes, records one durable warning, and does
@@ -60,6 +62,7 @@ final class SectionLayoutStep implements Step
         $warnings = [];
         $wideSelectors = self::wideSelectorSet($project);
         $fullBleedClasses = self::fullBleedClassSet($project);
+        $outOfFlowClasses = self::outOfFlowClassSet($project);
         $themeWrite = null;
         if ($project->exists('theme/theme.json') && $project->exists('design/site.css')) {
             $authoredTheme = $project->readJson('theme/theme.json');
@@ -89,6 +92,7 @@ final class SectionLayoutStep implements Step
                         "page '{$pageSlug}', section '{$entry['slug']}'",
                         $wideSelectors,
                         $fullBleedClasses,
+                        $outOfFlowClasses,
                     );
                     $pageWrites[$currentPath] = $rewritten;
                     if ($rewritten !== $entry['markup']) {
@@ -145,17 +149,20 @@ final class SectionLayoutStep implements Step
     /**
      * @param list<list<array{tag:?string,id:?string,classes:list<string>}>> $wideSelectors
      * @param array<string,true> $fullBleedClasses class token => true from design/site.css
+     * @param array<string,true> $outOfFlowClasses class token => true from design/site.css
      */
     private static function rewriteSection(
         string $markup,
         string $label,
         array $wideSelectors = [],
         array $fullBleedClasses = [],
+        array $outOfFlowClasses = [],
     ): string
     {
         $doc = self::validatedDocument($markup, $label);
         $root = (int) $doc->topLevel();
         $attrs = $doc->attrs($root) ?? [];
+        $cssOwnedRoot = GeneratedMarkup::hasCssOwnedLayoutMarker($attrs);
 
         $attrs['layout'] = ['type' => 'constrained'];
         self::constrainCommentClass($attrs, $label);
@@ -172,6 +179,20 @@ final class SectionLayoutStep implements Step
             $coverAttrs['layout'] = ['type' => 'constrained'];
             self::constrainCommentClass($coverAttrs, "{$label}, direct cover");
             $doc->setAttrs($covers[0], $coverAttrs);
+        }
+
+        if ($cssOwnedRoot && $outOfFlowClasses !== []) {
+            foreach ($doc->children($root) as $child) {
+                foreach (self::elementClassTokens($doc, $child) as $token) {
+                    if (!isset($outOfFlowClasses[$token])) {
+                        continue;
+                    }
+                    $childAttrs = $doc->attrs($child) ?? [];
+                    $childAttrs['align'] = 'full';
+                    $doc->setAttrs($child, $childAttrs);
+                    break;
+                }
+            }
         }
 
         if ($fullBleedClasses !== []) {
@@ -444,6 +465,19 @@ final class SectionLayoutStep implements Step
         return $set;
     }
 
+    /** The out-of-flow class lookup set from the design stylesheet. @return array<string,true> */
+    private static function outOfFlowClassSet(Project $project): array
+    {
+        if (!$project->exists('design/site.css')) {
+            return [];
+        }
+        $set = [];
+        foreach (self::outOfFlowClassTokens($project->readText('design/site.css')) as $token) {
+            $set[$token] = true;
+        }
+        return $set;
+    }
+
     /**
      * Class selectors in a stylesheet whose horizontal measure references the
      * literal var(--wide-size) token. Token-based only: a max-width/width that
@@ -602,6 +636,36 @@ final class SectionLayoutStep implements Step
             }
         }
         return array_keys(array_diff_key($tokens, $outOfFlowTokens));
+    }
+
+    /**
+     * Class selectors whose rule takes the selected element out of normal flow.
+     * This is deliberately separate from fullBleedClassTokens(): an overlay is
+     * not a painted section band, but as a direct child of a constrained,
+     * CSS-owned section it still must escape WordPress's content-width cap.
+     *
+     * @return list<string>
+     */
+    public static function outOfFlowClassTokens(string $css): array
+    {
+        $stripped = preg_replace('~/\*.*?\*/~s', '', $css);
+        if (!is_string($stripped)) {
+            return [];
+        }
+        $tokens = [];
+        if (preg_match_all('/([^{}]+)\{([^{}]*)\}/s', $stripped, $rules, PREG_SET_ORDER)) {
+            foreach ($rules as $rule) {
+                if (!self::positionsOutOfFlow($rule[2])) {
+                    continue;
+                }
+                if (preg_match_all('/\.(-?[A-Za-z_][A-Za-z0-9_-]*)/', $rule[1], $classes) > 0) {
+                    foreach ($classes[1] as $class) {
+                        $tokens[$class] = true;
+                    }
+                }
+            }
+        }
+        return array_keys($tokens);
     }
 
     /** Whether a rule body's max-width or width references var(--wide-size). */

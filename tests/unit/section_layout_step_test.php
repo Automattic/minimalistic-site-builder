@@ -14,6 +14,13 @@ function section_layout_group(array $attrs, string $inner, string $wrapperAttrs 
         . '<div class="wp-block-group"' . $wrapperAttrs . '>' . $inner . '</div><!-- /wp:group -->';
 }
 
+/** @param array<mixed> $attrs */
+function section_layout_section(array $attrs, string $inner, string $wrapperClasses = ''): string
+{
+    return BlockMarkup::serializeComment('group', $attrs, false)
+        . '<section class="wp-block-group' . $wrapperClasses . '">' . $inner . '</section><!-- /wp:group -->';
+}
+
 /** @return array{0:Project,1:string} */
 function section_layout_project(array $pages): array
 {
@@ -65,6 +72,107 @@ function section_layout_block_axis(string $markup): array
         'html' => $matches[0] ?? [],
     ];
 }
+
+test('section layout constrains CSS-owned roots and exempts only their direct out-of-flow children', function () {
+    [$project, $tmp] = section_layout_project([[
+        'slug' => 'home',
+        'sections' => [
+            ['slug' => 'hero', 'background' => 'image', 'vertical_density' => 'standard'],
+            ['slug' => 'story', 'background' => 'base', 'vertical_density' => 'compact'],
+        ],
+    ]]);
+    try {
+        $marker = 'blocks-engine-css-owned-layout';
+        $project->writeText(
+            'design/site.css',
+            '.hero-media{position:absolute;inset:0}'
+                . '.scrim{background:black}.scrim{position:fixed;inset:0}'
+                . '.in-flow{position:relative}'
+                . '.nested-layer{position:absolute;inset:0}'
+                . '.story-layer{position:absolute;inset:0}',
+        );
+        $heroInner = section_layout_group(['className' => 'hero-media'], 'Hero image')
+            . section_layout_group(['className' => 'scrim'], 'Scrim')
+            . section_layout_group(['className' => 'in-flow'], 'Hero copy')
+            . section_layout_group(
+                ['className' => 'wrapper'],
+                section_layout_group(['className' => 'nested-layer'], 'Nested image'),
+            );
+        $storyInner = '<!-- wp:paragraph --><p>Story copy</p><!-- /wp:paragraph -->';
+        $marked = section_layout_section(
+            ['tagName' => 'section', 'anchor' => 'hero', 'className' => $marker],
+            $heroInner,
+            " {$marker}",
+        );
+        $markedAttrs = section_layout_root_attrs($marked);
+        assert_eq($marker, $markedAttrs['className'] ?? null, 'fixture carries the exact CSS-owned marker');
+        assert_true(!isset($markedAttrs['layout']), 'fixture starts without a layout attribute');
+
+        $project->writeText('theme/parts/page-home--hero.html', $marked);
+        $project->writeText(
+            'theme/parts/page-home--story.html',
+            section_layout_section(
+                ['tagName' => 'section', 'anchor' => 'story', 'className' => 'story'],
+                section_layout_group(['className' => 'story-layer'], $storyInner),
+                ' story',
+            ),
+        );
+
+        (new SectionLayoutStep())->run($project);
+
+        $hero = $project->readText('theme/parts/page-home--hero.html');
+        $heroAttrs = section_layout_root_attrs($hero);
+        assert_eq(['type' => 'constrained'], $heroAttrs['layout'] ?? null, 'CSS-owned root keeps the foundation inset');
+        assert_eq(
+            "{$marker} is-layout-constrained",
+            $heroAttrs['className'] ?? null,
+            'CSS-owned root keeps its marker and constrained context',
+        );
+        assert_contains('Hero image', $hero, 'absolute child content survives');
+        assert_contains('Scrim', $hero, 'fixed child content survives');
+        assert_contains('Hero copy', $hero, 'in-flow child content survives');
+        assert_contains('Nested image', $hero, 'nested child content survives');
+
+        $heroDoc = BlockMarkup::parse($hero);
+        $attrsByClass = [];
+        foreach ($heroDoc->indices() as $index) {
+            $attrs = $heroDoc->attrs($index) ?? [];
+            $className = $attrs['className'] ?? '';
+            if (is_string($className)) {
+                $attrsByClass[$className] = $attrs;
+            }
+        }
+        assert_eq('full', $attrsByClass['hero-media']['align'] ?? null, 'direct absolute child escapes the content cap');
+        assert_eq('full', $attrsByClass['scrim']['align'] ?? null, 'direct fixed child escapes the content cap');
+        assert_true(!isset($attrsByClass['in-flow']['align']), 'relative child stays constrained');
+        assert_true(!isset($attrsByClass['nested-layer']['align']), 'nested out-of-flow child stays outside this boundary');
+
+        $story = $project->readText('theme/parts/page-home--story.html');
+        assert_eq(
+            [
+                'tagName' => 'section',
+                'anchor' => 'story',
+                'className' => 'story is-layout-constrained',
+                'layout' => ['type' => 'constrained'],
+            ],
+            section_layout_root_attrs($story),
+            'unmarked section keeps the exact foundation-inset attributes',
+        );
+        assert_contains($storyInner, $story, 'unmarked section child bytes stay byte-identical');
+        $storyDoc = BlockMarkup::parse($story);
+        $storyRoot = (int) $storyDoc->topLevel();
+        $storyChildren = $storyDoc->children($storyRoot);
+        assert_eq(1, count($storyChildren));
+        assert_true(!isset(($storyDoc->attrs($storyChildren[0]) ?? [])['align']), 'unmarked child is not promoted');
+
+        $step = new SectionLayoutStep();
+        $step->run($project);
+        assert_eq($hero, $project->readText('theme/parts/page-home--hero.html'), 'second pass is byte-stable');
+        assert_eq($story, $project->readText('theme/parts/page-home--story.html'), 'unmarked sibling is byte-stable');
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
 
 test('section layout constrains every planned section root and leaves nested layout alone', function () {
     [$project, $tmp] = section_layout_project([
