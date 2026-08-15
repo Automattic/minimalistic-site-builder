@@ -3,6 +3,10 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\BlocksEngine\PhpTransformer\HtmlToBlocks\Style\CssValueSplitter;
+use Automattic\SiteBuild\BlockSerializer\Html\HtmlFragment;
+use Automattic\SiteBuild\BlockSerializer\Html\HtmlNode;
+use Automattic\SiteBuild\BlockSerializer\Html\Selector;
 use Automattic\SiteBuild\CssTokenExtractor;
 use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\GeneratedJsonFallbackStep;
@@ -15,6 +19,7 @@ use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\Warnings;
+use Throwable;
 
 /**
  * Step (LLM): generate the block theme's theme.json.
@@ -39,6 +44,20 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
 
     private const REQUIRED_COLORS = ['base', 'contrast', 'primary', 'secondary', 'accent'];
     private const REQUIRED_FONTS = ['heading', 'body'];
+
+    /** @var array{contentSize:string,wideSize:string} */
+    private const FALLBACK_LAYOUT_WIDTHS = [
+        'contentSize' => '800px',
+        'wideSize' => '1280px',
+    ];
+
+    /**
+     * Fixed desktop reference chosen for fluid design carriers in this slice.
+     * Their resolved width will drift at other viewports until the layout
+     * contract can carry a fluid expression instead of one theme.json length.
+     */
+    private const CONTENT_WIDTH_REFERENCE_VIEWPORT = 1366.0;
+    private const CONTENT_WIDTH_ROOT_FONT_SIZE = 16.0;
 
     /** Element selectors whose box is the text itself, never a visual surface. */
     private const TEXT_SHADOW_ELEMENTS = [
@@ -369,6 +388,10 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         $theme['version'] = 3;
         $theme = self::disableCoreDefaultPresets($theme);
         $theme = self::normalizeSpacingSettings($theme);
+        [$theme, $layoutWarnings] = self::normalizeLayoutWidths(
+            $theme,
+            $this->htmlFirst ? $project->readText('design/site.css') : null,
+        );
 
         // A default vertical rhythm between sibling blocks: without it, per-block
         // "blockGap" the parts set (e.g. the branded-lockup header's zero-gap
@@ -432,6 +455,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         [$theme, $groupPaddingWarnings] = self::repairGroupBlockPadding($theme);
         $warnings = array_merge(
             $warnings,
+            $layoutWarnings,
             $colorWarnings,
             $fontWarnings,
             $sizeWarnings,
@@ -537,6 +561,619 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         $theme['settings']['spacing']['spacingSizes'] = self::SPACING_PROFILE;
 
         return $theme;
+    }
+
+    /**
+     * Guarantee that emitted layout widths are usable CSS lengths. HTML-first
+     * designs own these values through their root custom properties; otherwise
+     * a positive unitless model number is deterministically interpreted as px.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>}
+     */
+    public static function normalizeLayoutWidths(
+        array $theme,
+        ?string $designCss = null,
+        ?string $designHtml = null,
+    ): array
+    {
+        if (!isset($theme['settings']) || !is_array($theme['settings'])) {
+            $theme['settings'] = [];
+        }
+
+        $warnings = [];
+        $hadLayout = array_key_exists('layout', $theme['settings']);
+        $authoredLayout = $theme['settings']['layout'] ?? [];
+        if (!is_array($authoredLayout) || ($authoredLayout !== [] && array_is_list($authoredLayout))) {
+            $warnings[] = 'theme/theme.json settings.layout: authored '
+                . Warnings::value($authoredLayout)
+                . '; delivered build-supplied layout object; disposition replaced malformed layout container';
+            $authoredLayout = self::FALLBACK_LAYOUT_WIDTHS;
+        }
+
+        $designWidths = $designCss === null ? [] : self::designLayoutWidths($designCss);
+        $contentDerivationFailed = false;
+        $releaseRootGutter = false;
+        if ($designCss !== null && $designHtml !== null) {
+            $derivedContent = self::designContentWidth($designCss, $designHtml);
+            if ($derivedContent === null) {
+                $contentDerivationFailed = true;
+            } else {
+                $designWidths['contentSize'] = $derivedContent['width'];
+                $releaseRootGutter = $derivedContent['releaseRootGutter'];
+            }
+        }
+        $layout = $authoredLayout;
+        foreach (self::FALLBACK_LAYOUT_WIDTHS as $key => $fallback) {
+            if (isset($designWidths[$key])) {
+                $layout[$key] = $designWidths[$key];
+                continue;
+            }
+            if (!array_key_exists($key, $authoredLayout)) {
+                continue;
+            }
+
+            $normalized = self::normalizeLayoutLength($authoredLayout[$key]);
+            if ($normalized !== null) {
+                $layout[$key] = $normalized;
+                continue;
+            }
+
+            $layout[$key] = $fallback;
+            $warnings[] = "theme/theme.json settings.layout.{$key}: authored "
+                . Warnings::value($authoredLayout[$key])
+                . '; delivered ' . Warnings::value($fallback)
+                . '; disposition replaced invalid CSS length with build default';
+        }
+        if ($hadLayout || $layout !== []) {
+            $theme['settings']['layout'] = $layout;
+        }
+        if ($releaseRootGutter) {
+            // A viewport-fluid design has no inline inset to preserve. Leaving
+            // the build-supplied md gutter in place would cap the realized box
+            // at viewport - 2vw even though contentSize correctly says 1366px.
+            // Keep the aware-alignment mode (align:full still depends on it),
+            // but release only the root's physical inline padding.
+            if (!is_array($theme['styles'] ?? null)) {
+                $theme['styles'] = [];
+            }
+            if (!is_array($theme['styles']['spacing'] ?? null)) {
+                $theme['styles']['spacing'] = [];
+            }
+            if (!is_array($theme['styles']['spacing']['padding'] ?? null)) {
+                $theme['styles']['spacing']['padding'] = [];
+            }
+            $theme['styles']['spacing']['padding']['left'] = '0';
+            $theme['styles']['spacing']['padding']['right'] = '0';
+            $theme['settings']['useRootPaddingAwareAlignments'] = true;
+        }
+        if ($contentDerivationFailed) {
+            $authored = $authoredLayout['contentSize'] ?? null;
+            $delivered = $layout['contentSize'] ?? null;
+            $warnings[] = 'design/home.html main content carrier: authored '
+                . Warnings::value($authored)
+                . '; delivered ' . Warnings::value($delivered)
+                . '; disposition preserved normalized theme.json contentSize because the design carrier '
+                . 'could not be resolved at the 1366px reference viewport';
+        }
+
+        return [$theme, $warnings];
+    }
+
+    /** @return array{contentSize?:string,wideSize?:string} */
+    private static function designLayoutWidths(string $css): array
+    {
+        $stripped = preg_replace('~/\*.*?\*/~s', '', $css);
+        if (!is_string($stripped)) {
+            return [];
+        }
+
+        $widths = [];
+        if (preg_match_all('/:root\s*\{([^{}]*)\}/i', $stripped, $roots) === false) {
+            return [];
+        }
+        foreach ($roots[1] as $body) {
+            foreach (explode(';', $body) as $declaration) {
+                $colon = strpos($declaration, ':');
+                if ($colon === false) {
+                    continue;
+                }
+                $property = strtolower(trim(substr($declaration, 0, $colon)));
+                $key = $property === '--wide-size' ? 'wideSize' : null;
+                if ($key === null) {
+                    continue;
+                }
+                $value = self::normalizeLayoutLength(substr($declaration, $colon + 1), false);
+                if ($value !== null) {
+                    $widths[$key] = $value;
+                }
+            }
+        }
+
+        return $widths;
+    }
+
+    /**
+     * Resolve the design's repeated outer content carrier at the frozen
+     * 1366px desktop viewport. The carrier is discovered from final home
+     * markup rather than token names: a repeated shallow class wins, with
+     * main itself as the fluid fallback. Its used content box then follows
+     * the authored width/max-width/padding cascade.
+     */
+    /** @return array{width:string,releaseRootGutter:bool}|null */
+    private static function designContentWidth(string $css, string $html): ?array
+    {
+        try {
+            $fragment = HtmlFragment::parse($html);
+            $main = $fragment->querySelector('main');
+            if (!$main instanceof HtmlNode) {
+                return null;
+            }
+            $carrier = self::designContentCarrier($main);
+            $declarations = CssChecks::scanDeclarations($css);
+            $customProperties = self::designCustomProperties($declarations);
+            $width = self::resolvedCarrierContentWidth(
+                $main,
+                $carrier,
+                $declarations,
+                $customProperties,
+            );
+            if ($width === null || !is_finite($width) || $width <= 0) {
+                return null;
+            }
+            $roundedWidth = round($width);
+            return [
+                'width' => self::formatLayoutNumber($roundedWidth) . 'px',
+                'releaseRootGutter' => $roundedWidth === self::CONTENT_WIDTH_REFERENCE_VIEWPORT
+                    && self::designHasViewportFlushSection(
+                        $main,
+                        $declarations,
+                        $customProperties,
+                    ),
+            ];
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * A main-sized carrier alone does not prove the design is flush: some
+     * designs put the common inset directly on every section. Preserve the
+     * theme's single root gutter in that shape. Release it only when at least
+     * one section's own resolved content box really reaches the viewport.
+     *
+     * @param list<array{property:string,value:string,context:string,ancestors:list<string>,kind:string,structurallySafe:bool}> $declarations
+     * @param array<string,string> $customProperties
+     */
+    private static function designHasViewportFlushSection(
+        HtmlNode $main,
+        array $declarations,
+        array $customProperties,
+    ): bool {
+        $sections = array_values(array_filter(
+            $main->elementChildren(),
+            static fn (HtmlNode $node): bool => $node->tagName() === 'section',
+        ));
+        if ($sections === []) {
+            return false;
+        }
+        foreach ($sections as $section) {
+            $width = self::resolvedNodeContentWidth(
+                $section,
+                self::CONTENT_WIDTH_REFERENCE_VIEWPORT,
+                $declarations,
+                $customProperties,
+            );
+            if ($width !== null && round($width) >= self::CONTENT_WIDTH_REFERENCE_VIEWPORT) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Find the class carried shallowly by most direct main sections. */
+    private static function designContentCarrier(HtmlNode $main): HtmlNode
+    {
+        $sections = array_values(array_filter(
+            $main->elementChildren(),
+            static fn (HtmlNode $node): bool => $node->tagName() === 'section',
+        ));
+        if (count($sections) < 2) {
+            return $main;
+        }
+
+        /** @var array<string,array{coverage:int,depth:int,node:HtmlNode}> $classes */
+        $classes = [];
+        foreach ($sections as $section) {
+            /** @var array<string,array{depth:int,node:HtmlNode}> $seen */
+            $seen = [];
+            $queue = [[$section, 0]];
+            while ($queue !== []) {
+                [$node, $depth] = array_shift($queue);
+                if (!$node instanceof HtmlNode || $depth > 2) {
+                    continue;
+                }
+                foreach (preg_split('/\s+/', trim($node->attribute('class') ?? '')) ?: [] as $class) {
+                    if ($class === '' || preg_match('/\A-?[_a-zA-Z][_a-zA-Z0-9-]*\z/', $class) !== 1) {
+                        continue;
+                    }
+                    if (!isset($seen[$class]) || $depth < $seen[$class]['depth']) {
+                        $seen[$class] = ['depth' => $depth, 'node' => $node];
+                    }
+                }
+                if ($depth < 2) {
+                    foreach ($node->elementChildren() as $child) {
+                        $queue[] = [$child, $depth + 1];
+                    }
+                }
+            }
+            foreach ($seen as $class => $entry) {
+                if (!isset($classes[$class])) {
+                    $classes[$class] = [
+                        'coverage' => 0,
+                        'depth' => 0,
+                        'node' => $entry['node'],
+                    ];
+                }
+                $classes[$class]['coverage']++;
+                $classes[$class]['depth'] += $entry['depth'];
+                if ($entry['depth'] < self::nodeDepthBelow($classes[$class]['node'], $main)) {
+                    $classes[$class]['node'] = $entry['node'];
+                }
+            }
+        }
+
+        $minimumCoverage = max(2, (int) ceil(count($sections) * 2 / 3));
+        $eligible = array_filter(
+            $classes,
+            static fn (array $entry): bool => $entry['coverage'] >= $minimumCoverage,
+        );
+        if ($eligible === []) {
+            return $main;
+        }
+        uasort($eligible, static function (array $left, array $right): int {
+            return ($right['coverage'] <=> $left['coverage'])
+                ?: ($left['depth'] <=> $right['depth']);
+        });
+        $winner = reset($eligible);
+        return is_array($winner) && $winner['node'] instanceof HtmlNode
+            ? $winner['node']
+            : $main;
+    }
+
+    private static function nodeDepthBelow(HtmlNode $node, HtmlNode $ancestor): int
+    {
+        $depth = 0;
+        for ($cursor = $node; $cursor !== $ancestor; $cursor = $cursor->parent()) {
+            if (!$cursor instanceof HtmlNode || ++$depth > 64) {
+                return PHP_INT_MAX;
+            }
+        }
+        return $depth;
+    }
+
+    /**
+     * @param list<array{property:string,value:string,context:string,ancestors:list<string>,kind:string,structurallySafe:bool}> $declarations
+     * @return array<string,string>
+     */
+    private static function designCustomProperties(array $declarations): array
+    {
+        $properties = [];
+        foreach ($declarations as $declaration) {
+            if ($declaration['kind'] !== 'style'
+                || !$declaration['structurallySafe']
+                || !str_starts_with($declaration['property'], '--')
+                || !in_array(strtolower(trim($declaration['context'])), [':root', 'html'], true)
+                || !self::referenceMediaApplies($declaration['ancestors'], [])
+            ) {
+                continue;
+            }
+            $properties[strtolower($declaration['property'])] = CssChecks::splitDeclarationPriority(
+                $declaration['value'],
+            )['value'];
+        }
+        return $properties;
+    }
+
+    /**
+     * @param list<array{property:string,value:string,context:string,ancestors:list<string>,kind:string,structurallySafe:bool}> $declarations
+     * @param array<string,string> $customProperties
+     */
+    private static function resolvedCarrierContentWidth(
+        HtmlNode $main,
+        HtmlNode $carrier,
+        array $declarations,
+        array $customProperties,
+    ): ?float {
+        $chain = [];
+        for ($cursor = $carrier; $cursor instanceof HtmlNode; $cursor = $cursor->parent()) {
+            array_unshift($chain, $cursor);
+            if ($cursor === $main) {
+                break;
+            }
+        }
+        if ($chain === [] || $chain[0] !== $main) {
+            return null;
+        }
+
+        $containingWidth = self::CONTENT_WIDTH_REFERENCE_VIEWPORT;
+        foreach ($chain as $node) {
+            $resolved = self::resolvedNodeContentWidth(
+                $node,
+                $containingWidth,
+                $declarations,
+                $customProperties,
+            );
+            if ($resolved === null) {
+                return null;
+            }
+            $containingWidth = $resolved;
+        }
+        return $containingWidth;
+    }
+
+    /**
+     * @param list<array{property:string,value:string,context:string,ancestors:list<string>,kind:string,structurallySafe:bool}> $declarations
+     * @param array<string,string> $customProperties
+     */
+    private static function resolvedNodeContentWidth(
+        HtmlNode $node,
+        float $containingWidth,
+        array $declarations,
+        array $customProperties,
+    ): ?float {
+        $left = 0.0;
+        $right = 0.0;
+        $width = null;
+        $maxWidth = null;
+        $boxSizing = 'content-box';
+
+        foreach ($declarations as $declaration) {
+            if ($declaration['kind'] !== 'style'
+                || !$declaration['structurallySafe']
+                || !self::referenceMediaApplies($declaration['ancestors'], $customProperties)
+                || !self::selectorMatchesNode($declaration['context'], $node)
+            ) {
+                continue;
+            }
+            $property = strtolower($declaration['property']);
+            $value = CssChecks::splitDeclarationPriority($declaration['value'])['value'];
+            if ($property === 'box-sizing') {
+                if (in_array(strtolower($value), ['border-box', 'content-box'], true)) {
+                    $boxSizing = strtolower($value);
+                }
+                continue;
+            }
+            if (in_array($property, ['width', 'inline-size'], true)) {
+                if (strtolower(trim($value)) === 'auto') {
+                    $width = null;
+                    continue;
+                }
+                $width = self::resolveReferenceLength($value, $containingWidth, $customProperties);
+                if ($width === null) {
+                    return null;
+                }
+                continue;
+            }
+            if (in_array($property, ['max-width', 'max-inline-size'], true)) {
+                if (strtolower(trim($value)) === 'none') {
+                    $maxWidth = null;
+                    continue;
+                }
+                $maxWidth = self::resolveReferenceLength($value, $containingWidth, $customProperties);
+                if ($maxWidth === null) {
+                    return null;
+                }
+                continue;
+            }
+            if ($property === 'padding') {
+                $parts = CssValueSplitter::splitTopLevelWhitespace($value);
+                $horizontal = match (count($parts)) {
+                    1 => [$parts[0], $parts[0]],
+                    2, 3 => [$parts[1], $parts[1]],
+                    4 => [$parts[3], $parts[1]],
+                    default => null,
+                };
+                if ($horizontal === null) {
+                    return null;
+                }
+                $left = self::resolveReferenceLength($horizontal[0], $containingWidth, $customProperties);
+                $right = self::resolveReferenceLength($horizontal[1], $containingWidth, $customProperties);
+                if ($left === null || $right === null) {
+                    return null;
+                }
+                continue;
+            }
+            if ($property === 'padding-inline') {
+                $parts = CssValueSplitter::splitTopLevelWhitespace($value);
+                if (count($parts) < 1 || count($parts) > 2) {
+                    return null;
+                }
+                $left = self::resolveReferenceLength($parts[0], $containingWidth, $customProperties);
+                $right = self::resolveReferenceLength($parts[1] ?? $parts[0], $containingWidth, $customProperties);
+                if ($left === null || $right === null) {
+                    return null;
+                }
+                continue;
+            }
+            if (in_array($property, ['padding-left', 'padding-inline-start'], true)) {
+                $left = self::resolveReferenceLength($value, $containingWidth, $customProperties);
+                if ($left === null) {
+                    return null;
+                }
+                continue;
+            }
+            if (in_array($property, ['padding-right', 'padding-inline-end'], true)) {
+                $right = self::resolveReferenceLength($value, $containingWidth, $customProperties);
+                if ($right === null) {
+                    return null;
+                }
+            }
+        }
+
+        // theme.json needs one stable CSS pixel value. Resolve each physical
+        // edge the way the screenshot geometry gate observes it, then derive
+        // the inner span between those integer edges (5vw at 1366px is 68px
+        // per side, hence a 1230px fluid content box).
+        $padding = round($left) + round($right);
+        if ($width === null) {
+            $borderBox = $containingWidth;
+            if ($maxWidth !== null) {
+                $borderBox = min($borderBox, $boxSizing === 'border-box' ? $maxWidth : $maxWidth + $padding);
+            }
+            return max(0.0, $borderBox - $padding);
+        }
+        if ($boxSizing === 'border-box') {
+            $borderBox = $maxWidth === null ? $width : min($width, $maxWidth);
+            return max(0.0, $borderBox - $padding);
+        }
+        return max(0.0, $maxWidth === null ? $width : min($width, $maxWidth));
+    }
+
+    private static function selectorMatchesNode(string $selectorList, HtmlNode $node): bool
+    {
+        foreach (CssValueSplitter::splitTopLevel($selectorList, [',']) as $selector) {
+            try {
+                if (Selector::compile($selector)->matches($node)) {
+                    return true;
+                }
+            } catch (Throwable) {
+                continue;
+            }
+        }
+        return false;
+    }
+
+    /** @param list<string> $ancestors @param array<string,string> $customProperties */
+    private static function referenceMediaApplies(array $ancestors, array $customProperties): bool
+    {
+        foreach ($ancestors as $ancestor) {
+            $ancestor = trim($ancestor);
+            if (!str_starts_with(strtolower($ancestor), '@media')) {
+                if (str_starts_with($ancestor, '@')) {
+                    return false;
+                }
+                continue;
+            }
+            if (preg_match_all('/\((min|max)-width\s*:\s*([^\)]+)\)/i', $ancestor, $matches, PREG_SET_ORDER) < 1) {
+                return false;
+            }
+            foreach ($matches as $match) {
+                $boundary = self::resolveReferenceLength(
+                    $match[2],
+                    self::CONTENT_WIDTH_REFERENCE_VIEWPORT,
+                    $customProperties,
+                );
+                if ($boundary === null
+                    || (strtolower($match[1]) === 'min' && self::CONTENT_WIDTH_REFERENCE_VIEWPORT < $boundary)
+                    || (strtolower($match[1]) === 'max' && self::CONTENT_WIDTH_REFERENCE_VIEWPORT > $boundary)
+                ) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    /** @param array<string,string> $customProperties */
+    private static function resolveReferenceLength(
+        string $value,
+        float $containingWidth,
+        array $customProperties,
+        int $depth = 0,
+    ): ?float {
+        if ($depth > 16) {
+            return null;
+        }
+        $value = trim(CssChecks::splitDeclarationPriority($value)['value']);
+        if ($value === '0' || $value === '+0' || $value === '-0') {
+            return 0.0;
+        }
+        if (preg_match('/\Avar\(\s*(--[-_a-zA-Z0-9]+)\s*(?:,\s*(.*))?\)\z/s', $value, $match) === 1) {
+            $name = strtolower($match[1]);
+            $replacement = $customProperties[$name] ?? ($match[2] ?? null);
+            return is_string($replacement)
+                ? self::resolveReferenceLength($replacement, $containingWidth, $customProperties, $depth + 1)
+                : null;
+        }
+        if (preg_match('/\A([+-]?(?:\d+(?:\.\d+)?|\.\d+))(px|r?em|vw|vi|%)\z/i', $value, $match) === 1) {
+            $number = (float) $match[1];
+            return match (strtolower($match[2])) {
+                'px' => $number,
+                'em', 'rem' => $number * self::CONTENT_WIDTH_ROOT_FONT_SIZE,
+                'vw', 'vi' => $number * self::CONTENT_WIDTH_REFERENCE_VIEWPORT / 100,
+                '%' => $number * $containingWidth / 100,
+                default => null,
+            };
+        }
+        if (preg_match('/\A(clamp|min|max)\((.*)\)\z/is', $value, $match) === 1) {
+            $parts = CssValueSplitter::splitTopLevel($match[2], [',']);
+            $resolved = [];
+            foreach ($parts as $part) {
+                $length = self::resolveReferenceLength($part, $containingWidth, $customProperties, $depth + 1);
+                if ($length === null) {
+                    return null;
+                }
+                $resolved[] = $length;
+            }
+            return match (strtolower($match[1])) {
+                'clamp' => count($resolved) === 3
+                    ? min(max($resolved[1], $resolved[0]), $resolved[2])
+                    : null,
+                'min' => $resolved !== [] ? min($resolved) : null,
+                'max' => $resolved !== [] ? max($resolved) : null,
+                default => null,
+            };
+        }
+        return null;
+    }
+
+    private static function normalizeLayoutLength(mixed $value, bool $unitlessToPx = true): ?string
+    {
+        if (is_int($value) || is_float($value)) {
+            if (!$unitlessToPx || !is_finite((float) $value) || $value < 0) {
+                return null;
+            }
+            return self::formatLayoutNumber((float) $value) . 'px';
+        }
+        if (!is_string($value)) {
+            return null;
+        }
+
+        $value = trim($value);
+        if ($value === '') {
+            return null;
+        }
+        if (preg_match('/\A\+?(?:\d+(?:\.\d+)?|\.\d+)\z/', $value) === 1) {
+            return $unitlessToPx ? self::formatLayoutNumber((float) $value) . 'px' : null;
+        }
+
+        $number = '\\+?(?:\\d+(?:\\.\\d+)?|\\.\\d+)';
+        $unit = '(?:px|r?em|ch|ex|cap|ic|lh|rlh|vw|vh|vi|vb|vmin|vmax|svw|svh|lvw|lvh|dvw|dvh|cm|mm|q|in|pt|pc|%)';
+        if (preg_match('/\A' . $number . $unit . '\z/i', $value) === 1) {
+            return $value;
+        }
+        if (preg_match('/\A(?:calc|min|max|clamp)\(.+\)\z/is', $value) !== 1
+            || preg_match('/' . $number . $unit . '/i', $value) !== 1
+            || preg_match('/[;{}]/', $value) === 1
+        ) {
+            return null;
+        }
+
+        $depth = 0;
+        foreach (str_split($value) as $character) {
+            if ($character === '(') {
+                $depth++;
+            } elseif ($character === ')' && --$depth < 0) {
+                return null;
+            }
+        }
+        return $depth === 0 ? $value : null;
+    }
+
+    private static function formatLayoutNumber(float $value): string
+    {
+        return rtrim(rtrim(number_format($value, 6, '.', ''), '0'), '.');
     }
 
     /**

@@ -1913,3 +1913,232 @@ test('repairShapeWiring repairs authored cover and media-text corner styles with
         assert_eq([], $fixedWarnings);
     }
 });
+
+test('W6 theme-json normalizes unitless layout widths', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_unitless_width_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    try {
+        $project->writeJson('meta.json', ['prompt' => 'A cold-water swim club']);
+        $project->writeJson('siteSpec.json', ['name' => 'Teal Valley']);
+        seed_test_design_direction($project);
+
+        $payload = valid_theme_payload();
+        $payload['settings']['layout'] = ['contentSize' => '860px', 'wideSize' => 1320];
+        $llm = new FakeLlm();
+        $llm->queueJson($payload);
+        (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+        assert_eq(
+            ['contentSize' => '860px', 'wideSize' => '1320px'],
+            $project->readJson('theme/theme.json')['settings']['layout'] ?? null,
+        );
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('W6 theme-json keeps content width pending final markup and reconciles wide custom property', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_design_width_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    try {
+        $project->writeJson('meta.json', ['prompt' => 'A cold-water swim club']);
+        $project->writeJson('siteSpec.json', ['name' => 'Teal Valley']);
+        seed_test_design_direction($project);
+        $project->writeText(
+            'design/site.css',
+            ':root{--content-size:800px;--wide-size:1280px}'
+                . 'body{color:#111;background:#fff;font-family:system-ui,sans-serif}',
+        );
+
+        $payload = valid_theme_payload();
+        $payload['settings']['layout'] = ['contentSize' => '860px', 'wideSize' => '1320px'];
+        $llm = new FakeLlm();
+        $llm->queueJson($payload);
+        (new ThemeJsonStep(
+            $llm,
+            new PromptRenderer(repo_path('prompts')),
+            htmlFirst: true,
+        ))->run($project);
+
+        assert_eq(
+            ['contentSize' => '860px', 'wideSize' => '1280px'],
+            $project->readJson('theme/theme.json')['settings']['layout'] ?? null,
+        );
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+$themeLayoutWidthCases = [
+    [
+        'unitless integer content width',
+        ['settings' => ['layout' => ['contentSize' => 720, 'wideSize' => '1200px']]],
+        null,
+        ['contentSize' => '720px', 'wideSize' => '1200px'],
+        null,
+    ],
+    [
+        'unitless integer wide width',
+        ['settings' => ['layout' => ['contentSize' => '800px', 'wideSize' => 1280]]],
+        null,
+        ['contentSize' => '800px', 'wideSize' => '1280px'],
+        null,
+    ],
+    [
+        'numeric strings',
+        ['settings' => ['layout' => ['contentSize' => '860', 'wideSize' => '1320']]],
+        null,
+        ['contentSize' => '860px', 'wideSize' => '1320px'],
+        null,
+    ],
+    [
+        'decimal numbers',
+        ['settings' => ['layout' => ['contentSize' => 720.5, 'wideSize' => 1200.25]]],
+        null,
+        ['contentSize' => '720.5px', 'wideSize' => '1200.25px'],
+        null,
+    ],
+    [
+        'authored rem values',
+        ['settings' => ['layout' => ['contentSize' => '48rem', 'wideSize' => '80rem']]],
+        null,
+        ['contentSize' => '48rem', 'wideSize' => '80rem'],
+        null,
+    ],
+    [
+        'authored CSS function',
+        ['settings' => ['layout' => ['contentSize' => 'clamp(40rem, 70vw, 50rem)', 'wideSize' => '90vw']]],
+        null,
+        ['contentSize' => 'clamp(40rem, 70vw, 50rem)', 'wideSize' => '90vw'],
+        null,
+    ],
+    [
+        'negative content width',
+        ['settings' => ['layout' => ['contentSize' => -20, 'wideSize' => '1200px']]],
+        null,
+        ['contentSize' => '800px', 'wideSize' => '1200px'],
+        'settings.layout.contentSize',
+    ],
+    [
+        'array wide width',
+        ['settings' => ['layout' => ['contentSize' => '800px', 'wideSize' => ['1320px']]]],
+        null,
+        ['contentSize' => '800px', 'wideSize' => '1280px'],
+        'settings.layout.wideSize',
+    ],
+    [
+        'malformed layout container',
+        ['settings' => ['layout' => 'wide']],
+        null,
+        ['contentSize' => '800px', 'wideSize' => '1280px'],
+        'settings.layout: authored "wide"',
+    ],
+    [
+        'absent layout',
+        ['settings' => []],
+        null,
+        null,
+        null,
+    ],
+    [
+        'design root overrides wide width but not dead content token without markup',
+        ['settings' => ['layout' => ['contentSize' => '860px', 'wideSize' => '1320px']]],
+        '/* tokens */ :root { --content-size: 800px; --wide-size: 1280px; }',
+        ['contentSize' => '860px', 'wideSize' => '1280px'],
+        null,
+    ],
+    [
+        'partial design root ignores dead content and invalid unitless wide values',
+        ['settings' => ['layout' => ['contentSize' => '860px', 'wideSize' => '1320px']]],
+        ':root{--content-size:810px;--wide-size:1260}',
+        ['contentSize' => '860px', 'wideSize' => '1320px'],
+        null,
+    ],
+];
+
+foreach ($themeLayoutWidthCases as [$name, $authored, $css, $expected, $warningFragment]) {
+    test("theme-json layout width: {$name}", function () use (
+        $authored,
+        $css,
+        $expected,
+        $warningFragment,
+    ) {
+        [$theme, $warnings] = ThemeJsonStep::normalizeLayoutWidths($authored, $css);
+        $layout = $theme['settings']['layout'] ?? null;
+        assert_eq($expected, $layout);
+        if ($warningFragment === null) {
+            assert_eq([], $warnings);
+        } else {
+            assert_contains($warningFragment, implode(' ', $warnings));
+        }
+    });
+}
+
+test('C5 theme-json derives bounded content width from the carrier inner box at 1366px', function () {
+    $theme = ['settings' => ['layout' => ['contentSize' => '860px', 'wideSize' => '1320px']]];
+    $css = ':root{--content-size:800px;--wide-size:1280px}'
+        . '*,*::before,*::after{box-sizing:border-box}'
+        . '.shell{width:100%;max-width:var(--wide-size);margin:0 auto;'
+        . 'padding:0 clamp(20px,5vw,48px)}';
+    $html = '<main>'
+        . '<section id="hero"><div class="shell"><h1>Hero</h1></div></section>'
+        . '<section id="services"><div class="shell"><h2>Services</h2></div></section>'
+        . '</main>';
+
+    [$normalized, $warnings] = ThemeJsonStep::normalizeLayoutWidths($theme, $css, $html);
+
+    assert_eq(
+        ['contentSize' => '1184px', 'wideSize' => '1280px'],
+        $normalized['settings']['layout'] ?? null,
+        '1280px border box minus the resolved 48px carrier padding on both sides',
+    );
+    assert_eq([], $warnings);
+});
+
+test('C5 theme-json derives fluid content width from the main gutter at 1366px', function () {
+    $theme = ['settings' => ['layout' => ['contentSize' => '860px', 'wideSize' => '1320px']]];
+    $css = ':root{--content-size:800px;--wide-size:1280px;'
+        . '--gutter:clamp(1.25rem,5vw,5.5rem)}main{padding:0 var(--gutter)}';
+    $html = '<main>'
+        . '<section id="hero"><h1>Hero</h1></section>'
+        . '<section id="services"><h2>Services</h2></section>'
+        . '</main>';
+
+    [$normalized, $warnings] = ThemeJsonStep::normalizeLayoutWidths($theme, $css, $html);
+
+    assert_eq(
+        ['contentSize' => '1230px', 'wideSize' => '1280px'],
+        $normalized['settings']['layout'] ?? null,
+        '1366px reference viewport minus the resolved 5vw gutter on both sides',
+    );
+    assert_eq([], $warnings);
+});
+
+test('C5 theme-json releases the root gutter for a viewport-fluid carrier', function () {
+    $theme = [
+        'settings' => [
+            'layout' => ['contentSize' => '800px', 'wideSize' => '1280px'],
+            'useRootPaddingAwareAlignments' => true,
+        ],
+        'styles' => ['spacing' => ['padding' => [
+            'top' => '0',
+            'bottom' => '0',
+            'left' => 'var:preset|spacing|md',
+            'right' => 'var:preset|spacing|md',
+        ]]],
+    ];
+    $css = ':root{--content-size:800px;--wide-size:1280px}main{display:block}';
+    $html = '<main>'
+        . '<section id="hero"><div class="hero-inner"><h1>Hero</h1></div></section>'
+        . '<section class="section"><div class="section-inner"><h2>Services</h2></div></section>'
+        . '<section class="section"><div class="section-inner"><h2>About</h2></div></section>'
+        . '<section class="section"><div class="section-inner"><h2>Contact</h2></div></section>'
+        . '</main>';
+
+    [$normalized, $warnings] = ThemeJsonStep::normalizeLayoutWidths($theme, $css, $html);
+
+    assert_eq('1366px', $normalized['settings']['layout']['contentSize'] ?? null);
+    assert_eq('0', $normalized['styles']['spacing']['padding']['left'] ?? null);
+    assert_eq('0', $normalized['styles']['spacing']['padding']['right'] ?? null);
+    assert_eq([], $warnings);
+});
