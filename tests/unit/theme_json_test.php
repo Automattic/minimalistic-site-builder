@@ -2113,3 +2113,32 @@ test('C5 theme-json derives fluid content width from the main gutter at 1366px',
     );
     assert_eq([], $warnings);
 });
+
+test('C5 theme-json releases the root gutter for a viewport-fluid carrier', function () {
+    $theme = [
+        'settings' => [
+            'layout' => ['contentSize' => '800px', 'wideSize' => '1280px'],
+            'useRootPaddingAwareAlignments' => true,
+        ],
+        'styles' => ['spacing' => ['padding' => [
+            'top' => '0',
+            'bottom' => '0',
+            'left' => 'var:preset|spacing|md',
+            'right' => 'var:preset|spacing|md',
+        ]]],
+    ];
+    $css = ':root{--content-size:800px;--wide-size:1280px}main{display:block}';
+    $html = '<main>'
+        . '<section id="hero"><div class="hero-inner"><h1>Hero</h1></div></section>'
+        . '<section class="section"><div class="section-inner"><h2>Services</h2></div></section>'
+        . '<section class="section"><div class="section-inner"><h2>About</h2></div></section>'
+        . '<section class="section"><div class="section-inner"><h2>Contact</h2></div></section>'
+        . '</main>';
+
+    [$normalized, $warnings] = ThemeJsonStep::normalizeLayoutWidths($theme, $css, $html);
+
+    assert_eq('1366px', $normalized['settings']['layout']['contentSize'] ?? null);
+    assert_eq('0', $normalized['styles']['spacing']['padding']['left'] ?? null);
+    assert_eq('0', $normalized['styles']['spacing']['padding']['right'] ?? null);
+    assert_eq([], $warnings);
+});
