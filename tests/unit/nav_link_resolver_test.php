@@ -15,6 +15,41 @@ function nav_link_pages(): array
     ];
 }
 
+test('nav link resolver maps the azure garden navigation labels to every site page', function () {
+    $resolver = new DeterministicNavLinkResolver();
+    $pages = [
+        ['label' => 'Home', 'path' => '/', 'anchors' => ['hero']],
+        ['label' => 'Coaching Philosophy', 'path' => '/coaching-philosophy/', 'anchors' => []],
+        ['label' => 'Services', 'path' => '/services/', 'anchors' => []],
+        ['label' => 'Results & Testimonials', 'path' => '/results-testimonials/', 'anchors' => []],
+        ['label' => 'Contact', 'path' => '/contact/', 'anchors' => []],
+    ];
+    $input = '<nav>'
+        . '<a href="#hero">Home</a>'
+        . '<a href="#hero">Philosophy</a>'
+        . '<a href="#hero">Services</a>'
+        . '<a href="#hero">Results</a>'
+        . '<a href="#hero">Contact</a>'
+        . '</nav>';
+
+    assert_eq(5, substr_count($input, 'href="#hero"'));
+
+    $result = $resolver->resolve($input, $pages, 'theme/parts/header.html', null);
+
+    assert_eq(
+        '<nav>'
+            . '<a href="/">Home</a>'
+            . '<a href="/coaching-philosophy/">Philosophy</a>'
+            . '<a href="/services/">Services</a>'
+            . '<a href="/results-testimonials/">Results</a>'
+            . '<a href="/contact/">Contact</a>'
+            . '</nav>',
+        $result['markup'],
+    );
+    assert_eq(5, count($result['repairs']));
+    assert_eq([], $result['warnings']);
+});
+
 test('nav link resolver rewrites a header label match to the site page path', function () {
     $resolver = new DeterministicNavLinkResolver();
     $input = '<header><nav aria-label="Primary"><a class="brand" href="#hero"><span>About &amp; Services</span></a></nav></header>';
