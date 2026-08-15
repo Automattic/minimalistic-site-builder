@@ -716,6 +716,49 @@ test('section layout reconciles copied theme widths in the deterministic tail', 
     }
 });
 
+test('C5 section layout derives copied content width from the final design carrier', function () {
+    [$project, $tmp] = section_layout_project([[
+        'slug' => 'home',
+        'sections' => [['slug' => 'story', 'background' => 'base', 'vertical_density' => 'standard']],
+    ]]);
+    try {
+        $project->writeText(
+            'design/site.css',
+            ':root{--content-size:800px;--wide-size:1280px}'
+                . '*,*::before,*::after{box-sizing:border-box}'
+                . '.shell{width:100%;max-width:var(--wide-size);margin:0 auto;padding:0 48px}',
+        );
+        $project->writeText(
+            'design/home.html',
+            '<main>'
+                . '<section id="hero"><div class="shell"><h1>Hero</h1></div></section>'
+                . '<section id="story"><div class="shell"><h2>Story</h2></div></section>'
+                . '</main>',
+        );
+        $project->writeJson('theme/theme.json', [
+            'version' => 3,
+            'settings' => ['layout' => ['contentSize' => '800px', 'wideSize' => '1280px']],
+        ]);
+        $project->writeText(
+            'theme/parts/page-home--story.html',
+            '<!-- wp:group {"tagName":"section","anchor":"story"} -->'
+                . '<section id="story" class="wp-block-group">Story</section><!-- /wp:group -->',
+        );
+
+        $step = new SectionLayoutStep();
+        $step->run($project);
+        assert_eq(
+            ['contentSize' => '1184px', 'wideSize' => '1280px'],
+            $project->readJson('theme/theme.json')['settings']['layout'] ?? null,
+        );
+        $once = $project->readText('theme/theme.json');
+        $step->run($project);
+        assert_eq($once, $project->readText('theme/theme.json'), 'second pass leaves derived width byte-stable');
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
 test('section layout recognizes dynamic core navigation as a header nav carrier', function () {
     [$project, $tmp] = section_layout_project([[
         'slug' => 'home',

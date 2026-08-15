@@ -2073,3 +2073,43 @@ foreach ($themeLayoutWidthCases as [$name, $authored, $css, $expected, $warningF
         }
     });
 }
+
+test('C5 theme-json derives bounded content width from the carrier inner box at 1366px', function () {
+    $theme = ['settings' => ['layout' => ['contentSize' => '860px', 'wideSize' => '1320px']]];
+    $css = ':root{--content-size:800px;--wide-size:1280px}'
+        . '*,*::before,*::after{box-sizing:border-box}'
+        . '.shell{width:100%;max-width:var(--wide-size);margin:0 auto;'
+        . 'padding:0 clamp(20px,5vw,48px)}';
+    $html = '<main>'
+        . '<section id="hero"><div class="shell"><h1>Hero</h1></div></section>'
+        . '<section id="services"><div class="shell"><h2>Services</h2></div></section>'
+        . '</main>';
+
+    [$normalized, $warnings] = ThemeJsonStep::normalizeLayoutWidths($theme, $css, $html);
+
+    assert_eq(
+        ['contentSize' => '1184px', 'wideSize' => '1280px'],
+        $normalized['settings']['layout'] ?? null,
+        '1280px border box minus the resolved 48px carrier padding on both sides',
+    );
+    assert_eq([], $warnings);
+});
+
+test('C5 theme-json derives fluid content width from the main gutter at 1366px', function () {
+    $theme = ['settings' => ['layout' => ['contentSize' => '860px', 'wideSize' => '1320px']]];
+    $css = ':root{--content-size:800px;--wide-size:1280px;'
+        . '--gutter:clamp(1.25rem,5vw,5.5rem)}main{padding:0 var(--gutter)}';
+    $html = '<main>'
+        . '<section id="hero"><h1>Hero</h1></section>'
+        . '<section id="services"><h2>Services</h2></section>'
+        . '</main>';
+
+    [$normalized, $warnings] = ThemeJsonStep::normalizeLayoutWidths($theme, $css, $html);
+
+    assert_eq(
+        ['contentSize' => '1230px', 'wideSize' => '1280px'],
+        $normalized['settings']['layout'] ?? null,
+        '1366px reference viewport minus the resolved 5vw gutter on both sides',
+    );
+    assert_eq([], $warnings);
+});
