@@ -73,6 +73,22 @@ final class CssContrastAdjuster
 
             $currentFindings = CssContrastCheck::check($adjusted, $markup);
             $current = self::matchingFinding($currentFindings, $finding);
+            $repair = self::repairBackground($adjusted, $markup, $currentFindings, $finding);
+            if ($repair['css'] !== null) {
+                $adjusted = $repair['css'];
+                $warnings[] = self::receipt(
+                    $path,
+                    $finding['selector'],
+                    $finding['fg'],
+                    $finding['bg'],
+                    $repair['background'],
+                    $finding['ratio'] ?? null,
+                    $repair['ratio'],
+                    'adjusted',
+                    'background-moved-within-perceptual-cap',
+                );
+                continue;
+            }
             if ($current !== null && $current['status'] === 'pass') {
                 $warnings[] = self::receipt(
                     $path,
@@ -103,23 +119,6 @@ final class CssContrastAdjuster
                 continue;
             }
 
-            $repair = self::repairBackground($adjusted, $markup, $currentFindings, $current);
-            if ($repair['css'] !== null) {
-                $adjusted = $repair['css'];
-                $warnings[] = self::receipt(
-                    $path,
-                    $finding['selector'],
-                    $finding['fg'],
-                    $finding['bg'],
-                    $repair['background'],
-                    $finding['ratio'] ?? null,
-                    $repair['ratio'],
-                    'adjusted',
-                    'background-moved-within-perceptual-cap',
-                );
-                continue;
-            }
-
             $warnings[] = self::receipt(
                 $path,
                 $finding['selector'],
@@ -133,8 +132,83 @@ final class CssContrastAdjuster
             );
         }
 
-        $project->addWarnings('css_contrast', $warnings);
+        $project->replaceWarnings('css_contrast', $warnings);
         return $adjusted;
+    }
+
+    /**
+     * A resumed build may contain foreground bytes written by the superseded
+     * contrast strategy. Restore only declarations proven by its durable
+     * receipt before applying the current background-only strategy.
+     *
+     * @param list<array<string,mixed>> $findings
+     */
+    public static function restoreSupersededForegrounds(
+        Project $project,
+        string $path,
+        string $css,
+        array $findings,
+    ): string {
+        if (!$project->exists('warnings.json')) {
+            return $css;
+        }
+        $currentForegrounds = [];
+        foreach ($findings as $finding) {
+            if (($finding['status'] ?? null) === 'fail' && is_string($finding['fg'] ?? null)) {
+                $currentForegrounds[$finding['selector']][] = $finding['fg'];
+            }
+        }
+        if ($currentForegrounds === []) {
+            return $css;
+        }
+
+        $restorations = [];
+        foreach ($project->readJson('warnings.json')['css_contrast'] ?? [] as $warning) {
+            if (!is_string($warning)
+                || preg_match(
+                    '/\Afile=(.*?) selector=(.*?) authored=(.*?) delivered=(.*?) disposition=adjusted(?:\s|\z)/s',
+                    $warning,
+                    $match,
+                ) !== 1
+                || $match[1] !== $path) {
+                continue;
+            }
+            foreach ($currentForegrounds[$match[2]] ?? [] as $foreground) {
+                if (strcasecmp(trim($foreground), trim($match[3])) === 0) {
+                    $restorations[$match[2]][] = [
+                        'authored' => $match[3],
+                        'delivered' => $match[4],
+                    ];
+                }
+            }
+        }
+        if ($restorations === []) {
+            return $css;
+        }
+
+        $replacements = [];
+        foreach (self::stylesheetDeclarations($css) as $declaration) {
+            if ($declaration['property'] !== 'color') {
+                continue;
+            }
+            foreach ($restorations[$declaration['selector']] ?? [] as $restoration) {
+                if (strcasecmp(trim($declaration['evaluation']), trim($restoration['delivered'])) === 0) {
+                    $replacements[$declaration['value_start']] = [
+                        'start' => $declaration['value_start'],
+                        'end' => $declaration['value_end'],
+                        'value' => $restoration['authored'],
+                    ];
+                    break;
+                }
+            }
+        }
+        krsort($replacements);
+        foreach ($replacements as $replacement) {
+            $css = substr($css, 0, $replacement['start'])
+                . $replacement['value']
+                . substr($css, $replacement['end']);
+        }
+        return $css;
     }
 
     /**
@@ -182,13 +256,25 @@ final class CssContrastAdjuster
             return self::failedRepair($finding['bg'], 'perceptual-shift-cap-exceeded');
         }
 
-        $sawConflict = false;
+        $targetGroups = [];
         foreach ($targets as $target) {
+            $targetGroups[$target['selector']][] = $target;
+        }
+
+        $sawConflict = false;
+        foreach ($targetGroups as $targetGroup) {
+            usort(
+                $targetGroup,
+                static fn (array $left, array $right): int => $right['value_start'] <=> $left['value_start'],
+            );
             foreach ($withinCap as $candidate) {
                 $replacement = self::hex($candidate['rgb']);
-                $trial = substr($css, 0, $target['value_start'])
-                    . $replacement
-                    . substr($css, $target['value_end']);
+                $trial = $css;
+                foreach ($targetGroup as $target) {
+                    $trial = substr($trial, 0, $target['value_start'])
+                        . $replacement
+                        . substr($trial, $target['value_end']);
+                }
                 $after = CssContrastCheck::check($trial, $markup);
                 $delivered = self::matchingFinding($after, $finding);
                 if ($delivered === null || $delivered['status'] !== 'pass') {
