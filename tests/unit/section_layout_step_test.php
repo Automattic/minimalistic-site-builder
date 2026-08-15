@@ -556,6 +556,59 @@ test('section layout wide-class parser counts only var(--wide-size) horizontal m
     );
 });
 
+/** @return array<mixed> attrs for the fixture's measure-bearing child */
+function section_layout_author_width_attrs(string $css): array
+{
+    [$project, $tmp] = section_layout_project([[
+        'slug' => 'home',
+        'sections' => [['slug' => 'story', 'background' => 'base', 'vertical_density' => 'standard']],
+    ]]);
+    try {
+        $project->writeText('design/site.css', $css);
+        $project->writeText(
+            'theme/parts/page-home--story.html',
+            '<!-- wp:group --><div class="wp-block-group">'
+                . '<!-- wp:group {"anchor":"measure","className":"measure"} -->'
+                . '<div id="measure" class="wp-block-group measure">'
+                . '<!-- wp:paragraph --><p>Authored measure</p><!-- /wp:paragraph -->'
+                . '</div><!-- /wp:group --></div><!-- /wp:group -->',
+        );
+
+        (new SectionLayoutStep())->run($project);
+
+        $markup = $project->readText('theme/parts/page-home--story.html');
+        $doc = BlockMarkup::parse($markup);
+        $targets = array_values(array_filter(
+            $doc->indices(),
+            static fn (int $index): bool => (($doc->attrs($index) ?? [])['anchor'] ?? null) === 'measure',
+        ));
+        assert_eq(1, count($targets), 'fixture contains exactly one non-vacuous authored-width target');
+        assert_eq(
+            ['type' => 'constrained'],
+            section_layout_root_attrs($markup)['layout'] ?? null,
+            'fixture exercises a constrained section',
+        );
+        return $doc->attrs($targets[0]) ?? [];
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+}
+
+test('A1 section layout preserves a left-aligned author-owned max-width', function () {
+    $attrs = section_layout_author_width_attrs('.measure{max-width:min(100%,44rem)}');
+    assert_eq('full', $attrs['align'] ?? null, 'align:full exempts the authored left alignment from centring');
+});
+
+test('A2 section layout preserves an author-centred max-width', function () {
+    $attrs = section_layout_author_width_attrs('.measure{max-width:min(100%,44rem);margin:0 auto}');
+    assert_true(!isset($attrs['align']), 'both authored auto margins keep the measure in constrained centring');
+});
+
+test('A3 section layout preserves a right-aligned author-owned max-width', function () {
+    $attrs = section_layout_author_width_attrs('.measure{max-width:min(100%,44rem);margin-left:auto}');
+    assert_eq('full', $attrs['align'] ?? null, 'align:full leaves the one-sided authored auto margin in control');
+});
+
 test('section layout promotes a root whose wrapper bears a wide-size class to align:wide', function () {
     [$project, $tmp] = section_layout_project([[
         'slug' => 'home',
