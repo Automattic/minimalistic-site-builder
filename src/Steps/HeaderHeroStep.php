@@ -2299,7 +2299,8 @@ final class HeaderHeroStep implements Step
         foreach ($doc->indices() as $i) {
             $name = $doc->name($i);
             if ($name === 'navigation-link') {
-                $labels[] = (string) (($doc->attrs($i) ?? [])['label'] ?? '');
+                $label = (string) (($doc->attrs($i) ?? [])['label'] ?? '');
+                $labels[] = html_entity_decode(strip_tags($label), ENT_QUOTES | ENT_HTML5, 'UTF-8');
             } elseif ($name === 'page-list') {
                 $hasPageList = true;
             } elseif ($name === 'site-title') {
@@ -2319,7 +2320,11 @@ final class HeaderHeroStep implements Step
             $width += mb_strlen($siteName) * self::TITLE_CHAR_PX + self::CLUSTER_GAP_PX;
         }
         foreach ($labels as $label) {
-            $width += mb_strlen(trim($label)) * self::NAV_CHAR_PX + self::NAV_GAP_PX;
+            $lineLengths = array_map(
+                static fn (string $line): int => mb_strlen(trim($line)),
+                preg_split('/\R/u', trim($label)) ?: [],
+            );
+            $width += ($lineLengths === [] ? 0 : max($lineLengths)) * self::NAV_CHAR_PX + self::NAV_GAP_PX;
         }
         if ($hasButton) {
             $width += self::CLUSTER_GAP_PX;

@@ -355,6 +355,35 @@ test('estimatedRowWidth charges a button its width plus the cluster gap', functi
     assert_eq(56 + 2 * 9 + 32, $with - $without);
 });
 
+test('estimatedRowWidth measures rich navigation labels by visible text', function () {
+    $label = '<span class="name" data-blocks-engine-richtext-marker="blocks-engine-richtext-f5cea1491d8b-4">Super Coaching</span>';
+    $attrs = json_encode(['label' => $label], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+    $doc = BlockMarkup::parse('<!-- wp:navigation-link ' . $attrs . ' /-->');
+
+    // GUTTERS_PX (64) + 14 visible chars * NAV_CHAR_PX (11) + NAV_GAP_PX (28).
+    assert_eq(64 + 14 * 11 + 28, HeaderHeroStep::estimatedRowWidth($doc, ''));
+});
+
+test('estimatedRowWidth decodes entities in navigation labels before counting', function () {
+    $label = 'Tools &amp; Advice';
+    $attrs = json_encode(['label' => $label], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+    $doc = BlockMarkup::parse('<!-- wp:navigation-link ' . $attrs . ' /-->');
+
+    assert_eq(18, mb_strlen($label));
+    assert_eq(14, mb_strlen(html_entity_decode($label, ENT_QUOTES | ENT_HTML5, 'UTF-8')));
+    assert_eq(64 + 14 * 11 + 28, HeaderHeroStep::estimatedRowWidth($doc, ''));
+});
+
+test('estimatedRowWidth uses the widest visible line of a rich navigation label', function () {
+    $label = '<span class="name" data-blocks-engine-richtext-marker="blocks-engine-richtext-brand-name">Super Coaching</span>' . "\n      "
+        . '<span class="place" data-blocks-engine-richtext-marker="blocks-engine-richtext-brand-place">Plymouth, New Hampshire</span>';
+    $attrs = json_encode(['label' => $label], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+    $doc = BlockMarkup::parse('<!-- wp:navigation-link ' . $attrs . ' /-->');
+
+    // The two stacked lines occupy the width of the longer 23-character line.
+    assert_eq(64 + 23 * 11 + 28, HeaderHeroStep::estimatedRowWidth($doc, ''));
+});
+
 test('capCovers lowers a viewport-scale cover to 80vh and leaves the rest alone', function () {
     $result = HeaderHeroStep::capCovers(hh_cover('92'));
     assert_contains('"minHeight":80', $result['markup']);
