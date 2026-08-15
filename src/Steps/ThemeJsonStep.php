@@ -40,6 +40,12 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     private const REQUIRED_COLORS = ['base', 'contrast', 'primary', 'secondary', 'accent'];
     private const REQUIRED_FONTS = ['heading', 'body'];
 
+    /** @var array{contentSize:string,wideSize:string} */
+    private const FALLBACK_LAYOUT_WIDTHS = [
+        'contentSize' => '800px',
+        'wideSize' => '1280px',
+    ];
+
     /** Element selectors whose box is the text itself, never a visual surface. */
     private const TEXT_SHADOW_ELEMENTS = [
         'caption', 'cite', 'heading', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'link',
@@ -369,6 +375,10 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         $theme['version'] = 3;
         $theme = self::disableCoreDefaultPresets($theme);
         $theme = self::normalizeSpacingSettings($theme);
+        [$theme, $layoutWarnings] = self::normalizeLayoutWidths(
+            $theme,
+            $this->htmlFirst ? $project->readText('design/site.css') : null,
+        );
 
         // A default vertical rhythm between sibling blocks: without it, per-block
         // "blockGap" the parts set (e.g. the branded-lockup header's zero-gap
@@ -432,6 +442,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         [$theme, $groupPaddingWarnings] = self::repairGroupBlockPadding($theme);
         $warnings = array_merge(
             $warnings,
+            $layoutWarnings,
             $colorWarnings,
             $fontWarnings,
             $sizeWarnings,
@@ -537,6 +548,145 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         $theme['settings']['spacing']['spacingSizes'] = self::SPACING_PROFILE;
 
         return $theme;
+    }
+
+    /**
+     * Guarantee that emitted layout widths are usable CSS lengths. HTML-first
+     * designs own these values through their root custom properties; otherwise
+     * a positive unitless model number is deterministically interpreted as px.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>}
+     */
+    public static function normalizeLayoutWidths(array $theme, ?string $designCss = null): array
+    {
+        if (!isset($theme['settings']) || !is_array($theme['settings'])) {
+            $theme['settings'] = [];
+        }
+
+        $warnings = [];
+        $hadLayout = array_key_exists('layout', $theme['settings']);
+        $authoredLayout = $theme['settings']['layout'] ?? [];
+        if (!is_array($authoredLayout) || ($authoredLayout !== [] && array_is_list($authoredLayout))) {
+            $warnings[] = 'theme/theme.json settings.layout: authored '
+                . Warnings::value($authoredLayout)
+                . '; delivered build-supplied layout object; disposition replaced malformed layout container';
+            $authoredLayout = self::FALLBACK_LAYOUT_WIDTHS;
+        }
+
+        $designWidths = $designCss === null ? [] : self::designLayoutWidths($designCss);
+        $layout = $authoredLayout;
+        foreach (self::FALLBACK_LAYOUT_WIDTHS as $key => $fallback) {
+            if (isset($designWidths[$key])) {
+                $layout[$key] = $designWidths[$key];
+                continue;
+            }
+            if (!array_key_exists($key, $authoredLayout)) {
+                continue;
+            }
+
+            $normalized = self::normalizeLayoutLength($authoredLayout[$key]);
+            if ($normalized !== null) {
+                $layout[$key] = $normalized;
+                continue;
+            }
+
+            $layout[$key] = $fallback;
+            $warnings[] = "theme/theme.json settings.layout.{$key}: authored "
+                . Warnings::value($authoredLayout[$key])
+                . '; delivered ' . Warnings::value($fallback)
+                . '; disposition replaced invalid CSS length with build default';
+        }
+        if ($hadLayout || $layout !== []) {
+            $theme['settings']['layout'] = $layout;
+        }
+
+        return [$theme, $warnings];
+    }
+
+    /** @return array{contentSize?:string,wideSize?:string} */
+    private static function designLayoutWidths(string $css): array
+    {
+        $stripped = preg_replace('~/\*.*?\*/~s', '', $css);
+        if (!is_string($stripped)) {
+            return [];
+        }
+
+        $widths = [];
+        if (preg_match_all('/:root\s*\{([^{}]*)\}/i', $stripped, $roots) === false) {
+            return [];
+        }
+        foreach ($roots[1] as $body) {
+            foreach (explode(';', $body) as $declaration) {
+                $colon = strpos($declaration, ':');
+                if ($colon === false) {
+                    continue;
+                }
+                $property = strtolower(trim(substr($declaration, 0, $colon)));
+                $key = match ($property) {
+                    '--content-size' => 'contentSize',
+                    '--wide-size' => 'wideSize',
+                    default => null,
+                };
+                if ($key === null) {
+                    continue;
+                }
+                $value = self::normalizeLayoutLength(substr($declaration, $colon + 1), false);
+                if ($value !== null) {
+                    $widths[$key] = $value;
+                }
+            }
+        }
+
+        return $widths;
+    }
+
+    private static function normalizeLayoutLength(mixed $value, bool $unitlessToPx = true): ?string
+    {
+        if (is_int($value) || is_float($value)) {
+            if (!$unitlessToPx || !is_finite((float) $value) || $value < 0) {
+                return null;
+            }
+            return self::formatLayoutNumber((float) $value) . 'px';
+        }
+        if (!is_string($value)) {
+            return null;
+        }
+
+        $value = trim($value);
+        if ($value === '') {
+            return null;
+        }
+        if (preg_match('/\A\+?(?:\d+(?:\.\d+)?|\.\d+)\z/', $value) === 1) {
+            return $unitlessToPx ? self::formatLayoutNumber((float) $value) . 'px' : null;
+        }
+
+        $number = '\\+?(?:\\d+(?:\\.\\d+)?|\\.\\d+)';
+        $unit = '(?:px|r?em|ch|ex|cap|ic|lh|rlh|vw|vh|vi|vb|vmin|vmax|svw|svh|lvw|lvh|dvw|dvh|cm|mm|q|in|pt|pc|%)';
+        if (preg_match('/\A' . $number . $unit . '\z/i', $value) === 1) {
+            return $value;
+        }
+        if (preg_match('/\A(?:calc|min|max|clamp)\(.+\)\z/is', $value) !== 1
+            || preg_match('/' . $number . $unit . '/i', $value) !== 1
+            || preg_match('/[;{}]/', $value) === 1
+        ) {
+            return null;
+        }
+
+        $depth = 0;
+        foreach (str_split($value) as $character) {
+            if ($character === '(') {
+                $depth++;
+            } elseif ($character === ')' && --$depth < 0) {
+                return null;
+            }
+        }
+        return $depth === 0 ? $value : null;
+    }
+
+    private static function formatLayoutNumber(float $value): string
+    {
+        return rtrim(rtrim(number_format($value, 6, '.', ''), '0'), '.');
     }
 
     /**

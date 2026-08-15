@@ -47,8 +47,8 @@ final class SectionLayoutStep implements Step
         return new StepDeclaration(
             id: $this->id(),
             label: $this->label(),
-            reads: ['pages.json', 'theme/parts/*', 'design/site.css'],
-            writes: ['theme/parts/*', 'warnings.json'],
+            reads: ['pages.json', 'theme/parts/*', 'theme/theme.json', 'design/site.css'],
+            writes: ['theme/parts/*', 'theme/theme.json', 'warnings.json'],
             concurrent: false,
         );
     }
@@ -58,8 +58,20 @@ final class SectionLayoutStep implements Step
         $writes = [];
         $adjustments = 0;
         $warnings = [];
-        $wideClasses = self::wideClassSet($project);
+        $wideSelectors = self::wideSelectorSet($project);
         $fullBleedClasses = self::fullBleedClassSet($project);
+        $themeWrite = null;
+        if ($project->exists('theme/theme.json') && $project->exists('design/site.css')) {
+            $authoredTheme = $project->readJson('theme/theme.json');
+            [$normalizedTheme, $themeWarnings] = ThemeJsonStep::normalizeLayoutWidths(
+                $authoredTheme,
+                $project->readText('design/site.css'),
+            );
+            array_push($warnings, ...$themeWarnings);
+            if ($normalizedTheme !== $authoredTheme) {
+                $themeWrite = $normalizedTheme;
+            }
+        }
 
         foreach (SectionRhythmStep::pages($project) as $page) {
             $pageSlug = trim((string) ($page['slug'] ?? ''));
@@ -74,7 +86,7 @@ final class SectionLayoutStep implements Step
                     $rewritten = self::rewriteSection(
                         $entry['markup'],
                         "page '{$pageSlug}', section '{$entry['slug']}'",
-                        $wideClasses,
+                        $wideSelectors,
                         $fullBleedClasses,
                     );
                     $pageWrites[$currentPath] = $rewritten;
@@ -95,26 +107,48 @@ final class SectionLayoutStep implements Step
             $adjustments += $pageAdjustments;
         }
 
+        $headerPath = 'theme/parts/header.html';
+        if ($wideSelectors !== [] && $project->exists($headerPath)) {
+            try {
+                $header = self::rewriteWidePart(
+                    $project->readText($headerPath),
+                    'header part',
+                    $wideSelectors,
+                );
+                if ($header !== $project->readText($headerPath)) {
+                    $writes[$headerPath] = $header;
+                    $adjustments++;
+                }
+            } catch (\RuntimeException|\InvalidArgumentException $error) {
+                $warnings[] = "file {$headerPath}, block /: authored value transformed header blocks; "
+                    . 'delivered value pre-transformation bytes; disposition wide-carrier alignment skipped '
+                    . "({$error->getMessage()})";
+            }
+        }
+
         foreach ($writes as $path => $markup) {
             $project->writeText($path, $markup);
+        }
+        if ($themeWrite !== null) {
+            $project->writeJson('theme/theme.json', $themeWrite);
         }
         $project->addWarnings($this->id(), $warnings);
 
         Narrator::write("  section layout: {$adjustments} section adjustment(s)\n");
         if ($warnings !== []) {
             Narrator::write('  [section-layout] warning: ' . count($warnings)
-                . " page degradation(s) recorded in warnings.json\n");
+                . " degradation(s) recorded in warnings.json\n");
         }
     }
 
     /**
-     * @param array<string,true> $wideClasses class token => true from design/site.css
+     * @param list<list<array{tag:?string,id:?string,classes:list<string>}>> $wideSelectors
      * @param array<string,true> $fullBleedClasses class token => true from design/site.css
      */
     private static function rewriteSection(
         string $markup,
         string $label,
-        array $wideClasses = [],
+        array $wideSelectors = [],
         array $fullBleedClasses = [],
     ): string
     {
@@ -156,13 +190,11 @@ final class SectionLayoutStep implements Step
         }
 
         // A constrained layout re-caps its children at contentSize unless the
-        // measure-bearing block opts into wide. Align the OUTERMOST block whose
-        // element carries a var(--wide-size) class (the root when it bears it,
-        // else the inner wrapper that does). A direct cover already runs full,
-        // so its explicit align is never downgraded.
-        if ($wideClasses !== []) {
-            $target = self::outermostWideBlock($doc, $wideClasses);
-            if ($target !== null) {
+        // measure-bearing block opts into wide. Align every outermost block
+        // selected by a var(--wide-size) rule. A direct cover already runs
+        // full, so its explicit align is never downgraded.
+        if ($wideSelectors !== []) {
+            foreach (self::outermostWideBlocks($doc, $wideSelectors) as $target) {
                 $targetAttrs = $doc->attrs($target) ?? [];
                 if (!isset($targetAttrs['align'])) {
                     $targetAttrs['align'] = 'wide';
@@ -174,6 +206,34 @@ final class SectionLayoutStep implements Step
         $rewritten = $doc->render();
         $rendered = self::validatedDocument($rewritten, $label);
         return self::normalizeWrapper($rewritten, $rendered, (int) $rendered->topLevel(), $label);
+    }
+
+    /**
+     * Apply only CSS-owned wide alignment to a shared theme part. Section root
+     * constraints and #261's full-bleed promotion remain page-section concerns.
+     *
+     * @param list<list<array{tag:?string,id:?string,classes:list<string>}>> $wideSelectors
+     */
+    private static function rewriteWidePart(string $markup, string $label, array $wideSelectors): string
+    {
+        $doc = BlockMarkup::parse($markup);
+        if ($doc->indices() === []
+            || $doc->hasMalformedDelimiters()
+            || $doc->hasMismatchedDelimiters()
+            || $doc->unclosedIndices() !== []
+        ) {
+            throw new \RuntimeException("section-layout: {$label} has malformed block delimiters");
+        }
+
+        foreach (self::outermostWideBlocks($doc, $wideSelectors, ['header']) as $target) {
+            $attrs = $doc->attrs($target) ?? [];
+            if (!isset($attrs['align'])) {
+                $attrs['align'] = 'wide';
+                $doc->setAttrs($target, $attrs);
+            }
+        }
+
+        return $doc->render();
     }
 
     /**
@@ -357,17 +417,17 @@ final class SectionLayoutStep implements Step
         return implode(';', $kept);
     }
 
-    /** The wide-class lookup set from the design stylesheet, empty when absent. @return array<string,true> */
-    private static function wideClassSet(Project $project): array
+    /**
+     * Parsed wide-measure selectors from the design stylesheet.
+     *
+     * @return list<list<array{tag:?string,id:?string,classes:list<string>}>>
+     */
+    private static function wideSelectorSet(Project $project): array
     {
         if (!$project->exists('design/site.css')) {
             return [];
         }
-        $set = [];
-        foreach (self::wideClassTokens($project->readText('design/site.css')) as $token) {
-            $set[$token] = true;
-        }
-        return $set;
+        return self::wideSelectors($project->readText('design/site.css'));
     }
 
     /** The full-bleed class lookup set from the design stylesheet. @return array<string,true> */
@@ -412,6 +472,91 @@ final class SectionLayoutStep implements Step
             }
         }
         return array_keys($tokens);
+    }
+
+    /**
+     * Simple class, ID, type, and descendant selectors whose declaration owns
+     * the wide inline measure. Unsupported selector grammar is ignored rather
+     * than approximated, so ancestry can never be silently discarded.
+     *
+     * @return list<list<array{tag:?string,id:?string,classes:list<string>}>>
+     */
+    private static function wideSelectors(string $css): array
+    {
+        $stripped = preg_replace('~/\*.*?\*/~s', '', $css);
+        if (!is_string($stripped)) {
+            return [];
+        }
+
+        $selectors = [];
+        if (preg_match_all('/([^{}]+)\{([^{}]*)\}/s', $stripped, $rules, PREG_SET_ORDER) !== false) {
+            foreach ($rules as $rule) {
+                if (!self::measuresWideSize($rule[2])) {
+                    continue;
+                }
+                foreach (explode(',', $rule[1]) as $selector) {
+                    $parsed = self::parseWideSelector(trim($selector));
+                    if ($parsed !== null) {
+                        $selectors[] = $parsed;
+                    }
+                }
+            }
+        }
+
+        return $selectors;
+    }
+
+    /**
+     * @return list<array{tag:?string,id:?string,classes:list<string>}>|null
+     */
+    private static function parseWideSelector(string $selector): ?array
+    {
+        if ($selector === ''
+            || str_contains($selector, '\\')
+            || preg_match('/[>+~:\[\]]/', $selector) === 1
+        ) {
+            return null;
+        }
+
+        $parts = preg_split('/[\x20\t\r\n\f]+/', $selector, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        if ($parts === []) {
+            return null;
+        }
+
+        $compounds = [];
+        foreach ($parts as $part) {
+            if (preg_match(
+                '/\A(?:(?<tag>\*|-?[A-Za-z_][A-Za-z0-9_-]*))?'
+                    . '(?<tokens>(?:[.#]-?[A-Za-z_][A-Za-z0-9_-]*)*)\z/',
+                $part,
+                $match,
+            ) !== 1) {
+                return null;
+            }
+            $tag = ($match['tag'] ?? '') === '' || ($match['tag'] ?? '') === '*'
+                ? null
+                : strtolower($match['tag']);
+            $id = null;
+            $classes = [];
+            if (preg_match_all('/([.#])(-?[A-Za-z_][A-Za-z0-9_-]*)/', $match['tokens'], $tokens, PREG_SET_ORDER)) {
+                foreach ($tokens as $token) {
+                    if ($token[1] === '#') {
+                        if ($id !== null) {
+                            return null;
+                        }
+                        $id = $token[2];
+                    } else {
+                        $classes[] = $token[2];
+                    }
+                }
+            }
+            if ($tag === null && $id === null && $classes === []) {
+                return null;
+            }
+            $compounds[] = ['tag' => $tag, 'id' => $id, 'classes' => $classes];
+        }
+
+        return $compounds;
     }
 
     /**
@@ -467,7 +612,7 @@ final class SectionLayoutStep implements Step
                 continue;
             }
             $property = strtolower(trim(substr($declaration, 0, $colon)));
-            if (($property === 'max-width' || $property === 'width')
+            if (in_array($property, ['width', 'max-width', 'inline-size', 'max-inline-size'], true)
                 && preg_match('/var\(\s*--wide-size\s*\)/i', substr($declaration, $colon + 1)) === 1
             ) {
                 return true;
@@ -512,21 +657,120 @@ final class SectionLayoutStep implements Step
     }
 
     /**
-     * The first block, in document (outermost-first) order, whose own element
-     * carries a wide-class token.
-     *
-     * @param array<string,true> $wideClasses
+     * @param list<list<array{tag:?string,id:?string,classes:list<string>}>> $selectors
+     * @param list<string> $contextTags semantic ancestors supplied by the containing theme part
+     * @return list<int>
      */
-    private static function outermostWideBlock(BlockMarkup $doc, array $wideClasses): ?int
+    private static function outermostWideBlocks(
+        BlockMarkup $doc,
+        array $selectors,
+        array $contextTags = [],
+    ): array
     {
+        $matches = [];
         foreach ($doc->indices() as $index) {
-            foreach (self::elementClassTokens($doc, $index) as $token) {
-                if (isset($wideClasses[$token])) {
-                    return $index;
+            foreach ($selectors as $selector) {
+                if (self::selectorMatchesBlock($doc, $index, $selector, $contextTags)) {
+                    $matches[] = $index;
+                    break;
                 }
             }
         }
-        return null;
+
+        $matchSet = array_fill_keys($matches, true);
+        return array_values(array_filter($matches, static function (int $index) use ($doc, $matchSet): bool {
+            for ($parent = $doc->parent($index); $parent !== null; $parent = $doc->parent($parent)) {
+                if (isset($matchSet[$parent])) {
+                    return false;
+                }
+            }
+            return true;
+        }));
+    }
+
+    /**
+     * @param list<array{tag:?string,id:?string,classes:list<string>}> $selector
+     * @param list<string> $contextTags
+     */
+    private static function selectorMatchesBlock(
+        BlockMarkup $doc,
+        int $index,
+        array $selector,
+        array $contextTags = [],
+    ): bool
+    {
+        $last = count($selector) - 1;
+        if ($last < 0 || !self::compoundMatchesBlock($doc, $index, $selector[$last])) {
+            return false;
+        }
+
+        $cursor = $doc->parent($index);
+        $contextCursor = count($contextTags) - 1;
+        for ($part = $last - 1; $part >= 0; $part--) {
+            while ($cursor !== null && !self::compoundMatchesBlock($doc, $cursor, $selector[$part])) {
+                $cursor = $doc->parent($cursor);
+            }
+            if ($cursor === null) {
+                $compound = $selector[$part];
+                if ($compound['id'] !== null
+                    || $compound['classes'] !== []
+                    || $compound['tag'] === null
+                ) {
+                    return false;
+                }
+                while ($contextCursor >= 0 && $contextTags[$contextCursor] !== $compound['tag']) {
+                    $contextCursor--;
+                }
+                if ($contextCursor < 0) {
+                    return false;
+                }
+                $contextCursor--;
+                continue;
+            }
+            $cursor = $doc->parent($cursor);
+        }
+
+        return true;
+    }
+
+    /** @param array{tag:?string,id:?string,classes:list<string>} $compound */
+    private static function compoundMatchesBlock(BlockMarkup $doc, int $index, array $compound): bool
+    {
+        $facts = self::elementFacts($doc, $index);
+        if ($compound['tag'] !== null && $compound['tag'] !== $facts['tag']) {
+            return false;
+        }
+        if ($compound['id'] !== null && $compound['id'] !== $facts['id']) {
+            return false;
+        }
+        foreach ($compound['classes'] as $class) {
+            if (!in_array($class, $facts['classes'], true)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** @return array{tag:?string,id:?string,classes:list<string>} */
+    private static function elementFacts(BlockMarkup $doc, int $index): array
+    {
+        $attrs = $doc->attrs($index) ?? [];
+        $tag = is_string($attrs['tagName'] ?? null) ? strtolower($attrs['tagName']) : null;
+        if ($tag === null && $doc->name($index) === 'navigation') {
+            $tag = 'nav';
+        }
+        $id = is_string($attrs['anchor'] ?? null) ? $attrs['anchor'] : null;
+        $classes = self::elementClassTokens($doc, $index);
+
+        if (preg_match('/<([a-zA-Z][a-zA-Z0-9-]*)\b[^>]*>/s', $doc->ownHtml($index), $wrapper) === 1) {
+            $tag = strtolower($wrapper[1]);
+            $wrapperId = self::tagAttribute($wrapper[0], 'id');
+            if ($wrapperId !== null && trim($wrapperId[0]) !== '') {
+                $id = $wrapperId[0];
+            }
+        }
+
+        return ['tag' => $tag, 'id' => $id, 'classes' => array_values(array_unique($classes))];
     }
 
     /**

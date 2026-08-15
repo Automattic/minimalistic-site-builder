@@ -90,8 +90,11 @@ test('section layout constrains every planned section root and leaves nested lay
 
         $step = new SectionLayoutStep();
         assert_eq('section-layout', $step->id());
-        assert_eq(['pages.json', 'theme/parts/*', 'design/site.css'], $step->declaration()->reads);
-        assert_eq(['theme/parts/*', 'warnings.json'], $step->declaration()->writes);
+        assert_eq(
+            ['pages.json', 'theme/parts/*', 'theme/theme.json', 'design/site.css'],
+            $step->declaration()->reads,
+        );
+        assert_eq(['theme/parts/*', 'theme/theme.json', 'warnings.json'], $step->declaration()->writes);
         $step->run($project);
 
         foreach (['page-home--hero', 'page-home--story', 'page-about--team'] as $part) {
@@ -599,10 +602,9 @@ test('W6 section layout detects ID and descendant wide carriers with ancestry', 
         );
         $project->writeText(
             'theme/parts/header.html',
-            '<!-- wp:group {"tagName":"header"} --><header class="wp-block-group">'
-                . '<!-- wp:group {"tagName":"nav"} --><nav class="wp-block-group">'
+            '<!-- wp:group {"tagName":"nav"} --><nav class="wp-block-group">'
                 . '<!-- wp:paragraph --><p>Header navigation</p><!-- /wp:paragraph -->'
-                . '</nav><!-- /wp:group --></header><!-- /wp:group -->',
+                . '</nav><!-- /wp:group -->',
         );
 
         (new SectionLayoutStep())->run($project);
@@ -632,7 +634,170 @@ test('W6 section layout detects ID and descendant wide carriers with ancestry', 
             !isset(($standalone->attrs($standaloneNavs[0]) ?? [])['align']),
             'header ancestry is required; a standalone nav is not promoted',
         );
+
+        $once = [
+            'hero' => $project->readText('theme/parts/page-home--hero.html'),
+            'standalone' => $project->readText('theme/parts/page-home--standalone-nav.html'),
+            'header' => $project->readText('theme/parts/header.html'),
+        ];
+        (new SectionLayoutStep())->run($project);
+        assert_eq($once['hero'], $project->readText('theme/parts/page-home--hero.html'));
+        assert_eq($once['standalone'], $project->readText('theme/parts/page-home--standalone-nav.html'));
+        assert_eq($once['header'], $project->readText('theme/parts/header.html'));
     } finally {
         exec('rm -rf ' . escapeshellarg($tmp));
     }
 });
+
+test('section layout isolates malformed header width repair and still promotes healthy pages', function () {
+    [$project, $tmp] = section_layout_project([[
+        'slug' => 'home',
+        'sections' => [['slug' => 'hero', 'background' => 'base', 'vertical_density' => 'standard']],
+    ]]);
+    try {
+        $project->writeText(
+            'design/site.css',
+            '#hero{max-width:var(--wide-size)}header nav{max-width:var(--wide-size)}',
+        );
+        $project->writeText(
+            'theme/parts/page-home--hero.html',
+            '<!-- wp:group {"tagName":"section","anchor":"hero"} -->'
+                . '<section id="hero" class="wp-block-group">Hero</section><!-- /wp:group -->',
+        );
+        $malformedHeader = '<!-- wp:group {"tagName":"header"} --><header>Authored header';
+        $project->writeText('theme/parts/header.html', $malformedHeader);
+
+        (new SectionLayoutStep())->run($project);
+
+        assert_eq($malformedHeader, $project->readText('theme/parts/header.html'));
+        assert_eq(
+            'wide',
+            section_layout_root_attrs($project->readText('theme/parts/page-home--hero.html'))['align'] ?? null,
+            'healthy page still reaches align:wide',
+        );
+        $warnings = implode(' ', $project->readJson('warnings.json')['section-layout'] ?? []);
+        assert_contains('file theme/parts/header.html, block /', $warnings);
+        assert_contains('authored value transformed header blocks', $warnings);
+        assert_contains('delivered value pre-transformation bytes', $warnings);
+        assert_contains('disposition wide-carrier alignment skipped', $warnings);
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('section layout reconciles copied theme widths in the deterministic tail', function () {
+    [$project, $tmp] = section_layout_project([[
+        'slug' => 'home',
+        'sections' => [['slug' => 'story', 'background' => 'base', 'vertical_density' => 'standard']],
+    ]]);
+    try {
+        $project->writeText('design/site.css', ':root{--content-size:800px;--wide-size:1280px}');
+        $project->writeJson('theme/theme.json', [
+            'version' => 3,
+            'settings' => ['layout' => ['contentSize' => '860px', 'wideSize' => 1320]],
+        ]);
+        $project->writeText(
+            'theme/parts/page-home--story.html',
+            '<!-- wp:group {"tagName":"section","anchor":"story"} -->'
+                . '<section id="story" class="wp-block-group">Story</section><!-- /wp:group -->',
+        );
+
+        $step = new SectionLayoutStep();
+        $step->run($project);
+        assert_eq(
+            ['contentSize' => '800px', 'wideSize' => '1280px'],
+            $project->readJson('theme/theme.json')['settings']['layout'] ?? null,
+        );
+        $once = $project->readText('theme/theme.json');
+        $step->run($project);
+        assert_eq($once, $project->readText('theme/theme.json'), 'second pass leaves theme.json byte-stable');
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('section layout recognizes dynamic core navigation as a header nav carrier', function () {
+    [$project, $tmp] = section_layout_project([[
+        'slug' => 'home',
+        'sections' => [['slug' => 'story', 'background' => 'base', 'vertical_density' => 'standard']],
+    ]]);
+    try {
+        $project->writeText('design/site.css', 'header nav{max-width:var(--wide-size)}');
+        $project->writeText(
+            'theme/parts/page-home--story.html',
+            '<!-- wp:group {"tagName":"section","anchor":"story"} -->'
+                . '<section id="story" class="wp-block-group">Story</section><!-- /wp:group -->',
+        );
+        $project->writeText(
+            'theme/parts/header.html',
+            '<!-- wp:group {"tagName":"header"} --><header class="wp-block-group">'
+                . '<!-- wp:navigation --><!-- wp:navigation-link {"label":"Home","url":"/"} /-->'
+                . '<!-- /wp:navigation --></header><!-- /wp:group -->',
+        );
+
+        (new SectionLayoutStep())->run($project);
+
+        $header = BlockMarkup::parse($project->readText('theme/parts/header.html'));
+        $navigation = array_values(array_filter(
+            $header->indices(),
+            static fn (int $index): bool => $header->name($index) === 'navigation',
+        ));
+        assert_eq(1, count($navigation));
+        assert_eq('wide', ($header->attrs($navigation[0]) ?? [])['align'] ?? null);
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+/** @return list<string> aligned block anchors in document order */
+function section_layout_selector_fixture(string $selector, string $declaration): array
+{
+    [$project, $tmp] = section_layout_project([[
+        'slug' => 'home',
+        'sections' => [['slug' => 'hero', 'background' => 'base', 'vertical_density' => 'standard']],
+    ]]);
+    try {
+        $project->writeText('design/site.css', $selector . '{' . $declaration . '}');
+        $project->writeText(
+            'theme/parts/page-home--hero.html',
+            '<!-- wp:group {"tagName":"section","anchor":"hero","className":"hero outer"} -->'
+                . '<section id="hero" class="wp-block-group hero outer">'
+                . '<!-- wp:group {"anchor":"inner","className":"inner"} -->'
+                . '<div id="inner" class="wp-block-group inner">Inner</div><!-- /wp:group -->'
+                . '</section><!-- /wp:group -->',
+        );
+        (new SectionLayoutStep())->run($project);
+        $doc = BlockMarkup::parse($project->readText('theme/parts/page-home--hero.html'));
+        $anchors = [];
+        foreach ($doc->indices() as $index) {
+            $attrs = $doc->attrs($index) ?? [];
+            if (($attrs['align'] ?? null) === 'wide') {
+                $anchors[] = (string) ($attrs['anchor'] ?? '');
+            }
+        }
+        return $anchors;
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+}
+
+$sectionLayoutSelectorCases = [
+    ['ID subject', '#hero', 'max-width:var(--wide-size)', ['hero']],
+    ['type subject', 'section', 'max-width:var(--wide-size)', ['hero']],
+    ['class subject', '.hero', 'max-width:var(--wide-size)', ['hero']],
+    ['compound subject', 'section.hero#hero', 'max-width:var(--wide-size)', ['hero']],
+    ['class descendant', '.outer .inner', 'max-width:var(--wide-size)', ['inner']],
+    ['ID descendant', '#hero .inner', 'max-width:var(--wide-size)', ['inner']],
+    ['missing ancestry', '.missing .inner', 'max-width:var(--wide-size)', []],
+    ['selector list branch', '.missing, #hero', 'max-width:var(--wide-size)', ['hero']],
+    ['width property', '#hero', 'width:min(100%,var(--wide-size))', ['hero']],
+    ['inline-size property', '#hero', 'inline-size:var(--wide-size)', ['hero']],
+    ['max-inline-size property', '#hero', 'max-inline-size:var(--wide-size)', ['hero']],
+    ['unsupported child combinator', 'section > .inner', 'max-width:var(--wide-size)', []],
+];
+
+foreach ($sectionLayoutSelectorCases as [$name, $selector, $declaration, $expected]) {
+    test("section layout wide selector: {$name}", function () use ($selector, $declaration, $expected) {
+        assert_eq($expected, section_layout_selector_fixture($selector, $declaration));
+    });
+}

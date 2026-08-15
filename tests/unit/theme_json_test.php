@@ -1968,3 +1968,108 @@ test('W6 theme-json reconciles HTML-first widths to design custom properties', f
         exec('rm -rf ' . escapeshellarg($tmp));
     }
 });
+
+$themeLayoutWidthCases = [
+    [
+        'unitless integer content width',
+        ['settings' => ['layout' => ['contentSize' => 720, 'wideSize' => '1200px']]],
+        null,
+        ['contentSize' => '720px', 'wideSize' => '1200px'],
+        null,
+    ],
+    [
+        'unitless integer wide width',
+        ['settings' => ['layout' => ['contentSize' => '800px', 'wideSize' => 1280]]],
+        null,
+        ['contentSize' => '800px', 'wideSize' => '1280px'],
+        null,
+    ],
+    [
+        'numeric strings',
+        ['settings' => ['layout' => ['contentSize' => '860', 'wideSize' => '1320']]],
+        null,
+        ['contentSize' => '860px', 'wideSize' => '1320px'],
+        null,
+    ],
+    [
+        'decimal numbers',
+        ['settings' => ['layout' => ['contentSize' => 720.5, 'wideSize' => 1200.25]]],
+        null,
+        ['contentSize' => '720.5px', 'wideSize' => '1200.25px'],
+        null,
+    ],
+    [
+        'authored rem values',
+        ['settings' => ['layout' => ['contentSize' => '48rem', 'wideSize' => '80rem']]],
+        null,
+        ['contentSize' => '48rem', 'wideSize' => '80rem'],
+        null,
+    ],
+    [
+        'authored CSS function',
+        ['settings' => ['layout' => ['contentSize' => 'clamp(40rem, 70vw, 50rem)', 'wideSize' => '90vw']]],
+        null,
+        ['contentSize' => 'clamp(40rem, 70vw, 50rem)', 'wideSize' => '90vw'],
+        null,
+    ],
+    [
+        'negative content width',
+        ['settings' => ['layout' => ['contentSize' => -20, 'wideSize' => '1200px']]],
+        null,
+        ['contentSize' => '800px', 'wideSize' => '1200px'],
+        'settings.layout.contentSize',
+    ],
+    [
+        'array wide width',
+        ['settings' => ['layout' => ['contentSize' => '800px', 'wideSize' => ['1320px']]]],
+        null,
+        ['contentSize' => '800px', 'wideSize' => '1280px'],
+        'settings.layout.wideSize',
+    ],
+    [
+        'malformed layout container',
+        ['settings' => ['layout' => 'wide']],
+        null,
+        ['contentSize' => '800px', 'wideSize' => '1280px'],
+        'settings.layout: authored "wide"',
+    ],
+    [
+        'absent layout',
+        ['settings' => []],
+        null,
+        null,
+        null,
+    ],
+    [
+        'design root overrides both widths',
+        ['settings' => ['layout' => ['contentSize' => '860px', 'wideSize' => '1320px']]],
+        '/* tokens */ :root { --content-size: 800px; --wide-size: 1280px; }',
+        ['contentSize' => '800px', 'wideSize' => '1280px'],
+        null,
+    ],
+    [
+        'partial design root ignores an invalid unitless value',
+        ['settings' => ['layout' => ['contentSize' => '860px', 'wideSize' => '1320px']]],
+        ':root{--content-size:810px;--wide-size:1260}',
+        ['contentSize' => '810px', 'wideSize' => '1320px'],
+        null,
+    ],
+];
+
+foreach ($themeLayoutWidthCases as [$name, $authored, $css, $expected, $warningFragment]) {
+    test("theme-json layout width: {$name}", function () use (
+        $authored,
+        $css,
+        $expected,
+        $warningFragment,
+    ) {
+        [$theme, $warnings] = ThemeJsonStep::normalizeLayoutWidths($authored, $css);
+        $layout = $theme['settings']['layout'] ?? null;
+        assert_eq($expected, $layout);
+        if ($warningFragment === null) {
+            assert_eq([], $warnings);
+        } else {
+            assert_contains($warningFragment, implode(' ', $warnings));
+        }
+    });
+}
