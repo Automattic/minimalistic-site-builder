@@ -431,7 +431,10 @@ final class SectionLayoutStep implements Step
         $tokens = [];
         if (preg_match_all('/([^{}]+)\{([^{}]*)\}/s', $stripped, $rules, PREG_SET_ORDER)) {
             foreach ($rules as $rule) {
-                if (!self::paintsUnboundedBackground($rule[2])) {
+                if (preg_match(
+                    '/(?<!:)(?:::(?:before|after|first-line|first-letter|marker|selection|placeholder)|:(?:before|after))\b/i',
+                    $rule[1],
+                ) === 1 || !self::paintsUnboundedBackground($rule[2])) {
                     continue;
                 }
                 if (preg_match_all('/\.(-?[A-Za-z_][A-Za-z0-9_-]*)/', $rule[1], $classes) > 0) {
