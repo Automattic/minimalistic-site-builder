@@ -570,7 +570,8 @@ test('G5 HTML-first build delivers only resolved header navigation destinations'
         $builder->pipeline()->runThrough($project);
 
         $header = $project->readText('theme/parts/header.html');
-        assert_contains('"url":"/#hero"', $header, 'brand deep link is rooted to its owning home page');
+        assert_contains('"url":"/"', $header, 'brand link inherits the front page root');
+        assert_true(!str_contains($header, '/#hero'), 'shared nav keeps no front-page placeholder');
         assert_contains('"url":"/about/"', $header, 'About label resolves to the site page path');
 
         $emptyHrefCount = 0;

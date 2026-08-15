@@ -15,6 +15,159 @@ function nav_link_pages(): array
     ];
 }
 
+test('nav link resolver maps the azure garden navigation labels to every site page', function () {
+    $resolver = new DeterministicNavLinkResolver();
+    $pages = [
+        ['label' => 'Home', 'path' => '/', 'anchors' => ['hero']],
+        ['label' => 'Coaching Philosophy', 'path' => '/coaching-philosophy/', 'anchors' => []],
+        ['label' => 'Services', 'path' => '/services/', 'anchors' => []],
+        ['label' => 'Results & Testimonials', 'path' => '/results-testimonials/', 'anchors' => []],
+        ['label' => 'Contact', 'path' => '/contact/', 'anchors' => []],
+    ];
+    $input = '<nav>'
+        . '<a href="#hero">Home</a>'
+        . '<a href="#hero">Philosophy</a>'
+        . '<a href="#hero">Services</a>'
+        . '<a href="#hero">Results</a>'
+        . '<a href="#hero">Contact</a>'
+        . '</nav>';
+
+    assert_eq(5, substr_count($input, 'href="#hero"'));
+
+    $result = $resolver->resolve($input, $pages, 'theme/parts/header.html', null);
+
+    assert_eq(
+        '<nav>'
+            . '<a href="/">Home</a>'
+            . '<a href="/coaching-philosophy/">Philosophy</a>'
+            . '<a href="/services/">Services</a>'
+            . '<a href="/results-testimonials/">Results</a>'
+            . '<a href="/contact/">Contact</a>'
+            . '</nav>',
+        $result['markup'],
+    );
+    assert_eq(5, count($result['repairs']));
+    assert_eq([], $result['warnings']);
+});
+
+test('nav link resolver roots an unmatched brand sharing the front page placeholder', function () {
+    $resolver = new DeterministicNavLinkResolver();
+    $pages = [
+        ['label' => 'Home', 'path' => '/', 'anchors' => ['hero']],
+        ['label' => 'Coaching Philosophy', 'path' => '/coaching-philosophy/', 'anchors' => []],
+    ];
+    $input = '<nav>'
+        . '<a href="#hero"><strong>Acme Coaching</strong></a>'
+        . '<a href="#hero">Home</a>'
+        . '<a href="#hero">Philosophy</a>'
+        . '</nav>';
+
+    $result = $resolver->resolve($input, $pages, 'theme/parts/header.html', null);
+
+    assert_eq(
+        '<nav>'
+            . '<a href="/"><strong>Acme Coaching</strong></a>'
+            . '<a href="/">Home</a>'
+            . '<a href="/coaching-philosophy/">Philosophy</a>'
+            . '</nav>',
+        $result['markup'],
+    );
+    assert_eq(3, count($result['repairs']));
+    assert_eq([], $result['warnings']);
+
+    $pageOwned = $resolver->resolve($input, $pages, 'design/home.html', '/');
+    assert_eq($input, $pageOwned['markup']);
+    assert_eq([], $pageOwned['repairs']);
+    assert_eq([], $pageOwned['warnings']);
+});
+
+test('nav link resolver leaves an ambiguous partial label untouched and names every candidate', function () {
+    $resolver = new DeterministicNavLinkResolver();
+    $pages = [
+        ['label' => 'Home', 'path' => '/', 'anchors' => ['hero']],
+        ['label' => 'Coaching Philosophy', 'path' => '/coaching-philosophy/', 'anchors' => []],
+        ['label' => 'Philosophy Workshops', 'path' => '/philosophy-workshops/', 'anchors' => []],
+    ];
+    $input = '<nav><a href="#hero">Philosophy</a></nav>';
+
+    $result = $resolver->resolve($input, $pages, 'theme/parts/header.html', null);
+
+    assert_eq($input, $result['markup']);
+    assert_eq([], $result['repairs']);
+    assert_eq(1, count($result['warnings']));
+    assert_eq('#hero', $result['warnings'][0]['authored']);
+    assert_eq('#hero', $result['warnings'][0]['delivered']);
+    assert_contains('Coaching Philosophy', $result['warnings'][0]['disposition']);
+    assert_contains('/coaching-philosophy/', $result['warnings'][0]['disposition']);
+    assert_contains('Philosophy Workshops', $result['warnings'][0]['disposition']);
+    assert_contains('/philosophy-workshops/', $result['warnings'][0]['disposition']);
+});
+
+test('nav link resolver matches a navigation label against a page slug', function () {
+    $resolver = new DeterministicNavLinkResolver();
+    $pages = [
+        ['label' => 'Home', 'path' => '/', 'anchors' => ['hero']],
+        ['label' => 'How We Help', 'path' => '/executive-coaching/', 'anchors' => []],
+    ];
+
+    $result = $resolver->resolve(
+        '<nav><a href="#hero">Coaching</a></nav>',
+        $pages,
+        'theme/parts/header.html',
+        null,
+    );
+
+    assert_eq('<nav><a href="/executive-coaching/">Coaching</a></nav>', $result['markup']);
+    assert_eq([], $result['warnings']);
+});
+
+test('nav link resolver gives slashless and trailing-slash page paths the same valid verdict', function () {
+    $resolver = new DeterministicNavLinkResolver();
+    $pages = [
+        ['label' => 'Home', 'path' => '/', 'anchors' => ['hero']],
+        ['label' => 'Services', 'path' => '/services/', 'anchors' => []],
+    ];
+    $slashless = '<nav><a href="/services">Services</a></nav>';
+    $trailing = '<!-- wp:navigation -->'
+        . '<!-- wp:navigation-link {"label":"Services","url":"/services/"} /-->'
+        . '<!-- /wp:navigation -->';
+
+    $slashlessResult = $resolver->resolve(
+        $slashless,
+        $pages,
+        'theme/parts/footer.html',
+        null,
+    );
+    $trailingResult = $resolver->resolve(
+        $trailing,
+        $pages,
+        'theme/parts/header.html',
+        null,
+    );
+
+    assert_eq($slashless, $slashlessResult['markup']);
+    assert_eq($trailing, $trailingResult['markup']);
+    assert_eq([], $slashlessResult['warnings']);
+    assert_eq([], $trailingResult['warnings']);
+});
+
+test('nav link resolver still unwraps a genuinely unresolvable internal destination', function () {
+    $resolver = new DeterministicNavLinkResolver();
+    $input = '<nav><span>before</span><a href="#missing"><em>Elsewhere</em></a><b>after</b></nav>';
+
+    $result = $resolver->resolve($input, nav_link_pages(), 'theme/parts/footer.html', null);
+
+    assert_eq(
+        '<nav><span>before</span><em>Elsewhere</em><b>after</b></nav>',
+        $result['markup'],
+    );
+    assert_eq([], $result['repairs']);
+    assert_eq(1, count($result['warnings']));
+    assert_eq('#missing', $result['warnings'][0]['authored']);
+    assert_eq('removed', $result['warnings'][0]['delivered']);
+    assert_contains('unresolvable', $result['warnings'][0]['disposition']);
+});
+
 test('nav link resolver rewrites a header label match to the site page path', function () {
     $resolver = new DeterministicNavLinkResolver();
     $input = '<header><nav aria-label="Primary"><a class="brand" href="#hero"><span>About &amp; Services</span></a></nav></header>';
@@ -228,6 +381,37 @@ test('resolve-nav-links step persists repairs and actionable isolated-loss warni
         $report = $project->readJson('reports/nav-links.json');
         assert_eq(2, count($report['repairs']));
         assert_eq(1, count($report['warnings']));
+    });
+});
+
+test('resolve-nav-links step replaces stale warnings from an earlier resumed run', function () {
+    with_project('resolve_nav_stale_warnings_', function (Project $project): void {
+        $project->writeJson('pages.json', ['pages' => [[
+            'slug' => 'home',
+            'title' => 'Home',
+            'path' => '/',
+            'sections' => [['slug' => 'hero']],
+        ]]]);
+        $project->writeText(
+            'theme/parts/page-home--hero.html',
+            '<section id="hero"><h1>Home</h1></section>',
+        );
+        $project->writeText(
+            'theme/parts/header.html',
+            '<header><nav><a href="/">Home</a></nav></header>',
+        );
+        $project->writeJson('warnings.json', [
+            'resolve-nav-links' => ['stale removed link warning'],
+            'other-step' => ['current unrelated warning'],
+        ]);
+
+        (new ResolveNavLinksStep())->run($project);
+
+        assert_eq(
+            ['other-step' => ['current unrelated warning']],
+            $project->readJson('warnings.json'),
+        );
+        assert_eq([], $project->readJson('reports/nav-links.json')['warnings']);
     });
 });
 

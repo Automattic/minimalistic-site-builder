@@ -11,9 +11,14 @@ namespace Automattic\SiteBuild;
  * and warning rows.
  *
  * Resolution is deterministic:
- * - Existing valid site-page paths and non-site destinations stay unchanged.
- * - A matching link label selects that page. A fragment is retained only when
- *   it exists on that page; otherwise the delivered target is the page path.
+ * - Existing valid site-page paths and non-site destinations stay unchanged;
+ *   trailing slashes do not affect page-path validity.
+ * - One title/slug phrase match selects that page. The front page resolves to
+ *   its root; another page retains only a fragment that exists on that page.
+ * - Multiple plausible title/slug matches preserve the authored destination
+ *   and return a warning naming every candidate rather than guessing.
+ * - An unmatched shared-nav link that shares a resolved front-page link's
+ *   authored destination inherits the root (for example, a brand link).
  * - Without a label match, a fragment resolves only when it has one owning
  *   page. Shared chrome roots it to that page; page-owned content may keep a
  *   bare fragment only when the current page owns it.
