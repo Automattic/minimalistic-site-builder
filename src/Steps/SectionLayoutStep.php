@@ -8,16 +8,18 @@ use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\Units\GeneratedMarkup;
 
 /**
  * Deterministically give every transformed section one inline-axis owner.
  *
  * SectionRhythmStep owns the root group's block-axis spacing. This sibling
- * pass runs immediately afterwards and owns only the inline axis: every
- * section root becomes constrained, root-authored horizontal padding is
- * removed, and direct cover children or CSS-authored background bands opt into
- * full bleed. Covers also carry the constrained-layout class bridge their inner
- * container needs. Nested blocks stay outside this ownership boundary.
+ * pass runs immediately afterwards and owns only the inline axis: section roots
+ * become constrained unless their marker delegates layout to authored CSS,
+ * root-authored horizontal padding is removed, and direct cover children or
+ * CSS-authored background bands opt into full bleed. Covers also carry the
+ * constrained-layout class bridge their inner container needs. Nested blocks
+ * stay outside this ownership boundary.
  *
  * Rewrites are transactional per page. A malformed generated section keeps
  * that page's pre-transformation bytes, records one durable warning, and does
@@ -157,8 +159,10 @@ final class SectionLayoutStep implements Step
         $root = (int) $doc->topLevel();
         $attrs = $doc->attrs($root) ?? [];
 
-        $attrs['layout'] = ['type' => 'constrained'];
-        self::constrainCommentClass($attrs, $label);
+        if (!GeneratedMarkup::hasCssOwnedLayoutMarker($attrs)) {
+            $attrs['layout'] = ['type' => 'constrained'];
+            self::constrainCommentClass($attrs, $label);
+        }
         self::stripCommentInlinePadding($attrs);
         $doc->setAttrs($root, $attrs);
 
