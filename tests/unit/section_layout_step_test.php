@@ -567,3 +567,72 @@ test('section layout isolates a malformed page while still promoting healthy wid
         exec('rm -rf ' . escapeshellarg($tmp));
     }
 });
+
+test('W6 section layout detects ID and descendant wide carriers with ancestry', function () {
+    [$project, $tmp] = section_layout_project([[
+        'slug' => 'home',
+        'sections' => [
+            ['slug' => 'hero', 'background' => 'base', 'vertical_density' => 'standard'],
+            ['slug' => 'standalone-nav', 'background' => 'base', 'vertical_density' => 'standard'],
+        ],
+    ]]);
+    try {
+        $project->writeText(
+            'design/site.css',
+            ':root{--wide-size:1280px}#hero{max-width:var(--wide-size)}'
+                . 'header nav{max-width:var(--wide-size)}',
+        );
+        $project->writeText(
+            'theme/parts/page-home--hero.html',
+            '<!-- wp:group {"tagName":"section","anchor":"hero"} -->'
+                . '<section id="hero" class="wp-block-group">'
+                . '<!-- wp:paragraph --><p>Hero</p><!-- /wp:paragraph -->'
+                . '</section><!-- /wp:group -->',
+        );
+        $project->writeText(
+            'theme/parts/page-home--standalone-nav.html',
+            '<!-- wp:group {"tagName":"section","anchor":"standalone-nav"} -->'
+                . '<section id="standalone-nav" class="wp-block-group">'
+                . '<!-- wp:group {"tagName":"nav"} -->'
+                . '<nav class="wp-block-group"><!-- wp:paragraph --><p>Not header navigation</p><!-- /wp:paragraph -->'
+                . '</nav><!-- /wp:group --></section><!-- /wp:group -->',
+        );
+        $project->writeText(
+            'theme/parts/header.html',
+            '<!-- wp:group {"tagName":"header"} --><header class="wp-block-group">'
+                . '<!-- wp:group {"tagName":"nav"} --><nav class="wp-block-group">'
+                . '<!-- wp:paragraph --><p>Header navigation</p><!-- /wp:paragraph -->'
+                . '</nav><!-- /wp:group --></header><!-- /wp:group -->',
+        );
+
+        (new SectionLayoutStep())->run($project);
+
+        $hero = section_layout_root_attrs($project->readText('theme/parts/page-home--hero.html'));
+        assert_eq('wide', $hero['align'] ?? null, '#hero ID selector reaches its section block');
+
+        $header = BlockMarkup::parse($project->readText('theme/parts/header.html'));
+        $headerNavs = array_values(array_filter(
+            $header->indices(),
+            static fn (int $index): bool => (($header->attrs($index) ?? [])['tagName'] ?? null) === 'nav',
+        ));
+        assert_eq(1, count($headerNavs), 'fixture contains one header nav block');
+        assert_eq(
+            'wide',
+            ($header->attrs($headerNavs[0]) ?? [])['align'] ?? null,
+            'header nav descendant selector reaches the nav block',
+        );
+
+        $standalone = BlockMarkup::parse($project->readText('theme/parts/page-home--standalone-nav.html'));
+        $standaloneNavs = array_values(array_filter(
+            $standalone->indices(),
+            static fn (int $index): bool => (($standalone->attrs($index) ?? [])['tagName'] ?? null) === 'nav',
+        ));
+        assert_eq(1, count($standaloneNavs), 'fixture contains one standalone nav block');
+        assert_true(
+            !isset(($standalone->attrs($standaloneNavs[0]) ?? [])['align']),
+            'header ancestry is required; a standalone nav is not promoted',
+        );
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});

@@ -1913,3 +1913,58 @@ test('repairShapeWiring repairs authored cover and media-text corner styles with
         assert_eq([], $fixedWarnings);
     }
 });
+
+test('W6 theme-json normalizes unitless layout widths', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_unitless_width_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    try {
+        $project->writeJson('meta.json', ['prompt' => 'A cold-water swim club']);
+        $project->writeJson('siteSpec.json', ['name' => 'Teal Valley']);
+        seed_test_design_direction($project);
+
+        $payload = valid_theme_payload();
+        $payload['settings']['layout'] = ['contentSize' => '860px', 'wideSize' => 1320];
+        $llm = new FakeLlm();
+        $llm->queueJson($payload);
+        (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+        assert_eq(
+            ['contentSize' => '860px', 'wideSize' => '1320px'],
+            $project->readJson('theme/theme.json')['settings']['layout'] ?? null,
+        );
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('W6 theme-json reconciles HTML-first widths to design custom properties', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_design_width_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    try {
+        $project->writeJson('meta.json', ['prompt' => 'A cold-water swim club']);
+        $project->writeJson('siteSpec.json', ['name' => 'Teal Valley']);
+        seed_test_design_direction($project);
+        $project->writeText(
+            'design/site.css',
+            ':root{--content-size:800px;--wide-size:1280px}'
+                . 'body{color:#111;background:#fff;font-family:system-ui,sans-serif}',
+        );
+
+        $payload = valid_theme_payload();
+        $payload['settings']['layout'] = ['contentSize' => '860px', 'wideSize' => '1320px'];
+        $llm = new FakeLlm();
+        $llm->queueJson($payload);
+        (new ThemeJsonStep(
+            $llm,
+            new PromptRenderer(repo_path('prompts')),
+            htmlFirst: true,
+        ))->run($project);
+
+        assert_eq(
+            ['contentSize' => '800px', 'wideSize' => '1280px'],
+            $project->readJson('theme/theme.json')['settings']['layout'] ?? null,
+        );
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
