@@ -25,6 +25,7 @@ final class HtmlFirstFidelityReport
         'calm-lantern',
         'azure-garden',
         'amber-ember',
+        'zesty-canyon',
     ];
 
     /** @var list<string> */
@@ -144,6 +145,7 @@ final class HtmlFirstFidelityReport
             'empty_buttons' => count($emptyButtons[0]),
             'marks_without_background_color' => $markMetric['corrected'],
             'align_wide' => substr_count($markup, '"align":"wide"'),
+            'align_full' => substr_count($markup, '"align":"full"'),
             'layout' => [
                 'content_size' => self::layoutValue($layout['contentSize'] ?? null),
                 'wide_size' => self::layoutValue($layout['wideSize'] ?? null),
@@ -544,6 +546,7 @@ final class HtmlFirstFidelityReport
             'empty_buttons' => (int) ($metrics['empty_buttons'] ?? 0),
             'marks_without_background_color' => (int) ($metrics['marks_without_background_color'] ?? 0),
             'align_wide' => (int) ($metrics['align_wide'] ?? 0),
+            'align_full' => (int) ($metrics['align_full'] ?? 0),
             'unmatched_engine_marker_occurrences' => (int) ($metrics['unmatched_engine_marker_occurrences'] ?? 0),
         ];
     }
@@ -1239,10 +1242,10 @@ final class HtmlFirstFidelityPublisher
 final class HtmlFirstFidelityRunner
 {
     private const SOURCE_PROJECTS = '/Users/matt/git/minimalistic-site-builder/projects';
-    private const OVERLAY = '/Users/matt/projects/a8c/blocks-engine-wt-support-css/php-transformer';
+    private const OVERLAY = '/Users/matt/projects/a8c/be-wt-specificity/php-transformer';
     private const GALLERY = '/Users/matt/git/site-builder-eval/eval/html-first-fidelity';
     private const MUTEX = '/tmp/msb-gate.lock';
-    private const CONTROL_TRANSFORMER = '0.4.15';
+    private const CONTROL_TRANSFORMER = '0.4.18';
 
     private string $repo;
     private string $tempRoot = '';

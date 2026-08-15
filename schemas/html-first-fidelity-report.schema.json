@@ -258,6 +258,7 @@
         "empty_buttons",
         "marks_without_background_color",
         "align_wide",
+        "align_full",
         "layout",
         "unmatched_engine_markers",
         "unmatched_engine_marker_occurrences"
@@ -298,6 +299,10 @@
         "unmatched_engine_marker_occurrences": {
           "type": "integer",
           "minimum": 0
+        },
+        "align_full": {
+          "type": "integer",
+          "minimum": 0
         }
       }
     },
@@ -324,6 +329,7 @@
         "empty_buttons",
         "marks_without_background_color",
         "align_wide",
+        "align_full",
         "unmatched_engine_marker_occurrences"
       ],
       "properties": {
@@ -339,6 +345,10 @@
         },
         "unmatched_engine_marker_occurrences": {
           "type": "integer"
+        },
+        "align_full": {
+          "type": "integer",
+          "minimum": 0
         }
       }
     },
