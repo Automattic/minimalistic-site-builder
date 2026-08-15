@@ -596,8 +596,8 @@ final class HtmlFirstFidelityReport
     /** @param list<mixed> $projects */
     private static function renderStatus(array $projects): string
     {
-        $resumesPass = count($projects) === 6;
-        $inputsPass = count($projects) === 6;
+        $resumesPass = count($projects) === count(self::SLUGS);
+        $inputsPass = count($projects) === count(self::SLUGS);
         foreach ($projects as $project) {
             if (!is_array($project)) {
                 $resumesPass = $inputsPass = false;
@@ -615,7 +615,7 @@ final class HtmlFirstFidelityReport
                 $inputsPass = false;
             }
         }
-        return '<div class="status">' . self::badge('12 zero-request resumes', $resumesPass)
+        return '<div class="status">' . self::badge((count(self::SLUGS) * 2) . ' zero-request resumes', $resumesPass)
             . self::badge('Identical unchanged design inputs', $inputsPass) . '</div>';
     }
 
@@ -669,6 +669,7 @@ final class HtmlFirstFidelityReport
         return 'Empty buttons ' . self::number($metrics['empty_buttons'] ?? null)
             . ' · mark defects ' . self::number($metrics['marks_without_background_color'] ?? null)
             . ' · align wide ' . self::number($metrics['align_wide'] ?? null)
+            . ' · align full ' . self::number($metrics['align_full'] ?? null)
             . ' · unmatched marker uses ' . self::number($metrics['unmatched_engine_marker_occurrences'] ?? null);
     }
 
@@ -700,6 +701,7 @@ final class HtmlFirstFidelityReport
             'empty_buttons' => 'Empty wp:buttons containers',
             'marks_without_background_color' => 'Marks without background-color',
             'align_wide' => 'align=wide occurrences',
+            'align_full' => 'align=full occurrences',
             'unmatched_engine_marker_occurrences' => 'Unmatched engine marker occurrences',
             'layout.content_size' => 'theme.json contentSize',
             'layout.wide_size' => 'theme.json wideSize',
@@ -1242,16 +1244,18 @@ final class HtmlFirstFidelityPublisher
 final class HtmlFirstFidelityRunner
 {
     private const SOURCE_PROJECTS = '/Users/matt/git/minimalistic-site-builder/projects';
-    private const OVERLAY = '/Users/matt/projects/a8c/be-wt-specificity/php-transformer';
     private const GALLERY = '/Users/matt/git/site-builder-eval/eval/html-first-fidelity';
     private const MUTEX = '/tmp/msb-gate.lock';
-    private const CONTROL_TRANSFORMER = '0.4.18';
+    public const OVERLAY_ENV = 'MSB_HTML_FIRST_FIDELITY_OVERLAY';
 
     private string $repo;
     private string $tempRoot = '';
     private string $controlRoot = '';
     private string $stagingRoot = '';
     private HtmlFirstFidelityPublisher $publisher;
+    private ?string $configuredOverlay;
+    private string $overlay = '';
+    private string $controlTransformerVersion = '';
     private bool $lockHeld = false;
     private bool $worktreeAdded = false;
     private bool $composerLockExisted;
@@ -1270,6 +1274,7 @@ final class HtmlFirstFidelityRunner
         string $repo,
         ?HtmlFirstFidelityPublisher $publisher = null,
         bool $auditMarkMetric = false,
+        ?string $overlay = null,
     )
     {
         $real = realpath($repo);
@@ -1279,6 +1284,7 @@ final class HtmlFirstFidelityRunner
         $this->repo = $real;
         $this->publisher = $publisher ?? new HtmlFirstFidelityPublisher();
         $this->auditMarkMetric = $auditMarkMetric;
+        $this->configuredOverlay = $overlay;
         $this->composerLockExisted = is_file($this->repo . '/composer.lock');
     }
 
@@ -1294,6 +1300,44 @@ final class HtmlFirstFidelityRunner
         throw new RuntimeException('Usage: php bin/html-first-fidelity.php [--audit-mark-metric]');
     }
 
+    public static function requireOverlayPath(string|false|null $configured): string
+    {
+        if (!is_string($configured) || trim($configured) === '') {
+            throw new RuntimeException(
+                'Transformer overlay is not configured. Set ' . self::OVERLAY_ENV
+                . ' to the php-transformer directory inside its Git checkout.',
+            );
+        }
+        return rtrim($configured, DIRECTORY_SEPARATOR);
+    }
+
+    /** @return list<string> */
+    public static function composerUpdateCommand(?string $transformerVersion = null): array
+    {
+        $command = ['composer', 'update'];
+        if ($transformerVersion !== null) {
+            $command[] = '--with=automattic/blocks-engine-php-transformer:' . $transformerVersion;
+        }
+        return [...$command, '--no-interaction', '--no-progress', '--prefer-dist'];
+    }
+
+    /** @param array<string,mixed>|list<mixed> $installed */
+    public static function installedTransformerVersion(array $installed, string $side, string $path): string
+    {
+        $packages = is_array($installed['packages'] ?? null) ? $installed['packages'] : $installed;
+        foreach ($packages as $package) {
+            if (is_array($package) && ($package['name'] ?? null) === 'automattic/blocks-engine-php-transformer') {
+                $version = ltrim((string) ($package['pretty_version'] ?? $package['version'] ?? ''), 'v');
+                if ($version !== '') {
+                    return $version;
+                }
+            }
+        }
+        throw new RuntimeException(
+            "Transformer provenance failure: side={$side}; path={$path}; Composer installed no transformer version.",
+        );
+    }
+
     /**
      * @param array{commit_sha:string,git_subtree_oid:string,installed_tree_sha256:string,version:string,reference:string} $trusted
      * @param array{transformer_version:string,transformer_commit_sha:string,transformer_git_subtree_oid:string,transformer_installed_tree_sha256:string} $recorded
@@ -1302,12 +1346,22 @@ final class HtmlFirstFidelityRunner
     public static function treatmentTransformerProvenance(
         array $trusted,
         array $recorded,
+        string $controlTransformerVersion,
         string $side,
         string $path,
         string $revision,
     ): array {
+        $treatmentTransformerVersion = $trusted['version'] ?? null;
+        if (!is_string($treatmentTransformerVersion) || $treatmentTransformerVersion !== $controlTransformerVersion) {
+            throw new RuntimeException(
+                "Transformer version mismatch: side={$side}; path={$path}; revision={$revision}; "
+                . "control Composer resolved={$controlTransformerVersion}; treatment overlay VERSION="
+                . var_export($treatmentTransformerVersion, true) . '; set ' . self::OVERLAY_ENV
+                . ' to a php-transformer checkout at the same published version.',
+            );
+        }
         $expected = [
-            'transformer_version' => $trusted['version'] ?? null,
+            'transformer_version' => $treatmentTransformerVersion,
             'transformer_commit_sha' => $trusted['commit_sha'] ?? null,
             'transformer_git_subtree_oid' => $trusted['git_subtree_oid'] ?? null,
             'transformer_installed_tree_sha256' => $trusted['installed_tree_sha256'] ?? null,
@@ -1364,8 +1418,8 @@ final class HtmlFirstFidelityRunner
 
             $this->mustRun(['git', 'worktree', 'add', '--detach', $this->controlRoot, 'origin/trunk'], $this->repo);
             $this->worktreeAdded = true;
-            $this->installDependencies($this->controlRoot);
-            $this->installDependencies($this->repo);
+            $this->controlTransformerVersion = $this->installDependencies($this->controlRoot);
+            $this->installDependencies($this->repo, $this->controlTransformerVersion);
             $this->overlayTreatmentTransformer();
             $this->installNodeDependencies($this->controlRoot);
             $this->installNodeDependencies($this->repo);
@@ -1387,8 +1441,8 @@ final class HtmlFirstFidelityRunner
                     'source_projects' => self::SOURCE_PROJECTS,
                     'control' => [
                         ...$controlSiteBuilder,
-                        'transformer_label' => 'v' . self::CONTROL_TRANSFORMER,
-                        'transformer_reference' => 'composer:automattic/blocks-engine-php-transformer@' . self::CONTROL_TRANSFORMER,
+                        'transformer_label' => 'v' . $this->controlTransformerVersion,
+                        'transformer_reference' => 'composer:automattic/blocks-engine-php-transformer@' . $this->controlTransformerVersion,
                     ],
                     'treatment' => [
                         ...$treatmentSiteBuilder,
@@ -1497,7 +1551,10 @@ final class HtmlFirstFidelityRunner
 
     private function validateInputs(): void
     {
-        foreach ([self::SOURCE_PROJECTS, dirname(self::OVERLAY), dirname(self::GALLERY)] as $dir) {
+        $this->overlay = self::requireOverlayPath(
+            $this->configuredOverlay ?? getenv(self::OVERLAY_ENV),
+        );
+        foreach ([self::SOURCE_PROJECTS, $this->overlay, dirname(self::GALLERY)] as $dir) {
             if (!is_dir($dir)) {
                 throw new RuntimeException("Required directory missing: {$dir}");
             }
@@ -1512,38 +1569,37 @@ final class HtmlFirstFidelityRunner
         }
     }
 
-    private function installDependencies(string $repo): void
+    private function installDependencies(string $repo, ?string $expectedTransformerVersion = null): string
     {
         Narrator::write("Installing dependencies in {$repo}\n");
-        $this->mustRun([
-            'composer', 'update',
-            '--with=automattic/blocks-engine-php-transformer:' . self::CONTROL_TRANSFORMER,
-            '--no-interaction', '--no-progress', '--prefer-dist',
-        ], $repo);
+        $this->mustRun(self::composerUpdateCommand($expectedTransformerVersion), $repo);
         $installed = json_decode((string) file_get_contents($repo . '/vendor/composer/installed.json'), true, 512, JSON_THROW_ON_ERROR);
-        $packages = is_array($installed['packages'] ?? null) ? $installed['packages'] : (is_array($installed) ? $installed : []);
-        $version = null;
-        foreach ($packages as $package) {
-            if (is_array($package) && ($package['name'] ?? null) === 'automattic/blocks-engine-php-transformer') {
-                $version = ltrim((string) ($package['pretty_version'] ?? $package['version'] ?? ''), 'v');
-                break;
-            }
+        if (!is_array($installed)) {
+            throw new RuntimeException("Transformer provenance failure: invalid installed packages at {$repo}/vendor/composer/installed.json.");
         }
-        if ($version !== self::CONTROL_TRANSFORMER) {
-            throw new RuntimeException("Expected transformer " . self::CONTROL_TRANSFORMER . ", Composer installed " . ($version ?? 'nothing'));
+        $version = self::installedTransformerVersion($installed, $expectedTransformerVersion === null ? 'control' : 'treatment', $repo);
+        if ($expectedTransformerVersion !== null && $version !== $expectedTransformerVersion) {
+            throw new RuntimeException(
+                "Transformer version mismatch: side=treatment; path={$repo}; expected={$expectedTransformerVersion}; Composer installed={$version}.",
+            );
         }
+        Narrator::write(
+            ($expectedTransformerVersion === null ? 'Control' : 'Treatment')
+            . " Composer transformer: v{$version}\n",
+        );
+        return $version;
     }
 
     private function overlayTreatmentTransformer(): void
     {
         $trusted = HtmlFirstFidelityFrozenGitTree::installRevision(
             side: 'treatment transformer',
-            repository: dirname(self::OVERLAY),
+            repository: dirname($this->overlay),
             revision: 'HEAD',
-            subdirectory: basename(self::OVERLAY),
+            subdirectory: basename($this->overlay),
             workRoot: $this->tempRoot . '/frozen-treatment-transformer',
             target: $this->repo . '/vendor/automattic/blocks-engine-php-transformer',
-            referencePath: self::OVERLAY,
+            referencePath: $this->overlay,
         );
         $recorded = [
             'transformer_version' => $trusted['version'],
@@ -1554,8 +1610,9 @@ final class HtmlFirstFidelityRunner
         $this->overlayProvenance = self::treatmentTransformerProvenance(
             $trusted,
             $recorded,
+            $this->controlTransformerVersion,
             'treatment transformer',
-            self::OVERLAY,
+            $this->overlay,
             'HEAD',
         );
     }

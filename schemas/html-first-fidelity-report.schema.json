@@ -28,8 +28,8 @@
     },
     "projects": {
       "type": "array",
-      "minItems": 6,
-      "maxItems": 6,
+      "minItems": 7,
+      "maxItems": 7,
       "items": {
         "$ref": "#/$defs/project"
       }
@@ -347,8 +347,7 @@
           "type": "integer"
         },
         "align_full": {
-          "type": "integer",
-          "minimum": 0
+          "type": "integer"
         }
       }
     },
@@ -386,7 +385,8 @@
             "sunny-ember",
             "calm-lantern",
             "azure-garden",
-            "amber-ember"
+            "amber-ember",
+            "zesty-canyon"
           ]
         },
         "control": {
@@ -431,8 +431,8 @@
         },
         "projects": {
           "type": "array",
-          "minItems": 6,
-          "maxItems": 6,
+          "minItems": 7,
+          "maxItems": 7,
           "items": {
             "$ref": "#/$defs/markMetricTransitionProject"
           }
@@ -480,7 +480,8 @@
             "sunny-ember",
             "calm-lantern",
             "azure-garden",
-            "amber-ember"
+            "amber-ember",
+            "zesty-canyon"
           ]
         },
         "design_inputs": {

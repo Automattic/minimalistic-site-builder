@@ -18,6 +18,7 @@ test('html-first fidelity harness freezes exact projects and one re-run command'
         'calm-lantern',
         'azure-garden',
         'amber-ember',
+        'zesty-canyon',
     ], HtmlFirstFidelityReport::SLUGS);
     assert_true(!HtmlFirstFidelityRunner::auditMarkMetricRequested([]));
     assert_true(HtmlFirstFidelityRunner::auditMarkMetricRequested(['--audit-mark-metric']));
@@ -56,6 +57,7 @@ test('html-first fidelity implementation matches frozen report schema enums', fu
         HtmlFirstFidelityReport::MARK_METRIC_CORRECTED_DEFINITION,
         $schema['$defs']['markMetricTransitionAudit']['properties']['corrected_definition']['const'],
     );
+    assert_eq(['type' => 'integer'], $schema['$defs']['countTotals']['properties']['align_full']);
 });
 
 test('html-first fidelity design hashes cover only direct HTML and site CSS inputs', function () {
@@ -83,6 +85,7 @@ test('html-first fidelity measurements implement frozen markup and layout metric
 <mark style="color:red">missing property</mark>
 <mark style="color:red;background-color: transparent">carried transparent</mark>
 <!-- wp:group {"align":"wide"} --><div class="blocks-engine-control blocks-engine-css-owned-layout"></div>
+<!-- wp:group {"align":"full"} --><div></div>
 <div class='blocks-engine-control-deadbeef0000-1 blocks-engine-css-owned-layout marker-suffix'></div>
 <div class='blocks-engine-control-cafebabe0000-2'></div>
 <mark style="background-color:transparent;--blocks-engine-richtext-marker:blocks-engine-richtext-deadbeef0000-4">matched marker</mark>
@@ -103,6 +106,7 @@ CSS;
     assert_eq(2, $metrics['empty_buttons']);
     assert_eq(2, $metrics['marks_without_background_color']);
     assert_eq(1, $metrics['align_wide']);
+    assert_eq(1, $metrics['align_full']);
     assert_eq(['value' => '720px', 'unitless' => false], $metrics['layout']['content_size']);
     assert_eq(['value' => '1200', 'unitless' => true], $metrics['layout']['wide_size']);
     assert_eq([
@@ -343,18 +347,21 @@ test('html-first fidelity delta uses treatment minus control', function () {
         'empty_buttons' => 6,
         'marks_without_background_color' => 5,
         'align_wide' => 4,
+        'align_full' => 7,
         'unmatched_engine_marker_occurrences' => 3,
     ];
     $treatment = [
         'empty_buttons' => 1,
         'marks_without_background_color' => 2,
         'align_wide' => 4,
+        'align_full' => 2,
         'unmatched_engine_marker_occurrences' => 8,
     ];
     assert_eq([
         'empty_buttons' => -5,
         'marks_without_background_color' => -3,
         'align_wide' => 0,
+        'align_full' => -5,
         'unmatched_engine_marker_occurrences' => 5,
     ], HtmlFirstFidelityReport::delta($control, $treatment));
 });
@@ -387,9 +394,39 @@ test('html-first fidelity schema validates default and optional mark transition 
     assert_eq(HtmlFirstFidelityReport::MARK_METRIC_LEGACY_DEFINITION, $audit['legacy_definition']);
     assert_eq(HtmlFirstFidelityReport::MARK_METRIC_CORRECTED_DEFINITION, $audit['corrected_definition']);
     assert_eq([
-        'control' => ['legacy' => 21, 'corrected' => 15],
-        'treatment' => ['legacy' => 27, 'corrected' => 21],
+        'control' => ['legacy' => 28, 'corrected' => 21],
+        'treatment' => ['legacy' => 35, 'corrected' => 28],
     ], $audit['totals']);
+});
+
+test('html-first fidelity derives the control version and requires explicit overlay configuration', function () {
+    assert_eq([
+        'composer',
+        'update',
+        '--no-interaction',
+        '--no-progress',
+        '--prefer-dist',
+    ], HtmlFirstFidelityRunner::composerUpdateCommand());
+    assert_eq([
+        'composer',
+        'update',
+        '--with=automattic/blocks-engine-php-transformer:0.4.18',
+        '--no-interaction',
+        '--no-progress',
+        '--prefer-dist',
+    ], HtmlFirstFidelityRunner::composerUpdateCommand('0.4.18'));
+    assert_eq('0.4.18', HtmlFirstFidelityRunner::installedTransformerVersion([
+        'packages' => [[
+            'name' => 'automattic/blocks-engine-php-transformer',
+            'pretty_version' => 'v0.4.18',
+        ]],
+    ], 'control', '/control'));
+    assert_eq('/tmp/blocks-engine/php-transformer', HtmlFirstFidelityRunner::requireOverlayPath('/tmp/blocks-engine/php-transformer/'));
+
+    $missingOverlay = assert_throws(fn () => HtmlFirstFidelityRunner::requireOverlayPath(false));
+    assert_contains(HtmlFirstFidelityRunner::OVERLAY_ENV, $missingOverlay->getMessage());
+    $missingVersion = assert_throws(fn () => HtmlFirstFidelityRunner::installedTransformerVersion([], 'control', '/control'));
+    assert_contains('Composer installed no transformer version', $missingVersion->getMessage());
 });
 
 test('html-first fidelity cleanup throws when preserved treatment project cannot be restored', function () {
@@ -548,6 +585,7 @@ test('html-first fidelity rejects mismatched recorded transformer commit and tre
     $provenance = HtmlFirstFidelityRunner::treatmentTransformerProvenance(
         $trusted,
         $recorded,
+        '0.4.17',
         'treatment transformer',
         $path,
         'HEAD',
@@ -567,6 +605,7 @@ test('html-first fidelity rejects mismatched recorded transformer commit and tre
         $error = assert_throws(fn () => HtmlFirstFidelityRunner::treatmentTransformerProvenance(
             $trusted,
             $mismatch,
+            '0.4.17',
             'treatment transformer',
             $path,
             'HEAD',
@@ -576,6 +615,18 @@ test('html-first fidelity rejects mismatched recorded transformer commit and tre
         assert_contains('revision=HEAD', $error->getMessage());
         assert_contains("value={$field}", $error->getMessage());
     }
+
+    $versionMismatch = assert_throws(fn () => HtmlFirstFidelityRunner::treatmentTransformerProvenance(
+        $trusted,
+        $recorded,
+        '0.4.18',
+        'treatment transformer',
+        $path,
+        'HEAD',
+    ));
+    assert_contains('control Composer resolved=0.4.18', $versionMismatch->getMessage());
+    assert_contains('treatment overlay VERSION=', $versionMismatch->getMessage());
+    assert_contains(HtmlFirstFidelityRunner::OVERLAY_ENV, $versionMismatch->getMessage());
 });
 
 test('html-first fidelity detached site-builder HEAD gets explicit label', function () {
@@ -629,7 +680,7 @@ test('html-first fidelity detached site-builder HEAD gets explicit label', funct
     });
 });
 
-test('html-first fidelity routes report gallery and all 18 shots into one sibling staging tree', function () {
+test('html-first fidelity routes report gallery and all 21 shots into one sibling staging tree', function () {
     with_temp_dir('html-fidelity-paths-', function (string $dir) {
         $live = $dir . '/html-first-fidelity';
         $publisher = new HtmlFirstFidelityPublisher();
@@ -647,7 +698,7 @@ test('html-first fidelity routes report gallery and all 18 shots into one siblin
                     $shots[] = $paths[$side];
                 }
             }
-            assert_eq(18, count(array_unique($shots)));
+            assert_eq(21, count(array_unique($shots)));
         } finally {
             $publisher->discard($staging);
         }
@@ -832,6 +883,7 @@ test('html-first fidelity gallery renders aligned external three-column captures
         'empty_buttons' => 1,
         'marks_without_background_color' => 2,
         'align_wide' => 3,
+        'align_full' => 4,
         'layout' => [
             'content_size' => ['value' => '700px', 'unitless' => false],
             'wide_size' => ['value' => 1200, 'unitless' => true],
@@ -854,7 +906,7 @@ test('html-first fidelity gallery renders aligned external three-column captures
         ),
     ];
     $html = HtmlFirstFidelityReport::renderGallery([
-        'projects' => array_fill(0, 6, $project),
+        'projects' => array_fill(0, 7, $project),
         'totals' => [
             'control' => HtmlFirstFidelityReport::countTotals($metrics),
             'treatment' => HtmlFirstFidelityReport::countTotals($metrics),
@@ -869,7 +921,8 @@ test('html-first fidelity gallery renders aligned external three-column captures
     assert_contains('shots/silver-summit-treatment.png', $html);
     assert_true(!str_contains($html, 'data:image/'), 'large screenshots stay external');
     assert_contains('unitless', $html);
-    assert_contains('PASS · 12 zero-request resumes', $html);
+    assert_contains('align=full occurrences', $html);
+    assert_contains('PASS · 14 zero-request resumes', $html);
 });
 
 /** @return array<string,mixed> */
@@ -883,6 +936,7 @@ function html_first_fidelity_report_fixture(): array
         'empty_buttons' => 0,
         'marks_without_background_color' => 0,
         'align_wide' => 0,
+        'align_full' => 0,
         'layout' => [
             'content_size' => ['value' => '700px', 'unitless' => false],
             'wide_size' => ['value' => null, 'unitless' => false],
