@@ -364,10 +364,9 @@ CSS;
         // wins; it ships even when the design contributed no CSS at all.
         $tail = self::WORD_WRAP_CSS . "\n" . self::TABLE_BORDER_RESET_CSS . "\n" . $design;
         if (str_ends_with($style, $tail)) {
-            $reconciled = CssContrastAdjuster::apply(
-                $project,
-                'theme/style.css',
+            $reconciled = CssContrastAdjuster::reconcileHandledBackgroundCopies(
                 $style,
+                $design,
                 $markup,
                 $findings,
             );
@@ -379,10 +378,9 @@ CSS;
         }
 
         $separator = $style !== '' && !str_ends_with($style, "\n") ? "\n" : '';
-        $merged = CssContrastAdjuster::apply(
-            $project,
-            'theme/style.css',
+        $merged = CssContrastAdjuster::reconcileHandledBackgroundCopies(
             $style . $separator . $tail,
+            $design,
             $markup,
             $findings,
         );

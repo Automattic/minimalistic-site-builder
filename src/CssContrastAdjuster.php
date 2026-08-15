@@ -212,6 +212,81 @@ final class CssContrastAdjuster
     }
 
     /**
+     * Carry already-validated background moves into earlier copies of the
+     * same selector without rechecking an entire accumulated stylesheet.
+     *
+     * @param list<array<string,mixed>> $findings
+     */
+    public static function reconcileHandledBackgroundCopies(
+        string $css,
+        string $adjustedDesign,
+        string $markup,
+        array $findings,
+    ): string {
+        $designDeclarations = self::stylesheetDeclarations($adjustedDesign);
+        $designProperties = self::customProperties($designDeclarations);
+        $deliveredFindings = CssContrastCheck::check($adjustedDesign, $markup);
+        $moves = [];
+        foreach ($findings as $finding) {
+            if (($finding['status'] ?? null) !== 'fail'
+                || !is_string($finding['bg'] ?? null)) {
+                continue;
+            }
+            $delivered = self::matchingFinding($deliveredFindings, $finding);
+            if ($delivered === null || $delivered['status'] !== 'pass'
+                || !is_string($delivered['bg'] ?? null)) {
+                continue;
+            }
+            $authored = self::color(self::resolveVars($finding['bg'], $designProperties));
+            $background = self::color(self::resolveVars($delivered['bg'], $designProperties));
+            if ($authored === null || $background === null
+                || $authored['alpha'] < 1.0 || $background['alpha'] < 1.0
+                || $authored['rgb'] === $background['rgb']) {
+                continue;
+            }
+            $moves[self::backgroundMoveKey($finding['selector'], $authored['rgb'])]
+                = self::hex($background['rgb']);
+        }
+        if ($moves === []) {
+            return $css;
+        }
+
+        $declarations = self::stylesheetDeclarations($css);
+        $properties = self::customProperties($declarations);
+        $replacements = [];
+        foreach ($declarations as $declaration) {
+            if (!in_array($declaration['property'], ['background', 'background-color'], true)) {
+                continue;
+            }
+            $background = self::color(self::resolveVars($declaration['evaluation'], $properties));
+            if ($background === null || $background['alpha'] < 1.0) {
+                continue;
+            }
+            $key = self::backgroundMoveKey($declaration['selector'], $background['rgb']);
+            if (isset($moves[$key])) {
+                $replacements[$declaration['value_start']] = [
+                    'start' => $declaration['value_start'],
+                    'end' => $declaration['value_end'],
+                    'value' => $moves[$key],
+                ];
+            }
+        }
+        krsort($replacements);
+        foreach ($replacements as $replacement) {
+            $css = substr($css, 0, $replacement['start'])
+                . $replacement['value']
+                . substr($css, $replacement['end']);
+        }
+        return $css;
+    }
+
+    /** @param array{0:int,1:int,2:int} $background */
+    private static function backgroundMoveKey(string $selector, array $background): string
+    {
+        return $selector . "\0" . implode(',', $background);
+    }
+
+    /**
      * @param list<array<string,mixed>> $before
      * @param array<string,mixed> $finding
      * @return array{css:?string,background:string,ratio:?float,reason:string}
