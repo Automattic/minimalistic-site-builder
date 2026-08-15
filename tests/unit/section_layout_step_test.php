@@ -223,6 +223,61 @@ test('section layout bleeds only a direct cover and never nested or ordinary ima
     }
 });
 
+test('section layout promotes only direct CSS background bands without max-width to align:full', function () {
+    [$project, $tmp] = section_layout_project([[
+        'slug' => 'home',
+        'sections' => [['slug' => 'band', 'background' => 'base', 'vertical_density' => 'standard']],
+    ]]);
+    try {
+        $project->writeText(
+            'design/site.css',
+            '.statement{background:var(--primary);padding:4rem 0}'
+                . '.accent{background-color:#123456}'
+                . '.bounded{background:#fff;max-width:40rem}'
+                . '.nested-band{background:#000}',
+        );
+        $project->writeText(
+            'theme/parts/page-home--band.html',
+            section_layout_group(
+                ['tagName' => 'section'],
+                section_layout_group(['className' => 'statement'], 'Statement')
+                    . section_layout_group(['className' => 'accent'], 'Accent')
+                    . section_layout_group(['className' => 'bounded'], 'Bounded')
+                    . section_layout_group(
+                        ['className' => 'wrapper'],
+                        section_layout_group(['className' => 'nested-band'], 'Nested'),
+                    ),
+            ),
+        );
+
+        $step = new SectionLayoutStep();
+        $step->run($project);
+        $once = $project->readText('theme/parts/page-home--band.html');
+        $doc = BlockMarkup::parse($once);
+        $attrsByClass = [];
+        foreach ($doc->indices() as $index) {
+            $attrs = $doc->attrs($index) ?? [];
+            $className = $attrs['className'] ?? '';
+            if (!is_string($className)) {
+                continue;
+            }
+            foreach (preg_split('/[\x20\t\r\n\f]+/', trim($className), -1, PREG_SPLIT_NO_EMPTY) ?: [] as $class) {
+                $attrsByClass[$class] = $attrs;
+            }
+        }
+
+        assert_eq('full', $attrsByClass['statement']['align'] ?? null, 'background shorthand band bleeds');
+        assert_eq('full', $attrsByClass['accent']['align'] ?? null, 'background-color band bleeds');
+        assert_true(!isset($attrsByClass['bounded']['align']), 'a max-width keeps the band constrained');
+        assert_true(!isset($attrsByClass['nested-band']['align']), 'nested bands stay outside the section-root boundary');
+
+        $step->run($project);
+        assert_eq($once, $project->readText('theme/parts/page-home--band.html'), 'promotion reaches a fixed point');
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
 test('section layout removes only root inline padding and reaches a fixed point', function () {
     [$project, $tmp] = section_layout_project([[
         'slug' => 'home',
