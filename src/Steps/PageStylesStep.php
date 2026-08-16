@@ -15,6 +15,7 @@ use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
 use Automattic\SiteBuild\MarkupScan;
 use Automattic\SiteBuild\Narrator;
+use Automattic\SiteBuild\PageScope;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
@@ -134,6 +135,24 @@ CSS;
 .wp-block-table th {
   border: 0;
 }
+CSS;
+
+    /**
+     * The browser default a design page's headings start from.
+     *
+     * theme.json's `styles.elements` typography is invented from the above-fold
+     * preview, so it prescribes a family, a scale and a casing for every
+     * heading level — including the levels a design page never styles. Those
+     * headings are meant to render at the user-agent default, which is what the
+     * design itself renders. `revert` rolls the author origin back to exactly
+     * that. The selector weighs the same as theme.json's own `h1, h2, …` rule
+     * and ships later, so it wins there; every authored rule below outranks it
+     * in turn, by document order at equal weight or on specificity above it.
+     */
+    private const HEADING_BASELINE_DECLARATIONS = <<<'CSS'
+  font: revert;
+  letter-spacing: revert;
+  text-transform: revert;
 CSS;
 
     /** Hard ceiling on the appendix size; the prompt asks for under 80 lines. */
@@ -325,18 +344,21 @@ CSS;
             ];
         }
 
-        foreach (self::deliveredDesignSources($project) as $source) {
+        $carriedPages = self::deliveredDesignPages($project);
+        foreach ($carriedPages as $source => $pageSlug) {
             $html = $project->readText($source);
             foreach (self::pageCssChunks($html) as $index => $pageCss) {
+                $origin = $source . ' style[data-page-css]#' . ($index + 1);
                 $css = self::scrubAndNeutralizeChunk(
                     $pageCss,
-                    $source . ' style[data-page-css]#' . ($index + 1),
+                    $origin,
                     $sectionRootIds,
                     $warnings,
                 );
-                if ($css !== '') {
-                    $authorChunks[] = $css;
+                if ($css === '') {
+                    continue;
                 }
+                $authorChunks[] = self::scopeChunkToPage($css, $pageSlug, $origin, $warnings);
             }
         }
 
@@ -362,6 +384,7 @@ CSS;
         // replace stale receipts from prior tails instead of accumulating
         // warnings about CSS bytes no longer delivered.
         $project->replaceWarnings('page-styles', $warnings);
+        $baseline = self::headingBaselineCss(array_values($carriedPages));
         $designChunks = array_merge(
             $beforeAuthorChunks,
             $authorChunks,
@@ -375,6 +398,11 @@ CSS;
         // Contrast is a judgment on the DESIGN's colors: the wrap policy has
         // none, and including it would only add unverified-selector findings.
         $findings = CssContrastCheck::check($design, $markup);
+        // A resumed build hands this step the tail an earlier revision of the
+        // code merged. Appending a second one leaves both in the cascade, and
+        // a stale copy of a sibling page's rules is exactly the foreign CSS
+        // this step exists to keep off the page — so the merge starts from the
+        // bytes that were there before any merge, every time.
         $currentStyle = $project->readText('theme/style.css');
         $style = CssContrastAdjuster::restoreSupersededForegrounds(
             $project,
@@ -390,8 +418,12 @@ CSS;
             $findings,
         );
         // Wrap policy first, so a design that deliberately hyphenates still
-        // wins; it ships even when the design contributed no CSS at all.
-        $tail = self::WORD_WRAP_CSS . "\n" . self::TABLE_BORDER_RESET_CSS . "\n" . $design;
+        // wins; the foundation ships even when the design contributed no CSS
+        // at all. The heading baseline joins it rather than the design chunks:
+        // it declares no color, so the contrast pass above has nothing to say
+        // about it beyond an unverified-selector row.
+        $tail = self::WORD_WRAP_CSS . "\n" . self::TABLE_BORDER_RESET_CSS . "\n"
+            . ($baseline === '' ? '' : $baseline . "\n") . $design;
         $separator = $style !== '' && !str_ends_with($style, "\n") ? "\n" : '';
         $merged = CssContrastAdjuster::reconcileHandledBackgroundCopies(
             $style . $separator . $tail,
@@ -3072,8 +3104,26 @@ CSS;
         );
     }
 
-    /** @return list<string> */
+    /**
+     * Design sources of the pages that still carry a design, for callers that
+     * only need the artifacts and not which page each one belongs to.
+     *
+     * @return list<string>
+     */
     private static function deliveredDesignSources(Project $project): array
+    {
+        return array_keys(self::deliveredDesignPages($project));
+    }
+
+    /**
+     * Design source of every page that still carries a design, keyed by source
+     * and sorted by it, with the semantic page slug — the `post_name` the
+     * content plugin creates the page with, and so the key its scope class is
+     * built from — as the value.
+     *
+     * @return array<string,string> design source path => semantic page slug
+     */
+    private static function deliveredDesignPages(Project $project): array
     {
         $pages = $project->readJson('pages.json')['pages'] ?? null;
         if (!is_array($pages) || $pages === []) {
@@ -3092,12 +3142,183 @@ CSS;
             if ($project->exists("design/{$artifactSlug}.failed")) {
                 continue;
             }
-            $source = "design/{$artifactSlug}.html";
-            $sources[$source] = true;
+            $sources["design/{$artifactSlug}.html"] = $slug;
         }
-        $sources = array_keys($sources);
-        sort($sources, SORT_STRING);
+        ksort($sources, SORT_STRING);
         return $sources;
+    }
+
+    /**
+     * The browser heading baseline, covering every page that carries a design.
+     *
+     * Pages routed through the legacy tail carry no design CSS and depend on
+     * theme.json for their headings, so the reset never reaches them.
+     *
+     * @param list<string> $pageSlugs
+     */
+    public static function headingBaselineCss(array $pageSlugs): string
+    {
+        if ($pageSlugs === []) {
+            return '';
+        }
+        $scopes = implode(
+            ', ',
+            array_map(
+                static fn (string $slug): string => '.' . PageScope::bodyClass($slug),
+                $pageSlugs,
+            ),
+        );
+
+        return "/* Headings the design page never styles render at the browser default. */\n"
+            . ":where({$scopes}) :is(h1, h2, h3, h4, h5, h6) {\n"
+            . self::HEADING_BASELINE_DECLARATIONS . "\n}\n";
+    }
+
+    /**
+     * Scope one page's authored CSS to that page, keeping the unscoped bytes
+     * and warning when the rewrite cannot be proven safe: a page that renders
+     * with a sibling's rules is still better than a page with no CSS at all.
+     *
+     * @param list<string> $warnings
+     */
+    private static function scopeChunkToPage(
+        string $css,
+        string $pageSlug,
+        string $source,
+        array &$warnings,
+    ): string {
+        $error = null;
+        $scoped = self::scopeRuleList($css, PageScope::bodyClass($pageSlug), $error);
+        if ($scoped !== null) {
+            return $scoped;
+        }
+        $warnings[] = sprintf(
+            'source=%s; authored_value=%s; delivered_value=%s; disposition=%s',
+            $source,
+            json_encode(
+                'page CSS scoped to the ' . $pageSlug . ' page',
+                JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE,
+            ),
+            'delivered site-wide',
+            'kept unscoped page CSS (' . ($error ?? 'unrewritable stylesheet') . ')',
+        );
+        return $css;
+    }
+
+    /**
+     * Rewrite a stylesheet so every qualified rule only matches inside one
+     * page, recursing through grouping at-rules.
+     *
+     * `:where()` weighs nothing, so a scoped branch keeps exactly the
+     * specificity the design wrote and the authored cascade survives intact.
+     * Rules whose subject is the document root stay global: they carry the
+     * custom properties the rest of the stylesheet reads. Non-grouping at-rules
+     * — `@keyframes` above all, whose `from`/`to` are not element selectors —
+     * are carried verbatim. Returns null on syntax this bounded rewriter cannot
+     * prove safe.
+     */
+    private static function scopeRuleList(
+        string $css,
+        string $scopeClass,
+        ?string &$error,
+    ): ?string {
+        $length = strlen($css);
+        $offset = 0;
+        $statementStart = 0;
+        $out = '';
+        $state = CssSyntaxScanner::state();
+
+        while ($offset < $length) {
+            $topLevel = CssSyntaxScanner::isTopLevel($state);
+            $byte = $css[$offset];
+            if ($topLevel && $byte === '}') {
+                $error = "unexpected closing brace at byte {$offset}";
+                return null;
+            }
+            if ($topLevel && $byte === ';') {
+                $statement = substr($css, $statementStart, $offset + 1 - $statementStart);
+                if (!self::isTriviaOrAtRuleStatement($statement)) {
+                    $error = "unexpected top-level statement at byte {$statementStart}";
+                    return null;
+                }
+                $out .= $statement;
+                $offset++;
+                $statementStart = $offset;
+                $state = CssSyntaxScanner::state();
+                continue;
+            }
+            if ($topLevel && $byte === '{') {
+                $close = self::matchingBrace($css, $offset, $error);
+                if ($close === null) {
+                    return null;
+                }
+                $prelude = substr($css, $statementStart, $offset - $statementStart);
+                $body = substr($css, $offset + 1, $close - $offset - 1);
+                $atRule = self::atRuleName($prelude);
+                if ($atRule !== null) {
+                    if (self::isGroupingAtRule($atRule)) {
+                        $body = self::scopeRuleList($body, $scopeClass, $error);
+                        if ($body === null) {
+                            return null;
+                        }
+                    }
+                    $out .= $prelude . '{' . $body . '}';
+                } else {
+                    $branches = self::splitSelectorList($prelude, $error);
+                    if ($branches === null) {
+                        return null;
+                    }
+                    $scoped = [];
+                    foreach ($branches as $branch) {
+                        $scoped[] = self::scopeSelectorBranch($branch, $scopeClass);
+                    }
+                    $out .= implode(',', $scoped) . '{' . $body . '}';
+                }
+                $offset = $close + 1;
+                $statementStart = $offset;
+                $state = CssSyntaxScanner::state();
+                continue;
+            }
+
+            $next = CssSyntaxScanner::consume($css, $offset, $state);
+            if ($next === null) {
+                $error = "invalid CSS escape or delimiter at byte {$offset}";
+                return null;
+            }
+            $offset = $next;
+        }
+
+        if (!CssSyntaxScanner::isComplete($state)) {
+            $error = 'unterminated CSS string, comment, or function';
+            return null;
+        }
+        $tail = substr($css, $statementStart);
+        if (!self::isCssTrivia($tail)) {
+            $error = "unterminated CSS rule at byte {$statementStart}";
+            return null;
+        }
+        return $out . $tail;
+    }
+
+    /**
+     * The scope class lands on `<body>`, so a rule whose subject is the body
+     * takes it on the compound itself; everything else takes it as an
+     * ancestor. `html` and `:root` are left alone — a page chunk that sets a
+     * custom property there is speaking for the whole document.
+     */
+    private static function scopeSelectorBranch(string $branch, string $scopeClass): string
+    {
+        [$trivia, $rest] = self::leadingTriviaAndRest($branch);
+        $selector = rtrim($rest);
+        $trailing = substr($rest, strlen($selector));
+        if ($selector === '' || preg_match('/\A(?:html|:root)(?![\w-])/i', $selector) === 1) {
+            return $branch;
+        }
+        if (preg_match('/\Abody(?![\w-])/i', $selector) === 1) {
+            return $trivia . 'body:where(.' . $scopeClass . ')'
+                . substr($selector, 4) . $trailing;
+        }
+        return $trivia . ':where(.' . $scopeClass . ') ' . $selector . $trailing;
     }
 
     /**

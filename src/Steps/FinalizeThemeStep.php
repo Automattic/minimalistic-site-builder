@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\HeaderBehavior;
 use Automattic\SiteBuild\Narrator;
+use Automattic\SiteBuild\PageScope;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\ShapeMarkup;
@@ -296,6 +297,7 @@ final class FinalizeThemeStep implements Step
         bool $shapeKit,
     ): string {
         $slug = ProjectStore::slugify($slug);
+        $scopePrefix = PageScope::CLASS_PREFIX;
 
         $motionEnqueues = '';
         $styleDeps = 'array()';
@@ -355,6 +357,20 @@ final class FinalizeThemeStep implements Step
             // Mirror the theme stylesheets into the editor so previews match the front end.
             add_action('after_setup_theme', function () {
                 {$editorStyles}
+            });
+
+            // Carried design CSS is authored one page at a time; page-styles scopes
+            // each page's chunk to this class, so the front end has to publish it.
+            add_filter('body_class', function (\$classes) {
+                \$id = get_queried_object_id();
+                if (!is_singular() || !\$id) {
+                    return \$classes;
+                }
+                \$slug = get_post_field('post_name', \$id);
+                if (is_string(\$slug) && \$slug !== '') {
+                    \$classes[] = sanitize_html_class('{$scopePrefix}' . \$slug);
+                }
+                return \$classes;
             });
 
             // Google Fonts loading lives in its own generated module.

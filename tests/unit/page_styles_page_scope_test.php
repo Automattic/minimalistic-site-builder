@@ -197,6 +197,38 @@ test('carried design pages get the browser heading baseline before any author CS
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('a resumed merge replaces the tail an earlier revision of the merge left behind', function () {
+    [$project, $tmp] = ps_scope_project('ps_scope_resume_', 'h2{font-size:9rem;}', ".site{display:grid;}\n");
+    $scaffold = $project->readText('theme/style.css');
+    // What a build on older code left in the theme: the same foundation, with
+    // that revision's unscoped design CSS behind it.
+    $project->writeText(
+        'theme/style.css',
+        $scaffold . PageStylesStep::WORD_WRAP_CSS . "\n" . PageStylesStep::TABLE_BORDER_RESET_CSS
+            . "\n.site{display:grid;}\nh2{font-size:9rem;}"
+    );
+
+    ps_scope_step()->run($project);
+
+    $style = $project->readText('theme/style.css');
+    assert_eq(
+        1,
+        substr_count($style, PageStylesStep::WORD_WRAP_CSS),
+        'the stale merge is replaced, not stacked under a second one'
+    );
+    foreach (ps_scope_rules($style) as $rule) {
+        if (!str_contains($rule['body'], 'font-size:9rem')) {
+            continue;
+        }
+        assert_contains(
+            PageScope::bodyClass('about'),
+            $rule['selector'],
+            'no unscoped copy of the inner page rule survives the resume'
+        );
+    }
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('finalize-theme publishes the page scope class WordPress needs on the body', function () {
     $tmp = sys_get_temp_dir() . '/ps_scope_functions_' . uniqid();
     $project = (new ProjectStore($tmp))->create('Forno Vero');
