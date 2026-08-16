@@ -1,5 +1,14 @@
 [
     {
+        "project": "portfolio2",
+        "slug": "portfolio2",
+        "asset": "portfolio2-playground-20260816T234348Z.zip",
+        "artifact_url": "https://raw.githubusercontent.com/Automattic/minimalistic-site-builder/playground-artifacts/portfolio2-playground-20260816T234348Z.zip",
+        "playground_url": "https://playground.wordpress.net/?blueprint-url=https%3A%2F%2Fraw.githubusercontent.com%2FAutomattic%2Fminimalistic-site-builder%2Fplayground-artifacts%2Fportfolio2-playground-20260816T234348Z.zip",
+        "size_bytes": 11282308,
+        "created_at": "2026-08-16T23:43:52+00:00"
+    },
+    {
         "project": "atlas12",
         "slug": "atlas12",
         "asset": "atlas12-playground-20260807T024717Z.zip",
