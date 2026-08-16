@@ -754,6 +754,62 @@ CSS;
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('site CSS path restores authored block-axis spacing after WordPress layout resets', function () {
+    [$project, $tmp] = ps_project('builder_ps_vertical_rhythm_');
+    $project->writeText(TransformArtifacts::SITE_CSS, <<<'CSS'
+.flow-card {
+    display: flex;
+    margin: 1rem 2rem 3rem;
+    padding: 4rem 5rem 6rem;
+    inline-size: 20rem;
+}
+section {
+    padding-block: 7rem 8rem;
+}
+CSS);
+    $project->writeJson('pages.json', ['pages' => [['slug' => 'home', 'front' => true]]]);
+    $project->writeText(
+        'design/home.html',
+        '<main><section id="story" style="padding-top:9rem;padding-bottom:10rem">'
+            . '<div class="flow-card">Story</div></section></main>',
+    );
+    $project->writeText(
+        'plugin/pages/home.html',
+        '<section id="story"><div class="wp-block-group is-layout-flow">'
+            . '<div class="flow-card">Story</div></div></section>',
+    );
+
+    $step = ps_html_first_step(new FakeLlm());
+    $step->run($project);
+
+    $style = $project->readText('theme/style.css');
+    assert_contains(
+        'Preserve authored block-axis spacing against WordPress layout resets',
+        $style,
+        'the deterministic author-rhythm tail is present',
+    );
+    $card = implode("\n", ps_css_bodies_for_selector($style, ':root:root .flow-card'));
+    assert_contains('margin-top: 1rem', $card, 'authored block-start margin is restored');
+    assert_contains('margin-bottom: 3rem', $card, 'authored block-end margin is restored');
+    assert_contains('padding-top: 4rem', $card, 'authored block-start padding is restored');
+    assert_contains('padding-bottom: 6rem', $card, 'authored block-end padding is restored');
+    assert_true(!str_contains($card, '2rem'), 'inline-axis margin is not copied into the rhythm tail');
+    assert_true(!str_contains($card, '5rem'), 'inline-axis padding is not copied into the rhythm tail');
+    assert_true(!str_contains($card, 'inline-size'), 'non-spacing declarations are not copied');
+
+    $root = implode("\n", ps_css_bodies_for_selector($style, ':root:root #story'));
+    assert_contains('padding-top: 9rem !important', $root, 'source inline root padding wins the plan preset');
+    assert_contains('padding-bottom: 10rem !important', $root, 'source inline root padding remains exact');
+    assert_true(
+        strpos($style, ':root:root section:where(#story)') < strpos($style, ':root:root #story'),
+        'source inline spacing follows stylesheet spacing just as it did in the design',
+    );
+
+    $step->run($project);
+    assert_eq($style, $project->readText('theme/style.css'), 'author-rhythm restoration reaches a fixed point');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('site CSS path matches tag and class selectors only against delivered section roots', function () {
     [$project, $tmp] = ps_project('builder_ps_foundation_root_elements_');
     $siteCss = <<<'CSS'
