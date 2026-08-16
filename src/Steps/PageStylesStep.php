@@ -155,6 +155,36 @@ CSS;
   text-transform: revert;
 CSS;
 
+    /**
+     * Marks a chrome template-part reference whose part roots the same
+     * landmark the reference itself wraps that part in. AssemblePagesStep
+     * stamps it; NESTED_LANDMARK_CSS is what makes it mean something.
+     */
+    public const NESTED_LANDMARK_CLASS = 'chrome-nested-landmark';
+
+    /**
+     * A chrome template part renders its own <header>/<footer> wrapper, and
+     * the transformed part sometimes roots that same landmark. The design's
+     * own `header{…}` rule reaches this stylesheet verbatim as author CSS, so
+     * it then matches BOTH boxes and every box-model declaration in it is
+     * applied twice: the header's authored padding opens at double height and
+     * its content sits at double the authored inset. The authored landmark
+     * inside keeps that box model; the wrapper around it contributes none.
+     *
+     * Paint is deliberately left alone. It is idempotent across nested boxes,
+     * and for a header whose top state is transparent this wrapper is the only
+     * surface the authored background reaches. The class beats a bare element
+     * selector on specificity, so cascade order does not matter here.
+     */
+    public const NESTED_LANDMARK_CSS = <<<'CSS'
+/* Nested chrome landmark: the authored one inside owns the box model. */
+.chrome-nested-landmark {
+  padding: 0;
+  border: 0;
+  margin-block: 0;
+}
+CSS;
+
     /** Hard ceiling on the appendix size; the prompt asks for under 80 lines. */
     private const MAX_LINES = 100;
     private const LOG_FILE = 'page-styles.log';
@@ -419,10 +449,12 @@ CSS;
         );
         // Wrap policy first, so a design that deliberately hyphenates still
         // wins; the foundation ships even when the design contributed no CSS
-        // at all. The heading baseline joins it rather than the design chunks:
-        // it declares no color, so the contrast pass above has nothing to say
-        // about it beyond an unverified-selector row.
+        // at all. The nested-landmark reset joins the other foundation resets;
+        // the heading baseline joins them rather than the design chunks,
+        // because it declares no color and the contrast pass above has nothing
+        // to say about it beyond an unverified-selector row.
         $tail = self::WORD_WRAP_CSS . "\n" . self::TABLE_BORDER_RESET_CSS . "\n"
+            . self::NESTED_LANDMARK_CSS . "\n"
             . ($baseline === '' ? '' : $baseline . "\n") . $design;
         $separator = $style !== '' && !str_ends_with($style, "\n") ? "\n" : '';
         $merged = CssContrastAdjuster::reconcileHandledBackgroundCopies(
