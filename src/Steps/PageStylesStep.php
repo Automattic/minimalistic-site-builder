@@ -412,9 +412,12 @@ CSS;
 
     /**
      * Remove inline-axis padding only from selectors whose final subject is a
-     * delivered page section root. Scrubbing stays first so unsafe generated
-     * declarations never reach this structural pass. A malformed stylesheet
-     * keeps its scrubbed pre-neutralization bytes and records the degradation.
+     * delivered page section root, except roots whose constrained flow is
+     * explicitly left-justified. Those roots need their authored padding as
+     * the start inset for narrower children. Scrubbing stays first so unsafe
+     * generated declarations never reach this structural pass. A malformed
+     * stylesheet keeps its scrubbed pre-neutralization bytes and records the
+     * degradation.
      *
      * @param array{ids:array<string,true>,roots:list<\DOMElement>,elements:list<\DOMElement>} $sectionRootIds
      * @param list<string>       $warnings
@@ -508,6 +511,10 @@ CSS;
             }
             foreach ($xpath->query('/html/body[@id="page-styles-page-root"]/section') ?: [] as $section) {
                 if (!$section instanceof \DOMElement) {
+                    continue;
+                }
+                $classes = preg_split('/\s+/', trim($section->getAttribute('class'))) ?: [];
+                if (in_array(SectionLayoutStep::AUTHOR_WIDTH_START_CLASS, $classes, true)) {
                     continue;
                 }
                 $roots[] = $section;
