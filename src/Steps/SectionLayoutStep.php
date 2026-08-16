@@ -3,7 +3,9 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\BlocksEngine\PhpTransformer\HtmlToBlocks\Style\CssValueSplitter;
 use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\CssChecks;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
@@ -17,9 +19,11 @@ use Automattic\SiteBuild\Units\GeneratedMarkup;
  * pass runs immediately afterwards and owns only the inline axis: section roots
  * become constrained, root-authored horizontal padding is removed, and direct
  * cover children, CSS-authored background bands, or CSS-owned out-of-flow
- * children opt into full bleed. Covers also carry the constrained-layout class
- * bridge their inner container needs. Nested blocks stay outside this ownership
- * boundary.
+ * children opt into full bleed. In-flow children with an authored width retain
+ * their authored start, centre, or end alignment instead of inheriting
+ * WordPress centring; start-aligned children keep the root's authored inset.
+ * Covers also carry the constrained-layout class bridge their inner container
+ * needs. Nested blocks stay outside this ownership boundary.
  *
  * Rewrites are transactional per page. A malformed generated section keeps
  * that page's pre-transformation bytes, records one durable warning, and does
@@ -27,6 +31,8 @@ use Automattic\SiteBuild\Units\GeneratedMarkup;
  */
 final class SectionLayoutStep implements Step
 {
+    public const AUTHOR_WIDTH_START_CLASS = 'blocks-engine-author-width-start';
+
     /** Inline CSS declarations owned by the theme's root gutter. */
     private const ROOT_INLINE_PROPERTIES = [
         'padding-inline',
@@ -63,6 +69,7 @@ final class SectionLayoutStep implements Step
         $wideSelectors = self::wideSelectorSet($project);
         $fullBleedClasses = self::fullBleedClassSet($project);
         $outOfFlowClasses = self::outOfFlowClassSet($project);
+        $authoredWidthDeclarations = self::authoredWidthDeclarations($project);
         $themeWrite = null;
         if ($project->exists('theme/theme.json') && $project->exists('design/site.css')) {
             $authoredTheme = $project->readJson('theme/theme.json');
@@ -93,6 +100,7 @@ final class SectionLayoutStep implements Step
                         $wideSelectors,
                         $fullBleedClasses,
                         $outOfFlowClasses,
+                        $authoredWidthDeclarations,
                     );
                     $pageWrites[$currentPath] = $rewritten;
                     if ($rewritten !== $entry['markup']) {
@@ -150,6 +158,7 @@ final class SectionLayoutStep implements Step
      * @param list<list<array{tag:?string,id:?string,classes:list<string>}>> $wideSelectors
      * @param array<string,true> $fullBleedClasses class token => true from design/site.css
      * @param array<string,true> $outOfFlowClasses class token => true from design/site.css
+     * @param list<array<string,mixed>> $authoredWidthDeclarations
      */
     private static function rewriteSection(
         string $markup,
@@ -157,15 +166,35 @@ final class SectionLayoutStep implements Step
         array $wideSelectors = [],
         array $fullBleedClasses = [],
         array $outOfFlowClasses = [],
+        array $authoredWidthDeclarations = [],
     ): string
     {
         $doc = self::validatedDocument($markup, $label);
         $root = (int) $doc->topLevel();
         $attrs = $doc->attrs($root) ?? [];
         $cssOwnedRoot = GeneratedMarkup::hasCssOwnedLayoutMarker($attrs);
+        $authorWidthTargets = $authoredWidthDeclarations === []
+            ? ['start' => [], 'escape' => []]
+            : self::authorWidthAlignmentTargets(
+                $doc,
+                $root,
+                $authoredWidthDeclarations,
+                $outOfFlowClasses,
+            );
 
         $attrs['layout'] = ['type' => 'constrained'];
+        if ($authorWidthTargets['start'] !== []) {
+            // WordPress centres ordinary constrained children by default.
+            // Start justification restores normal authored flow inside the
+            // root's content inset without making those children full bleed.
+            $attrs['layout']['justifyContent'] = 'left';
+        }
         self::constrainCommentClass($attrs, $label);
+        self::toggleCommentClass(
+            $attrs,
+            self::AUTHOR_WIDTH_START_CLASS,
+            $authorWidthTargets['start'] !== [],
+        );
         self::stripCommentInlinePadding($attrs);
         $doc->setAttrs($root, $attrs);
 
@@ -207,6 +236,20 @@ final class SectionLayoutStep implements Step
                         $doc->setAttrs($child, $childAttrs);
                     }
                     break;
+                }
+            }
+        }
+
+        // A left auto margin expresses end alignment, which constrained start
+        // justification cannot represent. Only those authored-width children
+        // escape the constrained rule; start-aligned widths keep its inset and
+        // two auto margins retain WordPress's default centring.
+        if ($authorWidthTargets['escape'] !== []) {
+            foreach ($authorWidthTargets['escape'] as $target) {
+                $targetAttrs = $doc->attrs($target) ?? [];
+                if (!isset($targetAttrs['align']) || $targetAttrs['align'] === 'wide') {
+                    $targetAttrs['align'] = 'full';
+                    $doc->setAttrs($target, $targetAttrs);
                 }
             }
         }
@@ -310,6 +353,25 @@ final class SectionLayoutStep implements Step
             PREG_SPLIT_NO_EMPTY,
         ) ?: [];
         $attrs['className'] = self::constrainedClassTokens($tokens);
+    }
+
+    /** @param array<mixed> $attrs */
+    private static function toggleCommentClass(array &$attrs, string $token, bool $enabled): void
+    {
+        $tokens = preg_split(
+            '/[\x20\t\r\n\f]+/',
+            trim((string) ($attrs['className'] ?? '')),
+            -1,
+            PREG_SPLIT_NO_EMPTY,
+        ) ?: [];
+        $tokens = array_values(array_filter(
+            $tokens,
+            static fn (string $candidate): bool => $candidate !== $token,
+        ));
+        if ($enabled) {
+            $tokens[] = $token;
+        }
+        $attrs['className'] = implode(' ', $tokens);
     }
 
     /** @param array<mixed> $attrs */
@@ -476,6 +538,261 @@ final class SectionLayoutStep implements Step
             $set[$token] = true;
         }
         return $set;
+    }
+
+    /**
+     * Relevant authored declarations with enough selector and cascade facts
+     * to decide whether a direct constrained child owns its alignment.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private static function authoredWidthDeclarations(Project $project): array
+    {
+        if (!$project->exists('design/site.css')) {
+            return [];
+        }
+
+        $relevant = [
+            'all',
+            'width',
+            'max-width',
+            'margin',
+            'margin-inline',
+            'margin-left',
+            'margin-right',
+            'margin-inline-start',
+            'margin-inline-end',
+        ];
+        $parsed = [];
+        foreach (CssChecks::scanDeclarations($project->readText('design/site.css')) as $declaration) {
+            $property = strtolower($declaration['property']);
+            if ($declaration['kind'] !== 'style'
+                || !$declaration['structurallySafe']
+                || !in_array($property, $relevant, true)
+            ) {
+                continue;
+            }
+            $priority = CssChecks::splitDeclarationPriority($declaration['value']);
+            foreach (CssValueSplitter::splitTopLevel($declaration['context'], [',']) as $selectorText) {
+                $selector = self::parseWideSelector(trim($selectorText));
+                if ($selector === null) {
+                    continue;
+                }
+                $parsed[] = [
+                    'selector' => $selector,
+                    'property' => $property,
+                    'value' => $priority['value'],
+                    'important' => $priority['important'],
+                    'specificity' => self::selectorSpecificity($selector),
+                    'order' => $declaration['start'],
+                    // Static block alignment cannot represent conditional or
+                    // nested CSS safely. A matching row makes that target
+                    // unprovable and therefore ineligible for promotion.
+                    'conditional' => $declaration['ancestors'] !== [],
+                ];
+            }
+        }
+        return $parsed;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $declarations
+     * @param array<string,true> $outOfFlowClasses
+     * @return array{start:list<int>,escape:list<int>}
+     */
+    private static function authorWidthAlignmentTargets(
+        BlockMarkup $doc,
+        int $root,
+        array $declarations,
+        array $outOfFlowClasses,
+    ): array {
+        $targets = ['start' => [], 'escape' => []];
+        foreach ($doc->children($root) as $child) {
+            if (array_intersect_key(
+                array_fill_keys(self::elementClassTokens($doc, $child), true),
+                $outOfFlowClasses,
+            ) !== []) {
+                continue;
+            }
+            $alignment = self::authoredWidthAlignment(
+                $declarations,
+                static fn (array $declaration): bool => self::selectorMatchesBlock(
+                    $doc,
+                    $child,
+                    $declaration['selector'],
+                ),
+            );
+            if ($alignment !== null) {
+                $targets[$alignment][] = $child;
+            }
+        }
+        return $targets;
+    }
+
+    /**
+     * Resolve the relevant cascade for one block.
+     *
+     * @param list<array<string,mixed>> $declarations
+     * @param callable(array<string,mixed>):bool $matches
+     * @return 'start'|'escape'|null
+     */
+    private static function authoredWidthAlignment(array $declarations, callable $matches): ?string
+    {
+        $states = [
+            'width' => null,
+            'max-width' => null,
+            'margin-left' => null,
+            'margin-right' => null,
+        ];
+        $unprovable = false;
+        foreach ($declarations as $declaration) {
+            if (!$matches($declaration)) {
+                continue;
+            }
+            if ($declaration['conditional']) {
+                $unprovable = true;
+                continue;
+            }
+            foreach (self::expandedAlignmentValues($declaration) as $property => $value) {
+                $candidate = [
+                    'value' => $value,
+                    'important' => $declaration['important'],
+                    'specificity' => $declaration['specificity'],
+                    'order' => $declaration['order'],
+                ];
+                if (self::alignmentCandidateOutranks($candidate, $states[$property])) {
+                    $states[$property] = $candidate;
+                }
+            }
+        }
+        if ($unprovable) {
+            return null;
+        }
+
+        $ownsWidth = ($states['width']['value'] ?? null) === 'bound'
+            || ($states['max-width']['value'] ?? null) === 'bound';
+        $left = $states['margin-left']['value'] ?? 'non-auto';
+        $right = $states['margin-right']['value'] ?? 'non-auto';
+        if (!$ownsWidth || $left === 'unknown' || $right === 'unknown'
+            || ($left === 'auto' && $right === 'auto')
+        ) {
+            return null;
+        }
+        return $left === 'auto' ? 'escape' : 'start';
+    }
+
+    /**
+     * @param array{property:string,value:string} $declaration
+     * @return array<string,'bound'|'none'|'auto'|'non-auto'|'unknown'>
+     */
+    private static function expandedAlignmentValues(array $declaration): array
+    {
+        $property = $declaration['property'];
+        $value = trim($declaration['value']);
+        if ($property === 'width' || $property === 'max-width') {
+            return [$property => self::widthValueState($property, $value)];
+        }
+        if ($property === 'all') {
+            return array_fill_keys(
+                ['width', 'max-width', 'margin-left', 'margin-right'],
+                'unknown',
+            );
+        }
+
+        if ($property === 'margin-left' || $property === 'margin-inline-start') {
+            return ['margin-left' => self::marginValueState($value)];
+        }
+        if ($property === 'margin-right' || $property === 'margin-inline-end') {
+            return ['margin-right' => self::marginValueState($value)];
+        }
+
+        $parts = CssValueSplitter::splitTopLevelWhitespace($value);
+        if ($property === 'margin-inline') {
+            if (count($parts) < 1 || count($parts) > 2) {
+                return ['margin-left' => 'unknown', 'margin-right' => 'unknown'];
+            }
+            return [
+                'margin-left' => self::marginValueState($parts[0]),
+                'margin-right' => self::marginValueState($parts[1] ?? $parts[0]),
+            ];
+        }
+        if ($property !== 'margin' || count($parts) < 1 || count($parts) > 4) {
+            return [];
+        }
+        [$left, $right] = match (count($parts)) {
+            1 => [$parts[0], $parts[0]],
+            2, 3 => [$parts[1], $parts[1]],
+            4 => [$parts[3], $parts[1]],
+        };
+        return [
+            'margin-left' => self::marginValueState($left),
+            'margin-right' => self::marginValueState($right),
+        ];
+    }
+
+    /** @return 'bound'|'none'|'unknown' */
+    private static function widthValueState(string $property, string $value): string
+    {
+        $keyword = strtolower($value);
+        if (in_array($keyword, ['initial', 'unset'], true)
+            || ($property === 'width' && $keyword === 'auto')
+            || ($property === 'max-width' && $keyword === 'none')
+        ) {
+            return 'none';
+        }
+        if ($value === ''
+            || in_array($keyword, ['inherit', 'revert', 'revert-layer'], true)
+            || preg_match('/\A(?:var|env)\s*\(/i', $value) === 1
+        ) {
+            return 'unknown';
+        }
+        return 'bound';
+    }
+
+    /** @return 'auto'|'non-auto'|'unknown' */
+    private static function marginValueState(string $value): string
+    {
+        $keyword = strtolower(trim($value));
+        if ($keyword === 'auto') {
+            return 'auto';
+        }
+        if ($keyword === ''
+            || in_array($keyword, ['inherit', 'revert', 'revert-layer'], true)
+            || preg_match('/\A(?:var|env)\s*\(/i', $keyword) === 1
+        ) {
+            return 'unknown';
+        }
+        return 'non-auto';
+    }
+
+    /** @param list<array{tag:?string,id:?string,classes:list<string>}> $selector */
+    private static function selectorSpecificity(array $selector): int
+    {
+        $specificity = 0;
+        foreach ($selector as $compound) {
+            $specificity += ($compound['id'] === null ? 0 : 100)
+                + count($compound['classes']) * 10
+                + ($compound['tag'] === null ? 0 : 1);
+        }
+        return $specificity;
+    }
+
+    /**
+     * @param array{value:string,important:bool,specificity:int,order:int} $candidate
+     * @param array{value:string,important:bool,specificity:int,order:int}|null $winner
+     */
+    private static function alignmentCandidateOutranks(array $candidate, ?array $winner): bool
+    {
+        if ($winner === null) {
+            return true;
+        }
+        if ($candidate['important'] !== $winner['important']) {
+            return $candidate['important'];
+        }
+        if ($candidate['specificity'] !== $winner['specificity']) {
+            return $candidate['specificity'] > $winner['specificity'];
+        }
+        return $candidate['order'] > $winner['order'];
     }
 
     /**

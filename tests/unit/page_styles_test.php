@@ -806,6 +806,39 @@ CSS;
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('site CSS path preserves the authored inset for a left-justified section root', function () {
+    [$project, $tmp] = ps_project('builder_ps_author_width_inset_');
+    $project->writeText(
+        TransformArtifacts::SITE_CSS,
+        '.foundation-section{padding:1rem 2rem 3rem 4rem}',
+    );
+    $project->writeJson('pages.json', ['pages' => [['slug' => 'home', 'front' => true]]]);
+    $project->writeText('design/home.html', '<main></main>');
+    $project->writeText(
+        'plugin/pages/home.html',
+        '<section id="authored" class="foundation-section blocks-engine-author-width-start">Authored</section>'
+            . '<section id="ordinary" class="foundation-section">Ordinary</section>',
+    );
+
+    $step = ps_html_first_step(new FakeLlm());
+    $step->run($project);
+
+    $style = $project->readText('theme/style.css');
+    assert_contains(
+        'padding:1rem 2rem 3rem 4rem',
+        implode("\n", ps_css_bodies_for_selector(
+            $style,
+            '.foundation-section:not(:where(#ordinary))',
+        )),
+        'left-justified root keeps its authored inline inset',
+    );
+    ps_assert_no_root_inline_padding($style, '.foundation-section:where(#ordinary)');
+
+    $step->run($project);
+    assert_eq($style, $project->readText('theme/style.css'), 'selective inset preservation reaches a fixed point');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('site CSS path strips unsupported trailing pseudos before matching delivered section roots', function () {
     [$project, $tmp] = ps_project('builder_ps_foundation_trailing_pseudo_');
     $siteCss = <<<'CSS'

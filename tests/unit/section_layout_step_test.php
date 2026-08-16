@@ -85,7 +85,7 @@ test('section layout constrains CSS-owned roots and exempts only their direct ou
         $marker = 'blocks-engine-css-owned-layout';
         $project->writeText(
             'design/site.css',
-            '.hero-media{position:absolute;inset:0}'
+            '.hero-media{position:absolute;inset:0;max-width:44rem}'
                 . '.scrim{background:black}.scrim{position:fixed;inset:0}'
                 . '.in-flow{position:relative}'
                 . '.nested-layer{position:absolute;inset:0}'
@@ -344,7 +344,7 @@ test('section layout promotes only direct CSS background bands without max-width
             'design/site.css',
             '.statement{background:var(--primary);padding:4rem 0}'
                 . '.accent{background-color:#123456}'
-                . '.bounded{background:#fff;max-width:40rem}'
+                . '.bounded{background:#fff;max-width:40rem;margin:0 auto}'
                 . '.nested-band{background:#000}',
         );
         $project->writeText(
@@ -379,7 +379,7 @@ test('section layout promotes only direct CSS background bands without max-width
 
         assert_eq('full', $attrsByClass['statement']['align'] ?? null, 'background shorthand band bleeds');
         assert_eq('full', $attrsByClass['accent']['align'] ?? null, 'background-color band bleeds');
-        assert_true(!isset($attrsByClass['bounded']['align']), 'a max-width keeps the band constrained');
+        assert_true(!isset($attrsByClass['bounded']['align']), 'an author-centred max-width stays constrained');
         assert_true(!isset($attrsByClass['nested-band']['align']), 'nested bands stay outside the section-root boundary');
 
         $step->run($project);
@@ -556,6 +556,69 @@ test('section layout wide-class parser counts only var(--wide-size) horizontal m
     );
 });
 
+/** @return array{target:array<mixed>,root:array<mixed>} fixture alignment attrs */
+function section_layout_author_width_attrs(string $css): array
+{
+    [$project, $tmp] = section_layout_project([[
+        'slug' => 'home',
+        'sections' => [['slug' => 'story', 'background' => 'base', 'vertical_density' => 'standard']],
+    ]]);
+    try {
+        $project->writeText('design/site.css', $css);
+        $project->writeText(
+            'theme/parts/page-home--story.html',
+            '<!-- wp:group --><div class="wp-block-group">'
+                . '<!-- wp:group {"anchor":"measure","className":"measure"} -->'
+                . '<div id="measure" class="wp-block-group measure">'
+                . '<!-- wp:paragraph --><p>Authored measure</p><!-- /wp:paragraph -->'
+                . '</div><!-- /wp:group --></div><!-- /wp:group -->',
+        );
+
+        (new SectionLayoutStep())->run($project);
+
+        $markup = $project->readText('theme/parts/page-home--story.html');
+        $doc = BlockMarkup::parse($markup);
+        $targets = array_values(array_filter(
+            $doc->indices(),
+            static fn (int $index): bool => (($doc->attrs($index) ?? [])['anchor'] ?? null) === 'measure',
+        ));
+        assert_eq(1, count($targets), 'fixture contains exactly one non-vacuous authored-width target');
+        return [
+            'target' => $doc->attrs($targets[0]) ?? [],
+            'root' => section_layout_root_attrs($markup),
+        ];
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+}
+
+test('A1 section layout preserves a left-aligned author-owned max-width', function () {
+    $attrs = section_layout_author_width_attrs('.measure{max-width:min(100%,44rem)}');
+    assert_true(!isset($attrs['target']['align']), 'the authored measure keeps the constrained inset');
+    assert_eq(
+        ['type' => 'constrained', 'justifyContent' => 'left'],
+        $attrs['root']['layout'] ?? null,
+        'the constrained flow follows the authored start alignment',
+    );
+    assert_contains(
+        SectionLayoutStep::AUTHOR_WIDTH_START_CLASS,
+        $attrs['root']['className'] ?? '',
+        'page styles can preserve this root authored inset',
+    );
+});
+
+test('A2 section layout preserves an author-centred max-width', function () {
+    $attrs = section_layout_author_width_attrs('.measure{max-width:min(100%,44rem);margin:0 auto}');
+    assert_true(!isset($attrs['target']['align']), 'both authored auto margins keep the measure in constrained centring');
+    assert_eq(['type' => 'constrained'], $attrs['root']['layout'] ?? null);
+});
+
+test('A3 section layout preserves a right-aligned author-owned max-width', function () {
+    $attrs = section_layout_author_width_attrs('.measure{max-width:min(100%,44rem);margin-left:auto}');
+    assert_eq('full', $attrs['target']['align'] ?? null, 'align:full leaves the one-sided authored auto margin in control');
+    assert_eq(['type' => 'constrained'], $attrs['root']['layout'] ?? null);
+});
+
 test('section layout promotes a root whose wrapper bears a wide-size class to align:wide', function () {
     [$project, $tmp] = section_layout_project([[
         'slug' => 'home',
@@ -583,7 +646,10 @@ test('section layout aligns the inner wrapper that bears the wide measure and le
         'sections' => [['slug' => 'band', 'background' => 'base', 'vertical_density' => 'standard']],
     ]]);
     try {
-        $project->writeText('design/site.css', ':root{--wide-size:1280px}.shell{max-width:var(--wide-size)}');
+        $project->writeText(
+            'design/site.css',
+            ':root{--wide-size:1280px}.shell{max-width:var(--wide-size);margin:0 auto}',
+        );
         $project->writeText(
             'theme/parts/page-home--band.html',
             '<!-- wp:group --><div class="wp-block-group">'
@@ -908,7 +974,7 @@ function section_layout_selector_fixture(string $selector, string $declaration):
         'sections' => [['slug' => 'hero', 'background' => 'base', 'vertical_density' => 'standard']],
     ]]);
     try {
-        $project->writeText('design/site.css', $selector . '{' . $declaration . '}');
+        $project->writeText('design/site.css', $selector . '{' . $declaration . ';margin:0 auto}');
         $project->writeText(
             'theme/parts/page-home--hero.html',
             '<!-- wp:group {"tagName":"section","anchor":"hero","className":"hero outer"} -->'
