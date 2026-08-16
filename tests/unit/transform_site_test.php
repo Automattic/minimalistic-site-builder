@@ -865,3 +865,56 @@ test('transform-site threads shared site.css shape rules into image aspectRatio/
     assert_contains('"scale":"contain"', $part);
     transform_site_cleanup($tmp);
 });
+
+/**
+ * The theme's templates reference each chrome part with its own landmark
+ * (`wp:template-part {"slug":"header","tagName":"header"}`), so the rendered
+ * page already carries one <header>. When the transformed part ALSO roots
+ * itself in a header landmark, the authored `header{…}` rule — carried into
+ * the theme stylesheet verbatim — paints two nested boxes and every geometric
+ * declaration in it is applied twice.
+ */
+test('transform-site does not re-declare a chrome landmark the template part already provides', function () {
+    [$project, $llm, $tmp] = transform_site_fixture(
+        '<!doctype html><html><body>'
+        . '<header><nav aria-label="Primary"><a class="brand" href="#hero">Northstar</a>'
+        . '<ul><li><a href="#hero">Home</a></li><li><a href="#hero">Contact</a></li></ul></nav></header>'
+        . '<main><section id="hero"><h1>Homepage hero</h1></section></main>'
+        . '<footer><nav aria-label="Legal"><ul><li><a href="#hero">Terms</a></li></ul></nav></footer>'
+        . '</body></html>',
+    );
+    // Natively representable geometry on both landmarks: without it the
+    // transformer drops the wrapper on its own and the test proves nothing.
+    $project->writeText(
+        'design/site.css',
+        "header{padding:40px 22px 0}\nheader nav{display:flex;gap:16px}\n"
+        . "footer{padding:30px 22px}\nfooter nav{display:flex}\n",
+    );
+
+    transform_site_run($project, $llm);
+
+    foreach (['header', 'footer'] as $landmark) {
+        $part = $project->readText("theme/parts/{$landmark}.html");
+        assert_true(
+            !str_contains($part, "\"tagName\":\"{$landmark}\""),
+            "parts/{$landmark}.html must not re-declare the {$landmark} landmark: {$part}",
+        );
+        assert_true(
+            preg_match('~</?' . $landmark . '(?=[\s>])~i', $part) !== 1,
+            "parts/{$landmark}.html must not save a literal <{$landmark}> element: {$part}",
+        );
+        assert_contains('wp:', $part);
+    }
+    // Non-vacuous: the chrome content itself survives the unwrap.
+    $header = $project->readText('theme/parts/header.html');
+    assert_contains('Northstar', $header);
+    assert_contains('Home', $header);
+    assert_contains('Contact', $header);
+    assert_contains('Terms', $project->readText('theme/parts/footer.html'));
+    // The authored geometry still reaches the theme — it now lands once, on
+    // the template-part wrapper, instead of twice.
+    $styles = transform_site_finish_styles($project);
+    assert_contains('padding:40px 22px 0', $styles);
+    assert_contains('padding:30px 22px', $styles);
+    transform_site_cleanup($tmp);
+});
