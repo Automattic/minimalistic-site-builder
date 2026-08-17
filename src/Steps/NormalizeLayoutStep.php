@@ -46,7 +46,11 @@ final class NormalizeLayoutStep implements Step
             label: $this->label(),
             // Templates are only scanned when they exist; in the default graph
             // they are written by assemble-pages, which runs after this step.
-            reads: ['theme/theme.json', 'theme/parts/*'],
+            reads: [
+                ...($this->htmlFirst ? ['design/site.css'] : []),
+                'theme/theme.json',
+                'theme/parts/*',
+            ],
             writes: ['theme/parts/*'],
             concurrent: false,
         );
@@ -54,7 +58,20 @@ final class NormalizeLayoutStep implements Step
 
     public function run(Project $project): void
     {
-        $notes = FixBlocksStep::normalizeLayouts($project, [], $this->htmlFirst);
+        // fix-blocks computes these same tokens, but by the time it runs every
+        // root already carries a layout and the injection is a no-op — the
+        // stamp this signal would have prevented was committed one step
+        // earlier, here. Load it before the damage, not after.
+        $wideClassTokens = $this->htmlFirst && $project->exists('design/site.css')
+            ? SectionLayoutStep::wideClassTokens($project->readText('design/site.css'))
+            : [];
+        $notes = FixBlocksStep::normalizeLayouts(
+            $project,
+            [],
+            $this->htmlFirst,
+            $wideClassTokens,
+            promoteWideCarriers: false,
+        );
         $report = $notes === []
             ? "No layout/rhythm normalization needed.\n"
             : '- ' . implode("\n- ", $notes) . "\n";

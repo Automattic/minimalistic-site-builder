@@ -405,8 +405,14 @@ final class FixBlocksStep implements Step
      *        failed this step and must remain at their step-entry bytes
      * @param bool $htmlFirst carried design CSS owns section width — see
      *        LayoutFixer::fix()
-     * @param list<string> $wideClassTokens CSS-derived footer carriers;
-     *        supplied only by FixBlocksStep, whose declaration owns that read
+     * @param list<string> $wideClassTokens classes the design's own CSS gives
+     *        the wide measure; every caller must declare the design/site.css
+     *        read that produces them
+     * @param bool $promoteWideCarriers whether to also promote the footer's
+     *        outermost wide carrier to align:wide. Only fix-blocks does that,
+     *        and only there is it rolled back with a failed file transaction;
+     *        normalize-layout consults the same tokens purely to decide which
+     *        roots must not be constrained.
      * @return string[]
      */
     public static function normalizeLayouts(
@@ -414,6 +420,7 @@ final class FixBlocksStep implements Step
         array $excluded = [],
         bool $htmlFirst = false,
         array $wideClassTokens = [],
+        bool $promoteWideCarriers = true,
     ): array
     {
         $notes = [];
@@ -431,9 +438,10 @@ final class FixBlocksStep implements Step
                 $contentSize,
                 $spacingSlugs,
                 $htmlFirst,
+                $wideClassTokens,
             );
             $normalized = $result['markup'];
-            if ($rel === 'parts/footer.html' && $wideClassTokens !== []) {
+            if ($promoteWideCarriers && $rel === 'parts/footer.html' && $wideClassTokens !== []) {
                 $wide = self::promoteOutermostWidePartCarrier($normalized, $wideClassTokens);
                 if ($wide !== $normalized) {
                     $notes[] = "{$rel}: promoted outermost wide-size carrier to align:wide";

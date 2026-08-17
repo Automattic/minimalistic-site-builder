@@ -848,6 +848,15 @@ final class LayoutFixer
      * applied to every file's root groups. A root carrying the exact
      * CSS-owned-layout marker stays layout-less; every other repair still runs.
      *
+     * A root whose className carries a class the design's own stylesheet gives
+     * the wide measure stays layout-less too. The transformer only marks a
+     * container CSS-owned when its computed display is flex or grid, so a
+     * centred block container (max-width + margin:auto) reaches this pass
+     * unmarked. Constraining it makes core emit margin-inline:auto!important on
+     * every child, which centres any child with its own measure — sunny-ember's
+     * 34ch footer paragraph landed 460px right of where the design puts it.
+     *
+
      * @param object[] $roots
      * @param string[] $notes
      * @param list<string> $wideClassTokens classes the design's own CSS gives the wide measure
@@ -858,6 +867,7 @@ final class LayoutFixer
             if (self::is($node, 'group')
                 && !isset($node->attrs->layout)
                 && !GeneratedMarkup::hasCssOwnedLayoutMarker($node->attrs)
+                && !GeneratedMarkup::carriesAnyClassToken($node->attrs, $wideClassTokens)
             ) {
                 $node->attrs->layout = (object) ['type' => 'constrained'];
                 $node->dirty = true;
