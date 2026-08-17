@@ -794,7 +794,7 @@ CSS;
                             if ($flowMatchCache[$cacheKey]) {
                                 $flowSelectors[] = self::boostVerticalSelector($selector);
                             }
-                        } elseif ($isBlockMargin && $paintedSelectorKeys !== []) {
+                        } elseif ($isBlockMargin) {
                             $cacheKey = 'trailing:' . $selector;
                             if (!array_key_exists($cacheKey, $flowMatchCache)) {
                                 $flowMatchCache[$cacheKey] = self::selectorMatchesAnyElement(
@@ -873,9 +873,9 @@ CSS;
     }
 
     /**
-     * Decorated inline labels are the authored section-rhythm landmarks. Their
-     * own margins, and the margin of a trailing flow control before the next
-     * landmark, are the bounded inner-flow values this pass reinforces.
+     * Decorated inline labels are the authored section-rhythm landmarks. This
+     * set bounds their own margins only: a trailing flow control is bounded by
+     * its own predicate, so a design that paints nothing still keeps one.
      *
      * @param list<array{source:string,css:string}> $authorChunks
      * @return array<string,true>
