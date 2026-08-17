@@ -197,6 +197,7 @@ final class SectionLayoutStep implements Step
                 $root,
                 $authoredWidthDeclarations,
                 $outOfFlowClasses,
+                $fullBleedClasses,
             );
 
         $attrs['layout'] = ['type' => 'constrained'];
@@ -666,8 +667,16 @@ final class SectionLayoutStep implements Step
     }
 
     /**
+     * A full-bleed child is skipped alongside an out-of-flow one. It is about
+     * to be given align:full, whose root-padding-aware rules deliberately pull
+     * it past the content column; a pin at (0,3,0) with !important would then
+     * outrank them and shrink it back to the authored measure. That is the
+     * defect this per-child treatment exists to remove, so it must not be
+     * reintroduced against the design's own full-bleed intent.
+     *
      * @param list<array<string,mixed>> $declarations
      * @param array<string,true> $outOfFlowClasses
+     * @param array<string,true> $fullBleedClasses
      * @return array{start:list<int>,escape:list<int>}
      */
     private static function authorWidthAlignmentTargets(
@@ -675,12 +684,14 @@ final class SectionLayoutStep implements Step
         int $root,
         array $declarations,
         array $outOfFlowClasses,
+        array $fullBleedClasses = [],
     ): array {
+        $skip = $outOfFlowClasses + $fullBleedClasses;
         $targets = ['start' => [], 'escape' => []];
         foreach ($doc->children($root) as $child) {
             if (array_intersect_key(
                 array_fill_keys(self::elementClassTokens($doc, $child), true),
-                $outOfFlowClasses,
+                $skip,
             ) !== []) {
                 continue;
             }

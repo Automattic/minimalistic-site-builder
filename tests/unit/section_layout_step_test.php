@@ -847,6 +847,68 @@ test('AW3 section layout keeps per-child width markers out of the footer control
     }
 });
 
+test('AW8 section layout keeps a start-classified wide carrier out of the wide promotion', function () {
+    // The start half of the wide-promotion exclusion. Every other start case
+    // uses CSS with no var(--wide-size) rule at all, so $wideSelectors is empty
+    // and the exclusion never runs — the branch was reachable only by a design
+    // that measures wide-size AND owns a bound width with a non-auto margin.
+    // Measured in WordPress: core's `.wp-container-x > .alignwide` is (0,2,0)
+    // and overrides an author max-width at (0,1,0), so promoting this child
+    // would discard the very declaration that classified it.
+    $attrs = section_layout_author_width_attrs(
+        ':root{--wide-size:1280px}'
+            . '.measure{max-width:var(--wide-size)}'
+            . '.measure{width:min(100%,44rem);margin-left:0}',
+    );
+    assert_contains(
+        SectionLayoutStep::AUTHOR_WIDTH_CHILD_START_CLASS,
+        $attrs['target']['className'] ?? '',
+        'the wide-carrying child still classifies as start',
+    );
+    assert_true(
+        !isset($attrs['target']['align']),
+        'a start-classified wide carrier is never promoted to align:wide',
+    );
+});
+
+test('AW9 section layout leaves an authored full-bleed child unpinned', function () {
+    // A child the design marks full-bleed is about to receive align:full, whose
+    // root-padding-aware rules pull it past the content column on purpose. A pin
+    // at (0,3,0) with !important would outrank them and shrink it back to the
+    // authored measure — the exact defect this treatment removes.
+    [$project, $tmp] = section_layout_project([[
+        'slug' => 'home',
+        'sections' => [['slug' => 'band', 'background' => 'base', 'vertical_density' => 'standard']],
+    ]]);
+    try {
+        $project->writeText(
+            'design/site.css',
+            '.bleed{background:var(--primary)}'
+                . '.bleed{max-width:44rem;margin-left:auto}',
+        );
+        $project->writeText(
+            'theme/parts/page-home--band.html',
+            '<!-- wp:group --><div class="wp-block-group">'
+                . '<!-- wp:group {"className":"bleed"} --><div class="wp-block-group bleed">'
+                . '<!-- wp:paragraph --><p>Band</p><!-- /wp:paragraph -->'
+                . '</div><!-- /wp:group --></div><!-- /wp:group -->',
+        );
+
+        (new SectionLayoutStep())->run($project);
+
+        $markup = $project->readText('theme/parts/page-home--band.html');
+        $child = section_layout_class_attrs($markup, 'bleed');
+        assert_eq('full', $child['align'] ?? null, 'the authored full-bleed intent still wins');
+        assert_true(
+            !str_contains($markup, SectionLayoutStep::AUTHOR_WIDTH_CHILD_ESCAPE_CLASS)
+                && !str_contains($markup, SectionLayoutStep::AUTHOR_WIDTH_CHILD_START_CLASS),
+            'a full-bleed child is never also pinned back to the content column',
+        );
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
 test('AW7 section layout clears a per-child marker the design no longer earns', function () {
     // A resumed build re-runs this step over markup an earlier revision
     // stamped. An add-only marker would survive its own classification and
