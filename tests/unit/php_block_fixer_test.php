@@ -550,6 +550,41 @@ test('PhpBlockFixer converges on the authored overlayMenu across repeated passes
     }
 });
 
+test('PhpBlockFixer converges on the authored overlayMenu for LEGACY navigation content', function () {
+    // The legacy-signature gate does NOT exclude this adapter's own output:
+    // the migration writes the bare slug into the registered top-level
+    // fontFamily and leaves style.typography.fontFamily in the pipe form, so
+    // the gate matches again on every later pass. The raw-comment fontFamily
+    // guard is what makes the legacy path a fixed point. Deleting that guard
+    // while keeping the gate must fail this test.
+    $original = '<!-- wp:navigation {"className":"nav-links",'
+        . '"style":{"typography":{"fontFamily":"var:preset|font-family|heading"}},'
+        . '"overlayMenu":"mobile"} -->'
+        . '<!-- wp:navigation-link {"label":"Home","url":"/","kind":"custom"} /-->'
+        . '<!-- /wp:navigation -->';
+    $theme = php_block_fixer_test_theme(['parts/header.html' => $original]);
+
+    try {
+        $seen = [];
+        for ($pass = 1; $pass <= 3; $pass++) {
+            (new PhpBlockFixer())->fix($theme);
+            $seen[$pass] = file_get_contents($theme . '/parts/header.html');
+            assert_eq(
+                'mobile',
+                nav_overlay_menu($seen[$pass]),
+                "pass {$pass} must keep the authored overlayMenu on legacy content",
+            );
+        }
+        assert_eq($seen[1], $seen[2], 'pass 2 is byte-stable');
+        assert_eq($seen[2], $seen[3], 'pass 3 is byte-stable');
+        // The migration DID run: legacy content earns the real preset slug.
+        assert_true(nav_has_preset_font_family($seen[1]), 'legacy content is migrated');
+        assert_contains('"fontFamily":"heading"', $seen[1], 'the slug is the last pipe segment');
+    } finally {
+        remove_tree(dirname($theme));
+    }
+});
+
 test('PhpBlockFixer does not promote a custom navigation font-family to a preset slug', function () {
     // The legacy migration reads `var:preset|font-family|<slug>` and keeps the
     // last pipe segment. A transformer-authored CUSTOM value has no pipe, so the

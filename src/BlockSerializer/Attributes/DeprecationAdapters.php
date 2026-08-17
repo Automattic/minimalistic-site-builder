@@ -746,10 +746,16 @@ final class DeprecationAdapters
         array $rawCommentAttributes,
         bool &$matched,
     ): array {
-        // Redundant by design: the legacy-signature gate below already excludes
-        // this adapter's own output, because the migration replaces the pipe
-        // form with a bare slug. Kept as a second fixed-point guard so the
-        // idempotence property does not depend on that one string test alone.
+        // LOAD-BEARING for legacy content, not a redundant second guard. The
+        // gate below does NOT exclude this adapter's own output: the migration
+        // writes the bare slug into the registered top-level fontFamily and
+        // leaves style.typography.fontFamily in the pipe form, so the gate
+        // matches again on every later pass. Measured over three passes on a
+        // legacy fixture, style.typography.fontFamily keeps the pipe form each
+        // time. Without this check the overlayMenu forcing below re-fires after
+        // the serializer has elided the authored value as a default, and legacy
+        // content loses its authored overlayMenu. Pinned by the legacy
+        // convergence test in tests/unit/php_block_fixer_test.php.
         if (array_key_exists('fontFamily', $rawCommentAttributes)) {
             return $attributes;
         }
