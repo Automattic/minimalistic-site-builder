@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\Units\GeneratedMarkup;
 
 /**
  * Deterministic: run the LayoutFixer attribute repair + width/rhythm
@@ -46,7 +47,11 @@ final class NormalizeLayoutStep implements Step
             label: $this->label(),
             // Templates are only scanned when they exist; in the default graph
             // they are written by assemble-pages, which runs after this step.
-            reads: ['theme/theme.json', 'theme/parts/*'],
+            reads: [
+                ...($this->htmlFirst ? ['design/site.css'] : []),
+                'theme/theme.json',
+                'theme/parts/*',
+            ],
             writes: ['theme/parts/*'],
             concurrent: false,
         );
@@ -54,7 +59,21 @@ final class NormalizeLayoutStep implements Step
 
     public function run(Project $project): void
     {
-        $notes = FixBlocksStep::normalizeLayouts($project, [], $this->htmlFirst);
+        // fix-blocks computes these same tokens, but by the time it runs every
+        // root already carries a layout and the injection is a no-op — the
+        // stamp this signal would have prevented was committed one step
+        // earlier, here. Load it before the damage, not after.
+        $wideMeasureRootClasses = $this->htmlFirst && $project->exists('design/site.css')
+            ? GeneratedMarkup::wideMeasureSubjectClasses($project->readText('design/site.css'))
+            : [];
+        $notes = FixBlocksStep::normalizeLayouts(
+            $project,
+            [],
+            $this->htmlFirst,
+            $wideMeasureRootClasses,
+            // No carrier classes: align:wide promotion stays fix-blocks' alone.
+            widePartCarrierClasses: [],
+        );
         $report = $notes === []
             ? "No layout/rhythm normalization needed.\n"
             : '- ' . implode("\n- ", $notes) . "\n";

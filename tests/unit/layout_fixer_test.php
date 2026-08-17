@@ -75,6 +75,212 @@ test('layout fixer leaves CSS-owned header and footer roots layout-less in both 
     }
 });
 
+test('layout fixer leaves a root carrying a design wide-measure class layout-less', function () {
+    // sunny-ember: the bare <footer> gave the transformer nothing to carry, so
+    // the design's own content container ".hero-inner" became the part root.
+    // design/site.css gives that class max-width:var(--wide-size) + margin:0
+    // auto, so the author already owns this box. Stamping constrained makes
+    // core emit margin-inline:auto!important on every child, which shoved the
+    // 34ch ".deck" paragraph 460px to the right of where the design puts it.
+    $root = static fn (string $classes): string => '<!-- wp:group {"className":"' . $classes . '",'
+        . '"style":{"spacing":{"margin":{"top":"0","right":"auto","bottom":"0","left":"auto"}}}} -->'
+        . '<div class="wp-block-group ' . $classes . '" style="margin-top:0;margin-right:auto;'
+        . 'margin-bottom:0;margin-left:auto">'
+        . '<!-- wp:paragraph {"className":"deck"} --><p class="deck">Measure</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->';
+    $tokens = ['hero-inner', 'panel-inner'];
+
+    foreach ([LayoutFixer::ROLE_HEADER, LayoutFixer::ROLE_FOOTER] as $role) {
+        foreach ([true, false] as $htmlFirst) {
+            $where = "{$role} in " . ($htmlFirst ? 'HTML-first' : 'legacy') . ' mode';
+
+            // The carrier is one token among several unrelated classes.
+            $carrier = LayoutFixer::fix($root('brand-shell hero-inner nav-open'), $role, 840.0, [], $htmlFirst, $tokens);
+            assert_true(
+                !str_contains($carrier['markup'], '"layout":{"type":"constrained"}'),
+                "{$where}: a root carrying a design wide-measure class stays layout-less",
+            );
+
+            // NON-VACUITY: an identical root whose class the design's CSS does
+            // NOT give a wide measure must still be constrained, or the fix
+            // would be indistinguishable from never stamping anything.
+            $plain = LayoutFixer::fix($root('brand-shell nav-open'), $role, 840.0, [], $htmlFirst, $tokens);
+            assert_contains('"layout":{"type":"constrained"}', $plain['markup']);
+
+            // Same markup, empty token list: the stamp is driven by the design
+            // evidence, not by the class name happening to look structural.
+            $untold = LayoutFixer::fix($root('brand-shell hero-inner nav-open'), $role, 840.0, [], $htmlFirst);
+            assert_contains('"layout":{"type":"constrained"}', $untold['markup']);
+
+            // Whole tokens, not substrings. `hero-inner-alt` is a different
+            // class that merely contains the carrier's name, and it still
+            // needs its gutters.
+            $prefixed = LayoutFixer::fix($root('brand-shell hero-inner-alt nav-open'), $role, 840.0, [], $htmlFirst, $tokens);
+            assert_contains('"layout":{"type":"constrained"}', $prefixed['markup']);
+        }
+    }
+});
+
+test('wide-measure subject classes exclude a class that only qualifies an ancestor', function () {
+    // tbilisi4 ships `header.site-header nav{max-width:var(--wide-size)}`. The
+    // nav owns that measure; .site-header only says which header it is in.
+    // Reading .site-header as an owner exempted tbilisi4's header root from the
+    // constrained stamp it genuinely needs.
+    $css = <<<CSS
+    header.site-header nav { max-width: var(--wide-size); margin: 0 auto; }
+    .hero-inner { max-width: var(--wide-size); margin: 0 auto; }
+    .shell > .rail { width: var(--wide-size); }
+    .card[data-size="var(--wide-size)"] { color: red; }
+    /* .commented-out { max-width: var(--wide-size); } */
+    CSS;
+    $subjects = \Automattic\SiteBuild\Units\GeneratedMarkup::wideMeasureSubjectClasses($css);
+    sort($subjects);
+    assert_eq(['hero-inner', 'rail'], $subjects);
+
+    // The looser token list is a different question and still answers it: it
+    // reports every class named in such a rule, ancestors included.
+    $tokens = \Automattic\SiteBuild\Steps\SectionLayoutStep::wideClassTokens($css);
+    assert_true(in_array('site-header', $tokens, true), 'wideClassTokens still names the ancestor');
+    assert_true(!in_array('site-header', $subjects, true), 'subject classes do not');
+});
+
+test('wide-measure subject classes abandon a subject a functional pseudo-class narrows', function () {
+    // A functional pseudo carries its own comma list, so splitting the selector
+    // list naively turns `:is(.hdr, .ftr) .nav` into a fragment whose apparent
+    // subject is .hdr — an ancestor. And a subject the pseudo narrows
+    // (.wrap:is(.x,.y)) matches only some elements carrying .wrap, so claiming
+    // .wrap owns its width would strip gutters from the ones it does not match.
+    $expected = [
+        ':is(.hdr, .ftr) .nav'   => ['nav'],
+        ':where(.hdr,.ftr) .nav' => ['nav'],
+        '.shell:has(.rail)'      => [],
+        '.wrap:is(.x,.y)'        => [],
+        '.hero-inner:not(.bare)' => [],
+        '.hero-inner'            => ['hero-inner'],
+        '.shell>.rail'           => ['rail'],
+        '.a,.b'                  => ['a', 'b'],
+        // A decorative pseudo-element sized to the wide measure says nothing
+        // about the width of its host, and a state or structural pseudo-class
+        // narrows the match exactly as a functional one does.
+        '.foo::before'           => [],
+        '.foo::after'            => [],
+        '.foo:hover'             => [],
+        '.foo:first-child'       => [],
+        '.foo:nth-child(2n+1)'   => [],
+    ];
+    foreach ($expected as $selector => $want) {
+        $got = \Automattic\SiteBuild\Units\GeneratedMarkup::wideMeasureSubjectClasses(
+            $selector . '{max-width:var(--wide-size)}'
+        );
+        sort($got);
+        assert_eq($want, $got, "subject classes of `{$selector}`");
+    }
+});
+
+test('wide-measure subject classes ignore a measure that only applies inside an at-rule', function () {
+    // The rule scan needs a brace-free body, so on `@media (…){.foo{…}}` it
+    // matches the INNER rule and the prelude is discarded as a leading
+    // compound — a measure that holds at one breakpoint would exempt the root
+    // at every width. Worst case is a max-width override releasing the desktop
+    // root. Reading the condition is its own problem, so a conditional measure
+    // counts as no measure and the root keeps its stamp.
+    $wide = '{max-width:var(--wide-size)}';
+    $conditional = [
+        '@media (min-width:900px){.foo' . $wide . '}',
+        '@media (max-width:600px){.foo' . $wide . '}',
+        '@supports (display:grid){.foo' . $wide . '}',
+        '@media screen{@media (min-width:900px){.foo' . $wide . '}}',
+    ];
+    foreach ($conditional as $css) {
+        assert_eq([], \Automattic\SiteBuild\Units\GeneratedMarkup::wideMeasureSubjectClasses($css), $css);
+    }
+
+    // An at-rule must not swallow the rules that follow it.
+    assert_eq(
+        ['ok'],
+        \Automattic\SiteBuild\Units\GeneratedMarkup::wideMeasureSubjectClasses(
+            '@media (min-width:900px){.mq' . $wide . '}.ok' . $wide
+        ),
+    );
+    assert_eq(
+        ['after-import'],
+        \Automattic\SiteBuild\Units\GeneratedMarkup::wideMeasureSubjectClasses(
+            '@import "x.css";.after-import' . $wide
+        ),
+    );
+});
+
+test('layout fixer constrains a root whose class only qualifies an ancestor of the measured element', function () {
+    $markup = '<!-- wp:group {"className":"site-header header-behavior-sticky-soft"} -->'
+        . '<div class="wp-block-group site-header header-behavior-sticky-soft"></div><!-- /wp:group -->';
+    $css = 'header.site-header nav { max-width: var(--wide-size); margin: 0 auto; }';
+    $subjects = \Automattic\SiteBuild\Units\GeneratedMarkup::wideMeasureSubjectClasses($css);
+    foreach ([LayoutFixer::ROLE_HEADER, LayoutFixer::ROLE_FOOTER] as $role) {
+        $r = LayoutFixer::fix($markup, $role, 840.0, [], true, $subjects);
+        assert_contains('"layout":{"type":"constrained"}', $r['markup']);
+    }
+});
+
+test('the HTML-first steps load the design measure themselves and deliver an unconstrained carrier root', function () {
+    // The two tests above hand LayoutFixer a class list directly, so they pass
+    // even if nothing ever builds one. This pins the wiring the fix is: each
+    // step reads design/site.css and hands the list down. Blanking either
+    // step's list must fail here.
+    $tmp = sys_get_temp_dir() . '/builder_wiring_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('theme/theme.json', ['version' => 3, 'settings' => ['layout' => ['contentSize' => '860px', 'wideSize' => '1280px']]]);
+    $project->writeText(
+        'design/site.css',
+        ':root{--wide-size:1280px}.hero-inner{max-width:var(--wide-size);margin:0 auto}.deck{max-width:34ch}'
+    );
+    // sunny-ember's shape: the design's own content container became the root.
+    $project->writeText(
+        'theme/parts/footer.html',
+        '<!-- wp:group {"className":"hero-inner"} --><div class="wp-block-group hero-inner">'
+        . '<!-- wp:paragraph {"className":"deck"} --><p class="deck">Measure</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->'
+    );
+    // A root the design gives no measure still needs the gutters.
+    $project->writeText(
+        'theme/parts/header.html',
+        '<!-- wp:group {"className":"masthead"} --><div class="wp-block-group masthead"></div><!-- /wp:group -->'
+    );
+
+    try {
+        (new \Automattic\SiteBuild\Steps\NormalizeLayoutStep(htmlFirst: true))->run($project);
+
+        $footer = $project->readText('theme/parts/footer.html');
+        assert_true(
+            !str_contains($footer, '"layout":{"type":"constrained"}'),
+            'the carrier root is delivered without a constrained layout',
+        );
+        assert_contains('"layout":{"type":"constrained"}', $project->readText('theme/parts/header.html'));
+        $log = $project->readText('logs/normalize-layout.log');
+        assert_true(!str_contains($log, 'parts/footer.html:'), 'no footer stamp is logged');
+        assert_contains('parts/header.html:', $log);
+
+        // The linter dry-runs the same pass, so it must consult the same
+        // stylesheet or it reports the stamp the step deliberately withheld.
+        assert_eq([], ThemeValidator::layoutWarnings($project, true));
+
+        // fix-blocks re-runs the normalization; it must not put the stamp back.
+        $fake = new class implements \Automattic\SiteBuild\BlockFixer {
+            public function fix(string $themeDir): string
+            {
+                return '[fix-templates] 0/0 file(s) re-serialized';
+            }
+        };
+        (new \Automattic\SiteBuild\Steps\FixBlocksStep($fake, htmlFirst: true))->run($project);
+        assert_true(
+            !str_contains($project->readText('theme/parts/footer.html'), '"layout":{"type":"constrained"}'),
+            'fix-blocks does not re-constrain the carrier root',
+        );
+        assert_contains('"layout":{"type":"constrained"}', $project->readText('theme/parts/header.html'));
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
 test('layout fixer skips the HTML-first section width heuristics that assume theme width', function () {
     // freeGridsFromNarrowWrappers would force align:wide onto the grid; the
     // carried design CSS already sized it.
@@ -366,6 +572,18 @@ test('normalize-layout step repairs attributes on disk before the policy passes 
         'theme/parts/section-hero.html',
         '<!-- wp:group {"backgroundColor":"contrast"}} --><div class="wp-block-group has-contrast-background-color has-background"></div><!-- /wp:group -->'
     );
+    // The HTML-first step reads the design stylesheet, so its manifest must say
+    // so — and only there, since the legacy graph writes no design/site.css and
+    // StepGraph::validate rejects a read nothing upstream produces.
+    assert_true(
+        in_array('design/site.css', (new \Automattic\SiteBuild\Steps\NormalizeLayoutStep(htmlFirst: true))->declaration()->reads, true),
+        'HTML-first normalize-layout declares the design stylesheet it reads',
+    );
+    assert_true(
+        !in_array('design/site.css', (new \Automattic\SiteBuild\Steps\NormalizeLayoutStep())->declaration()->reads, true),
+        'the legacy graph, which writes no design/site.css, does not declare it',
+    );
+
     (new \Automattic\SiteBuild\Steps\NormalizeLayoutStep())->run($project);
     $markup = $project->readText('theme/parts/section-hero.html');
     assert_contains('wp:group {"backgroundColor":"contrast","layout":{"type":"constrained"}}', $markup);

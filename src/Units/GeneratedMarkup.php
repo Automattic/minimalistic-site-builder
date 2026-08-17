@@ -578,8 +578,16 @@ final class GeneratedMarkup
      * Ensure a header/footer top-level wp:group declares a constrained layout.
      * An explicit layout is preserved. A root whose carried CSS owns layout
      * stays flow so WordPress does not re-constrain its children.
+     *
+     * This re-assertion runs after the block fixer, so it must recognize the
+     * same design-owned roots the normalization pass deliberately left flow.
+     * Otherwise it puts back the exact stamp that pass withheld, and the only
+     * thing standing between the fix and its own undoing is whether the file
+     * happened to fail its transformation and get rolled back.
+     *
+     * @param list<string> $wideMeasureRootClasses see wideMeasureSubjectClasses()
      */
-    public static function constrainedPart(string $markup): string
+    public static function constrainedPart(string $markup, array $wideMeasureRootClasses = []): string
     {
         if (preg_match('/^<!--\s*wp:group\s*(\{.*?\})?\s*-->/s', $markup, $m) !== 1) {
             return $markup;
@@ -588,7 +596,9 @@ final class GeneratedMarkup
         if (!is_array($attrs) || isset($attrs['layout'])) {
             return $markup;
         }
-        if (self::hasCssOwnedLayoutMarker($attrs)) {
+        if (self::hasCssOwnedLayoutMarker($attrs)
+            || self::carriesAnyClassToken($attrs, $wideMeasureRootClasses)
+        ) {
             return $markup;
         }
         $attrs['layout'] = ['type' => 'constrained'];
@@ -599,12 +609,189 @@ final class GeneratedMarkup
     /** Whether block attributes carry the exact marker for CSS-owned layout. */
     public static function hasCssOwnedLayoutMarker(array|object $attrs): bool
     {
-        $className = is_array($attrs) ? ($attrs['className'] ?? null) : ($attrs->className ?? null);
-        if (!is_string($className)) {
+        return in_array('blocks-engine-css-owned-layout', self::attrClassTokens($attrs), true);
+    }
+
+    /**
+     * Whether block attributes carry any of the given class tokens. The caller
+     * supplies tokens derived from the design's own stylesheet, so a match is
+     * positive evidence about that specific build rather than a guess.
+     *
+     * @param list<string> $tokens
+     */
+    public static function carriesAnyClassToken(array|object $attrs, array $tokens): bool
+    {
+        if ($tokens === []) {
             return false;
         }
-        $tokens = preg_split('/[\x20\t\r\n\f]+/', trim($className), -1, PREG_SPLIT_NO_EMPTY) ?: [];
-        return in_array('blocks-engine-css-owned-layout', $tokens, true);
+        $carried = array_fill_keys(self::attrClassTokens($attrs), true);
+        foreach ($tokens as $token) {
+            if (isset($carried[$token])) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Classes the design's own stylesheet gives the wide inline measure — and
+     * that own it themselves, rather than merely qualifying an ancestor of the
+     * element that does.
+     *
+     * Steps\SectionLayoutStep::wideClassTokens answers a different question:
+     * every class NAMED anywhere in such a rule, which is what a search for the
+     * outermost carrier inside a part wants. Asking it "does this element own
+     * its width" reads tbilisi4's `header.site-header nav{max-width:var(--wide-size)}`
+     * as though .site-header owned the measure, when the subject is the nav.
+     * Only the subject compound counts here.
+     *
+     * @return list<string>
+     */
+    public static function wideMeasureSubjectClasses(string $css): array
+    {
+        $stripped = preg_replace('~/\*.*?\*/~s', '', $css);
+        if (!is_string($stripped)) {
+            return [];
+        }
+        $stripped = self::withoutAtRuleBlocks($stripped);
+        if (preg_match_all('/([^{}]+)\{([^{}]*)\}/s', $stripped, $rules, PREG_SET_ORDER) === false) {
+            return [];
+        }
+        $classes = [];
+        foreach ($rules as $rule) {
+            if (!self::declaresWideMeasure($rule[2])) {
+                continue;
+            }
+            // Emptying every balanced group first keeps a functional pseudo's
+            // own comma list (`:is(.hdr, .ftr) .nav`) from being split into
+            // fragments whose apparent subject is an ancestor qualifier.
+            $selectorList = preg_replace('/\((?:[^()]++|(?R))*\)/', '()', $rule[1]);
+            if (!is_string($selectorList)) {
+                continue;
+            }
+            foreach (explode(',', $selectorList) as $selector) {
+                foreach (self::subjectClasses($selector) as $class) {
+                    $classes[$class] = true;
+                }
+            }
+        }
+        return array_keys($classes);
+    }
+
+    /**
+     * Drop every at-rule block and its contents.
+     *
+     * The flat rule regex needs a brace-free body, so on `@media (…){.foo{…}}`
+     * it matches the INNER rule and the prelude merely becomes a leading
+     * compound the subject scan discards. A measure that applies at one
+     * breakpoint would then exempt the root at every width — worst case a
+     * `@media (max-width:600px)` override releasing the desktop root. Reading
+     * the condition is its own problem, so a conditional measure is treated as
+     * no measure: the root keeps its stamp, which is the recoverable direction.
+     */
+    private static function withoutAtRuleBlocks(string $css): string
+    {
+        $out = '';
+        $depth = 0;
+        $atDepth = null;
+        $length = strlen($css);
+        for ($i = 0; $i < $length; $i++) {
+            $char = $css[$i];
+            if ($char === '@' && $depth === 0 && $atDepth === null) {
+                $atDepth = 0;
+            }
+            if ($char === '{') {
+                $depth++;
+                if ($atDepth !== null) {
+                    $atDepth++;
+                }
+            } elseif ($char === '}') {
+                $depth = max(0, $depth - 1);
+                if ($atDepth !== null) {
+                    $atDepth--;
+                    if ($atDepth <= 0) {
+                        $atDepth = null;
+                        continue;
+                    }
+                }
+            }
+            // A prelude-only at-rule (`@import …;`) never opens a block.
+            if ($char === ';' && $atDepth === 0) {
+                $atDepth = null;
+                continue;
+            }
+            if ($atDepth === null) {
+                $out .= $char;
+            }
+        }
+        // An unterminated at-rule block swallows the rest; that CSS is already
+        // malformed, and reporting nothing keeps the stamp.
+        return $out;
+    }
+
+    /** Whether a rule body gives an inline measure the wide size. */
+    private static function declaresWideMeasure(string $body): bool
+    {
+        foreach (explode(';', $body) as $declaration) {
+            $colon = strpos($declaration, ':');
+            if ($colon === false) {
+                continue;
+            }
+            $property = strtolower(trim(substr($declaration, 0, $colon)));
+            if (in_array($property, ['width', 'max-width', 'inline-size', 'max-inline-size'], true)
+                && preg_match('/var\(\s*--wide-size\s*\)/i', substr($declaration, $colon + 1)) === 1
+            ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Classes on the compound a selector actually matches. Combinators are
+     * normalized to descendant spacing so the subject is the last compound
+     * either way, and attribute selectors are dropped rather than parsed —
+     * unsupported grammar contributes nothing instead of being approximated.
+     *
+     * A subject qualified by a functional pseudo-class (`.shell:has(.rail)`,
+     * `.wrap:is(.x,.y)`) matches only some elements carrying that class, so it
+     * is abandoned rather than approximated. Erring toward reporting nothing
+     * keeps the constrained stamp, which is the recoverable direction; a class
+     * wrongly reported as owning its width loses gutters it needs.
+     *
+     * @param string $selector one selector, with balanced groups already emptied
+     * @return list<string>
+     */
+    private static function subjectClasses(string $selector): array
+    {
+        $selector = preg_replace('/\[[^\]]*\]/', '', $selector) ?? '';
+        $selector = preg_replace('/[>+~]/', ' ', $selector) ?? '';
+        $compounds = preg_split('/\s+/', trim($selector), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        if ($compounds === []) {
+            return [];
+        }
+        $subject = (string) end($compounds);
+        // Any pseudo disqualifies the subject. A functional one is already
+        // marked by its emptied `()`; `::before`, `:hover` and `:first-child`
+        // narrow the match just as much, and a decorative pseudo-element sized
+        // to the wide measure says nothing about the width of its host.
+        if (str_contains($subject, ':')) {
+            return [];
+        }
+        if (preg_match_all('/\.(-?[A-Za-z_][A-Za-z0-9_-]*)/', $subject, $matches) < 1) {
+            return [];
+        }
+        return $matches[1];
+    }
+
+    /** @return list<string> the block's own className tokens, never descendants' */
+    private static function attrClassTokens(array|object $attrs): array
+    {
+        $className = is_array($attrs) ? ($attrs['className'] ?? null) : ($attrs->className ?? null);
+        if (!is_string($className)) {
+            return [];
+        }
+        return preg_split('/[\x20\t\r\n\f]+/', trim($className), -1, PREG_SPLIT_NO_EMPTY) ?: [];
     }
 
     /**
