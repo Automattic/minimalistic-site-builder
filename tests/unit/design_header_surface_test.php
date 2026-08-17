@@ -661,6 +661,86 @@ test('an identity class on the header still authors the surface', function () {
     assert_eq('primary', $reads('header{background:#FBFAF7;} header{background:#0B1B33;}'));
 });
 
+// A quoted span ends at a raw newline as well as at its matching quote, which
+// CSS requires. Without that, one stray apostrophe -- `font-family:Foo's Font`
+// is ordinary -- opens a span that runs to end of file and discards every
+// later rule, so a fix for quoted braces would have cost a whole stylesheet.
+test('an unterminated quote costs one declaration, not the rest of the file', function () {
+    $reads = static fn (string $css): ?string => \Automattic\SiteBuild\DesignHeaderSurface::slugFor(
+        \Automattic\SiteBuild\DesignHeaderSurface::authored($css)['background'],
+        DESIGN_HEADER_AZURE_PALETTE,
+    );
+
+    foreach ([
+        "p{\n  font-family:Foo's Font;\n}\nheader{\n  background:#0B1B33;\n}\n",
+        "a[title='x]{\n  color:red;\n}\nheader{\n  background:#0B1B33;\n}\n",
+        "p{\n  content:\"oops;\n}\nheader{\n  background:#0B1B33;\n}\n",
+    ] as $css) {
+        assert_eq('primary', $reads($css), 'a stray quote must not swallow the header rule');
+    }
+
+    // The comment stripper needs the same terminator: a stray quote there
+    // leaves a genuine comment unstripped, and its commented-out rule then
+    // reaches the scanner as if it were real.
+    $open = '/' . '*';
+    $close = '*' . '/';
+    assert_eq('primary', $reads(
+        "p{\n  font-family:Foo's Font;\n}\n"
+        . $open . ' header{background:#FBFAF7;} ' . $close . "\n"
+        . "header{\n  background:#0B1B33;\n}\n"
+    ));
+
+    // Known bound: with no newline to end the span there is nothing to bound
+    // it to, so a minified stylesheet with a stray quote still loses the rule.
+    // That is a loss into the reviewed default, never a wrong slug.
+    assert_eq(null, $reads("p{font-family:Foo's Font;}header{background:#0B1B33;}"));
+});
+
+// Comment stripping has to know what a string is. A regex pass deletes
+// everything between a quoted open marker and a later quoted close marker,
+// which is a wrong slug rather than a lost one.
+test('a comment marker inside a quoted value does not delete the rules around it', function () {
+    $reads = static fn (string $css): ?string => \Automattic\SiteBuild\DesignHeaderSurface::slugFor(
+        \Automattic\SiteBuild\DesignHeaderSurface::authored($css)['background'],
+        DESIGN_HEADER_AZURE_PALETTE,
+    );
+
+    $open = '/' . '*';
+    $close = '*' . '/';
+    // The real navy rule sits between two quoted markers and must survive.
+    assert_eq('primary', $reads(
+        'header{background:#FBFAF7}'
+        . '.a{content:"' . $open . '"}'
+        . 'header{background:#0B1B33}'
+        . '.b{content:"' . $close . '"}'
+    ));
+
+    // Genuine comments are still removed, including ones hiding a brace or a
+    // competing declaration, and an unterminated one ends the stylesheet.
+    assert_eq('primary', $reads($open . ' header{background:#FBFAF7} ' . $close . 'header{background:#0B1B33;}'));
+    assert_eq('primary', $reads('header{background:#0B1B33;' . $open . ' background:#FBFAF7 ' . $close . '}'));
+    assert_eq('primary', $reads('header{background:#0B1B33;' . $open . ' } ' . $close . '}'));
+    assert_eq('primary', $reads('header{background:#0B1B33;}' . $open . ' trailing'));
+});
+
+// The decoration rank deliberately contradicts the cascade when the extra
+// class is an identity rather than a state. CSS gives the second rule below
+// both higher specificity and later order; this gives the band to the first.
+// Pinned so the trade is a decision on the record, not a side effect.
+test('the decoration rank outranks CSS specificity for an identity class', function () {
+    $reads = static fn (string $css): ?string => \Automattic\SiteBuild\DesignHeaderSurface::slugFor(
+        \Automattic\SiteBuild\DesignHeaderSurface::authored($css)['background'],
+        DESIGN_HEADER_AZURE_PALETTE,
+    );
+
+    // `.site-header` and `.is-scrolled` are indistinguishable as tokens, so
+    // one rule has to lose. This is the branch that keeps a design shipping
+    // its own sticky treatment from losing its resting colour.
+    assert_eq('base', $reads('header{background:#FBFAF7;} header.site-header{background:#0B1B33;}'));
+    // The same rule read the other way round is what the trade buys.
+    assert_eq('primary', $reads('header{background:#0B1B33;} header.is-scrolled{background:#FBFAF7;}'));
+});
+
 // Every slug the mapping can emit must be one the header kit has a class for,
 // or the derived surface silently never reaches the rendered header.
 test('the derived surface vocabulary is exactly the header kit vocabulary', function () {

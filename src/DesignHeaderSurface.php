@@ -55,7 +55,7 @@ final class DesignHeaderSurface
      */
     public static function authored(string $css): array
     {
-        $css = (string) preg_replace('!/\*.*?\*/!s', '', $css);
+        $css = self::withoutComments($css);
         $vars = self::rootVars($css);
         $background = null;
         $text = null;
@@ -148,6 +148,56 @@ final class DesignHeaderSurface
     }
 
     /**
+     * Comments removed, without treating a comment marker inside a string
+     * value as one.
+     *
+     * A regex cannot do this. One rule whose content property holds an open
+     * marker and a later rule whose content holds a close marker make it
+     * delete every rule in between, which is how a quoted marker used to
+     * choose the band.
+     *
+     * This and rules() below share one convention: a quoted span ends at its
+     * matching quote OR at a raw newline, because CSS forbids newlines inside
+     * strings. Without the newline terminator a lone apostrophe, as in
+     * `font-family:Foo` + apostrophe + `s Font`, opens a span that runs to end
+     * of file and silently discards every rule after it.
+     */
+    private static function withoutComments(string $css): string
+    {
+        $out = '';
+        $length = strlen($css);
+        $quote = null;
+        for ($i = 0; $i < $length; $i++) {
+            $char = $css[$i];
+            if ($quote !== null) {
+                $out .= $char;
+                if ($char === '\\' && $i + 1 < $length) {
+                    $out .= $css[$i + 1];
+                    $i++;
+                } elseif ($char === $quote || $char === "\n" || $char === "\r") {
+                    $quote = null;
+                }
+                continue;
+            }
+            if ($char === '"' || $char === "'") {
+                $quote = $char;
+                $out .= $char;
+                continue;
+            }
+            if ($char === '/' && ($css[$i + 1] ?? '') === '*') {
+                $end = strpos($css, '*/', $i + 2);
+                if ($end === false) {
+                    break;
+                }
+                $i = $end + 1;
+                continue;
+            }
+            $out .= $char;
+        }
+        return $out;
+    }
+
+    /**
      * Top-level `selector { declarations }` pairs, in source order.
      *
      * Rules nested in an at-rule are deliberately skipped. `@media print`
@@ -178,7 +228,10 @@ final class DesignHeaderSurface
             if ($quote !== null) {
                 if ($char === '\\') {
                     $i++;
-                } elseif ($char === $quote) {
+                } elseif ($char === $quote || $char === "\n" || $char === "\r") {
+                    // CSS forbids a raw newline inside a string, so one ends
+                    // the span. A lone apostrophe then costs one declaration
+                    // instead of every rule to end of file.
                     $quote = null;
                 }
                 continue;
@@ -234,7 +287,17 @@ final class DesignHeaderSurface
      *
      * The rank exists for the same reason: a design may state the band on
      * `header` and a variant on `header.is-scrolled`, and the plainer rule
-     * has to win regardless of source order.
+     * wins regardless of source order.
+     *
+     * That deliberately contradicts the cascade when the decoration is an
+     * identity rather than a state: CSS gives
+     * `header{…} header.site-header{…}` to the second rule on both
+     * specificity and order, and this gives it to the first. The two are
+     * indistinguishable as tokens — `.site-header` and `.is-scrolled` are
+     * both just classes — so no syntax-only rule reads both patterns
+     * correctly, and honouring specificity would reopen exactly the defect
+     * the rank exists to close. The branch that protects a design shipping
+     * its own sticky treatment is the one worth having.
      */
     private static function headerRootRank(string $selector): ?int
     {
