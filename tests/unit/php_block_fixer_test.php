@@ -414,6 +414,83 @@ test('PhpBlockFixer isolates a file carrying an unknown deprecation signature', 
     }
 });
 
+test('PhpBlockFixer re-serializes a navigation-link carrying the transformer anchorClassName', function () {
+    // The pinned transformer emits anchorClassName for every classed anchor it
+    // promotes into a navigation. WordPress never registered the attribute, so
+    // without a reviewed adapter the whole part is delivered byte-for-byte and
+    // every other repair the step would have made is lost with it.
+    $original = '<!-- wp:navigation {"className":"nav-links","overlayMenu":"mobile"} -->'
+        . '<!-- wp:navigation-link {"className":"nav-reserve","label":"Reservations",'
+        . '"url":"/visit/","kind":"custom","anchorClassName":"nav-reserve"} /-->'
+        . '<!-- /wp:navigation -->';
+    $theme = php_block_fixer_test_theme(['parts/header.html' => $original]);
+
+    try {
+        $report = (new PhpBlockFixer())->fix($theme);
+        $fixed = file_get_contents($theme . '/parts/header.html');
+
+        assert_contains('FIXED  parts/header.html', $report);
+        assert_true(
+            !str_contains($report, "Unsupported comment attribute 'anchorClassName'"),
+            'the reviewed adapter admits the signature instead of rejecting the file',
+        );
+
+        // Non-vacuity: the block must SURVIVE, not be dropped. A serializer that
+        // deleted the navigation-link entirely would also stop throwing.
+        assert_eq(1, substr_count($fixed, '<!-- wp:navigation-link '), 'the link block survives');
+        assert_eq(1, substr_count($fixed, '<!-- wp:navigation '), 'its parent navigation survives');
+        assert_contains('"label":"Reservations"', $fixed);
+        assert_contains('"url":"/visit/"', $fixed);
+        assert_contains('"kind":"custom"', $fixed);
+        // The registered className carries the same authored value, so dropping
+        // the unregistered anchor alias loses no authored bytes.
+        assert_contains('"className":"nav-reserve"', $fixed);
+        assert_true(
+            !str_contains($fixed, 'anchorClassName'),
+            'the unregistered alias is discarded, matching the pinned createBlock path',
+        );
+    } finally {
+        remove_tree(dirname($theme));
+    }
+});
+
+test('PhpBlockFixer still rejects an unregistered navigation-link attribute with no reviewed adapter', function () {
+    // The anchorClassName adapter is one reviewed key for one block, not a
+    // blanket permissive mode; any other unregistered key must still fail closed.
+    $original = '<!-- wp:navigation {"className":"nav-links","overlayMenu":"mobile"} -->'
+        . '<!-- wp:navigation-link {"label":"Reservations","url":"/visit/",'
+        . '"kind":"custom","anchorTarget":"_blank"} /-->'
+        . '<!-- /wp:navigation -->';
+    $theme = php_block_fixer_test_theme(['parts/header.html' => $original]);
+
+    try {
+        $report = (new PhpBlockFixer())->fix($theme);
+
+        assert_contains('FAILED parts/header.html', $report);
+        assert_contains("Unsupported comment attribute 'anchorTarget' for core/navigation-link", $report);
+        assert_contains('a reviewed deprecation adapter is required', $report);
+        assert_eq($original, file_get_contents($theme . '/parts/header.html'));
+    } finally {
+        remove_tree(dirname($theme));
+    }
+});
+
+test('PhpBlockFixer keeps the anchorClassName adapter scoped to core/navigation-link', function () {
+    // A sibling block carrying the same key name must still fail closed.
+    $original = '<!-- wp:paragraph {"anchorClassName":"brand"} --><p>Brand</p><!-- /wp:paragraph -->';
+    $theme = php_block_fixer_test_theme(['parts/header.html' => $original]);
+
+    try {
+        $report = (new PhpBlockFixer())->fix($theme);
+
+        assert_contains('FAILED parts/header.html', $report);
+        assert_contains("Unsupported comment attribute 'anchorClassName' for core/paragraph", $report);
+        assert_eq($original, file_get_contents($theme . '/parts/header.html'));
+    } finally {
+        remove_tree(dirname($theme));
+    }
+});
+
 test('PhpBlockFixer isolates a current-key historical style signature to its file', function () {
     $aOriginal = '<!-- wp:paragraph --><p>Supported</p><!-- /wp:paragraph -->';
     // An invalid paragraph whose root is not a <p> is outside the reviewed
