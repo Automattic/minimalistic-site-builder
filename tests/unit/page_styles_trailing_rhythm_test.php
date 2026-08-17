@@ -14,6 +14,13 @@ use Automattic\SiteBuild\TransformArtifacts;
  * trailing control's authored block-end margin reinforced.
  */
 
+/**
+ * Trailing reinforcement is selector-scoped, so it carries a zero-specificity
+ * guard that keeps a grid item from matching. Spelled out here rather than read
+ * off the class: a test that took the constant would pass if it went empty.
+ */
+const PSTR_GRID_GUARD = ':not(:where(.blocks-engine-css-owned-grid > *))';
+
 /** @return array{0:\Automattic\SiteBuild\Project,1:string} */
 function pstr_project(string $prefix): array
 {
@@ -102,7 +109,7 @@ CSS;
     );
     assert_contains(
         'margin-bottom: clamp(1.5rem,4vw,2.25rem)',
-        pstr_bodies($style, ':root:root .actions:last-child'),
+        pstr_bodies($style, ':root:root .actions:last-child' . PSTR_GRID_GUARD),
         'the trailing control keeps the authored block-end margin that held sections apart',
     );
 
@@ -150,7 +157,7 @@ CSS);
     $style = $project->readText('theme/style.css');
     assert_contains(
         'margin-bottom: clamp(1.5rem,4vw,2.25rem)',
-        pstr_bodies($style, ':root:root .actions:last-child'),
+        pstr_bodies($style, ':root:root .actions:last-child' . PSTR_GRID_GUARD),
         'the trailing control is reinforced, so this fixture proves an emitting run',
     );
     assert_eq(
@@ -163,10 +170,9 @@ CSS);
         pstr_bodies($style, ':root:root .copy p'),
         'a mid-flow element gets no landmark rule when nothing is painted',
     );
-    assert_eq(
-        '',
-        pstr_bodies($style, ':root:root .copy p:last-child'),
-        'a mid-flow element is not a trailing control either',
+    assert_true(
+        !str_contains($style, '.copy p:last-child'),
+        'a mid-flow element is not a trailing control either, guarded or not',
     );
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -214,8 +220,90 @@ CSS);
     );
     assert_contains(
         'margin-bottom: clamp(1.5rem,4vw,2.25rem)',
-        pstr_bodies($style, ':root:root .actions:last-child'),
+        pstr_bodies($style, ':root:root .actions:last-child' . PSTR_GRID_GUARD),
         'a trailing control in a painted design keeps the reinforcement it already had',
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+/**
+ * One class can match both a grid item and an ordinary trailing control, and
+ * the reinforcement is written per selector, not per element. The guard is the
+ * only thing standing between the grid item and a margin that would add to its
+ * track gap instead of to the section edge.
+ */
+test('a trailing control that is also a grid item is excluded by the emitted selector', function () {
+    [$project, $tmp] = pstr_project('builder_ps_trailing_grid_item_');
+    $project->writeText(TransformArtifacts::SITE_CSS, ".actions {\n    margin: 0 0 2.1rem;\n}\n");
+    $project->writeText(
+        'design/home.html',
+        '<main><section id="story"><div class="actions">Ask</div></section>'
+            . '<section id="closer"><div class="grid"><div class="actions">Ask</div></div>'
+            . '</section></main>',
+    );
+    $project->writeText(
+        'plugin/pages/home.html',
+        '<section id="story"><div class="wp-block-group actions '
+            . 'blocks-engine-css-owned-flow">Ask</div></section>'
+            . '<section id="closer"><div class="wp-block-group grid '
+            . 'blocks-engine-css-owned-layout blocks-engine-css-owned-grid">'
+            . '<div class="wp-block-group actions blocks-engine-css-owned-flow">Ask</div>'
+            . '</div></section>',
+    );
+
+    pstr_step()->run($project);
+
+    $style = $project->readText('theme/style.css');
+    assert_contains(
+        'margin-bottom: 2.1rem',
+        pstr_bodies($style, ':root:root .actions:last-child' . PSTR_GRID_GUARD),
+        'the ordinary trailing control is still reinforced',
+    );
+    assert_true(
+        !str_contains($style, ':root:root .actions:last-child {'),
+        'no unguarded trailing rule is emitted for a class a grid item also matches',
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+/**
+ * Nothing may follow a pseudo-element, so appending `:last-child` to one builds
+ * a selector the browser drops whole. Emitting it is dead bytes that read like
+ * working CSS.
+ */
+test('a trailing control selector ending in a pseudo-element emits no rule', function () {
+    [$project, $tmp] = pstr_project('builder_ps_trailing_pseudo_element_');
+    $project->writeText(TransformArtifacts::SITE_CSS, <<<'CSS'
+.marker::after {
+    margin-bottom: 0.55rem;
+}
+.actions {
+    margin: 0 0 2.1rem;
+}
+CSS);
+    $project->writeText(
+        'design/home.html',
+        '<main><section id="story"><p class="marker">Sec</p>'
+            . '<div class="actions">Ask</div></section></main>',
+    );
+    $project->writeText(
+        'plugin/pages/home.html',
+        '<section id="story">'
+            . '<div class="wp-block-group is-layout-flow"><p class="marker">Sec</p></div>'
+            . '<div class="wp-block-group actions blocks-engine-css-owned-flow">Ask</div></section>',
+    );
+
+    pstr_step()->run($project);
+
+    $style = $project->readText('theme/style.css');
+    assert_contains(
+        'margin-bottom: 2.1rem',
+        pstr_bodies($style, ':root:root .actions:last-child' . PSTR_GRID_GUARD),
+        'the ordinary trailing control still emits, so this fixture is not vacuous',
+    );
+    assert_true(
+        !str_contains($style, '::after:last-child'),
+        'no rule is built by appending a pseudo-class to a pseudo-element',
     );
     exec('rm -rf ' . escapeshellarg($tmp));
 });
