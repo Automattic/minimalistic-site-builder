@@ -21,6 +21,7 @@ use Automattic\SiteBuild\SectionRole;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\TextBatchResult;
+use Automattic\SiteBuild\TransformArtifacts;
 use Automattic\SiteBuild\Units\FooterUnit;
 use Automattic\SiteBuild\Units\GeneratedMarkup;
 use Automattic\SiteBuild\Units\HeaderUnit;
@@ -460,6 +461,7 @@ final class SectionsStep implements Step
                 'surface' => FooterComposition::surface($footerArchetype),
             ],
             forcedHeaderArchetype: Env::get(AboveFoldContract::HEADER_ARCHETYPE_ENV),
+            designCss: self::designCss($project),
         );
         $partBytes = [];
         foreach (glob($project->themePath('parts/*.html')) ?: [] as $abs) {
@@ -810,6 +812,7 @@ final class SectionsStep implements Step
                 'surface' => FooterComposition::surface($footerArchetype),
             ],
             forcedHeaderArchetype: Env::get(AboveFoldContract::HEADER_ARCHETYPE_ENV),
+            designCss: self::designCss($project),
         );
         $frontContract = AboveFoldContract::frontContract($contract);
         // Preview the runtime header behavior for the contract's relation so
@@ -1119,6 +1122,19 @@ final class SectionsStep implements Step
      * catalog; the front outline makes a materially changed plan eligible for
      * a different coda. Pure — unit-testable.
      *
+    /**
+     * The design stylesheet, or null on the legacy path which never writes
+     * one. Its `header` rule is the only authored evidence of the stacked
+     * header's surface, so the above-fold contract reads it directly.
+     */
+    private static function designCss(Project $project): ?string
+    {
+        return $project->exists(TransformArtifacts::SITE_CSS)
+            ? $project->readText(TransformArtifacts::SITE_CSS)
+            : null;
+    }
+
+    /**
      * @param array<int,array<string,mixed>> $pages
      */
     public static function footerArchetype(array $pages, string $siteSpec, string $designDirection): string
