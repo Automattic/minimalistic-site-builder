@@ -238,7 +238,7 @@ final class FixBlocksStep implements Step
                 continue;
             }
             $markup = $project->readText('theme/' . $rel);
-            $repaired = GeneratedMarkup::constrainedPart($markup);
+            $repaired = GeneratedMarkup::constrainedPart($markup, $wideMeasureRootClasses);
             if ($repaired !== $markup) {
                 $project->writeText('theme/' . $rel, $repaired);
             }

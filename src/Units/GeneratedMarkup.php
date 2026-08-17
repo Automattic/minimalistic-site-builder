@@ -578,8 +578,16 @@ final class GeneratedMarkup
      * Ensure a header/footer top-level wp:group declares a constrained layout.
      * An explicit layout is preserved. A root whose carried CSS owns layout
      * stays flow so WordPress does not re-constrain its children.
+     *
+     * This re-assertion runs after the block fixer, so it must recognize the
+     * same design-owned roots the normalization pass deliberately left flow.
+     * Otherwise it puts back the exact stamp that pass withheld, and the only
+     * thing standing between the fix and its own undoing is whether the file
+     * happened to fail its transformation and get rolled back.
+     *
+     * @param list<string> $wideMeasureRootClasses see wideMeasureSubjectClasses()
      */
-    public static function constrainedPart(string $markup): string
+    public static function constrainedPart(string $markup, array $wideMeasureRootClasses = []): string
     {
         if (preg_match('/^<!--\s*wp:group\s*(\{.*?\})?\s*-->/s', $markup, $m) !== 1) {
             return $markup;
@@ -588,7 +596,9 @@ final class GeneratedMarkup
         if (!is_array($attrs) || isset($attrs['layout'])) {
             return $markup;
         }
-        if (self::hasCssOwnedLayoutMarker($attrs)) {
+        if (self::hasCssOwnedLayoutMarker($attrs)
+            || self::carriesAnyClassToken($attrs, $wideMeasureRootClasses)
+        ) {
             return $markup;
         }
         $attrs['layout'] = ['type' => 'constrained'];
@@ -651,7 +661,14 @@ final class GeneratedMarkup
             if (!self::declaresWideMeasure($rule[2])) {
                 continue;
             }
-            foreach (explode(',', $rule[1]) as $selector) {
+            // Emptying every balanced group first keeps a functional pseudo's
+            // own comma list (`:is(.hdr, .ftr) .nav`) from being split into
+            // fragments whose apparent subject is an ancestor qualifier.
+            $selectorList = preg_replace('/\((?:[^()]++|(?R))*\)/', '()', $rule[1]);
+            if (!is_string($selectorList)) {
+                continue;
+            }
+            foreach (explode(',', $selectorList) as $selector) {
                 foreach (self::subjectClasses($selector) as $class) {
                     $classes[$class] = true;
                 }
@@ -684,6 +701,13 @@ final class GeneratedMarkup
      * either way, and attribute selectors are dropped rather than parsed —
      * unsupported grammar contributes nothing instead of being approximated.
      *
+     * A subject qualified by a functional pseudo-class (`.shell:has(.rail)`,
+     * `.wrap:is(.x,.y)`) matches only some elements carrying that class, so it
+     * is abandoned rather than approximated. Erring toward reporting nothing
+     * keeps the constrained stamp, which is the recoverable direction; a class
+     * wrongly reported as owning its width loses gutters it needs.
+     *
+     * @param string $selector one selector, with balanced groups already emptied
      * @return list<string>
      */
     private static function subjectClasses(string $selector): array
@@ -695,6 +719,9 @@ final class GeneratedMarkup
             return [];
         }
         $subject = (string) end($compounds);
+        if (str_contains($subject, '()')) {
+            return [];
+        }
         if (preg_match_all('/\.(-?[A-Za-z_][A-Za-z0-9_-]*)/', $subject, $matches) < 1) {
             return [];
         }

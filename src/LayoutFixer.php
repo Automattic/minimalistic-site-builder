@@ -856,7 +856,6 @@ final class LayoutFixer
      * every child, which centres any child with its own measure — sunny-ember's
      * 34ch footer paragraph landed 460px right of where the design puts it.
      *
-
      * @param object[] $roots
      * @param string[] $notes
      * @param list<string> $wideMeasureRootClasses classes whose OWN rule in the
