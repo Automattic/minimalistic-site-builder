@@ -849,12 +849,23 @@ final class LayoutFixer
      * CSS-owned-layout marker stays layout-less; every other repair still runs.
      *
      * A root whose className carries a class the design's own stylesheet gives
-     * the wide measure stays layout-less too. The transformer only marks a
-     * container CSS-owned when its computed display is flex or grid, so a
-     * centred block container (max-width + margin:auto) reaches this pass
-     * unmarked. Constraining it makes core emit margin-inline:auto!important on
-     * every child, which centres any child with its own measure — sunny-ember's
-     * 34ch footer paragraph landed 460px right of where the design puts it.
+     * the wide measure stays layout-less too, because the marker check alone
+     * does not protect it: such a root can and does arrive here unmarked.
+     * Observed on sunny-ember, whose footer root is `.hero-inner` — a class the
+     * stylesheet gives max-width:var(--wide-size) and margin:0 auto. Two
+     * instances of that same class in one build, only one marked:
+     *
+     *   theme/parts/footer.html   hero-inner be-inline-geometry-…       unmarked
+     *   plugin/pages/home.html    hero-inner blocks-engine-css-owned-…  marked
+     *
+     * The footer instance is the one the design writes as
+     * `<div class="hero-inner" style="display:block">`, overriding the class's
+     * own display:grid. Whatever the marker keys on, an inline declaration on
+     * one instance decides it, so a container that unambiguously owns its
+     * horizontal geometry can reach this pass looking unowned. Constraining it
+     * makes core emit margin-inline:auto!important on every child, which
+     * centres any child with its own measure — sunny-ember's 34ch footer
+     * paragraph landed 460px right of where the design puts it.
      *
      * @param object[] $roots
      * @param string[] $notes

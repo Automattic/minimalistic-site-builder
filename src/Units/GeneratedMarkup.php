@@ -653,6 +653,7 @@ final class GeneratedMarkup
         if (!is_string($stripped)) {
             return [];
         }
+        $stripped = self::withoutAtRuleBlocks($stripped);
         if (preg_match_all('/([^{}]+)\{([^{}]*)\}/s', $stripped, $rules, PREG_SET_ORDER) === false) {
             return [];
         }
@@ -675,6 +676,57 @@ final class GeneratedMarkup
             }
         }
         return array_keys($classes);
+    }
+
+    /**
+     * Drop every at-rule block and its contents.
+     *
+     * The flat rule regex needs a brace-free body, so on `@media (…){.foo{…}}`
+     * it matches the INNER rule and the prelude merely becomes a leading
+     * compound the subject scan discards. A measure that applies at one
+     * breakpoint would then exempt the root at every width — worst case a
+     * `@media (max-width:600px)` override releasing the desktop root. Reading
+     * the condition is its own problem, so a conditional measure is treated as
+     * no measure: the root keeps its stamp, which is the recoverable direction.
+     */
+    private static function withoutAtRuleBlocks(string $css): string
+    {
+        $out = '';
+        $depth = 0;
+        $atDepth = null;
+        $length = strlen($css);
+        for ($i = 0; $i < $length; $i++) {
+            $char = $css[$i];
+            if ($char === '@' && $depth === 0 && $atDepth === null) {
+                $atDepth = 0;
+            }
+            if ($char === '{') {
+                $depth++;
+                if ($atDepth !== null) {
+                    $atDepth++;
+                }
+            } elseif ($char === '}') {
+                $depth = max(0, $depth - 1);
+                if ($atDepth !== null) {
+                    $atDepth--;
+                    if ($atDepth <= 0) {
+                        $atDepth = null;
+                        continue;
+                    }
+                }
+            }
+            // A prelude-only at-rule (`@import …;`) never opens a block.
+            if ($char === ';' && $atDepth === 0) {
+                $atDepth = null;
+                continue;
+            }
+            if ($atDepth === null) {
+                $out .= $char;
+            }
+        }
+        // An unterminated at-rule block swallows the rest; that CSS is already
+        // malformed, and reporting nothing keeps the stamp.
+        return $out;
     }
 
     /** Whether a rule body gives an inline measure the wide size. */
@@ -719,7 +771,11 @@ final class GeneratedMarkup
             return [];
         }
         $subject = (string) end($compounds);
-        if (str_contains($subject, '()')) {
+        // Any pseudo disqualifies the subject. A functional one is already
+        // marked by its emptied `()`; `::before`, `:hover` and `:first-child`
+        // narrow the match just as much, and a decorative pseudo-element sized
+        // to the wide measure says nothing about the width of its host.
+        if (str_contains($subject, ':')) {
             return [];
         }
         if (preg_match_all('/\.(-?[A-Za-z_][A-Za-z0-9_-]*)/', $subject, $matches) < 1) {
