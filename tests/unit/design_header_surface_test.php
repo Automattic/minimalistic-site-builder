@@ -579,6 +579,88 @@ test('the persisted stacked pair never reaches the header author as contract tex
     assert_true(str_contains($front, '"protection_token": "primary"'), 'header tokens must survive');
 });
 
+// A brace inside a quoted value is literal text, not structure. Counting it
+// desynchronises every rule that follows: `content:"}"` alone silently loses
+// the header surface, and a whole rule written inside a string would be read
+// as real. Both directions are pinned here.
+test('a brace inside a quoted value is text, not structure', function () {
+    $reads = static fn (string $css): ?string => \Automattic\SiteBuild\DesignHeaderSurface::slugFor(
+        \Automattic\SiteBuild\DesignHeaderSurface::authored($css)['background'],
+        DESIGN_HEADER_AZURE_PALETTE,
+    );
+
+    // The wrong-slug direction: a complete rule inside a string is not a rule.
+    assert_eq(null, $reads('.x{content:"}header{background:#0B1B33}";}'));
+
+    // The lost-surface direction: a stray brace in a string must not hide the
+    // real rule that follows it, nor one in the header's own body.
+    assert_eq('primary', $reads('.x{content:"}";}header{background:#0B1B33;}'));
+    assert_eq('primary', $reads('header{content:"}";background:#0B1B33;}'));
+    assert_eq('primary', $reads('.x{content:"{";}header{background:#0B1B33;}'));
+    assert_eq('primary', $reads(".x{content:'}';}header{background:#0B1B33;}"));
+    // A backslash-escaped quote does not end the string early.
+    assert_eq('primary', $reads('.x{content:"a\\"}";}header{background:#0B1B33;}'));
+});
+
+test('a stray close brace does not abandon the rest of the stylesheet', function () {
+    $reads = static fn (string $css): ?string => \Automattic\SiteBuild\DesignHeaderSurface::slugFor(
+        \Automattic\SiteBuild\DesignHeaderSurface::authored($css)['background'],
+        DESIGN_HEADER_AZURE_PALETTE,
+    );
+
+    // Losing every later rule is a worse failure than the typo that caused it.
+    assert_eq('primary', $reads('}header{background:#0B1B33;}'));
+    assert_eq('primary', $reads('.x{color:red;}}header{background:#0B1B33;}'));
+    // An unterminated block still yields nothing rather than guessing.
+    assert_eq(null, $reads('header{background:#0B1B33;'));
+});
+
+// A state or variant rule describes the header in a condition, not the band at
+// rest. Because later rules win, a design that ships its own sticky treatment
+// was losing its resting colour to its scrolled one.
+test('a header state or variant rule does not author the resting surface', function () {
+    $reads = static fn (string $css): ?string => \Automattic\SiteBuild\DesignHeaderSurface::slugFor(
+        \Automattic\SiteBuild\DesignHeaderSurface::authored($css)['background'],
+        DESIGN_HEADER_AZURE_PALETTE,
+    );
+
+    // The resting navy survives every shape of variant that follows it.
+    foreach ([
+        'header:hover',
+        'header:focus-within',
+        'header:not(.x)',
+        'header.is-scrolled',
+        'header[data-open]',
+        'header.site-header.is-scrolled',
+    ] as $variant) {
+        assert_eq(
+            'primary',
+            $reads("header{background:#0B1B33;} {$variant}{background:#FBFAF7;}"),
+            "variant '{$variant}' must not take the resting band",
+        );
+    }
+
+    // A pseudo-class or attribute rule alone authors nothing at all.
+    assert_eq(null, $reads('header:hover{background:#0B1B33;}'));
+    assert_eq(null, $reads('header[data-open]{background:#0B1B33;}'));
+});
+
+// The plainer rule wins on rank, not on source order, but an identity class is
+// still a legitimate way to state the band -- tbilisi4 authors exactly that.
+test('an identity class on the header still authors the surface', function () {
+    $reads = static fn (string $css): ?string => \Automattic\SiteBuild\DesignHeaderSurface::slugFor(
+        \Automattic\SiteBuild\DesignHeaderSurface::authored($css)['background'],
+        DESIGN_HEADER_AZURE_PALETTE,
+    );
+
+    assert_eq('primary', $reads('header.site-header{background:#0B1B33;}'));
+    // A plainer rule that sets no background must not block a decorated one
+    // that does.
+    assert_eq('primary', $reads('header{padding:1rem;} header.site-header{background:#0B1B33;}'));
+    // Equal rank still falls back to last-wins, matching the cascade.
+    assert_eq('primary', $reads('header{background:#FBFAF7;} header{background:#0B1B33;}'));
+});
+
 // Every slug the mapping can emit must be one the header kit has a class for,
 // or the derived surface silently never reaches the rendered header.
 test('the derived surface vocabulary is exactly the header kit vocabulary', function () {

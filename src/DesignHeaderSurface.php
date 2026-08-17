@@ -59,16 +59,28 @@ final class DesignHeaderSurface
         $vars = self::rootVars($css);
         $background = null;
         $text = null;
-        // Later rules win, matching the cascade for equal specificity.
+        // Decoration count of the rule that last set each property. A more
+        // decorated rule never overrides a plainer one, so a variant cannot
+        // take the resting band from the rule that states it; equal
+        // decoration falls back to last-wins, matching the cascade.
+        $backgroundRank = PHP_INT_MAX;
+        $textRank = PHP_INT_MAX;
         foreach (self::rules($css) as [$selector, $body]) {
-            if (!self::targetsHeaderRoot($selector)) {
+            $rank = self::headerRootRank($selector);
+            if ($rank === null) {
                 continue;
             }
-            if (preg_match_all('/(?:^|;)\s*background(?:-color)?\s*:\s*([^;]+)/i', $body, $m)) {
+            if ($rank <= $backgroundRank
+                && preg_match_all('/(?:^|;)\s*background(?:-color)?\s*:\s*([^;]+)/i', $body, $m)
+            ) {
                 $background = self::resolveVar(trim((string) end($m[1])), $vars);
+                $backgroundRank = $rank;
             }
-            if (preg_match_all('/(?:^|;)\s*color\s*:\s*([^;]+)/i', $body, $m)) {
+            if ($rank <= $textRank
+                && preg_match_all('/(?:^|;)\s*color\s*:\s*([^;]+)/i', $body, $m)
+            ) {
                 $text = self::resolveVar(trim((string) end($m[1])), $vars);
+                $textRank = $rank;
             }
         }
         return ['background' => $background, 'text' => $text];
@@ -145,6 +157,11 @@ final class DesignHeaderSurface
      * whose only header rule is conditional costs nothing — the contract
      * keeps its reviewed default.
      *
+     * Braces inside a quoted value are literal text, not structure. Counting
+     * them desynchronises every following rule: `content:"}"` alone silently
+     * loses the header surface, and a whole `header{…}` written inside a
+     * string would be read as a real rule.
+     *
      * @return list<array{0:string,1:string}>
      */
     private static function rules(string $css): array
@@ -153,8 +170,23 @@ final class DesignHeaderSurface
         $length = strlen($css);
         $depth = 0;
         $start = 0;
+        $quote = null;
+        $prelude = '';
+        $bodyStart = 0;
         for ($i = 0; $i < $length; $i++) {
             $char = $css[$i];
+            if ($quote !== null) {
+                if ($char === '\\') {
+                    $i++;
+                } elseif ($char === $quote) {
+                    $quote = null;
+                }
+                continue;
+            }
+            if ($char === '"' || $char === "'") {
+                $quote = $char;
+                continue;
+            }
             if ($char === '{') {
                 if ($depth === 0) {
                     $prelude = trim((string) preg_replace('/\s+/', ' ', substr($css, $start, $i - $start)));
@@ -166,33 +198,47 @@ final class DesignHeaderSurface
             if ($char !== '}') {
                 continue;
             }
+            if ($depth === 0) {
+                // A stray close brace. Resynchronise and keep reading: letting
+                // one of them abandon the rest of the stylesheet loses every
+                // later rule, which is worse than the typo that caused it.
+                $start = $i + 1;
+                continue;
+            }
             $depth--;
             if ($depth === 0) {
-                if (($prelude ?? '') !== '' && !str_starts_with($prelude, '@')) {
-                    $out[] = [$prelude, substr($css, $bodyStart ?? $i, $i - ($bodyStart ?? $i))];
+                if ($prelude !== '' && !str_starts_with($prelude, '@')) {
+                    $out[] = [$prelude, substr($css, $bodyStart, $i - $bodyStart)];
                 }
                 $start = $i + 1;
-            }
-            if ($depth < 0) {
-                // Unbalanced input; stop rather than mis-attribute the rest.
-                break;
             }
         }
         return $out;
     }
 
     /**
-     * Does this selector paint the site `<header>` itself?
+     * How plain a selector's claim on the site `<header>` is, or null when it
+     * has none. Zero is a bare `header`; each extra class adds one.
      *
-     * `header` and `header.site-header` do. `header nav` and
+     * `header` and `header.site-header` qualify. `header nav` and
      * `.site-header .brand` do not, because they paint something inside it.
      * Neither does `article header` or `main > header`: a nested content
-     * header is a different element that happens to share the tag name. And
-     * neither does `header::after`, which paints decoration over the band
-     * rather than the band.
+     * header is a different element that happens to share the tag name.
+     *
+     * State and variant selectors are refused outright rather than ranked.
+     * `header:hover`, `header:focus-within` and `header[data-open]` describe
+     * a header in a condition, not the header at rest, and `header::after`
+     * paints decoration over the band rather than the band. Reading any of
+     * them as the resting surface is how a design that ships its own sticky
+     * treatment loses its resting colour to its scrolled one.
+     *
+     * The rank exists for the same reason: a design may state the band on
+     * `header` and a variant on `header.is-scrolled`, and the plainer rule
+     * has to win regardless of source order.
      */
-    private static function targetsHeaderRoot(string $selector): bool
+    private static function headerRootRank(string $selector): ?int
     {
+        $best = null;
         foreach (explode(',', $selector) as $one) {
             $one = trim($one);
             if ($one === '' || str_starts_with($one, '@')) {
@@ -205,11 +251,20 @@ final class DesignHeaderSurface
                 continue;
             }
             $only = trim((string) $compounds[0]);
-            if ($only !== '' && preg_match('/^header(?![\w-])/i', $only) && !str_contains($only, '::')) {
-                return true;
+            if ($only === '' || !preg_match('/^header(?![\w-])/i', $only)) {
+                continue;
+            }
+            // Any pseudo, attribute filter or other qualifier makes it a
+            // conditional rule rather than a statement about the band.
+            if (preg_match('/[:\[]/', $only)) {
+                continue;
+            }
+            $rank = substr_count($only, '.');
+            if ($best === null || $rank < $best) {
+                $best = $rank;
             }
         }
-        return false;
+        return $best;
     }
 
     private static function resolveVar(?string $value, array $vars, int $depth = 0): ?string
