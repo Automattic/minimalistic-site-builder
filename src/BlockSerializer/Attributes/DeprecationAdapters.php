@@ -59,9 +59,14 @@ final class DeprecationAdapters
             // carry. WordPress registers no such attribute, and
             // render_block_core_navigation_link() hard-codes the anchor's class
             // and never reads it, so the pinned createBlock path discards this
-            // delimiter key. The authored value is already duplicated into the
-            // registered className, which reaches the rendered <li>, so the
-            // drop is current-save-equivalent rather than lossy.
+            // delimiter key and no render consumer can observe the drop.
+            // NavigationPattern also copies the anchor class into the
+            // registered className, but only when the source <li> carries no
+            // class of its own; a source `<li class="X"><a class="Y">` keeps
+            // className "X" and drops "Y". That divergence is render-equivalent
+            // for the same reason, and admitting it is deliberate: failing
+            // closed on it would bail the whole file again, which is the
+            // outcome this entry exists to prevent.
             'anchorClassName' => true,
         ],
         'core/image' => [
