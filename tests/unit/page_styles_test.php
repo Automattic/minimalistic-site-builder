@@ -754,6 +754,113 @@ CSS;
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('site CSS path restores authored block-axis spacing after WordPress layout resets', function () {
+    [$project, $tmp] = ps_project('builder_ps_vertical_rhythm_');
+    $siteCss = <<<'CSS'
+.flow-card {
+    display: flex;
+    background: var(--accent);
+    border-radius: 1rem;
+    gap: 1.5rem 2.5rem;
+    margin: 1rem 2rem 3rem;
+    padding: 4rem 5rem 6rem;
+    inline-size: 20rem;
+}
+section {
+    padding-block: 7rem 8rem;
+}
+#stage {
+    min-height: 100svh;
+    padding-block: 11rem 12rem;
+}
+CSS;
+    $project->writeText(TransformArtifacts::SITE_CSS, $siteCss);
+    $project->writeJson('pages.json', ['pages' => [['slug' => 'home', 'front' => true]]]);
+    $project->writeText(
+        'design/home.html',
+        '<main><section id="story" style="padding-top:9rem;padding-bottom:10rem;gap:3rem 4rem">'
+            . '<div class="flow-card">Story</div></section>'
+            . '<section id="banner"><p>Notice</p><div>Body</div></section>'
+            . '<section id="stage"><div>Stage</div></section></main>',
+    );
+    $project->writeText(
+        'plugin/pages/home.html',
+        '<section id="story"><div class="wp-block-group is-layout-flow">'
+            . '<div class="flow-card">Story</div></div></section>'
+            . '<section id="banner" style="padding-top:var(--wp--preset--spacing--xl)">'
+            . '<p>Notice</p><div>Body</div></section>'
+            . '<section id="stage" style="min-height:100svh;'
+            . 'padding-top:var(--wp--preset--spacing--lg)"><div>Stage</div></section>',
+    );
+
+    $step = ps_html_first_step(new FakeLlm());
+    $step->run($project);
+
+    $style = $project->readText('theme/style.css');
+    assert_contains(
+        'Preserve authored block-axis spacing against WordPress layout resets',
+        $style,
+        'the deterministic author-rhythm tail is present',
+    );
+    $card = implode("\n", ps_css_bodies_for_selector($style, ':root:root .flow-card'));
+    assert_contains('margin-top: 1rem', $card, 'authored block-start margin is restored');
+    assert_contains('margin-bottom: 3rem', $card, 'authored block-end margin is restored');
+    assert_true(!str_contains($card, 'padding-top'), 'flow padding is not duplicated into the rhythm tail');
+    assert_true(!str_contains($card, 'padding-bottom'), 'flow padding remains owned by the source rule');
+    assert_true(!str_contains($card, 'row-gap'), 'flow gap remains owned by the source rule');
+    assert_true(!str_contains($card, 'margin-left'), 'inline-axis margin is not copied into the rhythm tail');
+    assert_true(!str_contains($card, 'margin-right'), 'inline-axis margin is not copied into the rhythm tail');
+    assert_true(!str_contains($card, 'column-gap'), 'the horizontal gap component is not copied');
+    assert_true(!str_contains($card, 'padding-left'), 'inline-axis padding is not copied into the rhythm tail');
+    assert_true(!str_contains($card, 'padding-right'), 'inline-axis padding is not copied into the rhythm tail');
+    assert_true(!str_contains($card, 'inline-size'), 'non-spacing declarations are not copied');
+    assert_true(!str_contains($card, 'background'), 'paint is only a rhythm-landmark signal');
+
+    $root = implode("\n", ps_css_bodies_for_selector($style, ':root:root #story'));
+    assert_contains('padding-top: 9rem !important', $root, 'source inline root padding wins the plan preset');
+    assert_contains('padding-bottom: 10rem !important', $root, 'source inline root padding remains exact');
+    assert_contains('row-gap: 3rem !important', $root, 'source inline root row gap remains exact');
+    assert_true(!str_contains($root, '4rem'), 'source inline root column gap is not copied');
+    assert_true(
+        strpos($style, ':root:root section:where(') < strpos($style, ':root:root #story'),
+        'source inline spacing follows stylesheet spacing just as it did in the design',
+    );
+    assert_contains(
+        'padding-top:0!important',
+        implode("\n", ps_css_bodies_for_selector($style, ':root:root :where(#banner)')),
+        'a leading authored band starts at the section edge instead of after a build preset',
+    );
+    assert_true(
+        !str_contains($style, '#stage:where('),
+        'a viewport-height stage keeps its existing vertical box owner',
+    );
+
+    $project->writeText(
+        TransformArtifacts::SITE_CSS,
+        str_replace('margin: 1rem 2rem 3rem', 'margin: 2rem 2rem 3rem', $siteCss),
+    );
+    $step->run($project);
+    $changedStyle = $project->readText('theme/style.css');
+    assert_eq(
+        1,
+        substr_count($changedStyle, 'Preserve authored block-axis spacing against WordPress layout resets'),
+        'a resumed build replaces the previous deterministic rhythm tail',
+    );
+    assert_contains(
+        'margin-top: 2rem',
+        implode("\n", ps_css_bodies_for_selector($changedStyle, ':root:root .flow-card')),
+        'the replacement tail carries the current authored value',
+    );
+
+    $step->run($project);
+    assert_eq(
+        $changedStyle,
+        $project->readText('theme/style.css'),
+        'author-rhythm replacement reaches a fixed point',
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('site CSS path matches tag and class selectors only against delivered section roots', function () {
     [$project, $tmp] = ps_project('builder_ps_foundation_root_elements_');
     $siteCss = <<<'CSS'

@@ -13,6 +13,7 @@ use Automattic\SiteBuild\CssScrub;
 use Automattic\SiteBuild\Html;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
+use Automattic\SiteBuild\MarkupScan;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
@@ -29,8 +30,13 @@ use Automattic\SiteBuild\TransformArtifacts;
  * design/site.css bytes, each delivered nonfailed page artifact's data-page-css
  * contents, and optional scrubbed after-author transformer support CSS. It
  * checks and adjusts only that merged tail against delivered markup before
- * appending it; existing scaffold CSS and all source artifacts stay untouched.
- * This path never asks the model.
+ * appending it. A final block-axis-only author-rhythm tail reasserts
+ * source-backed section-root spacing after page-planned presets. It also
+ * restores the bounded inner margins that WordPress flow resets erase:
+ * painted rhythm labels and trailing flow controls. Viewport-height stages
+ * retain their existing box owner, and no inline-axis declaration is copied.
+ * Existing scaffold CSS and all source artifacts stay untouched. This path
+ * never asks the model.
  *
  * In legacy composition mode, the step reads designDirection.json +
  * theme/theme.json + the final section markup (theme/parts/*.html and
@@ -134,6 +140,10 @@ CSS;
     private const MAX_LINES = 100;
     private const LOG_FILE = 'page-styles.log';
     private const MARKER = '/* Layout utilities — generated per-design by the page-styles step. */';
+    private const DETERMINISTIC_STYLE_MARKER =
+        '/* Wrap at spaces only — never split a word mid-token. */';
+    private const VERTICAL_RHYTHM_MARKER =
+        '/* Preserve authored block-axis spacing against WordPress layout resets. */';
     private const RAW_COLOR_NAMES = [
         'aliceblue', 'antiquewhite', 'aqua', 'aquamarine', 'azure', 'beige',
         'bisque', 'black', 'blanchedalmond', 'blue', 'blueviolet', 'brown',
@@ -284,6 +294,7 @@ CSS;
     {
         $beforeAuthorChunks = [];
         $authorChunks = [];
+        $authorRhythmChunks = [];
         $afterAuthorChunks = [];
         $warnings = [];
         $sectionRootIds = self::sectionRoots($project, $warnings);
@@ -308,6 +319,10 @@ CSS;
         );
         if ($siteCss !== '') {
             $authorChunks[] = $siteCss;
+            $authorRhythmChunks[] = [
+                'source' => TransformArtifacts::SITE_CSS,
+                'css' => $siteCss,
+            ];
         }
 
         foreach (self::deliveredDesignSources($project) as $source) {
@@ -337,20 +352,34 @@ CSS;
             }
         }
 
-        $project->addWarnings('page-styles', $warnings);
-        $design = implode("\n", array_merge(
+        $verticalRhythm = self::authoredVerticalRhythmCss(
+            $project,
+            $authorRhythmChunks,
+            $sectionRootIds,
+            $warnings,
+        );
+        // This resumable deterministic pass owns the complete current set;
+        // replace stale receipts from prior tails instead of accumulating
+        // warnings about CSS bytes no longer delivered.
+        $project->replaceWarnings('page-styles', $warnings);
+        $designChunks = array_merge(
             $beforeAuthorChunks,
             $authorChunks,
             $afterAuthorChunks,
-        ));
+        );
+        if ($verticalRhythm !== '') {
+            $designChunks[] = $verticalRhythm;
+        }
+        $design = implode("\n", $designChunks);
         $markup = self::deliveredMarkup($project);
         // Contrast is a judgment on the DESIGN's colors: the wrap policy has
         // none, and including it would only add unverified-selector findings.
         $findings = CssContrastCheck::check($design, $markup);
+        $currentStyle = $project->readText('theme/style.css');
         $style = CssContrastAdjuster::restoreSupersededForegrounds(
             $project,
             'theme/style.css',
-            $project->readText('theme/style.css'),
+            self::withoutDeterministicStyles($currentStyle),
             $findings,
         );
         $design = CssContrastAdjuster::apply(
@@ -363,20 +392,6 @@ CSS;
         // Wrap policy first, so a design that deliberately hyphenates still
         // wins; it ships even when the design contributed no CSS at all.
         $tail = self::WORD_WRAP_CSS . "\n" . self::TABLE_BORDER_RESET_CSS . "\n" . $design;
-        if (str_ends_with($style, $tail)) {
-            $reconciled = CssContrastAdjuster::reconcileHandledBackgroundCopies(
-                $style,
-                $design,
-                $markup,
-                $findings,
-            );
-            if ($reconciled !== $style) {
-                $project->writeText('theme/style.css', $reconciled);
-            }
-            Narrator::write("  deterministic page CSS already merged\n");
-            return;
-        }
-
         $separator = $style !== '' && !str_ends_with($style, "\n") ? "\n" : '';
         $merged = CssContrastAdjuster::reconcileHandledBackgroundCopies(
             $style . $separator . $tail,
@@ -384,8 +399,26 @@ CSS;
             $markup,
             $findings,
         );
+        if ($merged === $currentStyle) {
+            Narrator::write("  deterministic page CSS already merged\n");
+            return;
+        }
         $project->writeText('theme/style.css', $merged);
         Narrator::write("  merged deterministic page CSS\n");
+    }
+
+    /**
+     * The deterministic CSS is one owned tail, not an append-only history.
+     * Truncate at its stable first marker so a resumed build replaces output
+     * produced by an older implementation or older source bytes atomically.
+     */
+    private static function withoutDeterministicStyles(string $style): string
+    {
+        $offset = strpos($style, self::DETERMINISTIC_STYLE_MARKER);
+        if ($offset === false) {
+            return $style;
+        }
+        return rtrim(substr($style, 0, $offset));
     }
 
     /**
@@ -472,7 +505,10 @@ CSS;
      * @return array{
      *     ids:array<string,true>,
      *     roots:list<\DOMElement>,
-     *     elements:list<\DOMElement>
+     *     elements:list<\DOMElement>,
+     *     allRootIds:array<string,true>,
+     *     allRoots:list<\DOMElement>,
+     *     trailingFlowChildren:list<\DOMElement>
      * }
      */
     private static function sectionRoots(Project $project, array &$warnings): array
@@ -481,7 +517,10 @@ CSS;
         sort($files, SORT_STRING);
         $ids = [];
         $roots = [];
+        $allRootIds = [];
+        $allRoots = [];
         $elements = [];
+        $trailingFlowChildren = [];
         foreach ($files as $file) {
             $markup = @file_get_contents($file);
             if ($markup === false) {
@@ -507,24 +546,710 @@ CSS;
             foreach ($xpath->query('/html/body[@id="page-styles-page-root"]//*') ?: [] as $element) {
                 if ($element instanceof \DOMElement) {
                     $elements[] = $element;
+                    $parent = $element->parentNode;
+                    if ($parent instanceof \DOMElement) {
+                        $parentClasses = preg_split(
+                            '/\s+/',
+                            trim($parent->getAttribute('class')),
+                        ) ?: [];
+                        $classes = preg_split(
+                            '/\s+/',
+                            trim($element->getAttribute('class')),
+                        ) ?: [];
+                        $nextElement = $element->nextSibling;
+                        while ($nextElement !== null && !$nextElement instanceof \DOMElement) {
+                            $nextElement = $nextElement->nextSibling;
+                        }
+                        if ($nextElement === null
+                            && (
+                                in_array('blocks-engine-css-owned-flow', $classes, true)
+                                || in_array('is-layout-flow', $parentClasses, true)
+                            )
+                        ) {
+                            $trailingFlowChildren[] = $element;
+                        }
+                    }
                 }
             }
             foreach ($xpath->query('/html/body[@id="page-styles-page-root"]/section') ?: [] as $section) {
                 if (!$section instanceof \DOMElement) {
                     continue;
                 }
+                $allRoots[] = $section;
+                $id = trim($section->getAttribute('id'));
+                if ($id !== '') {
+                    $allRootIds[$id] = true;
+                }
                 $classes = preg_split('/\s+/', trim($section->getAttribute('class'))) ?: [];
                 if (in_array(SectionLayoutStep::AUTHOR_WIDTH_START_CLASS, $classes, true)) {
                     continue;
                 }
                 $roots[] = $section;
-                $id = trim($section->getAttribute('id'));
                 if ($id !== '') {
                     $ids[$id] = true;
                 }
             }
         }
-        return ['ids' => $ids, 'roots' => $roots, 'elements' => $elements];
+        return [
+            'ids' => $ids,
+            'roots' => $roots,
+            'elements' => $elements,
+            'allRootIds' => $allRootIds,
+            'allRoots' => $allRoots,
+            'trailingFlowChildren' => $trailingFlowChildren,
+        ];
+    }
+
+    /**
+     * Reassert only the authored block axis after WordPress's generated layout
+     * stylesheet. Core's flow first/last-child rules carry more specificity
+     * than ordinary design classes, while SectionRhythm's section presets are
+     * inline declarations. The former is bounded to authored painted rhythm
+     * labels and trailing controls; the latter uses important rules scoped to
+     * source-design roots that do not already own a viewport-height stage.
+     * Inline-axis values are deliberately never copied into this tail.
+     *
+     * @param list<array{source:string,css:string}> $authorChunks
+     * @param array{
+     *     ids:array<string,true>,roots:list<\DOMElement>,elements:list<\DOMElement>,
+     *     allRootIds:array<string,true>,allRoots:list<\DOMElement>,
+     *     trailingFlowChildren:list<\DOMElement>
+     * } $sectionRoots
+     * @param list<string> $warnings
+     */
+    private static function authoredVerticalRhythmCss(
+        Project $project,
+        array $authorChunks,
+        array $sectionRoots,
+        array &$warnings,
+    ): string {
+        [$authoredRoots, $inlineById] = self::authoredSectionRootContext(
+            $project,
+            $sectionRoots,
+            $warnings,
+        );
+        if ($authoredRoots['ids'] === []) {
+            return '';
+        }
+
+        $rhythmRoots = self::rootsWithoutViewportHeightOwnership($authoredRoots);
+        $rootFilter = $rhythmRoots['ids'] === [] ? '' : self::rootSubjectFilter($rhythmRoots);
+        $rules = [self::VERTICAL_RHYTHM_MARKER];
+        $edgeStartIds = array_intersect_key($authoredRoots['edgeStartIds'], $rhythmRoots['ids']);
+        if ($edgeStartIds !== []) {
+            $edgeStartRoots = [
+                'ids' => $edgeStartIds,
+                'roots' => array_values(array_filter(
+                    $rhythmRoots['roots'],
+                    static fn (\DOMElement $root): bool => isset(
+                        $edgeStartIds[trim($root->getAttribute('id'))],
+                    ),
+                )),
+                'elements' => $rhythmRoots['elements'],
+            ];
+            $rules[] = ':root:root :where(' . self::rootSubjectFilter($edgeStartRoots)
+                . ') {padding-top:0!important}';
+        }
+        $resolvedCache = [];
+        $rootMatchCache = [];
+        $flowMatchCache = [];
+        $paintedSelectorKeys = self::paintedRhythmSelectorKeys($authorChunks);
+
+        foreach ($authorChunks as $chunk) {
+            foreach (CssChecks::scanDeclarations($chunk['css']) as $declaration) {
+                if ($declaration['kind'] !== 'style') {
+                    continue;
+                }
+                $conversionError = null;
+                $converted = self::blockAxisDeclarations(
+                    $declaration['property'],
+                    $declaration['value'],
+                    false,
+                    $conversionError,
+                );
+                if ($converted === []) {
+                    continue;
+                }
+                if (!$declaration['structurallySafe'] || $converted === null) {
+                    $warnings[] = sprintf(
+                        'source=%s; block_path=stylesheet selector %s; authored_value=%s; '
+                            . 'delivered_value=authored declaration without cascade reinforcement; '
+                            . 'disposition=retained unprovable block-axis declaration; reason=%s',
+                        $chunk['source'],
+                        self::warningValue($declaration['context']),
+                        self::warningValue(trim($declaration['raw'])),
+                        self::warningValue(
+                            !$declaration['structurallySafe']
+                                ? 'declaration is inside structurally recovered CSS'
+                                : ($conversionError ?? 'unknown shorthand shape'),
+                        ),
+                    );
+                    continue;
+                }
+
+                $selectorKey = json_encode(
+                    [$declaration['ancestors'], $declaration['context']],
+                    JSON_UNESCAPED_SLASHES,
+                );
+                $selectorKey = is_string($selectorKey) ? $selectorKey : $declaration['context'];
+                if (!array_key_exists($selectorKey, $resolvedCache)) {
+                    $selectorError = null;
+                    $resolvedCache[$selectorKey] = [
+                        'result' => self::resolvedVerticalSelectors($declaration, $selectorError),
+                        'error' => $selectorError,
+                    ];
+                }
+                $resolved = $resolvedCache[$selectorKey]['result'];
+                $selectorError = $resolvedCache[$selectorKey]['error'];
+                if ($resolved === null) {
+                    $warnings[] = sprintf(
+                        'source=%s; block_path=stylesheet selector %s; authored_value=%s; '
+                            . 'delivered_value=authored declaration without cascade reinforcement; '
+                            . 'disposition=retained unprovable selector; reason=%s',
+                        $chunk['source'],
+                        self::warningValue($declaration['context']),
+                        self::warningValue(trim($declaration['raw'])),
+                        self::warningValue($selectorError ?? 'unknown selector shape'),
+                    );
+                    continue;
+                }
+
+                foreach ($converted as $item) {
+                    $flowSelectors = [];
+                    $rootSelectors = [];
+                    foreach ($resolved['selectors'] as $selector) {
+                        $isBlockMargin = str_starts_with($item['property'], 'margin-');
+                        if ($isBlockMargin && isset($paintedSelectorKeys[$selectorKey])) {
+                            $cacheKey = 'painted:' . $selector;
+                            if (!array_key_exists($cacheKey, $flowMatchCache)) {
+                                $flowMatchCache[$cacheKey] = self::selectorMatchesAnyElement(
+                                    $selector,
+                                    $sectionRoots['elements'],
+                                );
+                            }
+                            if ($flowMatchCache[$cacheKey]) {
+                                $flowSelectors[] = self::boostVerticalSelector($selector);
+                            }
+                        } elseif ($isBlockMargin && $paintedSelectorKeys !== []) {
+                            $cacheKey = 'trailing:' . $selector;
+                            if (!array_key_exists($cacheKey, $flowMatchCache)) {
+                                $flowMatchCache[$cacheKey] = self::selectorMatchesAnyElement(
+                                    $selector,
+                                    $sectionRoots['trailingFlowChildren'],
+                                );
+                            }
+                            if ($flowMatchCache[$cacheKey]) {
+                                $flowSelectors[] = self::boostVerticalSelector(
+                                    $selector . ':last-child',
+                                );
+                            }
+                        }
+                        if (!array_key_exists($selector, $rootMatchCache)) {
+                            $relationError = null;
+                            $rootMatchCache[$selector] = [
+                                'matches' => self::selectorMatchesAnyRoot(
+                                    $selector,
+                                    $rhythmRoots,
+                                    $relationError,
+                                ),
+                                'error' => $relationError,
+                            ];
+                        }
+                        $matchesRoot = $rootMatchCache[$selector]['matches'];
+                        $relationError = $rootMatchCache[$selector]['error'];
+                        if ($matchesRoot === null) {
+                            $warnings[] = sprintf(
+                                'source=%s; block_path=stylesheet selector %s; authored_value=%s; '
+                                    . 'delivered_value=authored root declaration without inline-preset override; '
+                                    . 'disposition=retained unprovable root selector; reason=%s',
+                                $chunk['source'],
+                                self::warningValue($selector),
+                                self::warningValue(trim($declaration['raw'])),
+                                self::warningValue($relationError ?? 'unknown root relation'),
+                            );
+                            continue;
+                        }
+                        if (!$matchesRoot || $rootFilter === '') {
+                            continue;
+                        }
+                        $filter = $item['important'] ? ':is(' : ':where(';
+                        $rootSelectors[] = self::boostVerticalSelector(
+                            $selector . $filter . $rootFilter . ')',
+                        );
+                    }
+                    if ($flowSelectors !== []) {
+                        $rules[] = self::wrapVerticalGroupingRules(
+                            $resolved['grouping'],
+                            implode(', ', $flowSelectors)
+                                . ' {' . self::verticalDeclarationText($item, false) . '}',
+                        );
+                    }
+                    if ($rootSelectors !== []) {
+                        $rules[] = self::wrapVerticalGroupingRules(
+                            $resolved['grouping'],
+                            implode(', ', $rootSelectors)
+                                . ' {' . self::verticalDeclarationText($item, true) . '}',
+                        );
+                    }
+                }
+            }
+        }
+
+        foreach ($inlineById as $id => $declarations) {
+            if (!isset($rhythmRoots['ids'][$id])) {
+                continue;
+            }
+            $selector = ':root:root ' . self::cssIdSelector($id);
+            foreach ($declarations as $declaration) {
+                $rules[] = $selector . ' {' . self::verticalDeclarationText($declaration, true) . '}';
+            }
+        }
+
+        return implode("\n", $rules);
+    }
+
+    /**
+     * Decorated inline labels are the authored section-rhythm landmarks. Their
+     * own margins, and the margin of a trailing flow control before the next
+     * landmark, are the bounded inner-flow values this pass reinforces.
+     *
+     * @param list<array{source:string,css:string}> $authorChunks
+     * @return array<string,true>
+     */
+    private static function paintedRhythmSelectorKeys(array $authorChunks): array
+    {
+        $traits = [];
+        foreach ($authorChunks as $chunk) {
+            foreach (CssChecks::scanDeclarations($chunk['css']) as $declaration) {
+                if ($declaration['kind'] !== 'style' || !$declaration['structurallySafe']) {
+                    continue;
+                }
+                $property = strtolower(trim($declaration['property']));
+                if (!in_array($property, ['background', 'background-color', 'border-radius'], true)) {
+                    continue;
+                }
+                $key = json_encode(
+                    [$declaration['ancestors'], $declaration['context']],
+                    JSON_UNESCAPED_SLASHES,
+                );
+                $key = is_string($key) ? $key : $declaration['context'];
+                if ($property === 'border-radius') {
+                    $traits[$key]['radius'] = true;
+                } else {
+                    $traits[$key]['background'] = true;
+                }
+            }
+        }
+
+        $painted = [];
+        foreach ($traits as $key => $trait) {
+            if (($trait['background'] ?? false) && ($trait['radius'] ?? false)) {
+                $painted[$key] = true;
+            }
+        }
+        return $painted;
+    }
+
+    /**
+     * Match source-design section ids to delivered roots. An id is the only
+     * stable cross-representation key: class and tree-shape matching would
+     * guess when the transformer introduces wrapper groups.
+     *
+     * @param array{
+     *     ids:array<string,true>,roots:list<\DOMElement>,elements:list<\DOMElement>,
+     *     allRootIds:array<string,true>,allRoots:list<\DOMElement>,
+     *     trailingFlowChildren:list<\DOMElement>
+     * } $sectionRoots
+     * @param list<string> $warnings
+     * @return array{
+     *   0:array{
+     *     ids:array<string,true>,roots:list<\DOMElement>,elements:list<\DOMElement>,
+     *     edgeStartIds:array<string,true>
+     *   },
+     *   1:array<string,list<array{property:string,value:string,important:bool}>>
+     * }
+     */
+    private static function authoredSectionRootContext(
+        Project $project,
+        array $sectionRoots,
+        array &$warnings,
+    ): array {
+        $sourceIds = [];
+        $edgeStartIds = [];
+        $inlineCandidates = [];
+        foreach (self::deliveredDesignSources($project) as $source) {
+            $dom = Html::loadUtf8Html(
+                $project->readText($source),
+                LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING,
+            );
+            if (!$dom instanceof \DOMDocument) {
+                $warnings[] = 'source=' . $source
+                    . '; block_path=source section roots; authored_value=unparseable HTML; '
+                    . 'delivered_value=no source-root vertical cascade; '
+                    . 'disposition=retained delivered section presets';
+                continue;
+            }
+            $xpath = new \DOMXPath($dom);
+            foreach ($xpath->query('//section[@id]') ?: [] as $section) {
+                if (!$section instanceof \DOMElement) {
+                    continue;
+                }
+                $id = trim($section->getAttribute('id'));
+                if ($id === '' || !isset($sectionRoots['allRootIds'][$id])) {
+                    continue;
+                }
+                $sourceIds[$id] = true;
+                $firstElement = null;
+                foreach ($section->childNodes as $child) {
+                    if ($child instanceof \DOMElement) {
+                        $firstElement = $child;
+                        break;
+                    }
+                }
+                if ($firstElement instanceof \DOMElement
+                    && strtolower($firstElement->tagName) !== 'div'
+                ) {
+                    // A leading content/band element begins at the authored
+                    // section edge. A build-owned top preset would insert a
+                    // new band before it, as opposed to padding a wrapper.
+                    $edgeStartIds[$id] = true;
+                }
+                $style = $section->getAttribute('style');
+                if (trim($style) === '') {
+                    continue;
+                }
+                $converted = [];
+                foreach (MarkupScan::parseInlineStyle($style) as $declaration) {
+                    if ($declaration['value'] === null) {
+                        continue;
+                    }
+                    $error = null;
+                    $items = self::blockAxisDeclarations(
+                        $declaration['property'],
+                        $declaration['value'],
+                        false,
+                        $error,
+                    );
+                    if ($items === []) {
+                        continue;
+                    }
+                    if ($items === null) {
+                        $warnings[] = sprintf(
+                            'source=%s; block_path=section#%s inline style; authored_value=%s; '
+                                . 'delivered_value=section preset; disposition=retained unprovable '
+                                . 'block-axis shorthand; reason=%s',
+                            $source,
+                            $id,
+                            self::warningValue($declaration['segment']),
+                            self::warningValue($error ?? 'unknown shorthand shape'),
+                        );
+                        continue;
+                    }
+                    array_push($converted, ...$items);
+                }
+                if ($converted !== []) {
+                    $inlineCandidates[$id][] = [
+                        'source' => $source,
+                        'declarations' => $converted,
+                    ];
+                }
+            }
+        }
+
+        $roots = [];
+        $ids = [];
+        foreach ($sectionRoots['allRoots'] as $root) {
+            $id = trim($root->getAttribute('id'));
+            if ($id === '' || !isset($sourceIds[$id])) {
+                continue;
+            }
+            $roots[] = $root;
+            $ids[$id] = true;
+        }
+
+        $inlineById = [];
+        foreach ($inlineCandidates as $id => $candidates) {
+            $byValue = [];
+            foreach ($candidates as $candidate) {
+                $key = json_encode($candidate['declarations'], JSON_UNESCAPED_SLASHES);
+                if (is_string($key)) {
+                    $byValue[$key][] = $candidate['source'];
+                }
+            }
+            if (count($byValue) !== 1) {
+                $warnings[] = sprintf(
+                    'source=%s; block_path=section#%s inline style; authored_value=%s; '
+                        . 'delivered_value=section preset; disposition=retained ambiguous source-root spacing',
+                    implode(',', array_map(
+                        static fn (array $candidate): string => $candidate['source'],
+                        $candidates,
+                    )),
+                    $id,
+                    self::warningValue(implode(' | ', array_keys($byValue))),
+                );
+                continue;
+            }
+            $inlineById[$id] = $candidates[0]['declarations'];
+        }
+
+        return [
+            [
+                'ids' => $ids,
+                'roots' => $roots,
+                'elements' => $sectionRoots['elements'],
+                'edgeStartIds' => array_intersect_key($edgeStartIds, $ids),
+            ],
+            $inlineById,
+        ];
+    }
+
+    /**
+     * Viewport-height stages already own their complete vertical box. Keep
+     * their delivered section preset rather than forcing a second padding
+     * owner into that height calculation.
+     *
+     * @param array{
+     *   ids:array<string,true>,roots:list<\DOMElement>,elements:list<\DOMElement>,
+     *   edgeStartIds:array<string,true>
+     * } $roots
+     * @return array{ids:array<string,true>,roots:list<\DOMElement>,elements:list<\DOMElement>}
+     */
+    private static function rootsWithoutViewportHeightOwnership(array $roots): array
+    {
+        $kept = [];
+        $ids = [];
+        foreach ($roots['roots'] as $root) {
+            $style = $root->getAttribute('style');
+            if (preg_match(
+                '/(?:^|;)\s*(?:min-)?height\s*:[^;]*(?:dvh|lvh|svh|vh)(?:\s|;|$)/i',
+                $style,
+            ) === 1) {
+                continue;
+            }
+            $kept[] = $root;
+            $id = trim($root->getAttribute('id'));
+            if ($id !== '') {
+                $ids[$id] = true;
+            }
+        }
+        return ['ids' => $ids, 'roots' => $kept, 'elements' => $roots['elements']];
+    }
+
+    /**
+     * @param array{property:string,value:string,important:bool} $declaration
+     */
+    private static function verticalDeclarationText(array $declaration, bool $forceImportant): string
+    {
+        $important = $forceImportant || $declaration['important'] ? ' !important' : '';
+        return $declaration['property'] . ': ' . $declaration['value'] . $important . ';';
+    }
+
+    /**
+     * Convert a spacing declaration into block-axis-only longhands. An empty
+     * but cannot be decomposed without guessing.
+     *
+     * @return list<array{property:string,value:string,important:bool}>|null
+     */
+    private static function blockAxisDeclarations(
+        string $property,
+        string $rawValue,
+        bool $forceImportant,
+        ?string &$error,
+    ): ?array {
+        $property = strtolower(trim($property));
+        $priority = CssChecks::splitDeclarationPriority($rawValue);
+        $important = $forceImportant || $priority['important'];
+        $value = $priority['value'];
+        if (in_array($property, [
+            'margin-top', 'margin-bottom', 'margin-block-start', 'margin-block-end',
+            'padding-top', 'padding-bottom', 'padding-block-start', 'padding-block-end',
+            'margin-block', 'padding-block', 'row-gap',
+        ], true)) {
+            return [[
+                'property' => $property,
+                'value' => $value,
+                'important' => $important,
+            ]];
+        }
+        if (!in_array($property, ['margin', 'padding', 'gap'], true)) {
+            return [];
+        }
+
+        $values = self::splitPaddingValues($value, $error);
+        if ($values === null || count($values) < 1 || count($values) > ($property === 'gap' ? 2 : 4)) {
+            $error ??= $property . ' shorthand has an unsupported component count';
+            return null;
+        }
+        if ($property === 'gap') {
+            if (self::hasOpaquePaddingComponent([$values[0]])) {
+                $error = 'gap shorthand has an opaque row component';
+                return null;
+            }
+            return [[
+                'property' => 'row-gap',
+                'value' => $values[0],
+                'important' => $important,
+            ]];
+        }
+
+        $bottom = match (count($values)) {
+            1, 2 => $values[0],
+            3, 4 => $values[2],
+        };
+        if (self::hasOpaquePaddingComponent([$values[0], $bottom])) {
+            $error = $property . ' shorthand has an opaque block-axis component';
+            return null;
+        }
+        return [
+            [
+                'property' => $property . '-top',
+                'value' => $values[0],
+                'important' => $important,
+            ],
+            [
+                'property' => $property . '-bottom',
+                'value' => $bottom,
+                'important' => $important,
+            ],
+        ];
+    }
+
+    /**
+     * Resolve CSS nesting for selector matching/emission while retaining only
+     * conditional grouping at-rules. @layer is intentionally flattened: a
+     * normal declaration inside a layer cannot outrank WordPress's unlayered
+     * layout CSS regardless of selector specificity.
+     *
+     * @param array{context:string,ancestors:list<string>} $declaration
+     * @return array{selectors:list<string>,grouping:list<string>}|null
+     */
+    private static function resolvedVerticalSelectors(array $declaration, ?string &$error): ?array
+    {
+        $parents = [];
+        $grouping = [];
+        foreach ($declaration['ancestors'] as $ancestor) {
+            $atRule = self::atRuleName($ancestor);
+            if ($atRule !== null) {
+                if ($atRule === 'layer') {
+                    continue;
+                }
+                if (!in_array(
+                    $atRule,
+                    ['media', 'supports', 'container', 'scope', 'document', 'starting-style'],
+                    true,
+                )) {
+                    $error = "unsupported vertical-rhythm ancestor @{$atRule}";
+                    return null;
+                }
+                $grouping[] = trim($ancestor);
+                continue;
+            }
+            $parents = self::resolveVerticalSelectorList($ancestor, $parents, $error) ?? [];
+            if ($error !== null || $parents === []) {
+                return null;
+            }
+        }
+        $selectors = self::resolveVerticalSelectorList($declaration['context'], $parents, $error);
+        return $selectors === null ? null : ['selectors' => $selectors, 'grouping' => $grouping];
+    }
+
+    /** @param list<string> $parents @return list<string>|null */
+    private static function resolveVerticalSelectorList(
+        string $selectorText,
+        array $parents,
+        ?string &$error,
+    ): ?array {
+        $branches = self::splitSelectorList($selectorText, $error);
+        if ($branches === null) {
+            return null;
+        }
+        $resolved = [];
+        foreach ($branches as $branch) {
+            $selectors = self::resolveNestedSelectorBranch(trim($branch), $parents, $error);
+            if ($selectors === null) {
+                return null;
+            }
+            array_push($resolved, ...$selectors);
+        }
+        return $resolved;
+    }
+
+    private static function boostVerticalSelector(string $selector): string
+    {
+        $selector = trim($selector);
+        if (preg_match('/\Ahtml(?=\z|[.#:\[])/i', $selector) === 1) {
+            return ':root:root:root' . substr($selector, 4);
+        }
+        if (preg_match('/\A:root(?=\z|[.#:\[])/i', $selector) === 1) {
+            return ':root:root:root' . substr($selector, 5);
+        }
+        return ':root:root ' . $selector;
+    }
+
+    /**
+     * Whether a selector matches at least one source-backed delivered root.
+     * Unlike selectorSetRootRelation(), this does not scan every non-root
+     * element to distinguish ROOT_ALL from ROOT_MIXED: every emitted rule gets
+     * the same explicit root-id filter, so that distinction has no effect.
+     *
+     * @param array{ids:array<string,true>,roots:list<\DOMElement>,elements:list<\DOMElement>} $roots
+     */
+    private static function selectorMatchesAnyRoot(
+        string $selector,
+        array $roots,
+        ?string &$error,
+    ): ?bool {
+        $parsed = CssSelectorMatcher::parse($selector);
+        if ($parsed['supported'] ?? false) {
+            $allMatchesSupported = true;
+            foreach ($roots['roots'] as $root) {
+                $match = CssSelectorMatcher::matches($root, $parsed, true);
+                if (!($match['supported'] ?? false)) {
+                    $allMatchesSupported = false;
+                    break;
+                }
+                if ($match['matches']) {
+                    return true;
+                }
+            }
+            if ($allMatchesSupported) {
+                return false;
+            }
+        }
+
+        $relation = self::selectorRootRelation($selector, $roots, $error);
+        return $relation === null ? null : $relation !== self::ROOT_NONE;
+    }
+
+    /** @param list<\DOMElement> $elements */
+    private static function selectorMatchesAnyElement(string $selector, array $elements): bool
+    {
+        $parsed = CssSelectorMatcher::parse($selector);
+        if (!($parsed['supported'] ?? false)) {
+            // The source selector is still delivered unchanged. Conservatively
+            // reinforce an unsupported selector rather than guessing that no
+            // flow child can match it.
+            return true;
+        }
+        foreach ($elements as $element) {
+            $match = CssSelectorMatcher::matches($element, $parsed, true);
+            if (!($match['supported'] ?? false)) {
+                return true;
+            }
+            if ($match['matches']) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** @param list<string> $grouping */
+    private static function wrapVerticalGroupingRules(array $grouping, string $rule): string
+    {
+        for ($index = count($grouping) - 1; $index >= 0; $index--) {
+            $rule = $grouping[$index] . ' {' . $rule . '}';
+        }
+        return $rule;
     }
 
     /**
