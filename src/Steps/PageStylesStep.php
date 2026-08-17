@@ -670,6 +670,19 @@ CSS;
                 if ($id !== '') {
                     $allRootIds[$id] = true;
                 }
+                // These roots keep their authored horizontal padding: excluding
+                // them here keeps the padding neutralisation off them. The
+                // original reason — that the padding was the start inset for
+                // narrower children — died with layout.justifyContent, since a
+                // start-aligned child now carries its own pin.
+                //
+                // It still changes geometry, so it is left alone deliberately
+                // rather than retired here. Be aware it couples: the pin's
+                // 100% resolves against the padded content box, so a marked
+                // child inside one of these roots lands at
+                // padding + max(0, (paddedBox - contentSize) / 2), not at the
+                // bare content column. Retiring this exclusion is its own
+                // change, with its own measurement.
                 $classes = preg_split('/\s+/', trim($section->getAttribute('class'))) ?: [];
                 if (in_array(SectionLayoutStep::AUTHOR_WIDTH_START_CLASS, $classes, true)) {
                     continue;

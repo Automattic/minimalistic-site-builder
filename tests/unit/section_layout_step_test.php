@@ -703,6 +703,10 @@ test('A7 section layout resolves a rem media prelude against the render viewport
         $attrs['target']['className'] ?? '',
         '56rem is 896px, so the rule applies at 1366',
     );
+    assert_true(
+        !isset($attrs['target']['align']),
+        'a classified measure is never handed a block alignment',
+    );
 });
 
 test('A8 section layout leaves a non-width at-rule unprovable', function () {
@@ -820,12 +824,15 @@ test('AW3 section layout keeps per-child width markers out of the footer control
         (new SectionLayoutStep())->run($project);
 
         assert_eq($footer, $project->readText('theme/parts/footer.html'), 'the footer part is never rewritten');
+        $header = $project->readText('theme/parts/header.html');
         assert_true(
-            !str_contains(
-                $project->readText('theme/parts/header.html'),
-                SectionLayoutStep::AUTHOR_WIDTH_CHILD_ESCAPE_CLASS,
-            ),
+            !str_contains($header, SectionLayoutStep::AUTHOR_WIDTH_CHILD_ESCAPE_CLASS),
             'a wide-carrier part never gains a per-child width marker',
+        );
+        assert_eq(
+            'wide',
+            section_layout_class_attrs($header, 'hero-inner')['align'] ?? null,
+            'the part still receives the wide-carrier alignment it always had',
         );
         assert_contains(
             SectionLayoutStep::AUTHOR_WIDTH_CHILD_ESCAPE_CLASS,
@@ -834,6 +841,53 @@ test('AW3 section layout keeps per-child width markers out of the footer control
                 'hero-inner',
             )['className'] ?? '',
             'the page section carrying the same class does get the marker',
+        );
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('AW7 section layout clears a per-child marker the design no longer earns', function () {
+    // A resumed build re-runs this step over markup an earlier revision
+    // stamped. An add-only marker would survive its own classification and
+    // PageStylesStep would pin a child with an !important margin that nothing
+    // in the current design authored.
+    [$project, $tmp] = section_layout_project([[
+        'slug' => 'home',
+        'sections' => [['slug' => 'band', 'background' => 'base', 'vertical_density' => 'standard']],
+    ]]);
+    try {
+        $part = 'theme/parts/page-home--band.html';
+        $project->writeText(
+            $part,
+            '<!-- wp:group --><div class="wp-block-group">'
+                . '<!-- wp:group {"className":"measure"} --><div class="wp-block-group measure">'
+                . '<!-- wp:paragraph --><p>Band</p><!-- /wp:paragraph -->'
+                . '</div><!-- /wp:group --></div><!-- /wp:group -->',
+        );
+
+        $project->writeText('design/site.css', '.measure{max-width:44rem;margin-left:auto}');
+        (new SectionLayoutStep())->run($project);
+        assert_contains(
+            SectionLayoutStep::AUTHOR_WIDTH_CHILD_ESCAPE_CLASS,
+            section_layout_class_attrs($project->readText($part), 'measure')['className'] ?? '',
+            'the classifying design stamps the marker',
+        );
+
+        // Same markup, a design that no longer classifies the child at all.
+        $project->writeText('design/site.css', '.measure{color:red}');
+        (new SectionLayoutStep())->run($project);
+        assert_true(
+            !str_contains(
+                $project->readText($part),
+                SectionLayoutStep::AUTHOR_WIDTH_CHILD_ESCAPE_CLASS,
+            ),
+            'the stale marker is cleared rather than carried forward',
+        );
+        assert_contains(
+            'measure',
+            section_layout_class_attrs($project->readText($part), 'measure')['className'] ?? '',
+            'clearing the marker leaves the authored class list intact',
         );
     } finally {
         exec('rm -rf ' . escapeshellarg($tmp));
@@ -1274,10 +1328,18 @@ test('A10 section layout leaves the footer part exactly as it found it', functio
         (new SectionLayoutStep())->run($project);
 
         assert_eq($footer, $project->readText('theme/parts/footer.html'), 'the footer part is never rewritten');
+        $band = section_layout_class_attrs(
+            $project->readText('theme/parts/page-home--band.html'),
+            'hero-inner',
+        );
         assert_contains(
             SectionLayoutStep::AUTHOR_WIDTH_CHILD_ESCAPE_CLASS,
-            section_layout_class_attrs($project->readText('theme/parts/page-home--band.html'), 'hero-inner')['className'] ?? '',
+            $band['className'] ?? '',
             'the page section carrying the same class does escape',
+        );
+        assert_true(
+            !isset($band['align']),
+            'the escaping page-section child is never handed a block alignment',
         );
     } finally {
         exec('rm -rf ' . escapeshellarg($tmp));

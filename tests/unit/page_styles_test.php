@@ -953,6 +953,41 @@ test('AW4 site CSS path pins a marked authored-width child to its content-column
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('AW6 site CSS path emits only the pin whose marker is on the page', function () {
+    // Each marker is emitted independently. A page carrying only start-aligned
+    // children must not ship the end-alignment rule: every pin declaration is
+    // !important, and that is authorised only where a marked child needs it.
+    [$project, $tmp] = ps_project('builder_ps_author_width_one_marker_');
+    $project->writeText(TransformArtifacts::SITE_CSS, '.rule{max-width:52ch}');
+    $project->writeJson('pages.json', ['pages' => [['slug' => 'home', 'front' => true]]]);
+    $project->writeText(
+        'design/home.html',
+        '<main><section id="services"><hr class="rule"><p>Services</p></section></main>',
+    );
+    $project->writeText(
+        'plugin/pages/home.html',
+        '<section id="services"><hr class="rule '
+            . SectionLayoutStep::AUTHOR_WIDTH_CHILD_START_CLASS . '"><p>Services</p></section>',
+    );
+
+    ps_html_first_step(new FakeLlm())->run($project);
+    $style = $project->readText('theme/style.css');
+
+    assert_contains(
+        'margin-left: max(0px, (100% - var(--wp--style--global--content-size, 100%)) / 2) !important',
+        implode("\n", ps_css_bodies_for_selector(
+            $style,
+            ':root:root .' . SectionLayoutStep::AUTHOR_WIDTH_CHILD_START_CLASS,
+        )),
+        'the marker present on the page is pinned',
+    );
+    assert_true(
+        !str_contains($style, SectionLayoutStep::AUTHOR_WIDTH_CHILD_ESCAPE_CLASS),
+        'the marker absent from the page ships no rule at all',
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('AW5 site CSS path emits no authored-width pin when no child is marked', function () {
     // The pin carries !important against WordPress's own !important layout
     // margins. It is authorised for marked children only, so an unmarked page

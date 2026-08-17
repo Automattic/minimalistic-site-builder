@@ -258,15 +258,40 @@ final class SectionLayoutStep implements Step
         // and max-width. These markers carry the classification to
         // PageStylesStep, which pins each child to the content column edge it
         // asked for. Two auto margins still mean WordPress's default centring.
-        foreach (['start', 'escape'] as $alignment) {
-            $marker = $alignment === 'start'
-                ? self::AUTHOR_WIDTH_CHILD_START_CLASS
-                : self::AUTHOR_WIDTH_CHILD_ESCAPE_CLASS;
-            foreach ($authorWidthTargets[$alignment] as $target) {
-                $targetAttrs = $doc->attrs($target) ?? [];
-                self::toggleCommentClass($targetAttrs, $marker, true);
-                $doc->setAttrs($target, $targetAttrs);
+        //
+        // Every direct child is visited, not just the classified ones, because
+        // a resumed build re-runs this step over markup an earlier revision
+        // stamped. Stamping add-only would leave a marker on a child the
+        // current design no longer classifies, and PageStylesStep would then
+        // pin it with an !important margin nothing authored.
+        $markers = [
+            self::AUTHOR_WIDTH_CHILD_START_CLASS => array_fill_keys($authorWidthTargets['start'], true),
+            self::AUTHOR_WIDTH_CHILD_ESCAPE_CLASS => array_fill_keys($authorWidthTargets['escape'], true),
+        ];
+        foreach ($doc->children($root) as $child) {
+            $childAttrs = $doc->attrs($child) ?? [];
+            $classified = false;
+            foreach ($markers as $targets) {
+                $classified = $classified || isset($targets[$child]);
             }
+            $tokens = preg_split(
+                '/[\x20\t\r\n\f]+/',
+                trim((string) ($childAttrs['className'] ?? '')),
+                -1,
+                PREG_SPLIT_NO_EMPTY,
+            ) ?: [];
+            $carries = array_intersect(array_keys($markers), $tokens) !== [];
+            // toggleCommentClass always writes className, so a child that is
+            // neither classified now nor carrying a stale marker must not be
+            // touched at all — writing an empty className it never had would
+            // re-serialize an authored block for no reason.
+            if (!$classified && !$carries) {
+                continue;
+            }
+            foreach ($markers as $marker => $targets) {
+                self::toggleCommentClass($childAttrs, $marker, isset($targets[$child]));
+            }
+            $doc->setAttrs($child, $childAttrs);
         }
 
         // A constrained layout re-caps its children at contentSize unless the
@@ -274,11 +299,17 @@ final class SectionLayoutStep implements Step
         // selected by a var(--wide-size) rule. A direct cover already runs
         // full, so its explicit align is never downgraded.
         //
-        // A classified child is excluded: wideClassTokens() is deliberately
-        // media-blind, so a design whose mobile rule reads var(--wide-size) and
-        // whose desktop rule narrows the column would have its authored measure
-        // replaced by .alignwide's wide-size cap — the very declaration the
-        // per-child pin exists to keep.
+        // Every classified child is excluded, start as well as escape, and for
+        // one reason that covers both: classification requires the child to own
+        // a bound width or max-width, so .alignwide's wide-size cap would
+        // always override the very declaration that classified it.
+        // wideClassTokens() is deliberately media-blind, which is how a design
+        // whose mobile rule reads var(--wide-size) and whose desktop rule
+        // narrows the column reaches this promotion at all.
+        // This does change the start case: before the per-child pin, a
+        // start-classified child carried no align and was eligible here. No
+        // corpus project has that shape, so the exclusion is asserted on the
+        // mechanism above rather than demonstrated by a measured project.
         if ($wideSelectors !== []) {
             $classified = array_fill_keys(
                 array_merge($authorWidthTargets['start'], $authorWidthTargets['escape']),
