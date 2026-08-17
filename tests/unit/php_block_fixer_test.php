@@ -414,6 +414,269 @@ test('PhpBlockFixer isolates a file carrying an unknown deprecation signature', 
     }
 });
 
+test('PhpBlockFixer re-serializes a navigation-link carrying the transformer anchorClassName', function () {
+    // The pinned transformer emits anchorClassName for every classed anchor it
+    // promotes into a navigation. WordPress never registered the attribute, so
+    // without a reviewed adapter the whole part is delivered byte-for-byte and
+    // every other repair the step would have made is lost with it.
+    $original = '<!-- wp:navigation {"className":"nav-links","overlayMenu":"mobile"} -->'
+        . '<!-- wp:navigation-link {"className":"nav-reserve","label":"Reservations",'
+        . '"url":"/visit/","kind":"custom","anchorClassName":"nav-reserve"} /-->'
+        . '<!-- /wp:navigation -->';
+    $theme = php_block_fixer_test_theme(['parts/header.html' => $original]);
+
+    try {
+        $report = (new PhpBlockFixer())->fix($theme);
+        $fixed = file_get_contents($theme . '/parts/header.html');
+
+        assert_contains('FIXED  parts/header.html', $report);
+        assert_true(
+            !str_contains($report, "Unsupported comment attribute 'anchorClassName'"),
+            'the reviewed adapter admits the signature instead of rejecting the file',
+        );
+
+        // Non-vacuity: the block must SURVIVE, not be dropped. A serializer that
+        // deleted the navigation-link entirely would also stop throwing.
+        assert_eq(1, substr_count($fixed, '<!-- wp:navigation-link '), 'the link block survives');
+        assert_eq(1, substr_count($fixed, '<!-- wp:navigation '), 'its parent navigation survives');
+        assert_contains('"label":"Reservations"', $fixed);
+        assert_contains('"url":"/visit/"', $fixed);
+        assert_contains('"kind":"custom"', $fixed);
+        // The registered className carries the same authored value, so dropping
+        // the unregistered anchor alias loses no authored bytes.
+        assert_contains('"className":"nav-reserve"', $fixed);
+        assert_true(
+            !str_contains($fixed, 'anchorClassName'),
+            'the unregistered alias is discarded, matching the pinned createBlock path',
+        );
+    } finally {
+        remove_tree(dirname($theme));
+    }
+});
+
+test('PhpBlockFixer still rejects an unregistered navigation-link attribute with no reviewed adapter', function () {
+    // The anchorClassName adapter is one reviewed key for one block, not a
+    // blanket permissive mode; any other unregistered key must still fail closed.
+    $original = '<!-- wp:navigation {"className":"nav-links","overlayMenu":"mobile"} -->'
+        . '<!-- wp:navigation-link {"label":"Reservations","url":"/visit/",'
+        . '"kind":"custom","anchorTarget":"_blank"} /-->'
+        . '<!-- /wp:navigation -->';
+    $theme = php_block_fixer_test_theme(['parts/header.html' => $original]);
+
+    try {
+        $report = (new PhpBlockFixer())->fix($theme);
+
+        assert_contains('FAILED parts/header.html', $report);
+        assert_contains("Unsupported comment attribute 'anchorTarget' for core/navigation-link", $report);
+        assert_contains('a reviewed deprecation adapter is required', $report);
+        assert_eq($original, file_get_contents($theme . '/parts/header.html'));
+    } finally {
+        remove_tree(dirname($theme));
+    }
+});
+
+/**
+ * Effective overlayMenu of the sole navigation block: the delimiter value when
+ * present, otherwise the registered default. The serializer elides a value that
+ * equals the default, so an absent key is not an absent behaviour.
+ */
+function nav_overlay_menu(string $html): string
+{
+    // Fail loudly rather than reporting the default when the block is missing:
+    // a helper that returns 'mobile' for absent markup would let every
+    // assert_eq('mobile', ...) below pass against a deleted block or an empty
+    // file, which is the vacuity shape this project rejects slices for.
+    $count = substr_count($html, '<!-- wp:navigation ');
+    if ($count !== 1) {
+        throw new RuntimeException("expected exactly 1 navigation block, found {$count}");
+    }
+    return preg_match('/<!-- wp:navigation [^>]*?"overlayMenu":"([^"]*)"/', $html, $m) === 1
+        ? $m[1]
+        : 'mobile';
+}
+
+/**
+ * True when the navigation carries a TOP-LEVEL (registered preset) fontFamily.
+ * Parses the delimiter JSON rather than matching a substring: the nested
+ * style.typography.fontFamily lives in the same comment, so a regex would
+ * report a preset that is not there.
+ */
+function nav_has_preset_font_family(string $html): bool
+{
+    if (preg_match('/<!-- wp:navigation (\{.*?\}) -->/s', $html, $m) !== 1) {
+        return false;
+    }
+    $attrs = json_decode($m[1], true);
+    if (!is_array($attrs)) {
+        throw new RuntimeException('navigation delimiter JSON did not parse: ' . $m[1]);
+    }
+    return array_key_exists('fontFamily', $attrs);
+}
+
+test('PhpBlockFixer converges on the authored overlayMenu across repeated passes', function () {
+    // N1. The navigation deprecation supplies overlayMenu:"never" as a migration
+    // default. Re-running the fixer must be a no-op: the adapter's own output is
+    // already migrated, so re-applying it would overwrite the authored value.
+    $original = '<!-- wp:navigation {"className":"nav-links",'
+        . '"style":{"typography":{"fontFamily":"var(--heading)"}},"overlayMenu":"mobile"} -->'
+        . '<!-- wp:navigation-link {"className":"nav-reserve","label":"Reservations",'
+        . '"url":"/visit/","kind":"custom","anchorClassName":"nav-reserve"} /-->'
+        . '<!-- /wp:navigation -->';
+    $theme = php_block_fixer_test_theme(['parts/header.html' => $original]);
+
+    try {
+        $seen = [];
+        for ($pass = 1; $pass <= 3; $pass++) {
+            (new PhpBlockFixer())->fix($theme);
+            $seen[$pass] = file_get_contents($theme . '/parts/header.html');
+            assert_eq(
+                'mobile',
+                nav_overlay_menu($seen[$pass]),
+                "pass {$pass} must keep the authored overlayMenu, not the migration default",
+            );
+        }
+        assert_eq($seen[1], $seen[2], 'pass 2 is byte-stable');
+        assert_eq($seen[2], $seen[3], 'pass 3 is byte-stable');
+        // The authored custom family must stay where it was authored.
+        // Promoting it to the registered preset attribute would make
+        // WordPress resolve it as a slug - pinned by the regression test below.
+        assert_true(
+            !nav_has_preset_font_family($seen[1]),
+            'a custom font-family is not promoted to the registered preset attribute',
+        );
+        assert_contains('"typography":{"fontFamily":"var(\u002d\u002dheading)"', $seen[1]);
+    } finally {
+        remove_tree(dirname($theme));
+    }
+});
+
+test('PhpBlockFixer converges on the authored overlayMenu for LEGACY navigation content', function () {
+    // The legacy-signature gate does NOT exclude this adapter's own output:
+    // the migration writes the bare slug into the registered top-level
+    // fontFamily and leaves style.typography.fontFamily in the pipe form, so
+    // the gate matches again on every later pass. The raw-comment fontFamily
+    // guard is what makes the legacy path a fixed point. Deleting that guard
+    // while keeping the gate must fail this test.
+    $original = '<!-- wp:navigation {"className":"nav-links",'
+        . '"style":{"typography":{"fontFamily":"var:preset|font-family|heading"}},'
+        . '"overlayMenu":"mobile"} -->'
+        . '<!-- wp:navigation-link {"label":"Home","url":"/","kind":"custom"} /-->'
+        . '<!-- /wp:navigation -->';
+    $theme = php_block_fixer_test_theme(['parts/header.html' => $original]);
+
+    try {
+        $seen = [];
+        for ($pass = 1; $pass <= 3; $pass++) {
+            (new PhpBlockFixer())->fix($theme);
+            $seen[$pass] = file_get_contents($theme . '/parts/header.html');
+            assert_eq(
+                'mobile',
+                nav_overlay_menu($seen[$pass]),
+                "pass {$pass} must keep the authored overlayMenu on legacy content",
+            );
+        }
+        assert_eq($seen[1], $seen[2], 'pass 2 is byte-stable');
+        assert_eq($seen[2], $seen[3], 'pass 3 is byte-stable');
+        // The migration DID run: legacy content earns the real preset slug.
+        assert_true(nav_has_preset_font_family($seen[1]), 'legacy content is migrated');
+        assert_contains('"fontFamily":"heading"', $seen[1], 'the slug is the last pipe segment');
+    } finally {
+        remove_tree(dirname($theme));
+    }
+});
+
+test('PhpBlockFixer does not promote a custom navigation font-family to a preset slug', function () {
+    // The legacy migration reads `var:preset|font-family|<slug>` and keeps the
+    // last pipe segment. A transformer-authored CUSTOM value has no pipe, so the
+    // whole CSS value would land in the registered fontFamily attribute.
+    // WordPress prefers that attribute over style.typography.fontFamily and
+    // kebab-cases it into --wp--preset--font-family--var-heading, which no
+    // theme.json defines, so the authored font silently disappears.
+    $original = '<!-- wp:navigation {"className":"nav-links",'
+        . '"style":{"typography":{"fontFamily":"var(--heading)"}}} -->'
+        . '<!-- wp:navigation-link {"label":"Home","url":"/","kind":"custom"} /-->'
+        . '<!-- /wp:navigation -->';
+    $theme = php_block_fixer_test_theme(['parts/header.html' => $original]);
+
+    try {
+        (new PhpBlockFixer())->fix($theme);
+        $fixed = file_get_contents($theme . '/parts/header.html');
+
+        assert_eq(1, substr_count($fixed, '<!-- wp:navigation '), 'the navigation survives');
+        assert_true(
+            !nav_has_preset_font_family($fixed),
+            'a custom value must not become a registered preset font-family',
+        );
+        assert_contains('"typography":{"fontFamily":"var(\u002d\u002dheading)"', $fixed);
+    } finally {
+        remove_tree(dirname($theme));
+    }
+});
+
+test('PhpBlockFixer round-trips an authored attribute whose value equals the registered default', function () {
+    // N2. overlayMenu's registered default is "mobile". The serializer elides a
+    // value equal to the default, so a later pass cannot tell "authored mobile"
+    // from "unspecified" — the interaction that broke convergence.
+    $authored = '<!-- wp:navigation {"className":"nav-links",'
+        . '"style":{"typography":{"fontFamily":"var(--heading)"}},"overlayMenu":"mobile"} -->'
+        . '<!-- wp:navigation-link {"label":"Home","url":"/","kind":"custom"} /-->'
+        . '<!-- /wp:navigation -->';
+    $theme = php_block_fixer_test_theme(['parts/header.html' => $authored]);
+
+    try {
+        (new PhpBlockFixer())->fix($theme);
+        $fixed = file_get_contents($theme . '/parts/header.html');
+
+        assert_eq('mobile', nav_overlay_menu($fixed), 'the authored default-valued attribute survives');
+        assert_true(
+            !str_contains($fixed, '"overlayMenu":"never"'),
+            'the migration default never overwrites an authored value',
+        );
+    } finally {
+        remove_tree(dirname($theme));
+    }
+});
+
+test('PhpBlockFixer still applies the navigation migration to un-migrated content', function () {
+    // The forcing rule is not deleted. Content that has NOT yet been migrated -
+    // style.typography.fontFamily with no top-level fontFamily and no authored
+    // overlayMenu - still receives the deprecation's overlay default.
+    // GENUINELY LEGACY content: the pinned save form is a pipe-delimited
+    // preset reference, not a raw CSS value. Using a custom value here would
+    // pass vacuously against the legacy-signature gate.
+    $original = '<!-- wp:navigation {"className":"nav-links",'
+        . '"style":{"typography":{"fontFamily":"var:preset|font-family|heading"}}} -->'
+        . '<!-- wp:navigation-link {"label":"Home","url":"/","kind":"custom"} /-->'
+        . '<!-- /wp:navigation -->';
+    $theme = php_block_fixer_test_theme(['parts/header.html' => $original]);
+
+    try {
+        (new PhpBlockFixer())->fix($theme);
+        $fixed = file_get_contents($theme . '/parts/header.html');
+
+        assert_eq('never', nav_overlay_menu($fixed), 'the migration still supplies its overlay default');
+        assert_contains('"fontFamily":"heading"', $fixed, 'the preset slug is the last pipe segment');
+    } finally {
+        remove_tree(dirname($theme));
+    }
+});
+
+test('PhpBlockFixer keeps the anchorClassName adapter scoped to core/navigation-link', function () {
+    // A sibling block carrying the same key name must still fail closed.
+    $original = '<!-- wp:paragraph {"anchorClassName":"brand"} --><p>Brand</p><!-- /wp:paragraph -->';
+    $theme = php_block_fixer_test_theme(['parts/header.html' => $original]);
+
+    try {
+        $report = (new PhpBlockFixer())->fix($theme);
+
+        assert_contains('FAILED parts/header.html', $report);
+        assert_contains("Unsupported comment attribute 'anchorClassName' for core/paragraph", $report);
+        assert_eq($original, file_get_contents($theme . '/parts/header.html'));
+    } finally {
+        remove_tree(dirname($theme));
+    }
+});
+
 test('PhpBlockFixer isolates a current-key historical style signature to its file', function () {
     $aOriginal = '<!-- wp:paragraph --><p>Supported</p><!-- /wp:paragraph -->';
     // An invalid paragraph whose root is not a <p> is outside the reviewed

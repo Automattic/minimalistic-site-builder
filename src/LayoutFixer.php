@@ -91,6 +91,7 @@ final class LayoutFixer
         ?float $contentSize = null,
         array $spacingSlugs = [],
         bool $htmlFirst = false,
+        array $wideMeasureRootClasses = [],
     ): array {
         $notes = [];
         $markup = self::repairMalformedAttributes($markup, $notes);
@@ -121,7 +122,7 @@ final class LayoutFixer
         self::mirrorDynamicChromeSpacing($markup, $all, $htmlEdits, $notes);
         $pageWidth = $role === self::ROLE_SECTION || $role === self::ROLE_TEMPLATE;
         if (!$pageWidth || !$htmlFirst) {
-            self::addMissingRootLayout($roots, $notes);
+            self::addMissingRootLayout($roots, $notes, $wideMeasureRootClasses);
         }
         self::promoteAlignClassNames($all, $notes);
 
@@ -847,15 +848,38 @@ final class LayoutFixer
      * applied to every file's root groups. A root carrying the exact
      * CSS-owned-layout marker stays layout-less; every other repair still runs.
      *
+     * A root whose className carries a class the design's own stylesheet gives
+     * the wide measure stays layout-less too, because the marker check alone
+     * does not protect it: such a root can and does arrive here unmarked.
+     * Observed on sunny-ember, whose footer root is `.hero-inner` — a class the
+     * stylesheet gives max-width:var(--wide-size) and margin:0 auto. Two
+     * instances of that same class in one build, only one marked:
+     *
+     *   theme/parts/footer.html   hero-inner be-inline-geometry-…       unmarked
+     *   plugin/pages/home.html    hero-inner blocks-engine-css-owned-…  marked
+     *
+     * The footer instance is the one the design writes as
+     * `<div class="hero-inner" style="display:block">`, overriding the class's
+     * own display:grid. Whatever the marker keys on, an inline declaration on
+     * one instance decides it, so a container that unambiguously owns its
+     * horizontal geometry can reach this pass looking unowned. Constraining it
+     * makes core emit margin-inline:auto!important on every child, which
+     * centres any child with its own measure — sunny-ember's 34ch footer
+     * paragraph landed 460px right of where the design puts it.
+     *
      * @param object[] $roots
      * @param string[] $notes
+     * @param list<string> $wideMeasureRootClasses classes whose OWN rule in the
+     *        design's stylesheet gives them the wide measure — a class that only
+     *        qualifies an ancestor of the element that has it does not count
      */
-    private static function addMissingRootLayout(array $roots, array &$notes): void
+    private static function addMissingRootLayout(array $roots, array &$notes, array $wideMeasureRootClasses = []): void
     {
         foreach ($roots as $node) {
             if (self::is($node, 'group')
                 && !isset($node->attrs->layout)
                 && !GeneratedMarkup::hasCssOwnedLayoutMarker($node->attrs)
+                && !GeneratedMarkup::carriesAnyClassToken($node->attrs, $wideMeasureRootClasses)
             ) {
                 $node->attrs->layout = (object) ['type' => 'constrained'];
                 $node->dirty = true;

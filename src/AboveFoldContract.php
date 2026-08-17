@@ -101,6 +101,10 @@ final class AboveFoldContract
      * @param array<string,mixed> $themeContext raw theme.json or {base,contrast}
      * @param array<string,mixed> $siteContext stable_id, writing_direction, page_count
      * @param array<string,mixed> $footerContext archetype and surface
+     * @param ?string $designCss design/site.css bytes; the design's own
+     *                           `header` rule is the only authored evidence
+     *                           of the stacked surface. Null on the legacy
+     *                           path, which has no design stylesheet.
      * @return array<string,mixed>
      */
     public static function resolve(
@@ -111,6 +115,7 @@ final class AboveFoldContract
         array $siteContext,
         array $footerContext,
         ?string $forcedHeaderArchetype = null,
+        ?string $designCss = null,
     ): array {
         $pages = self::pages($pages);
         $front = self::frontPage($pages);
@@ -204,8 +209,13 @@ final class AboveFoldContract
             $mode = self::MODE_OVERLAY;
         }
         $tagline = trim((string) ($siteContext['tagline'] ?? ''));
-        $foreground = $mode === self::MODE_OVERLAY ? $overlayForeground : 'contrast';
-        $protection = $mode === self::MODE_OVERLAY ? $overlayProtection : 'base';
+        // An overlay header floats over the opening image, so its pair is
+        // owned by the luminance ordering above; only a stacked header paints
+        // a band of its own, and the design's `header` rule is the authored
+        // evidence of what colour that band is.
+        [$stackedForeground, $stackedProtection] = self::stackedTokenRoles($designCss, $themeContext);
+        $foreground = $mode === self::MODE_OVERLAY ? $overlayForeground : $stackedForeground;
+        $protection = $mode === self::MODE_OVERLAY ? $overlayProtection : $stackedProtection;
         foreach ($openings as &$opening) {
             $opening['top_protection_token'] = $opening['surface'] === 'image'
                 || $opening['surface'] === $protection
@@ -280,6 +290,10 @@ final class AboveFoldContract
                 'part_keys' => [],
             ],
             'theme_tokens' => $tokens,
+            // Kept so a later degradation to the stacked relation restores the
+            // surface the design authored. Page count and lost overlay support
+            // invalidate the header's SHAPE; they say nothing about its colour.
+            'stacked_pair' => ['foreground' => $stackedForeground, 'protection' => $stackedProtection],
             'degradations' => $degradations,
         ];
     }
@@ -430,7 +444,7 @@ final class AboveFoldContract
     {
         self::assertContract($contract);
         $copy = $contract;
-        unset($copy['theme_tokens'], $copy['degradations'], $copy['delivered']);
+        unset($copy['theme_tokens'], $copy['stacked_pair'], $copy['degradations'], $copy['delivered']);
         return "ABOVE-FOLD CONTRACT (authoritative; front page only):\n"
             . self::encode($copy);
     }
@@ -678,6 +692,99 @@ final class AboveFoldContract
         return ['contrast', 'base'];
     }
 
+    /**
+     * The stacked pair, taken from the design's own `header` rule wherever
+     * the palette already carries the authored colour. Each side falls back
+     * to the reviewed literal on its own, because a design may author only a
+     * background.
+     *
+     * The two sides cannot be adopted in isolation, though: a design whose
+     * background the palette does not carry but whose ink it does would pair
+     * the reviewed surface with ink of that same colour, leaving invisible
+     * header text. calm-lantern is exactly that shape — `#2E0B5A` matches no
+     * slug while its `#fff` matches `base` — so a collided pair yields to the
+     * reviewed default, and the design's ink hint is discarded along with the
+     * surface it was chosen for.
+     *
+     * An unauthored ink resolves against the surface actually chosen rather
+     * than to a fixed `contrast`. On the reviewed `base` surface that still
+     * picks `contrast`, so every design that derives no surface keeps its
+     * present pair exactly; on a derived surface it stops the contract
+     * advertising an ink that `opaquePairWithSafety()` will then refuse to
+     * deliver — a mismatch the header author also reads through
+     * openingHeaderContract().
+     *
+     * @param array<string,mixed> $themeContext
+     * @return array{0:string,1:string} [foreground, protection]
+     */
+    private static function stackedTokenRoles(?string $designCss, array $themeContext): array
+    {
+        $palette = self::paletteMap($themeContext);
+        $pair = DesignHeaderSurface::stackedPair($designCss, $palette);
+        $protection = $pair['protection'] ?? 'base';
+        $foreground = $pair['foreground'];
+        // A design that stated a surface the palette cannot carry also stated
+        // its ink against that surface. Keeping the ink while painting a
+        // different band is the mismatch readableInk() exists to avoid, so the
+        // hint goes with the surface it was chosen for.
+        if ($pair['authored_background'] && $pair['protection'] === null) {
+            $foreground = null;
+        }
+        if ($foreground === null || $foreground === $protection) {
+            $foreground = self::readableInk($protection, $palette);
+        }
+        return [$foreground, $protection];
+    }
+
+    /**
+     * Whichever reviewed token reads better on this surface. The reviewed
+     * `base` surface, an unreadable palette, and a tie all keep `contrast`,
+     * which is the historical answer.
+     *
+     * @param array<string,string> $palette
+     */
+    private static function readableInk(string $protection, array $palette): string
+    {
+        if ($protection === 'contrast') {
+            return 'base';
+        }
+        $surface = ContrastMath::hexToRgb($palette[$protection] ?? '');
+        $base = ContrastMath::hexToRgb($palette['base'] ?? '');
+        $contrast = ContrastMath::hexToRgb($palette['contrast'] ?? '');
+        if ($protection === 'base' || $surface === null || $base === null || $contrast === null) {
+            return 'contrast';
+        }
+        return ContrastMath::ratio($base, $surface) > ContrastMath::ratio($contrast, $surface)
+            ? 'base'
+            : 'contrast';
+    }
+
+    /**
+     * Every concrete palette slug, unlike themeTokens() which deliberately
+     * narrows to the verified base/contrast pair it persists.
+     *
+     * @param array<string,mixed> $theme
+     * @return array<string,string> slug => hex
+     */
+    private static function paletteMap(array $theme): array
+    {
+        $palette = $theme['settings']['color']['palette'] ?? ($theme['palette'] ?? $theme);
+        $out = [];
+        foreach (is_array($palette) ? $palette : [] as $key => $entry) {
+            if (is_array($entry)) {
+                $slug = (string) ($entry['slug'] ?? $key);
+                $hex = (string) ($entry['color'] ?? $entry['hex'] ?? '');
+            } else {
+                $slug = (string) $key;
+                $hex = (string) $entry;
+            }
+            if ($slug !== '' && ContrastMath::hexToRgb($hex) !== null) {
+                $out[$slug] = strtoupper(trim($hex));
+            }
+        }
+        return $out;
+    }
+
     private static function tokensContrast(array $tokens): bool
     {
         $base = ContrastMath::hexToRgb((string) ($tokens['base']['hex'] ?? ''));
@@ -765,11 +872,12 @@ final class AboveFoldContract
         mixed $delivered,
         string $disposition,
     ): array {
+        $stacked = is_array($contract['stacked_pair'] ?? null) ? $contract['stacked_pair'] : [];
         $contract['header'] = [
             'mode' => self::MODE_STACKED,
             'archetype' => 'standard-row',
-            'foreground_token' => 'contrast',
-            'protection_token' => 'base',
+            'foreground_token' => (string) ($stacked['foreground'] ?? 'contrast'),
+            'protection_token' => (string) ($stacked['protection'] ?? 'base'),
             'protection_orientation' => 'top-edge',
             'protect_top_edge' => false,
             'safe_top_px' => 0,
@@ -870,6 +978,11 @@ final class AboveFoldContract
         [$overlayForeground, $overlayProtection] = self::overlayTokenRoles(
             is_array($contract['theme_tokens'] ?? null) ? $contract['theme_tokens'] : [],
         );
+        // An overlay pair stays fully derivable from the persisted tokens, so
+        // it is still checked by value. A stacked pair is not: it comes from
+        // the design's own `header` rule, which no consumer of aboveFold.json
+        // holds. What remains objective is that both slugs are ones the
+        // header kit can actually paint, and that they are distinct.
         $expectedHeader = $overlay
             ? [
                 'archetype' => 'minimal-overlay',
@@ -879,14 +992,24 @@ final class AboveFoldContract
                 'safe_top_px' => 80,
             ]
             : [
-                'foreground_token' => 'contrast',
-                'protection_token' => 'base',
                 'protect_top_edge' => false,
                 'safe_top_px' => 0,
             ];
         foreach ($expectedHeader as $field => $expected) {
             if (($header[$field] ?? null) !== $expected) {
                 throw new \RuntimeException("aboveFold.json has an incoherent header.{$field}");
+            }
+        }
+        if (!$overlay) {
+            foreach (['foreground_token', 'protection_token'] as $field) {
+                if (!in_array($header[$field], HeaderBehavior::SURFACES, true)) {
+                    throw new \RuntimeException(
+                        "aboveFold.json has an unpaintable header.{$field} '{$header[$field]}'"
+                    );
+                }
+            }
+            if ($header['foreground_token'] === $header['protection_token']) {
+                throw new \RuntimeException('aboveFold.json has an invisible stacked header pair');
             }
         }
         if (!$overlay && $header['archetype'] === 'minimal-overlay') {

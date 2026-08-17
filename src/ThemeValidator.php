@@ -882,13 +882,21 @@ final class ThemeValidator
         $warnings = [];
         $contentSize = Steps\FixBlocksStep::themeContentSize($project);
         $spacingSlugs = Steps\FixBlocksStep::themeSpacingSlugs($project);
+        // The build's normalization consults the design's own stylesheet to
+        // decide which roots already own their width. Reading it here too is
+        // what keeps this a dry run of that pass: without it the linter reports
+        // the very stamp normalize-layout deliberately withheld.
+        $wideMeasureRootClasses = $htmlFirst && $project->exists('design/site.css')
+            ? Units\GeneratedMarkup::wideMeasureSubjectClasses($project->readText('design/site.css'))
+            : [];
         foreach ($project->themeFiles() as $rel) {
             $result = LayoutFixer::fix(
                 $project->readText('theme/' . $rel),
                 LayoutFixer::roleFor($rel),
                 $contentSize,
                 $spacingSlugs,
-                $htmlFirst
+                $htmlFirst,
+                $wideMeasureRootClasses,
             );
             foreach ($result['notes'] as $note) {
                 $warnings[] = "{$rel}: {$note}";
