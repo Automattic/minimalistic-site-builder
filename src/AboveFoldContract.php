@@ -691,9 +691,16 @@ final class AboveFoldContract
     /**
      * The stacked pair, taken from the design's own `header` rule wherever
      * the palette already carries the authored colour. Each side falls back
-     * to the reviewed literal independently: a design may author only a
-     * background, and the delivered foreground is repaired downstream by
-     * HeaderBehavior::opaquePairWithSafety() either way.
+     * to the reviewed literal on its own, because a design may author only a
+     * background.
+     *
+     * The two sides cannot be adopted in isolation, though: a design whose
+     * background the palette does not carry but whose ink it does would pair
+     * the reviewed surface with ink of that same colour, leaving invisible
+     * header text. calm-lantern is exactly that shape — `#2E0B5A` matches no
+     * slug while its `#fff` matches `base` — so a collided pair yields to the
+     * opposite reviewed token, and the design's ink hint is discarded along
+     * with the surface it was chosen for.
      *
      * @param array<string,mixed> $themeContext
      * @return array{0:string,1:string} [foreground, protection]
@@ -701,7 +708,12 @@ final class AboveFoldContract
     private static function stackedTokenRoles(?string $designCss, array $themeContext): array
     {
         $pair = DesignHeaderSurface::stackedPair($designCss, self::paletteMap($themeContext));
-        return [$pair['foreground'] ?? 'contrast', $pair['protection'] ?? 'base'];
+        $protection = $pair['protection'] ?? 'base';
+        $foreground = $pair['foreground'] ?? 'contrast';
+        if ($foreground === $protection) {
+            $foreground = $protection === 'contrast' ? 'base' : 'contrast';
+        }
+        return [$foreground, $protection];
     }
 
     /**

@@ -220,8 +220,33 @@ test('an authored header background far from every palette slug keeps the review
     );
 
     assert_eq('base', $contract['header']['protection_token']);
-    // The authored `#FFFFFF` text IS an exact palette colour, so it still maps.
-    assert_eq('base', $contract['header']['foreground_token']);
+    // calm-lantern's authored `#fff` ink IS an exact `base` match, but its
+    // surface was refused, so keeping the ink would paint base-on-base and
+    // leave the header text invisible. The ink yields with the surface.
+    assert_eq('contrast', $contract['header']['foreground_token']);
+});
+
+test('a stacked pair can never resolve to one slug painted on itself', function () {
+    // Every corpus-shaped combination of authored/unauthored, matched and
+    // unmatched, must still leave a header whose text is visible.
+    $palettes = [DESIGN_HEADER_AZURE_PALETTE, DESIGN_HEADER_INVERTED_PALETTE];
+    $colours = [null, '#FFFFFF', '#000000', '#0B1B33', '#12151A', '#F7F2FF', '#1B0B2E', '#2E0B5A'];
+    foreach ($palettes as $palette) {
+        foreach ($colours as $background) {
+            foreach ($colours as $text) {
+                $css = $background === null && $text === null
+                    ? "header{position:relative;}"
+                    : design_header_css($background, $text);
+                $header = design_header_contract($css, $palette)['header'];
+                assert_true(
+                    $header['foreground_token'] !== $header['protection_token'],
+                    "invisible pair for background=" . var_export($background, true)
+                        . " text=" . var_export($text, true)
+                        . " -> {$header['foreground_token']} on {$header['protection_token']}",
+                );
+            }
+        }
+    }
 });
 
 test('a near-identical authored background inside the match window still maps to its slug', function () {
