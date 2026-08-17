@@ -155,8 +155,9 @@ final class AssemblePagesStep implements Step
         $specs = $project->exists('images.json') ? $project->readJson('images.json') : [];
         $project->writeJson('plugin/images.json', ['images' => self::contentImages($contents, $specs)]);
 
-        $project->writeText('theme/templates/page.html', self::pageTemplate($headerBehavior));
-        $project->writeText('theme/templates/index.html', self::index($headerBehavior));
+        $nestedLandmarks = self::partOwnedLandmarks($project);
+        $project->writeText('theme/templates/page.html', self::pageTemplate($headerBehavior, $nestedLandmarks));
+        $project->writeText('theme/templates/index.html', self::index($headerBehavior, $nestedLandmarks));
         $this->registerTemplateParts($project);
 
         // The inlined markup is the single copy now — drop the transient parts.
@@ -220,22 +221,78 @@ final class AssemblePagesStep implements Step
     /**
      * The universal page template: chrome around bare post content. Every
      * seeded page — the front page included — renders through this. Pure.
+     *
+     * @param list<string> $nestedLandmarks
      */
-    public static function pageTemplate(string $headerBehavior = 'static'): string
+    public static function pageTemplate(string $headerBehavior = 'static', array $nestedLandmarks = []): string
     {
-        return self::part('header', 'header', self::pageHeaderClassName($headerBehavior)) . "\n"
+        return self::part('header', 'header', self::shellClassName(self::pageHeaderClassName($headerBehavior), 'header', $nestedLandmarks)) . "\n"
             . '<!-- wp:post-content /-->' . "\n"
-            . self::part('footer', 'footer') . "\n";
+            . self::part('footer', 'footer', self::shellClassName(null, 'footer', $nestedLandmarks)) . "\n";
     }
 
-    /** The blog fallback template: header, post content, footer. Pure. */
-    public static function index(string $headerBehavior = 'static'): string
+    /**
+     * The blog fallback template: header, post content, footer. Pure.
+     *
+     * @param list<string> $nestedLandmarks
+     */
+    public static function index(string $headerBehavior = 'static', array $nestedLandmarks = []): string
     {
-        return self::part('header', 'header', self::indexHeaderClassName($headerBehavior)) . "\n"
+        return self::part('header', 'header', self::shellClassName(self::indexHeaderClassName($headerBehavior), 'header', $nestedLandmarks)) . "\n"
             . '<!-- wp:group {"tagName":"main","layout":{"type":"constrained"}} -->' . "\n"
             . '<main class="wp-block-group"><!-- wp:post-content {"layout":{"type":"constrained"}} /--></main>' . "\n"
             . '<!-- /wp:group -->' . "\n"
-            . self::part('footer', 'footer') . "\n";
+            . self::part('footer', 'footer', self::shellClassName(null, 'footer', $nestedLandmarks)) . "\n";
+    }
+
+    /**
+     * The class list for one chrome template-part reference: its behavior
+     * classes plus, when the part roots the same landmark the reference wraps
+     * it in, the marker that neutralizes this wrapper's box model.
+     *
+     * Two nested <header> elements both match the design's own `header{…}`
+     * rule, which reaches the theme stylesheet verbatim, so its padding,
+     * margins and borders are applied twice. The authored landmark inside
+     * keeps them; the wrapper contributes none. Pure — testable.
+     *
+     * @param list<string> $nestedLandmarks
+     */
+    public static function shellClassName(?string $behaviorClasses, string $area, array $nestedLandmarks): ?string
+    {
+        if (!in_array($area, $nestedLandmarks, true)) {
+            return $behaviorClasses;
+        }
+        return trim(($behaviorClasses ?? '') . ' ' . PageStylesStep::NESTED_LANDMARK_CLASS);
+    }
+
+    /**
+     * Which chrome areas root their own landmark. Reads the delivered parts,
+     * so it reflects what the transformer and header-hero actually left there
+     * rather than what the design happened to author.
+     *
+     * @return list<string>
+     */
+    public static function partOwnedLandmarks(Project $project): array
+    {
+        $owned = [];
+        foreach (['header', 'footer'] as $area) {
+            $rel = "theme/parts/{$area}.html";
+            if (!$project->exists($rel)) {
+                continue;
+            }
+            $document = BlockMarkup::parse($project->readText($rel));
+            $top = $document->topLevel();
+            $attrs = $top === null ? null : $document->attrs($top);
+            if (
+                $top !== null
+                && $document->name($top) === 'group'
+                && is_array($attrs)
+                && ($attrs['tagName'] ?? null) === $area
+            ) {
+                $owned[] = $area;
+            }
+        }
+        return $owned;
     }
 
     /**

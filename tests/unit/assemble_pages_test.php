@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Steps\AssemblePagesStep;
+use Automattic\SiteBuild\Steps\PageStylesStep;
 
 /**
  * Unit tests for AssemblePagesStep: inlines every page's (already fixed)
@@ -450,5 +451,41 @@ test('assemble-pages throws when pages.json is empty', function () {
     assert_throws(function () use ($project) {
         (new AssemblePagesStep())->run($project);
     }, 'no pages');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+/**
+ * Two nested <header> elements — the template part's own wrapper and the
+ * authored landmark the transformed part roots — both match the design's
+ * `header{…}` rule, which the theme stylesheet carries verbatim, so its box
+ * model is applied twice.
+ */
+test('assemble-pages neutralizes a chrome shell that wraps a part rooting the same landmark', function () {
+    [$project, $tmp] = assemble_fixture();
+    // The transformer keeps the authored landmark whenever the design's own
+    // header rule maps onto block attributes, so the part roots it here. The
+    // fixture's footer part roots none, which keeps this test honest in both
+    // directions.
+    $project->writeText(
+        'theme/parts/header.html',
+        '<!-- wp:group {"tagName":"header","style":{"spacing":{"padding":{"top":"40px"}}}} -->'
+        . '<header class="wp-block-group" style="padding-top:40px"><!-- wp:site-title /--></header>'
+        . '<!-- /wp:group -->' . "\n",
+    );
+
+    (new AssemblePagesStep())->run($project);
+
+    foreach (['page', 'index'] as $template) {
+        $markup = $project->readText("theme/templates/{$template}.html");
+        assert_contains('"slug":"header","tagName":"header","className":"chrome-nested-landmark"', $markup);
+        assert_contains(PageStylesStep::NESTED_LANDMARK_CLASS, $markup);
+        // Pin the footer reference before asserting it carries no marker:
+        // absence alone would also pass if the reference vanished entirely.
+        assert_contains('"slug":"footer","tagName":"footer"', $markup);
+        assert_true(
+            !str_contains($markup, '"slug":"footer","tagName":"footer","className"'),
+            "{$template}.html must not neutralize a footer shell whose part roots no landmark: {$markup}",
+        );
+    }
     exec('rm -rf ' . escapeshellarg($tmp));
 });

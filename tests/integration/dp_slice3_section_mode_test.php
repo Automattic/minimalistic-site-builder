@@ -147,9 +147,9 @@ test('TG5 section mode stitches whole-page HTML then real transform and assemble
             'transform-site source stays frozen after unknown support-placement warning',
         );
         assert_eq(
-            'a13ab8e90cad1296319daeed773f810acdd848deaaba5fc86e472503b16a4ef8',
+            '8b1b1c02cfb91397c67410ea63380821c84d578b486028a108c8fd846133e692',
             hash_file('sha256', repo_path('src/Steps/AssemblePagesStep.php')),
-            'assemble-pages source stays frozen at Slice 2',
+            'assemble-pages source stays frozen after chrome landmark de-duplication',
         );
         $llm = new FakeLlm();
         $llm->queueText('Northstar Studio presents a measured editorial portfolio.');
