@@ -33,6 +33,23 @@ final class SectionLayoutStep implements Step
 {
     public const AUTHOR_WIDTH_START_CLASS = 'blocks-engine-author-width-start';
 
+    /**
+     * Per-child alignment markers. Alignment lives on the child that owns the
+     * authored width, never on the section root: layout.justifyContent is a
+     * container property WordPress fans out to every sibling, and align:full
+     * hands the block to root-padding-aware rules that outrank the authored
+     * max-width. PageStylesStep pins these to the content column edge.
+     */
+    public const AUTHOR_WIDTH_CHILD_START_CLASS = 'blocks-engine-author-width-child-start';
+    public const AUTHOR_WIDTH_CHILD_ESCAPE_CLASS = 'blocks-engine-author-width-child-escape';
+
+    /**
+     * The desktop width the design preview renders at, so a media-scoped rule
+     * is judged against the layout the theme is built to reproduce. Matches
+     * ThemeJsonStep's content-width reference viewport and bin/screenshot.
+     */
+    private const RENDER_VIEWPORT_WIDTH = 1366.0;
+
     /** Inline CSS declarations owned by the theme's root gutter. */
     private const ROOT_INLINE_PROPERTIES = [
         'padding-inline',
@@ -180,15 +197,10 @@ final class SectionLayoutStep implements Step
                 $root,
                 $authoredWidthDeclarations,
                 $outOfFlowClasses,
+                $fullBleedClasses,
             );
 
         $attrs['layout'] = ['type' => 'constrained'];
-        if ($authorWidthTargets['start'] !== []) {
-            // WordPress centres ordinary constrained children by default.
-            // Start justification restores normal authored flow inside the
-            // root's content inset without making those children full bleed.
-            $attrs['layout']['justifyContent'] = 'left';
-        }
         self::constrainCommentClass($attrs, $label);
         self::toggleCommentClass(
             $attrs,
@@ -240,28 +252,78 @@ final class SectionLayoutStep implements Step
             }
         }
 
-        // A left auto margin expresses end alignment, which constrained start
-        // justification cannot represent. Only those authored-width children
-        // escape the constrained rule; start-aligned widths keep its inset and
-        // two auto margins retain WordPress's default centring.
-        if ($authorWidthTargets['escape'] !== []) {
-            foreach ($authorWidthTargets['escape'] as $target) {
-                $targetAttrs = $doc->attrs($target) ?? [];
-                if (!isset($targetAttrs['align']) || $targetAttrs['align'] === 'wide') {
-                    $targetAttrs['align'] = 'full';
-                    $doc->setAttrs($target, $targetAttrs);
-                }
+        // Alignment belongs to the child that owns the authored width, never to
+        // the section root. Both container remedies are measurably wrong: a
+        // root's justifyContent reaches every sibling, and align:full hands the
+        // child to root-padding-aware rules that outrank its authored margin
+        // and max-width. These markers carry the classification to
+        // PageStylesStep, which pins each child to the content column edge it
+        // asked for. Two auto margins still mean WordPress's default centring.
+        //
+        // Every direct child is visited, not just the classified ones, because
+        // a resumed build re-runs this step over markup an earlier revision
+        // stamped. Stamping add-only would leave a marker on a child the
+        // current design no longer classifies, and PageStylesStep would then
+        // pin it with an !important margin nothing authored.
+        $markers = [
+            self::AUTHOR_WIDTH_CHILD_START_CLASS => array_fill_keys($authorWidthTargets['start'], true),
+            self::AUTHOR_WIDTH_CHILD_ESCAPE_CLASS => array_fill_keys($authorWidthTargets['escape'], true),
+        ];
+        foreach ($doc->children($root) as $child) {
+            $childAttrs = $doc->attrs($child) ?? [];
+            $classified = false;
+            foreach ($markers as $targets) {
+                $classified = $classified || isset($targets[$child]);
             }
+            $tokens = preg_split(
+                '/[\x20\t\r\n\f]+/',
+                trim((string) ($childAttrs['className'] ?? '')),
+                -1,
+                PREG_SPLIT_NO_EMPTY,
+            ) ?: [];
+            $carries = array_intersect(array_keys($markers), $tokens) !== [];
+            // toggleCommentClass always writes className, so a child that is
+            // neither classified now nor carrying a stale marker must not be
+            // touched at all — writing an empty className it never had would
+            // re-serialize an authored block for no reason.
+            if (!$classified && !$carries) {
+                continue;
+            }
+            foreach ($markers as $marker => $targets) {
+                self::toggleCommentClass($childAttrs, $marker, isset($targets[$child]));
+            }
+            $doc->setAttrs($child, $childAttrs);
         }
 
         // A constrained layout re-caps its children at contentSize unless the
         // measure-bearing block opts into wide. Align every outermost block
         // selected by a var(--wide-size) rule. A direct cover already runs
         // full, so its explicit align is never downgraded.
+        //
+        // Every classified child is excluded, start as well as escape, and for
+        // one reason that covers both: classification requires the child to own
+        // a bound width or max-width, so .alignwide's wide-size cap would
+        // always override the very declaration that classified it.
+        // wideClassTokens() is deliberately media-blind, which is how a design
+        // whose mobile rule reads var(--wide-size) and whose desktop rule
+        // narrows the column reaches this promotion at all.
+        // Measured in WordPress at 1366, as a direct child of a constrained
+        // container: an author max-width:38rem computes 608px on its own and
+        // 1280px — wide-size — once alignwide is added. Core's rule is (0,2,0)
+        // and beats the author's (0,1,0) whatever the source order.
+        //
+        // This does change the start case: before the per-child pin, a
+        // start-classified child carried no align and was eligible here. No
+        // corpus project has that shape, so the behaviour change rests on the
+        // measurement above rather than on a diff in a shipped project.
         if ($wideSelectors !== []) {
+            $classified = array_fill_keys(
+                array_merge($authorWidthTargets['start'], $authorWidthTargets['escape']),
+                true,
+            );
             foreach (self::outermostWideBlocks($doc, $wideSelectors) as $target) {
                 $targetAttrs = $doc->attrs($target) ?? [];
-                if (!isset($targetAttrs['align'])) {
+                if (!isset($targetAttrs['align']) && !isset($classified[$target])) {
                     $targetAttrs['align'] = 'wide';
                     $doc->setAttrs($target, $targetAttrs);
                 }
@@ -572,6 +634,15 @@ final class SectionLayoutStep implements Step
             ) {
                 continue;
             }
+            $scope = CssChecks::declarationScopeAtViewport(
+                $declaration['ancestors'],
+                self::RENDER_VIEWPORT_WIDTH,
+            );
+            if ($scope === 'inert') {
+                // Proven false at the render viewport, so it is not part of
+                // this design's cascade at all and cannot bear on alignment.
+                continue;
+            }
             $priority = CssChecks::splitDeclarationPriority($declaration['value']);
             foreach (CssValueSplitter::splitTopLevel($declaration['context'], [',']) as $selectorText) {
                 $selector = self::parseWideSelector(trim($selectorText));
@@ -585,10 +656,10 @@ final class SectionLayoutStep implements Step
                     'important' => $priority['important'],
                     'specificity' => self::selectorSpecificity($selector),
                     'order' => $declaration['start'],
-                    // Static block alignment cannot represent conditional or
-                    // nested CSS safely. A matching row makes that target
-                    // unprovable and therefore ineligible for promotion.
-                    'conditional' => $declaration['ancestors'] !== [],
+                    // Static block alignment cannot represent a scope this
+                    // build cannot settle by width alone. A matching row makes
+                    // that target unprovable and ineligible for promotion.
+                    'unprovable' => $scope === 'unprovable',
                 ];
             }
         }
@@ -596,8 +667,16 @@ final class SectionLayoutStep implements Step
     }
 
     /**
+     * A full-bleed child is skipped alongside an out-of-flow one. It is about
+     * to be given align:full, whose root-padding-aware rules deliberately pull
+     * it past the content column; a pin at (0,3,0) with !important would then
+     * outrank them and shrink it back to the authored measure. That is the
+     * defect this per-child treatment exists to remove, so it must not be
+     * reintroduced against the design's own full-bleed intent.
+     *
      * @param list<array<string,mixed>> $declarations
      * @param array<string,true> $outOfFlowClasses
+     * @param array<string,true> $fullBleedClasses
      * @return array{start:list<int>,escape:list<int>}
      */
     private static function authorWidthAlignmentTargets(
@@ -605,12 +684,14 @@ final class SectionLayoutStep implements Step
         int $root,
         array $declarations,
         array $outOfFlowClasses,
+        array $fullBleedClasses = [],
     ): array {
+        $skip = $outOfFlowClasses + $fullBleedClasses;
         $targets = ['start' => [], 'escape' => []];
         foreach ($doc->children($root) as $child) {
             if (array_intersect_key(
                 array_fill_keys(self::elementClassTokens($doc, $child), true),
-                $outOfFlowClasses,
+                $skip,
             ) !== []) {
                 continue;
             }
@@ -649,7 +730,7 @@ final class SectionLayoutStep implements Step
             if (!$matches($declaration)) {
                 continue;
             }
-            if ($declaration['conditional']) {
+            if ($declaration['unprovable']) {
                 $unprovable = true;
                 continue;
             }

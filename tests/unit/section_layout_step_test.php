@@ -53,6 +53,19 @@ function section_layout_first_attrs(string $markup, string $name): array
     throw new RuntimeException("fixture has no {$name} block");
 }
 
+/** @return array<mixed> */
+function section_layout_class_attrs(string $markup, string $token): array
+{
+    $doc = BlockMarkup::parse($markup);
+    foreach ($doc->indices() as $i) {
+        $classes = preg_split('/\\s+/', (string) (($doc->attrs($i) ?? [])['className'] ?? ''), -1, PREG_SPLIT_NO_EMPTY);
+        if (in_array($token, $classes ?: [], true)) {
+            return $doc->attrs($i) ?? [];
+        }
+    }
+    throw new RuntimeException("fixture has no block classed {$token}");
+}
+
 /** @return array{attrs:array{top:mixed,bottom:mixed},html:list<string>} */
 function section_layout_block_axis(string $markup): array
 {
@@ -596,9 +609,14 @@ test('A1 section layout preserves a left-aligned author-owned max-width', functi
     $attrs = section_layout_author_width_attrs('.measure{max-width:min(100%,44rem)}');
     assert_true(!isset($attrs['target']['align']), 'the authored measure keeps the constrained inset');
     assert_eq(
-        ['type' => 'constrained', 'justifyContent' => 'left'],
+        ['type' => 'constrained'],
         $attrs['root']['layout'] ?? null,
-        'the constrained flow follows the authored start alignment',
+        'start alignment rides the child, never the container',
+    );
+    assert_contains(
+        SectionLayoutStep::AUTHOR_WIDTH_CHILD_START_CLASS,
+        $attrs['target']['className'] ?? '',
+        'the authored measure carries its own start marker',
     );
     assert_contains(
         SectionLayoutStep::AUTHOR_WIDTH_START_CLASS,
@@ -615,8 +633,327 @@ test('A2 section layout preserves an author-centred max-width', function () {
 
 test('A3 section layout preserves a right-aligned author-owned max-width', function () {
     $attrs = section_layout_author_width_attrs('.measure{max-width:min(100%,44rem);margin-left:auto}');
-    assert_eq('full', $attrs['target']['align'] ?? null, 'align:full leaves the one-sided authored auto margin in control');
+    assert_contains(
+        SectionLayoutStep::AUTHOR_WIDTH_CHILD_ESCAPE_CLASS,
+        $attrs['target']['className'] ?? '',
+        'the per-child pin leaves the one-sided authored auto margin in control',
+    );
+    assert_true(!isset($attrs['target']['align']), 'end alignment never becomes a full-bleed promotion');
     assert_eq(['type' => 'constrained'], $attrs['root']['layout'] ?? null);
+});
+
+test('A4 section layout honours the desktop media query that owns the render viewport', function () {
+    // tbilisi4's real shape: the base rule governs below 1000px only, and the
+    // desktop rule that actually applies at the render viewport ends-aligns the
+    // column. Reading the base rule as the render rule stamps align:wide.
+    $attrs = section_layout_author_width_attrs(
+        ':root{--wide-size:1280px}'
+            . '.measure{max-width:var(--wide-size);margin:0 auto;width:100%}'
+            . '@media (min-width:1000px){.measure{max-width:38rem;margin:0 0 0 auto;}}',
+    );
+    assert_contains(
+        SectionLayoutStep::AUTHOR_WIDTH_CHILD_ESCAPE_CLASS,
+        $attrs['target']['className'] ?? '',
+        'the desktop max-width plus one-sided auto margin escapes the constrained centring',
+    );
+    assert_true(
+        !isset($attrs['target']['align']),
+        'the media-blind wide promotion never re-caps a classified measure',
+    );
+});
+
+test('A5 section layout ignores a mobile-only media query at the render viewport', function () {
+    // calm-lantern's real .badge shape, minus its position:absolute so the
+    // out-of-flow skip cannot make this vacuous. The base rule alone proves
+    // start alignment; the max-width:899px rule never applies at 1366.
+    $attrs = section_layout_author_width_attrs(
+        '.measure{max-width:12.5rem;padding:0.8rem 1.05rem;border-radius:20px}'
+            . '@media (max-width:899px){.measure{max-width:10.5rem;padding:0.65rem 0.85rem;}}',
+    );
+    assert_true(
+        !isset($attrs['target']['align']),
+        'a mobile-only declaration is ignored, not treated as unprovable',
+    );
+    assert_contains(
+        SectionLayoutStep::AUTHOR_WIDTH_START_CLASS,
+        $attrs['root']['className'] ?? '',
+        'the base rule still proves start alignment',
+    );
+});
+
+test('A6 section layout never cascades a mobile-only margin into the render viewport', function () {
+    $attrs = section_layout_author_width_attrs(
+        '.measure{max-width:12.5rem}'
+            . '@media (max-width:899px){.measure{max-width:10.5rem;margin-left:auto;}}',
+    );
+    assert_true(
+        !isset($attrs['target']['align']),
+        'the mobile end alignment must not reach the desktop classification',
+    );
+});
+
+test('A7 section layout resolves a rem media prelude against the render viewport', function () {
+    // swift-grove and sunny-ember author their desktop breakpoint in rem.
+    $attrs = section_layout_author_width_attrs(
+        '.measure{max-width:100%}'
+            . '@media (min-width:56rem){.measure{max-width:38rem;margin-left:auto;}}',
+    );
+    assert_contains(
+        SectionLayoutStep::AUTHOR_WIDTH_CHILD_ESCAPE_CLASS,
+        $attrs['target']['className'] ?? '',
+        '56rem is 896px, so the rule applies at 1366',
+    );
+    assert_true(
+        !isset($attrs['target']['align']),
+        'a classified measure is never handed a block alignment',
+    );
+});
+
+test('A8 section layout leaves a non-width at-rule unprovable', function () {
+    $attrs = section_layout_author_width_attrs(
+        '.measure{max-width:44rem}'
+            . '@media (prefers-reduced-motion: reduce){.measure{margin-left:auto;}}',
+    );
+    assert_true(
+        !isset($attrs['target']['align']),
+        'a preference query cannot be decided by a width comparison',
+    );
+    assert_true(
+        !str_contains($attrs['root']['className'] ?? '', SectionLayoutStep::AUTHOR_WIDTH_START_CLASS),
+        'one unprovable match still poisons the whole classification',
+    );
+});
+
+test('A9 section layout keeps a keyframe step out of the width classification', function () {
+    // Keyframe bodies never reach the classifier: scanDeclarations marks them
+    // kind=keyframe and authoredWidthDeclarations drops every non-style row.
+    $attrs = section_layout_author_width_attrs(
+        '.measure{max-width:44rem;margin-right:auto}'
+            . '@keyframes settle{from{max-width:10rem;margin-left:auto;}to{max-width:44rem;}}',
+    );
+    assert_contains(
+        SectionLayoutStep::AUTHOR_WIDTH_START_CLASS,
+        $attrs['root']['className'] ?? '',
+        'an animation step cannot change the authored alignment',
+    );
+});
+
+test('AW1 section layout marks an escaping authored width per child, never align:full', function () {
+    // align:full hands the block to WordPress's root-padding-aware alignment
+    // rules, which outrank the authored max-width and margin at (0,1,0). The
+    // remedy has to stay on the child and leave those authored values in play.
+    $attrs = section_layout_author_width_attrs(
+        ':root{--wide-size:1280px}'
+            . '.measure{max-width:var(--wide-size);margin:0 auto;width:100%}'
+            . '@media (min-width:1000px){.measure{max-width:38rem;margin:0 0 0 auto;}}',
+    );
+    assert_contains(
+        SectionLayoutStep::AUTHOR_WIDTH_CHILD_ESCAPE_CLASS,
+        $attrs['target']['className'] ?? '',
+        'the escaping child carries the per-child end-alignment marker',
+    );
+    assert_true(
+        !isset($attrs['target']['align']),
+        'the escaping child is never promoted to a full-bleed alignment',
+    );
+    assert_eq(
+        ['type' => 'constrained'],
+        $attrs['root']['layout'] ?? null,
+        'the root keeps a plain constrained layout',
+    );
+});
+
+test('AW2 section layout marks a start-aligned authored width per child, never on the container', function () {
+    // layout.justifyContent is a container property: WordPress fans it out to
+    // every child of the section with a !important margin-left reset, moving
+    // siblings that own no authored width at all.
+    $attrs = section_layout_author_width_attrs('.measure{max-width:min(100%,44rem)}');
+    assert_contains(
+        SectionLayoutStep::AUTHOR_WIDTH_CHILD_START_CLASS,
+        $attrs['target']['className'] ?? '',
+        'the start-aligned child carries the per-child start marker',
+    );
+    assert_eq(
+        ['type' => 'constrained'],
+        $attrs['root']['layout'] ?? null,
+        'the section root never carries justifyContent',
+    );
+    assert_true(
+        !isset($attrs['target']['align']),
+        'a start-aligned child keeps the constrained inset',
+    );
+});
+
+test('AW3 section layout keeps per-child width markers out of the footer control', function () {
+    // tbilisi4's footer reproduces its design to the pixel while the body
+    // sections carrying the identical classes do not. A per-child marker that
+    // reached a part would move the one thing that already renders correctly.
+    [$project, $tmp] = section_layout_project([[
+        'slug' => 'home',
+        'sections' => [['slug' => 'band', 'background' => 'base', 'vertical_density' => 'standard']],
+    ]]);
+    try {
+        $project->writeText(
+            'design/site.css',
+            ':root{--wide-size:1280px}'
+                . '.hero-inner{max-width:var(--wide-size);margin:0 auto;width:100%}'
+                . '@media (min-width:1000px){.hero-inner{max-width:38rem;margin:0 0 0 auto;}}',
+        );
+        $footer = '<!-- wp:group {"tagName":"footer","className":"hero-panel"} -->'
+            . '<footer class="wp-block-group hero-panel">'
+            . '<!-- wp:group {"align":"wide","className":"hero-inner"} -->'
+            . '<div class="wp-block-group alignwide hero-inner">'
+            . '<!-- wp:paragraph --><p>Tbilisi Tavern</p><!-- /wp:paragraph -->'
+            . '</div><!-- /wp:group --></footer><!-- /wp:group -->';
+        $project->writeText('theme/parts/footer.html', $footer);
+        $project->writeText(
+            'theme/parts/header.html',
+            '<!-- wp:group {"tagName":"header"} --><header class="wp-block-group">'
+                . '<!-- wp:group {"className":"hero-inner"} --><div class="wp-block-group hero-inner">'
+                . '<!-- wp:paragraph --><p>Chrome</p><!-- /wp:paragraph -->'
+                . '</div><!-- /wp:group --></header><!-- /wp:group -->',
+        );
+        $project->writeText(
+            'theme/parts/page-home--band.html',
+            '<!-- wp:group --><div class="wp-block-group">'
+                . '<!-- wp:group {"className":"hero-inner"} --><div class="wp-block-group hero-inner">'
+                . '<!-- wp:paragraph --><p>Band</p><!-- /wp:paragraph -->'
+                . '</div><!-- /wp:group --></div><!-- /wp:group -->',
+        );
+
+        (new SectionLayoutStep())->run($project);
+
+        assert_eq($footer, $project->readText('theme/parts/footer.html'), 'the footer part is never rewritten');
+        $header = $project->readText('theme/parts/header.html');
+        assert_true(
+            !str_contains($header, SectionLayoutStep::AUTHOR_WIDTH_CHILD_ESCAPE_CLASS),
+            'a wide-carrier part never gains a per-child width marker',
+        );
+        assert_eq(
+            'wide',
+            section_layout_class_attrs($header, 'hero-inner')['align'] ?? null,
+            'the part still receives the wide-carrier alignment it always had',
+        );
+        assert_contains(
+            SectionLayoutStep::AUTHOR_WIDTH_CHILD_ESCAPE_CLASS,
+            section_layout_class_attrs(
+                $project->readText('theme/parts/page-home--band.html'),
+                'hero-inner',
+            )['className'] ?? '',
+            'the page section carrying the same class does get the marker',
+        );
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('AW8 section layout keeps a start-classified wide carrier out of the wide promotion', function () {
+    // The start half of the wide-promotion exclusion. Every other start case
+    // uses CSS with no var(--wide-size) rule at all, so $wideSelectors is empty
+    // and the exclusion never runs — the branch was reachable only by a design
+    // that measures wide-size AND owns a bound width with a non-auto margin.
+    // Measured in WordPress: core's `.wp-container-x > .alignwide` is (0,2,0)
+    // and overrides an author max-width at (0,1,0), so promoting this child
+    // would discard the very declaration that classified it.
+    $attrs = section_layout_author_width_attrs(
+        ':root{--wide-size:1280px}'
+            . '.measure{max-width:var(--wide-size)}'
+            . '.measure{width:min(100%,44rem);margin-left:0}',
+    );
+    assert_contains(
+        SectionLayoutStep::AUTHOR_WIDTH_CHILD_START_CLASS,
+        $attrs['target']['className'] ?? '',
+        'the wide-carrying child still classifies as start',
+    );
+    assert_true(
+        !isset($attrs['target']['align']),
+        'a start-classified wide carrier is never promoted to align:wide',
+    );
+});
+
+test('AW9 section layout leaves an authored full-bleed child unpinned', function () {
+    // A child the design marks full-bleed is about to receive align:full, whose
+    // root-padding-aware rules pull it past the content column on purpose. A pin
+    // at (0,3,0) with !important would outrank them and shrink it back to the
+    // authored measure — the exact defect this treatment removes.
+    [$project, $tmp] = section_layout_project([[
+        'slug' => 'home',
+        'sections' => [['slug' => 'band', 'background' => 'base', 'vertical_density' => 'standard']],
+    ]]);
+    try {
+        $project->writeText(
+            'design/site.css',
+            '.bleed{background:var(--primary)}'
+                . '.bleed{max-width:44rem;margin-left:auto}',
+        );
+        $project->writeText(
+            'theme/parts/page-home--band.html',
+            '<!-- wp:group --><div class="wp-block-group">'
+                . '<!-- wp:group {"className":"bleed"} --><div class="wp-block-group bleed">'
+                . '<!-- wp:paragraph --><p>Band</p><!-- /wp:paragraph -->'
+                . '</div><!-- /wp:group --></div><!-- /wp:group -->',
+        );
+
+        (new SectionLayoutStep())->run($project);
+
+        $markup = $project->readText('theme/parts/page-home--band.html');
+        $child = section_layout_class_attrs($markup, 'bleed');
+        assert_eq('full', $child['align'] ?? null, 'the authored full-bleed intent still wins');
+        assert_true(
+            !str_contains($markup, SectionLayoutStep::AUTHOR_WIDTH_CHILD_ESCAPE_CLASS)
+                && !str_contains($markup, SectionLayoutStep::AUTHOR_WIDTH_CHILD_START_CLASS),
+            'a full-bleed child is never also pinned back to the content column',
+        );
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('AW7 section layout clears a per-child marker the design no longer earns', function () {
+    // A resumed build re-runs this step over markup an earlier revision
+    // stamped. An add-only marker would survive its own classification and
+    // PageStylesStep would pin a child with an !important margin that nothing
+    // in the current design authored.
+    [$project, $tmp] = section_layout_project([[
+        'slug' => 'home',
+        'sections' => [['slug' => 'band', 'background' => 'base', 'vertical_density' => 'standard']],
+    ]]);
+    try {
+        $part = 'theme/parts/page-home--band.html';
+        $project->writeText(
+            $part,
+            '<!-- wp:group --><div class="wp-block-group">'
+                . '<!-- wp:group {"className":"measure"} --><div class="wp-block-group measure">'
+                . '<!-- wp:paragraph --><p>Band</p><!-- /wp:paragraph -->'
+                . '</div><!-- /wp:group --></div><!-- /wp:group -->',
+        );
+
+        $project->writeText('design/site.css', '.measure{max-width:44rem;margin-left:auto}');
+        (new SectionLayoutStep())->run($project);
+        assert_contains(
+            SectionLayoutStep::AUTHOR_WIDTH_CHILD_ESCAPE_CLASS,
+            section_layout_class_attrs($project->readText($part), 'measure')['className'] ?? '',
+            'the classifying design stamps the marker',
+        );
+
+        // Same markup, a design that no longer classifies the child at all.
+        $project->writeText('design/site.css', '.measure{color:red}');
+        (new SectionLayoutStep())->run($project);
+        assert_true(
+            !str_contains(
+                $project->readText($part),
+                SectionLayoutStep::AUTHOR_WIDTH_CHILD_ESCAPE_CLASS,
+            ),
+            'the stale marker is cleared rather than carried forward',
+        );
+        assert_contains(
+            'measure',
+            section_layout_class_attrs($project->readText($part), 'measure')['className'] ?? '',
+            'clearing the marker leaves the authored class list intact',
+        );
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
 });
 
 test('section layout promotes a root whose wrapper bears a wide-size class to align:wide', function () {
@@ -1018,3 +1355,108 @@ foreach ($sectionLayoutSelectorCases as [$name, $selector, $declaration, $expect
         assert_eq($expected, section_layout_selector_fixture($selector, $declaration));
     });
 }
+
+test('A10 section layout leaves the footer part exactly as it found it', function () {
+    // The footer is the control case for the media-scoped width fix: it
+    // reproduces tbilisi4's design to the pixel while the five body sections
+    // carrying the identical classes do not. Only page sections and the header
+    // part are rewritten, so a widened classification must not reach it.
+    [$project, $tmp] = section_layout_project([[
+        'slug' => 'home',
+        'sections' => [['slug' => 'band', 'background' => 'base', 'vertical_density' => 'standard']],
+    ]]);
+    try {
+        $project->writeText(
+            'design/site.css',
+            ':root{--wide-size:1280px}'
+                . '.hero-inner{max-width:var(--wide-size);margin:0 auto;width:100%}'
+                . '@media (min-width:1000px){.hero-inner{max-width:38rem;margin:0 0 0 auto;}}',
+        );
+        $footer = '<!-- wp:group {"tagName":"footer","className":"hero-panel"} -->'
+            . '<footer class="wp-block-group hero-panel">'
+            . '<!-- wp:group {"align":"wide","className":"hero-inner"} -->'
+            . '<div class="wp-block-group alignwide hero-inner">'
+            . '<!-- wp:paragraph --><p>Tbilisi Tavern</p><!-- /wp:paragraph -->'
+            . '</div><!-- /wp:group --></footer><!-- /wp:group -->';
+        $project->writeText('theme/parts/footer.html', $footer);
+        $project->writeText(
+            'theme/parts/page-home--band.html',
+            '<!-- wp:group --><div class="wp-block-group">'
+                . '<!-- wp:group {"className":"hero-inner"} --><div class="wp-block-group hero-inner">'
+                . '<!-- wp:paragraph --><p>Band</p><!-- /wp:paragraph -->'
+                . '</div><!-- /wp:group --></div><!-- /wp:group -->',
+        );
+
+        (new SectionLayoutStep())->run($project);
+
+        assert_eq($footer, $project->readText('theme/parts/footer.html'), 'the footer part is never rewritten');
+        $band = section_layout_class_attrs(
+            $project->readText('theme/parts/page-home--band.html'),
+            'hero-inner',
+        );
+        assert_contains(
+            SectionLayoutStep::AUTHOR_WIDTH_CHILD_ESCAPE_CLASS,
+            $band['className'] ?? '',
+            'the page section carrying the same class does escape',
+        );
+        assert_true(
+            !isset($band['align']),
+            'the escaping page-section child is never handed a block alignment',
+        );
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('A11 section layout gives a wide-carrier part alignment only, never a constrained layout', function () {
+    // rewriteWidePart() is the narrow path: align:wide and nothing else. It
+    // must never apply the section-root treatment — layout:constrained plus
+    // stripped inline padding — which is what moves a part off the design.
+    [$project, $tmp] = section_layout_project([[
+        'slug' => 'home',
+        'sections' => [['slug' => 'band', 'background' => 'base', 'vertical_density' => 'standard']],
+    ]]);
+    try {
+        $project->writeText(
+            'design/site.css',
+            ':root{--wide-size:1280px}'
+                . '.hero-inner{max-width:var(--wide-size);margin:0 auto;width:100%}'
+                . '@media (min-width:1000px){.hero-inner{max-width:38rem;margin:0 0 0 auto;}}',
+        );
+        $project->writeText(
+            'theme/parts/header.html',
+            '<!-- wp:group {"tagName":"header","style":{"spacing":{"padding":{"left":"2rem","right":"2rem"}}}} -->'
+                . '<header class="wp-block-group">'
+                . '<!-- wp:group {"className":"hero-inner"} --><div class="wp-block-group hero-inner">'
+                . '<!-- wp:paragraph --><p>Chrome</p><!-- /wp:paragraph -->'
+                . '</div><!-- /wp:group --></header><!-- /wp:group -->',
+        );
+        $project->writeText(
+            'theme/parts/page-home--band.html',
+            '<!-- wp:group --><div class="wp-block-group">'
+                . '<!-- wp:paragraph --><p>Band</p><!-- /wp:paragraph --></div><!-- /wp:group -->',
+        );
+
+        (new SectionLayoutStep())->run($project);
+
+        $markup = $project->readText('theme/parts/header.html');
+        $root = section_layout_root_attrs($markup);
+        assert_true(!isset($root['layout']), 'a wide-carrier part root never becomes constrained');
+        assert_true(
+            !str_contains($markup, 'is-layout-constrained'),
+            'a wide-carrier part never carries the constrained layout class',
+        );
+        assert_eq(
+            ['left' => '2rem', 'right' => '2rem'],
+            $root['style']['spacing']['padding'] ?? null,
+            'a wide-carrier part keeps its authored inline padding',
+        );
+        assert_eq(
+            'wide',
+            section_layout_class_attrs($markup, 'hero-inner')['align'] ?? null,
+            'the wide measure carrier still reaches align:wide',
+        );
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
