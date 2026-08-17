@@ -193,6 +193,17 @@ CSS;
         '/* Wrap at spaces only — never split a word mid-token. */';
     private const VERTICAL_RHYTHM_MARKER =
         '/* Preserve authored block-axis spacing against WordPress layout resets. */';
+    private const AUTHOR_WIDTH_PIN_MARKER =
+        '/* Pin an authored-width child to its authored content-column edge. */';
+    /**
+     * The distance from a constrained container's own content box to the
+     * content column WordPress centres inside it. Computed rather than read
+     * from a preset because the root padding differs per theme, and pinning to
+     * the padding box instead lands 41px off at 1366 and diverges at every
+     * other width. Falls back to the container edge when contentSize is absent.
+     */
+    private const CONTENT_COLUMN_INSET =
+        'max(0px, (100% - var(--wp--style--global--content-size, 100%)) / 2)';
     /**
      * A grid item's block-axis margin adds to the track gap instead of to the
      * section edge, which is why the transformer zeroes it. Reinforcement is
@@ -433,6 +444,10 @@ CSS;
         );
         if ($verticalRhythm !== '') {
             $designChunks[] = $verticalRhythm;
+        }
+        $authoredWidthPin = self::authoredWidthPinCss($sectionRootIds);
+        if ($authoredWidthPin !== '') {
+            $designChunks[] = $authoredWidthPin;
         }
         $design = implode("\n", $designChunks);
         $markup = self::deliveredMarkup($project);
@@ -880,6 +895,62 @@ CSS;
             }
         }
 
+        return implode("\n", $rules);
+    }
+
+    /**
+     * Pin each marked authored-width child to the content column edge its
+     * authored margin asked for.
+     *
+     * WordPress's constrained layout centres every child with margin-left and
+     * margin-right auto carrying !important, so an ordinary author rule at
+     * (0,1,0) can never deliver a one-sided authored margin. :root:root plus
+     * the marker class reaches (0,3,0) with !important, which outranks it.
+     * Scoped by class rather than by root id because a section root is not
+     * required to have one — tbilisi4's dish-list section has none.
+     *
+     * Emits only for markers actually present in delivered markup, so a design
+     * with no authored-width child ships none of this.
+     *
+     * @param array{elements:list<\DOMElement>} $sectionRoots
+     */
+    private static function authoredWidthPinCss(array $sectionRoots): string
+    {
+        $present = [];
+        foreach ($sectionRoots['elements'] as $element) {
+            $classes = preg_split('/\s+/', trim($element->getAttribute('class'))) ?: [];
+            foreach ([
+                SectionLayoutStep::AUTHOR_WIDTH_CHILD_START_CLASS,
+                SectionLayoutStep::AUTHOR_WIDTH_CHILD_ESCAPE_CLASS,
+            ] as $marker) {
+                if (in_array($marker, $classes, true)) {
+                    $present[$marker] = true;
+                }
+            }
+        }
+        if ($present === []) {
+            return '';
+        }
+
+        $rules = [self::AUTHOR_WIDTH_PIN_MARKER];
+        // A start-aligned child begins at the column start and keeps its
+        // trailing slack; an escaping child is the mirror. Neither touches
+        // width, so the authored max-width stays in control of the measure.
+        foreach ([
+            SectionLayoutStep::AUTHOR_WIDTH_CHILD_START_CLASS =>
+                ['margin-left: ' . self::CONTENT_COLUMN_INSET, 'margin-right: auto'],
+            SectionLayoutStep::AUTHOR_WIDTH_CHILD_ESCAPE_CLASS =>
+                ['margin-left: auto', 'margin-right: ' . self::CONTENT_COLUMN_INSET],
+        ] as $marker => $declarations) {
+            if (!isset($present[$marker])) {
+                continue;
+            }
+            $body = implode('; ', array_map(
+                static fn (string $declaration): string => $declaration . ' !important',
+                $declarations,
+            ));
+            $rules[] = ':root:root .' . $marker . ' {' . $body . '}';
+        }
         return implode("\n", $rules);
     }
 

@@ -200,12 +200,6 @@ final class SectionLayoutStep implements Step
             );
 
         $attrs['layout'] = ['type' => 'constrained'];
-        if ($authorWidthTargets['start'] !== []) {
-            // WordPress centres ordinary constrained children by default.
-            // Start justification restores normal authored flow inside the
-            // root's content inset without making those children full bleed.
-            $attrs['layout']['justifyContent'] = 'left';
-        }
         self::constrainCommentClass($attrs, $label);
         self::toggleCommentClass(
             $attrs,
@@ -257,17 +251,21 @@ final class SectionLayoutStep implements Step
             }
         }
 
-        // A left auto margin expresses end alignment, which constrained start
-        // justification cannot represent. Only those authored-width children
-        // escape the constrained rule; start-aligned widths keep its inset and
-        // two auto margins retain WordPress's default centring.
-        if ($authorWidthTargets['escape'] !== []) {
-            foreach ($authorWidthTargets['escape'] as $target) {
+        // Alignment belongs to the child that owns the authored width, never to
+        // the section root. Both container remedies are measurably wrong: a
+        // root's justifyContent reaches every sibling, and align:full hands the
+        // child to root-padding-aware rules that outrank its authored margin
+        // and max-width. These markers carry the classification to
+        // PageStylesStep, which pins each child to the content column edge it
+        // asked for. Two auto margins still mean WordPress's default centring.
+        foreach (['start', 'escape'] as $alignment) {
+            $marker = $alignment === 'start'
+                ? self::AUTHOR_WIDTH_CHILD_START_CLASS
+                : self::AUTHOR_WIDTH_CHILD_ESCAPE_CLASS;
+            foreach ($authorWidthTargets[$alignment] as $target) {
                 $targetAttrs = $doc->attrs($target) ?? [];
-                if (!isset($targetAttrs['align']) || $targetAttrs['align'] === 'wide') {
-                    $targetAttrs['align'] = 'full';
-                    $doc->setAttrs($target, $targetAttrs);
-                }
+                self::toggleCommentClass($targetAttrs, $marker, true);
+                $doc->setAttrs($target, $targetAttrs);
             }
         }
 
@@ -275,10 +273,20 @@ final class SectionLayoutStep implements Step
         // measure-bearing block opts into wide. Align every outermost block
         // selected by a var(--wide-size) rule. A direct cover already runs
         // full, so its explicit align is never downgraded.
+        //
+        // A classified child is excluded: wideClassTokens() is deliberately
+        // media-blind, so a design whose mobile rule reads var(--wide-size) and
+        // whose desktop rule narrows the column would have its authored measure
+        // replaced by .alignwide's wide-size cap — the very declaration the
+        // per-child pin exists to keep.
         if ($wideSelectors !== []) {
+            $classified = array_fill_keys(
+                array_merge($authorWidthTargets['start'], $authorWidthTargets['escape']),
+                true,
+            );
             foreach (self::outermostWideBlocks($doc, $wideSelectors) as $target) {
                 $targetAttrs = $doc->attrs($target) ?? [];
-                if (!isset($targetAttrs['align'])) {
+                if (!isset($targetAttrs['align']) && !isset($classified[$target])) {
                     $targetAttrs['align'] = 'wide';
                     $doc->setAttrs($target, $targetAttrs);
                 }

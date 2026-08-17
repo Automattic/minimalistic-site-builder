@@ -609,9 +609,14 @@ test('A1 section layout preserves a left-aligned author-owned max-width', functi
     $attrs = section_layout_author_width_attrs('.measure{max-width:min(100%,44rem)}');
     assert_true(!isset($attrs['target']['align']), 'the authored measure keeps the constrained inset');
     assert_eq(
-        ['type' => 'constrained', 'justifyContent' => 'left'],
+        ['type' => 'constrained'],
         $attrs['root']['layout'] ?? null,
-        'the constrained flow follows the authored start alignment',
+        'start alignment rides the child, never the container',
+    );
+    assert_contains(
+        SectionLayoutStep::AUTHOR_WIDTH_CHILD_START_CLASS,
+        $attrs['target']['className'] ?? '',
+        'the authored measure carries its own start marker',
     );
     assert_contains(
         SectionLayoutStep::AUTHOR_WIDTH_START_CLASS,
@@ -628,7 +633,12 @@ test('A2 section layout preserves an author-centred max-width', function () {
 
 test('A3 section layout preserves a right-aligned author-owned max-width', function () {
     $attrs = section_layout_author_width_attrs('.measure{max-width:min(100%,44rem);margin-left:auto}');
-    assert_eq('full', $attrs['target']['align'] ?? null, 'align:full leaves the one-sided authored auto margin in control');
+    assert_contains(
+        SectionLayoutStep::AUTHOR_WIDTH_CHILD_ESCAPE_CLASS,
+        $attrs['target']['className'] ?? '',
+        'the per-child pin leaves the one-sided authored auto margin in control',
+    );
+    assert_true(!isset($attrs['target']['align']), 'end alignment never becomes a full-bleed promotion');
     assert_eq(['type' => 'constrained'], $attrs['root']['layout'] ?? null);
 });
 
@@ -641,10 +651,14 @@ test('A4 section layout honours the desktop media query that owns the render vie
             . '.measure{max-width:var(--wide-size);margin:0 auto;width:100%}'
             . '@media (min-width:1000px){.measure{max-width:38rem;margin:0 0 0 auto;}}',
     );
-    assert_eq(
-        'full',
-        $attrs['target']['align'] ?? null,
-        'the desktop max-width plus one-sided auto margin escapes the constrained rule',
+    assert_contains(
+        SectionLayoutStep::AUTHOR_WIDTH_CHILD_ESCAPE_CLASS,
+        $attrs['target']['className'] ?? '',
+        'the desktop max-width plus one-sided auto margin escapes the constrained centring',
+    );
+    assert_true(
+        !isset($attrs['target']['align']),
+        'the media-blind wide promotion never re-caps a classified measure',
     );
 });
 
@@ -684,7 +698,11 @@ test('A7 section layout resolves a rem media prelude against the render viewport
         '.measure{max-width:100%}'
             . '@media (min-width:56rem){.measure{max-width:38rem;margin-left:auto;}}',
     );
-    assert_eq('full', $attrs['target']['align'] ?? null, '56rem is 896px, so the rule applies at 1366');
+    assert_contains(
+        SectionLayoutStep::AUTHOR_WIDTH_CHILD_ESCAPE_CLASS,
+        $attrs['target']['className'] ?? '',
+        '56rem is 896px, so the rule applies at 1366',
+    );
 });
 
 test('A8 section layout leaves a non-width at-rule unprovable', function () {
@@ -1256,9 +1274,9 @@ test('A10 section layout leaves the footer part exactly as it found it', functio
         (new SectionLayoutStep())->run($project);
 
         assert_eq($footer, $project->readText('theme/parts/footer.html'), 'the footer part is never rewritten');
-        assert_eq(
-            'full',
-            section_layout_class_attrs($project->readText('theme/parts/page-home--band.html'), 'hero-inner')['align'] ?? null,
+        assert_contains(
+            SectionLayoutStep::AUTHOR_WIDTH_CHILD_ESCAPE_CLASS,
+            section_layout_class_attrs($project->readText('theme/parts/page-home--band.html'), 'hero-inner')['className'] ?? '',
             'the page section carrying the same class does escape',
         );
     } finally {
