@@ -362,6 +362,78 @@ test('a derived stacked surface reaches the header kit through its header-start 
     );
 });
 
+// Degrading the header changes its SHAPE. Page count and lost overlay support
+// say nothing about what colour the design painted the bar, so the derived
+// surface has to survive a degradation that resets the archetype.
+test('a header degradation keeps the surface the design authored', function () {
+    $page = static fn (string $slug): array => [
+        'slug' => $slug,
+        'title' => ucfirst($slug),
+        'path' => "/{$slug}",
+        'front' => $slug === 'home',
+        'sections' => [
+            [
+                'slug' => 'hero',
+                'title' => 'Welcome',
+                'layout_archetype' => 'stacked-band',
+                'background' => 'base',
+                'primary_action' => null,
+            ],
+            [
+                'slug' => 'proof',
+                'title' => 'Proof',
+                'layout_archetype' => 'offset-grid',
+                'background' => 'base',
+                'primary_action' => null,
+            ],
+        ],
+    ];
+    $contract = AboveFoldContract::resolve(
+        pages: [$page('home'), $page('about')],
+        blueprint: HeroBlueprint::defaultFor('editorial-split'),
+        canvas: 'full-bleed',
+        themeContext: design_header_theme(DESIGN_HEADER_AZURE_PALETTE),
+        siteContext: [
+            'stable_id' => 'degrade-fixture',
+            'writing_direction' => 'ltr',
+            'page_count' => 2,
+        ],
+        footerContext: ['archetype' => 'minimal-columns', 'surface' => 'base'],
+        forcedHeaderArchetype: 'split-nav',
+        designCss: design_header_css('#0B1B33', '#FBFAF7'),
+    );
+    assert_eq('split-nav', $contract['header']['archetype']);
+    assert_eq('primary', $contract['header']['protection_token']);
+
+    // Delivering one page makes split-nav impossible and degrades the shape.
+    $degraded = AboveFoldContract::finalizeDelivery($contract, [$page('home')], [
+        'part_keys' => ['page-home--hero'],
+        'opening_surfaces' => [],
+        'primary_action_delivered' => true,
+    ]);
+    assert_eq('standard-row', $degraded['header']['archetype']);
+    assert_eq('split-nav-page-count', $degraded['degradations'][0]['code']);
+    // The shape changed; the authored colour did not.
+    assert_eq('primary', $degraded['header']['protection_token']);
+    assert_eq('base', $degraded['header']['foreground_token']);
+});
+
+test('the persisted stacked pair never reaches the header author as contract text', function () {
+    $contract = design_header_contract(
+        design_header_css('#0B1B33', '#FBFAF7'),
+        DESIGN_HEADER_AZURE_PALETTE,
+    );
+    assert_true(is_array($contract['stacked_pair'] ?? null), 'contract must carry the derived pair');
+
+    $front = AboveFoldContract::frontContract($contract);
+    assert_true(
+        !str_contains($front, 'stacked_pair'),
+        'stacked_pair is bookkeeping and must be stripped like theme_tokens',
+    );
+    // The tokens themselves still reach the author through header.*.
+    assert_true(str_contains($front, '"protection_token": "primary"'), 'header tokens must survive');
+});
+
 // Every slug the mapping can emit must be one the header kit has a class for,
 // or the derived surface silently never reaches the rendered header.
 test('the derived surface vocabulary is exactly the header kit vocabulary', function () {

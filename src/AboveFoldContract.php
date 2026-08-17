@@ -290,6 +290,10 @@ final class AboveFoldContract
                 'part_keys' => [],
             ],
             'theme_tokens' => $tokens,
+            // Kept so a later degradation to the stacked relation restores the
+            // surface the design authored. Page count and lost overlay support
+            // invalidate the header's SHAPE; they say nothing about its colour.
+            'stacked_pair' => ['foreground' => $stackedForeground, 'protection' => $stackedProtection],
             'degradations' => $degradations,
         ];
     }
@@ -440,7 +444,7 @@ final class AboveFoldContract
     {
         self::assertContract($contract);
         $copy = $contract;
-        unset($copy['theme_tokens'], $copy['degradations'], $copy['delivered']);
+        unset($copy['theme_tokens'], $copy['stacked_pair'], $copy['degradations'], $copy['delivered']);
         return "ABOVE-FOLD CONTRACT (authoritative; front page only):\n"
             . self::encode($copy);
     }
@@ -861,11 +865,12 @@ final class AboveFoldContract
         mixed $delivered,
         string $disposition,
     ): array {
+        $stacked = is_array($contract['stacked_pair'] ?? null) ? $contract['stacked_pair'] : [];
         $contract['header'] = [
             'mode' => self::MODE_STACKED,
             'archetype' => 'standard-row',
-            'foreground_token' => 'contrast',
-            'protection_token' => 'base',
+            'foreground_token' => (string) ($stacked['foreground'] ?? 'contrast'),
+            'protection_token' => (string) ($stacked['protection'] ?? 'base'),
             'protection_orientation' => 'top-edge',
             'protect_top_edge' => false,
             'safe_top_px' => 0,
