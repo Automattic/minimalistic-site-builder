@@ -91,7 +91,7 @@ final class LayoutFixer
         ?float $contentSize = null,
         array $spacingSlugs = [],
         bool $htmlFirst = false,
-        array $wideClassTokens = [],
+        array $wideMeasureRootClasses = [],
     ): array {
         $notes = [];
         $markup = self::repairMalformedAttributes($markup, $notes);
@@ -122,7 +122,7 @@ final class LayoutFixer
         self::mirrorDynamicChromeSpacing($markup, $all, $htmlEdits, $notes);
         $pageWidth = $role === self::ROLE_SECTION || $role === self::ROLE_TEMPLATE;
         if (!$pageWidth || !$htmlFirst) {
-            self::addMissingRootLayout($roots, $notes, $wideClassTokens);
+            self::addMissingRootLayout($roots, $notes, $wideMeasureRootClasses);
         }
         self::promoteAlignClassNames($all, $notes);
 
@@ -859,15 +859,17 @@ final class LayoutFixer
 
      * @param object[] $roots
      * @param string[] $notes
-     * @param list<string> $wideClassTokens classes the design's own CSS gives the wide measure
+     * @param list<string> $wideMeasureRootClasses classes whose OWN rule in the
+     *        design's stylesheet gives them the wide measure — a class that only
+     *        qualifies an ancestor of the element that has it does not count
      */
-    private static function addMissingRootLayout(array $roots, array &$notes, array $wideClassTokens = []): void
+    private static function addMissingRootLayout(array $roots, array &$notes, array $wideMeasureRootClasses = []): void
     {
         foreach ($roots as $node) {
             if (self::is($node, 'group')
                 && !isset($node->attrs->layout)
                 && !GeneratedMarkup::hasCssOwnedLayoutMarker($node->attrs)
-                && !GeneratedMarkup::carriesAnyClassToken($node->attrs, $wideClassTokens)
+                && !GeneratedMarkup::carriesAnyClassToken($node->attrs, $wideMeasureRootClasses)
             ) {
                 $node->attrs->layout = (object) ['type' => 'constrained'];
                 $node->dirty = true;

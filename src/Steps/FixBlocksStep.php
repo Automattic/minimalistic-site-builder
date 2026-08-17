@@ -78,15 +78,27 @@ final class FixBlocksStep implements Step
         // rollback.
         $entryShapeChanges = self::shapeChangesInSnapshot($beforeInitialPass, $shape);
         $shapeChanges = [];
-        $wideClassTokens = $this->htmlFirst && $project->exists('design/site.css')
-            ? SectionLayoutStep::wideClassTokens($project->readText('design/site.css'))
-            : [];
+        $designCss = $this->htmlFirst && $project->exists('design/site.css')
+            ? $project->readText('design/site.css')
+            : null;
+        $wideMeasureRootClasses = $designCss === null
+            ? []
+            : GeneratedMarkup::wideMeasureSubjectClasses($designCss);
+        $wideClassTokens = $designCss === null
+            ? []
+            : SectionLayoutStep::wideClassTokens($designCss);
         try {
             $listReport = self::liftBareListItems($project);
             $listNotes = $listReport['notes'];
             $listWarnings = $listReport['warnings'];
             $listBlocked = $listReport['blocked'];
-            $layoutNotes = self::normalizeLayouts($project, [], $this->htmlFirst, $wideClassTokens);
+            $layoutNotes = self::normalizeLayouts(
+                $project,
+                [],
+                $this->htmlFirst,
+                $wideMeasureRootClasses,
+                $wideClassTokens,
+            );
             $shapeChanges = self::normalizeShapes($project, $shape);
             $alignmentBaselines[] = self::snapshotThemeFiles($project);
             $blockedFailures = [];
@@ -127,6 +139,7 @@ final class FixBlocksStep implements Step
                 $project,
                 self::failurePaths($failedFiles),
                 $this->htmlFirst,
+                $wideMeasureRootClasses,
                 $wideClassTokens,
             );
             $postRepairShapeChanges = self::normalizeShapes(
@@ -405,22 +418,26 @@ final class FixBlocksStep implements Step
      *        failed this step and must remain at their step-entry bytes
      * @param bool $htmlFirst carried design CSS owns section width — see
      *        LayoutFixer::fix()
-     * @param list<string> $wideClassTokens classes the design's own CSS gives
-     *        the wide measure; every caller must declare the design/site.css
-     *        read that produces them
-     * @param bool $promoteWideCarriers whether to also promote the footer's
-     *        outermost wide carrier to align:wide. Only fix-blocks does that,
-     *        and only there is it rolled back with a failed file transaction;
-     *        normalize-layout consults the same tokens purely to decide which
-     *        roots must not be constrained.
+     * Both class lists come from design/site.css, so every caller must declare
+     * that read, but they answer different questions and are not
+     * interchangeable. A root must keep its own width only when its OWN rule
+     * gives it the measure; the carrier search wants every class named in such
+     * a rule, because it is looking for a wrapper anywhere inside the part.
+     *
+     * @param list<string> $wideMeasureRootClasses classes whose own rule gives
+     *        them the wide measure — see Units\GeneratedMarkup::wideMeasureSubjectClasses
+     * @param list<string> $widePartCarrierClasses classes named anywhere in such
+     *        a rule — see SectionLayoutStep::wideClassTokens. Empty means "do
+     *        not promote", which is how normalize-layout leaves align:wide
+     *        promotion to fix-blocks alone.
      * @return string[]
      */
     public static function normalizeLayouts(
         Project $project,
         array $excluded = [],
         bool $htmlFirst = false,
-        array $wideClassTokens = [],
-        bool $promoteWideCarriers = true,
+        array $wideMeasureRootClasses = [],
+        array $widePartCarrierClasses = [],
     ): array
     {
         $notes = [];
@@ -438,11 +455,11 @@ final class FixBlocksStep implements Step
                 $contentSize,
                 $spacingSlugs,
                 $htmlFirst,
-                $wideClassTokens,
+                $wideMeasureRootClasses,
             );
             $normalized = $result['markup'];
-            if ($promoteWideCarriers && $rel === 'parts/footer.html' && $wideClassTokens !== []) {
-                $wide = self::promoteOutermostWidePartCarrier($normalized, $wideClassTokens);
+            if ($rel === 'parts/footer.html' && $widePartCarrierClasses !== []) {
+                $wide = self::promoteOutermostWidePartCarrier($normalized, $widePartCarrierClasses);
                 if ($wide !== $normalized) {
                     $notes[] = "{$rel}: promoted outermost wide-size carrier to align:wide";
                     $normalized = $wide;

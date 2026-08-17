@@ -623,6 +623,84 @@ final class GeneratedMarkup
         return false;
     }
 
+    /**
+     * Classes the design's own stylesheet gives the wide inline measure — and
+     * that own it themselves, rather than merely qualifying an ancestor of the
+     * element that does.
+     *
+     * Steps\SectionLayoutStep::wideClassTokens answers a different question:
+     * every class NAMED anywhere in such a rule, which is what a search for the
+     * outermost carrier inside a part wants. Asking it "does this element own
+     * its width" reads tbilisi4's `header.site-header nav{max-width:var(--wide-size)}`
+     * as though .site-header owned the measure, when the subject is the nav.
+     * Only the subject compound counts here.
+     *
+     * @return list<string>
+     */
+    public static function wideMeasureSubjectClasses(string $css): array
+    {
+        $stripped = preg_replace('~/\*.*?\*/~s', '', $css);
+        if (!is_string($stripped)) {
+            return [];
+        }
+        if (preg_match_all('/([^{}]+)\{([^{}]*)\}/s', $stripped, $rules, PREG_SET_ORDER) === false) {
+            return [];
+        }
+        $classes = [];
+        foreach ($rules as $rule) {
+            if (!self::declaresWideMeasure($rule[2])) {
+                continue;
+            }
+            foreach (explode(',', $rule[1]) as $selector) {
+                foreach (self::subjectClasses($selector) as $class) {
+                    $classes[$class] = true;
+                }
+            }
+        }
+        return array_keys($classes);
+    }
+
+    /** Whether a rule body gives an inline measure the wide size. */
+    private static function declaresWideMeasure(string $body): bool
+    {
+        foreach (explode(';', $body) as $declaration) {
+            $colon = strpos($declaration, ':');
+            if ($colon === false) {
+                continue;
+            }
+            $property = strtolower(trim(substr($declaration, 0, $colon)));
+            if (in_array($property, ['width', 'max-width', 'inline-size', 'max-inline-size'], true)
+                && preg_match('/var\(\s*--wide-size\s*\)/i', substr($declaration, $colon + 1)) === 1
+            ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Classes on the compound a selector actually matches. Combinators are
+     * normalized to descendant spacing so the subject is the last compound
+     * either way, and attribute selectors are dropped rather than parsed —
+     * unsupported grammar contributes nothing instead of being approximated.
+     *
+     * @return list<string>
+     */
+    private static function subjectClasses(string $selector): array
+    {
+        $selector = preg_replace('/\[[^\]]*\]/', '', $selector) ?? '';
+        $selector = preg_replace('/[>+~]/', ' ', $selector) ?? '';
+        $compounds = preg_split('/\s+/', trim($selector), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        if ($compounds === []) {
+            return [];
+        }
+        $subject = (string) end($compounds);
+        if (preg_match_all('/\.(-?[A-Za-z_][A-Za-z0-9_-]*)/', $subject, $matches) < 1) {
+            return [];
+        }
+        return $matches[1];
+    }
+
     /** @return list<string> the block's own className tokens, never descendants' */
     private static function attrClassTokens(array|object $attrs): array
     {

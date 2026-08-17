@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\Units\GeneratedMarkup;
 
 /**
  * Deterministic: run the LayoutFixer attribute repair + width/rhythm
@@ -62,15 +63,16 @@ final class NormalizeLayoutStep implements Step
         // root already carries a layout and the injection is a no-op — the
         // stamp this signal would have prevented was committed one step
         // earlier, here. Load it before the damage, not after.
-        $wideClassTokens = $this->htmlFirst && $project->exists('design/site.css')
-            ? SectionLayoutStep::wideClassTokens($project->readText('design/site.css'))
+        $wideMeasureRootClasses = $this->htmlFirst && $project->exists('design/site.css')
+            ? GeneratedMarkup::wideMeasureSubjectClasses($project->readText('design/site.css'))
             : [];
         $notes = FixBlocksStep::normalizeLayouts(
             $project,
             [],
             $this->htmlFirst,
-            $wideClassTokens,
-            promoteWideCarriers: false,
+            $wideMeasureRootClasses,
+            // No carrier classes: align:wide promotion stays fix-blocks' alone.
+            widePartCarrierClasses: [],
         );
         $report = $notes === []
             ? "No layout/rhythm normalization needed.\n"

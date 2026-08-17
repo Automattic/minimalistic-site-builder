@@ -115,6 +115,40 @@ test('layout fixer leaves a root carrying a design wide-measure class layout-les
     }
 });
 
+test('wide-measure subject classes exclude a class that only qualifies an ancestor', function () {
+    // tbilisi4 ships `header.site-header nav{max-width:var(--wide-size)}`. The
+    // nav owns that measure; .site-header only says which header it is in.
+    // Reading .site-header as an owner exempted tbilisi4's header root from the
+    // constrained stamp it genuinely needs.
+    $css = <<<CSS
+    header.site-header nav { max-width: var(--wide-size); margin: 0 auto; }
+    .hero-inner { max-width: var(--wide-size); margin: 0 auto; }
+    .shell > .rail { width: var(--wide-size); }
+    .card[data-size="var(--wide-size)"] { color: red; }
+    /* .commented-out { max-width: var(--wide-size); } */
+    CSS;
+    $subjects = \Automattic\SiteBuild\Units\GeneratedMarkup::wideMeasureSubjectClasses($css);
+    sort($subjects);
+    assert_eq(['hero-inner', 'rail'], $subjects);
+
+    // The looser token list is a different question and still answers it: it
+    // reports every class named in such a rule, ancestors included.
+    $tokens = \Automattic\SiteBuild\Steps\SectionLayoutStep::wideClassTokens($css);
+    assert_true(in_array('site-header', $tokens, true), 'wideClassTokens still names the ancestor');
+    assert_true(!in_array('site-header', $subjects, true), 'subject classes do not');
+});
+
+test('layout fixer constrains a root whose class only qualifies an ancestor of the measured element', function () {
+    $markup = '<!-- wp:group {"className":"site-header header-behavior-sticky-soft"} -->'
+        . '<div class="wp-block-group site-header header-behavior-sticky-soft"></div><!-- /wp:group -->';
+    $css = 'header.site-header nav { max-width: var(--wide-size); margin: 0 auto; }';
+    $subjects = \Automattic\SiteBuild\Units\GeneratedMarkup::wideMeasureSubjectClasses($css);
+    foreach ([LayoutFixer::ROLE_HEADER, LayoutFixer::ROLE_FOOTER] as $role) {
+        $r = LayoutFixer::fix($markup, $role, 840.0, [], true, $subjects);
+        assert_contains('"layout":{"type":"constrained"}', $r['markup']);
+    }
+});
+
 test('layout fixer skips the HTML-first section width heuristics that assume theme width', function () {
     // freeGridsFromNarrowWrappers would force align:wide onto the grid; the
     // carried design CSS already sized it.
