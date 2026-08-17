@@ -724,20 +724,6 @@ test('A8 section layout leaves a non-width at-rule unprovable', function () {
     );
 });
 
-test('A9 section layout keeps a keyframe step out of the width classification', function () {
-    // Keyframe bodies never reach the classifier: scanDeclarations marks them
-    // kind=keyframe and authoredWidthDeclarations drops every non-style row.
-    $attrs = section_layout_author_width_attrs(
-        '.measure{max-width:44rem;margin-right:auto}'
-            . '@keyframes settle{from{max-width:10rem;margin-left:auto;}to{max-width:44rem;}}',
-    );
-    assert_contains(
-        SectionLayoutStep::AUTHOR_WIDTH_START_CLASS,
-        $attrs['root']['className'] ?? '',
-        'an animation step cannot change the authored alignment',
-    );
-});
-
 test('AW1 section layout marks an escaping authored width per child, never align:full', function () {
     // align:full hands the block to WordPress's root-padding-aware alignment
     // rules, which outrank the authored max-width and margin at (0,1,0). The

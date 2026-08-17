@@ -450,6 +450,9 @@ test('declarationScopeAtViewport reports a width media query false at the render
 });
 
 test('declarationScopeAtViewport refuses to decide anything a width comparison cannot settle', function () {
+    // The only place a @keyframes ancestor can be pinned. Asserting it through
+    // SectionLayoutStep instead is vacuous: a keyframe declaration's context is
+    // its step prelude, so it matches no selector however the classifier breaks.
     foreach ([
         ['@media (prefers-reduced-motion: reduce)'],
         ['@media (prefers-reduced-motion:no-preference)'],
