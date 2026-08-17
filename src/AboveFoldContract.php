@@ -722,8 +722,15 @@ final class AboveFoldContract
         $palette = self::paletteMap($themeContext);
         $pair = DesignHeaderSurface::stackedPair($designCss, $palette);
         $protection = $pair['protection'] ?? 'base';
-        $foreground = $pair['foreground'] ?? self::readableInk($protection, $palette);
-        if ($foreground === $protection) {
+        $foreground = $pair['foreground'];
+        // A design that stated a surface the palette cannot carry also stated
+        // its ink against that surface. Keeping the ink while painting a
+        // different band is the mismatch readableInk() exists to avoid, so the
+        // hint goes with the surface it was chosen for.
+        if ($pair['authored_background'] && $pair['protection'] === null) {
+            $foreground = null;
+        }
+        if ($foreground === null || $foreground === $protection) {
             $foreground = self::readableInk($protection, $palette);
         }
         return [$foreground, $protection];

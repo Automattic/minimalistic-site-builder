@@ -267,6 +267,33 @@ test('a design that derives no surface keeps the historical contrast-on-base ink
     }
 });
 
+// The ink a design states is chosen against the surface it states. If the
+// palette refuses that surface, keeping the ink paints it on a band it was
+// never picked for. Needs a palette where the adopted ink and the reviewed
+// default differ, or the bug hides behind the collision rule.
+test('a refused header surface takes the ink authored against it', function () {
+    // base is DARK here, so the reviewed ink is `contrast`; the design's own
+    // ink maps to `primary`, which is what an unfixed derivation would keep.
+    $css = ":root{--band:#2E0B5A;--ink:#A855F7;}\n"
+        . "header{background:var(--band);color:var(--ink);}\n";
+    $header = design_header_contract($css, DESIGN_HEADER_INVERTED_PALETTE)['header'];
+
+    // #2E0B5A matches no slug in this palette, so the surface is refused...
+    assert_eq('base', $header['protection_token']);
+    // ...and the ink chosen for it goes with it, rather than being painted on
+    // the reviewed surface instead.
+    assert_eq('contrast', $header['foreground_token']);
+
+    // A design that authored NO surface is a different case: there is no
+    // refused surface for its ink to be discarded along with.
+    $inkOnly = design_header_contract(
+        ":root{--ink:#A855F7;}\nheader{color:var(--ink);}\n",
+        DESIGN_HEADER_INVERTED_PALETTE,
+    )['header'];
+    assert_eq('base', $inkOnly['protection_token']);
+    assert_eq('primary', $inkOnly['foreground_token']);
+});
+
 test('a stacked pair can never resolve to one slug painted on itself', function () {
     // Every corpus-shaped combination of authored/unauthored, matched and
     // unmatched, must still leave a header whose text is visible.
@@ -337,8 +364,33 @@ test('an authored header pair below 4.5:1 is vetoed by the existing behavior fal
 });
 
 test('a derived stacked surface reaches the header kit through its header-start class', function () {
+    // A one-page site resolves to `static`, whose rootClasses() is empty by
+    // design, so the kit assertions below would never run. Give the resolver
+    // the site depth that earns sticky-soft and the classes it emits.
+    $page = static fn (string $slug): array => [
+        'slug' => $slug,
+        'title' => ucfirst($slug),
+        'path' => "/{$slug}",
+        'front' => $slug === 'home',
+        'sections' => [
+            [
+                'slug' => 'hero',
+                'title' => 'Welcome',
+                'layout_archetype' => 'stacked-band',
+                'background' => 'base',
+                'primary_action' => null,
+            ],
+            [
+                'slug' => 'proof',
+                'title' => 'Proof',
+                'layout_archetype' => 'offset-grid',
+                'background' => 'base',
+                'primary_action' => null,
+            ],
+        ],
+    ];
     $artifact = HeaderBehavior::resolve(
-        design_header_pages(),
+        [$page('home'), $page('about'), $page('services'), $page('contact')],
         HeaderBehavior::MODE_STACKED,
         DESIGN_HEADER_AZURE_PALETTE,
         'standard-row',
@@ -347,19 +399,112 @@ test('a derived stacked surface reaches the header kit through its header-start 
         'base',
         'base',
     );
+    // No early return: if the behavior ever regresses to `static` the kit
+    // stops being shipped at all, and this test must fail rather than pass
+    // vacuously on an empty class list.
+    assert_eq(HeaderBehavior::STICKY_SOFT, $artifact['behavior']);
     $classes = HeaderBehavior::rootClasses($artifact);
-    if ($artifact['behavior'] === HeaderBehavior::STATIC) {
-        assert_eq([], $classes);
-        return;
-    }
     assert_true(
         in_array('header-start-primary', $classes, true),
         'kit surface class must name the derived slug, got: ' . implode(' ', $classes),
     );
     assert_true(
+        in_array('header-foreground-base', $classes, true),
+        'kit foreground class must name the derived ink, got: ' . implode(' ', $classes),
+    );
+    assert_true(
         !in_array('header-top-transparent', $classes, true),
         'a stacked header must not resolve to a transparent top: ' . implode(' ', $classes),
     );
+});
+
+// The SURFACES restriction is the reason assertContract() can throw on an
+// unpaintable token at all. Deleting it left the whole suite green, so pin it
+// on a palette whose exact-matching slug is outside the kit's vocabulary.
+test('a palette slug the header kit cannot paint is never derived', function () {
+    $palette = [
+        'base' => '#FBFAF7',
+        'contrast' => '#12151A',
+        // Not in HeaderBehavior::SURFACES, and an EXACT match for the
+        // authored colour, so only the vocabulary restriction can refuse it.
+        'tertiary' => '#0B1B33',
+        'brand-navy' => '#0B1B33',
+    ];
+    assert_eq(null, \Automattic\SiteBuild\DesignHeaderSurface::slugFor('#0B1B33', $palette));
+
+    $header = design_header_contract(design_header_css('#0B1B33'), $palette)['header'];
+    assert_eq('base', $header['protection_token']);
+    assert_eq('contrast', $header['foreground_token']);
+
+    // Whatever is derived must always be a slug the kit has a class for.
+    foreach ([DESIGN_HEADER_AZURE_PALETTE, DESIGN_HEADER_INVERTED_PALETTE, $palette] as $candidate) {
+        foreach (array_values($candidate) as $hex) {
+            $derived = design_header_contract(design_header_css($hex), $candidate)['header'];
+            foreach (['protection_token', 'foreground_token'] as $field) {
+                assert_true(
+                    in_array($derived[$field], HeaderBehavior::SURFACES, true),
+                    "derived {$field} '{$derived[$field]}' is outside the kit vocabulary",
+                );
+            }
+        }
+    }
+});
+
+// targetsHeaderRoot()'s negatives had no coverage: replacing the whole
+// compound analysis with a `str_contains($selector, 'header')` left the suite
+// green. These are the shapes that must NOT be read as the site header.
+test('only a top-level header element authors the surface', function () {
+    $reads = static fn (string $selector): ?string => \Automattic\SiteBuild\DesignHeaderSurface::slugFor(
+        \Automattic\SiteBuild\DesignHeaderSurface::authored($selector . '{background:#0B1B33;}')['background'],
+        DESIGN_HEADER_AZURE_PALETTE,
+    );
+
+    // Paints the site header.
+    assert_eq('primary', $reads('header'));
+    assert_eq('primary', $reads('header.site-header'));
+    assert_eq('primary', $reads('footer,header,aside'));
+
+    // Paints something else entirely.
+    foreach ([
+        'header nav',              // a child of the header
+        '.site-header .brand',     // a descendant by class
+        'article header',          // a nested content header
+        'main > header',           // ditto, via a child combinator
+        'header::after',           // decoration over the band, not the band
+        'header::before',
+        'headers',                 // a different element name
+        'header-bar',              // a custom element
+    ] as $selector) {
+        assert_eq(null, $reads($selector), "selector '{$selector}' must not author the header surface");
+    }
+});
+
+// A rule that only applies to print or to a narrow viewport does not state
+// what colour the desktop band is.
+test('a header rule nested in an at-rule does not author the surface', function () {
+    $reads = static fn (string $css): ?string => \Automattic\SiteBuild\DesignHeaderSurface::slugFor(
+        \Automattic\SiteBuild\DesignHeaderSurface::authored($css)['background'],
+        DESIGN_HEADER_AZURE_PALETTE,
+    );
+
+    foreach ([
+        '@media print{header{background:#0B1B33;}}',
+        '@media (max-width:600px){header{background:#0B1B33;}}',
+        '@media (min-width:60rem){header{background:#0B1B33;}}',
+        '@supports (display:grid){header{background:#0B1B33;}}',
+    ] as $css) {
+        assert_eq(null, $reads($css), "conditional rule must not author the surface: {$css}");
+    }
+
+    // A top-level rule still wins even when a conditional one follows it.
+    assert_eq('primary', $reads('header{background:#0B1B33;}@media print{header{background:#FBFAF7;}}'));
+
+    // A dark-mode :root must not override the light custom property.
+    assert_eq('base', $reads(
+        ':root{--band:#FBFAF7;}'
+        . '@media (prefers-color-scheme:dark){:root{--band:#0B1B33;}}'
+        . 'header{background:var(--band);}'
+    ));
 });
 
 // Degrading the header changes its SHAPE. Page count and lost overlay support

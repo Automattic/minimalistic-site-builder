@@ -27,18 +27,23 @@ final class DesignHeaderSurface
      * The stacked pair a design authors, each side null when the design does
      * not author it or authors a colour the palette does not carry.
      *
+     * `authored_background` separates those two cases, which the caller has to
+     * tell apart: ink chosen against a surface the palette refused says nothing
+     * about the surface that gets painted instead.
+     *
      * @param array<string,string> $palette slug => hex
-     * @return array{protection:?string,foreground:?string}
+     * @return array{protection:?string,foreground:?string,authored_background:bool}
      */
     public static function stackedPair(?string $css, array $palette): array
     {
         if ($css === null || trim($css) === '') {
-            return ['protection' => null, 'foreground' => null];
+            return ['protection' => null, 'foreground' => null, 'authored_background' => false];
         }
         $authored = self::authored($css);
         return [
             'protection' => self::slugFor($authored['background'], $palette),
             'foreground' => self::slugFor($authored['text'], $palette),
+            'authored_background' => $authored['background'] !== null,
         ];
     }
 
@@ -106,14 +111,21 @@ final class DesignHeaderSurface
         return $bestDelta <= self::MATCH_DELTA_E ? $best : null;
     }
 
-    /** @return array<string,string> custom property => declared value */
+    /**
+     * Custom properties from top-level `:root` blocks only. A `:root` inside
+     * `@media (prefers-color-scheme: dark)` states the colour for a mode the
+     * band may never render in, and merging it would let the dark value win
+     * on last-wins ordering.
+     *
+     * @return array<string,string> custom property => declared value
+     */
     private static function rootVars(string $css): array
     {
         $out = [];
-        if (!preg_match_all('/:root\s*\{([^{}]*)\}/s', $css, $blocks)) {
-            return $out;
-        }
-        foreach ($blocks[1] as $body) {
+        foreach (self::rules($css) as [$selector, $body]) {
+            if (trim($selector) !== ':root') {
+                continue;
+            }
             foreach (explode(';', $body) as $declaration) {
                 if (preg_match('/^\s*(--[\w-]+)\s*:\s*(.+)$/s', $declaration, $m)) {
                     $out[trim($m[1])] = trim($m[2]);
@@ -124,36 +136,60 @@ final class DesignHeaderSurface
     }
 
     /**
-     * Every `selector { declarations }` pair, at-rule nesting included. A
-     * design may declare its header rule inside `@media (min-width: …)`.
+     * Top-level `selector { declarations }` pairs, in source order.
+     *
+     * Rules nested in an at-rule are deliberately skipped. `@media print`
+     * states the header's paper colour and `@media (max-width: …)` states a
+     * narrow-viewport variant; treating either as the band would repaint the
+     * desktop header from a rule that never applies to it. Missing a design
+     * whose only header rule is conditional costs nothing — the contract
+     * keeps its reviewed default.
      *
      * @return list<array{0:string,1:string}>
      */
     private static function rules(string $css): array
     {
         $out = [];
-        if (!preg_match_all('/([^{}]+)\{([^{}]*)\}/s', $css, $matches, PREG_SET_ORDER)) {
-            return $out;
-        }
-        foreach ($matches as $match) {
-            $selector = trim((string) preg_replace('/\s+/', ' ', $match[1]));
-            // An at-rule prelude is captured with the first selector inside
-            // it; keep only the part after the prelude's own brace.
-            if (str_contains($selector, '@')) {
-                $selector = trim((string) substr($selector, (int) strrpos($selector, '@')));
-                $selector = trim((string) preg_replace('/^@[^\s]+[^{]*/', '', $selector));
-            }
-            if ($selector === '') {
+        $length = strlen($css);
+        $depth = 0;
+        $start = 0;
+        for ($i = 0; $i < $length; $i++) {
+            $char = $css[$i];
+            if ($char === '{') {
+                if ($depth === 0) {
+                    $prelude = trim((string) preg_replace('/\s+/', ' ', substr($css, $start, $i - $start)));
+                    $bodyStart = $i + 1;
+                }
+                $depth++;
                 continue;
             }
-            $out[] = [$selector, $match[2]];
+            if ($char !== '}') {
+                continue;
+            }
+            $depth--;
+            if ($depth === 0) {
+                if (($prelude ?? '') !== '' && !str_starts_with($prelude, '@')) {
+                    $out[] = [$prelude, substr($css, $bodyStart ?? $i, $i - ($bodyStart ?? $i))];
+                }
+                $start = $i + 1;
+            }
+            if ($depth < 0) {
+                // Unbalanced input; stop rather than mis-attribute the rest.
+                break;
+            }
         }
         return $out;
     }
 
     /**
-     * Does this selector paint the `<header>` element itself? `header nav`
-     * and `.site-header .brand` do not; `header` and `header.site-header` do.
+     * Does this selector paint the site `<header>` itself?
+     *
+     * `header` and `header.site-header` do. `header nav` and
+     * `.site-header .brand` do not, because they paint something inside it.
+     * Neither does `article header` or `main > header`: a nested content
+     * header is a different element that happens to share the tag name. And
+     * neither does `header::after`, which paints decoration over the band
+     * rather than the band.
      */
     private static function targetsHeaderRoot(string $selector): bool
     {
@@ -163,8 +199,13 @@ final class DesignHeaderSurface
                 continue;
             }
             $compounds = preg_split('/\s*[\s>+~]\s*/', $one) ?: [];
-            $last = trim((string) end($compounds));
-            if ($last !== '' && preg_match('/^header(?![\w-])/i', $last)) {
+            // The element must be the subject of the whole selector AND have
+            // no ancestor part, so only a top-level `<header>` qualifies.
+            if (count($compounds) !== 1) {
+                continue;
+            }
+            $only = trim((string) $compounds[0]);
+            if ($only !== '' && preg_match('/^header(?![\w-])/i', $only) && !str_contains($only, '::')) {
                 return true;
             }
         }
