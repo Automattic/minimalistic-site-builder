@@ -363,7 +363,7 @@ final class DeprecationAdapters
         } elseif ($name === 'core/heading') {
             $attributes = $this->heading($attributes, $rawCommentAttributes, $matched);
         } elseif ($name === 'core/navigation') {
-            $attributes = $this->navigation($attributes, $matched);
+            $attributes = $this->navigation($attributes, $rawCommentAttributes, $matched);
         } elseif (in_array($name, ['core/site-title', 'core/site-tagline'], true)) {
             $attributes = $this->siteIdentityText(
                 $name,
@@ -727,11 +727,28 @@ final class DeprecationAdapters
      * and flex layout; the authored current-schema overlay later restores
      * either key when it was explicitly present.
      *
+     * A deprecation describes UN-MIGRATED content, so re-running it over its own
+     * output must be a no-op. This adapter's migration writes the current-schema
+     * top-level fontFamily, so that key's presence in the raw comment marks
+     * content this adapter has already handled. Without that guard the pass is
+     * not a fixed point: the overlayMenu default below is re-forced on every
+     * later pass, and because the raw-comment overlay can only restore a value
+     * the serializer actually wrote — and it elides any value equal to the
+     * registered default, "mobile" included — an authored overlayMenu:"mobile"
+     * survives pass 1 and is then overwritten by "never" on pass 2.
+     *
      * @param array<string,mixed> $attributes
+     * @param array<string,mixed> $rawCommentAttributes
      * @return array<string,mixed>
      */
-    private function navigation(array $attributes, bool &$matched): array
-    {
+    private function navigation(
+        array $attributes,
+        array $rawCommentAttributes,
+        bool &$matched,
+    ): array {
+        if (array_key_exists('fontFamily', $rawCommentAttributes)) {
+            return $attributes;
+        }
         $typography = $attributes['style']['typography'] ?? null;
         if (!is_array($typography) || !array_key_exists('fontFamily', $typography)
             || $typography['fontFamily'] === null || $typography['fontFamily'] === '') {

@@ -475,6 +475,94 @@ test('PhpBlockFixer still rejects an unregistered navigation-link attribute with
     }
 });
 
+/**
+ * Effective overlayMenu of the sole navigation block: the delimiter value when
+ * present, otherwise the registered default. The serializer elides a value that
+ * equals the default, so an absent key is not an absent behaviour.
+ */
+function nav_overlay_menu(string $html): string
+{
+    return preg_match('/<!-- wp:navigation [^>]*?"overlayMenu":"([^"]*)"/', $html, $m) === 1
+        ? $m[1]
+        : 'mobile';
+}
+
+test('PhpBlockFixer converges on the authored overlayMenu across repeated passes', function () {
+    // N1. The navigation deprecation supplies overlayMenu:"never" as a migration
+    // default. Re-running the fixer must be a no-op: the adapter's own output is
+    // already migrated, so re-applying it would overwrite the authored value.
+    $original = '<!-- wp:navigation {"className":"nav-links",'
+        . '"style":{"typography":{"fontFamily":"var(--heading)"}},"overlayMenu":"mobile"} -->'
+        . '<!-- wp:navigation-link {"className":"nav-reserve","label":"Reservations",'
+        . '"url":"/visit/","kind":"custom","anchorClassName":"nav-reserve"} /-->'
+        . '<!-- /wp:navigation -->';
+    $theme = php_block_fixer_test_theme(['parts/header.html' => $original]);
+
+    try {
+        $seen = [];
+        for ($pass = 1; $pass <= 3; $pass++) {
+            (new PhpBlockFixer())->fix($theme);
+            $seen[$pass] = file_get_contents($theme . '/parts/header.html');
+            assert_eq(
+                'mobile',
+                nav_overlay_menu($seen[$pass]),
+                "pass {$pass} must keep the authored overlayMenu, not the migration default",
+            );
+        }
+        assert_eq($seen[1], $seen[2], 'pass 2 is byte-stable');
+        assert_eq($seen[2], $seen[3], 'pass 3 is byte-stable');
+        // The migration itself must still have happened on the first pass.
+        assert_contains('"fontFamily":"var(\u002d\u002dheading)"', $seen[1]);
+    } finally {
+        remove_tree(dirname($theme));
+    }
+});
+
+test('PhpBlockFixer round-trips an authored attribute whose value equals the registered default', function () {
+    // N2. overlayMenu's registered default is "mobile". The serializer elides a
+    // value equal to the default, so a later pass cannot tell "authored mobile"
+    // from "unspecified" — the interaction that broke convergence.
+    $authored = '<!-- wp:navigation {"className":"nav-links",'
+        . '"style":{"typography":{"fontFamily":"var(--heading)"}},"overlayMenu":"mobile"} -->'
+        . '<!-- wp:navigation-link {"label":"Home","url":"/","kind":"custom"} /-->'
+        . '<!-- /wp:navigation -->';
+    $theme = php_block_fixer_test_theme(['parts/header.html' => $authored]);
+
+    try {
+        (new PhpBlockFixer())->fix($theme);
+        $fixed = file_get_contents($theme . '/parts/header.html');
+
+        assert_eq('mobile', nav_overlay_menu($fixed), 'the authored default-valued attribute survives');
+        assert_true(
+            !str_contains($fixed, '"overlayMenu":"never"'),
+            'the migration default never overwrites an authored value',
+        );
+    } finally {
+        remove_tree(dirname($theme));
+    }
+});
+
+test('PhpBlockFixer still applies the navigation migration to un-migrated content', function () {
+    // The forcing rule is not deleted. Content that has NOT yet been migrated -
+    // style.typography.fontFamily with no top-level fontFamily and no authored
+    // overlayMenu - still receives the deprecation's overlay default.
+    $original = '<!-- wp:navigation {"className":"nav-links",'
+        . '"style":{"typography":{"fontFamily":"var(--heading)"}}} -->'
+        . '<!-- wp:navigation-link {"label":"Home","url":"/","kind":"custom"} /-->'
+        . '<!-- /wp:navigation -->';
+    $theme = php_block_fixer_test_theme(['parts/header.html' => $original]);
+
+    try {
+        (new PhpBlockFixer())->fix($theme);
+        $fixed = file_get_contents($theme . '/parts/header.html');
+
+        assert_eq('never', nav_overlay_menu($fixed), 'the migration still supplies its overlay default');
+        assert_contains('"fontFamily":"var(\u002d\u002dheading)"', $fixed);
+    } finally {
+        remove_tree(dirname($theme));
+    }
+});
+
 test('PhpBlockFixer keeps the anchorClassName adapter scoped to core/navigation-link', function () {
     // A sibling block carrying the same key name must still fail closed.
     $original = '<!-- wp:paragraph {"anchorClassName":"brand"} --><p>Brand</p><!-- /wp:paragraph -->';
