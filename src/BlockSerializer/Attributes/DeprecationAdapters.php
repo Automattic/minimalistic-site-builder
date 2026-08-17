@@ -54,6 +54,16 @@ final class DeprecationAdapters
             // not this comment key, so the key is dropped either way.
             'textAlign' => true,
         ],
+        'core/navigation-link' => [
+            // Transformer-authored alias for a class the anchor itself should
+            // carry. WordPress registers no such attribute, and
+            // render_block_core_navigation_link() hard-codes the anchor's class
+            // and never reads it, so the pinned createBlock path discards this
+            // delimiter key. The authored value is already duplicated into the
+            // registered className, which reaches the rendered <li>, so the
+            // drop is current-save-equivalent rather than lossy.
+            'anchorClassName' => true,
+        ],
         'core/image' => [
             // AI-authored legacy support form observed in tbilisi35. The
             // pinned registry drops the top-level key and its stale wrapper
