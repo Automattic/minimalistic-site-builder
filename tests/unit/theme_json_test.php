@@ -2142,3 +2142,36 @@ test('C5 theme-json releases the root gutter for a viewport-fluid carrier', func
     assert_eq('0', $normalized['styles']['spacing']['padding']['right'] ?? null);
     assert_eq([], $warnings);
 });
+
+/**
+ * The scaffold may wire families and roles, but a font SIZE for a block the
+ * design left unstyled is an aesthetic choice, not wiring. Measured: assigning
+ * core/quote the `lead` preset rendered quotes at 22px where the design's own
+ * render was 18px, and six of eight corpus designs author no quote size at all.
+ */
+test('theme-json scaffold does not assign core/quote a font size', function () {
+    $theme = ThemeJsonStep::applyScaffold([]);
+    $quote = $theme['styles']['blocks']['core/quote'] ?? [];
+
+    assert_eq(
+        'var:preset|font-family|body',
+        $quote['typography']['fontFamily'] ?? null,
+        'family wiring still ships',
+    );
+    assert_true(
+        !array_key_exists('fontSize', $quote['typography'] ?? []),
+        'quotes inherit the body size the design gave them instead of a scaffold preset',
+    );
+    // Guard the mechanism, not just the absence: a model that DOES author a
+    // quote size must still win, which is the path that keeps this removable.
+    $authored = ThemeJsonStep::applyScaffold([
+        'styles' => ['blocks' => ['core/quote' => ['typography' => [
+            'fontSize' => 'var:preset|font-size|lead',
+        ]]]],
+    ]);
+    assert_eq(
+        'var:preset|font-size|lead',
+        $authored['styles']['blocks']['core/quote']['typography']['fontSize'],
+        'an explicitly authored quote size survives',
+    );
+});

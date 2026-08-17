@@ -99,11 +99,13 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         'body'    => 'system-ui, sans-serif',
     ];
     /**
-     * The type scale the scaffold wires roles to. Every slug here is
-     * referenced by SCAFFOLD, so a missing one would leave a dangling
+     * The type scale the scaffold wires roles to. Every slug SCAFFOLD does
+     * reference must exist here, or it would leave a dangling
      * var:preset|font-size|… — PresetReferences does scan theme.json's own
      * strings and would report it, but as a build-time problem rather than a
-     * rendered site. Filling them keeps the scaffold's references valid.
+     * rendered site. `lead` is deliberately unreferenced by SCAFFOLD: it stays
+     * in the scale as an editor choice, but nothing is wired to it, because
+     * choosing which blocks are larger than body text is the design's call.
      *
      * @var list<array{slug: string, name: string, size: string}>
      */
@@ -204,10 +206,16 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                 ],
             ],
             'blocks' => [
+                // No fontSize here. A size for a block the design left unstyled
+                // is an aesthetic choice, not wiring: assigning `lead` rendered
+                // quotes at 22px where the design's own render is 18px, because
+                // the design authors no quote size and the quote inherits body.
+                // Six of eight corpus designs author none either. Omitting the
+                // key lets that inheritance stand; a design that does author a
+                // quote size still wins through its own delivered CSS.
                 'core/quote' => [
                     'typography' => [
                         'fontFamily' => 'var:preset|font-family|body',
-                        'fontSize' => 'var:preset|font-size|lead',
                     ],
                 ],
                 'core/pullquote' => [
