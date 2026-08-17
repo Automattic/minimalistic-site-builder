@@ -53,6 +53,19 @@ function section_layout_first_attrs(string $markup, string $name): array
     throw new RuntimeException("fixture has no {$name} block");
 }
 
+/** @return array<mixed> */
+function section_layout_class_attrs(string $markup, string $token): array
+{
+    $doc = BlockMarkup::parse($markup);
+    foreach ($doc->indices() as $i) {
+        $classes = preg_split('/\\s+/', (string) (($doc->attrs($i) ?? [])['className'] ?? ''), -1, PREG_SPLIT_NO_EMPTY);
+        if (in_array($token, $classes ?: [], true)) {
+            return $doc->attrs($i) ?? [];
+        }
+    }
+    throw new RuntimeException("fixture has no block classed {$token}");
+}
+
 /** @return array{attrs:array{top:mixed,bottom:mixed},html:list<string>} */
 function section_layout_block_axis(string $markup): array
 {
@@ -1102,3 +1115,100 @@ foreach ($sectionLayoutSelectorCases as [$name, $selector, $declaration, $expect
         assert_eq($expected, section_layout_selector_fixture($selector, $declaration));
     });
 }
+
+test('A10 section layout leaves the footer part exactly as it found it', function () {
+    // The footer is the control case for the media-scoped width fix: it
+    // reproduces tbilisi4's design to the pixel while the five body sections
+    // carrying the identical classes do not. Only page sections and the header
+    // part are rewritten, so a widened classification must not reach it.
+    [$project, $tmp] = section_layout_project([[
+        'slug' => 'home',
+        'sections' => [['slug' => 'band', 'background' => 'base', 'vertical_density' => 'standard']],
+    ]]);
+    try {
+        $project->writeText(
+            'design/site.css',
+            ':root{--wide-size:1280px}'
+                . '.hero-inner{max-width:var(--wide-size);margin:0 auto;width:100%}'
+                . '@media (min-width:1000px){.hero-inner{max-width:38rem;margin:0 0 0 auto;}}',
+        );
+        $footer = '<!-- wp:group {"tagName":"footer","className":"hero-panel"} -->'
+            . '<footer class="wp-block-group hero-panel">'
+            . '<!-- wp:group {"align":"wide","className":"hero-inner"} -->'
+            . '<div class="wp-block-group alignwide hero-inner">'
+            . '<!-- wp:paragraph --><p>Tbilisi Tavern</p><!-- /wp:paragraph -->'
+            . '</div><!-- /wp:group --></footer><!-- /wp:group -->';
+        $project->writeText('theme/parts/footer.html', $footer);
+        $project->writeText(
+            'theme/parts/page-home--band.html',
+            '<!-- wp:group --><div class="wp-block-group">'
+                . '<!-- wp:group {"className":"hero-inner"} --><div class="wp-block-group hero-inner">'
+                . '<!-- wp:paragraph --><p>Band</p><!-- /wp:paragraph -->'
+                . '</div><!-- /wp:group --></div><!-- /wp:group -->',
+        );
+
+        (new SectionLayoutStep())->run($project);
+
+        assert_eq($footer, $project->readText('theme/parts/footer.html'), 'the footer part is never rewritten');
+        assert_eq(
+            'full',
+            section_layout_class_attrs($project->readText('theme/parts/page-home--band.html'), 'hero-inner')['align'] ?? null,
+            'the page section carrying the same class does escape',
+        );
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('A11 section layout gives a wide-carrier part alignment only, never a constrained layout', function () {
+    // rewriteWidePart() is the narrow path: align:wide and nothing else. It
+    // must never apply the section-root treatment — layout:constrained plus
+    // stripped inline padding — which is what moves a part off the design.
+    [$project, $tmp] = section_layout_project([[
+        'slug' => 'home',
+        'sections' => [['slug' => 'band', 'background' => 'base', 'vertical_density' => 'standard']],
+    ]]);
+    try {
+        $project->writeText(
+            'design/site.css',
+            ':root{--wide-size:1280px}'
+                . '.hero-inner{max-width:var(--wide-size);margin:0 auto;width:100%}'
+                . '@media (min-width:1000px){.hero-inner{max-width:38rem;margin:0 0 0 auto;}}',
+        );
+        $project->writeText(
+            'theme/parts/header.html',
+            '<!-- wp:group {"tagName":"header","style":{"spacing":{"padding":{"left":"2rem","right":"2rem"}}}} -->'
+                . '<header class="wp-block-group">'
+                . '<!-- wp:group {"className":"hero-inner"} --><div class="wp-block-group hero-inner">'
+                . '<!-- wp:paragraph --><p>Chrome</p><!-- /wp:paragraph -->'
+                . '</div><!-- /wp:group --></header><!-- /wp:group -->',
+        );
+        $project->writeText(
+            'theme/parts/page-home--band.html',
+            '<!-- wp:group --><div class="wp-block-group">'
+                . '<!-- wp:paragraph --><p>Band</p><!-- /wp:paragraph --></div><!-- /wp:group -->',
+        );
+
+        (new SectionLayoutStep())->run($project);
+
+        $markup = $project->readText('theme/parts/header.html');
+        $root = section_layout_root_attrs($markup);
+        assert_true(!isset($root['layout']), 'a wide-carrier part root never becomes constrained');
+        assert_true(
+            !str_contains($markup, 'is-layout-constrained'),
+            'a wide-carrier part never carries the constrained layout class',
+        );
+        assert_eq(
+            ['left' => '2rem', 'right' => '2rem'],
+            $root['style']['spacing']['padding'] ?? null,
+            'a wide-carrier part keeps its authored inline padding',
+        );
+        assert_eq(
+            'wide',
+            section_layout_class_attrs($markup, 'hero-inner')['align'] ?? null,
+            'the wide measure carrier still reaches align:wide',
+        );
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});

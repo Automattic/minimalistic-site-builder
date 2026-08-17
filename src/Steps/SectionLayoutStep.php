@@ -33,6 +33,13 @@ final class SectionLayoutStep implements Step
 {
     public const AUTHOR_WIDTH_START_CLASS = 'blocks-engine-author-width-start';
 
+    /**
+     * The desktop width the design preview renders at, so a media-scoped rule
+     * is judged against the layout the theme is built to reproduce. Matches
+     * ThemeJsonStep's content-width reference viewport and bin/screenshot.
+     */
+    private const RENDER_VIEWPORT_WIDTH = 1366.0;
+
     /** Inline CSS declarations owned by the theme's root gutter. */
     private const ROOT_INLINE_PROPERTIES = [
         'padding-inline',
@@ -572,6 +579,15 @@ final class SectionLayoutStep implements Step
             ) {
                 continue;
             }
+            $scope = CssChecks::declarationScopeAtViewport(
+                $declaration['ancestors'],
+                self::RENDER_VIEWPORT_WIDTH,
+            );
+            if ($scope === 'inert') {
+                // Proven false at the render viewport, so it is not part of
+                // this design's cascade at all and cannot bear on alignment.
+                continue;
+            }
             $priority = CssChecks::splitDeclarationPriority($declaration['value']);
             foreach (CssValueSplitter::splitTopLevel($declaration['context'], [',']) as $selectorText) {
                 $selector = self::parseWideSelector(trim($selectorText));
@@ -585,10 +601,10 @@ final class SectionLayoutStep implements Step
                     'important' => $priority['important'],
                     'specificity' => self::selectorSpecificity($selector),
                     'order' => $declaration['start'],
-                    // Static block alignment cannot represent conditional or
-                    // nested CSS safely. A matching row makes that target
-                    // unprovable and therefore ineligible for promotion.
-                    'conditional' => $declaration['ancestors'] !== [],
+                    // Static block alignment cannot represent a scope this
+                    // build cannot settle by width alone. A matching row makes
+                    // that target unprovable and ineligible for promotion.
+                    'unprovable' => $scope === 'unprovable',
                 ];
             }
         }
@@ -649,7 +665,7 @@ final class SectionLayoutStep implements Step
             if (!$matches($declaration)) {
                 continue;
             }
-            if ($declaration['conditional']) {
+            if ($declaration['unprovable']) {
                 $unprovable = true;
                 continue;
             }
