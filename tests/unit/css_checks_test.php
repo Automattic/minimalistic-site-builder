@@ -421,3 +421,56 @@ test('unscopedSelectors drops @media preludes and splits selector lists', functi
     assert_eq(['body'], CssChecks::unscopedSelectors($css, $isAllowed));
     assert_eq([], CssChecks::unscopedSelectors('.ok:hover { color: inherit; }', $isAllowed));
 });
+
+test('declarationScopeAtViewport honours width media queries true at the render viewport', function () {
+    assert_eq('apply', CssChecks::declarationScopeAtViewport([], 1366.0), 'an unscoped declaration always applies');
+    assert_eq('apply', CssChecks::declarationScopeAtViewport(['@media (min-width:1000px)'], 1366.0));
+    assert_eq('apply', CssChecks::declarationScopeAtViewport(['@media (min-width:56rem)'], 1366.0), '56rem is 896px');
+    assert_eq('apply', CssChecks::declarationScopeAtViewport(['@media (min-width:0)'], 1366.0), 'a unitless zero is a length');
+    assert_eq(
+        'apply',
+        CssChecks::declarationScopeAtViewport(['@media screen and (min-width:600px) and (max-width:1400px)'], 1366.0),
+        'a media type and a conjunction of width features stay decidable',
+    );
+});
+
+test('declarationScopeAtViewport reports a width media query false at the render viewport as inert', function () {
+    assert_eq('inert', CssChecks::declarationScopeAtViewport(['@media (max-width:899px)'], 1366.0));
+    assert_eq('inert', CssChecks::declarationScopeAtViewport(['@media (min-width:100rem)'], 1366.0), '1600px');
+    assert_eq(
+        'inert',
+        CssChecks::declarationScopeAtViewport(['@media (min-width:600px) and (max-width:1200px)'], 1366.0),
+        'one false arm of a conjunction is enough',
+    );
+    assert_eq(
+        'inert',
+        CssChecks::declarationScopeAtViewport(['@media (max-width:600px)', '.wrapper'], 1366.0),
+        'a proven-false ancestor outranks an undecidable one',
+    );
+});
+
+test('declarationScopeAtViewport refuses to decide anything a width comparison cannot settle', function () {
+    foreach ([
+        ['@media (prefers-reduced-motion: reduce)'],
+        ['@media (prefers-reduced-motion:no-preference)'],
+        ['@keyframes settle'],
+        ['@supports (display:grid)'],
+        ['@layer components'],
+        ['@media print'],
+        ['@media (width >= 1000px)'],
+        ['@media (max-width:620px), print'],
+        ['@media not all and (min-width:1000px)'],
+        ['@media (min-width:calc(50rem + 2px))'],
+        ['@media (min-width:2vw)'],
+        ['@container (min-width:1000px)'],
+        // Nested CSS: the caller's selector test only saw the inner selector.
+        ['.wrapper'],
+        ['@media (min-width:1000px)', '.wrapper'],
+    ] as $ancestors) {
+        assert_eq(
+            'unprovable',
+            CssChecks::declarationScopeAtViewport($ancestors, 1366.0),
+            implode(' / ', $ancestors),
+        );
+    }
+});

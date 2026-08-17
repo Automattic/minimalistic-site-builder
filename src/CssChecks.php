@@ -66,6 +66,9 @@ final class CssChecks
     /** Maximum nested CSS blocks inspected by the generated-CSS scanner. */
     private const MAX_DECLARATION_SCAN_DEPTH = 64;
 
+    /** Media preludes resolve rem/em against the initial font size only. */
+    private const MEDIA_PRELUDE_ROOT_FONT_SIZE = 16.0;
+
     /**
      * Whether a CSS property can directly change a corner radius owned by the
      * design direction. Covers the shorthand, physical/logical longhands, and
@@ -290,6 +293,99 @@ final class CssChecks
             static fn (array $left, array $right): int => $left['start'] <=> $right['start'],
         );
         return $declarations;
+    }
+
+    /**
+     * Where a scanned declaration stands at one render viewport width.
+     *
+     * Three answers, because a scoped declaration is not one question.
+     * 'apply' — every ancestor is a width media query that holds here.
+     * 'inert' — a width media query is provably false, so the declaration
+     * cannot enter the cascade at all and a caller may ignore it outright.
+     * 'unprovable' — a static width comparison cannot settle it: a non-media
+     * at-rule, a non-width feature, range or negated syntax, a media query
+     * list (a disjunction, where one false arm proves nothing), or an outer
+     * selector from nested CSS, whose match the caller's own selector test
+     * never saw. A provably false ancestor outranks an unprovable one: false
+     * stays false however much else is unknown.
+     *
+     * @param list<string> $ancestors as produced by scanDeclarations()
+     * @return 'apply'|'inert'|'unprovable'
+     */
+    public static function declarationScopeAtViewport(array $ancestors, float $viewportWidth): string
+    {
+        $unprovable = false;
+        foreach ($ancestors as $ancestor) {
+            $ancestor = trim(self::withoutComments($ancestor));
+            if (!str_starts_with($ancestor, '@')) {
+                $unprovable = true;
+                continue;
+            }
+            $scope = self::mediaWidthScope($ancestor, $viewportWidth);
+            if ($scope === 'inert') {
+                return 'inert';
+            }
+            $unprovable = $unprovable || $scope === 'unprovable';
+        }
+        return $unprovable ? 'unprovable' : 'apply';
+    }
+
+    /** @return 'apply'|'inert'|'unprovable' */
+    private static function mediaWidthScope(string $prelude, float $viewportWidth): string
+    {
+        if (preg_match('/\A@media\b(.*)\z/is', $prelude, $match) !== 1) {
+            return 'unprovable';
+        }
+        $condition = trim($match[1]);
+        if ($condition === ''
+            || preg_match_all('/\(([^()]*)\)/', $condition, $features, PREG_SET_ORDER) < 1
+        ) {
+            return 'unprovable';
+        }
+
+        $inert = false;
+        foreach ($features as $feature) {
+            if (preg_match('/\A\s*(min|max)-width\s*:\s*(.+?)\s*\z/i', $feature[1], $parts) !== 1) {
+                return 'unprovable';
+            }
+            $boundary = self::mediaLengthPixels($parts[2]);
+            if ($boundary === null) {
+                return 'unprovable';
+            }
+            $inert = $inert || !(strtolower($parts[1]) === 'min'
+                ? $viewportWidth >= $boundary
+                : $viewportWidth <= $boundary);
+        }
+
+        // Whatever sits between the features has to be media-type glue this
+        // comparison already accounts for. A `not` inverts the result, a media
+        // type this build never renders as decides nothing, and a comma is a
+        // disjunction — each makes the prelude undecidable rather than false.
+        $glue = (string) preg_replace('/\([^()]*\)/', ' ', $condition);
+        foreach (preg_split('/\s+/', $glue, -1, PREG_SPLIT_NO_EMPTY) ?: [] as $token) {
+            if (!in_array(strtolower($token), ['only', 'screen', 'all', 'and'], true)) {
+                return 'unprovable';
+            }
+        }
+        return $inert ? 'inert' : 'apply';
+    }
+
+    /**
+     * A media feature length in CSS pixels. `rem` and `em` in a prelude resolve
+     * against the initial font size, never the document's own root rule, and a
+     * unitless number is only a length when it is zero.
+     */
+    private static function mediaLengthPixels(string $value): ?float
+    {
+        if (preg_match('/\A([+-]?(?:\d+(?:\.\d+)?|\.\d+))(px|r?em)?\z/i', trim($value), $match) !== 1) {
+            return null;
+        }
+        $number = (float) $match[1];
+        return match (strtolower($match[2] ?? '')) {
+            'px' => $number,
+            'em', 'rem' => $number * self::MEDIA_PRELUDE_ROOT_FONT_SIZE,
+            default => $number === 0.0 ? 0.0 : null,
+        };
     }
 
     /**
