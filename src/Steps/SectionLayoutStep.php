@@ -306,10 +306,15 @@ final class SectionLayoutStep implements Step
         // wideClassTokens() is deliberately media-blind, which is how a design
         // whose mobile rule reads var(--wide-size) and whose desktop rule
         // narrows the column reaches this promotion at all.
+        // Measured in WordPress at 1366, as a direct child of a constrained
+        // container: an author max-width:38rem computes 608px on its own and
+        // 1280px — wide-size — once alignwide is added. Core's rule is (0,2,0)
+        // and beats the author's (0,1,0) whatever the source order.
+        //
         // This does change the start case: before the per-child pin, a
         // start-classified child carried no align and was eligible here. No
-        // corpus project has that shape, so the exclusion is asserted on the
-        // mechanism above rather than demonstrated by a measured project.
+        // corpus project has that shape, so the behaviour change rests on the
+        // measurement above rather than on a diff in a shipped project.
         if ($wideSelectors !== []) {
             $classified = array_fill_keys(
                 array_merge($authorWidthTargets['start'], $authorWidthTargets['escape']),

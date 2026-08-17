@@ -676,13 +676,19 @@ CSS;
                 // narrower children — died with layout.justifyContent, since a
                 // start-aligned child now carries its own pin.
                 //
-                // It still changes geometry, so it is left alone deliberately
-                // rather than retired here. Be aware it couples: the pin's
-                // 100% resolves against the padded content box, so a marked
-                // child inside one of these roots lands at
-                // padding + max(0, (paddedBox - contentSize) / 2), not at the
-                // bare content column. Retiring this exclusion is its own
-                // change, with its own measurement.
+                // The pin is invariant to this padding: for padding p and
+                // viewport W, p + (W - 2p - contentSize) / 2 reduces to
+                // (W - contentSize) / 2 for any p, so a marked child inside a
+                // padded root still lands on the content column. Measured on
+                // tbilisi4 at 1366: root padding 27.3125 plus a pinned
+                // margin-right of 40.6875 is exactly 68, the content column
+                // inset. The two only interact when the padded box is narrower
+                // than contentSize, where max() clamps to 0 and the child sits
+                // at the padding edge instead — the child then fills the
+                // column rather than overflowing it.
+                //
+                // So this exclusion is left alone because retiring it moves the
+                // ROOT's own geometry, not because it constrains the pin.
                 $classes = preg_split('/\s+/', trim($section->getAttribute('class'))) ?: [];
                 if (in_array(SectionLayoutStep::AUTHOR_WIDTH_START_CLASS, $classes, true)) {
                     continue;
