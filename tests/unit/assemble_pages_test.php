@@ -479,6 +479,9 @@ test('assemble-pages neutralizes a chrome shell that wraps a part rooting the sa
         $markup = $project->readText("theme/templates/{$template}.html");
         assert_contains('"slug":"header","tagName":"header","className":"chrome-nested-landmark"', $markup);
         assert_contains(PageStylesStep::NESTED_LANDMARK_CLASS, $markup);
+        // Pin the footer reference before asserting it carries no marker:
+        // absence alone would also pass if the reference vanished entirely.
+        assert_contains('"slug":"footer","tagName":"footer"', $markup);
         assert_true(
             !str_contains($markup, '"slug":"footer","tagName":"footer","className"'),
             "{$template}.html must not neutralize a footer shell whose part roots no landmark: {$markup}",

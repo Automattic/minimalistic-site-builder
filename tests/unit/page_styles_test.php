@@ -80,6 +80,15 @@ function ps_nested_landmark(): string
     return PageStylesStep::NESTED_LANDMARK_CSS . "\n";
 }
 
+/**
+ * The reset is a nowdoc, so it cannot interpolate the constant that names the
+ * class AssemblePagesStep stamps. Without this, renaming the constant leaves
+ * CSS that matches nothing and every other test still passes.
+ */
+test('nested-landmark reset selects the class the shell is stamped with', function () {
+    assert_contains(PageStylesStep::NESTED_LANDMARK_CLASS, PageStylesStep::NESTED_LANDMARK_CSS);
+});
+
 function ps_project(string $prefix): array
 {
     $tmp = sys_get_temp_dir() . '/' . $prefix . uniqid();
