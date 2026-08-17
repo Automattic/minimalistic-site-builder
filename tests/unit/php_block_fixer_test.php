@@ -482,9 +482,35 @@ test('PhpBlockFixer still rejects an unregistered navigation-link attribute with
  */
 function nav_overlay_menu(string $html): string
 {
+    // Fail loudly rather than reporting the default when the block is missing:
+    // a helper that returns 'mobile' for absent markup would let every
+    // assert_eq('mobile', ...) below pass against a deleted block or an empty
+    // file, which is the vacuity shape this project rejects slices for.
+    $count = substr_count($html, '<!-- wp:navigation ');
+    if ($count !== 1) {
+        throw new RuntimeException("expected exactly 1 navigation block, found {$count}");
+    }
     return preg_match('/<!-- wp:navigation [^>]*?"overlayMenu":"([^"]*)"/', $html, $m) === 1
         ? $m[1]
         : 'mobile';
+}
+
+/**
+ * True when the navigation carries a TOP-LEVEL (registered preset) fontFamily.
+ * Parses the delimiter JSON rather than matching a substring: the nested
+ * style.typography.fontFamily lives in the same comment, so a regex would
+ * report a preset that is not there.
+ */
+function nav_has_preset_font_family(string $html): bool
+{
+    if (preg_match('/<!-- wp:navigation (\{.*?\}) -->/s', $html, $m) !== 1) {
+        return false;
+    }
+    $attrs = json_decode($m[1], true);
+    if (!is_array($attrs)) {
+        throw new RuntimeException('navigation delimiter JSON did not parse: ' . $m[1]);
+    }
+    return array_key_exists('fontFamily', $attrs);
 }
 
 test('PhpBlockFixer converges on the authored overlayMenu across repeated passes', function () {
@@ -511,8 +537,42 @@ test('PhpBlockFixer converges on the authored overlayMenu across repeated passes
         }
         assert_eq($seen[1], $seen[2], 'pass 2 is byte-stable');
         assert_eq($seen[2], $seen[3], 'pass 3 is byte-stable');
-        // The migration itself must still have happened on the first pass.
-        assert_contains('"fontFamily":"var(\u002d\u002dheading)"', $seen[1]);
+        // The authored custom family must stay where it was authored.
+        // Promoting it to the registered preset attribute would make
+        // WordPress resolve it as a slug - pinned by the regression test below.
+        assert_true(
+            !nav_has_preset_font_family($seen[1]),
+            'a custom font-family is not promoted to the registered preset attribute',
+        );
+        assert_contains('"typography":{"fontFamily":"var(\u002d\u002dheading)"', $seen[1]);
+    } finally {
+        remove_tree(dirname($theme));
+    }
+});
+
+test('PhpBlockFixer does not promote a custom navigation font-family to a preset slug', function () {
+    // The legacy migration reads `var:preset|font-family|<slug>` and keeps the
+    // last pipe segment. A transformer-authored CUSTOM value has no pipe, so the
+    // whole CSS value would land in the registered fontFamily attribute.
+    // WordPress prefers that attribute over style.typography.fontFamily and
+    // kebab-cases it into --wp--preset--font-family--var-heading, which no
+    // theme.json defines, so the authored font silently disappears.
+    $original = '<!-- wp:navigation {"className":"nav-links",'
+        . '"style":{"typography":{"fontFamily":"var(--heading)"}}} -->'
+        . '<!-- wp:navigation-link {"label":"Home","url":"/","kind":"custom"} /-->'
+        . '<!-- /wp:navigation -->';
+    $theme = php_block_fixer_test_theme(['parts/header.html' => $original]);
+
+    try {
+        (new PhpBlockFixer())->fix($theme);
+        $fixed = file_get_contents($theme . '/parts/header.html');
+
+        assert_eq(1, substr_count($fixed, '<!-- wp:navigation '), 'the navigation survives');
+        assert_true(
+            !nav_has_preset_font_family($fixed),
+            'a custom value must not become a registered preset font-family',
+        );
+        assert_contains('"typography":{"fontFamily":"var(\u002d\u002dheading)"', $fixed);
     } finally {
         remove_tree(dirname($theme));
     }
@@ -546,8 +606,11 @@ test('PhpBlockFixer still applies the navigation migration to un-migrated conten
     // The forcing rule is not deleted. Content that has NOT yet been migrated -
     // style.typography.fontFamily with no top-level fontFamily and no authored
     // overlayMenu - still receives the deprecation's overlay default.
+    // GENUINELY LEGACY content: the pinned save form is a pipe-delimited
+    // preset reference, not a raw CSS value. Using a custom value here would
+    // pass vacuously against the legacy-signature gate.
     $original = '<!-- wp:navigation {"className":"nav-links",'
-        . '"style":{"typography":{"fontFamily":"var(--heading)"}}} -->'
+        . '"style":{"typography":{"fontFamily":"var:preset|font-family|heading"}}} -->'
         . '<!-- wp:navigation-link {"label":"Home","url":"/","kind":"custom"} /-->'
         . '<!-- /wp:navigation -->';
     $theme = php_block_fixer_test_theme(['parts/header.html' => $original]);
@@ -557,7 +620,7 @@ test('PhpBlockFixer still applies the navigation migration to un-migrated conten
         $fixed = file_get_contents($theme . '/parts/header.html');
 
         assert_eq('never', nav_overlay_menu($fixed), 'the migration still supplies its overlay default');
-        assert_contains('"fontFamily":"var(\u002d\u002dheading)"', $fixed);
+        assert_contains('"fontFamily":"heading"', $fixed, 'the preset slug is the last pipe segment');
     } finally {
         remove_tree(dirname($theme));
     }

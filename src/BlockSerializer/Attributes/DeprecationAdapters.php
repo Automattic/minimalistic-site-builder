@@ -746,6 +746,10 @@ final class DeprecationAdapters
         array $rawCommentAttributes,
         bool &$matched,
     ): array {
+        // Redundant by design: the legacy-signature gate below already excludes
+        // this adapter's own output, because the migration replaces the pipe
+        // form with a bare slug. Kept as a second fixed-point guard so the
+        // idempotence property does not depend on that one string test alone.
         if (array_key_exists('fontFamily', $rawCommentAttributes)) {
             return $attributes;
         }
@@ -759,6 +763,17 @@ final class DeprecationAdapters
                 'Unsupported deprecated core/navigation font-family value; '
                 . 'a reviewed deprecation adapter is required'
             );
+        }
+        // Only legacy content carries the pinned pipe-delimited preset form, and
+        // only for it does taking the last segment yield a real slug. A
+        // transformer-authored custom value like `var(--heading)` has no pipe,
+        // so migrating it would write the whole CSS value into the registered
+        // fontFamily attribute — which WordPress prefers over
+        // style.typography.fontFamily and kebab-cases into
+        // `--wp--preset--font-family--var-heading`, a property no theme.json
+        // defines. The authored font would vanish.
+        if (!str_starts_with($typography['fontFamily'], 'var:preset|font-family|')) {
+            return $attributes;
         }
         $matched = true;
         $attributes['overlayMenu'] = 'never';
