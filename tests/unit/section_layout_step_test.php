@@ -619,6 +619,90 @@ test('A3 section layout preserves a right-aligned author-owned max-width', funct
     assert_eq(['type' => 'constrained'], $attrs['root']['layout'] ?? null);
 });
 
+test('A4 section layout honours the desktop media query that owns the render viewport', function () {
+    // tbilisi4's real shape: the base rule governs below 1000px only, and the
+    // desktop rule that actually applies at the render viewport ends-aligns the
+    // column. Reading the base rule as the render rule stamps align:wide.
+    $attrs = section_layout_author_width_attrs(
+        ':root{--wide-size:1280px}'
+            . '.measure{max-width:var(--wide-size);margin:0 auto;width:100%}'
+            . '@media (min-width:1000px){.measure{max-width:38rem;margin:0 0 0 auto;}}',
+    );
+    assert_eq(
+        'full',
+        $attrs['target']['align'] ?? null,
+        'the desktop max-width plus one-sided auto margin escapes the constrained rule',
+    );
+});
+
+test('A5 section layout ignores a mobile-only media query at the render viewport', function () {
+    // calm-lantern's real .badge shape, minus its position:absolute so the
+    // out-of-flow skip cannot make this vacuous. The base rule alone proves
+    // start alignment; the max-width:899px rule never applies at 1366.
+    $attrs = section_layout_author_width_attrs(
+        '.measure{max-width:12.5rem;padding:0.8rem 1.05rem;border-radius:20px}'
+            . '@media (max-width:899px){.measure{max-width:10.5rem;padding:0.65rem 0.85rem;}}',
+    );
+    assert_true(
+        !isset($attrs['target']['align']),
+        'a mobile-only declaration is ignored, not treated as unprovable',
+    );
+    assert_contains(
+        SectionLayoutStep::AUTHOR_WIDTH_START_CLASS,
+        $attrs['root']['className'] ?? '',
+        'the base rule still proves start alignment',
+    );
+});
+
+test('A6 section layout never cascades a mobile-only margin into the render viewport', function () {
+    $attrs = section_layout_author_width_attrs(
+        '.measure{max-width:12.5rem}'
+            . '@media (max-width:899px){.measure{max-width:10.5rem;margin-left:auto;}}',
+    );
+    assert_true(
+        !isset($attrs['target']['align']),
+        'the mobile end alignment must not reach the desktop classification',
+    );
+});
+
+test('A7 section layout resolves a rem media prelude against the render viewport', function () {
+    // swift-grove and sunny-ember author their desktop breakpoint in rem.
+    $attrs = section_layout_author_width_attrs(
+        '.measure{max-width:100%}'
+            . '@media (min-width:56rem){.measure{max-width:38rem;margin-left:auto;}}',
+    );
+    assert_eq('full', $attrs['target']['align'] ?? null, '56rem is 896px, so the rule applies at 1366');
+});
+
+test('A8 section layout leaves a non-width at-rule unprovable', function () {
+    $attrs = section_layout_author_width_attrs(
+        '.measure{max-width:44rem}'
+            . '@media (prefers-reduced-motion: reduce){.measure{margin-left:auto;}}',
+    );
+    assert_true(
+        !isset($attrs['target']['align']),
+        'a preference query cannot be decided by a width comparison',
+    );
+    assert_true(
+        !str_contains($attrs['root']['className'] ?? '', SectionLayoutStep::AUTHOR_WIDTH_START_CLASS),
+        'one unprovable match still poisons the whole classification',
+    );
+});
+
+test('A9 section layout keeps a keyframe step out of the width classification', function () {
+    // Keyframe bodies never reach the classifier: scanDeclarations marks them
+    // kind=keyframe and authoredWidthDeclarations drops every non-style row.
+    $attrs = section_layout_author_width_attrs(
+        '.measure{max-width:44rem;margin-right:auto}'
+            . '@keyframes settle{from{max-width:10rem;margin-left:auto;}to{max-width:44rem;}}',
+    );
+    assert_contains(
+        SectionLayoutStep::AUTHOR_WIDTH_START_CLASS,
+        $attrs['root']['className'] ?? '',
+        'an animation step cannot change the authored alignment',
+    );
+});
+
 test('section layout promotes a root whose wrapper bears a wide-size class to align:wide', function () {
     [$project, $tmp] = section_layout_project([[
         'slug' => 'home',
