@@ -193,6 +193,17 @@ CSS;
         '/* Wrap at spaces only — never split a word mid-token. */';
     private const VERTICAL_RHYTHM_MARKER =
         '/* Preserve authored block-axis spacing against WordPress layout resets. */';
+    /**
+     * A grid item's block-axis margin adds to the track gap instead of to the
+     * section edge, which is why the transformer zeroes it. Reinforcement is
+     * selector-scoped rather than element-scoped, so the exclusion has to
+     * travel in the selector. Adds no specificity: :not() takes its argument's,
+     * and :where() is zero.
+     */
+    private const TRAILING_GRID_ITEM_GUARD =
+        ':not(:where(.blocks-engine-css-owned-grid > *))';
+    /** The four pseudo-elements CSS still spells with one colon. */
+    private const LEGACY_PSEUDO_ELEMENTS = ['before', 'after', 'first-line', 'first-letter'];
     private const RAW_COLOR_NAMES = [
         'aliceblue', 'antiquewhite', 'aqua', 'aquamarine', 'azure', 'beige',
         'bisque', 'black', 'blanchedalmond', 'blue', 'blueviolet', 'brown',
@@ -794,7 +805,7 @@ CSS;
                             if ($flowMatchCache[$cacheKey]) {
                                 $flowSelectors[] = self::boostVerticalSelector($selector);
                             }
-                        } elseif ($isBlockMargin && $paintedSelectorKeys !== []) {
+                        } elseif ($isBlockMargin && !self::endsWithPseudoElement($selector)) {
                             $cacheKey = 'trailing:' . $selector;
                             if (!array_key_exists($cacheKey, $flowMatchCache)) {
                                 $flowMatchCache[$cacheKey] = self::selectorMatchesAnyElement(
@@ -804,7 +815,7 @@ CSS;
                             }
                             if ($flowMatchCache[$cacheKey]) {
                                 $flowSelectors[] = self::boostVerticalSelector(
-                                    $selector . ':last-child',
+                                    $selector . ':last-child' . self::TRAILING_GRID_ITEM_GUARD,
                                 );
                             }
                         }
@@ -873,9 +884,9 @@ CSS;
     }
 
     /**
-     * Decorated inline labels are the authored section-rhythm landmarks. Their
-     * own margins, and the margin of a trailing flow control before the next
-     * landmark, are the bounded inner-flow values this pass reinforces.
+     * Decorated inline labels are the authored section-rhythm landmarks. This
+     * set bounds their own margins only: a trailing flow control is bounded by
+     * its own predicate, so a design that paints nothing still keeps one.
      *
      * @param list<array{source:string,css:string}> $authorChunks
      * @return array<string,true>
@@ -1248,6 +1259,21 @@ CSS;
             return ':root:root:root' . substr($selector, 5);
         }
         return ':root:root ' . $selector;
+    }
+
+    /**
+     * A pseudo-element has to be the last thing in a selector, so appending
+     * `:last-child` to one produces a rule the browser drops whole. The
+     * trailing branch skips these rather than emitting dead CSS.
+     */
+    private static function endsWithPseudoElement(string $selector): bool
+    {
+        $selector = rtrim(trim($selector));
+        if (preg_match('/::[a-z-]+(\([^()]*\))?\z/i', $selector) === 1) {
+            return true;
+        }
+        $legacy = implode('|', self::LEGACY_PSEUDO_ELEMENTS);
+        return preg_match('/(?<!:):(' . $legacy . ')\z/i', $selector) === 1;
     }
 
     /**
