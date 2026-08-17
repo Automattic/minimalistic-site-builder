@@ -226,6 +226,47 @@ test('an authored header background far from every palette slug keeps the review
     assert_eq('contrast', $contract['header']['foreground_token']);
 });
 
+// A design may author a surface and no ink. Naming a fixed `contrast` there
+// can advertise ink that opaquePairWithSafety() will refuse to deliver, and
+// that same token reaches the header author through openingHeaderContract().
+test('an unauthored ink resolves against the surface the design actually chose', function () {
+    // squirrel-img3's real palette: contrast on primary is 1.45:1, base is 10.40:1.
+    $palette = [
+        'base' => '#F4EBDA',
+        'contrast' => '#1A1714',
+        'primary' => '#1E3A32',
+        'secondary' => '#5C4423',
+        'accent' => '#8A6C13',
+    ];
+    $header = design_header_contract(design_header_css('#1E3A32'), $palette)['header'];
+    assert_eq('primary', $header['protection_token']);
+    assert_eq('base', $header['foreground_token']);
+
+    // The contract must now name the pair the behavior resolver delivers.
+    $artifact = HeaderBehavior::resolve(
+        design_header_pages(),
+        HeaderBehavior::MODE_STACKED,
+        $palette,
+        'standard-row',
+        HeaderBehavior::TRANSITION_SMOOTH,
+        $header['protection_token'],
+        $header['foreground_token'],
+        'base',
+    );
+    assert_eq($header['protection_token'], $artifact['topSurface']);
+    assert_eq($header['foreground_token'], $artifact['foreground']);
+});
+
+test('a design that derives no surface keeps the historical contrast-on-base ink', function () {
+    // The reviewed `base` surface must still name `contrast`, on both a
+    // conventional palette and one whose base is the dark token.
+    foreach ([DESIGN_HEADER_AZURE_PALETTE, DESIGN_HEADER_INVERTED_PALETTE] as $palette) {
+        $header = design_header_contract("header{position:relative;}", $palette)['header'];
+        assert_eq('base', $header['protection_token']);
+        assert_eq('contrast', $header['foreground_token']);
+    }
+});
+
 test('a stacked pair can never resolve to one slug painted on itself', function () {
     // Every corpus-shaped combination of authored/unauthored, matched and
     // unmatched, must still leave a header whose text is visible.

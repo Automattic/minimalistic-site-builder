@@ -699,21 +699,53 @@ final class AboveFoldContract
      * the reviewed surface with ink of that same colour, leaving invisible
      * header text. calm-lantern is exactly that shape — `#2E0B5A` matches no
      * slug while its `#fff` matches `base` — so a collided pair yields to the
-     * opposite reviewed token, and the design's ink hint is discarded along
-     * with the surface it was chosen for.
+     * reviewed default, and the design's ink hint is discarded along with the
+     * surface it was chosen for.
+     *
+     * An unauthored ink resolves against the surface actually chosen rather
+     * than to a fixed `contrast`. On the reviewed `base` surface that still
+     * picks `contrast`, so every design that derives no surface keeps its
+     * present pair exactly; on a derived surface it stops the contract
+     * advertising an ink that `opaquePairWithSafety()` will then refuse to
+     * deliver — a mismatch the header author also reads through
+     * openingHeaderContract().
      *
      * @param array<string,mixed> $themeContext
      * @return array{0:string,1:string} [foreground, protection]
      */
     private static function stackedTokenRoles(?string $designCss, array $themeContext): array
     {
-        $pair = DesignHeaderSurface::stackedPair($designCss, self::paletteMap($themeContext));
+        $palette = self::paletteMap($themeContext);
+        $pair = DesignHeaderSurface::stackedPair($designCss, $palette);
         $protection = $pair['protection'] ?? 'base';
-        $foreground = $pair['foreground'] ?? 'contrast';
+        $foreground = $pair['foreground'] ?? self::readableInk($protection, $palette);
         if ($foreground === $protection) {
-            $foreground = $protection === 'contrast' ? 'base' : 'contrast';
+            $foreground = self::readableInk($protection, $palette);
         }
         return [$foreground, $protection];
+    }
+
+    /**
+     * Whichever reviewed token reads better on this surface. The reviewed
+     * `base` surface, an unreadable palette, and a tie all keep `contrast`,
+     * which is the historical answer.
+     *
+     * @param array<string,string> $palette
+     */
+    private static function readableInk(string $protection, array $palette): string
+    {
+        if ($protection === 'contrast') {
+            return 'base';
+        }
+        $surface = ContrastMath::hexToRgb($palette[$protection] ?? '');
+        $base = ContrastMath::hexToRgb($palette['base'] ?? '');
+        $contrast = ContrastMath::hexToRgb($palette['contrast'] ?? '');
+        if ($protection === 'base' || $surface === null || $base === null || $contrast === null) {
+            return 'contrast';
+        }
+        return ContrastMath::ratio($base, $surface) > ContrastMath::ratio($contrast, $surface)
+            ? 'base'
+            : 'contrast';
     }
 
     /**
