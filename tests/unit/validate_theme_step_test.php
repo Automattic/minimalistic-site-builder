@@ -110,6 +110,18 @@ test('validate-theme declaration rejects an incomplete theme graph', function ()
         'plugin/pages/*',
     ], (new ValidateThemeStep())->declaration()->reads);
 
+    // The HTML-first linter dry-runs a normalization that consults the design's
+    // stylesheet, so that read belongs in the manifest — and only there, since
+    // the legacy graph never writes one.
+    assert_true(
+        in_array('design/site.css', (new ValidateThemeStep(htmlFirst: true))->declaration()->reads, true),
+        'HTML-first validate-theme declares the design stylesheet it reads',
+    );
+    assert_true(
+        !in_array('design/site.css', (new ValidateThemeStep())->declaration()->reads, true),
+        'the legacy graph, which writes no design/site.css, does not declare it',
+    );
+
     assert_throws(
         fn () => new Pipeline(
             [new ScaffoldThemeStep(), new ValidateThemeStep()],

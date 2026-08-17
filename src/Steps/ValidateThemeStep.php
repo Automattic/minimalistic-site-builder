@@ -50,6 +50,10 @@ final class ValidateThemeStep implements Step
             id: $this->id(),
             label: $this->label(),
             reads: [
+                // layoutWarnings dry-runs the build's normalization, which
+                // consults the design's stylesheet for roots that own their
+                // width. Only the HTML-first graph has one to read.
+                ...($this->htmlFirst ? ['design/site.css'] : []),
                 'pages.json',
                 'aboveFold.json',
                 'headerBehavior.json',
