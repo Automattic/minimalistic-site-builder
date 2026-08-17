@@ -34,6 +34,16 @@ final class SectionLayoutStep implements Step
     public const AUTHOR_WIDTH_START_CLASS = 'blocks-engine-author-width-start';
 
     /**
+     * Per-child alignment markers. Alignment lives on the child that owns the
+     * authored width, never on the section root: layout.justifyContent is a
+     * container property WordPress fans out to every sibling, and align:full
+     * hands the block to root-padding-aware rules that outrank the authored
+     * max-width. PageStylesStep pins these to the content column edge.
+     */
+    public const AUTHOR_WIDTH_CHILD_START_CLASS = 'blocks-engine-author-width-child-start';
+    public const AUTHOR_WIDTH_CHILD_ESCAPE_CLASS = 'blocks-engine-author-width-child-escape';
+
+    /**
      * The desktop width the design preview renders at, so a media-scoped rule
      * is judged against the layout the theme is built to reproduce. Matches
      * ThemeJsonStep's content-width reference viewport and bin/screenshot.

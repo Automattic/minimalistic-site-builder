@@ -716,6 +716,112 @@ test('A9 section layout keeps a keyframe step out of the width classification', 
     );
 });
 
+test('AW1 section layout marks an escaping authored width per child, never align:full', function () {
+    // align:full hands the block to WordPress's root-padding-aware alignment
+    // rules, which outrank the authored max-width and margin at (0,1,0). The
+    // remedy has to stay on the child and leave those authored values in play.
+    $attrs = section_layout_author_width_attrs(
+        ':root{--wide-size:1280px}'
+            . '.measure{max-width:var(--wide-size);margin:0 auto;width:100%}'
+            . '@media (min-width:1000px){.measure{max-width:38rem;margin:0 0 0 auto;}}',
+    );
+    assert_contains(
+        SectionLayoutStep::AUTHOR_WIDTH_CHILD_ESCAPE_CLASS,
+        $attrs['target']['className'] ?? '',
+        'the escaping child carries the per-child end-alignment marker',
+    );
+    assert_true(
+        !isset($attrs['target']['align']),
+        'the escaping child is never promoted to a full-bleed alignment',
+    );
+    assert_eq(
+        ['type' => 'constrained'],
+        $attrs['root']['layout'] ?? null,
+        'the root keeps a plain constrained layout',
+    );
+});
+
+test('AW2 section layout marks a start-aligned authored width per child, never on the container', function () {
+    // layout.justifyContent is a container property: WordPress fans it out to
+    // every child of the section with a !important margin-left reset, moving
+    // siblings that own no authored width at all.
+    $attrs = section_layout_author_width_attrs('.measure{max-width:min(100%,44rem)}');
+    assert_contains(
+        SectionLayoutStep::AUTHOR_WIDTH_CHILD_START_CLASS,
+        $attrs['target']['className'] ?? '',
+        'the start-aligned child carries the per-child start marker',
+    );
+    assert_eq(
+        ['type' => 'constrained'],
+        $attrs['root']['layout'] ?? null,
+        'the section root never carries justifyContent',
+    );
+    assert_true(
+        !isset($attrs['target']['align']),
+        'a start-aligned child keeps the constrained inset',
+    );
+});
+
+test('AW3 section layout keeps per-child width markers out of the footer control', function () {
+    // tbilisi4's footer reproduces its design to the pixel while the body
+    // sections carrying the identical classes do not. A per-child marker that
+    // reached a part would move the one thing that already renders correctly.
+    [$project, $tmp] = section_layout_project([[
+        'slug' => 'home',
+        'sections' => [['slug' => 'band', 'background' => 'base', 'vertical_density' => 'standard']],
+    ]]);
+    try {
+        $project->writeText(
+            'design/site.css',
+            ':root{--wide-size:1280px}'
+                . '.hero-inner{max-width:var(--wide-size);margin:0 auto;width:100%}'
+                . '@media (min-width:1000px){.hero-inner{max-width:38rem;margin:0 0 0 auto;}}',
+        );
+        $footer = '<!-- wp:group {"tagName":"footer","className":"hero-panel"} -->'
+            . '<footer class="wp-block-group hero-panel">'
+            . '<!-- wp:group {"align":"wide","className":"hero-inner"} -->'
+            . '<div class="wp-block-group alignwide hero-inner">'
+            . '<!-- wp:paragraph --><p>Tbilisi Tavern</p><!-- /wp:paragraph -->'
+            . '</div><!-- /wp:group --></footer><!-- /wp:group -->';
+        $project->writeText('theme/parts/footer.html', $footer);
+        $project->writeText(
+            'theme/parts/header.html',
+            '<!-- wp:group {"tagName":"header"} --><header class="wp-block-group">'
+                . '<!-- wp:group {"className":"hero-inner"} --><div class="wp-block-group hero-inner">'
+                . '<!-- wp:paragraph --><p>Chrome</p><!-- /wp:paragraph -->'
+                . '</div><!-- /wp:group --></header><!-- /wp:group -->',
+        );
+        $project->writeText(
+            'theme/parts/page-home--band.html',
+            '<!-- wp:group --><div class="wp-block-group">'
+                . '<!-- wp:group {"className":"hero-inner"} --><div class="wp-block-group hero-inner">'
+                . '<!-- wp:paragraph --><p>Band</p><!-- /wp:paragraph -->'
+                . '</div><!-- /wp:group --></div><!-- /wp:group -->',
+        );
+
+        (new SectionLayoutStep())->run($project);
+
+        assert_eq($footer, $project->readText('theme/parts/footer.html'), 'the footer part is never rewritten');
+        assert_true(
+            !str_contains(
+                $project->readText('theme/parts/header.html'),
+                SectionLayoutStep::AUTHOR_WIDTH_CHILD_ESCAPE_CLASS,
+            ),
+            'a wide-carrier part never gains a per-child width marker',
+        );
+        assert_contains(
+            SectionLayoutStep::AUTHOR_WIDTH_CHILD_ESCAPE_CLASS,
+            section_layout_class_attrs(
+                $project->readText('theme/parts/page-home--band.html'),
+                'hero-inner',
+            )['className'] ?? '',
+            'the page section carrying the same class does get the marker',
+        );
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
 test('section layout promotes a root whose wrapper bears a wide-size class to align:wide', function () {
     [$project, $tmp] = section_layout_project([[
         'slug' => 'home',

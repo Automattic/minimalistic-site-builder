@@ -8,6 +8,7 @@ use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Steps\PageStylesStep;
+use Automattic\SiteBuild\Steps\SectionLayoutStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
 use Automattic\SiteBuild\TransformArtifacts;
 
@@ -890,6 +891,98 @@ CSS;
         $changedStyle,
         $project->readText('theme/style.css'),
         'author-rhythm replacement reaches a fixed point',
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('AW4 site CSS path pins a marked authored-width child to its content-column edge', function () {
+    // WordPress's constrained layout centres every child with margin-left and
+    // margin-right auto at !important, so the authored one-sided margin never
+    // reaches the page. The pin has to outrank that and land on the content
+    // column edge — not the root padding box, which sits 41px further out at
+    // 1366 and diverges from it at every other width.
+    [$project, $tmp] = ps_project('builder_ps_author_width_pin_');
+    $project->writeText(TransformArtifacts::SITE_CSS, ".hero-inner{max-width:38rem}\n.rule{max-width:52ch}");
+    $project->writeJson('pages.json', ['pages' => [['slug' => 'home', 'front' => true]]]);
+    $project->writeText(
+        'design/home.html',
+        '<main><section id="story"><div class="hero-inner">Story</div></section>'
+            . '<section id="services"><hr class="rule"><p>Services</p></section></main>',
+    );
+    $project->writeText(
+        'plugin/pages/home.html',
+        '<section id="story"><div class="hero-inner '
+            . SectionLayoutStep::AUTHOR_WIDTH_CHILD_ESCAPE_CLASS . '">Story</div></section>'
+            . '<section id="services"><hr class="rule '
+            . SectionLayoutStep::AUTHOR_WIDTH_CHILD_START_CLASS . '"><p>Services</p></section>',
+    );
+
+    ps_html_first_step(new FakeLlm())->run($project);
+    $style = $project->readText('theme/style.css');
+
+    $escape = implode("\n", ps_css_bodies_for_selector(
+        $style,
+        ':root:root .' . SectionLayoutStep::AUTHOR_WIDTH_CHILD_ESCAPE_CLASS,
+    ));
+    assert_contains('margin-left: auto !important', $escape, 'the authored end alignment survives the layout reset');
+    assert_contains(
+        'margin-right: max(0px, (100% - var(--wp--style--global--content-size, 100%)) / 2) !important',
+        $escape,
+        'the escaping child ends at the content column edge, not the root padding box',
+    );
+
+    $start = implode("\n", ps_css_bodies_for_selector(
+        $style,
+        ':root:root .' . SectionLayoutStep::AUTHOR_WIDTH_CHILD_START_CLASS,
+    ));
+    assert_contains(
+        'margin-left: max(0px, (100% - var(--wp--style--global--content-size, 100%)) / 2) !important',
+        $start,
+        'the start-aligned child begins at the content column edge',
+    );
+    assert_contains('margin-right: auto !important', $start, 'the start-aligned child keeps its trailing slack');
+
+    assert_eq(
+        1,
+        substr_count($style, 'Pin an authored-width child to its authored content-column edge'),
+        'exactly one authored-width pin tail is present',
+    );
+
+    ps_html_first_step(new FakeLlm())->run($project);
+    assert_eq($style, $project->readText('theme/style.css'), 'the authored-width pin reaches a fixed point');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('AW5 site CSS path emits no authored-width pin when no child is marked', function () {
+    // The pin carries !important against WordPress's own !important layout
+    // margins. It is authorised for marked children only, so an unmarked page
+    // must ship none of it at all.
+    [$project, $tmp] = ps_project('builder_ps_author_width_unmarked_');
+    $project->writeText(TransformArtifacts::SITE_CSS, '.hero-inner{max-width:38rem}');
+    $project->writeJson('pages.json', ['pages' => [['slug' => 'home', 'front' => true]]]);
+    $project->writeText(
+        'design/home.html',
+        '<main><section id="story"><div class="hero-inner">Story</div></section></main>',
+    );
+    $project->writeText(
+        'plugin/pages/home.html',
+        '<section id="story"><div class="hero-inner">Story</div></section>',
+    );
+
+    ps_html_first_step(new FakeLlm())->run($project);
+    $style = $project->readText('theme/style.css');
+
+    assert_true(
+        !str_contains($style, 'Pin an authored-width child to its authored content-column edge'),
+        'no pin tail is emitted for a page with no marked child',
+    );
+    assert_true(
+        !str_contains($style, SectionLayoutStep::AUTHOR_WIDTH_CHILD_ESCAPE_CLASS),
+        'no end-alignment pin reaches an unmarked page',
+    );
+    assert_true(
+        !str_contains($style, SectionLayoutStep::AUTHOR_WIDTH_CHILD_START_CLASS),
+        'no start-alignment pin reaches an unmarked page',
     );
     exec('rm -rf ' . escapeshellarg($tmp));
 });
