@@ -75,6 +75,46 @@ test('layout fixer leaves CSS-owned header and footer roots layout-less in both 
     }
 });
 
+test('layout fixer leaves a root carrying a design wide-measure class layout-less', function () {
+    // sunny-ember: the bare <footer> gave the transformer nothing to carry, so
+    // the design's own content container ".hero-inner" became the part root.
+    // design/site.css gives that class max-width:var(--wide-size) + margin:0
+    // auto, so the author already owns this box. Stamping constrained makes
+    // core emit margin-inline:auto!important on every child, which shoved the
+    // 34ch ".deck" paragraph 460px to the right of where the design puts it.
+    $root = static fn (string $classes): string => '<!-- wp:group {"className":"' . $classes . '",'
+        . '"style":{"spacing":{"margin":{"top":"0","right":"auto","bottom":"0","left":"auto"}}}} -->'
+        . '<div class="wp-block-group ' . $classes . '" style="margin-top:0;margin-right:auto;'
+        . 'margin-bottom:0;margin-left:auto">'
+        . '<!-- wp:paragraph {"className":"deck"} --><p class="deck">Measure</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->';
+    $tokens = ['hero-inner', 'panel-inner'];
+
+    foreach ([LayoutFixer::ROLE_HEADER, LayoutFixer::ROLE_FOOTER] as $role) {
+        foreach ([true, false] as $htmlFirst) {
+            $where = "{$role} in " . ($htmlFirst ? 'HTML-first' : 'legacy') . ' mode';
+
+            // The carrier is one token among several unrelated classes.
+            $carrier = LayoutFixer::fix($root('brand-shell hero-inner nav-open'), $role, 840.0, [], $htmlFirst, $tokens);
+            assert_true(
+                !str_contains($carrier['markup'], '"layout":{"type":"constrained"}'),
+                "{$where}: a root carrying a design wide-measure class stays layout-less",
+            );
+
+            // NON-VACUITY: an identical root whose class the design's CSS does
+            // NOT give a wide measure must still be constrained, or the fix
+            // would be indistinguishable from never stamping anything.
+            $plain = LayoutFixer::fix($root('brand-shell nav-open'), $role, 840.0, [], $htmlFirst, $tokens);
+            assert_contains('"layout":{"type":"constrained"}', $plain['markup']);
+
+            // Same markup, empty token list: the stamp is driven by the design
+            // evidence, not by the class name happening to look structural.
+            $untold = LayoutFixer::fix($root('brand-shell hero-inner nav-open'), $role, 840.0, [], $htmlFirst);
+            assert_contains('"layout":{"type":"constrained"}', $untold['markup']);
+        }
+    }
+});
+
 test('layout fixer skips the HTML-first section width heuristics that assume theme width', function () {
     // freeGridsFromNarrowWrappers would force align:wide onto the grid; the
     // carried design CSS already sized it.
