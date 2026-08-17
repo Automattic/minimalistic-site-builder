@@ -599,12 +599,38 @@ final class GeneratedMarkup
     /** Whether block attributes carry the exact marker for CSS-owned layout. */
     public static function hasCssOwnedLayoutMarker(array|object $attrs): bool
     {
-        $className = is_array($attrs) ? ($attrs['className'] ?? null) : ($attrs->className ?? null);
-        if (!is_string($className)) {
+        return in_array('blocks-engine-css-owned-layout', self::attrClassTokens($attrs), true);
+    }
+
+    /**
+     * Whether block attributes carry any of the given class tokens. The caller
+     * supplies tokens derived from the design's own stylesheet, so a match is
+     * positive evidence about that specific build rather than a guess.
+     *
+     * @param list<string> $tokens
+     */
+    public static function carriesAnyClassToken(array|object $attrs, array $tokens): bool
+    {
+        if ($tokens === []) {
             return false;
         }
-        $tokens = preg_split('/[\x20\t\r\n\f]+/', trim($className), -1, PREG_SPLIT_NO_EMPTY) ?: [];
-        return in_array('blocks-engine-css-owned-layout', $tokens, true);
+        $carried = array_fill_keys(self::attrClassTokens($attrs), true);
+        foreach ($tokens as $token) {
+            if (isset($carried[$token])) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** @return list<string> the block's own className tokens, never descendants' */
+    private static function attrClassTokens(array|object $attrs): array
+    {
+        $className = is_array($attrs) ? ($attrs['className'] ?? null) : ($attrs->className ?? null);
+        if (!is_string($className)) {
+            return [];
+        }
+        return preg_split('/[\x20\t\r\n\f]+/', trim($className), -1, PREG_SPLIT_NO_EMPTY) ?: [];
     }
 
     /**

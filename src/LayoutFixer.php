@@ -91,6 +91,7 @@ final class LayoutFixer
         ?float $contentSize = null,
         array $spacingSlugs = [],
         bool $htmlFirst = false,
+        array $wideClassTokens = [],
     ): array {
         $notes = [];
         $markup = self::repairMalformedAttributes($markup, $notes);
@@ -121,7 +122,7 @@ final class LayoutFixer
         self::mirrorDynamicChromeSpacing($markup, $all, $htmlEdits, $notes);
         $pageWidth = $role === self::ROLE_SECTION || $role === self::ROLE_TEMPLATE;
         if (!$pageWidth || !$htmlFirst) {
-            self::addMissingRootLayout($roots, $notes);
+            self::addMissingRootLayout($roots, $notes, $wideClassTokens);
         }
         self::promoteAlignClassNames($all, $notes);
 
@@ -849,8 +850,9 @@ final class LayoutFixer
      *
      * @param object[] $roots
      * @param string[] $notes
+     * @param list<string> $wideClassTokens classes the design's own CSS gives the wide measure
      */
-    private static function addMissingRootLayout(array $roots, array &$notes): void
+    private static function addMissingRootLayout(array $roots, array &$notes, array $wideClassTokens = []): void
     {
         foreach ($roots as $node) {
             if (self::is($node, 'group')
