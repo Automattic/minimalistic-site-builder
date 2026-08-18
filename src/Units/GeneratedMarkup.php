@@ -729,8 +729,21 @@ final class GeneratedMarkup
         return $out;
     }
 
-    /** Whether a rule body gives an inline measure the wide size. */
-    private static function declaresWideMeasure(string $body): bool
+    /**
+     * Whether a rule body gives an inline measure the wide size.
+     *
+     * The single definition of that question. Steps\SectionLayoutStep asks it
+     * too, of the same stylesheets, and delegates here rather than keeping a
+     * second copy that can drift.
+     *
+     * Known limit, deliberately unchanged while it is unobserved: the pattern
+     * requires a bare `var(--wide-size)`, so the fallback form
+     * `var(--wide-size, 1200px)` reads as no measure. That direction is safe —
+     * the root keeps its constrained stamp — and no design in the corpus emits
+     * it. Widening it would change which classes both callers report, including
+     * the align:wide carrier promotion, so it wants its own corpus evidence.
+     */
+    public static function declaresWideMeasure(string $body): bool
     {
         foreach (explode(';', $body) as $declaration) {
             $colon = strpos($declaration, ':');
