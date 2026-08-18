@@ -121,11 +121,12 @@ final class FixBlocksStep implements Step
                     $failedFiles[$file] = [$file, $reason];
                 }
             }
-            self::restoreFailedThemeFiles($project, $beforeInitialPass, self::failurePaths($failedFiles));
-            $formNotes = self::withoutFailedLayoutNotes($formNotes, self::failurePaths($failedFiles));
-            $layoutNotes = self::withoutFailedLayoutNotes($layoutNotes, self::failurePaths($failedFiles));
-            $listNotes = self::withoutFailedLayoutNotes($listNotes, self::failurePaths($failedFiles));
-            $listWarnings = self::withoutFailedLayoutNotes($listWarnings, self::failurePaths($failedFiles));
+            $failedPaths = self::failurePaths($failedFiles);
+            self::restoreFailedThemeFiles($project, $beforeInitialPass, $failedPaths);
+            $formNotes = self::withoutFailedLayoutNotes($formNotes, $failedPaths);
+            $layoutNotes = self::withoutFailedLayoutNotes($layoutNotes, $failedPaths);
+            $listNotes = self::withoutFailedLayoutNotes($listNotes, $failedPaths);
+            $listWarnings = self::withoutFailedLayoutNotes($listWarnings, $failedPaths);
         } catch (\RuntimeException $e) {
             self::restoreThemeFiles($project, $beforeInitialPass);
             $project->writeText('logs/' . self::LOG_FILE, $e->getMessage() . "\n");
@@ -162,11 +163,12 @@ final class FixBlocksStep implements Step
                 $summary .= "\n[form/layout/shape] post-repair normalization required a second block-fixer pass:\n  "
                     . str_replace("\n", "\n  ", $followUpSummary);
                 self::appendFailures($failedFiles, $followUpOutcome);
-                self::restoreFailedThemeFiles($project, $beforeInitialPass, self::failurePaths($failedFiles));
-                $formNotes = self::withoutFailedLayoutNotes($formNotes, self::failurePaths($failedFiles));
-                $layoutNotes = self::withoutFailedLayoutNotes($layoutNotes, self::failurePaths($failedFiles));
-                $listNotes = self::withoutFailedLayoutNotes($listNotes, self::failurePaths($failedFiles));
-                $listWarnings = self::withoutFailedLayoutNotes($listWarnings, self::failurePaths($failedFiles));
+                $failedPaths = self::failurePaths($failedFiles);
+                self::restoreFailedThemeFiles($project, $beforeInitialPass, $failedPaths);
+                $formNotes = self::withoutFailedLayoutNotes($formNotes, $failedPaths);
+                $layoutNotes = self::withoutFailedLayoutNotes($layoutNotes, $failedPaths);
+                $listNotes = self::withoutFailedLayoutNotes($listNotes, $failedPaths);
+                $listWarnings = self::withoutFailedLayoutNotes($listWarnings, $failedPaths);
             }
         } catch (\RuntimeException $e) {
             // The public step is one transaction even though structural

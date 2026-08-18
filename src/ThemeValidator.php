@@ -91,6 +91,24 @@ final class ThemeValidator
             }
         }
 
+        // A contact form without a working submit control is the same dead UI
+        // in block-shaped markup. JetpackFormFixer repairs the one known
+        // legacy shape (element-less jetpack/button); every other drift — no
+        // control at all, a default-anchor core/button, an explicit anchor
+        // jetpack/button — only a scan of the delivered markup can catch.
+        foreach ($checked as $rel) {
+            if (!$project->exists($rel)) {
+                continue;
+            }
+            $markup = $project->readText($rel);
+            if (!str_contains($markup, 'wp:jetpack/contact-form')) {
+                continue;
+            }
+            foreach (self::formsWithoutWorkingSubmit($markup) as $note) {
+                $problems[] = "{$rel}: {$note}";
+            }
+        }
+
         // Generated interactions must remain usable. The prompts promise real
         // destinations and populated utility lists, but only a scan of what
         // the model actually delivered can catch placeholder links or list
@@ -1139,5 +1157,46 @@ final class ThemeValidator
             return 'no block markup';
         }
         return null;
+    }
+
+    /**
+     * Each jetpack/contact-form in the markup that lacks a working submit
+     * control: a core/button with "type":"submit", or a jetpack/button whose
+     * "element" is "button" (the shape JetpackFormFixer repairs to).
+     *
+     * @return list<string>
+     */
+    private static function formsWithoutWorkingSubmit(string $markup): array
+    {
+        $blocks = BlockMarkup::parse($markup);
+        $problems = [];
+        foreach ($blocks->indices() as $index) {
+            if ($blocks->name($index) !== 'jetpack/contact-form' || !$blocks->isStructurallySafe($index)) {
+                continue;
+            }
+            if (!self::subtreeHasWorkingSubmit($blocks, $index)) {
+                $problems[] = 'jetpack/contact-form has no working submit control'
+                    . ' — needs a core/button with "type":"submit" or a jetpack/button with "element":"button"';
+            }
+        }
+        return $problems;
+    }
+
+    private static function subtreeHasWorkingSubmit(BlockMarkup $blocks, int $form): bool
+    {
+        foreach ($blocks->indices() as $index) {
+            $attrs = $blocks->attrs($index) ?? [];
+            $isSubmit = ($blocks->name($index) === 'button' && ($attrs['type'] ?? null) === 'submit')
+                || ($blocks->name($index) === 'jetpack/button' && ($attrs['element'] ?? null) === 'button');
+            if (!$isSubmit) {
+                continue;
+            }
+            for ($parent = $blocks->parent($index); $parent !== null; $parent = $blocks->parent($parent)) {
+                if ($parent === $form) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 }

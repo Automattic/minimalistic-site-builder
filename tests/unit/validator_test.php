@@ -489,6 +489,43 @@ test('validator accepts Jetpack Forms block markup', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('validator flags a contact form whose submit control cannot submit', function () {
+    [$project, $tmp] = validator_project();
+
+    // No submit control at all.
+    $project->writeText('plugin/pages/contact.html',
+        '<!-- wp:jetpack/contact-form --><div class="wp-block-jetpack-contact-form">'
+        . '<!-- wp:jetpack/field-email {"label":"Email","required":true} /-->'
+        . '</div><!-- /wp:jetpack/contact-form -->'
+    );
+    $problems = ThemeValidator::validate($project);
+    assert_eq(1, count($problems));
+    assert_true(str_contains($problems[0], 'no working submit control'), 'missing control flagged');
+
+    // An explicit anchor jetpack/button is exactly as dead as the implicit
+    // one the fixer repairs — and the fixer deliberately skips it.
+    $project->writeText('plugin/pages/contact.html',
+        '<!-- wp:jetpack/contact-form --><div class="wp-block-jetpack-contact-form">'
+        . '<!-- wp:jetpack/field-email {"label":"Email","required":true} /-->'
+        . '<!-- wp:jetpack/button {"element":"a","text":"Send"} /-->'
+        . '</div><!-- /wp:jetpack/contact-form -->'
+    );
+    $problems = ThemeValidator::validate($project);
+    assert_eq(1, count($problems));
+    assert_true(str_contains($problems[0], 'no working submit control'), 'anchor jetpack/button flagged');
+
+    // The fixer's repaired shape passes: both blessed grammars stay valid.
+    $project->writeText('plugin/pages/contact.html',
+        '<!-- wp:jetpack/contact-form --><div class="wp-block-jetpack-contact-form">'
+        . '<!-- wp:jetpack/field-email {"label":"Email","required":true} /-->'
+        . '<!-- wp:jetpack/button {"element":"button","text":"Send"} /-->'
+        . '</div><!-- /wp:jetpack/contact-form -->'
+    );
+    assert_eq([], ThemeValidator::validate($project));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 /** A two-page site (home + visit) with markup on disk, for the link checks. */
 function validator_linked_project(): array
 {

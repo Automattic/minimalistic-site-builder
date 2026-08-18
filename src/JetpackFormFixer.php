@@ -34,7 +34,7 @@ final class JetpackFormFixer
             }
 
             $attrs = $blocks->attrs($index) ?? [];
-            if (($attrs['element'] ?? null) !== null) {
+            if (isset($attrs['element'])) {
                 continue;
             }
 

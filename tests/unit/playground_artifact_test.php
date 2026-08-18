@@ -98,18 +98,25 @@ test('Jetpack Forms previews install Jetpack before seeding content', function (
     $steps = $blueprint['steps'];
 
     assert_eq(
-        ['setSiteOptions', 'mkdir', 'unzip', 'mv', 'activateTheme', 'installPlugin', 'mv', 'activatePlugin'],
+        ['setSiteOptions', 'mkdir', 'unzip', 'mv', 'activateTheme', 'defineWpConfigConsts', 'installPlugin', 'runPHP', 'mv', 'activatePlugin'],
         array_column($steps, 'step')
     );
-    assert_eq('wordpress.org/plugins', $steps[5]['pluginData']['resource']);
-    assert_eq('jetpack', $steps[5]['pluginData']['slug']);
-    assert_eq(true, $steps[5]['options']['activate']);
+    // Offline mode first, then the plugin, then the forms module: a
+    // Playground has no Jetpack connection, and without all three the
+    // contact-form render callback never registers and the preview ships
+    // the fieldless dead form this feature exists to prevent.
+    assert_eq(true, $steps[5]['consts']['JETPACK_DEV_DEBUG']);
+    assert_eq('wordpress.org/plugins', $steps[6]['pluginData']['resource']);
+    assert_eq('jetpack', $steps[6]['pluginData']['slug']);
+    assert_eq(true, $steps[6]['options']['activate']);
+    assert_true(str_contains($steps[7]['code'], 'jetpack_active_modules'), 'forms module activation step');
+    assert_true(str_contains($steps[7]['code'], 'contact-form'), 'forms module activation step');
 
     $localSteps = PlaygroundArtifact::withJetpackFormsPlugin($project, [
         PlaygroundArtifact::offlineGuardStep(),
         ['step' => 'activateTheme', 'themeFolderName' => 'demo-site'],
     ]);
-    assert_eq(['writeFile', 'activateTheme', 'installPlugin'], array_column($localSteps, 'step'));
+    assert_eq(['writeFile', 'activateTheme', 'defineWpConfigConsts', 'installPlugin', 'runPHP'], array_column($localSteps, 'step'));
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

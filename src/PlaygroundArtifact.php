@@ -211,6 +211,15 @@ final class PlaygroundArtifact
                 continue;
             }
 
+            // Offline mode first: a Playground has no Jetpack connection, and
+            // without it Jetpack activates but keeps its modules dormant — the
+            // contact-form render callback never registers and the form ships
+            // as a fieldless <div>, exactly the dead-form failure this feature
+            // exists to prevent.
+            $steps[] = [
+                'step'   => 'defineWpConfigConsts',
+                'consts' => ['JETPACK_DEV_DEBUG' => true],
+            ];
             $steps[] = [
                 'step'       => 'installPlugin',
                 'pluginData' => [
@@ -218,6 +227,15 @@ final class PlaygroundArtifact
                     'slug'     => 'jetpack',
                 ],
                 'options'    => ['activate' => true],
+            ];
+            // The forms module itself: offline mode makes modules possible,
+            // not active. The option write is the durable form of
+            // Jetpack::activate_module() and needs no connection.
+            $steps[] = [
+                'step' => 'runPHP',
+                'code' => '<?php require_once "/wordpress/wp-load.php"; '
+                    . '$m = (array) get_option("jetpack_active_modules", []); '
+                    . 'if (!in_array("contact-form", $m, true)) { $m[] = "contact-form"; update_option("jetpack_active_modules", $m); }',
             ];
             break;
         }
