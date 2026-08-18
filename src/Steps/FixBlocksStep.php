@@ -9,6 +9,7 @@ use Automattic\SiteBuild\BlockFixerOutcome;
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\BlockSerializer\AlignmentClassLoss;
 use Automattic\SiteBuild\BlockSerializer\AlignmentClassLossDetector;
+use Automattic\SiteBuild\JetpackFormConverter;
 use Automattic\SiteBuild\JetpackFormFixer;
 use Automattic\SiteBuild\LayoutFixer;
 use Automattic\SiteBuild\PhpBlockFixer;
@@ -89,7 +90,9 @@ final class FixBlocksStep implements Step
             ? []
             : SectionLayoutStep::wideClassTokens($designCss);
         try {
-            $formNotes = self::normalizeJetpackForms($project);
+            $formReport = self::normalizeJetpackForms($project);
+            $formNotes = $formReport['notes'];
+            $formWarnings = $formReport['warnings'];
             $listReport = self::liftBareListItems($project);
             $listNotes = $listReport['notes'];
             $listWarnings = $listReport['warnings'];
@@ -139,7 +142,9 @@ final class FixBlocksStep implements Step
         // contract one more chance, then re-serialize only when that pass
         // actually changed comment attributes so saved HTML stays in sync.
         try {
-            $postRepairFormNotes = self::normalizeJetpackForms($project, self::failurePaths($failedFiles));
+            $postRepairFormReport = self::normalizeJetpackForms($project, self::failurePaths($failedFiles));
+            $postRepairFormNotes = $postRepairFormReport['notes'];
+            $formWarnings = array_merge($formWarnings, $postRepairFormReport['warnings']);
             $postRepairLayoutNotes = self::normalizeLayouts(
                 $project,
                 self::failurePaths($failedFiles),
@@ -178,7 +183,7 @@ final class FixBlocksStep implements Step
             $summary .= "\n[form/layout/shape] post-repair normalization required a second block-fixer pass, which failed:\n  "
                 . str_replace("\n", "\n  ", $e->getMessage());
             if ($formNotes !== []) {
-                $summary .= "\n[forms] " . count($formNotes) . " submit-button repair(s):\n  "
+                $summary .= "\n[forms] " . count($formNotes) . " form fix(es):\n  "
                     . implode("\n  ", $formNotes);
             }
             if ($layoutNotes !== []) {
@@ -189,7 +194,7 @@ final class FixBlocksStep implements Step
             throw $e;
         }
         if ($formNotes !== []) {
-            $summary .= "\n[forms] " . count($formNotes) . " submit-button repair(s):\n  "
+            $summary .= "\n[forms] " . count($formNotes) . " form fix(es):\n  "
                 . implode("\n  ", $formNotes);
         }
         if ($listNotes !== []) {
@@ -285,11 +290,17 @@ final class FixBlocksStep implements Step
         // durable for the later repair pass rather than hiding it in this log.
         $paragraphStyleWarnings = self::degradedParagraphStyles($deliveredSummary);
         $warnings = array_merge(
+            $formWarnings,
             $listWarnings,
             $paragraphStyleWarnings,
             $shapeDeliveryWarnings,
             $shapeRollbackWarnings,
         );
+        if ($formWarnings !== []) {
+            $summary .= "\n[forms] WARNING: " . count($formWarnings)
+                . " lossy form conversion detail(s) recorded in warnings.json:\n  "
+                . implode("\n  ", $formWarnings);
+        }
         foreach ($rhythmDrops as $drop) {
             $warnings[] = "block re-serialization dropped vertical rhythm CSS `{$drop}`; "
                 . 'see logs/' . self::LOG_FILE;
@@ -393,24 +404,32 @@ final class FixBlocksStep implements Step
      *        failed this step and must remain at their step-entry bytes
      * @return list<string>
      */
+    /** @return array{notes: list<string>, warnings: list<string>} */
     private static function normalizeJetpackForms(Project $project, array $excluded = []): array
     {
         $notes = [];
+        $formWarnings = [];
         $excluded = array_fill_keys($excluded, true);
         foreach ($project->themeFiles() as $rel) {
             if (isset($excluded[$rel])) {
                 continue;
             }
             $markup = $project->readText('theme/' . $rel);
-            $result = JetpackFormFixer::fix($markup);
+            // Conversion first: a raw model-authored <form> becomes canonical
+            // jetpack markup, then the button repair covers the legacy shape.
+            $converted = JetpackFormConverter::fix($markup);
+            $result = JetpackFormFixer::fix($converted['markup']);
             if ($result['markup'] !== $markup) {
                 $project->writeText('theme/' . $rel, $result['markup']);
             }
-            foreach ($result['notes'] as $note) {
+            foreach (array_merge($converted['notes'], $result['notes']) as $note) {
                 $notes[] = "{$rel}: {$note}";
             }
+            foreach ($converted['warnings'] as $warning) {
+                $formWarnings[] = "{$rel}: {$warning}";
+            }
         }
-        return $notes;
+        return ['notes' => $notes, 'warnings' => $formWarnings];
     }
 
     /**

@@ -61,6 +61,6 @@ test('FixBlocksStep applies the Jetpack form repair before block re-serializatio
             '<!-- wp:jetpack/button {"text":"Submit","element":"button"} /-->',
             $project->readText('theme/parts/contact.html'),
         );
-        assert_contains('[forms] 1 submit-button repair(s)', $project->readText('logs/fix-blocks.log'));
+        assert_contains('[forms] 1 form fix(es)', $project->readText('logs/fix-blocks.log'));
     });
 });
