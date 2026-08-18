@@ -133,6 +133,10 @@ final class HeaderHeroStep implements Step
             id: $this->id(),
             label: $this->label(),
             reads: [
+                // The hero root-layout re-assertion consults the design's own
+                // stylesheet for roots that already own their width. Only the
+                // HTML-first graph writes one.
+                ...($this->htmlFirst ? ['design/site.css'] : []),
                 'pages.json',
                 'aboveFold.json',
                 'designDirection.json',
@@ -158,6 +162,13 @@ final class HeaderHeroStep implements Step
         if ($pages === []) {
             throw new \RuntimeException('header-hero: pages.json has no pages');
         }
+        // Same evidence normalize-layout and fix-blocks use: a root whose own
+        // rule in the design's stylesheet gives it the wide measure owns its
+        // width, so re-asserting a constrained layout over it would undo the
+        // policy those steps apply to header and footer roots.
+        $wideMeasureRootClasses = $this->htmlFirst && $project->exists('design/site.css')
+            ? GeneratedMarkup::wideMeasureSubjectClasses($project->readText('design/site.css'))
+            : [];
         $delivery = $project->readJson('aboveFold.json');
         AboveFoldContract::assertPhase($delivery, AboveFoldContract::PHASE_DELIVERY);
         $mode = (string) ($delivery['header']['mode'] ?? '');
@@ -310,7 +321,7 @@ final class HeaderHeroStep implements Step
                     $heroRepairs,
                 );
                 $beforeLayout = $heroMarkup;
-                $heroMarkup = GeneratedMarkup::constrainedPart($heroMarkup);
+                $heroMarkup = GeneratedMarkup::constrainedPart($heroMarkup, $wideMeasureRootClasses);
                 if ($heroMarkup !== $beforeLayout) {
                     $heroRepairs[] = [
                         'code' => 'root-layout-constrained',

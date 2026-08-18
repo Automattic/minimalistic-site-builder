@@ -5,6 +5,7 @@ use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Steps\SectionLayoutStep;
+use Automattic\SiteBuild\Units\GeneratedMarkup;
 use Automattic\SiteBuild\Steps\SectionRhythmStep;
 
 /** @param array<mixed> $attrs */
@@ -1458,5 +1459,39 @@ test('A11 section layout gives a wide-carrier part alignment only, never a const
         );
     } finally {
         exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('both wide-measure consumers share one predicate', function () {
+    // The same question — does this rule body give an inline measure the wide
+    // size — was asked by two byte-identical private copies, one here and one
+    // in Units\GeneratedMarkup. They are now one implementation, so a change to
+    // the property list or the var pattern cannot land for one caller only.
+    $measured = [
+        '.a{max-width:var(--wide-size)}',
+        '.a{width:var(--wide-size)}',
+        '.a{inline-size:var(--wide-size)}',
+        '.a{max-inline-size:var(--wide-size)}',
+        '.a{MAX-WIDTH:VAR( --WIDE-SIZE )}',
+        '.a{width:min(100%,var(--wide-size))}',
+    ];
+    foreach ($measured as $css) {
+        assert_eq(['a'], SectionLayoutStep::wideClassTokens($css), "tokens for `{$css}`");
+        assert_eq(['a'], GeneratedMarkup::wideMeasureSubjectClasses($css), "subjects for `{$css}`");
+    }
+
+    $notMeasured = [
+        '.a{max-width:var(--content-size)}',
+        '.a{max-width:72rem}',
+        '.a{min-width:var(--wide-size)}',
+        // Known shared limit: the fallback form reads as no measure. Safe
+        // direction — the root keeps its constrained stamp — and no design in
+        // the corpus emits it. Pinned so that widening it is a deliberate,
+        // corpus-verified change for BOTH callers at once rather than a drift.
+        '.a{max-width:var(--wide-size, 1200px)}',
+    ];
+    foreach ($notMeasured as $css) {
+        assert_eq([], SectionLayoutStep::wideClassTokens($css), "tokens for `{$css}`");
+        assert_eq([], GeneratedMarkup::wideMeasureSubjectClasses($css), "subjects for `{$css}`");
     }
 });

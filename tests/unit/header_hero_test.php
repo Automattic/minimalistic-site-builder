@@ -1891,3 +1891,58 @@ test('HeaderHeroStep unwraps a header action row emptied by duplicate CTA remova
         assert_eq([], $againCleanup['warnings']);
     });
 });
+
+test('the HTML-first hero re-assertion respects a root the design already measures', function () {
+    // header-hero re-asserts the part layout contract after its own repairs,
+    // and it runs AFTER normalize-layout. Without the design's class list it
+    // would stamp a hero root that owns its width — the same policy footer and
+    // header roots already get, applied inconsistently to the hero.
+    $run = function (string $rootClass) {
+        return with_project('builder_hh_wide_' . $rootClass . '_', function ($project) use ($rootClass) {
+            $pages = [[
+                'slug' => 'home', 'title' => 'Home', 'front' => true,
+                'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+            ]];
+            $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+            $project->writeJson('theme/theme.json', hh_theme_json());
+            $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'calm']);
+            $project->writeJson('pages.json', ['pages' => $pages]);
+            hh_above_fold($project, $pages);
+            $project->writeText(
+                'design/site.css',
+                ':root{--wide-size:1280px}.hero-inner{max-width:var(--wide-size);margin:0 auto}'
+            );
+            $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
+            $project->writeText(
+                'theme/parts/page-home--hero.html',
+                '<!-- wp:group {"className":"' . $rootClass . '"} -->'
+                . '<div class="wp-block-group ' . $rootClass . '">'
+                . '<!-- wp:paragraph --><p>Hero</p><!-- /wp:paragraph -->'
+                . '</div><!-- /wp:group -->' . "\n"
+            );
+
+            putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
+            (new HeaderHeroStep(htmlFirst: true))->run($project);
+
+            return $project->readText('theme/parts/page-home--hero.html');
+        });
+    };
+
+    assert_true(
+        !str_contains($run('hero-inner'), '"layout":{"type":"constrained"}'),
+        'a hero root the design gives the wide measure keeps its own width',
+    );
+    // Non-vacuity: a root the stylesheet does not measure is still constrained.
+    assert_contains('"layout":{"type":"constrained"}', $run('plain-hero'));
+});
+
+test('header-hero declares the design stylesheet it reads on the HTML-first graph', function () {
+    assert_true(
+        in_array('design/site.css', (new HeaderHeroStep(htmlFirst: true))->declaration()->reads, true),
+        'HTML-first header-hero declares the design stylesheet it reads',
+    );
+    assert_true(
+        !in_array('design/site.css', (new HeaderHeroStep())->declaration()->reads, true),
+        'the legacy graph, which writes no design/site.css, does not declare it',
+    );
+});

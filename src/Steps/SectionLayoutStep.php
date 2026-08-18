@@ -1066,22 +1066,16 @@ final class SectionLayoutStep implements Step
         return array_keys($tokens);
     }
 
-    /** Whether a rule body's max-width or width references var(--wide-size). */
+    /**
+     * Whether a rule body's max-width or width references var(--wide-size).
+     *
+     * Units\GeneratedMarkup owns this test, because it asks the same question
+     * of the same stylesheets when deciding which roots already own their
+     * width. Two copies of one predicate drift; this is the same one.
+     */
     private static function measuresWideSize(string $body): bool
     {
-        foreach (explode(';', $body) as $declaration) {
-            $colon = strpos($declaration, ':');
-            if ($colon === false) {
-                continue;
-            }
-            $property = strtolower(trim(substr($declaration, 0, $colon)));
-            if (in_array($property, ['width', 'max-width', 'inline-size', 'max-inline-size'], true)
-                && preg_match('/var\(\s*--wide-size\s*\)/i', substr($declaration, $colon + 1)) === 1
-            ) {
-                return true;
-            }
-        }
-        return false;
+        return GeneratedMarkup::declaresWideMeasure($body);
     }
 
     /** Whether a rule paints a background and leaves its horizontal measure unbounded. */
