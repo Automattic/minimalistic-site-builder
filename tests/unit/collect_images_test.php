@@ -205,6 +205,33 @@ test('collect-images recovers a bare img src placeholder with no ratio', functio
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('collect-images recovers a comment-wrapped JSON-object src placeholder', function () {
+    [$project, $tmp] = collect_fixture();
+    // The model sometimes emits the object form of the spec, wrapped in an HTML
+    // comment inside src. Nothing in the recovery net matched this, so the
+    // placeholder shipped as-is: no image generated, a raw comment left as the
+    // source. Recover the prompt as the subject and the aspect from the
+    // dimensions (900x1100 maps to 3:4).
+    $project->writeText('theme/parts/origins.html',
+        '<img src="<!-- AI_IMAGE: {&quot;prompt&quot;:&quot;coffee beans in a shallow metal tray&quot;,'
+        . '&quot;alt&quot;:&quot;Granos de cafe en bandeja metalica&quot;,'
+        . '&quot;width&quot;:900,&quot;height&quot;:1100} -->" alt="Granos de cafe en bandeja metalica"/>'
+    );
+
+    (new CollectImagesStep())->run($project);
+
+    $images = $project->readJson('images.json');
+    assert_eq(1, count($images));
+    assert_contains('coffee beans in a shallow metal tray', $images[0]['subject']);
+    assert_eq('3:4', $images[0]['aspectRatio']);
+    $markup = $project->readText('theme/parts/origins.html');
+    assert_contains('src="' . $images[0]['src'] . '"', $markup);
+    assert_true(!str_contains($markup, 'AI_IMAGE:'), 'comment-wrapped src normalized');
+    assert_true(!str_contains($markup, '<!--'), 'wrapping comment dropped');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('collect-images recovers every source shape the validator flags', function () {
     [$project, $tmp] = collect_fixture();
     // Leading whitespace inside the quoted values, plus an unquoted src —

@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\GeminiImage;
+use Automattic\SiteBuild\JsonDecoder;
 use Automattic\SiteBuild\MediaReferenceRemoval;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
@@ -516,13 +517,12 @@ final class CollectImagesStep implements Step
         $imageFor = static function (string $literal, bool $json) use (&$byPrompt, $canonicalSrcBySubject): ?array {
             $semantic = self::decodeRecoveredLiteral($literal, $json);
             $body = trim(substr($semantic, strlen('AI_IMAGE:')));
-            $subject = trim(explode('|', $body, 2)[0]);
-            if ($subject === '') {
-                return null;
-            }
-
             $promptKey = 'AI_IMAGE:' . $body;
             if (!isset($byPrompt[$promptKey])) {
+                [$subject, $aspectRatio] = self::recoverSubjectAndRatio($body);
+                if ($subject === '') {
+                    return null;
+                }
                 $src = $canonicalSrcBySubject[self::normalizeSubject($subject)]
                     ?? 'theme:./assets/' . self::synthesizeFilename($subject, $promptKey);
                 $byPrompt[$promptKey] = [
@@ -531,7 +531,7 @@ final class CollectImagesStep implements Step
                     'subject'     => $subject,
                     'pageContext' => '',
                     'style'       => '',
-                    'aspectRatio' => self::sniffAspectRatio($body),
+                    'aspectRatio' => $aspectRatio,
                 ];
             }
             return $byPrompt[$promptKey];
@@ -558,8 +558,13 @@ final class CollectImagesStep implements Step
         // AI_IMAGE alt remains available to the canonical parser above.
         // Leading whitespace inside the quotes is tolerated, mirroring the
         // validator's detection.
-        $srcPattern = '/(?P<prefix>\bsrc\s*=\s*(?P<quote>["\']))\s*'
-            . '(?P<lit>AI_IMAGE:.*?)(?P<suffix>\k<quote>)/is';
+        // A leading <!-- ... --> is tolerated: the model sometimes wraps the
+        // whole spec in an HTML comment *inside* the src attribute
+        // (src="<!-- AI_IMAGE: {…} -->"), which slips past both this pattern's
+        // old quote-anchored form and the canonical parser. The comment is
+        // dropped on rewrite along with everything but the resolved asset path.
+        $srcPattern = '/(?P<prefix>\bsrc\s*=\s*(?P<quote>["\']))\s*(?:<!--\s*)?'
+            . '(?P<lit>AI_IMAGE:.*?)(?:\s*-->)?(?P<suffix>\k<quote>)/is';
         $content = (string) preg_replace_callback(
             $srcPattern,
             static function (array $match) use ($imageFor): string {
@@ -708,6 +713,39 @@ final class CollectImagesStep implements Step
     {
         $slug = rtrim(substr(ProjectStore::slugify($subject), 0, 40), '-') ?: 'image';
         return $slug . '-' . substr(sha1($literal), 0, 8) . '.jpg';
+    }
+
+    /**
+     * The subject and aspect ratio a recovered AI_IMAGE body carries.
+     *
+     * Two shapes reach here. The documented one is pipe-delimited: "subject |
+     * page context | style | ratio", where the subject is the first field.
+     * The model also emits an object form, {"prompt":…,"alt":…,"width":…,
+     * "height":…}, usually wrapped in a comment inside src; there the prompt is
+     * the subject and the dimensions give the aspect. Either way a usable
+     * subject is what keeps the image from being dropped and the raw spec
+     * shipped as a src.
+     *
+     * @return array{0:string,1:string} subject, aspect ratio
+     */
+    private static function recoverSubjectAndRatio(string $body): array
+    {
+        if (str_starts_with($body, '{')) {
+            $object = JsonDecoder::decode($body);
+            if ($object !== null) {
+                $subject = trim((string) ($object['prompt'] ?? $object['alt'] ?? ''));
+                $width   = (int) ($object['width'] ?? 0);
+                $height  = (int) ($object['height'] ?? 0);
+                // Route the dimensions through the same numeric-ratio mapping
+                // the rest of the class uses rather than classifying inline.
+                $ratio   = $width > 0 && $height > 0
+                    ? GeminiImage::aspectRatio($width . ':' . $height)
+                    : self::sniffAspectRatio($body);
+                return [$subject, $ratio];
+            }
+        }
+
+        return [trim(explode('|', $body, 2)[0]), self::sniffAspectRatio($body)];
     }
 
     /**
