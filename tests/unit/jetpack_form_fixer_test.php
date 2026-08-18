@@ -2,7 +2,10 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\BlockFixer;
+use Automattic\SiteBuild\BlockSerializer\FileReport;
+use Automattic\SiteBuild\BlockSerializer\FixerReport;
 use Automattic\SiteBuild\JetpackFormFixer;
+use Automattic\SiteBuild\ReportingBlockFixer;
 use Automattic\SiteBuild\Steps\FixBlocksStep;
 
 test('JetpackFormFixer repairs an element-less submit button nested inside a contact form', function () {
@@ -62,5 +65,41 @@ test('FixBlocksStep applies the Jetpack form repair before block re-serializatio
             $project->readText('theme/parts/contact.html'),
         );
         assert_contains('[forms] 1 form fix(es)', $project->readText('logs/fix-blocks.log'));
+    });
+});
+
+test('FixBlocksStep drops form-conversion warnings when the file is restored', function () {
+    with_project('jetpack-form-rollback-', function ($project): void {
+        $original = '<!-- wp:html -->'
+            . '<form action="/book"><label>CV<input type="file" name="cv"></label>'
+            . '<button type="submit">Book</button></form>'
+            . '<!-- /wp:html -->';
+        $project->writeText('theme/parts/contact.html', $original);
+
+        $fixer = new class implements ReportingBlockFixer {
+            public function fix(string $themeDir): string
+            {
+                throw new LogicException('FixBlocksStep must consume the typed fixer contract');
+            }
+
+            public function fixReport(string $themeDir): FixerReport
+            {
+                return new FixerReport([
+                    new FileReport(
+                        'parts/contact.html',
+                        'failed',
+                        error: 'serializer rejected the converted form',
+                    ),
+                ]);
+            }
+        };
+
+        quietly(fn () => (new FixBlocksStep($fixer))->run($project));
+
+        assert_eq($original, $project->readText('theme/parts/contact.html'));
+        $warnings = implode("\n", $project->readJson('warnings.json')['fix-blocks'] ?? []);
+        assert_contains('pre-step markup delivered byte-for-byte', $warnings);
+        assert_true(!str_contains($warnings, 'form conversion dropped'));
+        assert_true(!str_contains($warnings, 'form conversion replaced'));
     });
 });

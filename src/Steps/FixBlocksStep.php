@@ -127,6 +127,7 @@ final class FixBlocksStep implements Step
             $failedPaths = self::failurePaths($failedFiles);
             self::restoreFailedThemeFiles($project, $beforeInitialPass, $failedPaths);
             $formNotes = self::withoutFailedLayoutNotes($formNotes, $failedPaths);
+            $formWarnings = self::withoutFailedLayoutNotes($formWarnings, $failedPaths);
             $layoutNotes = self::withoutFailedLayoutNotes($layoutNotes, $failedPaths);
             $listNotes = self::withoutFailedLayoutNotes($listNotes, $failedPaths);
             $listWarnings = self::withoutFailedLayoutNotes($listWarnings, $failedPaths);
@@ -171,6 +172,7 @@ final class FixBlocksStep implements Step
                 $failedPaths = self::failurePaths($failedFiles);
                 self::restoreFailedThemeFiles($project, $beforeInitialPass, $failedPaths);
                 $formNotes = self::withoutFailedLayoutNotes($formNotes, $failedPaths);
+                $formWarnings = self::withoutFailedLayoutNotes($formWarnings, $failedPaths);
                 $layoutNotes = self::withoutFailedLayoutNotes($layoutNotes, $failedPaths);
                 $listNotes = self::withoutFailedLayoutNotes($listNotes, $failedPaths);
                 $listWarnings = self::withoutFailedLayoutNotes($listWarnings, $failedPaths);
@@ -392,7 +394,7 @@ final class FixBlocksStep implements Step
             echo '  layout: ' . count($layoutNotes) . " width/rhythm fix(es) applied\n";
         }
         if ($formNotes !== []) {
-            echo '  forms: ' . count($formNotes) . " submit button(s) repaired\n";
+            echo '  forms: ' . count($formNotes) . " form repair(s) applied\n";
         }
     }
 
