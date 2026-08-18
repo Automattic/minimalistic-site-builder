@@ -90,6 +90,25 @@ test('nested-landmark reset selects the class the shell is stamped with', functi
     assert_contains(PageStylesStep::NESTED_LANDMARK_CLASS, PageStylesStep::NESTED_LANDMARK_CSS);
 });
 
+/**
+ * The reassertion chunk as it lands in the stylesheet, for the exact-byte
+ * expectations. Spelled literally rather than composed from the step's own
+ * constants: building it from the source under test would pass no matter what
+ * selector the step emitted.
+ */
+function ps_ua(string ...$tags): string
+{
+    $selectors = [];
+    foreach ($tags as $tag) {
+        $selectors[] = ':root:root :where(.is-layout-flow, .is-layout-constrained) > '
+            . $tag . ':last-child'
+            . ':not(:where(.blocks-engine-css-owned-grid > *))'
+            . ':not(:where(.blocks-engine-css-owned-flow > *))';
+    }
+    return "\n/* Reassert the browser block-end margin WordPress deletes on a trailing child. */\n"
+        . implode(",\n", $selectors) . ' {margin-block-end: 1em}';
+}
+
 function ps_project(string $prefix): array
 {
     $tmp = sys_get_temp_dir() . '/' . $prefix . uniqid();
@@ -576,7 +595,8 @@ test('site CSS path skips a source HTML file when its page has a failed marker',
     ps_html_first_step($llm)->run($project);
 
     assert_eq(
-        $base . ".site{display:grid;}\n" . ps_scoped('home', '.home{padding:1rem;}'),
+        $base . ".site{display:grid;}\n" . ps_scoped('home', '.home{padding:1rem;}')
+            . ps_ua('p'),
         $project->readText('theme/style.css'),
         'failed page contributes no source HTML CSS',
     );
@@ -2597,5 +2617,135 @@ test('run rejects :root motion tuning instead of extracting it', function () {
     assert_true(!str_contains($llm->calls[0]['prompt'], 'MOTION TUNING'), 'prompt offers no override channel');
     assert_eq($before, $project->readText('theme/style.css'), 'global override rejects the whole appendix');
     assert_contains('not scoped', $project->readText('logs/page-styles.log'));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+/**
+ * Fixture for the UA block-end reassertion: a design that leaves its trailing
+ * elements to the browser, delivered as generated markup where WordPress's
+ * layout classes are present.
+ */
+function ps_ua_project(string $siteCss, string $pageMarkup): array
+{
+    [$project, $tmp] = ps_project('builder_ps_ua_');
+    $project->writeText(TransformArtifacts::SITE_CSS, $siteCss);
+    $project->writeJson('pages.json', ['pages' => [['slug' => 'home', 'front' => true]]]);
+    $project->writeText('design/home.html', '<main>' . $pageMarkup . '</main>');
+    $project->writeText('plugin/pages/home.html', $pageMarkup);
+    return [$project, $tmp];
+}
+
+/**
+ * The whole reassertion rule, marker through closing brace.
+ *
+ * Not line-filtered: the selectors are comma-joined one per line and only the
+ * LAST one carries the declaration, so a line filter sees a single tag and
+ * every per-tag assertion silently passes or fails on `figure` alone.
+ */
+function ps_ua_rules(string $style): string
+{
+    $start = strpos($style, PageStylesStep::UA_BLOCK_END_MARKER);
+    if ($start === false) {
+        return '';
+    }
+    $end = strpos($style, '}', $start);
+    return substr($style, $start, $end === false ? null : $end - $start + 1);
+}
+
+test('ua reassertion restores the block-end margin WordPress deletes on a trailing child', function () {
+    [$project, $tmp] = ps_ua_project(
+        "body { color: #111 }\n",
+        '<section id="proof"><div class="wp-block-group is-layout-flow">'
+            . '<p>Lead</p><blockquote>Quote</blockquote></div></section>',
+    );
+    ps_html_first_step(new FakeLlm())->run($project);
+    $style = $project->readText('theme/style.css');
+    $rules = ps_ua_rules($style);
+
+    assert_contains(PageStylesStep::UA_BLOCK_END_MARKER, $style, 'the reassertion tail is present');
+    assert_contains('margin-block-end: 1em', $rules, 'the UA value is reasserted font-relative');
+    assert_true(!str_contains($rules, 'margin-block-end: 16px'), 'never a pixel snapshot');
+    assert_contains('blockquote:last-child', $rules, 'blockquote is reasserted');
+    assert_contains('p:last-child', $rules, 'p is reasserted');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('ua reassertion carries both css-owned guards and WordPress layout scoping', function () {
+    [$project, $tmp] = ps_ua_project(
+        "body { color: #111 }\n",
+        '<section id="proof"><div class="wp-block-group is-layout-flow">'
+            . '<p>Lead</p><blockquote>Quote</blockquote></div></section>',
+    );
+    ps_html_first_step(new FakeLlm())->run($project);
+    $rules = ps_ua_rules($project->readText('theme/style.css'));
+
+    // Measured: an unscoped rule clobbered live authored margins on elements
+    // whose parent was never a WordPress layout container.
+    assert_contains(':where(.is-layout-flow, .is-layout-constrained) >', $rules, 'scoped to WP layout containers');
+    // Both guards, not one. Grid was proven load-bearing by PR #278; flow is
+    // equally so, because the transformer zeroes margins in both on purpose.
+    assert_contains(':not(:where(.blocks-engine-css-owned-grid > *))', $rules, 'grid guard survives');
+    assert_contains(':not(:where(.blocks-engine-css-owned-flow > *))', $rules, 'flow guard is present');
+    // Per selector, not just somewhere in the rule: a single guarded branch
+    // beside five unguarded ones would satisfy a bare contains().
+    $branches = substr_count($rules, ':last-child');
+    assert_true($branches > 1, "expected several reasserted tags, saw {$branches}");
+    assert_eq(
+        $branches,
+        substr_count($rules, ':not(:where(.blocks-engine-css-owned-grid > *))'),
+        'every reasserted selector carries the grid guard',
+    );
+    assert_eq(
+        $branches,
+        substr_count($rules, ':not(:where(.blocks-engine-css-owned-flow > *))'),
+        'every reasserted selector carries the flow guard',
+    );
+    assert_eq(
+        $branches,
+        substr_count($rules, ':where(.is-layout-flow, .is-layout-constrained) >'),
+        'every reasserted selector carries the WordPress layout scope',
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('ua reassertion skips a tag whose design authors a bare-tag block-end margin', function () {
+    [$project, $tmp] = ps_ua_project(
+        "figure { margin: 0 }\nblockquote { margin-bottom: 2rem }\n",
+        '<section id="proof"><div class="wp-block-group is-layout-flow">'
+            . '<p>Lead</p><figure>Fig</figure></div>'
+            . '<div class="wp-block-group is-layout-flow"><p>X</p><blockquote>Q</blockquote></div></section>',
+    );
+    ps_html_first_step(new FakeLlm())->run($project);
+    $rules = ps_ua_rules($project->readText('theme/style.css'));
+
+    assert_true(!str_contains($rules, 'figure:last-child'), 'a design-zeroed figure is not given a margin back');
+    assert_true(
+        !str_contains($rules, 'blockquote:last-child'),
+        'a design-authored blockquote margin is left to the authored-rhythm path, never doubled',
+    );
+    assert_contains('p:last-child', $rules, 'an unstyled tag is still reasserted');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('ua reassertion covers only tags with a UA block-end margin', function () {
+    [$project, $tmp] = ps_ua_project(
+        "body { color: #111 }\n",
+        '<section id="proof"><div class="wp-block-group is-layout-flow">'
+            . '<p>Lead</p><div>Trailing div</div></div>'
+            . '<div class="wp-block-group is-layout-constrained"><p>Y</p><h2>Trailing heading</h2></div></section>',
+    );
+    ps_html_first_step(new FakeLlm())->run($project);
+    $rules = ps_ua_rules($project->readText('theme/style.css'));
+
+    // Positive first: without this the negatives below pass vacuously if the
+    // step emits nothing at all.
+    assert_contains('p:last-child', $rules, 'the reassertion did fire on this fixture');
+    assert_true(!str_contains($rules, 'div:last-child'), 'div has no UA block-end margin to restore');
+    foreach (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] as $heading) {
+        assert_true(
+            !str_contains($rules, $heading . ':last-child'),
+            "headings carry six different UA values and are deliberately excluded ({$heading})",
+        );
+    }
     exec('rm -rf ' . escapeshellarg($tmp));
 });

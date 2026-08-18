@@ -215,6 +215,40 @@ CSS;
         ':not(:where(.blocks-engine-css-owned-grid > *))';
     /** The four pseudo-elements CSS still spells with one colon. */
     private const LEGACY_PSEUDO_ELEMENTS = ['before', 'after', 'first-line', 'first-letter'];
+    public const UA_BLOCK_END_MARKER =
+        '/* Reassert the browser block-end margin WordPress deletes on a trailing child. */';
+    /**
+     * WordPress's layout spacing styles are what delete the margin, and they
+     * reach only the last child of a flow or constrained layout container. The
+     * reassertion carries the same scope so it can never reach anywhere
+     * WordPress never touched: measured without this scope, the rule overwrote
+     * live authored margins on paragraphs inside `li.card`, which is not a
+     * layout container and which WordPress therefore left alone.
+     */
+    private const UA_BLOCK_END_SCOPE = ':where(.is-layout-flow, .is-layout-constrained) > ';
+    /**
+     * A css-owned container's children have their block margins zeroed by the
+     * transformer on purpose, because CSS gap owns the spacing there
+     * (HtmlTransformer emits `.blocks-engine-css-owned-flow>p{margin-bottom:0}`
+     * and `.blocks-engine-css-owned-{flow,grid})>*{margin-block-end:0}`).
+     * Restoring a margin inside one double-spaces a gap layout. Named
+     * UA_-prefixed to stay independent of the authored-rhythm path's own guards.
+     *
+     * @var list<string>
+     */
+    private const UA_BLOCK_END_GUARDS = [
+        ':not(:where(.blocks-engine-css-owned-grid > *))',
+        ':not(:where(.blocks-engine-css-owned-flow > *))',
+    ];
+    /**
+     * Tags whose UA block-end margin is `1em`, so one declaration restores each
+     * at whatever font-size it computes to. Headings are deliberately absent:
+     * h1–h6 carry six different UA values. Anything added here must genuinely
+     * be 1em in the UA stylesheet, or the reassertion invents a value.
+     *
+     * @var list<string>
+     */
+    private const UA_BLOCK_END_TAGS = ['p', 'ul', 'ol', 'blockquote', 'dl', 'figure'];
     private const RAW_COLOR_NAMES = [
         'aliceblue', 'antiquewhite', 'aqua', 'aquamarine', 'azure', 'beige',
         'bisque', 'black', 'blanchedalmond', 'blue', 'blueviolet', 'brown',
@@ -449,8 +483,14 @@ CSS;
         if ($authoredWidthPin !== '') {
             $designChunks[] = $authoredWidthPin;
         }
-        $design = implode("\n", $designChunks);
         $markup = self::deliveredMarkup($project);
+        $design = implode("\n", $designChunks);
+        // Deliberately NOT part of $design: this rule declares no color, and its
+        // selector targets WordPress's render-time layout classes, which never
+        // appear in design markup — so the contrast pass could only ever add an
+        // unverified-selector row about it. Same reasoning as the wrap policy
+        // and the heading baseline, which ship in the foundation tail instead.
+        $uaBlockEnd = self::uaBlockEndCss($authorChunks, $markup);
         // Contrast is a judgment on the DESIGN's colors: the wrap policy has
         // none, and including it would only add unverified-selector findings.
         $findings = CssContrastCheck::check($design, $markup);
@@ -481,7 +521,10 @@ CSS;
         // to say about it beyond an unverified-selector row.
         $tail = self::WORD_WRAP_CSS . "\n" . self::TABLE_BORDER_RESET_CSS . "\n"
             . self::NESTED_LANDMARK_CSS . "\n"
-            . ($baseline === '' ? '' : $baseline . "\n") . $design;
+            . ($baseline === '' ? '' : $baseline . "\n") . $design
+            // Last of all, so the reassertion is the final word on a block-end
+            // margin nothing else claimed.
+            . ($uaBlockEnd === '' ? '' : "\n" . $uaBlockEnd);
         $separator = $style !== '' && !str_ends_with($style, "\n") ? "\n" : '';
         $merged = CssContrastAdjuster::reconcileHandledBackgroundCopies(
             $style . $separator . $tail,
@@ -915,6 +958,132 @@ CSS;
         }
 
         return implode("\n", $rules);
+    }
+
+    /**
+    /**
+     * Put back the block-end margin the browser gives a bare `p`, `ul`, `ol`,
+     * `blockquote`, `dl` or `figure`, which WordPress's layout spacing styles
+     * delete on the last child of every layout container and substitute nothing
+     * for. The design's render had that space; the pipeline is what removed it,
+     * so reasserting `1em` is declining to delete, not inventing a value.
+     *
+     * Deliberately a static rule, not a per-element pass. WordPress stamps
+     * `is-layout-flow` / `is-layout-constrained` at RENDER, so no build-time
+     * walk of the stored block markup can tell which containers will be layout
+     * containers — mirroring the scope in the selector lets the browser decide
+     * at exactly the moment the information exists.
+     *
+     * @param list<string> $authorChunks
+     */
+    private static function uaBlockEndCss(array $authorChunks, string $markup): string
+    {
+        $authored = self::bareTagBlockEndMargins($authorChunks);
+        $rules = [];
+        foreach (self::UA_BLOCK_END_TAGS as $tag) {
+            // Ship a selector only for a tag the delivered markup actually has.
+            // Emitting all six unconditionally puts dead CSS in every theme,
+            // including designs with no trailing flow content at all.
+            if (!self::markupHasTag($markup, $tag)) {
+                continue;
+            }
+            // A design that states a block-end margin for the bare tag has
+            // already said what it wants there — including `0`. Reasserting
+            // would override the design with the browser default, and for a
+            // non-zero authored value the authored-rhythm pass owns it.
+            if (isset($authored[$tag])) {
+                continue;
+            }
+            $rules[] = ':root:root ' . self::UA_BLOCK_END_SCOPE . $tag . ':last-child'
+                . implode('', self::UA_BLOCK_END_GUARDS);
+        }
+        if ($rules === []) {
+            return '';
+        }
+        return self::UA_BLOCK_END_MARKER . "\n"
+            . implode(",\n", $rules) . ' {margin-block-end: 1em}';
+    }
+
+    /**
+     * Which of the reassertable tags the design styles a block-end margin on
+     * through a bare type selector.
+     *
+     * Bare-tag only, and any hit disables that tag for the whole site: a
+     * page-scoped or class-scoped rule cannot be honoured by one static rule, so
+     * the choice is deliberately the conservative direction — under-apply rather
+     * than override something a design asked for.
+     *
+     * @param list<string> $authorChunks
+     * @return array<string,true>
+     */
+    private static function bareTagBlockEndMargins(array $authorChunks): array
+    {
+        $tags = array_fill_keys(self::UA_BLOCK_END_TAGS, true);
+        $authored = [];
+        foreach ($authorChunks as $css) {
+            foreach (CssChecks::scanDeclarations($css) as $declaration) {
+                if ($declaration['kind'] !== 'style') {
+                    continue;
+                }
+                // A nested rule's real subject includes its ancestors, so `p`
+                // inside `.card` is not a bare type selector.
+                foreach ($declaration['ancestors'] as $ancestor) {
+                    if (!str_starts_with(ltrim($ancestor), '@')) {
+                        continue 2;
+                    }
+                }
+                $error = null;
+                $converted = self::blockAxisDeclarations(
+                    $declaration['property'],
+                    $declaration['value'],
+                    false,
+                    $error,
+                );
+                if ($converted === null || $converted === []) {
+                    continue;
+                }
+                $setsBlockEnd = false;
+                foreach ($converted as $item) {
+                    if (in_array(
+                        $item['property'],
+                        ['margin-bottom', 'margin-block-end', 'margin-block'],
+                        true,
+                    )) {
+                        $setsBlockEnd = true;
+                    }
+                }
+                if (!$setsBlockEnd) {
+                    continue;
+                }
+                $branches = self::splitSelectorList($declaration['context'], $error);
+                foreach ($branches ?? [] as $branch) {
+                    $tag = strtolower(self::stripPageScope($branch));
+                    if (isset($tags[$tag])) {
+                        $authored[$tag] = true;
+                    }
+                }
+            }
+        }
+        return $authored;
+    }
+
+    /** Whether the delivered markup contains at least one element of this tag. */
+    private static function markupHasTag(string $markup, string $tag): bool
+    {
+        return preg_match('/<' . preg_quote($tag, '/') . '(?=[\s>\/])/i', $markup) === 1;
+    }
+
+    /**
+     * Page chunks reach here already scoped by scopeChunkToPage(), so a design's
+     * bare `figure {…}` arrives as `:where(.blocks-engine-page-home) figure`.
+     * Strip that one wrapper so the bare-tag test sees what the design wrote.
+     */
+    private static function stripPageScope(string $selector): string
+    {
+        $selector = trim($selector);
+        $pattern = '/\A:where\(\.' . preg_quote(PageScope::CLASS_PREFIX, '/')
+            . '[A-Za-z0-9_-]*\)\s+/';
+        return trim((string) preg_replace($pattern, '', $selector));
     }
 
     /**
