@@ -537,61 +537,67 @@ final class CollectImagesStep implements Step
             return $byPrompt[$promptKey];
         };
 
-        // Block-comment JSON. Match "src" as well as "url" so any block that
-        // puts the prompt in a JSON source field gets the same repair. Leading
-        // whitespace inside the value is tolerated (and dropped on rewrite) so
-        // every shape ThemeValidator flags as a JSON source is also repaired.
-        $jsonPattern = '/(?P<prefix>"(?:url|src)"\s*:\s*")\s*'
-            . '(?P<lit>AI_IMAGE:(?:[^"\\\\]|\\\\.)*)(?P<suffix>")/is';
-        $content = (string) preg_replace_callback(
-            $jsonPattern,
-            static function (array $match) use ($imageFor): string {
-                $image = $imageFor($match['lit'], true);
-                return $image === null
-                    ? $match[0]
-                    : $match['prefix'] . $image['src'] . $match['suffix'];
-            },
-            $content
-        );
+        // Each rule catches one shape the model emits for an image source and
+        // rewrites it to the resolved asset path. They share the resolver above
+        // and one skip-on-unrecoverable contract; only the match position, the
+        // JSON-vs-attribute decoding, and how the path is spliced back differ.
+        // The model keeps finding new ways to malform a source, so adding the
+        // next shape is a new entry here, not another copy of the replace loop.
+        // The passes run in listed order over the same content, but the order is
+        // incidental: each consumes the AI_IMAGE literal it rewrites, so no pass
+        // can see a source another already repaired. Without a 'rewrite', a rule
+        // splices the resolved path between its captured prefix and suffix; the
+        // one shape with neither gives its own (matched, resolved image) => src.
+        $spliceInPlace = static fn (array $match, array $image): string =>
+            $match['prefix'] . $image['src'] . $match['suffix'];
+        $rules = [
+            // Block-comment JSON. Match "src" as well as "url" so any block that
+            // puts the prompt in a JSON source field gets the same repair.
+            // Leading whitespace inside the value is tolerated (and dropped on
+            // rewrite) so every shape ThemeValidator flags as a JSON source is
+            // also repaired.
+            [
+                'pattern' => '/(?P<prefix>"(?:url|src)"\s*:\s*")\s*'
+                    . '(?P<lit>AI_IMAGE:(?:[^"\\\\]|\\\\.)*)(?P<suffix>")/is',
+                'json'    => true,
+            ],
+            // Rendered HTML. Keep the replacement scoped to src= so an identical
+            // AI_IMAGE alt remains available to the canonical parser above.
+            // Leading whitespace inside the quotes is tolerated, mirroring the
+            // validator's detection. A leading <!-- ... --> is tolerated too:
+            // the model sometimes wraps the whole spec in an HTML comment inside
+            // the src attribute (src="<!-- AI_IMAGE: {…} -->"), which slips past
+            // the quote-anchored form and the canonical parser. The comment is
+            // dropped on rewrite along with everything but the resolved path.
+            [
+                'pattern' => '/(?P<prefix>\bsrc\s*=\s*(?P<quote>["\']))\s*(?:<!--\s*)?'
+                    . '(?P<lit>AI_IMAGE:.*?)(?:\s*-->)?(?P<suffix>\k<quote>)/is',
+                'json'    => false,
+            ],
+            // Unquoted src=AI_IMAGE:… — the value necessarily ends at the first
+            // whitespace or ">", so a piped spec loses everything past the
+            // subject's first word; a truncated recovery still beats shipping
+            // the raw prompt (or, with images requested, failing the whole build
+            // at the gate). The rewrite adds the quotes the model omitted.
+            [
+                'pattern' => '/\bsrc\s*=\s*(?P<lit>AI_IMAGE:[^\s>"\'`=]*)/i',
+                'json'    => false,
+                'rewrite' => static fn (array $match, array $image): string =>
+                    'src="' . $image['src'] . '"',
+            ],
+        ];
 
-        // Rendered HTML. Keep the replacement scoped to src= so an identical
-        // AI_IMAGE alt remains available to the canonical parser above.
-        // Leading whitespace inside the quotes is tolerated, mirroring the
-        // validator's detection.
-        // A leading <!-- ... --> is tolerated: the model sometimes wraps the
-        // whole spec in an HTML comment *inside* the src attribute
-        // (src="<!-- AI_IMAGE: {…} -->"), which slips past both this pattern's
-        // old quote-anchored form and the canonical parser. The comment is
-        // dropped on rewrite along with everything but the resolved asset path.
-        $srcPattern = '/(?P<prefix>\bsrc\s*=\s*(?P<quote>["\']))\s*(?:<!--\s*)?'
-            . '(?P<lit>AI_IMAGE:.*?)(?:\s*-->)?(?P<suffix>\k<quote>)/is';
-        $content = (string) preg_replace_callback(
-            $srcPattern,
-            static function (array $match) use ($imageFor): string {
-                $image = $imageFor($match['lit'], false);
-                return $image === null
-                    ? $match[0]
-                    : $match['prefix'] . $image['src'] . $match['suffix'];
-            },
-            $content
-        );
-
-        // Unquoted src=AI_IMAGE:… — the value necessarily ends at the first
-        // whitespace or ">", so a piped spec loses everything past the subject's
-        // first word; a truncated recovery still beats shipping the raw prompt
-        // (or, with images requested, failing the whole build at the gate).
-        // The rewrite adds the quotes the model omitted.
-        $bareSrcPattern = '/\bsrc\s*=\s*(?P<lit>AI_IMAGE:[^\s>"\'`=]*)/i';
-        $content = (string) preg_replace_callback(
-            $bareSrcPattern,
-            static function (array $match) use ($imageFor): string {
-                $image = $imageFor($match['lit'], false);
-                return $image === null
-                    ? $match[0]
-                    : 'src="' . $image['src'] . '"';
-            },
-            $content
-        );
+        foreach ($rules as $rule) {
+            $rewrite = $rule['rewrite'] ?? $spliceInPlace;
+            $content = (string) preg_replace_callback(
+                $rule['pattern'],
+                static function (array $match) use ($imageFor, $rule, $rewrite): string {
+                    $image = $imageFor($match['lit'], $rule['json']);
+                    return $image === null ? $match[0] : $rewrite($match, $image);
+                },
+                $content
+            );
+        }
 
         return ['content' => $content, 'images' => array_values($byPrompt)];
     }
