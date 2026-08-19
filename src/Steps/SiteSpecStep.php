@@ -274,9 +274,11 @@ final class SiteSpecStep implements Step
         // may rely on at least a homepage entry existing. A caller-fixed list
         // wins over whatever tree the model returned — the model's tree can
         // contribute only per-page purposes.
-        $spec['pages'] = self::normalizePages($spec['pages'] ?? null, $spec, $multiPage);
+        $spec['pages'] = self::normalizePages($spec['pages'] ?? null, $spec, $multiPage, $warnings);
         if ($requested !== []) {
             $spec['pages'] = self::forcePages($requested, $spec['pages']);
+            [$spec['pages'], $cartWarnings] = \Automattic\SiteBuild\StorefrontDegrade::pages($spec['pages']);
+            array_push($warnings, ...$cartWarnings);
         }
 
         // `invented` lists which identity values the model made up; keep only
@@ -337,9 +339,10 @@ final class SiteSpecStep implements Step
      *
      * @param mixed        $raw
      * @param array<mixed> $spec
+     * @param list<string> $warnings
      * @return array<int,array<string,mixed>>
      */
-    public static function normalizePages($raw, array $spec, bool $multiPage = true): array
+    public static function normalizePages($raw, array $spec, bool $multiPage = true, array &$warnings = []): array
     {
         $seen = self::initialPageSlugSet();
         $pages = is_array($raw) ? self::normalizePageList($raw, $seen) : [];
@@ -354,6 +357,8 @@ final class SiteSpecStep implements Step
                 'children' => [],
             ]];
         }
+        [$pages, $cartWarnings] = \Automattic\SiteBuild\StorefrontDegrade::pages($pages);
+        array_push($warnings, ...$cartWarnings);
         return $pages;
     }
 
