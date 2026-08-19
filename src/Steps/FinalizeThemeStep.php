@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\HeaderBehavior;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\PageScope;
@@ -79,6 +80,7 @@ final class FinalizeThemeStep implements Step
                 'theme/assets/motion/*',
                 'theme/assets/header/*',
                 'theme/assets/shape/*',
+                'theme/assets/device/*',
                 'warnings.json',
             ],
             concurrent: false,
@@ -107,12 +109,14 @@ final class FinalizeThemeStep implements Step
         self::pruneHeaderKit($project, $header);
         $shape = DesignDirectionStep::shapeFor($project);
         $shapeKit = self::writeShapeKit($project, $shape);
+        $device = DesignDirectionStep::deviceFor($project);
+        $deviceKit = self::writeDeviceKit($project, $device);
         if ($headerWarnings !== []) {
             $project->addWarnings($this->id(), $headerWarnings);
         }
         $project->writeText(
             'theme/functions.php',
-            self::functionsPhp($project->slug(), $motion, $header, $shapeKit),
+            self::functionsPhp($project->slug(), $motion, $header, $shapeKit, $deviceKit),
         );
         Narrator::write($motion === null
             ? "  motion: none (kit not shipped)\n"
@@ -123,6 +127,9 @@ final class FinalizeThemeStep implements Step
         Narrator::write($shapeKit
             ? "  shape: '{$shape}' corner kit enqueued\n"
             : '  shape: ' . ($shape ?? 'none committed') . " (kit not shipped)\n");
+        Narrator::write($deviceKit
+            ? "  device: '{$device}' utility enqueued\n"
+            : "  device: {$device} (kit not shipped)\n");
     }
 
     /**
@@ -145,6 +152,27 @@ final class FinalizeThemeStep implements Step
             unlink($file);
         }
         @rmdir($project->themePath('assets/shape'));
+        @rmdir($project->themePath('assets'));
+        return false;
+    }
+
+    /**
+     * Write or prune the one-band CSS device. Gone when the commitment is
+     * `none` so a previous stamp cannot linger.
+     */
+    private static function writeDeviceKit(Project $project, string $device): bool
+    {
+        $css = Device::kitCss($device);
+        $rel = 'theme/assets/device/device.css';
+        if ($css !== null) {
+            $project->writeText($rel, $css);
+            return true;
+        }
+        $file = $project->themePath('assets/device/device.css');
+        if (is_file($file)) {
+            unlink($file);
+        }
+        @rmdir($project->themePath('assets/device'));
         @rmdir($project->themePath('assets'));
         return false;
     }
@@ -295,6 +323,7 @@ final class FinalizeThemeStep implements Step
         ?string $motion,
         bool $header,
         bool $shapeKit,
+        bool $deviceKit = false,
     ): string {
         $slug = ProjectStore::slugify($slug);
         $scopePrefix = PageScope::CLASS_PREFIX;
@@ -316,9 +345,9 @@ final class FinalizeThemeStep implements Step
         }
 
         $shapeEnqueues = '';
-        $editorStyles = "add_editor_style('style.css');";
+        $editorStyleList = ['style.css'];
         if ($shapeKit) {
-            $editorStyles = "add_editor_style(array('style.css', 'assets/shape/shape.css'));";
+            $editorStyleList[] = 'assets/shape/shape.css';
             $shapeEnqueues = <<<PHP
 
                 // Committed corner language for contained media surfaces theme.json
@@ -327,6 +356,18 @@ final class FinalizeThemeStep implements Step
                 wp_enqueue_style('{$slug}-shape', get_theme_file_uri('assets/shape/shape.css'), array('{$slug}-style'), \$ver);
             PHP;
         }
+        $deviceEnqueues = '';
+        if ($deviceKit) {
+            $editorStyleList[] = 'assets/device/device.css';
+            $deviceEnqueues = <<<PHP
+
+                // Committed one-band CSS device. Loads after generated style.css.
+                wp_enqueue_style('{$slug}-device', get_theme_file_uri('assets/device/device.css'), array('{$slug}-style'), \$ver);
+            PHP;
+        }
+        $editorStyles = count($editorStyleList) === 1
+            ? "add_editor_style('style.css');"
+            : "add_editor_style(array('" . implode("', '", $editorStyleList) . "'));";
 
         $headerEnqueues = '';
         if ($header) {
@@ -351,7 +392,7 @@ final class FinalizeThemeStep implements Step
                 \$ver = wp_get_theme()->get('Version');{$motionEnqueues}
                 // Block themes do not load style.css automatically — without this
                 // enqueue its utility CSS (card layouts, layout utilities) never applies.
-                wp_enqueue_style('{$slug}-style', get_stylesheet_uri(), {$styleDeps}, \$ver);{$shapeEnqueues}{$headerEnqueues}
+                wp_enqueue_style('{$slug}-style', get_stylesheet_uri(), {$styleDeps}, \$ver);{$shapeEnqueues}{$deviceEnqueues}{$headerEnqueues}
             });
 
             // Mirror the theme stylesheets into the editor so previews match the front end.

@@ -307,3 +307,22 @@ test('finalize-theme ships no shape kit for sharp and prunes a stale one', funct
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('finalize-theme ships the device kit and prunes it for none', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    $project->writeJson('designDirection.json', ['description' => 'x', 'device' => 'stamp']);
+    finalize_static_header($project);
+
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+
+    assert_contains('.device--stamp', $project->readText('theme/assets/device/device.css'));
+    assert_contains('assets/device/device.css', $project->readText('theme/functions.php'));
+
+    $project->writeJson('designDirection.json', ['description' => 'x', 'device' => 'none']);
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+    assert_true(!$project->exists('theme/assets/device/device.css'), 'stale device kit pruned');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+

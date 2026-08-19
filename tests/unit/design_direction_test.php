@@ -1233,6 +1233,29 @@ test('shapeFor returns only an explicit valid commitment', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('normalize commits a catalog device and strips twine and tape', function () {
+    $direction = DesignDirectionStep::normalize([
+        'description' => 'A stamp on the menu.',
+        'device' => 'stamp',
+    ], 'cinematic-safe-zone');
+    assert_eq('stamp', $direction['device']);
+    assert_contains('device--stamp', DesignDirectionStep::format($direction));
+
+    $warnings = [];
+    assert_eq('none', DesignDirectionStep::normalizeDevice('twine', $warnings));
+    assert_contains('unbuildable motif', implode(' ', $warnings));
+
+    $stripWarnings = [];
+    $scrubbed = DesignDirectionStep::stripUnbuildableMotifs(
+        'Kraft labels with twine and tape corners on the loaf.',
+        'none',
+        $stripWarnings,
+    );
+    assert_true(!str_contains($scrubbed, 'twine'));
+    assert_true(!str_contains($scrubbed, 'tape corners'));
+    assert_contains('unbuildable motif', implode(' ', $stripWarnings));
+});
+
 test('directionFor returns nothing when no direction was committed', function () {
     $project = new Project(sys_get_temp_dir() . '/design-direction-absent-' . uniqid());
     try {
