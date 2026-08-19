@@ -758,6 +758,13 @@ final class SectionsStep implements Step
      * double-counts neither: a folded total already exceeds its own cache
      * components, and a raw total is corrected by them.
      *
+     * The totals are cumulative and per-client, so this reads as one call's
+     * usage only while nothing else is spending on the same Llm. That holds
+     * here — SectionsStep is a standalone step in both compositions, never a
+     * ConcurrentGroup member, and the probe is sequential. A host that shared
+     * one client across parallel work would inflate the delta, which errs
+     * toward silence rather than toward a false accusation.
+     *
      * @param array<string,mixed> $before cumulative totals before the call
      * @param array<string,mixed> $after  cumulative totals after it
      */
