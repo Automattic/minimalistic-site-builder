@@ -44,6 +44,48 @@ final class TextBatchRecovery
     }
 
     /**
+     * Infer an output-budget truncation from usage alone, for hosts that never
+     * report a stop reason at all.
+     *
+     * Every recovery path here keys off `stop_reason`. A host whose adapter
+     * omits the field therefore turns a truncated generation into a silently
+     * accepted one — the batch sees a clean termination, skips regeneration,
+     * and ships block markup that stops mid-element. That is not theoretical:
+     * a production run returned a section of EXACTLY 16,000 output tokens
+     * against a 16,000-token budget, with no stop reason and no retry, and
+     * nothing recorded it.
+     *
+     * A response that filled its entire output budget to the token, from a
+     * host that declined to say why it stopped, is treated as truncated. When
+     * a stop reason IS supplied it is authoritative and this never second-
+     * guesses it, so a conforming host is unaffected. A response with no usage
+     * figures is unjudgeable and returns false rather than guessing.
+     *
+     * Pure.
+     *
+     * @param array<string,mixed> $response transport record for one member
+     * @param array<string,mixed> $request  the request that produced it
+     */
+    public static function suspectedOutputLimit(
+        array $response,
+        array $request,
+        int $defaultMaxTokens,
+    ): bool {
+        if (is_string($response['stop_reason'] ?? null) && trim($response['stop_reason']) !== '') {
+            return false; // The host told us; believe it.
+        }
+        $output = $response['output'] ?? null;
+        if (!is_int($output) && !(is_string($output) && ctype_digit($output))) {
+            return false; // No usage reported — nothing to reason from.
+        }
+        $budget = isset($request['max_tokens']) ? (int) $request['max_tokens'] : $defaultMaxTokens;
+        if ($budget < 1) {
+            return false;
+        }
+        return (int) $output >= $budget;
+    }
+
+    /**
      * @param array<array-key,array<string,mixed>> $requests
      * @param callable(array<array-key,array<string,mixed>>):array<array-key,array<string,mixed>|string> $send
      * @return TextBatchResult raw text and keyed degradation notes, ordered as the input
@@ -120,6 +162,19 @@ final class TextBatchRecovery
             foreach ($active as $key => $_request) {
                 $response = self::responseRecord($responses[$key], $key);
                 $error = StopReasons::terminationError($response['stop_reason'] ?? null);
+                if ($error === null
+                    && self::suspectedOutputLimit($response, $requests[$key], $defaultMaxTokens)
+                ) {
+                    // A stop-reason-blind host cannot tell us the response was
+                    // cut off, so treat a budget filled to the token as the
+                    // truncation it almost certainly is. Naming it max_tokens
+                    // routes it through the same doubled-budget regeneration a
+                    // conforming host would have triggered.
+                    $budget = $requests[$key]['max_tokens'] ?? $defaultMaxTokens;
+                    $response['stop_reason'] = 'max_tokens';
+                    $error = 'generation filled its entire ' . (int) $budget
+                        . '-token output budget and the host reported no stop reason';
+                }
                 if ($error === null) {
                     $texts[$key] = (string) $response['text'];
                     continue;
