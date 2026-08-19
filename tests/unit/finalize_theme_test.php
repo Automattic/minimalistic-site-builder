@@ -307,3 +307,46 @@ test('finalize-theme ships no shape kit for sharp and prunes a stale one', funct
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('finalize-theme ships and enqueues the surface overlay', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    $project->writeJson('designDirection.json', ['description' => 'x', 'surface' => 'paper']);
+    $project->writeJson('theme/theme.json', ['settings' => ['color' => ['palette' => [
+        ['slug' => 'base', 'color' => '#EFE8DA'],
+    ]]]]);
+    finalize_static_header($project);
+
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+
+    $css = $project->readText('theme/assets/surface/surface.css');
+    assert_contains('position: fixed', $css);
+    assert_contains('mix-blend-mode: multiply', $css);
+    $php = $project->readText('theme/functions.php');
+    assert_contains('assets/surface/surface.css', $php);
+
+    $project->writeJson('designDirection.json', ['description' => 'x', 'surface' => 'none']);
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+    assert_true(!$project->exists('theme/assets/surface/surface.css'), 'stale overlay pruned');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('finalize-theme uses overlay blend on a dark page base', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    $project->writeJson('designDirection.json', ['description' => 'x', 'surface' => 'concrete']);
+    $project->writeJson('theme/theme.json', ['settings' => ['color' => ['palette' => [
+        ['slug' => 'base', 'color' => '#16181A'],
+    ]]]]);
+    finalize_static_header($project);
+
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+
+    $css = $project->readText('theme/assets/surface/surface.css');
+    assert_contains('mix-blend-mode: overlay', $css);
+    assert_true(!str_contains($css, 'feTurbulence'));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
