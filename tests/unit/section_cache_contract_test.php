@@ -178,8 +178,8 @@ test('sections skips the uncached hero and warms the first ordinary section pref
 
         $step->run($project);
 
-        assert_eq(1, $llm->completeCalls);
-        assert_eq(1, $llm->completeBatchCalls);
+        assert_eq(0, $llm->completeCalls);
+        assert_eq(2, $llm->completeBatchCalls, 'the probe and generation both use the batch seam');
         assert_eq(SECTION_CACHE_PROBE_PROMPT, $llm->calls[0]['prompt']);
         assert_eq(1, $llm->calls[0]['opts']['max_tokens'] ?? null);
         assert_eq(true, $llm->calls[0]['opts']['tolerate_empty'] ?? null);
@@ -203,8 +203,8 @@ test('section cache warm-up failure is non-fatal', function () {
 
         (new SectionsStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
 
-        assert_eq(1, $llm->completeCalls);
-        assert_eq(1, $llm->completeBatchCalls);
+        assert_eq(0, $llm->completeCalls);
+        assert_eq(2, $llm->completeBatchCalls);
         assert_true($project->exists('theme/parts/page-home--hero.html'));
         assert_true($project->exists('theme/parts/page-home--about.html'));
     });
@@ -227,5 +227,21 @@ test('section cache warm-up is skipped when the front hero is the only section',
         assert_eq(0, $llm->completeCalls, 'no cache probe is sent without an ordinary SectionUnit request');
         assert_eq(1, $llm->completeBatchCalls);
         assert_true($project->exists('theme/parts/page-home--hero.html'));
+    });
+});
+
+test('sections warn when the batch path drops cached prefixes', function () {
+    with_project('builder_section_cache_', function ($project) {
+        seed_section_cache_project($project);
+        $llm = new FakeLlm();
+        $llm->billCachedPrefixes = false;
+        queue_section_cache_parts($llm);
+
+        (new SectionsStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+        $warnings = $project->readJson('warnings.json');
+        $sectionWarnings = implode("\n", $warnings['sections'] ?? []);
+        assert_contains('discard cached_prefixes', $sectionWarnings);
+        assert_contains('bin/llm-conformance.php', $sectionWarnings);
     });
 });

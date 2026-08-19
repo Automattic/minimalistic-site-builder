@@ -22,6 +22,8 @@ final class FakeLlm implements FinishReasonAwareLlm, UsageReporting
     public int $completeJsonCalls = 0;
     public int $completeBatchCalls = 0;
     public int $completeJsonBatchCalls = 0;
+    /** Set false to model a host that accepts but drops cached_prefixes. */
+    public bool $billCachedPrefixes = true;
     private int $usageRequests = 0;
     private int $usageInputTokens = 0;
     private int $usageOutputTokens = 0;
@@ -177,8 +179,10 @@ final class FakeLlm implements FinishReasonAwareLlm, UsageReporting
     {
         $this->usageRequests++;
         $this->usageInputTokens += self::syntheticTokenCount($prompt);
-        foreach ($opts['cached_prefixes'] ?? [] as $prefix) {
-            $this->usageInputTokens += self::syntheticTokenCount((string) $prefix);
+        if ($this->billCachedPrefixes) {
+            foreach ($opts['cached_prefixes'] ?? [] as $prefix) {
+                $this->usageInputTokens += self::syntheticTokenCount((string) $prefix);
+            }
         }
         $this->usageOutputTokens += self::syntheticTokenCount($response);
     }

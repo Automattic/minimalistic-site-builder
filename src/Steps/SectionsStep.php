@@ -688,17 +688,14 @@ final class SectionsStep implements Step
 
     /**
      * Warm the exact cached context used by the deterministic first section,
-     * and use that same probe to verify the host actually SENT that context.
+     * and use that same probe to verify the batch path actually SENT it.
      * A failed probe only forfeits first-window cache hits; it must not abort
      * the build or change the subsequent concurrent fan-out.
      *
-     * The probe travels the single-completion path, while the sections
-     * themselves are generated through completeBatch(). A host whose batch
-     * implementation is separate code — wpcom's native path fans each section
-     * out as its own stateless server-side promise — can therefore satisfy this
-     * probe and still drop the layers where it counts. Read a silent probe as
-     * "the single path carries the layers", not as a clean bill of health;
-     * bin/llm-conformance.php exercises both paths deliberately.
+     * The sections themselves are generated through completeBatch(), so the
+     * one-member probe deliberately travels that same seam. Hosts may implement
+     * complete() and completeBatch() separately; measuring complete() would
+     * permit either path to lie about the one that actually authors sections.
      *
      * @param array<string,array{prompt:string,model?:string,temperature?:float,cached_prefixes?:list<string>}> $requests
      * @return list<string> context-loss warnings, empty when the host is conformant or unmeasurable
@@ -719,7 +716,9 @@ final class SectionsStep implements Step
             $before = $this->llm instanceof UsageReporting ? $this->llm->usageTotals() : null;
 
             try {
-                $this->llm->complete(self::CACHE_WARM_PROMPT, $opts);
+                $this->llm->completeBatch([
+                    'section-cache-warm' => ['prompt' => self::CACHE_WARM_PROMPT] + $opts,
+                ]);
             } catch (\Throwable $e) {
                 Narrator::write("    section cache warm-up failed ({$e->getMessage()}); continuing uncached\n");
                 return [];

@@ -84,7 +84,7 @@ interface Llm
      * rather than aborting the batch. Its keyed degradation note lets callers
      * persist a warning only if that member survives structural salvage.
      *
-     * @param array<array-key,array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float,json_schema?:array{name:string,schema:array<string,mixed>},cached_prefixes?:list<string>}> $requests
+     * @param array<array-key,array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float,json_schema?:array{name:string,schema:array<string,mixed>},cached_prefixes?:list<string>,tolerate_empty?:bool}> $requests
      *        cached_prefixes are ordered reusable text layers prepended before
      *        the varying prompt; blank layers are ignored and callers may
      *        provide at most three non-blank layers per request. Anthropic
@@ -95,6 +95,9 @@ interface Llm
      *        all preceding message content, through the reused boundary. On
      *        Anthropic Sonnet, the cumulative prefix through a breakpoint must
      *        meet the model's minimum cacheable size (1,024 tokens on Sonnet-tier; higher on some tiers) or it silently will not cache.
+     *        tolerate_empty is reserved for one-token cache-warm probes: an
+     *        output-limit response is accepted without regeneration because
+     *        only the input usage is observed.
      * @return TextBatchResult raw assistant text and keyed degradation notes
      */
     public function completeBatch(array $requests): TextBatchResult;
