@@ -10,6 +10,7 @@ use Automattic\SiteBuild\BlockSerializer\Html\Selector;
 use Automattic\SiteBuild\CssTokenExtractor;
 use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\GeneratedJsonFallbackStep;
+use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\CssChecks;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
@@ -32,10 +33,11 @@ use Throwable;
  * Validates the structure the templates depend on (version 3, the five color
  * slugs, the heading/body font slugs, and an optional accent family) and
  * repairs drift deterministically: missing slugs are filled from the design
- * direction's committed values, then neutral defaults. When an accent family
- * ships, captions pick it up even if a section forgot fontFamily:accent.
- * Every fill is recorded in warnings.json — a missing slug never
- * aborts the build.
+ * direction's committed values, then neutral defaults, and heading/body
+ * families and palette hexes that disagree with the direction are written
+ * back. When an accent family ships, captions pick it up even if a section
+ * forgot fontFamily:accent. Every fill or overwrite is recorded in
+ * warnings.json — a missing slug never aborts the build.
  *
  * HTML-first composition mode declares and consumes design/site.css token
  * evidence. Legacy mode ignores any stale design artifact from an earlier run.
@@ -1402,7 +1404,20 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                 continue;
             }
             $entry['slug'] = $slug;
-            $entry['color'] = trim($color);
+            $entry['color'] = trim((string) $color);
+            $rawPreferred = $preferredHexes[$slug] ?? null;
+            $preferred = is_string($rawPreferred) ? self::normalizeHex($rawPreferred) : null;
+            $current = self::normalizeHex($entry['color']);
+            if ($preferred !== null && $current !== null && $current !== $preferred) {
+                $authored = $entry['color'];
+                $entry['color'] = $preferred;
+                $warnings[] = "theme.json palette slug '{$slug}': authored {$authored}; delivered {$preferred}"
+                    . '; disposition wrote the design-direction hex back'
+                    . (in_array($slug, ['secondary', 'accent'], true)
+                        && self::hueDistance($authored, $preferred) > 30.0
+                        ? '; the model hex no longer matched the named color'
+                        : '');
+            }
             $entries[] = $entry;
         }
         if ($nonObjects > 0) {
@@ -1490,7 +1505,13 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $entry['slug'] = $slug;
             $entry['fontFamily'] = trim($family);
             if (isset($preferred[$slug])) {
+                $previous = $entry['fontFamily'];
                 $entry['fontFamily'] = self::replacePrimaryFamily($entry['fontFamily'], $preferred[$slug]);
+                if (!self::samePrimaryFamily($previous, $preferred[$slug])) {
+                    $warnings[] = "theme.json fontFamilies slug '{$slug}': authored {$previous}; delivered "
+                        . $entry['fontFamily']
+                        . '; disposition wrote the design-direction family back';
+                }
             }
             $entries[] = $entry;
         }
@@ -1576,6 +1597,59 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             ? ', ' . trim($parts[1])
             : ', system-ui, sans-serif';
         return '"' . $family . '"' . $fallback;
+    }
+
+    private static function samePrimaryFamily(string $stack, string $family): bool
+    {
+        $primary = trim(explode(',', $stack, 2)[0], " \t\"'");
+        return strcasecmp($primary, $family) === 0;
+    }
+
+    /** @return ?string uppercase #RRGGBB */
+    private static function normalizeHex(string $hex): ?string
+    {
+        $hex = strtoupper(trim($hex));
+        if (preg_match('/^#[0-9A-F]{6}$/', $hex) === 1) {
+            return $hex;
+        }
+        if (preg_match('/^#[0-9A-F]{3}$/', $hex) === 1) {
+            return '#' . $hex[1] . $hex[1] . $hex[2] . $hex[2] . $hex[3] . $hex[3];
+        }
+        return null;
+    }
+
+    /** Circular hue distance in degrees, or 0 when either hex is unreadable. */
+    private static function hueDistance(string $a, string $b): float
+    {
+        $ha = self::hueDegrees($a);
+        $hb = self::hueDegrees($b);
+        if ($ha === null || $hb === null) {
+            return 0.0;
+        }
+        $delta = abs($ha - $hb);
+        return min($delta, 360.0 - $delta);
+    }
+
+    private static function hueDegrees(string $hex): ?float
+    {
+        $rgb = ContrastMath::hexToRgb($hex);
+        if ($rgb === null) {
+            return null;
+        }
+        [$r, $g, $b] = [$rgb[0] / 255, $rgb[1] / 255, $rgb[2] / 255];
+        $max = max($r, $g, $b);
+        $min = min($r, $g, $b);
+        $d = $max - $min;
+        if ($d < 1e-6) {
+            return 0.0;
+        }
+        $h = match ($max) {
+            $r => fmod((($g - $b) / $d), 6),
+            $g => (($b - $r) / $d) + 2,
+            default => (($r - $g) / $d) + 4,
+        };
+        $h *= 60.0;
+        return $h < 0 ? $h + 360.0 : $h;
     }
 
     /**
