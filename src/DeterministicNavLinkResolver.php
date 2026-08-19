@@ -333,6 +333,20 @@ final class DeterministicNavLinkResolver implements NavLinkResolver
             return null;
         }
 
+        // A fragment that names a page is a destination even when the same id
+        // also appears as a section on other pages. sunny-ember's CTA is
+        // `<a href="#contact">Book a session</a>` beside a real `contact` page,
+        // and `contact` is also a section on two others: the owner search below
+        // finds two owners, gives up, and the caller DELETES the item. As a raw
+        // anchor that merely stayed unresolved and still rendered; inside
+        // core/navigation it disappears, because the block renders its inner
+        // blocks and drops the unwrapped label text.
+        foreach ($pages as $page) {
+            if ($fragment === $this->pageSlug($page)) {
+                return $page['path'];
+            }
+        }
+
         $owners = $this->anchorOwners($pages, $fragment);
         if (count($owners) !== 1) {
             return null;
@@ -381,6 +395,12 @@ final class DeterministicNavLinkResolver implements NavLinkResolver
     }
 
     /** @param array{label:string,path:string,anchors:list<string>} $page */
+    /** The page's own slug, read from its public path. */
+    private function pageSlug(array $page): string
+    {
+        return trim((string) ($page['path'] ?? ''), '/');
+    }
+
     private function hasAnchor(array $page, string $fragment): bool
     {
         return $fragment !== '' && in_array($fragment, $page['anchors'], true);

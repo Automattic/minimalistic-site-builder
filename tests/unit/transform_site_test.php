@@ -340,13 +340,20 @@ test('G1 engine-support families reach final theme CSS after transform-site and 
     transform_site_cleanup($tmp);
 });
 
-test('G2 CSS-owned flex nav items beat WordPress flow margins without important', function () {
+/**
+ * The subject here is the flow reset for CSS-owned flex ITEMS, not navigation.
+ * The row is deliberately not a `<nav>`: a nav landmark holding a brand anchor
+ * beside a link cluster is now hoisted into a carrier group with a real
+ * core/navigation, which has no synthetic paragraphs to reset. A toolbar row
+ * still takes the css-owned path this test exists to cover.
+ */
+test('G2 CSS-owned flex link row items beat WordPress flow margins without important', function () {
     [$project, $llm, $tmp] = transform_site_fixture(
-        '<!doctype html><html><body><header><nav class="site-nav">'
+        '<!doctype html><html><body><header><div class="site-nav">'
         . '<a class="brand" href="/">Northstar</a><div class="navlinks">'
         . '<a class="active" href="/">Home</a><a href="/services">Services</a>'
         . '<a href="/about">About</a><a href="/contact">Contact</a>'
-        . '</div></nav></header><main><section id="hero"><h1>Welcome</h1></section></main>'
+        . '</div></div></header><main><section id="hero"><h1>Welcome</h1></section></main>'
         . '<footer><p>Footer</p></footer></body></html>',
     );
     $project->writeText(
@@ -363,7 +370,7 @@ test('G2 CSS-owned flex nav items beat WordPress flow margins without important'
     assert_contains('.navlinks{display:flex;align-items:center}', preg_replace('/\s+/', '', $style));
     transform_site_assert_flow_reset_wins(
         $style,
-        'G2 nav synthetic paragraph flex items',
+        'G2 link row synthetic paragraph flex items',
     );
 
     transform_site_cleanup($tmp);
