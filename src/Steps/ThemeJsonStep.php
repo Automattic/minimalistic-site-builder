@@ -30,9 +30,11 @@ use Throwable;
  * Output: theme/theme.json — palette, typography, spacing, layout, element styles.
  *
  * Validates the structure the templates depend on (version 3, the five color
- * slugs, the two font slugs) and repairs drift deterministically: missing
- * slugs are filled from the design direction's committed values, then neutral
- * defaults, with every fill recorded in warnings.json — a missing slug never
+ * slugs, the heading/body font slugs, and an optional accent family) and
+ * repairs drift deterministically: missing slugs are filled from the design
+ * direction's committed values, then neutral defaults. When an accent family
+ * ships, captions pick it up even if a section forgot fontFamily:accent.
+ * Every fill is recorded in warnings.json — a missing slug never
  * aborts the build.
  *
  * HTML-first composition mode declares and consumes design/site.css token
@@ -44,6 +46,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
 
     private const REQUIRED_COLORS = ['base', 'contrast', 'primary', 'secondary', 'accent'];
     private const REQUIRED_FONTS = ['heading', 'body'];
+    private const OPTIONAL_FONTS = ['accent'];
 
     /** @var array{contentSize:string,wideSize:string} */
     private const FALLBACK_LAYOUT_WIDTHS = [
@@ -451,6 +454,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         [$theme, $colorWarnings] = self::repairColors($theme, $preferred);
         $preferredType = is_array($direction['type'] ?? null) ? $direction['type'] : [];
         [$theme, $fontWarnings] = self::repairFonts($theme, $preferredType);
+        [$theme, $accentCaptionWarnings] = self::repairAccentCaption($theme);
         [$theme, $sizeWarnings] = self::repairFontSizes($theme);
 
         // Last: the scaffold references the preset slugs repaired above. The
@@ -466,6 +470,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $layoutWarnings,
             $colorWarnings,
             $fontWarnings,
+            $accentCaptionWarnings,
             $sizeWarnings,
             $scaffoldWarnings,
             $groupPaddingWarnings,
@@ -1423,7 +1428,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     {
         $warnings = [];
         $preferred = [];
-        foreach (self::REQUIRED_FONTS as $slot) {
+        foreach (array_merge(self::REQUIRED_FONTS, self::OPTIONAL_FONTS) as $slot) {
             $typeSlot = is_array($preferredType[$slot] ?? null) ? $preferredType[$slot] : [];
             $family = is_string($typeSlot['family'] ?? null) ? trim($typeSlot['family']) : '';
             if (
@@ -1487,8 +1492,64 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                 ? "theme.json fontFamilies missing slug '{$needed}'; filled from designDirection.json with {$stack}"
                 : "theme.json fontFamilies missing slug '{$needed}'; filled with the system stack";
         }
+
+        foreach (self::OPTIONAL_FONTS as $optional) {
+            if (!isset($preferred[$optional]) || in_array($optional, array_column($families, 'slug'), true)) {
+                continue;
+            }
+            $stack = self::replacePrimaryFamily('cursive, system-ui, sans-serif', $preferred[$optional]);
+            $families[] = ['slug' => $optional, 'name' => ucfirst($optional), 'fontFamily' => $stack];
+            $warnings[] = "theme.json fontFamilies missing slug '{$optional}'; filled from designDirection.json with {$stack}";
+        }
+
         $theme['settings']['typography']['fontFamilies'] = $families;
         return [$theme, $warnings];
+    }
+
+    /**
+     * When an accent family shipped, captions and image credits use it so
+     * the third face is visible even if a section forgot fontFamily:accent.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>}
+     */
+    public static function repairAccentCaption(array $theme): array
+    {
+        $hasAccent = false;
+        foreach ($theme['settings']['typography']['fontFamilies'] ?? [] as $entry) {
+            if (is_array($entry) && ($entry['slug'] ?? '') === 'accent') {
+                $family = is_string($entry['fontFamily'] ?? null) ? trim($entry['fontFamily']) : '';
+                $hasAccent = $family !== '';
+                break;
+            }
+        }
+        if (!$hasAccent) {
+            return [$theme, []];
+        }
+        if (!is_array($theme['styles'] ?? null)) {
+            $theme['styles'] = [];
+        }
+        if (!is_array($theme['styles']['elements'] ?? null)) {
+            $theme['styles']['elements'] = [];
+        }
+        if (!is_array($theme['styles']['elements']['caption'] ?? null)) {
+            $theme['styles']['elements']['caption'] = [];
+        }
+        if (!is_array($theme['styles']['elements']['caption']['typography'] ?? null)) {
+            $theme['styles']['elements']['caption']['typography'] = [];
+        }
+        $theme['styles']['elements']['caption']['typography']['fontFamily'] = 'var:preset|font-family|accent';
+        if (!is_array($theme['styles']['blocks'] ?? null)) {
+            $theme['styles']['blocks'] = [];
+        }
+        if (!is_array($theme['styles']['blocks']['core/image'] ?? null)) {
+            $theme['styles']['blocks']['core/image'] = [];
+        }
+        if (!is_array($theme['styles']['blocks']['core/image']['typography'] ?? null)) {
+            $theme['styles']['blocks']['core/image']['typography'] = [];
+        }
+        $theme['styles']['blocks']['core/image']['typography']['fontFamily'] = 'var:preset|font-family|accent';
+        return [$theme, []];
     }
 
     private static function replacePrimaryFamily(string $stack, string $family): string

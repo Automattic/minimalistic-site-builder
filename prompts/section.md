@@ -14,7 +14,7 @@ Rules:
     gallery — photo grids with proper gutters; set `"columns"` (2–4) and it handles responsive wrapping. Better than hand-built image columns for photo-led sections.
 - Reference theme.json presets by slug:
     colors via "backgroundColor" / "textColor" using slugs: base, contrast, primary, secondary, accent
-    fonts via "fontFamily" using slugs: heading, body
+    fonts via "fontFamily" using slugs: heading, body, and `accent` only when the DESIGN DIRECTION Type fact includes an accent family (flavor names, prices, folio, numerals — never running copy)
     font sizes via "fontSize" using slugs: caption, body, lead, heading, section-title, display (e.g. "fontSize":"display" → class `has-display-font-size`)
   Example: <!-- wp:heading {"level":2,"fontFamily":"heading","textColor":"primary"} --><h2 class="wp-block-heading has-heading-font-family has-primary-color has-text-color">…</h2><!-- /wp:heading -->
 - ALL text sizing comes from the fontSizes presets via the "fontSize" attribute. NEVER hardcode a font size — no raw values or `clamp()` in `"style":{"typography":{"fontSize":...}}` and no hand-written `font-size:` inline styles. The scale (including the masthead-scale `display` step) already lives in theme.json; if no preset genuinely fits a rare case, reference a preset variable through the block attribute (`"style":{"typography":{"fontSize":"var:preset|font-size|<slug>"}}`) — never a raw value.
