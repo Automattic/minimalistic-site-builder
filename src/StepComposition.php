@@ -46,8 +46,8 @@ use Automattic\SiteBuild\Steps\ValidateThemeStep;
  */
 final class StepComposition
 {
-    /** Artifacts produced before the runtime fallback enters the legacy tail. */
-    private const LEGACY_TAIL_SEEDS = [
+    /** Artifacts produced before the runtime fallback enters the blocks tail. */
+    private const BLOCKS_TAIL_SEEDS = [
         'meta.json',
         'theme/style.css',
         'theme/readme.txt',
@@ -71,8 +71,9 @@ final class StepComposition
     }
 
     /**
-     * The package default / CLI composition. HTML-first unless the explicit
-     * SITE_BUILD_LEGACY=1 escape hatch selects the unchanged legacy graph.
+     * The package default / CLI composition: the blocks graph, where the model
+     * authors block markup directly. The explicit SITE_BUILD_HTML_FIRST=1
+     * escape hatch selects the HTML-first graph instead.
      *
      * @param array<string, string> $models       step id => model id overrides
      * @param array<string, ?float> $temperatures step id => temperature overrides
@@ -85,10 +86,37 @@ final class StepComposition
         ?BlockFixer $blockFixer = null,
         ?FontFetcher $fontFetcher = null,
     ): self {
-        if (Env::get('SITE_BUILD_LEGACY') === '1') {
-            return self::legacy($llm, $renderer, $models, $temperatures, $blockFixer, $fontFetcher);
-        }
+        return self::htmlFirstSelected()
+            ? self::htmlFirst($llm, $renderer, $models, $temperatures, $blockFixer, $fontFetcher)
+            : self::blocks($llm, $renderer, $models, $temperatures, $blockFixer, $fontFetcher);
+    }
 
+    /**
+     * Whether the caller opted into the HTML-first graph. Single owner of the
+     * env key so the facade's fallback wiring can't disagree with default().
+     */
+    public static function htmlFirstSelected(): bool
+    {
+        return Env::get('SITE_BUILD_HTML_FIRST') === '1';
+    }
+
+    /**
+     * The HTML-first graph: the model authors an HTML+CSS design, and
+     * transform-site converts it to block markup deterministically. Opt-in via
+     * SITE_BUILD_HTML_FIRST=1; SiteBuilder pairs it with blocksTail() so a
+     * malformed design falls back instead of failing the build.
+     *
+     * @param array<string, string> $models       step id => model id overrides
+     * @param array<string, ?float> $temperatures step id => temperature overrides
+     */
+    public static function htmlFirst(
+        Llm $llm,
+        PromptRenderer $renderer,
+        array $models = [],
+        array $temperatures = [],
+        ?BlockFixer $blockFixer = null,
+        ?FontFetcher $fontFetcher = null,
+    ): self {
         $blockFixer ??= BlockFixers::default();
         $models = array_merge(StepDefaults::models(), $models);
         $temps = array_merge(StepDefaults::temperatures(), $temperatures);
@@ -187,13 +215,13 @@ final class StepComposition
     }
 
     /**
-     * Full pre-HTML-first composition. Keep ordering and constructor options
-     * identical for the SITE_BUILD_LEGACY=1 escape hatch.
+     * The blocks graph: sections are generated as block markup directly, with
+     * no HTML design document in between. This is what default() returns.
      *
      * @param array<string, string> $models       step id => model id overrides
      * @param array<string, ?float> $temperatures step id => temperature overrides
      */
-    public static function legacy(
+    public static function blocks(
         Llm $llm,
         PromptRenderer $renderer,
         array $models = [],
@@ -305,13 +333,14 @@ final class StepComposition
     }
 
     /**
-     * Legacy graph after the shared design-direction prefix. Its seeds are the
-     * common artifacts already produced by the primary pipeline.
+     * The blocks graph after the shared design-direction prefix, used as the
+     * HTML-first runtime fallback. Its seeds are the common artifacts already
+     * produced by the primary pipeline.
      *
      * @param array<string, string> $models       step id => model id overrides
      * @param array<string, ?float> $temperatures step id => temperature overrides
      */
-    public static function legacyTail(
+    public static function blocksTail(
         Llm $llm,
         PromptRenderer $renderer,
         array $models = [],
@@ -319,14 +348,14 @@ final class StepComposition
         ?BlockFixer $blockFixer = null,
         ?FontFetcher $fontFetcher = null,
     ): self {
-        $steps = self::legacy($llm, $renderer, $models, $temperatures, $blockFixer, $fontFetcher)->steps();
+        $steps = self::blocks($llm, $renderer, $models, $temperatures, $blockFixer, $fontFetcher)->steps();
         foreach ($steps as $index => $step) {
             if ($step->id() === 'design-direction') {
-                return new self(array_slice($steps, $index + 1), self::LEGACY_TAIL_SEEDS);
+                return new self(array_slice($steps, $index + 1), self::BLOCKS_TAIL_SEEDS);
             }
         }
 
-        throw new \LogicException('StepComposition::legacyTail: design-direction boundary missing');
+        throw new \LogicException('StepComposition::blocksTail: design-direction boundary missing');
     }
 
     /** @return Step[] */

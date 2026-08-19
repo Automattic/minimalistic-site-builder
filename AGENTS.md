@@ -16,19 +16,19 @@ We don't need to plan for backwards compatibility. This is a green field project
 
 ## Generation step maps
 
-Default HTML-first graph:
+Default blocks graph (`StepComposition::default()` → `StepComposition::blocks()`), where the model authors block markup directly:
 
-`scaffold-theme -> scaffold-plugin -> refine-prompt -> site-spec -> apply-identity -> design-direction -> homepage-design -> theme-json -> inner-pages-design -> assign-image-sources -> transform-site -> section-rhythm -> collect-images -> normalize-layout -> header-hero -> contrast-fix -> motion-sanity -> fix-blocks -> assemble-pages -> page-styles -> custom-motion -> fonts-php -> finalize-theme -> validate-theme`
+`scaffold-theme -> scaffold-plugin -> refine-prompt -> site-spec -> apply-identity -> design-direction -> (theme-json + page-plan, concurrent) -> sections -> section-rhythm -> copy-dedupe -> collect-images -> normalize-layout -> header-hero -> contrast-fix -> motion-sanity -> fix-blocks -> assemble-pages -> page-styles -> custom-motion -> bundle-fonts -> fonts-php -> finalize-theme -> validate-theme`
 
-`theme-json` reads CSS-derived design tokens. `assign-image-sources` gives every design `<img>` the theme asset path the rest of the image pipeline generates into. `contrast-fix` and `motion-sanity` stay addressable but skip only in explicit HTML-first composition mode. `normalize-layout`, `fix-blocks`, and `validate-theme` skip the width rules that assume the theme owns page width — on this path the carried design CSS does. `page-styles` scrubs and merges generated CSS, then runs `CssContrastCheck` and applies safe tail-only adjustments against delivered markup. Stale `design/site.css` bytes never select pipeline behavior.
+Set `SITE_BUILD_HTML_FIRST=1` for the HTML-first graph (`StepComposition::htmlFirst()`), where the model authors an HTML+CSS design that `transform-site` converts to blocks:
 
-Set `SITE_BUILD_LEGACY=1` for the unchanged legacy graph:
+`scaffold-theme -> scaffold-plugin -> refine-prompt -> site-spec -> apply-identity -> design-direction -> design-preview -> theme-json -> inner-pages-design -> splice-home-design -> assign-image-sources -> transform-site -> resolve-nav-links -> section-rhythm -> section-layout -> collect-images -> normalize-layout -> header-hero -> contrast-fix -> motion-sanity -> fix-blocks -> assemble-pages -> fix-pages -> page-styles -> custom-motion -> fonts-php -> finalize-theme -> validate-theme`
 
-`scaffold-theme -> scaffold-plugin -> refine-prompt -> site-spec -> apply-identity -> design-direction -> (theme-json + page-plan, concurrent) -> sections -> section-rhythm -> collect-images -> normalize-layout -> header-hero -> contrast-fix -> motion-sanity -> fix-blocks -> assemble-pages -> page-styles -> custom-motion -> fonts-php -> finalize-theme -> validate-theme`
+On that path `theme-json` reads CSS-derived design tokens. `assign-image-sources` gives every design `<img>` the theme asset path the rest of the image pipeline generates into. `contrast-fix` and `motion-sanity` stay addressable but skip only in explicit HTML-first composition mode. `normalize-layout`, `fix-blocks`, and `validate-theme` skip the width rules that assume the theme owns page width — here the carried design CSS does. `page-styles` scrubs and merges generated CSS, then runs `CssContrastCheck` and applies safe tail-only adjustments against delivered markup. Stale `design/site.css` bytes never select pipeline behavior.
 
-Default `SiteBuilder` wraps the HTML-first graph with runtime fallback. A `MalformedDesignException` from `homepage-design` keeps completed artifacts through `design-direction`, records an actionable warning, then runs the unchanged legacy tail. Other exceptions propagate.
+Only the HTML-first graph gets a runtime fallback: with `SITE_BUILD_HTML_FIRST=1`, `SiteBuilder` wraps it in `FallbackBuildPipeline`, so a `MalformedDesignException` from the design step keeps completed artifacts through `design-direction`, records an actionable warning, then runs `StepComposition::blocksTail()`. Other exceptions propagate. The default blocks graph generates no design document, so it is an unwrapped `Pipeline`.
 
-For mixed multi-page builds, each `design/<slug>.failed` marker routes only that slug through scoped legacy page planning and section generation. Other pages and shared transformed chrome stay on the HTML-first path; `page-styles` ignores failed-page source HTML.
+For mixed multi-page HTML-first builds, each `design/<slug>.failed` marker routes only that slug through scoped blocks-path page planning and section generation. Other pages and shared transformed chrome stay on the HTML-first path; `page-styles` ignores failed-page source HTML.
 
 ## Generated-content validation: fix, degrade, warn — never crash the build
 

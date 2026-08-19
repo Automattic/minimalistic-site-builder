@@ -13,7 +13,7 @@ final class FallbackBuildPipeline implements BuildPipeline
 {
     public function __construct(
         private BuildPipeline $primary,
-        private BuildPipeline $legacyTail,
+        private BuildPipeline $blocksTail,
     ) {}
 
     public function stepIds(): array
@@ -68,11 +68,11 @@ final class FallbackBuildPipeline implements BuildPipeline
             $project->addWarnings('homepage-design', [
                 'file design/home.html block_path homepage-design '
                     . 'authored_value HTML-first homepage design '
-                    . 'delivered_value legacy section pipeline '
-                    . 'disposition legacy_reroute; error ' . $error->getMessage(),
+                    . 'delivered_value blocks section pipeline '
+                    . 'disposition blocks_reroute; error ' . $error->getMessage(),
             ]);
 
-            $this->legacyTail->runThrough($project, $untilId, $reporter, $onStart, $fromId);
+            $this->blocksTail->runThrough($project, $untilId, $reporter, $onStart, $fromId);
         }
     }
 }

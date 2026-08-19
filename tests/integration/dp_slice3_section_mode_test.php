@@ -137,9 +137,9 @@ function dp3_integration_section(string $slug, string $title, string $archetype)
 test('TG5 section mode stitches whole-page HTML then real transform and assemble preserve outline order', function () {
     $tmp = sys_get_temp_dir() . '/builder_dp_slice3_integration_' . uniqid();
     $previousMode = getenv('SITE_BUILD_GEN_UNIT');
-    $previousLegacy = getenv('SITE_BUILD_LEGACY');
+    $previousHtmlFirst = getenv('SITE_BUILD_HTML_FIRST');
     putenv('SITE_BUILD_GEN_UNIT=section');
-    putenv('SITE_BUILD_LEGACY');
+    putenv('SITE_BUILD_HTML_FIRST=1');
     try {
         assert_eq(
             'f7411abb1126b41311ae8a98f862a61d3303e8e544fd24f7d09847f2a7e29290',
@@ -222,9 +222,9 @@ test('TG5 section mode stitches whole-page HTML then real transform and assemble
         $previousMode === false
             ? putenv('SITE_BUILD_GEN_UNIT')
             : putenv('SITE_BUILD_GEN_UNIT=' . $previousMode);
-        $previousLegacy === false
-            ? putenv('SITE_BUILD_LEGACY')
-            : putenv('SITE_BUILD_LEGACY=' . $previousLegacy);
+        $previousHtmlFirst === false
+            ? putenv('SITE_BUILD_HTML_FIRST')
+            : putenv('SITE_BUILD_HTML_FIRST=' . $previousHtmlFirst);
         if (is_dir($tmp)) {
             exec('rm -rf ' . escapeshellarg($tmp));
         }
