@@ -2,6 +2,15 @@
     {
         "project": "silver-comet",
         "slug": "silver-comet",
+        "asset": "silver-comet-playground-20260819T225516Z.zip",
+        "artifact_url": "https://raw.githubusercontent.com/Automattic/minimalistic-site-builder/playground-artifacts/silver-comet-playground-20260819T225516Z.zip",
+        "playground_url": "https://playground.wordpress.net/?blueprint-url=https%3A%2F%2Fraw.githubusercontent.com%2FAutomattic%2Fminimalistic-site-builder%2Fplayground-artifacts%2Fsilver-comet-playground-20260819T225516Z.zip",
+        "size_bytes": 38893870,
+        "created_at": "2026-08-19T22:55:26+00:00"
+    },
+    {
+        "project": "silver-comet",
+        "slug": "silver-comet",
         "asset": "silver-comet-playground-20260819T225352Z.zip",
         "artifact_url": "https://raw.githubusercontent.com/Automattic/minimalistic-site-builder/playground-artifacts/silver-comet-playground-20260819T225352Z.zip",
         "playground_url": "https://playground.wordpress.net/?blueprint-url=https%3A%2F%2Fraw.githubusercontent.com%2FAutomattic%2Fminimalistic-site-builder%2Fplayground-artifacts%2Fsilver-comet-playground-20260819T225352Z.zip",
