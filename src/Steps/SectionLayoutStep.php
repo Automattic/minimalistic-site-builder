@@ -10,6 +10,7 @@ use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\TransformArtifacts;
 use Automattic\SiteBuild\Units\GeneratedMarkup;
 
 /**
@@ -610,7 +611,24 @@ final class SectionLayoutStep implements Step
      */
     private static function authoredWidthDeclarations(Project $project): array
     {
-        if (!$project->exists('design/site.css')) {
+        // A design may declare its measure inline, on an element no selector can
+        // reach. The transformer carries that inline geometry into a generated
+        // `.be-inline-geometry-*` rule, so it is a stylesheet declaration by the
+        // time this step runs — just not one in design/site.css. Reading only
+        // site.css leaves such a child unclassified, and WordPress's constrained
+        // layout then centres it with `margin-inline:auto !important`, which
+        // outranks the block's own non-important inline margin.
+        //
+        // The carried sheet ships before the author's, so it is read first and
+        // the author's declaration order continues past it: same document order,
+        // same cascade outcome.
+        $sources = [];
+        foreach ([TransformArtifacts::CARRIED_CSS_BEFORE_AUTHOR, 'design/site.css'] as $path) {
+            if ($project->exists($path)) {
+                $sources[] = $project->readText($path);
+            }
+        }
+        if ($sources === []) {
             return [];
         }
 
@@ -626,7 +644,9 @@ final class SectionLayoutStep implements Step
             'margin-inline-end',
         ];
         $parsed = [];
-        foreach (CssChecks::scanDeclarations($project->readText('design/site.css')) as $declaration) {
+        $orderBase = 0;
+        foreach ($sources as $css) {
+        foreach (CssChecks::scanDeclarations($css) as $declaration) {
             $property = strtolower($declaration['property']);
             if ($declaration['kind'] !== 'style'
                 || !$declaration['structurallySafe']
@@ -655,13 +675,15 @@ final class SectionLayoutStep implements Step
                     'value' => $priority['value'],
                     'important' => $priority['important'],
                     'specificity' => self::selectorSpecificity($selector),
-                    'order' => $declaration['start'],
+                    'order' => $orderBase + $declaration['start'],
                     // Static block alignment cannot represent a scope this
                     // build cannot settle by width alone. A matching row makes
                     // that target unprovable and ineligible for promotion.
                     'unprovable' => $scope === 'unprovable',
                 ];
             }
+        }
+            $orderBase += strlen($css) + 1;
         }
         return $parsed;
     }
