@@ -232,6 +232,30 @@ test('collect-images recovers a comment-wrapped JSON-object src placeholder', fu
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('collect-images recovers a comment-wrapped spec in a cover url field', function () {
+    [$project, $tmp] = collect_fixture();
+    // Same wrapper creativity as the src= shape above, but landing in the
+    // cover's JSON "url" field. The syntax patterns capture whole source
+    // values, so a wrapper proven in one syntax is covered in all of them
+    // without a new rule.
+    $project->writeText('theme/parts/band.html',
+        '<!-- wp:cover {"url":"<!-- AI_IMAGE: misty harbor at dawn | full-bleed band | photorealistic | landscape -->"} -->'
+        . '<div class="wp-block-cover"></div><!-- /wp:cover -->'
+    );
+
+    (new CollectImagesStep())->run($project);
+
+    $images = $project->readJson('images.json');
+    assert_eq(1, count($images));
+    assert_contains('misty harbor at dawn', $images[0]['subject']);
+    assert_eq('landscape', $images[0]['aspectRatio']);
+    $markup = $project->readText('theme/parts/band.html');
+    assert_contains('"url":"' . $images[0]['src'] . '"', $markup);
+    assert_true(!str_contains($markup, 'AI_IMAGE:'), 'comment-wrapped url normalized');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('collect-images recovers every source shape the validator flags', function () {
     [$project, $tmp] = collect_fixture();
     // Leading whitespace inside the quoted values, plus an unquoted src —

@@ -514,8 +514,7 @@ final class CollectImagesStep implements Step
         /** @var array<string,array<string,mixed>> $byPrompt semantic prompt => spec */
         $byPrompt = [];
 
-        $imageFor = static function (string $literal, bool $json) use (&$byPrompt, $canonicalSrcBySubject): ?array {
-            $semantic = self::decodeRecoveredLiteral($literal, $json);
+        $imageFor = static function (string $semantic) use (&$byPrompt, $canonicalSrcBySubject): ?array {
             $body = trim(substr($semantic, strlen('AI_IMAGE:')));
             $promptKey = 'AI_IMAGE:' . $body;
             if (!isset($byPrompt[$promptKey])) {
@@ -537,50 +536,47 @@ final class CollectImagesStep implements Step
             return $byPrompt[$promptKey];
         };
 
-        // Each rule catches one shape the model emits for an image source and
-        // rewrites it to the resolved asset path. They share the resolver above
-        // and one skip-on-unrecoverable contract; only the match position, the
-        // JSON-vs-attribute decoding, and how the path is spliced back differ.
-        // The model keeps finding new ways to malform a source, so adding the
-        // next shape is a new entry here, not another copy of the replace loop.
-        // The passes run in listed order over the same content, but the order is
-        // incidental: each consumes the AI_IMAGE literal it rewrites, so no pass
-        // can see a source another already repaired. Without a 'rewrite', a rule
-        // splices the resolved path between its captured prefix and suffix; the
-        // one shape with neither gives its own (matched, resolved image) => src.
+        // One rule per SOURCE SYNTAX, not per malformed shape. There are only
+        // three ways this grammar writes a source value (a JSON "url"/"src"
+        // field, a quoted src= attribute, an unquoted src= attribute), so each
+        // pattern captures the whole value for its syntax and stays frozen;
+        // whether that value is a spec, and under which wrappers (comments,
+        // entities, whitespace), is decided by specFromSourceValue(). The
+        // model's next creative wrapper lands there as plain string handling,
+        // not as another regex. A value that is a real path no-ops.
+        // The passes run in listed order over the same content, but the order
+        // is incidental: each consumes the AI_IMAGE literal it rewrites, so no
+        // pass can see a source another already repaired. Without a 'rewrite',
+        // a rule splices the resolved path between its captured prefix and
+        // suffix; the one shape with neither gives its own resolved src.
         $spliceInPlace = static fn (array $match, array $image): string =>
             $match['prefix'] . $image['src'] . $match['suffix'];
         $rules = [
-            // Block-comment JSON. Match "src" as well as "url" so any block that
-            // puts the prompt in a JSON source field gets the same repair.
-            // Leading whitespace inside the value is tolerated (and dropped on
-            // rewrite) so every shape ThemeValidator flags as a JSON source is
-            // also repaired.
+            // JSON source field in a block comment. Match "src" as well as
+            // "url" so any block that puts the prompt in a JSON source field
+            // gets the same repair.
             [
-                'pattern' => '/(?P<prefix>"(?:url|src)"\s*:\s*")\s*'
-                    . '(?P<lit>AI_IMAGE:(?:[^"\\\\]|\\\\.)*)(?P<suffix>")/is',
+                'pattern' => '/(?P<prefix>"(?:url|src)"\s*:\s*")'
+                    . '(?P<raw>(?:[^"\\\\]|\\\\.)*)(?P<suffix>")/is',
                 'json'    => true,
             ],
-            // Rendered HTML. Keep the replacement scoped to src= so an identical
-            // AI_IMAGE alt remains available to the canonical parser above.
-            // Leading whitespace inside the quotes is tolerated, mirroring the
-            // validator's detection. A leading <!-- ... --> is tolerated too:
-            // the model sometimes wraps the whole spec in an HTML comment inside
-            // the src attribute (src="<!-- AI_IMAGE: {…} -->"), which slips past
-            // the quote-anchored form and the canonical parser. The comment is
-            // dropped on rewrite along with everything but the resolved path.
+            // Quoted src= attribute in rendered HTML. Keep the replacement
+            // scoped to src= so an identical AI_IMAGE alt remains available to
+            // the canonical parser above.
             [
-                'pattern' => '/(?P<prefix>\bsrc\s*=\s*(?P<quote>["\']))\s*(?:<!--\s*)?'
-                    . '(?P<lit>AI_IMAGE:.*?)(?:\s*-->)?(?P<suffix>\k<quote>)/is',
+                'pattern' => '/(?P<prefix>\bsrc\s*=\s*(?P<quote>["\']))'
+                    . '(?P<raw>.*?)(?P<suffix>\k<quote>)/is',
                 'json'    => false,
             ],
             // Unquoted src=AI_IMAGE:… — the value necessarily ends at the first
             // whitespace or ">", so a piped spec loses everything past the
-            // subject's first word; a truncated recovery still beats shipping
-            // the raw prompt (or, with images requested, failing the whole build
-            // at the gate). The rewrite adds the quotes the model omitted.
+            // subject's first word (and no wrapper can survive in it, which is
+            // why this one keeps its AI_IMAGE anchor); a truncated recovery
+            // still beats shipping the raw prompt (or, with images requested,
+            // failing the whole build at the gate). The rewrite adds the
+            // quotes the model omitted.
             [
-                'pattern' => '/\bsrc\s*=\s*(?P<lit>AI_IMAGE:[^\s>"\'`=]*)/i',
+                'pattern' => '/\bsrc\s*=\s*(?P<raw>AI_IMAGE:[^\s>"\'`=]*)/i',
                 'json'    => false,
                 'rewrite' => static fn (array $match, array $image): string =>
                     'src="' . $image['src'] . '"',
@@ -592,7 +588,11 @@ final class CollectImagesStep implements Step
             $content = (string) preg_replace_callback(
                 $rule['pattern'],
                 static function (array $match) use ($imageFor, $rule, $rewrite): string {
-                    $image = $imageFor($match['lit'], $rule['json']);
+                    $spec = self::specFromSourceValue($match['raw'], $rule['json']);
+                    if ($spec === null) {
+                        return $match[0];
+                    }
+                    $image = $imageFor($spec);
                     return $image === null ? $match[0] : $rewrite($match, $image);
                 },
                 $content
@@ -612,6 +612,22 @@ final class CollectImagesStep implements Step
             }
         }
         return trim(html_entity_decode($literal, ENT_QUOTES | ENT_HTML5));
+    }
+
+    /**
+     * The AI_IMAGE spec carried by one source value, or null when the value
+     * is an ordinary path. All wrapper creativity is normalized away HERE, in
+     * plain string handling (JSON escapes, HTML entities, an HTML comment
+     * wrapped around the spec, stray whitespace), so the source-syntax
+     * patterns in recoverPlaceholders() never change for a new wrapper.
+     */
+    private static function specFromSourceValue(string $raw, bool $json): ?string
+    {
+        $value = self::decodeRecoveredLiteral($raw, $json);
+        // The model sometimes wraps the whole spec in an HTML comment inside
+        // the value (src="<!-- AI_IMAGE: {…} -->"); peel it and re-trim.
+        $value = trim((string) preg_replace('/\A<!--\s*|\s*-->\z/', '', $value));
+        return str_starts_with($value, 'AI_IMAGE:') ? $value : null;
     }
 
     /**
