@@ -49,7 +49,7 @@ Return exactly one closed root `<section id="{{section_slug}}">...</section>` an
 
 Use only headings, paragraphs, lists, block quotes, code, tables, images, buttons, links, and semantic or presentational wrappers such as `section`, `nav`, `article`, `aside`, `div`, and `span`.
 
-There are no forms or form controls, no SVG, no custom elements, and no JavaScript. Do not emit `<form>`, `<input>`, `<textarea>`, `<select>`, `<button>` with scripted behavior, `<svg>`, inline event handlers, or `javascript:` URLs. Express layout, ornament, and interaction states with the established HTML classes only.
+There are no forms or form controls, no SVG, no custom elements, and no JavaScript. Do not emit `<form>`, `<input>`, `<textarea>`, `<select>`, `<button>` with scripted behavior, `<svg>`, inline event handlers, or `javascript:` URLs. Express layout, ornament, and interaction states with the established HTML classes only. A form the brief or plan genuinely asks for (contact, booking, RSVP, signup) must NOT silently disappear because of this rule: reserve its place with a `<div class="jetpack-form-placeholder">` containing the heading the form would have and one short line naming what it will collect (e.g. "Booking form: name, email, message") — a later build step replaces that placeholder with the working form.
 
 Use `<button>` only for a real non-scripted action. Prefer an `<a>` link styled as a button for navigation or a CTA.
 

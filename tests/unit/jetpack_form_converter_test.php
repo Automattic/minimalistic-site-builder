@@ -73,6 +73,14 @@ test('converter turns the live raw mailto form into canonical Jetpack markup', f
     assert_eq(1, count($result['notes']));
     assert_contains('mailto action dropped', $result['notes'][0]);
 
+    // Content the model wrote INSIDE the form survives, in place, as blocks.
+    assert_contains('<!-- wp:paragraph --><p>Los campos marcados con * son obligatorios.</p><!-- /wp:paragraph -->', $markup);
+
+    // The invented recipient is a recorded loss, not a silent one.
+    assert_eq(1, count($result['warnings']));
+    assert_contains('recipient "tallerdebarro@tallerdebarro.com" removed', $result['warnings'][0]);
+    assert_contains("admin email", $result['warnings'][0]);
+
     // Fixed point: converted markup contains no raw form to convert.
     assert_eq(['markup' => $markup, 'notes' => [], 'warnings' => []], JetpackFormConverter::fix($markup));
 });
@@ -127,6 +135,12 @@ test('converter preserves non-form content sharing the wp:html block', function 
     assert_contains('Tus datos no se comparten.', $result['markup']);
     assert_contains('<!-- wp:jetpack/contact-form -->', $result['markup']);
     assert_true(!str_contains($result['markup'], '<form'), 'form removed, siblings kept');
+
+    // Document order survives: intro before the form, legal text after it.
+    $intro = strpos($result['markup'], 'Escribinos');
+    $formAt = strpos($result['markup'], 'wp:jetpack/contact-form');
+    $legal = strpos($result['markup'], 'Tus datos');
+    assert_true($intro < $formAt && $formAt < $legal, 'original order preserved');
 });
 
 test('converter emits comment-safe attributes for hostile label text', function () {
@@ -188,7 +202,8 @@ test('converter warns about lossy edges: file inputs and authored non-mailto act
 
     assert_eq(2, count($result['warnings']));
     assert_contains('file upload input', $result['warnings'][0]);
-    assert_contains('replaced the authored action "/reservas"', $result['warnings'][1]);
+    assert_contains('authored action "/reservas" replaced', $result['warnings'][1]);
+    assert_contains('form "/reservas"', $result['warnings'][1]);
     assert_true(!str_contains($result['markup'], 'type="file"'), 'file input not carried over');
 });
 
@@ -218,4 +233,88 @@ test('converter survives a wp:html nested inside another wp:html', function () {
     assert_true(!$reparsed->hasMismatchedDelimiters(), 'no mismatched delimiters');
     assert_contains('<!-- wp:jetpack/contact-form -->', $result['markup']);
     assert_true(!str_contains($result['markup'], '<form'), 'the nested form converted exactly once');
+});
+
+test('converter handles each form independently and leaves refused ones in place', function () {
+    $markup = '<!-- wp:html -->'
+        . '<form role="search" action="/s"><input type="text" name="q"><button type="submit">Buscar</button></form>'
+        . '<p class="between">Entre los dos formularios.</p>'
+        . '<form action="mailto:x@x.example"><label for="e">Email</label>'
+        . '<input type="email" id="e" name="e"><button type="submit">Enviar</button></form>'
+        . '<!-- /wp:html -->';
+
+    $result = JetpackFormConverter::fix($markup);
+
+    // The search form survives untouched, in its original position, before
+    // the interstitial text; the mailto form converts after it.
+    $search = strpos($result['markup'], 'role="search"');
+    $between = strpos($result['markup'], 'Entre los dos');
+    $jetpack = strpos($result['markup'], 'wp:jetpack/contact-form');
+    assert_true($search !== false, 'refused search form kept');
+    assert_true($jetpack !== false, 'convertible form converted');
+    assert_true($search < $between && $between < $jetpack, 'document order preserved');
+});
+
+test('converter keeps privacy text and links written inside the form', function () {
+    $markup = '<!-- wp:html --><form action="mailto:x@x.example" aria-label="Reservas">'
+        . '<h3>Reservá tu lugar</h3>'
+        . '<label for="e">Email</label><input type="email" id="e" name="e" required>'
+        . '<p>Al enviar aceptás nuestra <a href="/privacidad">política de privacidad</a>.</p>'
+        . '<button type="submit">Enviar</button></form><!-- /wp:html -->';
+
+    $result = JetpackFormConverter::fix($markup);
+
+    assert_contains('<!-- wp:heading {"level":3} --><h3 class="wp-block-heading">Reservá tu lugar</h3><!-- /wp:heading -->', $result['markup']);
+    assert_contains('<a href="/privacidad">política de privacidad</a>', $result['markup']);
+    // And it lives INSIDE the contact form, between the field and the submit.
+    $field = strpos($result['markup'], 'jetpack/field-email');
+    $privacy = strpos($result['markup'], 'política de privacidad');
+    $submit = strpos($result['markup'], 'form-button-submit');
+    assert_true($field < $privacy && $privacy < $submit, 'in-form content stays in place');
+});
+
+test('converter reports constraints it cannot carry: limits, patterns, prefills, preselections', function () {
+    $markup = '<!-- wp:html --><form action="mailto:x@x.example" id="reserva">'
+        . '<label for="p">Personas</label><input type="number" id="p" name="p" min="1" max="8">'
+        . '<label for="n">Nombre</label><input type="text" id="n" name="n" value="Juan">'
+        . '<label for="c">Clase</label><select id="c" name="c">'
+        . '<option>Torno</option><option selected>Modelado</option></select>'
+        . '<label for="ok">Suscribirme</label><input type="checkbox" id="ok" name="ok" checked>'
+        . '<button type="submit">Enviar</button></form><!-- /wp:html -->';
+
+    $result = JetpackFormConverter::fix($markup);
+
+    assert_contains('<!-- wp:jetpack/field-number {"label":"Personas"} /-->', $result['markup']);
+    $all = implode("\n", $result['warnings']);
+    assert_contains('form "reserva": min="1"', $all);
+    assert_contains('form "reserva": max="8"', $all);
+    assert_contains('pre-filled value "Juan"', $all);
+    assert_contains('preselected choice "Modelado"', $all);
+    assert_contains('"Suscribirme" was pre-checked', $all);
+});
+
+test('converter refuses the WordPress search-field shape', function () {
+    // No role attribute, no type=search: just the `s` query field. Converting
+    // it would email visitors\' search words to the owner.
+    $markup = '<!-- wp:html --><form action="/" method="get">'
+        . '<label for="s">Buscar</label><input type="text" id="s" name="s">'
+        . '<button type="submit">Ir</button></form><!-- /wp:html -->';
+
+    $result = JetpackFormConverter::fix($markup);
+
+    assert_eq($markup, $result['markup']);
+});
+
+test('converter reports dropped hidden values with their form and value', function () {
+    $markup = '<!-- wp:html --><form action="mailto:owner@invented.example" id="contacto">'
+        . '<input type="hidden" name="campaign" value="verano-2026">'
+        . '<label for="e">Email</label><input type="email" id="e" name="e">'
+        . '<button type="submit">Enviar</button></form><!-- /wp:html -->';
+
+    $result = JetpackFormConverter::fix($markup);
+
+    $all = implode("\n", $result['warnings']);
+    assert_contains('form "contacto": hidden field "campaign" (value "verano-2026") removed', $all);
+    assert_contains('recipient "owner@invented.example" removed', $all);
+    assert_contains("admin email", $all);
 });

@@ -1186,7 +1186,15 @@ final class ThemeValidator
     {
         foreach ($blocks->indices() as $index) {
             $attrs = $blocks->attrs($index) ?? [];
-            $isSubmit = ($blocks->name($index) === 'button' && ($attrs['type'] ?? null) === 'submit')
+            // The saved HTML is what visitors get, and a core/button whose
+            // attributes claim a submit control can still save an <a> — a
+            // link styled as a button submits nothing, so the delivered
+            // markup must contain the real element, not just the claim.
+            // jetpack/button is a void block rendered dynamically; its attrs
+            // ARE the delivered truth.
+            $isSubmit = ($blocks->name($index) === 'button'
+                    && ($attrs['type'] ?? null) === 'submit'
+                    && preg_match('/<button\b[^>]*\btype\s*=\s*["\']submit["\']/i', $blocks->ownHtml($index)) === 1)
                 || ($blocks->name($index) === 'jetpack/button' && ($attrs['element'] ?? null) === 'button');
             if (!$isSubmit) {
                 continue;

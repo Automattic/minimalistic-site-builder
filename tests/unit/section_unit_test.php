@@ -442,3 +442,16 @@ test('SectionUnit rejects malformed or unsupported section roles before calling 
         assert_eq(0, $llm->completeCalls, "{$case} role should fail before calling the LLM");
     }
 });
+
+test('design prompts preserve a requested form instead of silently dropping it', function () {
+    foreach ([
+        'prompts/homepage-design.md',
+        'prompts/home-body-design.md',
+        'prompts/inner-page-design.md',
+        'prompts/inner-section-design.md',
+    ] as $prompt) {
+        $text = file_get_contents(__DIR__ . '/../../' . $prompt);
+        assert_true(str_contains($text, 'jetpack-form-placeholder'), "$prompt reserves the form request");
+        assert_true(str_contains($text, 'must NOT silently disappear'), "$prompt names the rule");
+    }
+});

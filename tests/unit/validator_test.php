@@ -489,6 +489,27 @@ test('validator accepts Jetpack Forms block markup', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('validator rejects a submit claim whose saved HTML is a link', function () {
+    [$project, $tmp] = validator_project();
+
+    // Attributes claim a submit button, but the saved HTML is an anchor — a
+    // link styled as a button submits nothing.
+    $project->writeText('plugin/pages/contacto.html',
+        '<!-- wp:jetpack/contact-form --><div class="wp-block-jetpack-contact-form">'
+        . '<!-- wp:jetpack/field-email {"label":"Email","required":true} /-->'
+        . '<!-- wp:button {"tagName":"button","type":"submit","className":"form-button-submit is-submit"} -->'
+        . '<div class="wp-block-button form-button-submit is-submit">'
+        . '<a class="wp-block-button__link wp-element-button" href="/gracias">Enviar</a>'
+        . '</div><!-- /wp:button -->'
+        . '</div><!-- /wp:jetpack/contact-form -->'
+    );
+    $problems = ThemeValidator::validate($project);
+    assert_eq(1, count($problems));
+    assert_true(str_contains($problems[0], 'no working submit control'), 'anchor-saved submit flagged');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('validator flags a contact form whose submit control cannot submit', function () {
     [$project, $tmp] = validator_project();
 
