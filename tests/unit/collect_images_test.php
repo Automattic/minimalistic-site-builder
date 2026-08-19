@@ -228,6 +228,7 @@ test('collect-images recovers a comment-wrapped JSON-object src placeholder', fu
     assert_contains('src="' . $images[0]['src'] . '"', $markup);
     assert_true(!str_contains($markup, 'AI_IMAGE:'), 'comment-wrapped src normalized');
     assert_true(!str_contains($markup, '<!--'), 'wrapping comment dropped');
+    assert_eq([], \Automattic\SiteBuild\ThemeValidator::unresolvedImageSourceProblems($project));
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -252,6 +253,7 @@ test('collect-images recovers a comment-wrapped spec in a cover url field', func
     $markup = $project->readText('theme/parts/band.html');
     assert_contains('"url":"' . $images[0]['src'] . '"', $markup);
     assert_true(!str_contains($markup, 'AI_IMAGE:'), 'comment-wrapped url normalized');
+    assert_eq([], \Automattic\SiteBuild\ThemeValidator::unresolvedImageSourceProblems($project));
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

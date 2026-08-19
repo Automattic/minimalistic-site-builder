@@ -545,10 +545,14 @@ final class CollectImagesStep implements Step
         // model's next creative wrapper lands there as plain string handling,
         // not as another regex. A value that is a real path no-ops.
         // The passes run in listed order over the same content, but the order
-        // is incidental: each consumes the AI_IMAGE literal it rewrites, so no
-        // pass can see a source another already repaired. Without a 'rewrite',
-        // a rule splices the resolved path between its captured prefix and
-        // suffix; the one shape with neither gives its own resolved src.
+        // is incidental: a repaired value no longer carries AI_IMAGE:, so later
+        // passes no-op on it. By default a rule splices the resolved path
+        // between its captured prefix and suffix; the unquoted rule overrides
+        // 'rewrite' to also add the quotes the model omitted.
+        // ThemeValidator::unresolvedImageSourceProblems() keeps its own two
+        // anchored detections of these same syntaxes; they must stay a subset
+        // of what these rules repair, which the "recovers every source shape
+        // the validator flags" test in collect_images_test.php pins.
         $spliceInPlace = static fn (array $match, array $image): string =>
             $match['prefix'] . $image['src'] . $match['suffix'];
         $rules = [
@@ -588,6 +592,12 @@ final class CollectImagesStep implements Step
             $content = (string) preg_replace_callback(
                 $rule['pattern'],
                 static function (array $match) use ($imageFor, $rule, $rewrite): string {
+                    // Cheap bail for the common case: a real path. The literal
+                    // token requirement matches the file-level guard in
+                    // parseAndNormalize(), so nothing new is excluded.
+                    if (stripos($match['raw'], 'AI_IMAGE') === false) {
+                        return $match[0];
+                    }
                     $spec = self::specFromSourceValue($match['raw'], $rule['json']);
                     if ($spec === null) {
                         return $match[0];
@@ -602,18 +612,6 @@ final class CollectImagesStep implements Step
         return ['content' => $content, 'images' => array_values($byPrompt)];
     }
 
-    /** Decode one captured URL/source value to the prompt text it represents. */
-    private static function decodeRecoveredLiteral(string $literal, bool $json): string
-    {
-        if ($json) {
-            $decoded = json_decode('"' . $literal . '"', true);
-            if (is_string($decoded)) {
-                $literal = $decoded;
-            }
-        }
-        return trim(html_entity_decode($literal, ENT_QUOTES | ENT_HTML5));
-    }
-
     /**
      * The AI_IMAGE spec carried by one source value, or null when the value
      * is an ordinary path. All wrapper creativity is normalized away HERE, in
@@ -623,7 +621,13 @@ final class CollectImagesStep implements Step
      */
     private static function specFromSourceValue(string $raw, bool $json): ?string
     {
-        $value = self::decodeRecoveredLiteral($raw, $json);
+        if ($json) {
+            $decoded = json_decode('"' . $raw . '"', true);
+            if (is_string($decoded)) {
+                $raw = $decoded;
+            }
+        }
+        $value = trim(html_entity_decode($raw, ENT_QUOTES | ENT_HTML5));
         // The model sometimes wraps the whole spec in an HTML comment inside
         // the value (src="<!-- AI_IMAGE: {…} -->"); peel it and re-trim.
         $value = trim((string) preg_replace('/\A<!--\s*|\s*-->\z/', '', $value));
