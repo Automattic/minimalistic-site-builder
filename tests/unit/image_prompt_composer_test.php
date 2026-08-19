@@ -462,3 +462,28 @@ test('compose sheds the site context under token pressure but keeps the grade', 
     assert_contains("{$subject}. Style: photorealistic", $out);
     assert_contains("Art direction for all site imagery: {$grade}.", $out);
 });
+
+test('stripCompetingGradeTokens drops studio white and no grain on a Portra grade', function () {
+    $subject = ImagePromptComposer::stripCompetingGradeTokens(
+        'A loaf on a studio white cyclorama, no grain, catalog-lit',
+        'warm Portra 400, visible 35mm grain, available light',
+    );
+    assert_true(!str_contains(strtolower($subject), 'studio white'));
+    assert_true(!str_contains(strtolower($subject), 'no grain'));
+    assert_true(!str_contains(strtolower($subject), 'catalog-lit'));
+    assert_contains('A loaf on a', $subject);
+});
+
+test('compose strips competing grade tokens before the API prompt is built', function () {
+    $out = ImagePromptComposer::compose(
+        'A loaf on studio white, no grain',
+        'menu item card',
+        'photorealistic',
+        '',
+        'warm Portra 400, visible 35mm grain',
+    );
+    assert_true(!str_contains(strtolower($out), 'studio white'));
+    assert_true(!str_contains(strtolower($out), 'no grain'));
+    assert_contains('Art direction for all site imagery: warm Portra 400, visible 35mm grain.', $out);
+});
+
