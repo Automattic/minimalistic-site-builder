@@ -12,6 +12,7 @@ use Automattic\SiteBuild\Steps\ContrastFixStep;
 use Automattic\SiteBuild\Steps\CustomMotionStep;
 use Automattic\SiteBuild\Steps\DesignDirectionStep;
 use Automattic\SiteBuild\Steps\DesignPreviewStep;
+use Automattic\SiteBuild\Steps\DirectionFidelityStep;
 use Automattic\SiteBuild\Steps\FinalizeThemeStep;
 use Automattic\SiteBuild\Steps\FixBlocksStep;
 use Automattic\SiteBuild\Steps\FixPagesStep;
@@ -214,6 +215,7 @@ final class StepComposition
             // to the transformed theme and changing text geometry.
             new FontsPhpStep(htmlFirst: true),
             new FinalizeThemeStep(),
+            new DirectionFidelityStep(),
             new ValidateThemeStep(htmlFirst: true),
         ]);
     }
@@ -330,6 +332,7 @@ final class StepComposition
             // Sole owner of functions.php: the deterministic loader that enqueues
             // style.css and require_once's the generated fonts.php.
             new FinalizeThemeStep(),
+            new DirectionFidelityStep(),
             // Last chance to catch contract drift introduced by serialization or
             // later append-only steps before the project is reported as complete.
             new ValidateThemeStep(),
