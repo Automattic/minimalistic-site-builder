@@ -39,6 +39,8 @@ Always include exactly these fixed properties:
 
 Beyond these fixed properties, **add any additional factual fields the user actually stated or strongly implied** — for example business hours, location/address, phone, email, a product or service list, price ranges, social links, founding year, tagline. Preserve them as structured data (strings, arrays, or nested objects) under clearly named keys. Only include facts that are grounded in the prompt; apart from the identity fields above, do NOT invent specifics, and do NOT add design fields (colors, typography, layout, imagery).
 
+A shop is a catalog storefront: product cards, prices, a contact enquiry. Do NOT invent Cart, Checkout, Basket, or WooCommerce pages. The build has no cart backend.
+
 Keep `visual_vibe` to a brief mood phrase. If the prompt is sparse, include only the fixed properties plus whatever facts are genuinely present.
 
 Output JSON only.

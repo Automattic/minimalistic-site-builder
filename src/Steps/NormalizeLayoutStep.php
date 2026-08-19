@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\StorefrontDegrade;
 use Automattic\SiteBuild\Units\GeneratedMarkup;
 
 /**
@@ -52,7 +53,7 @@ final class NormalizeLayoutStep implements Step
                 'theme/theme.json',
                 'theme/parts/*',
             ],
-            writes: ['theme/parts/*'],
+            writes: ['theme/parts/*', 'warnings.json'],
             concurrent: false,
         );
     }
@@ -74,6 +75,23 @@ final class NormalizeLayoutStep implements Step
             // No carrier classes: align:wide promotion stays fix-blocks' alone.
             widePartCarrierClasses: [],
         );
+        $cartWarnings = [];
+        foreach ($project->themeFiles() as $rel) {
+            $path = 'theme/' . $rel;
+            if (!$project->exists($path)) {
+                continue;
+            }
+            [$markup, $degraded] = StorefrontDegrade::markup($project->readText($path), $path);
+            if ($degraded === []) {
+                continue;
+            }
+            $project->writeText($path, $markup);
+            array_push($notes, ...$degraded);
+            array_push($cartWarnings, ...$degraded);
+        }
+        if ($cartWarnings !== []) {
+            $project->addWarnings($this->id(), $cartWarnings);
+        }
         $report = $notes === []
             ? "No layout/rhythm normalization needed.\n"
             : '- ' . implode("\n- ", $notes) . "\n";
