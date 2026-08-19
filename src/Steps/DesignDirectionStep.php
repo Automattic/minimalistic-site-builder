@@ -584,6 +584,19 @@ final class DesignDirectionStep implements Step
                 . '; disposition repaired invalid profile';
         }
 
+        $authoredNote = is_string($raw['motion_note'] ?? null) ? trim($raw['motion_note']) : '';
+        $mappedNote = Motion::mapNote($authoredNote, $motion);
+        $motionNote = $mappedNote['note'];
+        if ($authoredNote !== '' && $motionNote === '') {
+            $warnings[] = 'designDirection.json: field motion_note authored '
+                . Warnings::value($authoredNote)
+                . '; delivered ""; disposition note could not be expressed as a kit class and was stripped';
+        } elseif ($authoredNote !== '' && $motionNote !== $authoredNote) {
+            $repairs[] = 'designDirection.json: field motion_note authored '
+                . self::describe($authoredNote) . ' delivered ' . self::describe($motionNote)
+                . '; disposition mapped onto existing motion-kit classes';
+        }
+
         // The corner language is a fixed list; anything unrecognized falls
         // back to sharp — an accidental radius reads as template styling, so
         // rounding only ships on an explicit commitment.
@@ -620,7 +633,7 @@ final class DesignDirectionStep implements Step
             // anything unrecognized falls back to the default so every build
             // commits to ONE profile the downstream steps can gate on.
             'motion'           => $motion,
-            'motion_note'      => trim((string) ($raw['motion_note'] ?? '')),
+            'motion_note'      => $motionNote,
             'concept_seed'     => $conceptSeed,
             'hero_blueprint'   => $blueprint,
         ];
