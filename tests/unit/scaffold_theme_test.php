@@ -213,6 +213,14 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     assert_contains('.wp-site-blocks .wp-block-navigation__responsive-container-open:not(.always-shown)', $css);
     assert_contains('.wp-site-blocks .wp-block-navigation__responsive-container:not(.hidden-by-default):not(.is-menu-open)', $css);
 
+    assert_contains('.wp-site-blocks .wp-block-navigation__responsive-container.is-menu-open {', $css);
+    assert_contains('background-color: var(--wp--preset--color--base) !important;', $css);
+    assert_contains('color: var(--wp--preset--color--contrast) !important;', $css);
+    assert_contains('--navigation-layout-justification-setting: flex-start;', $css);
+    assert_contains('flex-direction: column !important;', $css);
+    $openBlock = substr($css, (int) strpos($css, '.wp-site-blocks .wp-block-navigation__responsive-container.is-menu-open {'));
+    assert_contains('justify-content: flex-start !important;', $openBlock);
+
     // Hero topology and mobile behavior are code-owned. All recipe hooks ship
     // in the static stylesheet (unused hooks are inert), and the mobile rules
     // consume only the transformation marker normalized by HeroUnit.
