@@ -318,3 +318,54 @@ test('converter reports dropped hidden values with their form and value', functi
     assert_contains('recipient "owner@invented.example" removed', $all);
     assert_contains("admin email", $all);
 });
+
+test('converter dedupes a radio group split across sibling wrappers', function () {
+    $markup = '<!-- wp:html --><form action="mailto:x@x.example" id="turno">'
+        . '<div><label><input type="radio" name="turno" value="am"> Mañana</label></div>'
+        . '<div><label><input type="radio" name="turno" value="pm"> Tarde</label></div>'
+        . '<label for="e">Email</label><input type="email" id="e" name="e">'
+        . '<button type="submit">Enviar</button></form><!-- /wp:html -->';
+
+    $result = JetpackFormConverter::fix($markup);
+
+    assert_eq(1, substr_count($result['markup'], 'jetpack/field-radio'));
+    assert_contains('2 field(s)', $result['notes'][0]);
+});
+
+test('converter is immune to authored text shaped like an internal marker', function () {
+    $markup = '<!-- wp:html --><p>Escribinos a @@JETPACK_FORM_0@@ para reservas.</p>'
+        . '<form action="mailto:x@x.example"><label for="e">Email</label>'
+        . '<input type="email" id="e" name="e"><button type="submit">Enviar</button></form><!-- /wp:html -->';
+
+    $result = JetpackFormConverter::fix($markup);
+
+    assert_eq(1, substr_count($result['markup'], '<!-- wp:jetpack/contact-form -->'));
+    assert_contains('@@JETPACK_FORM_0@@ para reservas.', $result['markup']);
+});
+
+test('converter keeps a wrapper whole when the form lives inside it', function () {
+    $markup = '<!-- wp:html --><div class="contact-section"><p>Antes</p>'
+        . '<form action="mailto:x@x.example"><label for="e">Email</label>'
+        . '<input type="email" id="e" name="e"><button type="submit">Enviar</button></form>'
+        . '<p>Después</p></div><!-- /wp:html -->';
+
+    $result = JetpackFormConverter::fix($markup);
+
+    // The wrapper div survives balanced (open and close in ONE wp:html
+    // block) and the converted form emits right after it.
+    assert_eq(1, preg_match('/<!-- wp:html -->\n<div class="contact-section">.*<\/div>\n<!-- \/wp:html -->/s', $result['markup']), 'wrapper stays balanced');
+    assert_contains('Antes', $result['markup']);
+    assert_contains('Después', $result['markup']);
+    assert_contains('wp:jetpack/contact-form', $result['markup']);
+    assert_true(strpos($result['markup'], '</div>') < strpos($result['markup'], 'wp:jetpack/contact-form'), 'form emits after its wrapper');
+});
+
+test('converter carries placeholder text onto the converted fields', function () {
+    $markup = '<!-- wp:html --><form action="mailto:x@x.example">'
+        . '<label for="e">Email</label><input type="email" id="e" name="e" placeholder="tu@correo.com">'
+        . '<button type="submit">Enviar</button></form><!-- /wp:html -->';
+
+    $result = JetpackFormConverter::fix($markup);
+
+    assert_contains('"placeholder":"tu@correo.com"', $result['markup']);
+});

@@ -911,3 +911,17 @@ test('degraded image spacing survives FixBlocks before the final validator', fun
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('validator reports an unmaterialized form placeholder', function () {
+    [$project, $tmp] = validator_project();
+
+    $project->writeText('plugin/pages/contacto.html',
+        '<!-- wp:html --><div class="jetpack-form-placeholder"><h3>Booking form</h3>'
+        . '<p>Booking form: name, email, message</p></div><!-- /wp:html -->'
+    );
+    $problems = ThemeValidator::validate($project);
+    assert_eq(1, count($problems));
+    assert_true(str_contains($problems[0], 'unmaterialized jetpack-form-placeholder'), 'stub reported');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

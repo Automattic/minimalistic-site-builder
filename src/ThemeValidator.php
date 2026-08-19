@@ -91,6 +91,17 @@ final class ThemeValidator
             }
         }
 
+        // The design prompts reserve a requested form with a
+        // jetpack-form-placeholder container so the request survives for the
+        // form step. One surviving into delivered markup means that step has
+        // not run: visitors would see the stub, so the loss must be reported,
+        // not silent.
+        foreach ($checked as $rel) {
+            if ($project->exists($rel) && str_contains($project->readText($rel), 'jetpack-form-placeholder')) {
+                $problems[] = "{$rel}: contains an unmaterialized jetpack-form-placeholder — the requested form was never built";
+            }
+        }
+
         // A contact form without a working submit control is the same dead UI
         // in block-shaped markup. JetpackFormFixer repairs the one known
         // legacy shape (element-less jetpack/button); every other drift — no

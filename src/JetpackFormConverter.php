@@ -14,26 +14,27 @@ namespace Automattic\SiteBuild;
  * prompt rule cannot be the last line of defense; this pass converts
  * deterministically what the model should have written.
  *
- * Document order is preserved: the block is split at each converted form, so
- * content before and after every form stays exactly where it was, and each
- * form converts independently — one unconvertible form leaves only itself
- * unchanged. Content INSIDE a form (instructions, privacy text, links)
- * becomes paragraph/heading blocks inside the jetpack/contact-form, in
- * place. Field constraints Jetpack markup cannot express (numeric limits,
- * patterns, pre-filled values, preselected choices) and dropped values
- * (hidden inputs, mailto recipients) are reported per form in warnings.json:
- * which form, the original value, and what visitors get instead.
+ * Document order is preserved by walking the block's DOM once: content
+ * before and after every top-level form stays exactly where it was, a form
+ * nested inside a wrapper keeps the wrapper whole and emits right after it,
+ * and each form converts independently — one unconvertible form leaves only
+ * itself unchanged. Content INSIDE a form (instructions, headings, privacy
+ * text, links) becomes paragraph/heading blocks inside the
+ * jetpack/contact-form, in place. Constraints Jetpack markup cannot express
+ * (numeric limits, patterns, pre-filled values, preselected choices) and
+ * dropped values (hidden inputs, mailto recipients) are reported per form in
+ * warnings.json: which form, the original value, and what visitors get
+ * instead.
  *
- * Refused, not converted: search forms (role="search", type="search", or
- * WordPress's `s` query field — converting one would email visitors' search
- * words to the owner), login forms (password fields), and forms with no
- * recognizable fields. Emission goes through BlockMarkup::serializeComment(),
- * so model-authored text cannot smuggle `-->` into a comment delimiter.
+ * Refused, not converted — and left for the validator's raw-form problem to
+ * escalate: search forms (role="search", type="search", or WordPress's `s`
+ * query field — converting one would email visitors' search words to the
+ * owner), login forms (password fields), and forms with no recognizable
+ * fields. Emission goes through BlockMarkup::serializeComment(), so
+ * model-authored text cannot smuggle `-->` into a comment delimiter.
  */
 final class JetpackFormConverter
 {
-    private const PLACEHOLDER = '@@JETPACK_FORM_%d@@';
-
     /** @return array{markup:string, notes:list<string>, warnings:list<string>} */
     public static function fix(string $markup): array
     {
@@ -74,9 +75,7 @@ final class JetpackFormConverter
         foreach ($replacements as [$start, $end, $converted]) {
             $markup = substr($markup, 0, $start) . $converted['markup'] . substr($markup, $end);
             $notes[] = $converted['note'];
-            foreach ($converted['warnings'] as $warning) {
-                $warnings[] = $warning;
-            }
+            array_push($warnings, ...$converted['warnings']);
         }
         return ['markup' => $markup, 'notes' => $notes, 'warnings' => $warnings];
     }
@@ -104,55 +103,73 @@ final class JetpackFormConverter
     private static function convert(string $html): ?array
     {
         $dom = Html::loadUtf8Html($html, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING);
-        if ($dom === null) {
+        $body = $dom?->getElementsByTagName('body')->item(0);
+        if ($body === null) {
             return null;
         }
 
-        // Convert each form independently, replacing convertible ones with a
-        // placeholder IN the DOM so document order survives serialization.
-        // Refused forms stay in the DOM untouched.
-        $converted = [];
+        // Convert each form independently. A top-level form is swapped for an
+        // empty marker text node so its converted block lands exactly where
+        // the form was; markers are tracked by NODE IDENTITY, so authored
+        // text cannot collide with them. A form nested inside a wrapper
+        // cannot be cut out without leaving unbalanced fragments on both
+        // sides, so the wrapper stays whole and the converted block emits
+        // right after the wrapper's own segment.
+        $markers = new \SplObjectStorage();
+        $afterSegment = new \SplObjectStorage();
         $summaries = [];
         $warnings = [];
-        foreach (iterator_to_array($dom->getElementsByTagName('form')) as $i => $form) {
+        foreach (iterator_to_array($dom->getElementsByTagName('form')) as $form) {
             $result = self::convertForm($form);
             if ($result === null) {
                 continue;
             }
-            $placeholder = sprintf(self::PLACEHOLDER, $i);
-            $form->parentNode?->replaceChild($dom->createTextNode($placeholder), $form);
-            $converted[$placeholder] = $result['markup'];
             $summaries[] = $result['summary'];
-            foreach ($result['warnings'] as $warning) {
-                $warnings[] = $warning;
+            array_push($warnings, ...$result['warnings']);
+
+            if ($form->parentNode === $body) {
+                $marker = $dom->createTextNode('');
+                $body->replaceChild($marker, $form);
+                $markers[$marker] = $result['markup'];
+                continue;
             }
+            $top = $form;
+            while ($top->parentNode !== null && $top->parentNode !== $body) {
+                $top = $top->parentNode;
+            }
+            $form->parentNode?->removeChild($form);
+            $afterSegment[$top] = array_merge(
+                $afterSegment->contains($top) ? $afterSegment[$top] : [],
+                [$result['markup']]
+            );
         }
-        if ($converted === []) {
+        if ($summaries === []) {
             return null;
         }
 
-        $body = $dom->getElementsByTagName('body')->item(0);
-        $serialized = '';
-        foreach ($body?->childNodes ?? [] as $child) {
-            $serialized .= $dom->saveHTML($child);
-        }
-
-        // Split at the placeholders: surviving HTML segments keep their own
-        // wp:html blocks in their original positions around the converted
-        // forms.
-        $parts = preg_split('/(@@JETPACK_FORM_\d+@@)/', $serialized, -1, PREG_SPLIT_DELIM_CAPTURE);
         $out = [];
-        foreach ($parts as $part) {
-            if (isset($converted[$part])) {
-                $out[] = $converted[$part];
+        $buffer = '';
+        $flush = static function () use (&$buffer, &$out): void {
+            $segment = trim($buffer);
+            $buffer = '';
+            if ($segment === '' || (trim(strip_tags($segment)) === '' && stripos($segment, '<img') === false)) {
+                return;
+            }
+            $out[] = "<!-- wp:html -->\n" . $segment . "\n<!-- /wp:html -->";
+        };
+        foreach (iterator_to_array($body->childNodes) as $child) {
+            if ($markers->contains($child)) {
+                $flush();
+                $out[] = $markers[$child];
                 continue;
             }
-            $part = trim($part);
-            if ($part === '' || (trim(strip_tags($part)) === '' && stripos($part, '<img') === false)) {
-                continue;
+            $buffer .= $dom->saveHTML($child);
+            if ($afterSegment->contains($child)) {
+                $flush();
+                array_push($out, ...$afterSegment[$child]);
             }
-            $out[] = "<!-- wp:html -->\n" . $part . "\n<!-- /wp:html -->";
         }
+        $flush();
 
         return [
             'markup'   => implode("\n", $out),
@@ -167,7 +184,8 @@ final class JetpackFormConverter
         // A search box or a login is not a submission to the site owner;
         // rewriting it would destroy behavior (and email visitors' search
         // words to the owner) instead of repairing anything. WordPress's
-        // search field is named `s`.
+        // search field is named `s`. Refusal is deliberate escalation: the
+        // raw form stays and the validator's raw-form problem reports it.
         if (strtolower($form->getAttribute('role')) === 'search') {
             return null;
         }
@@ -180,20 +198,21 @@ final class JetpackFormConverter
         }
 
         $formName = self::formName($form);
-        $inner = self::innerBlocks($form, $form, $formName);
+        $warnings = [];
+        $seenRadioGroups = [];
+        $inner = self::innerBlocks($form, $form, $formName, $seenRadioGroups, $warnings);
         if ($inner['fields'] === 0) {
             return null;
         }
 
-        $warnings = $inner['warnings'];
         $action = $form->getAttribute('action');
         $isMailto = str_starts_with($action, 'mailto:');
         if ($isMailto) {
-            $warnings[] = "form \"{$formName}\": recipient \"" . substr($action, strlen('mailto:'))
-                . '" removed (model-invented address); visitors\' submissions go to the site\'s admin email instead';
+            $warnings[] = "form \"{$formName}\": recipient " . Warnings::value(substr($action, strlen('mailto:')))
+                . ' removed (model-invented address); visitors\' submissions go to the site\'s admin email instead';
         } elseif ($action !== '') {
-            $warnings[] = "form \"{$formName}\": authored action \"{$action}\" replaced;"
-                . " visitors' submissions go to the site's admin email instead";
+            $warnings[] = "form \"{$formName}\": authored action " . Warnings::value($action)
+                . " replaced; visitors' submissions go to the site's admin email instead";
         }
 
         $markup = '<!-- wp:jetpack/contact-form --><div class="wp-block-jetpack-contact-form">'
@@ -211,14 +230,19 @@ final class JetpackFormConverter
      * paragraph/heading blocks between them, so nothing the model wrote
      * inside the form is silently destroyed.
      *
-     * @return array{blocks: list<string>, fields: int, warnings: list<string>}
+     * @param array<string,bool> $seenRadioGroups Form-scoped radio dedupe.
+     * @param list<string>       $warnings        Form-scoped loss report.
+     * @return array{blocks: list<string>, fields: int}
      */
-    private static function innerBlocks(\DOMElement $form, \DOMElement $scope, string $formName): array
-    {
+    private static function innerBlocks(
+        \DOMElement $form,
+        \DOMElement $scope,
+        string $formName,
+        array &$seenRadioGroups,
+        array &$warnings
+    ): array {
         $blocks = [];
         $fields = 0;
-        $warnings = [];
-        $seenRadioGroups = [];
         foreach ($scope->childNodes as $node) {
             if (!$node instanceof \DOMElement) {
                 continue;
@@ -235,15 +259,9 @@ final class JetpackFormConverter
             if (self::containsControl($node)) {
                 // Wrapping labels included: the control inside converts, and
                 // its label text travels with the field via label().
-
-                $nested = self::innerBlocks($form, $node, $formName);
-                foreach ($nested['blocks'] as $block) {
-                    $blocks[] = $block;
-                }
+                $nested = self::innerBlocks($form, $node, $formName, $seenRadioGroups, $warnings);
+                array_push($blocks, ...$nested['blocks']);
                 $fields += $nested['fields'];
-                foreach ($nested['warnings'] as $warning) {
-                    $warnings[] = $warning;
-                }
                 continue;
             }
             if ($tag === 'button' || $tag === 'label') {
@@ -257,13 +275,13 @@ final class JetpackFormConverter
             }
             if (preg_match('/^h([1-6])$/', $tag, $m) === 1) {
                 $level = (int) $m[1];
-                $blocks[] = "<!-- wp:heading {\"level\":{$level}} -->"
+                $blocks[] = BlockMarkup::serializeComment('heading', ['level' => $level], false)
                     . "<h{$level} class=\"wp-block-heading\">{$text}</h{$level}><!-- /wp:heading -->";
                 continue;
             }
             $blocks[] = "<!-- wp:paragraph --><p>{$text}</p><!-- /wp:paragraph -->";
         }
-        return ['blocks' => $blocks, 'fields' => $fields, 'warnings' => $warnings];
+        return ['blocks' => $blocks, 'fields' => $fields];
     }
 
     /**
@@ -278,26 +296,28 @@ final class JetpackFormConverter
         array &$seenRadioGroups,
         array &$warnings
     ): ?string {
+        $label = self::label($form, $el);
         if ($tag === 'textarea') {
             if (trim($el->textContent) !== '') {
-                $warnings[] = "form \"{$formName}\": pre-filled text of \"" . self::label($form, $el)
-                    . '" not carried; the field starts empty';
+                $warnings[] = "form \"{$formName}\": pre-filled text of \"{$label}\" not carried; the field starts empty";
             }
-            return self::field('jetpack/field-textarea', self::label($form, $el), $el->hasAttribute('required'));
+            return self::field('jetpack/field-textarea', $label, $el->hasAttribute('required'), null, $el->getAttribute('placeholder'));
         }
         if ($tag === 'select') {
-            return self::selectField($form, $el, $formName, $warnings);
+            if ($el->hasAttribute('multiple')) {
+                $warnings[] = "form \"{$formName}\": \"{$label}\" allowed multiple choices; the converted select accepts one";
+            }
+            return self::selectField($el, $label, $formName, $warnings);
         }
 
         $type = strtolower($el->getAttribute('type') ?: 'text');
         if ($type === 'file') {
-            $warnings[] = "form \"{$formName}\": file upload input \"" . self::label($form, $el)
-                . '" removed; Jetpack Forms has no equivalent field';
+            $warnings[] = "form \"{$formName}\": file upload input \"{$label}\" removed; Jetpack Forms has no equivalent field";
             return null;
         }
         if ($type === 'hidden') {
             $warnings[] = "form \"{$formName}\": hidden field \"" . $el->getAttribute('name')
-                . '" (value "' . $el->getAttribute('value') . '") removed; Jetpack submissions carry no hidden values';
+                . '" (value ' . Warnings::value($el->getAttribute('value')) . ') removed; Jetpack submissions carry no hidden values';
             return null;
         }
         if (in_array($type, ['submit', 'button', 'reset', 'image'], true)) {
@@ -313,21 +333,24 @@ final class JetpackFormConverter
         }
         if ($type === 'checkbox') {
             if ($el->hasAttribute('checked')) {
-                $warnings[] = "form \"{$formName}\": \"" . self::label($form, $el)
-                    . '" was pre-checked; the converted checkbox starts unchecked';
+                $warnings[] = "form \"{$formName}\": \"{$label}\" was pre-checked; the converted checkbox starts unchecked";
             }
-            return self::field('jetpack/field-checkbox', self::label($form, $el), $el->hasAttribute('required'));
+            return self::field('jetpack/field-checkbox', $label, $el->hasAttribute('required'));
         }
 
-        foreach (['min', 'max', 'step', 'pattern', 'maxlength'] as $constraint) {
+        // Reported losses: validation- or semantics-bearing attributes that
+        // Jetpack form markup cannot express. Presentation attributes
+        // (class, style, aria-*) drop silently on purpose — reporting them
+        // would drown warnings.json. `placeholder` is carried, not lost.
+        foreach (['min', 'max', 'minlength', 'maxlength', 'step', 'pattern'] as $constraint) {
             if ($el->hasAttribute($constraint)) {
-                $warnings[] = "form \"{$formName}\": {$constraint}=\"" . $el->getAttribute($constraint)
-                    . '" on "' . self::label($form, $el) . '" not carried; the field accepts any value';
+                $warnings[] = "form \"{$formName}\": {$constraint}=" . Warnings::value($el->getAttribute($constraint))
+                    . " on \"{$label}\" not carried; the field accepts any value";
             }
         }
         if (trim($el->getAttribute('value')) !== '') {
-            $warnings[] = "form \"{$formName}\": pre-filled value \"" . $el->getAttribute('value')
-                . '" of "' . self::label($form, $el) . '" not carried; the field starts empty';
+            $warnings[] = "form \"{$formName}\": pre-filled value " . Warnings::value($el->getAttribute('value'))
+                . " of \"{$label}\" not carried; the field starts empty";
         }
 
         $block = match ($type) {
@@ -347,7 +370,7 @@ final class JetpackFormConverter
                 || preg_match('/\b(name|nombre|nome|full[-_]?name)\b/i', $el->getAttribute('name') . ' ' . $el->getAttribute('id')) === 1;
             $block = $isName ? 'jetpack/field-name' : 'jetpack/field-text';
         }
-        return self::field($block, self::label($form, $el), $el->hasAttribute('required'));
+        return self::field($block, $label, $el->hasAttribute('required'), null, $el->getAttribute('placeholder'));
     }
 
     private static function containsControl(\DOMElement $el): bool
@@ -361,22 +384,24 @@ final class JetpackFormConverter
     }
 
     /**
-     * A short human identifier for warnings: the form's aria-label, its id,
-     * or its (mailto-stripped) action — enough to find it on the page.
+     * A short human identifier for warnings: the form's aria-label, id,
+     * name, or (mailto-stripped) action — enough to find it on the page.
      */
     private static function formName(\DOMElement $form): string
     {
-        foreach (['aria-label', 'id', 'name'] as $attr) {
-            if (trim($form->getAttribute($attr)) !== '') {
-                return trim($form->getAttribute($attr));
+        foreach (['aria-label', 'id', 'name', 'action'] as $attr) {
+            $value = trim($form->getAttribute($attr));
+            if ($value !== '') {
+                return $attr === 'action' && str_starts_with($value, 'mailto:')
+                    ? substr($value, strlen('mailto:'))
+                    : $value;
             }
         }
-        $action = $form->getAttribute('action');
-        return $action !== '' ? $action : 'unnamed form';
+        return 'unnamed form';
     }
 
     /** @param list<string> $warnings */
-    private static function selectField(\DOMElement $form, \DOMElement $el, string $formName, array &$warnings): ?string
+    private static function selectField(\DOMElement $el, string $label, string $formName, array &$warnings): ?string
     {
         $options = [];
         foreach ($el->getElementsByTagName('option') as $option) {
@@ -392,15 +417,15 @@ final class JetpackFormConverter
                 continue;
             }
             if ($option->hasAttribute('selected')) {
-                $warnings[] = "form \"{$formName}\": preselected choice \"{$text}\" of \""
-                    . self::label($form, $el) . '" not carried; the converted select starts unselected';
+                $warnings[] = "form \"{$formName}\": preselected choice \"{$text}\" of \"{$label}\""
+                    . ' not carried; the converted select starts unselected';
             }
             $options[] = $text;
         }
         if ($options === []) {
             return null;
         }
-        return self::field('jetpack/field-select', self::label($form, $el), $el->hasAttribute('required'), $options);
+        return self::field('jetpack/field-select', $label, $el->hasAttribute('required'), $options);
     }
 
     /** @param list<string> $warnings */
@@ -429,7 +454,7 @@ final class JetpackFormConverter
     }
 
     /** @param list<string>|null $options */
-    private static function field(string $block, string $label, bool $required, ?array $options = null): string
+    private static function field(string $block, string $label, bool $required, ?array $options = null, string $placeholder = ''): string
     {
         $attrs = [];
         if ($label !== '') {
@@ -440,6 +465,9 @@ final class JetpackFormConverter
         }
         if ($options !== null) {
             $attrs['options'] = $options;
+        }
+        if ($placeholder !== '') {
+            $attrs['placeholder'] = $placeholder;
         }
         // serializeComment escapes the way WP serialize_block_attributes()
         // does — a model-authored label containing `-->` must not be able to
@@ -491,9 +519,11 @@ final class JetpackFormConverter
 
     /**
      * Element content reduced to paragraph-safe inline HTML: text plus
-     * links and emphasis, everything else stripped to its text. Links keep
-     * only safe destinations, so authored javascript: URLs cannot ride
-     * along into the converted block.
+     * links and emphasis, everything else stripped to its text. The href
+     * allowlist is deliberately narrower than the sanitizer's executable-
+     * scheme denylist: on freshly-emitted bytes, failing closed against
+     * anything but plain web destinations needs no entity-decoding
+     * machinery.
      */
     private static function inlineHtml(\DOMElement $el): string
     {
