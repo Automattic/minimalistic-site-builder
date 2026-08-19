@@ -972,13 +972,19 @@ test('normalize commits a motion profile: valid values pass, anything else defau
     assert_eq('calm', DesignDirectionStep::normalize(['description' => 'x'], 'cinematic-safe-zone')['motion'], 'missing → default');
     assert_eq('calm', DesignDirectionStep::normalize(['description' => 'x', 'motion' => 'bouncy'], 'cinematic-safe-zone')['motion'], 'unknown → default');
     assert_eq('calm', DesignDirectionStep::normalize(['description' => 'x', 'motion' => ['calm']], 'cinematic-safe-zone')['motion'], 'non-string → default');
-    assert_eq('a note', DesignDirectionStep::normalize(['description' => 'x', 'motion_note' => ' a note '], 'cinematic-safe-zone')['motion_note']);
+    $mapped = DesignDirectionStep::normalize([
+        'description' => 'x',
+        'motion' => 'calm',
+        'motion_note' => 'buttons press',
+    ], 'cinematic-safe-zone');
+    assert_contains('hover-lift', $mapped['motion_note']);
+    assert_eq('', DesignDirectionStep::normalize(['description' => 'x', 'motion_note' => ' a note '], 'cinematic-safe-zone')['motion_note']);
 });
 
 test('format renders the motion commitment with its executable meaning', function () {
-    $calm = DesignDirectionStep::format(['description' => 'x', 'motion' => 'calm', 'motion_note' => 'let the hero breathe']);
+    $calm = DesignDirectionStep::format(['description' => 'x', 'motion' => 'calm', 'motion_note' => 'Use kit classes: ken-burns.']);
     assert_contains('**Motion**: calm', $calm);
-    assert_contains('let the hero breathe', $calm);
+    assert_contains('ken-burns', $calm);
 
     $minimal = DesignDirectionStep::format(['description' => 'x', 'motion' => 'minimal']);
     assert_contains('hover-lift', $minimal, 'minimal names the only classes allowed');
