@@ -824,8 +824,8 @@ final class SectionsStep implements Step
             'file \'theme/parts/*.html\'; block=\'section cache layers\'; authored="%d cached_prefixes tokens '
             . '(site spec, theme.json, design direction, page outline)"; delivered="%d input tokens billed by the '
             . 'host"; disposition=the injected Llm appears to discard cached_prefixes, so every section below was '
-            . 'authored without the theme or the design direction. Fix the host adapter; verify with '
-            . 'bin/llm-conformance.php',
+            . 'authored without the theme or the design direction. Fix the host adapter so completeBatch() '
+            . 'forwards cached_prefixes and reports their billed input usage',
             $expected,
             $observedInputTokens,
         );

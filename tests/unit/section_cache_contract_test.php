@@ -242,6 +242,7 @@ test('sections warn when the batch path drops cached prefixes', function () {
         $warnings = $project->readJson('warnings.json');
         $sectionWarnings = implode("\n", $warnings['sections'] ?? []);
         assert_contains('discard cached_prefixes', $sectionWarnings);
-        assert_contains('bin/llm-conformance.php', $sectionWarnings);
+        assert_contains('completeBatch() forwards cached_prefixes', $sectionWarnings);
+        assert_true(!str_contains($sectionWarnings, 'bin/llm-conformance.php'));
     });
 });

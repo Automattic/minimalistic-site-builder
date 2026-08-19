@@ -36,8 +36,9 @@ test('a host that drops the cache layers is accused, with actionable context', f
     // AGENTS.md requires actionable file/block/value/disposition context.
     assert_contains("file 'theme/parts/*.html'", $warning);
     assert_contains('disposition=', $warning);
-    // It must say what to do next, not just that something is wrong.
-    assert_contains('bin/llm-conformance.php', $warning);
+    // It must say what to fix next without depending on another PR's tooling.
+    assert_contains('completeBatch() forwards cached_prefixes', $warning);
+    assert_contains('reports their billed input usage', $warning);
 });
 
 test('a conformant host is not accused', function () {
