@@ -33,16 +33,16 @@ function make_integration_builder(FakeLlm $llm, string $outputRoot): SiteBuilder
     );
 }
 
-function legacy_integration_pipeline(SiteBuilder $builder): \Automattic\SiteBuild\BuildPipeline
+function blocks_integration_pipeline(SiteBuilder $builder): \Automattic\SiteBuild\BuildPipeline
 {
-    $previous = getenv('SITE_BUILD_LEGACY');
-    putenv('SITE_BUILD_LEGACY=1');
+    $previous = getenv('SITE_BUILD_HTML_FIRST');
+    putenv('SITE_BUILD_HTML_FIRST');
     try {
         return $builder->pipeline();
     } finally {
         $previous === false
-            ? putenv('SITE_BUILD_LEGACY')
-            : putenv('SITE_BUILD_LEGACY=' . $previous);
+            ? putenv('SITE_BUILD_HTML_FIRST')
+            : putenv('SITE_BUILD_HTML_FIRST=' . $previous);
     }
 }
 
@@ -211,7 +211,7 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     // uniqid temp path — pin the recipe so selection stays deterministic.
     putenv('HERO_RECIPE=cinematic-safe-zone');
     try {
-        legacy_integration_pipeline($builder)->runThrough($project);
+        blocks_integration_pipeline($builder)->runThrough($project);
     } finally {
         putenv('HERO_RECIPE');
     }
@@ -225,13 +225,13 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     assert_contains('Theme Name: Hearth & Crumb', $project->readText('theme/style.css'));
     assert_true(
         !str_contains($project->readText('theme/style.css'), 'STALE-HTML-FIRST-CSS'),
-        'SITE_BUILD_LEGACY=1 ignores stale HTML-first CSS',
+        'the default blocks graph ignores stale HTML-first CSS',
     );
-    assert_true($project->exists('logs/contrast-report.txt'), 'legacy contrast fix still runs');
-    assert_true($project->exists('logs/motion-sanity.txt'), 'legacy motion fix still runs');
+    assert_true($project->exists('logs/contrast-report.txt'), 'blocks-path contrast fix still runs');
+    assert_true($project->exists('logs/motion-sanity.txt'), 'blocks-path motion fix still runs');
     assert_true(
         !isset(($project->readJson('warnings.json'))['fixup_skipped']),
-        'legacy fixups never inherit stale HTML-first skip mode',
+        'blocks-path fixups never inherit stale HTML-first skip mode',
     );
     assert_contains('Plugin Name: Hearth & Crumb Content', $project->readText('plugin/site-content.php'));
     assert_eq(3, $project->readJson('theme/theme.json')['version']);
@@ -470,7 +470,7 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
 
 test('pipeline step order is correct', function () {
     $tmp = sys_get_temp_dir() . '/builder_int_order_' . uniqid();
-    $ids = legacy_integration_pipeline(make_integration_builder(new FakeLlm(), $tmp))->stepIds();
+    $ids = blocks_integration_pipeline(make_integration_builder(new FakeLlm(), $tmp))->stepIds();
     assert_eq([
         'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
         'theme-json+page-plan', 'sections', 'section-rhythm', 'copy-dedupe',
