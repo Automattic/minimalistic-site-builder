@@ -160,8 +160,14 @@ final class FakeLlm implements FinishReasonAwareLlm, UsageReporting
             $this->recordUsage((string) $req['prompt'], $response, $opts);
             $out[$key] = $response;
         }
-        $notes = $this->batchNotes;
-        $this->batchNotes = [];
+        $notes = [];
+        foreach (array_keys($requests) as $key) {
+            if (!isset($this->batchNotes[$key])) {
+                continue;
+            }
+            $notes[$key] = $this->batchNotes[$key];
+            unset($this->batchNotes[$key]);
+        }
         return new \Automattic\SiteBuild\TextBatchResult($out, $notes);
     }
 
