@@ -745,6 +745,59 @@ test('theme-json fills a missing required color slug from the direction, then de
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('repairAccentCaption wires captions to the accent family when one shipped', function () {
+    [$theme] = ThemeJsonStep::repairAccentCaption([
+        'settings' => ['typography' => ['fontFamilies' => [
+            ['slug' => 'heading', 'fontFamily' => 'Oswald, sans-serif'],
+            ['slug' => 'body', 'fontFamily' => 'Source Sans 3, sans-serif'],
+            ['slug' => 'accent', 'fontFamily' => '"Caveat", cursive'],
+        ]]],
+    ]);
+    assert_eq(
+        'var:preset|font-family|accent',
+        $theme['styles']['elements']['caption']['typography']['fontFamily'],
+    );
+    assert_eq(
+        'var:preset|font-family|accent',
+        $theme['styles']['blocks']['core/image']['typography']['fontFamily'],
+    );
+});
+
+test('repairAccentCaption stays quiet when no accent family shipped', function () {
+    [$theme] = ThemeJsonStep::repairAccentCaption([
+        'settings' => ['typography' => ['fontFamilies' => [
+            ['slug' => 'heading', 'fontFamily' => 'Oswald, sans-serif'],
+            ['slug' => 'body', 'fontFamily' => 'Source Sans 3, sans-serif'],
+        ]]],
+    ]);
+    assert_eq(null, $theme['styles']['elements']['caption']['typography']['fontFamily'] ?? null);
+});
+
+test('repairFonts adds an optional accent family from the direction', function () {
+    [$theme, $warnings] = ThemeJsonStep::repairFonts(
+        ['settings' => ['typography' => ['fontFamilies' => [
+            ['slug' => 'heading', 'fontFamily' => 'Oswald, sans-serif', 'name' => 'Heading'],
+            ['slug' => 'body', 'fontFamily' => 'Source Sans 3, sans-serif', 'name' => 'Body'],
+        ]]]],
+        ['accent' => ['family' => 'Caveat', 'weights' => [400], 'italic' => false, 'axes' => [], 'character' => '']],
+    );
+    $bySlug = array_column($theme['settings']['typography']['fontFamilies'], 'fontFamily', 'slug');
+    assert_contains('Caveat', $bySlug['accent']);
+    assert_contains("missing slug 'accent'", implode(' ', $warnings));
+});
+
+test('repairFonts does not invent an accent family when the direction left it empty', function () {
+    [$theme] = ThemeJsonStep::repairFonts(
+        ['settings' => ['typography' => ['fontFamilies' => [
+            ['slug' => 'heading', 'fontFamily' => 'Oswald, sans-serif', 'name' => 'Heading'],
+            ['slug' => 'body', 'fontFamily' => 'Source Sans 3, sans-serif', 'name' => 'Body'],
+        ]]]],
+        ['accent' => ['family' => '', 'weights' => [], 'italic' => false, 'axes' => [], 'character' => '']],
+    );
+    $slugs = array_column($theme['settings']['typography']['fontFamilies'], 'slug');
+    assert_true(!in_array('accent', $slugs, true));
+});
+
 test('repairColors falls back to neutral readable defaults without a direction hex', function () {
     [$theme, $warnings] = \Automattic\SiteBuild\Steps\ThemeJsonStep::repairColors(
         ['settings' => ['color' => ['palette' => [
