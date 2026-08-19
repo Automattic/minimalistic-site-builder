@@ -116,6 +116,21 @@ field aliases.
 
 > **Architecture note (transport resolution).** When a build is triggered from *inside* a coding agent, the harness in play is resolved from the environment the agent leaves in the build's subprocess (`CLAUDECODE=1`, `OPENCODE=1`, `PI_CODING_AGENT=true`; Codex is sandbox-gated, so its `codex` process ancestry is the reliable signal) — then a transport is *declared* and injected, never sniffed by the core. Spending a subscription has one landmine: in `claude -p`, `ANTHROPIC_API_KEY` overrides the plan, so the shell-out transport must strip it from the child env. The alternative topology — the builder as an MCP server borrowing the harness model via MCP *sampling* — was evaluated and rejected (no harness supports it; human-in-the-loop; model-hints-only). Full design: [`docs/transport-resolution.md`](transport-resolution.md).
 
+## Wiring up a host: the conformance gate
+
+Handing in an `Llm` is one line, which makes it easy to miss that the line carries a whole contract. The steps above the seam assume every documented option holds — most consequentially `cached_prefixes`, because `SectionUnit` ships the site spec, theme JSON, design direction and page outline in those layers and sends only the per-section brief as `prompt`. A host that accepts the field and then discards it produces a complete, plausible-looking site whose sections never saw the theme, and nothing anywhere fails.
+
+That happened. A production blocks-first run generated 19 of 21 sections with no theme, no design direction and no page outline; it was caught only by noticing that section generations reported ~2,400 input tokens against a 29,870-byte prompt template.
+
+So a new host is not considered wired up until it passes the conformance suite:
+
+```
+php bin/llm-conformance.php --structural   # zero spend, safe on every commit
+php bin/llm-conformance.php                # + four small live completions
+```
+
+The checks are behavioural rather than structural, because the interface deliberately hides the transport — a portable suite can't inspect an outgoing request body, only observe what an implementation does. The load-bearing check sends a prefix of known size and asserts its tokens appear in the host's reported input usage; that one holds even when the model ignores instructions, and it is the same measurement that exposed the original defect. `LlmConformance` is part of the shipped package, so a host can also call it directly from its own test suite.
+
 ## One core, two orchestrators
 
 Everything up to here - hand in an `Llm`, run the pipeline - is one way to drive the core. Call it the library orchestrator: the `Pipeline` runs in-process, sequences the steps, and fans the independent work out through the `Llm` batch. The command line uses it, Studio uses it, the harness uses it, and it's also the simple way to run on wpcom - drive the pipeline with the `WpcomAiLlm` adapter and the completions go one at a time.
