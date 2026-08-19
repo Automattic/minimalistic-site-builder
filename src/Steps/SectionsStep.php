@@ -692,6 +692,14 @@ final class SectionsStep implements Step
      * A failed probe only forfeits first-window cache hits; it must not abort
      * the build or change the subsequent concurrent fan-out.
      *
+     * The probe travels the single-completion path, while the sections
+     * themselves are generated through completeBatch(). A host whose batch
+     * implementation is separate code — wpcom's native path fans each section
+     * out as its own stateless server-side promise — can therefore satisfy this
+     * probe and still drop the layers where it counts. Read a silent probe as
+     * "the single path carries the layers", not as a clean bill of health;
+     * bin/llm-conformance.php exercises both paths deliberately.
+     *
      * @param array<string,array{prompt:string,model?:string,temperature?:float,cached_prefixes?:list<string>}> $requests
      * @return list<string> context-loss warnings, empty when the host is conformant or unmeasurable
      */
@@ -708,9 +716,7 @@ final class SectionsStep implements Step
             $opts['tolerate_empty'] = true;
             $opts['log_label'] = 'section-cache-warm';
 
-            $before = $this->llm instanceof UsageReporting
-                ? (int) ($this->llm->usageTotals()['input_tokens'] ?? 0)
-                : null;
+            $before = $this->llm instanceof UsageReporting ? $this->llm->usageTotals() : null;
 
             try {
                 $this->llm->complete(self::CACHE_WARM_PROMPT, $opts);
@@ -722,7 +728,7 @@ final class SectionsStep implements Step
             if ($before === null) {
                 return [];
             }
-            $observed = (int) ($this->llm->usageTotals()['input_tokens'] ?? 0) - $before;
+            $observed = self::billedInputDelta($before, $this->llm->usageTotals());
             $warning = self::contextLossWarning($request['cached_prefixes'], $observed);
             if ($warning !== null) {
                 Narrator::write("    WARNING: {$warning}\n");
@@ -731,6 +737,39 @@ final class SectionsStep implements Step
             return [];
         }
         return [];
+    }
+
+    /**
+     * Input tokens a host billed for a single call, from cumulative usage
+     * snapshots taken either side of it.
+     *
+     * Hosts disagree about what `input_tokens` means, and reading the wrong
+     * convention here would turn this guard's signal upside down. This repo's
+     * AnthropicClient folds cache reads and creations INTO `input_tokens`
+     * (see extractUsage()), while the raw Anthropic Messages API reports
+     * `usage.input_tokens` with both EXCLUDED. Under the second convention a
+     * conformant host bills a cached 2,400-token prefix almost entirely as
+     * `cache_creation_input_tokens` on the probe, and as
+     * `cache_read_input_tokens` on every section after it — leaving an
+     * `input_tokens` delta that looks exactly like a discarded layer, and
+     * shrinking further the better the caching works.
+     *
+     * Taking the larger of the two readings satisfies both conventions and
+     * double-counts neither: a folded total already exceeds its own cache
+     * components, and a raw total is corrected by them.
+     *
+     * @param array<string,mixed> $before cumulative totals before the call
+     * @param array<string,mixed> $after  cumulative totals after it
+     */
+    public static function billedInputDelta(array $before, array $after): int
+    {
+        $delta = static fn (string $key): int
+            => (int) ($after[$key] ?? 0) - (int) ($before[$key] ?? 0);
+
+        return max(
+            $delta('input_tokens'),
+            $delta('cache_read_input_tokens') + $delta('cache_creation_input_tokens'),
+        );
     }
 
     /**
@@ -754,6 +793,10 @@ final class SectionsStep implements Step
      * Pure, so the threshold is unit-testable without a transport.
      *
      * @param list<string> $cachedPrefixes
+     * @param int          $observedInputTokens total billed input for the probe,
+     *                     cache reads and creations included — take it from
+     *                     billedInputDelta() rather than from a raw
+     *                     `input_tokens` field, whose meaning varies by host
      */
     public static function contextLossWarning(array $cachedPrefixes, int $observedInputTokens): ?string
     {
