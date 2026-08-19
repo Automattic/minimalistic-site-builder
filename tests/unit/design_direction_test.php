@@ -1241,3 +1241,28 @@ test('directionFor returns nothing when no direction was committed', function ()
         exec('rm -rf ' . escapeshellarg($project->root));
     }
 });
+
+test('normalize commits optional accent type and leaves an empty accent valid', function () {
+    $withAccent = DesignDirectionStep::normalize([
+        'description' => 'Caveat on flavor labels.',
+        'type' => [
+            'heading' => ['family' => 'Oswald', 'weights' => [700], 'italic' => false, 'axes' => [], 'character' => ''],
+            'body' => ['family' => 'Source Sans 3', 'weights' => [400], 'italic' => false, 'axes' => [], 'character' => ''],
+            'accent' => ['family' => 'Caveat', 'weights' => [400, 700], 'italic' => false, 'axes' => [], 'character' => 'hand labels'],
+        ],
+    ], 'cinematic-safe-zone');
+
+    assert_eq('Caveat', $withAccent['type']['accent']['family']);
+    assert_eq([400, 700], $withAccent['type']['accent']['weights']);
+    assert_contains('accent — Caveat', DesignDirectionStep::format($withAccent));
+
+    $empty = DesignDirectionStep::normalize([
+        'description' => 'Two faces only.',
+        'type' => [
+            'heading' => ['family' => 'Oswald', 'weights' => [700], 'italic' => false, 'axes' => [], 'character' => ''],
+            'body' => ['family' => 'Source Sans 3', 'weights' => [400], 'italic' => false, 'axes' => [], 'character' => ''],
+        ],
+    ], 'cinematic-safe-zone');
+    assert_eq('', $empty['type']['accent']['family']);
+    assert_true(!str_contains(DesignDirectionStep::format($empty), 'accent —'));
+});
