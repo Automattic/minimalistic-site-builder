@@ -296,6 +296,95 @@ final class ScaffoldThemeStep implements Step
             }
         }
 
+        /* Hamburger / overlay panel.
+           Color: core paints `:not(.has-background) .is-menu-open { #fff }`,
+           so contrast-colored labels on a dark canvas become cream-on-white.
+           Layout: the open modal inherits the desktop justification
+           (`items-justified-right` / --navigation-layout-justification-setting),
+           which glues the list to one viewport edge and clips labels. Reset
+           both here so every header — static or adaptive — gets a readable
+           stacked sheet. */
+        .wp-site-blocks .wp-block-navigation__responsive-container.is-menu-open {
+            --navigation-layout-justification-setting: flex-start;
+            --navigation-layout-justify: flex-start;
+            position: fixed !important;
+            inset: 0 !important;
+            width: 100% !important;
+            height: 100% !important;
+            max-width: none !important;
+            box-sizing: border-box !important;
+            padding: max(1.25rem, env(safe-area-inset-top, 0px))
+                max(1.25rem, env(safe-area-inset-right, 0px))
+                max(1.25rem, env(safe-area-inset-bottom, 0px))
+                max(1.25rem, env(safe-area-inset-left, 0px)) !important;
+            overflow: auto !important;
+            color: var(--wp--preset--color--contrast) !important;
+            background-color: var(--wp--preset--color--base) !important;
+            background-image: none !important;
+            z-index: 10000;
+        }
+        .wp-site-blocks .wp-block-navigation__responsive-container.is-menu-open
+            .wp-block-navigation__responsive-dialog,
+        .wp-site-blocks .wp-block-navigation__responsive-container.is-menu-open
+            .wp-block-navigation__responsive-container-content {
+            width: 100% !important;
+            max-width: none !important;
+            margin: 0 !important;
+            color: inherit !important;
+            background-color: transparent !important;
+            background-image: none !important;
+        }
+        .wp-site-blocks .wp-block-navigation__responsive-container.is-menu-open
+            .wp-block-navigation__responsive-container-content {
+            align-items: stretch !important;
+            justify-content: flex-start !important;
+            text-align: start !important;
+            padding-block-start: 3.25rem !important;
+        }
+        .wp-site-blocks .wp-block-navigation__responsive-container.is-menu-open
+            :is(.wp-block-navigation__container, .wp-block-page-list) {
+            display: flex !important;
+            flex-direction: column !important;
+            align-items: stretch !important;
+            justify-content: flex-start !important;
+            gap: 0.15rem !important;
+            width: 100% !important;
+        }
+        .wp-site-blocks .wp-block-navigation__responsive-container.is-menu-open
+            .wp-block-navigation-item {
+            width: 100% !important;
+        }
+        .wp-site-blocks .wp-block-navigation__responsive-container.is-menu-open
+            .wp-block-navigation-item__content:not(.wp-element-button) {
+            display: block !important;
+            width: 100% !important;
+            box-sizing: border-box !important;
+            padding-block: 0.85rem !important;
+            text-align: start !important;
+            font-size: var(--wp--preset--font-size--heading, 1.5rem) !important;
+            line-height: 1.25 !important;
+            white-space: normal !important;
+            overflow-wrap: anywhere;
+            color: var(--wp--preset--color--contrast) !important;
+        }
+        .wp-site-blocks .wp-block-navigation__responsive-container.is-menu-open
+            :is(
+                .wp-block-navigation__responsive-container-close,
+                .wp-block-navigation__submenu-icon
+            ) {
+            color: var(--wp--preset--color--contrast) !important;
+        }
+        .wp-site-blocks .wp-block-navigation__responsive-container.is-menu-open
+            .wp-block-navigation__responsive-container-close {
+            top: max(1rem, env(safe-area-inset-top, 0px)) !important;
+            inset-inline-end: max(1rem, env(safe-area-inset-right, 0px)) !important;
+            inset-inline-start: auto !important;
+        }
+        .wp-site-blocks .wp-block-navigation__responsive-container.is-menu-open
+            .wp-block-navigation-item__content:not(.wp-element-button):is(:hover, :focus) {
+            color: var(--wp--preset--color--accent) !important;
+        }
+
         /* The root block-gap margin would open a page-background band between every pair
            of top-level template parts — above the hero (behind the transparent overlay
            header, where light text lands on the page background) and as a visible stripe
