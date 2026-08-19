@@ -103,8 +103,9 @@ final class StepComposition
     /**
      * The HTML-first graph: the model authors an HTML+CSS design, and
      * transform-site converts it to block markup deterministically. Opt-in via
-     * SITE_BUILD_HTML_FIRST=1; SiteBuilder pairs it with blocksTail() so a
-     * malformed design falls back instead of failing the build.
+     * SITE_BUILD_HTML_FIRST=1. SiteBuilder wraps this graph with the currently
+     * dormant whole-build fallback; mixed-page degradation is handled inside
+     * TransformSiteStep.
      *
      * @param array<string, string> $models       step id => model id overrides
      * @param array<string, ?float> $temperatures step id => temperature overrides
