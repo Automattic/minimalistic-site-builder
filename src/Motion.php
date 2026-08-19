@@ -82,4 +82,68 @@ final class Motion
             $token
         ) === 1;
     }
+
+    /**
+     * Map a free-text motion note onto kit classes the committed profile can
+     * actually ship. An unmappable note is not a promise.
+     *
+     * @return array{note:string,classes:list<string>}
+     */
+    public static function mapNote(mixed $raw, string $profile): array
+    {
+        $note = is_string($raw) ? trim($raw) : '';
+        if ($note === '') {
+            return ['note' => '', 'classes' => []];
+        }
+
+        $allowed = self::allowedClasses($profile);
+        if ($allowed === []) {
+            return ['note' => '', 'classes' => []];
+        }
+
+        $haystack = strtolower($note);
+        $mapped = [];
+        foreach (self::notePhrases() as $class => $phrases) {
+            if (!in_array($class, $allowed, true)) {
+                continue;
+            }
+            $aliases = array_merge([$class, str_replace('-', ' ', $class)], $phrases);
+            foreach ($aliases as $phrase) {
+                if ($phrase !== '' && str_contains($haystack, $phrase)) {
+                    $mapped[] = $class;
+                    break;
+                }
+            }
+        }
+
+        $mapped = array_values(array_unique($mapped));
+        if ($mapped === []) {
+            return ['note' => '', 'classes' => []];
+        }
+
+        return [
+            'note' => 'Use kit classes: ' . implode(', ', $mapped) . '.',
+            'classes' => $mapped,
+        ];
+    }
+
+    /** @return array<string,list<string>> */
+    private static function notePhrases(): array
+    {
+        return [
+            'hero-entrance' => ['hero entrance', 'hero arrive', 'hero focus', 'focus pull'],
+            'ken-burns' => ['ken burns', 'hero image breathe', 'image breathe', 'slow zoom', 'breathe'],
+            'stagger-children' => ['one by one', 'cards rise', 'stagger', 'cascade'],
+            'reveal-up' => ['rise', 'arrive from below', 'settle up'],
+            'reveal-fade' => ['fade in', 'soft fade', 'fade'],
+            'reveal-scale' => ['scale in', 'zoom settle'],
+            'hover-lift' => [
+                'press on', 'overshoot', 'hover lift', 'lift on hover', 'labels press',
+                'buttons press', 'press', 'inset',
+            ],
+            'hover-reveal' => ['hover reveal', 'image reveal on hover'],
+            'gradient-shift' => ['gradient shift', 'gradient drift'],
+            'ambient-drift' => ['ambient drift', 'slow float'],
+        ];
+    }
 }
