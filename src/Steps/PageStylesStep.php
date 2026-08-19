@@ -778,6 +778,7 @@ CSS;
         [$authoredRoots, $inlineById] = self::authoredSectionRootContext(
             $project,
             $sectionRoots,
+            $authorChunks,
             $warnings,
         );
         if ($authoredRoots['ids'] === []) {
@@ -787,20 +788,23 @@ CSS;
         $rhythmRoots = self::rootsWithoutViewportHeightOwnership($authoredRoots);
         $rootFilter = $rhythmRoots['ids'] === [] ? '' : self::rootSubjectFilter($rhythmRoots);
         $rules = [self::VERTICAL_RHYTHM_MARKER];
-        $edgeStartIds = array_intersect_key($authoredRoots['edgeStartIds'], $rhythmRoots['ids']);
-        if ($edgeStartIds !== []) {
-            $edgeStartRoots = [
-                'ids' => $edgeStartIds,
+        foreach ([['edgeStartIds', 'padding-top'], ['edgeEndIds', 'padding-bottom']] as [$key, $property]) {
+            $edgeIds = array_intersect_key($authoredRoots[$key], $rhythmRoots['ids']);
+            if ($edgeIds === []) {
+                continue;
+            }
+            $edgeRoots = [
+                'ids' => $edgeIds,
                 'roots' => array_values(array_filter(
                     $rhythmRoots['roots'],
                     static fn (\DOMElement $root): bool => isset(
-                        $edgeStartIds[trim($root->getAttribute('id'))],
+                        $edgeIds[trim($root->getAttribute('id'))],
                     ),
                 )),
                 'elements' => $rhythmRoots['elements'],
             ];
-            $rules[] = ':root:root :where(' . self::rootSubjectFilter($edgeStartRoots)
-                . ') {padding-top:0!important}';
+            $rules[] = ':root:root :where(' . self::rootSubjectFilter($edgeRoots)
+                . ') {' . $property . ':0!important}';
         }
         $resolvedCache = [];
         $rootMatchCache = [];
@@ -1194,11 +1198,12 @@ CSS;
      *     allRootIds:array<string,true>,allRoots:list<\DOMElement>,
      *     trailingFlowChildren:list<\DOMElement>
      * } $sectionRoots
+     * @param list<array{source:string,css:string}> $authorChunks
      * @param list<string> $warnings
      * @return array{
      *   0:array{
      *     ids:array<string,true>,roots:list<\DOMElement>,elements:list<\DOMElement>,
-     *     edgeStartIds:array<string,true>
+     *     edgeStartIds:array<string,true>,edgeEndIds:array<string,true>
      *   },
      *   1:array<string,list<array{property:string,value:string,important:bool}>>
      * }
@@ -1206,10 +1211,13 @@ CSS;
     private static function authoredSectionRootContext(
         Project $project,
         array $sectionRoots,
+        array $authorChunks,
         array &$warnings,
     ): array {
+        $paddedWrapperSelectors = self::authoredBlockPaddingSelectors($authorChunks);
         $sourceIds = [];
         $edgeStartIds = [];
+        $edgeEndIds = [];
         $inlineCandidates = [];
         foreach (self::deliveredDesignSources($project) as $source) {
             $dom = Html::loadUtf8Html(
@@ -1234,19 +1242,21 @@ CSS;
                 }
                 $sourceIds[$id] = true;
                 $firstElement = null;
+                $lastElement = null;
                 foreach ($section->childNodes as $child) {
                     if ($child instanceof \DOMElement) {
-                        $firstElement = $child;
-                        break;
+                        $firstElement ??= $child;
+                        $lastElement = $child;
                     }
                 }
-                if ($firstElement instanceof \DOMElement
-                    && strtolower($firstElement->tagName) !== 'div'
-                ) {
+                if (self::beginsAuthoredEdge($firstElement, $paddedWrapperSelectors)) {
                     // A leading content/band element begins at the authored
                     // section edge. A build-owned top preset would insert a
                     // new band before it, as opposed to padding a wrapper.
                     $edgeStartIds[$id] = true;
+                }
+                if (self::beginsAuthoredEdge($lastElement, $paddedWrapperSelectors)) {
+                    $edgeEndIds[$id] = true;
                 }
                 $style = $section->getAttribute('style');
                 if (trim($style) === '') {
@@ -1332,9 +1342,92 @@ CSS;
                 'roots' => $roots,
                 'elements' => $sectionRoots['elements'],
                 'edgeStartIds' => array_intersect_key($edgeStartIds, $ids),
+                'edgeEndIds' => array_intersect_key($edgeEndIds, $ids),
             ],
             $inlineById,
         ];
+    }
+
+    /**
+     * Whether $element sits flush against the authored section edge.
+     *
+     * A content or band element always does. A wrapper div normally does not —
+     * a build-owned preset pads the wrapper rather than opening a band before
+     * it — but a wrapper the design already gives block-axis padding is itself
+     * what positions the content, so a preset on top of it double-counts the
+     * edge. Measured on calm-lantern, whose sections each wrap their content in
+     * a padded div: every seam ran 76-130px wider than the design until the
+     * preset stopped stacking on the wrapper's own padding.
+     *
+     * @param list<string> $paddedWrapperSelectors
+     */
+    private static function beginsAuthoredEdge(
+        ?\DOMElement $element,
+        array $paddedWrapperSelectors,
+    ): bool {
+        if (!$element instanceof \DOMElement) {
+            return false;
+        }
+        if (strtolower($element->tagName) !== 'div') {
+            return true;
+        }
+        foreach ($paddedWrapperSelectors as $selector) {
+            if (self::selectorMatchesAnyElement($selector, [$element])) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Selectors carrying an authored block-axis PADDING declaration.
+     *
+     * Margin is deliberately excluded: a wrapper's block margin collapses
+     * through the section box rather than adding to it, so it does not make the
+     * wrapper the owner of the section's edge.
+     *
+     * @param list<array{source:string,css:string}> $authorChunks
+     * @return list<string>
+     */
+    private static function authoredBlockPaddingSelectors(array $authorChunks): array
+    {
+        $selectors = [];
+        foreach ($authorChunks as $chunk) {
+            foreach (CssChecks::scanDeclarations($chunk['css']) as $declaration) {
+                if ($declaration['kind'] !== 'style' || !$declaration['structurallySafe']) {
+                    continue;
+                }
+                $error = null;
+                $converted = self::blockAxisDeclarations(
+                    $declaration['property'],
+                    $declaration['value'],
+                    false,
+                    $error,
+                );
+                if ($converted === null || $converted === []) {
+                    continue;
+                }
+                $carriesPadding = false;
+                foreach ($converted as $item) {
+                    if (str_starts_with($item['property'], 'padding-')) {
+                        $carriesPadding = true;
+                        break;
+                    }
+                }
+                if (!$carriesPadding) {
+                    continue;
+                }
+                $selectorError = null;
+                $resolved = self::resolvedVerticalSelectors($declaration, $selectorError);
+                if ($resolved === null) {
+                    continue;
+                }
+                foreach ($resolved['selectors'] as $selector) {
+                    $selectors[$selector] = true;
+                }
+            }
+        }
+        return array_keys($selectors);
     }
 
     /**
