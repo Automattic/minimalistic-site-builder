@@ -22,6 +22,7 @@ use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\TextBatchResult;
 use Automattic\SiteBuild\TransformArtifacts;
+use Automattic\SiteBuild\UsageReporting;
 use Automattic\SiteBuild\Units\FooterUnit;
 use Automattic\SiteBuild\Units\GeneratedMarkup;
 use Automattic\SiteBuild\Units\HeaderUnit;
@@ -58,6 +59,21 @@ use Automattic\SiteBuild\Warnings;
 final class SectionsStep implements Step
 {
     private const CACHE_WARM_PROMPT = 'Warm the cached section context.';
+
+    /**
+     * Below this many estimated prefix tokens the warm-up probe cannot tell a
+     * discarded layer from ordinary system-prompt overhead, so it stays quiet.
+     * Real section layers run to thousands of tokens.
+     */
+    private const CONTEXT_PROBE_MIN_TOKENS = 500;
+
+    /**
+     * Fraction of the estimated prefix a conformant host must bill. Set low on
+     * purpose: a host that sent the layers bills MORE than this estimate (the
+     * system preamble and brief are extra), while a host that dropped them
+     * bills a rounding error. Only a collapse trips it.
+     */
+    private const CONTEXT_PROBE_RATIO = 0.5;
 
     /** Prefix for a page section part's request key and filename. */
     public const PART_PREFIX = SectionUnit::KEY_PREFIX;
@@ -160,7 +176,7 @@ final class SectionsStep implements Step
         $jobs = $jobPlan['jobs'];
         $initialContract = $jobPlan['contract'];
         $requests = self::requestsFor($jobs);
-        $this->warmSectionCache($requests);
+        array_push($warnings, ...$this->warmSectionCache($requests));
         $batchFailure = null;
         try {
             $batch = $this->llm->completeBatch($requests);
@@ -361,7 +377,7 @@ final class SectionsStep implements Step
             return $pages;
         }
         $requests = self::requestsFor($jobs);
-        $this->warmSectionCache($requests);
+        array_push($warnings, ...$this->warmSectionCache($requests));
         try {
             $batch = $this->llm->completeBatch($requests);
         } catch (\RuntimeException $error) {
@@ -671,13 +687,15 @@ final class SectionsStep implements Step
     }
 
     /**
-     * Warm the exact cached context used by the deterministic first section.
+     * Warm the exact cached context used by the deterministic first section,
+     * and use that same probe to verify the host actually SENT that context.
      * A failed probe only forfeits first-window cache hits; it must not abort
      * the build or change the subsequent concurrent fan-out.
      *
      * @param array<string,array{prompt:string,model?:string,temperature?:float,cached_prefixes?:list<string>}> $requests
+     * @return list<string> context-loss warnings, empty when the host is conformant or unmeasurable
      */
-    private function warmSectionCache(array $requests): void
+    private function warmSectionCache(array $requests): array
     {
         foreach ($requests as $request) {
             if (!isset($request['cached_prefixes'])) {
@@ -690,13 +708,78 @@ final class SectionsStep implements Step
             $opts['tolerate_empty'] = true;
             $opts['log_label'] = 'section-cache-warm';
 
+            $before = $this->llm instanceof UsageReporting
+                ? (int) ($this->llm->usageTotals()['input_tokens'] ?? 0)
+                : null;
+
             try {
                 $this->llm->complete(self::CACHE_WARM_PROMPT, $opts);
             } catch (\Throwable $e) {
                 Narrator::write("    section cache warm-up failed ({$e->getMessage()}); continuing uncached\n");
+                return [];
             }
-            return;
+
+            if ($before === null) {
+                return [];
+            }
+            $observed = (int) ($this->llm->usageTotals()['input_tokens'] ?? 0) - $before;
+            $warning = self::contextLossWarning($request['cached_prefixes'], $observed);
+            if ($warning !== null) {
+                Narrator::write("    WARNING: {$warning}\n");
+                return [$warning];
+            }
+            return [];
         }
+        return [];
+    }
+
+    /**
+     * Decide whether a host discarded the cached context layers, from the
+     * input-token usage its own accounting reported for the warm-up probe.
+     *
+     * This exists because the Llm seam has no other way to tell. The layers
+     * carry the site spec, theme JSON, design direction and page outline;
+     * `prompt` carries only the per-section brief. A host that accepts
+     * `cached_prefixes` and drops them still returns perfectly well-formed
+     * markup, so the build cannot notice from the response — it can only
+     * notice that far too few input tokens were billed. That is exactly how
+     * the defect was found in production, after 19 of 21 sections had already
+     * been generated against no theme at all.
+     *
+     * Inconclusive cases return null rather than guessing. A host with small
+     * layers, or one whose tokenizer is unusually dense, must never be accused
+     * on thin evidence — this only fires when the gap is far too large to be
+     * anything else.
+     *
+     * Pure, so the threshold is unit-testable without a transport.
+     *
+     * @param list<string> $cachedPrefixes
+     */
+    public static function contextLossWarning(array $cachedPrefixes, int $observedInputTokens): ?string
+    {
+        $bytes = 0;
+        foreach ($cachedPrefixes as $prefix) {
+            $bytes += strlen($prefix);
+        }
+        // ~4 bytes per token is a deliberate under-estimate of the real count,
+        // which biases every comparison below toward staying silent.
+        $expected = intdiv($bytes, 4);
+        if ($expected < self::CONTEXT_PROBE_MIN_TOKENS) {
+            return null; // Layers too small to distinguish signal from overhead.
+        }
+        if ($observedInputTokens >= (int) ($expected * self::CONTEXT_PROBE_RATIO)) {
+            return null; // The host sent them.
+        }
+
+        return sprintf(
+            'file \'theme/parts/*.html\'; block=\'section cache layers\'; authored="%d cached_prefixes tokens '
+            . '(site spec, theme.json, design direction, page outline)"; delivered="%d input tokens billed by the '
+            . 'host"; disposition=the injected Llm appears to discard cached_prefixes, so every section below was '
+            . 'authored without the theme or the design direction. Fix the host adapter; verify with '
+            . 'bin/llm-conformance.php',
+            $expected,
+            $observedInputTokens,
+        );
     }
 
     /**
