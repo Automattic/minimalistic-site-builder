@@ -922,16 +922,16 @@ final class SectionsStep implements Step
         }
 
         $common = [
-            'site_spec'        => $siteSpec,
-            'language'         => SiteSpecStep::languageOf($project),
-            'theme_json'       => $themeJsonText,
-            'design_direction' => $designDirection,
+            'site_spec'         => $siteSpec,
+            'language'          => SiteSpecStep::languageOf($project),
+            'theme_json'        => $themeJsonText,
+            'design_direction'  => $designDirection,
             // Unlike design_direction's prose, this value is a portable,
             // machine-readable execution contract consumed by SectionUnit's
             // delivery boundary. Old/missing directions retain the documented
             // flush default without making section generation fatal.
-            'card_style'       => $cardStyle,
-            'site_pages'       => PagePlanStep::sitePagesList($pages),
+            'card_style'        => $cardStyle,
+            'site_pages'        => PagePlanStep::sitePagesList($pages),
             // A host capability, not a site fact: it says whether a real form
             // backend exists to replace the placeholders, so it stays in the
             // caller-owned meta rather than in the spec the model authors.
@@ -1050,10 +1050,8 @@ final class SectionsStep implements Step
      * Whether this build's host owns a real form backend.
      *
      * Set by the caller at createProject time (CLI: --use-jetpack-placeholders).
-     * When true, sections reserve a form's place with a JP_FORM placeholder the
-     * host replaces later; when false they follow the default no-form-markup
-     * rule, because a form without a backend silently discards what visitors
-     * type.
+     * True picks prompts/jetpack-form.md for every section, false picks
+     * prompts/no-forms.md; those two files carry the reasoning.
      */
     public static function formPlaceholders(Project $project): bool
     {
