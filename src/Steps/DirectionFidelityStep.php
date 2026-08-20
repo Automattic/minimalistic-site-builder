@@ -9,7 +9,6 @@ use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
-use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\Warnings;
 
 /**
