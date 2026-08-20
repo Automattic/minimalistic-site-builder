@@ -106,11 +106,41 @@ final class LlmConformance
         ];
     }
 
-    /** True when every non-skipped finding passed. */
+    /**
+     * True when every non-skipped finding passed.
+     *
+     * A skip is not a pass — it is "this run could not tell". Callers gating a
+     * build on this must ask inconclusive() too, or a host that skipped every
+     * check goes green having proven nothing.
+     *
+     * @param list<LlmConformanceFinding> $findings
+     */
     public static function passed(array $findings): bool
     {
         foreach ($findings as $finding) {
             if (!$finding->passed) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * True when the run established nothing at all: no findings, or every one
+     * of them skipped.
+     *
+     * Worth a separate question because the two ways a suite can be useless
+     * look identical from passed(). An adapter behind a bad key, or one that
+     * implements neither UsageReporting nor a recognisable rejection, can skip
+     * its way to a green report — which is the exact false confidence this
+     * suite exists to remove.
+     *
+     * @param list<LlmConformanceFinding> $findings
+     */
+    public static function inconclusive(array $findings): bool
+    {
+        foreach ($findings as $finding) {
+            if (!$finding->skipped) {
                 return false;
             }
         }
@@ -152,36 +182,46 @@ final class LlmConformance
     // ---------------------------------------------------------------- checks
 
     /**
-     * The contract says cached_prefixes must be a list of strings. A host that
-     * accepts anything else will mangle or silently discard real layers.
-     */
-    /**
      * Whether a throwable is the host rejecting the request itself, rather
      * than a transport that happened to fail.
      *
-     * The structural tier is advertised as zero-spend and safe on every
-     * commit, so it runs where a key may be absent or wrong. Bad credentials,
-     * a DNS failure and a timeout all throw, and counting those as "rejected"
-     * reports a green structural run for an adapter that validated nothing —
-     * the false confidence is worse than no check.
+     * The structural tier is advertised as zero-spend and safe on every commit,
+     * so it runs exactly where a key is most likely to be absent or wrong. Bad
+     * credentials, a DNS failure and a timeout all throw, and counting those as
+     * "rejected" reports a green structural run for an adapter that validated
+     * nothing — false confidence, which is worse than no check.
      *
-     * Two independent signals, either is enough:
+     * So only POSITIVE proof of a local refusal is accepted, and only these
+     * two things are positive proof:
      *
-     *   - the host never sent anything (its own request counter did not move),
-     *     which only a local rejection can produce;
-     *   - the message names the field, which both reference clients do.
+     *   - LlmRequestRejected, which the contract reserves for a request refused
+     *     before transport;
+     *   - a message naming the field, which both reference clients produce.
      *
-     * A host that reports no usage and throws something opaque is
-     * unclassifiable, and the caller reports the check as skipped rather than
-     * passed.
+     * An unmoved request counter is deliberately NOT proof, and this is the
+     * whole point. Both reference clients increment that counter only after a
+     * call succeeds (AnthropicClient::complete, OpenAiCompatibleClient::complete
+     * both accrue below their catch), so an HTTP 401 leaves it exactly where a
+     * local rejection would. Reading it as proof is what let an adapter with no
+     * validation at all print "Rejected all 3 malformed cached_prefixes shapes
+     * before transport."
+     *
+     * A counter that DID move is still conclusive in the other direction: the
+     * host sent something, so it did not refuse.
+     *
+     * Anything else is unclassifiable, and the caller reports the check as
+     * skipped rather than passed.
      */
     private static function rejectedBeforeTransport(\Throwable $e, ?int $requestsBefore, ?int $requestsAfter): ?bool
     {
-        if ($requestsBefore !== null && $requestsAfter !== null) {
-            return $requestsAfter === $requestsBefore;
+        if ($e instanceof LlmRequestRejected) {
+            return true;
         }
         if (stripos($e->getMessage(), 'cached_prefixes') !== false) {
             return true;
+        }
+        if ($requestsBefore !== null && $requestsAfter !== null && $requestsAfter !== $requestsBefore) {
+            return false;
         }
         return null;
     }
@@ -199,6 +239,10 @@ final class LlmConformance
         }
     }
 
+    /**
+     * The contract says cached_prefixes must be a list of strings. A host that
+     * accepts anything else will mangle or silently discard real layers.
+     */
     private static function checkMalformedPrefixesRejected(Llm $llm): LlmConformanceFinding
     {
         $check = 'malformed_prefixes_rejected';
@@ -239,9 +283,11 @@ final class LlmConformance
         if ($unclassified !== []) {
             return LlmConformanceFinding::skip(
                 $check,
-                'Could not tell rejection from transport failure. The host threw, but it reports no '
-                . 'request count and the error does not name cached_prefixes, so this run proves '
-                . 'nothing either way: ' . implode('; ', $unclassified),
+                'Could not tell rejection from transport failure. The host threw, but not '
+                . 'LlmRequestRejected, and the message does not name cached_prefixes — a bad key '
+                . 'looks the same from here, so this run proves nothing either way. Throw '
+                . 'LlmRequestRejected for a refused request and this check becomes decisive: '
+                . implode('; ', $unclassified),
                 LlmConformanceFinding::TIER_STRUCTURAL,
             );
         }
@@ -276,11 +322,20 @@ final class LlmConformance
             if ($local === null) {
                 return LlmConformanceFinding::skip(
                     $check,
-                    'Could not tell rejection from transport failure. The host threw, but it reports no '
-                    . 'request count and the error does not name cached_prefixes: ' . $e->getMessage(),
+                    'Could not tell rejection from transport failure. The host threw, but not '
+                    . 'LlmRequestRejected, and the message does not name cached_prefixes: '
+                    . $e->getMessage(),
                     LlmConformanceFinding::TIER_STRUCTURAL,
                 );
             }
+            return LlmConformanceFinding::fail(
+                $check,
+                'Host sent a four-layer cached_prefixes list to its transport and failed there ('
+                . $e->getMessage() . '). The contract caps a request at three non-blank layers and '
+                . 'makes enforcing that the implementation\'s job, so the fourth layer must be '
+                . 'refused before transport, not passed along.',
+                LlmConformanceFinding::TIER_STRUCTURAL,
+            );
         }
         return LlmConformanceFinding::fail(
             $check,

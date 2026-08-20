@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\CachedPrefixes;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmConformance;
 use Automattic\SiteBuild\LlmConformanceFinding;
@@ -17,7 +18,7 @@ use Automattic\SiteBuild\UsageReporting;
  * implementation would prove nothing.
  */
 
-/** Shared request validation, mirroring AnthropicClient::bodyFor's contract checks. */
+/** Shared request validation, through the same helper both reference clients use. */
 abstract class ConformanceFakeBase implements Llm, UsageReporting
 {
     public int $inputTokens = 0;
@@ -30,23 +31,7 @@ abstract class ConformanceFakeBase implements Llm, UsageReporting
         if (!array_key_exists('cached_prefixes', $opts)) {
             return [];
         }
-        $provided = $opts['cached_prefixes'];
-        if (!is_array($provided) || !array_is_list($provided)) {
-            throw new \RuntimeException('cached_prefixes must be a list of strings');
-        }
-        $layers = [];
-        foreach ($provided as $index => $prefix) {
-            if (!is_string($prefix)) {
-                throw new \RuntimeException("cached_prefixes[{$index}] must be a string");
-            }
-            if (trim($prefix) !== '') {
-                $layers[] = $prefix;
-            }
-        }
-        if (count($layers) > 3) {
-            throw new \RuntimeException('requests support at most three cached_prefixes');
-        }
-        return $layers;
+        return CachedPrefixes::normalize($opts['cached_prefixes'], 'requests');
     }
 
     /** What this host actually puts in front of the model. Subclasses differ here. */
@@ -158,6 +143,44 @@ final class PrefixDroppingFakeLlm extends ConformanceFakeBase
     }
 }
 
+/**
+ * The adapter the structural tier used to hand a green report to: no
+ * cached_prefixes validation at all, a bad key, and — like BOTH reference
+ * clients — a request counter that only moves after a call SUCCEEDS.
+ *
+ * That last detail is the whole trap. An unmoved counter was read as proof of
+ * a local rejection, and an HTTP 401 leaves it exactly where a rejection does.
+ */
+final class NoValidationBadKeyFakeLlm implements Llm, UsageReporting
+{
+    public int $requests = 0;
+
+    public function complete(string $prompt, array $opts = []): string
+    {
+        throw new \RuntimeException('HTTP 401 from api.example.com: {"error":{"message":"invalid x-api-key"}}');
+    }
+
+    public function completeJson(string $prompt, array $opts = []): array
+    {
+        return [];
+    }
+
+    public function completeJsonBatch(array $requests): array
+    {
+        return array_map(static fn () => [], $requests);
+    }
+
+    public function completeBatch(array $requests): TextBatchResult
+    {
+        return new TextBatchResult([]);
+    }
+
+    public function usageTotals(): array
+    {
+        return ['requests' => $this->requests, 'input_tokens' => 0, 'output_tokens' => 0, 'total_tokens' => 0];
+    }
+}
+
 /** A host with no input validation at all. */
 final class PermissiveFakeLlm extends ConformanceFakeBase
 {
@@ -231,6 +254,58 @@ test('a host with no cached_prefixes validation fails the structural checks', fu
     assert_contains('list of strings', $byCheck['malformed_prefixes_rejected']->detail);
     assert_contains('null', $byCheck['malformed_prefixes_rejected']->detail);
     assert_true(!$byCheck['oversized_prefix_list_rejected']->passed, 'a fourth layer must be rejected');
+});
+
+test('a bad key is never mistaken for validation the host does not have', function () {
+    // Regression: this adapter validates nothing, and every structural check
+    // used to report PASS — "Rejected all 3 malformed cached_prefixes shapes
+    // before transport" — because its request counter had not moved. Both
+    // reference clients count that way, so this is the realistic shape.
+    $findings = conformance_by_check(LlmConformance::structural(new NoValidationBadKeyFakeLlm()));
+
+    foreach (['malformed_prefixes_rejected', 'oversized_prefix_list_rejected'] as $check) {
+        assert_true($findings[$check]->skipped, "{$check} must report skipped, not passed");
+        // And the skip has to tell the host how to make the check decisive.
+        assert_contains('LlmRequestRejected', $findings[$check]->detail);
+    }
+    // Nothing was proven, so the run as a whole must not read as a pass.
+    assert_true(LlmConformance::inconclusive(array_values($findings)), 'an all-skipped run is inconclusive');
+});
+
+test('LlmRequestRejected is accepted as proof even from a usage-blind host', function () {
+    // A host with no UsageReporting at all: the type alone has to carry it.
+    $llm = new class implements Llm {
+        public function complete(string $prompt, array $opts = []): string
+        {
+            // array_key_exists, not ??: `cached_prefixes => null` must reach the
+            // validator rather than coalescing into a silent empty list.
+            if (array_key_exists('cached_prefixes', $opts)) {
+                CachedPrefixes::normalize($opts['cached_prefixes'], 'requests');
+            }
+            return 'ok';
+        }
+
+        public function completeJson(string $prompt, array $opts = []): array
+        {
+            return [];
+        }
+
+        public function completeJsonBatch(array $requests): array
+        {
+            return array_map(static fn () => [], $requests);
+        }
+
+        public function completeBatch(array $requests): TextBatchResult
+        {
+            return new TextBatchResult(array_map(static fn () => 'ok', $requests));
+        }
+    };
+
+    $findings = conformance_by_check(LlmConformance::structural($llm));
+
+    assert_true($findings['malformed_prefixes_rejected']->passed);
+    assert_true(!$findings['malformed_prefixes_rejected']->skipped, 'the exception type is decisive on its own');
+    assert_true($findings['oversized_prefix_list_rejected']->passed);
 });
 
 test('structural checks spend nothing on a conforming host', function () {
