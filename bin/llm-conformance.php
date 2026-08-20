@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\LlmConformance;
 use Automattic\SiteBuild\LlmConformanceFinding;
+use Automattic\SiteBuild\Narrator;
 
 /**
  * Run the Llm contract conformance suite against the configured provider.
@@ -20,7 +21,13 @@ use Automattic\SiteBuild\LlmConformanceFinding;
 
 require_once __DIR__ . '/../src/bootstrap.php';
 
-$structuralOnly = in_array('--structural', $argv, true);
+$args = parse_cli_args($argv, ['--structural' => 'bool']);
+if ($args['unknown'] !== null) {
+    Narrator::write("Unknown argument: {$args['unknown']}\n");
+    Narrator::write("Usage: php bin/llm-conformance.php [--structural]\n");
+    exit(2);
+}
+$structuralOnly = $args['flags']['--structural'] ?? false;
 
 $llm = make_llm();
 $findings = LlmConformance::run($llm, includeLive: !$structuralOnly);
