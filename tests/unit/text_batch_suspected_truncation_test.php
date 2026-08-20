@@ -116,6 +116,31 @@ test('a stop-reason-blind host gets the doubled-budget regeneration end to end',
     assert_eq([], $result->notesFor('menu'), 'a recovered member carries no degradation note');
 });
 
+test('a retry that finishes inside its doubled budget is accepted', function () {
+    $calls = 0;
+    $send = static function (array $subset) use (&$calls): array {
+        $calls++;
+        $out = [];
+        foreach ($subset as $key => $request) {
+            $out[$key] = $calls === 1
+                ? ['text' => 'CUT OFF', 'output' => (int) $request['max_tokens']]
+                : ['text' => 'COMPLETE', 'output' => 20000];
+        }
+        return $out;
+    };
+
+    $result = TextBatchRecovery::run(
+        ['menu' => ['prompt' => 'Generate the menu page.', 'max_tokens' => 16000]],
+        $send,
+        maxRetries: 1,
+        defaultMaxTokens: 16000,
+    );
+
+    assert_eq(2, $calls, 'exactly one regeneration');
+    assert_eq('COMPLETE', $result->texts['menu'], 'the retry is judged against its doubled budget');
+    assert_eq([], $result->notesFor('menu'), 'a complete retry carries no degradation note');
+});
+
 test('a still-truncated stop-reason-blind member is retained with an actionable note', function () {
     // Always fills whatever budget it is given: regeneration cannot help, so
     // the best partial must survive for salvage rather than aborting the batch.
@@ -138,6 +163,6 @@ test('a still-truncated stop-reason-blind member is retained with an actionable 
     assert_eq(str_repeat('x', 10), $result->texts['menu'], 'the best partial is kept, not discarded');
     $notes = $result->notesFor('menu');
     assert_true($notes !== [], 'a retained truncation must be recorded for warnings.json');
-    assert_contains('16000-token output budget', $notes[0], 'the note names the budget that was filled');
+    assert_contains('32000-token output budget', $notes[0], 'the note names the retry budget that was filled');
     assert_contains('no stop reason', $notes[0], 'the note names the host defect that hid it');
 });

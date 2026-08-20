@@ -159,18 +159,18 @@ final class TextBatchRecovery
             }
 
             $retry = [];
-            foreach ($active as $key => $_request) {
+            foreach ($active as $key => $request) {
                 $response = self::responseRecord($responses[$key], $key);
                 $error = StopReasons::terminationError($response['stop_reason'] ?? null);
                 if ($error === null
-                    && self::suspectedOutputLimit($response, $requests[$key], $defaultMaxTokens)
+                    && self::suspectedOutputLimit($response, $request, $defaultMaxTokens)
                 ) {
                     // A stop-reason-blind host cannot tell us the response was
                     // cut off, so treat a budget filled to the token as the
                     // truncation it almost certainly is. Naming it max_tokens
                     // routes it through the same doubled-budget regeneration a
                     // conforming host would have triggered.
-                    $budget = $requests[$key]['max_tokens'] ?? $defaultMaxTokens;
+                    $budget = $request['max_tokens'] ?? $defaultMaxTokens;
                     $response['stop_reason'] = 'max_tokens';
                     $error = 'generation filled its entire ' . (int) $budget
                         . '-token output budget and the host reported no stop reason';
