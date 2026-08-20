@@ -56,48 +56,57 @@
             return;
         }
 
-        var links = document.querySelectorAll('.wp-block-navigation a[href]');
-        var index;
-        var item;
-        for (index = 0; index < links.length; index += 1) {
-            item = navigationItemForLink(links[index]);
-            if (links[index].getAttribute('aria-current') === 'page'
-                || (item && item.classList.contains('current-menu-item'))) {
-                // WordPress state remains authoritative when it is present.
-                return;
-            }
-        }
-
+        var navigationBlocks = document.querySelectorAll('.wp-block-navigation');
         var current = new window.URL(window.location.href);
         var currentPath = normalizedPath(current.pathname);
-        var matches = [];
-        for (index = 0; index < links.length; index += 1) {
-            var rawHref = links[index].getAttribute('href');
-            if (!rawHref || rawHref.charAt(0) === '#') {
+        var blockIndex;
+        var index;
+        var item;
+        for (blockIndex = 0; blockIndex < navigationBlocks.length; blockIndex += 1) {
+            var links = navigationBlocks[blockIndex].querySelectorAll('a[href]');
+            var wordpressOwned = false;
+            for (index = 0; index < links.length; index += 1) {
+                item = navigationItemForLink(links[index]);
+                if (links[index].getAttribute('aria-current') === 'page'
+                    || (item && item.classList.contains('current-menu-item'))) {
+                    wordpressOwned = true;
+                    break;
+                }
+            }
+            if (wordpressOwned) {
+                // WordPress state remains authoritative within this block.
                 continue;
             }
 
-            var target;
-            try {
-                target = new window.URL(rawHref, current.href);
-            } catch (error) {
-                continue;
-            }
-            if (target.origin !== current.origin
-                || normalizedPath(target.pathname) !== currentPath
-                || (rawHref.indexOf('?') !== -1 && target.search !== current.search)) {
-                continue;
+            var matches = [];
+            for (index = 0; index < links.length; index += 1) {
+                var rawHref = links[index].getAttribute('href');
+                if (!rawHref || rawHref.charAt(0) === '#') {
+                    continue;
+                }
+
+                var target;
+                try {
+                    target = new window.URL(rawHref, current.href);
+                } catch (error) {
+                    continue;
+                }
+                if (target.origin !== current.origin
+                    || normalizedPath(target.pathname) !== currentPath
+                    || (rawHref.indexOf('?') !== -1 && target.search !== current.search)) {
+                    continue;
+                }
+
+                item = navigationItemForLink(links[index]);
+                if (item) {
+                    matches.push({ link: links[index], item: item });
+                }
             }
 
-            item = navigationItemForLink(links[index]);
-            if (item) {
-                matches.push({ link: links[index], item: item });
+            for (index = 0; index < matches.length; index += 1) {
+                matches[index].link.setAttribute('aria-current', 'page');
+                matches[index].item.classList.add('current-menu-item');
             }
-        }
-
-        for (index = 0; index < matches.length; index += 1) {
-            matches[index].link.setAttribute('aria-current', 'page');
-            matches[index].item.classList.add('current-menu-item');
         }
     }
 
