@@ -290,7 +290,7 @@ final class LlmConformance
     /**
      * completeBatch must return a TextBatchResult keyed exactly as its input.
      * SectionsStep pairs every response back to its job by key, so a host that
-     * re-keys or reorders silently writes sections into the wrong files.
+     * re-keys silently writes sections into the wrong files.
      */
     private static function checkBatchKeysRoundTrip(Llm $llm): LlmConformanceFinding
     {
