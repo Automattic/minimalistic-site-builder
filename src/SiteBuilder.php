@@ -115,6 +115,9 @@ final class SiteBuilder
      * $designConstraints is the optional caller-owned hero capability object;
      * it is validated before a project directory is claimed. $writingDirection
      * is the optional explicit logical direction and accepts only ltr|rtl.
+     * $formPlaceholders declares that the host owns a real form backend, so
+     * sections reserve a form's place with a JP_FORM placeholder the host
+     * replaces after the build; without it they emit no form markup at all.
      *
      * @param array<int,string|array<string,mixed>> $pages
      * @param array<string,mixed>|null              $siteSpec
@@ -128,6 +131,7 @@ final class SiteBuilder
         ?array $siteSpec = null,
         array $designConstraints = [],
         ?string $writingDirection = null,
+        bool $formPlaceholders = false,
     ): Project {
         if ($multiPage === false && $pages !== []) {
             throw new \InvalidArgumentException('A fixed page list requires multiPage to be true or omitted');
@@ -176,6 +180,9 @@ final class SiteBuilder
         }
         if ($writingDirection !== null) {
             $seed['writing_direction'] = $writingDirection;
+        }
+        if ($formPlaceholders) {
+            $seed['form_placeholders'] = true;
         }
 
         $meta = $project->exists('meta.json') ? $project->readJson('meta.json') : [];
