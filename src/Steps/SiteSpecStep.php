@@ -290,9 +290,13 @@ final class SiteSpecStep implements Step
         $pageWarnings = [];
         $spec['pages'] = self::normalizePages($spec['pages'] ?? null, $spec, $multiPage, $pageWarnings);
         if ($requested !== []) {
+            // A caller-fixed list is promised to survive unchanged — same
+            // order, same slugs, same titles (REQUESTED_SCOPE above, and the
+            // tests that pin it). A host that explicitly asks for a Cart page
+            // keeps its name and its route; the cart CONTENTS still degrade
+            // downstream, where StorefrontDegrade::markup strips the purchase
+            // controls the catalog cannot honor.
             $spec['pages'] = self::forcePages($requested, $spec['pages']);
-            [$spec['pages'], $cartWarnings] = \Automattic\SiteBuild\StorefrontDegrade::pages($spec['pages']);
-            array_push($warnings, ...$cartWarnings);
         } else {
             array_push($warnings, ...$pageWarnings);
         }

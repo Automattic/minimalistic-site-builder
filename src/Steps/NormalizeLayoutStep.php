@@ -41,6 +41,36 @@ final class NormalizeLayoutStep implements Step
         return 'Normalize layout attributes';
     }
 
+    /**
+     * The route of this build's contact page, or null when it has none.
+     *
+     * Matched on slug and title so a localized site still resolves; when
+     * nothing matches, callers report the cart destination they could not
+     * repair rather than pointing a button at a route that does not exist.
+     */
+    private static function contactRoute(Project $project): ?string
+    {
+        if (!$project->exists('pages.json')) {
+            return null;
+        }
+        foreach (($project->readJson('pages.json')['pages'] ?? []) as $page) {
+            if (!is_array($page)) {
+                continue;
+            }
+            $slug = strtolower(trim((string) ($page['slug'] ?? '')));
+            $title = strtolower(trim((string) ($page['title'] ?? '')));
+            foreach ([$slug, $title] as $candidate) {
+                if ($candidate === '') {
+                    continue;
+                }
+                if (preg_match('/\b(?:contact|contacto|contato|kontakt|contatti)\b/u', $candidate) === 1) {
+                    return '/' . ltrim($slug, '/');
+                }
+            }
+        }
+        return null;
+    }
+
     public function declaration(): StepDeclaration
     {
         return new StepDeclaration(
@@ -52,6 +82,11 @@ final class NormalizeLayoutStep implements Step
                 ...($this->htmlFirst ? ['design/site.css'] : []),
                 'theme/theme.json',
                 'theme/parts/*',
+                // Read only when it exists: a relabelled purchase CTA needs
+                // somewhere to send an enquiry, and pages.json is where the
+                // build's routes live. Absent, the CTA's destination is
+                // reported instead of invented.
+                'pages.json',
             ],
             writes: ['theme/parts/*', 'warnings.json'],
             concurrent: false,
@@ -75,13 +110,20 @@ final class NormalizeLayoutStep implements Step
             // No carrier classes: align:wide promotion stays fix-blocks' alone.
             widePartCarrierClasses: [],
         );
+        // Where a relabelled purchase CTA should send an enquiry, when this
+        // build has a contact page at all.
+        $contactRoute = self::contactRoute($project);
         $cartWarnings = [];
         foreach ($project->themeFiles() as $rel) {
             $path = 'theme/' . $rel;
             if (!$project->exists($path)) {
                 continue;
             }
-            [$markup, $degraded] = StorefrontDegrade::markup($project->readText($path), $path);
+            [$markup, $degraded] = StorefrontDegrade::markup(
+                $project->readText($path),
+                $path,
+                $contactRoute,
+            );
             if ($degraded === []) {
                 continue;
             }

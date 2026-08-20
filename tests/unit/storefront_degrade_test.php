@@ -74,25 +74,107 @@ test('StorefrontDegrade strips add-to-cart forms from markup', function () {
     assert_true(!str_contains(strtolower($out), '<form'));
     assert_true(!str_contains(strtolower($out), '<input'));
     assert_contains('Enquire', $out);
-    assert_contains('stripped unbuildable cart', implode(' ', $warnings));
+    assert_contains('kept a catalog storefront', implode(' ', $warnings));
 });
 
 test('StorefrontDegrade preserves original markup when a cleanup regex fails', function () {
     $originalLimit = ini_get('pcre.backtrack_limit');
     ini_set('pcre.backtrack_limit', '1000');
     try {
-        $markup = '<!-- wp:woocommerce/cart --><div>' . str_repeat('x', 2000);
+        $markup = '<!-- wp:group --><div><form><input name="quantity">'
+            . str_repeat('<span>x</span>', 300)
+            . '</form></div><!-- /wp:group -->';
         [$out, $warnings] = StorefrontDegrade::markup($markup, 'theme/parts/shop.html');
 
-        assert_eq($markup, $out);
+        assert_eq($markup, $out, 'a failed pattern never wipes the page');
         assert_contains("file='theme/parts/shop.html'", implode(' ', $warnings));
-        assert_contains('delivered=unchanged', implode(' ', $warnings));
-        assert_contains('cart cleanup regex failed', implode(' ', $warnings));
+        assert_contains('delivered="unchanged"', implode(' ', $warnings));
+        assert_contains('cart cleanup pattern failed', implode(' ', $warnings));
     } finally {
         if ($originalLimit !== false) {
             ini_set('pcre.backtrack_limit', (string) $originalLimit);
         }
     }
+});
+
+test('StorefrontDegrade removes a nested vendor block at its real boundary', function () {
+    // A lazy `.*?` under /s stopped at the FIRST closing comment, so the outer
+    // block's closer survived as an orphan and broke the page.
+    $markup = '<!-- wp:group --><div class="wp-block-group">'
+        . '<!-- wp:woocommerce/cart --><div class="cart">'
+        . '<!-- wp:woocommerce/cart-line-items-block --><div>lines</div><!-- /wp:woocommerce/cart-line-items-block -->'
+        . '</div><!-- /wp:woocommerce/cart -->'
+        . '<!-- wp:paragraph --><p>Fresh bread daily.</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->';
+    [$out, $warnings] = StorefrontDegrade::markup($markup, 'theme/parts/shop.html');
+
+    assert_true(!str_contains($out, 'woocommerce'), 'no vendor block or delimiter survives');
+    assert_true(!str_contains($out, '/wp:woocommerce'), 'no orphan closing comment is left behind');
+    assert_contains('<p>Fresh bread daily.</p>', $out, 'the sibling paragraph is untouched');
+    assert_eq(
+        substr_count($out, '<!-- wp:group -->'),
+        substr_count($out, '<!-- /wp:group -->'),
+        'the surrounding group stays balanced',
+    );
+    assert_contains('removed woocommerce/cart', implode(' ', $warnings));
+});
+
+test('StorefrontDegrade leaves an unprovable vendor boundary alone and says so', function () {
+    // BlockMarkup::endOffset() returns null exactly so a caller can decline to
+    // half-rewrite bytes it cannot delimit.
+    $markup = '<!-- wp:woocommerce/cart --><div class="cart">no closing delimiter';
+    [$out, $warnings] = StorefrontDegrade::markup($markup, 'theme/parts/shop.html');
+
+    assert_eq($markup, $out);
+    assert_contains('delimiter boundary could not be proven', implode(' ', $warnings));
+});
+
+test('StorefrontDegrade relabels every purchase CTA, not just add-to-cart', function () {
+    foreach (['Add to cart', 'Checkout', 'Buy now', 'Proceed to checkout', 'Place order'] as $label) {
+        $markup = '<!-- wp:button --><div class="wp-block-button">'
+            . '<a class="wp-block-button__link" href="/shop">' . $label . '</a>'
+            . '</div><!-- /wp:button -->';
+        [$out] = StorefrontDegrade::markup($markup, 'theme/parts/shop.html');
+        assert_contains('Enquire', $out, "'{$label}' is relabelled");
+        assert_true(!str_contains(strtolower($out), strtolower($label)), "'{$label}' does not survive");
+    }
+});
+
+test('StorefrontDegrade points a relabelled CTA at the contact page', function () {
+    $markup = '<!-- wp:button --><div class="wp-block-button">'
+        . '<a class="wp-block-button__link" href="/cart">Add to cart</a>'
+        . '</div><!-- /wp:button -->';
+    [$out, $warnings] = StorefrontDegrade::markup($markup, 'theme/parts/shop.html', '/contact');
+
+    assert_contains('Enquire', $out);
+    assert_contains('href="/contact"', $out, 'the button no longer points at the cart');
+    assert_true(!str_contains($out, '/cart'), 'no cart route survives');
+    assert_contains('pointed /cart at /contact', implode(' ', $warnings));
+});
+
+test('StorefrontDegrade reports a cart destination it cannot repair', function () {
+    // Without a contact page there is nowhere to send an enquiry, so the row
+    // names the destination rather than the button silently staying broken.
+    $markup = '<!-- wp:button --><div class="wp-block-button">'
+        . '<a class="wp-block-button__link" href="/checkout">Buy now</a>'
+        . '</div><!-- /wp:button -->';
+    [$out, $warnings] = StorefrontDegrade::markup($markup, 'theme/parts/shop.html');
+
+    assert_contains('Enquire', $out);
+    $joined = implode(' ', $warnings);
+    assert_contains('/checkout', $joined);
+    assert_contains('no contact page', $joined);
+});
+
+test('StorefrontDegrade markup is idempotent over what it delivered', function () {
+    $markup = '<!-- wp:group --><div><form><input name="quantity">'
+        . '<!-- wp:button --><div class="wp-block-button">'
+        . '<a class="wp-block-button__link" href="/cart">Add to cart</a></div><!-- /wp:button -->'
+        . '</form></div><!-- /wp:group -->';
+    [$once] = StorefrontDegrade::markup($markup, 'theme/parts/shop.html', '/contact');
+    [$twice, $repeat] = StorefrontDegrade::markup($once, 'theme/parts/shop.html', '/contact');
+    assert_eq($once, $twice, 'a degraded part degrades unchanged');
+    assert_eq([], $repeat);
 });
 
 test('site-spec normalizePages degrades a cart page to a catalog storefront', function () {
