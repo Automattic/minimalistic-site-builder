@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\AboveFoldContract;
 use Automattic\SiteBuild\CardStyle;
+use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\HeroBlueprint;
@@ -284,6 +285,7 @@ final class DesignDirectionStep implements Step
             'canvas'           => $canvas,
             'card_style'       => 'flush',
             'shape'            => 'sharp',
+            'device'           => Device::DEFAULT,
             'motion'           => Motion::DEFAULT_PROFILE,
             'motion_note'      => '',
             'concept_seed'     => $seed,
@@ -574,6 +576,7 @@ final class DesignDirectionStep implements Step
         }
 
         $cardStyle = self::normalizeCardStyle($raw['card_style'] ?? null, $warnings);
+        $device = self::normalizeDevice($raw['device'] ?? null, $warnings);
 
         $motion = self::motionProfile($raw['motion'] ?? null);
         $rawMotion = is_string($raw['motion'] ?? null)
@@ -617,6 +620,7 @@ final class DesignDirectionStep implements Step
             // the accidental look every site gets.
             'card_style'       => $cardStyle,
             'shape'            => $shape,
+            'device'           => $device,
             // The motion profile is a fixed list (the kit ships exactly these);
             // anything unrecognized falls back to the default so every build
             // commits to ONE profile the downstream steps can gate on.
@@ -644,6 +648,21 @@ final class DesignDirectionStep implements Step
             'card_style',
             $warnings,
             'unsupported generated card treatment replaced by default',
+        );
+    }
+
+    /**
+     * @param list<string> $warnings
+     */
+    public static function normalizeDevice(mixed $authored, array &$warnings = []): string
+    {
+        return BoundedChoice::normalize(
+            $authored,
+            Device::ALL,
+            Device::DEFAULT,
+            'device',
+            $warnings,
+            'unbuildable motif replaced by none',
         );
     }
 
@@ -896,6 +915,18 @@ final class DesignDirectionStep implements Step
             };
         }
 
+        $device = Device::explicit($direction['device'] ?? null);
+        $deviceClass = Device::className($device);
+        if ($device !== null && $device !== 'none' && $deviceClass !== null) {
+            $deviceMeaning = match ($device) {
+                'hairline-rule'  => 'a 1px accent rule on ONE non-hero band',
+                'section-numeral'=> 'a folio numeral on ONE non-hero band',
+                'stamp'          => 'a rotated stamp mark on ONE non-hero band',
+                default          => 'the committed one-band CSS device',
+            };
+            $facts[] = "- **Device**: {$deviceClass} — {$deviceMeaning}. Never the hero. Never two bands.";
+        }
+
         // Render the motion commitment with its executable meaning: the
         // section prompts gate their motion-class placement on this line.
         $motion = strtolower(trim((string) ($direction['motion'] ?? '')));
@@ -1086,6 +1117,15 @@ final class DesignDirectionStep implements Step
             return null;
         }
         return self::explicitShape($project->readJson(self::FILE)['shape'] ?? null);
+    }
+
+    /** The committed one-band CSS device, or `none`. */
+    public static function deviceFor(Project $project): string
+    {
+        if (!$project->exists(self::FILE)) {
+            return Device::DEFAULT;
+        }
+        return self::normalizeDevice($project->readJson(self::FILE)['device'] ?? null);
     }
 
     /** Parse only an explicit valid corner-language commitment. */

@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\Motion;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
@@ -89,13 +90,20 @@ final class MotionSanityStep implements Step
         }
 
         $profile = DesignDirectionStep::motionProfileFor($project);
+        $deviceClass = Device::className(DesignDirectionStep::deviceFor($project));
         $report = [];
 
         foreach (self::fileGroups($project) as $group) {
             $budget = self::newBudget();
             foreach ($group['files'] as $rel) {
                 $markup = $project->readText('theme/' . $rel);
-                $result = self::sanitize($markup, $profile, $budget, $rel === $group['hero']);
+                $result = self::sanitize(
+                    $markup,
+                    $profile,
+                    $budget,
+                    $rel === $group['hero'],
+                    $deviceClass,
+                );
                 if ($result['markup'] !== $markup) {
                     $project->writeText('theme/' . $rel, $result['markup']);
                 }
@@ -129,11 +137,11 @@ final class MotionSanityStep implements Step
      * Fresh page-level budget state, threaded through sanitize() calls so the
      * one-per-page limits span every file of the page.
      *
-     * @return array{ambient:int, hero:int}
+     * @return array{ambient:int, hero:int, device:int}
      */
     public static function newBudget(): array
     {
-        return ['ambient' => 0, 'hero' => 0];
+        return ['ambient' => 0, 'hero' => 0, 'device' => 0];
     }
 
     /**
@@ -204,7 +212,11 @@ final class MotionSanityStep implements Step
      * kept class list is always a subset of the authored one. $budget carries
      * the page-level counters across files. Pure — unit-testable.
      *
-     * @param array{ambient:int, hero:int} $budget
+     * @param array{ambient:int, hero:int, device:int} $budget
+     * @param ?string $deviceClass the one device class the direction committed,
+     *        or null when it committed none. prompts/page-plan.md budgets it to
+     *        one non-hero band per page, and nothing was checking that after
+     *        the model wrote the markup.
      * @return array{markup:string, notes:string[]}
      */
     public static function sanitize(
@@ -212,6 +224,7 @@ final class MotionSanityStep implements Step
         string $profile,
         array &$budget,
         bool $heroAllowed = true,
+        ?string $deviceClass = null,
     ): array
     {
         $doc = BlockMarkup::parse($markup);
@@ -220,6 +233,7 @@ final class MotionSanityStep implements Step
         $sectionEntrances = 0;
 
         foreach ($doc->indices() as $i) {
+            self::enforceDeviceBudget($doc, $i, $deviceClass, $heroAllowed, $budget, $notes);
             $attrs = $doc->attrs($i) ?? [];
             $className = $attrs['className'] ?? null;
             $jsonTokens = is_string($className)
@@ -329,6 +343,74 @@ final class MotionSanityStep implements Step
         }
 
         return ['markup' => $doc->render(), 'notes' => $notes];
+    }
+
+    /**
+     * Hold the one-band device budget the prompt only asked for.
+     *
+     * prompts/page-plan.md says at most one non-hero band carries the device,
+     * and until this ran nothing checked it afterwards — a build could skip the
+     * class, use it twice, put it on the hero, or invent a variant with no CSS,
+     * and nobody found out. Removal-only, like every other pass here.
+     *
+     * @param array{ambient:int, hero:int, device:int} $budget
+     * @param list<string> $notes
+     */
+    private static function enforceDeviceBudget(
+        BlockMarkup $doc,
+        int $i,
+        ?string $deviceClass,
+        bool $isHero,
+        array &$budget,
+        array &$notes,
+    ): void {
+        $attrs = $doc->attrs($i) ?? [];
+        $className = $attrs['className'] ?? null;
+        $jsonTokens = is_string($className)
+            ? (preg_split('/\s+/', trim($className), -1, PREG_SPLIT_NO_EMPTY) ?: [])
+            : [];
+        $htmlTokens = self::classTokensInOwnHtml($doc, $i);
+
+        $candidates = array_values(array_unique(array_filter(
+            array_merge($jsonTokens, $htmlTokens),
+            static fn (string $token): bool => str_starts_with($token, Device::CLASS_PREFIX),
+        )));
+        if ($candidates === []) {
+            return;
+        }
+
+        $dropped = [];
+        foreach ($candidates as $token) {
+            $reason = match (true) {
+                $deviceClass === null => 'the direction committed no device',
+                $token !== $deviceClass => "not the committed device ({$deviceClass})",
+                $isHero => 'the hero never carries the device',
+                $budget['device'] >= 1 => 'one band per page already carries it',
+                default => null,
+            };
+            if ($reason === null) {
+                $budget['device']++;
+                continue;
+            }
+            $dropped[] = $token;
+            $notes[] = "{$doc->name($i)}: dropped '{$token}' ({$reason})";
+        }
+        if ($dropped === []) {
+            return;
+        }
+
+        $kept = array_values(array_diff($jsonTokens, $dropped));
+        if (is_string($className)) {
+            if ($kept === []) {
+                unset($attrs['className']);
+            } else {
+                $attrs['className'] = implode(' ', $kept);
+            }
+            $doc->setAttrs($i, $attrs);
+        }
+        foreach ($dropped as $token) {
+            $doc->removeClassTokenInOwnHtml($i, $token);
+        }
     }
 
     /**

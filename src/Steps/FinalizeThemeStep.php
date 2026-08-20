@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\HeaderBehavior;
 use Automattic\SiteBuild\Narrator;
+use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\OverlayKit;
 use Automattic\SiteBuild\PageScope;
 use Automattic\SiteBuild\Project;
@@ -112,9 +113,14 @@ final class FinalizeThemeStep implements Step
         self::pruneMotionKit($project, $motion);
         self::pruneHeaderKit($project, $header);
         $shape = DesignDirectionStep::shapeFor($project);
+        $device = DesignDirectionStep::deviceFor($project);
         $overlays = [];
         if (self::writeOverlayKit($project, self::shapeKit(), ShapeMarkup::kitCss($shape))) {
             $overlays[] = self::shapeKit();
+        }
+        $deviceKit = self::writeOverlayKit($project, self::deviceKit(), Device::kitCss($device));
+        if ($deviceKit) {
+            $overlays[] = self::deviceKit();
         }
         if ($headerWarnings !== []) {
             $project->addWarnings($this->id(), $headerWarnings);
@@ -129,6 +135,9 @@ final class FinalizeThemeStep implements Step
         Narrator::write($header
             ? "  header: '{$headerBehavior}' state kit enqueued\n"
             : "  header: static (kit not shipped)\n");
+        Narrator::write($deviceKit
+            ? "  device: '{$device}' utility enqueued\n"
+            : "  device: {$device} (kit not shipped)\n");
         Narrator::write($overlays !== []
             ? "  shape: '{$shape}' corner kit enqueued\n"
             : '  shape: ' . ($shape ?? 'none committed') . " (kit not shipped)\n");
@@ -155,7 +164,15 @@ final class FinalizeThemeStep implements Step
      */
     public static function overlayKits(): array
     {
-        return [self::shapeKit()];
+        return [self::shapeKit(), self::deviceKit()];
+    }
+
+    public static function deviceKit(): OverlayKit
+    {
+        return new OverlayKit(
+            'device',
+            '// Committed one-band CSS device. Loads after generated style.css.',
+        );
     }
 
     public static function shapeKit(): OverlayKit
