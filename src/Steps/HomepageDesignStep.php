@@ -102,6 +102,7 @@ final class HomepageDesignStep implements Step
         $warnings = [];
         try {
             $seeds = $this->candidateSeeds($brief, $siteSpec, $candidateCount, $warnings);
+            $language = SiteSpecStep::languageOf($project);
             $requests = [];
             foreach ($seeds as $index => $seed) {
                 $requests[$index] = $this->withOptions([
@@ -109,6 +110,7 @@ final class HomepageDesignStep implements Step
                         'brief'            => $brief,
                         'site_spec'        => $siteSpec,
                         'design_direction' => $designDirection,
+                        'language'         => $language,
                         'seed'             => $seed,
                     ]),
                 ]);

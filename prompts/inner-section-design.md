@@ -35,6 +35,8 @@ Use the full outline to understand this section's position, neighboring sections
 
 Write specific visitor-facing copy grounded in the site spec, page spec, and section spec. Keep copy consistent across the full page outline. Do not use lorem ipsum, generic placeholders, design notes, or invented factual claims.
 
+LANGUAGE: write ALL visitor-facing copy — headings, body text, captions, list items, labels, button text, image alt text — in {{language}}. Do NOT mix languages; the only exceptions are proper nouns and the spec's verbatim identity values.
+
 ## Fragment contract
 
 Return exactly one closed root `<section id="{{section_slug}}">...</section>` and nothing else. The root section ID must match `{{section_slug}}` exactly.

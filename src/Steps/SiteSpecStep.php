@@ -192,13 +192,26 @@ final class SiteSpecStep implements Step
     /**
      * The committed copy language from siteSpec.json, for wiring into the
      * {{language}} placeholder of downstream prompts. Falls back to a
-     * descriptive phrase for specs that predate the language field, so the
-     * rendered rule still reads as an instruction.
+     * descriptive phrase for specs that arrive without the field — a
+     * host-supplied spec never carries one — so the rendered rule still reads
+     * as an instruction.
+     *
+     * The fallback names the SITE SPEC, not the user prompt: the prompts that
+     * author visitor-facing copy (section, hero, header, footer, and the
+     * HTML-first page prompts) all carry {{site_spec}} but NONE of them carry
+     * {{user_prompt}}, so a rule pointing at the prompt names a document the
+     * model cannot see. Left unresolvable, the richest language signal in
+     * context is the site's address, and a francophone address produced a
+     * French About page on an otherwise English site (BIGR-849). The spec is
+     * a faithful stand-in: its own title, description, and page purposes are
+     * written in the user's language on both the generated and host paths.
      */
     public static function languageOf(Project $project): string
     {
         $language = trim((string) ($project->readJson('siteSpec.json')['language'] ?? ''));
-        return $language !== '' ? $language : 'the language the user prompt is written in';
+        return $language !== ''
+            ? $language
+            : "the SITE SPEC's own language (never a language implied by the site's location or audience)";
     }
 
     /** The normalized logical writing direction persisted in siteSpec.json. */
@@ -288,14 +301,14 @@ final class SiteSpecStep implements Step
 
         // Every piece of site copy is written in this language. A missing or
         // implausible value degrades to '' — languageOf() then renders the
-        // "follow the user prompt's language" instruction downstream — with
+        // "follow the spec's own language" instruction downstream — with
         // a durable warning, instead of aborting the build over one field.
         $language = trim((string) ($spec['language'] ?? ''));
         if ($language === '') {
-            $warnings[] = 'site spec has no "language"; downstream copy follows the user prompt\'s language';
+            $warnings[] = 'site spec has no "language"; downstream copy follows the spec\'s own language';
         } elseif (!self::plausibleLanguage($language)) {
             $warnings[] = "site spec \"language\" is not a plausible language code or name: {$language}; "
-                . "dropped — downstream copy follows the user prompt's language";
+                . "dropped — downstream copy follows the spec's own language";
             $language = '';
         }
         $spec['language'] = $language;

@@ -122,6 +122,7 @@ final class InnerPagesDesignStep implements Step
         ];
         $siteSpecContext = self::jsonContext($siteSpec);
         $sitePagesContext = PagePlanStep::sitePagesList($allPages);
+        $language = SiteSpecStep::languageOf($project);
         $frontPage = $allPages[0];
 
         $requests = [];
@@ -130,6 +131,7 @@ final class InnerPagesDesignStep implements Step
             'site_spec'      => $siteSpecContext,
             'site_pages'     => $sitePagesContext,
             'page_spec'      => self::jsonContext($frontPage),
+            'language'       => $language,
             'site_css'       => '[cached prefix layer 1 contains the exact design/site.css bytes]',
             'design_preview' => '[cached prefix layer 2 contains the exact design preview bytes]',
         ]);
@@ -168,6 +170,7 @@ final class InnerPagesDesignStep implements Step
                 'site_spec'      => $siteSpecContext,
                 'site_pages'     => $sitePagesContext,
                 'page_spec'      => self::jsonContext($page),
+                'language'       => $language,
                 'site_css'       => '[cached prefix layer 1 contains the exact design/site.css bytes]',
                 'design_preview' => '[cached prefix layer 2 contains the exact design preview bytes]',
             ]);
@@ -413,10 +416,12 @@ final class InnerPagesDesignStep implements Step
         }
 
         $requests = [];
+        $language = SiteSpecStep::languageOf($project);
         $homePrompt = $this->renderer->render('home-body-design.md', [
             'site_spec'      => $siteSpecContext,
             'site_pages'     => $sitePagesContext,
             'page_spec'      => self::jsonContext($frontPage),
+            'language'       => $language,
             'site_css'       => '[cached prefix layer 1 contains the exact design/site.css bytes]',
             'design_preview' => '[cached prefix layer 2 contains the exact design preview bytes]',
         ]);
@@ -447,6 +452,7 @@ final class InnerPagesDesignStep implements Step
                 $prompt = $this->renderer->render('inner-section-design.md', [
                     'site_spec'       => $siteSpecContext,
                     'site_pages'      => $sitePagesContext,
+                    'language'        => $language,
                     'design_direction' => DesignDirectionStep::readFor($project),
                     'page_spec'       => self::jsonContext($page),
                     'page_outline'    => $outline,
