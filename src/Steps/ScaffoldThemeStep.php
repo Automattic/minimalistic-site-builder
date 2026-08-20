@@ -365,14 +365,14 @@ final class ScaffoldThemeStep implements Step
             line-height: 1.25 !important;
             white-space: normal !important;
             overflow-wrap: anywhere;
-            color: var(--wp--preset--color--contrast) !important;
+            color: inherit !important;
         }
         .wp-site-blocks .wp-block-navigation__responsive-container.is-menu-open
             :is(
                 .wp-block-navigation__responsive-container-close,
                 .wp-block-navigation__submenu-icon
             ) {
-            color: var(--wp--preset--color--contrast) !important;
+            color: inherit !important;
         }
         .wp-site-blocks .wp-block-navigation__responsive-container.is-menu-open
             .wp-block-navigation__responsive-container-close {

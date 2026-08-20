@@ -220,6 +220,26 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     assert_contains('flex-direction: column !important;', $css);
     $openBlock = substr($css, (int) strpos($css, '.wp-site-blocks .wp-block-navigation__responsive-container.is-menu-open {'));
     assert_contains('justify-content: flex-start !important;', $openBlock);
+    assert_eq(
+        1,
+        preg_match(
+            '/\.wp-site-blocks \.wp-block-navigation__responsive-container\.is-menu-open\s+'
+                . '\.wp-block-navigation-item__content:not\(\.wp-element-button\)\s*\{'
+                . '(?=[^}]*color:\s*inherit !important;)(?![^}]*color:[^;}]*contrast)[^}]*\}/s',
+            $css,
+        ),
+        'overlay links inherit the modal foreground without forcing contrast',
+    );
+    assert_eq(
+        1,
+        preg_match(
+            '/\.wp-site-blocks \.wp-block-navigation__responsive-container\.is-menu-open\s+'
+                . ':is\([^}]+\)\s*\{'
+                . '(?=[^}]*color:\s*inherit !important;)(?![^}]*color:[^;}]*contrast)[^}]*\}/s',
+            $css,
+        ),
+        'overlay close and submenu controls inherit the modal foreground without forcing contrast',
+    );
 
     // Hero topology and mobile behavior are code-owned. All recipe hooks ship
     // in the static stylesheet (unused hooks are inert), and the mobile rules
