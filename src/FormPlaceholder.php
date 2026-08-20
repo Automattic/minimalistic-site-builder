@@ -26,7 +26,8 @@ final class FormPlaceholder
     public const PURPOSES = ['contact', 'booking', 'rsvp', 'enquiry', 'newsletter-signup'];
 
     public const TYPES = [
-        'text', 'email', 'tel', 'url', 'date', 'textarea', 'checkbox', 'select', 'radio',
+        'name', 'text', 'email', 'tel', 'url', 'date', 'textarea',
+        'checkbox', 'select', 'radio',
     ];
 
     /** Types whose choices are written as a parenthesised list after the type. */

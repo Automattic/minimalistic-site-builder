@@ -197,3 +197,27 @@ test('a marker loose in the markup is caught, since the host only reads the bloc
 
     assert_contains('outside a jetpack-form-placeholder block', $joined);
 });
+
+test('a name field is a type, not something a host guesses from the label', function () {
+    // The label is written in the site's language, so a host matching display
+    // text picks the right field in English and a bare text input everywhere
+    // else. The type carries the meaning instead.
+    $parsed = Automattic\SiteBuild\FormPlaceholder::parse(
+        'JP_FORM: contact | Nombre completo:name:required, Correo:email:required | Enviar',
+    );
+
+    assert_true(is_array($parsed), 'a Spanish spec parses');
+    assert_eq('name', $parsed['fields'][0]['type']);
+    assert_eq('Nombre completo', $parsed['fields'][0]['label']);
+    assert_eq('Enviar', $parsed['submit']);
+});
+
+test('the contract tells the model to use the name type rather than text', function () {
+    $contract = (string) file_get_contents(repo_path('prompts/jetpack-form.md'));
+
+    assert_contains('Use `name` for the field asking who the', $contract, 'the rule is stated');
+    assert_true(
+        !str_contains($contract, 'Name:text'),
+        'no example shows a name field typed as text',
+    );
+});
