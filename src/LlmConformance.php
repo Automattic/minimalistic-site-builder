@@ -118,10 +118,35 @@ final class LlmConformance
     }
 
     /** The probe prefix: inert filler wrapped around the echo nonce. */
-    public static function probePrefix(): string
+    public static function probePrefix(?int $layer = null): string
     {
+        $token = $layer === null ? self::PROBE_TOKEN : self::PROBE_TOKEN . '-L' . $layer;
         return str_repeat(self::FILLER_LINE, self::FILLER_REPEATS)
-            . "\n\nPROBE TOKEN: " . self::PROBE_TOKEN . "\n\n";
+            . "\n\nPROBE TOKEN: " . $token . "\n\n";
+    }
+
+    /**
+     * One request carrying three distinguishable layers, sent through
+     * completeBatch.
+     *
+     * Both halves matter. SectionUnit sends TWO layers, so a host that
+     * forwards only cached_prefixes[0] keeps the theme and drops the page
+     * outline, and a single-layer probe reports that host conformant. And
+     * sections are dispatched through completeBatch, so a host whose batch
+     * path is a separate body builder can honour the field in complete() and
+     * discard it in the call that actually runs.
+     *
+     * @return array{prompt:string,cached_prefixes:list<string>,max_tokens:int}
+     */
+    private static function layeredProbeRequest(): array
+    {
+        return [
+            'prompt' => 'Above this line are three PROBE TOKEN lines. Reply with those three tokens '
+                . 'in the order they appear, separated by single spaces, and nothing else. '
+                . 'If you cannot find them, reply with the word MISSING.',
+            'cached_prefixes' => [self::probePrefix(1), self::probePrefix(2), self::probePrefix(3)],
+            'max_tokens'      => 128,
+        ];
     }
 
     // ---------------------------------------------------------------- checks
@@ -317,24 +342,46 @@ final class LlmConformance
         $check = 'cached_prefixes_reach_the_model';
         $tier = LlmConformanceFinding::TIER_LIVE;
         try {
-            $reply = $llm->complete(
-                'Above this line is a PROBE TOKEN. Reply with that token exactly and nothing else. '
-                . 'If you cannot find a PROBE TOKEN, reply with the word MISSING.',
-                ['cached_prefixes' => [self::probePrefix()], 'max_tokens' => 64],
-            );
+            $result = $llm->completeBatch(['probe' => self::layeredProbeRequest()]);
+            $reply = (string) ($result->texts['probe'] ?? '');
         } catch (\Throwable $e) {
             return LlmConformanceFinding::fail($check, 'Probe call failed: ' . $e->getMessage(), $tier);
         }
-        if (!str_contains($reply, self::PROBE_TOKEN)) {
+        $missing = [];
+        $at = [];
+        foreach ([1, 2, 3] as $layer) {
+            $pos = strpos($reply, self::PROBE_TOKEN . '-L' . $layer);
+            if ($pos === false) {
+                $missing[] = 'layer ' . $layer;
+                continue;
+            }
+            $at[$layer] = $pos;
+        }
+        if ($missing !== []) {
             return LlmConformanceFinding::fail(
                 $check,
-                'The model could not repeat a token that was placed in a cached prefix (replied '
+                'The model could not repeat ' . implode(' and ', $missing) . ' of a three-layer '
+                . 'cached_prefixes (replied '
                 . json_encode(mb_substr(trim($reply), 0, 80), JSON_UNESCAPED_SLASHES) . '). '
-                . 'The prefix did not reach it.',
+                . 'A host that forwards only the first layer keeps the theme and drops the page '
+                . 'outline, which is half of the defect this suite exists for.',
                 $tier,
             );
         }
-        return LlmConformanceFinding::pass($check, 'Model echoed the nonce carried in the cached prefix.', $tier);
+        if ($at[1] > $at[2] || $at[2] > $at[3]) {
+            return LlmConformanceFinding::fail(
+                $check,
+                'All three cached_prefixes layers reached the model but came back out of order. '
+                . 'The contract prepends them in order; callers compose the layers so that later '
+                . 'ones may refer to earlier ones.',
+                $tier,
+            );
+        }
+        return LlmConformanceFinding::pass(
+            $check,
+            'Model echoed all three cached_prefixes nonces, in order, through completeBatch.',
+            $tier,
+        );
     }
 
     /**

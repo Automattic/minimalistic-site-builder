@@ -65,8 +65,14 @@ abstract class ConformanceFakeBase implements Llm, UsageReporting
 
     protected function reply(string $seen): string
     {
-        if (str_contains($seen, LlmConformance::PROBE_TOKEN)) {
-            return LlmConformance::PROBE_TOKEN;
+        // Echo every probe token the host actually put in front of us, in the
+        // order it appears. The layered probe carries one per cached layer, so
+        // a host that forwards only the first is visible in the reply.
+        if (preg_match_all('/' . preg_quote(LlmConformance::PROBE_TOKEN, '/') . '(?:-L\d+)?/', $seen, $m) === 0
+            || $m[0] === []) {
+            // fall through
+        } else {
+            return implode(' ', $m[0]);
         }
         // Stand in for a model that follows a plain instruction. The batch
         // check pairs each response to its key by asking for the key as the
@@ -274,7 +280,8 @@ test('usage-blind hosts skip the usage probe instead of failing it', function ()
         public function complete(string $prompt, array $opts = []): string
         {
             $seen = implode('', (array) ($opts['cached_prefixes'] ?? [])) . $prompt;
-            return str_contains($seen, LlmConformance::PROBE_TOKEN) ? LlmConformance::PROBE_TOKEN : 'MISSING';
+            preg_match_all('/' . preg_quote(LlmConformance::PROBE_TOKEN, '/') . '(?:-L\d+)?/', $seen, $m);
+            return $m[0] === [] ? 'MISSING' : implode(' ', $m[0]);
         }
 
         public function completeJson(string $prompt, array $opts = []): array
