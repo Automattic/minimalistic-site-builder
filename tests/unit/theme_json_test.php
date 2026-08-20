@@ -984,8 +984,10 @@ test('repairFonts does not invent an accent family when the direction left it em
 });
 
 test('repairColors overwrites a drifted hex with the direction value', function () {
-    $preferred = ['secondary' => '#8A5A2B', 'accent' => '#E08A3C'];
-    [$theme, $warnings] = ThemeJsonStep::repairColors(
+    // Both direction hexes clear the floor prompts/theme-json.md states for
+    // their slug on this base, so neither is held back by the contrast gate.
+    $preferred = ['secondary' => '#8A5A2B', 'accent' => '#B4541E'];
+    [$theme, $warnings, $repairs] = ThemeJsonStep::repairColors(
         ['settings' => ['color' => ['palette' => [
             ['slug' => 'base', 'color' => '#FFFFFF', 'name' => 'Base'],
             ['slug' => 'contrast', 'color' => '#111111', 'name' => 'Contrast'],
@@ -997,14 +999,83 @@ test('repairColors overwrites a drifted hex with the direction value', function 
     );
     $bySlug = array_column($theme['settings']['color']['palette'], 'color', 'slug');
     assert_eq('#8A5A2B', $bySlug['secondary']);
-    assert_eq('#E08A3C', $bySlug['accent']);
-    $joined = implode(' ', $warnings);
+    assert_eq('#B4541E', $bySlug['accent']);
+    assert_eq([], $warnings, 'an applied writeback is not a delivered defect');
+    $joined = implode(' ', $repairs);
     assert_contains("palette slug 'secondary'", $joined);
     assert_contains('hue distance exceeded 30 degrees', $joined);
 
-    [$again, $repeatWarnings] = ThemeJsonStep::repairColors($theme, $preferred);
+    [$again, $repeatWarnings, $repeatRepairs] = ThemeJsonStep::repairColors($theme, $preferred);
     assert_eq($theme, $again, 'palette drift repair reaches a fixed point');
     assert_eq([], $repeatWarnings, 'fixed palette emits no repeat repair warnings');
+    assert_eq([], $repeatRepairs, 'fixed palette emits no repeat repair receipts');
+});
+
+test('repairColors keeps a model hex the direction would make unreadable', function () {
+    // prompts/theme-json.md lets the model nudge a hex to clear WCAG. Here it
+    // darkened secondary to 7.46:1; the direction's own hex scores 4.48:1,
+    // under the 4.5 floor that file states for secondary on base.
+    $preferred = ['secondary' => '#777777'];
+    [$theme, $warnings, $repairs] = ThemeJsonStep::repairColors(
+        ['settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#FFFFFF', 'name' => 'Base'],
+            ['slug' => 'contrast', 'color' => '#111111', 'name' => 'Contrast'],
+            ['slug' => 'primary', 'color' => '#111111', 'name' => 'Primary'],
+            ['slug' => 'secondary', 'color' => '#555555', 'name' => 'Secondary'],
+            ['slug' => 'accent', 'color' => '#B4541E', 'name' => 'Accent'],
+        ]]]],
+        $preferred,
+    );
+    $bySlug = array_column($theme['settings']['color']['palette'], 'color', 'slug');
+    assert_eq('#555555', $bySlug['secondary'], 'the readable model hex survives the writeback');
+    assert_eq([], $repairs, 'a rejected writeback is not a repair');
+    $joined = implode(' ', $warnings);
+    assert_contains("palette slug 'secondary'", $joined);
+    assert_contains('kept the model hex', $joined);
+    assert_contains('#777777', $joined);
+    assert_contains('4.48:1', $joined);
+    assert_contains('7.46:1', $joined);
+
+    [$again] = ThemeJsonStep::repairColors($theme, $preferred);
+    assert_eq($theme, $again, 'a rejected writeback reaches a fixed point too');
+});
+
+test('repairColors judges each slug against the floor its own role carries', function () {
+    // accent is judged by "base on accent >= 4.5:1" (button labels), so a
+    // direction accent that clears 4.5 lands even though it would fail the
+    // 7:1 that contrast carries.
+    [$theme, $warnings] = ThemeJsonStep::repairColors(
+        ['settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#FFFFFF', 'name' => 'Base'],
+            ['slug' => 'contrast', 'color' => '#111111', 'name' => 'Contrast'],
+            ['slug' => 'primary', 'color' => '#111111', 'name' => 'Primary'],
+            ['slug' => 'secondary', 'color' => '#555555', 'name' => 'Secondary'],
+            ['slug' => 'accent', 'color' => '#0000FF', 'name' => 'Accent'],
+        ]]]],
+        ['accent' => '#B4541E'],
+    );
+    $bySlug = array_column($theme['settings']['color']['palette'], 'color', 'slug');
+    assert_eq('#B4541E', $bySlug['accent'], '4.97:1 clears the accent floor');
+    assert_eq([], $warnings);
+});
+
+test('repairColors measures against the base the writeback itself delivers', function () {
+    // The direction moves the page to a dark base, so the model's near-black
+    // secondary stops being readable and its own secondary is the right call.
+    [$theme, $warnings] = ThemeJsonStep::repairColors(
+        ['settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#FFFFFF', 'name' => 'Base'],
+            ['slug' => 'contrast', 'color' => '#111111', 'name' => 'Contrast'],
+            ['slug' => 'primary', 'color' => '#111111', 'name' => 'Primary'],
+            ['slug' => 'secondary', 'color' => '#222222', 'name' => 'Secondary'],
+            ['slug' => 'accent', 'color' => '#B4541E', 'name' => 'Accent'],
+        ]]]],
+        ['base' => '#111111', 'secondary' => '#C9C4BC'],
+    );
+    $bySlug = array_column($theme['settings']['color']['palette'], 'color', 'slug');
+    assert_eq('#111111', $bySlug['base']);
+    assert_eq('#C9C4BC', $bySlug['secondary'], 'judged on the delivered base, not the authored one');
+    assert_eq([], $warnings);
 });
 
 test('repairFonts writes the direction family back when the primary face drifted', function () {
@@ -1012,7 +1083,7 @@ test('repairFonts writes the direction family back when the primary face drifted
         'heading' => ['family' => 'Oswald', 'weights' => [700], 'italic' => false, 'axes' => [], 'character' => ''],
         'body' => ['family' => 'Source Sans 3', 'weights' => [400], 'italic' => false, 'axes' => [], 'character' => ''],
     ];
-    [$theme, $warnings] = ThemeJsonStep::repairFonts(
+    [$theme, $warnings, $repairs] = ThemeJsonStep::repairFonts(
         ['settings' => ['typography' => ['fontFamilies' => [
             ['slug' => 'heading', 'fontFamily' => '"Fraunces", serif', 'name' => 'Heading'],
             ['slug' => 'body', 'fontFamily' => '"Inter", sans-serif', 'name' => 'Body'],
@@ -1022,13 +1093,15 @@ test('repairFonts writes the direction family back when the primary face drifted
     $bySlug = array_column($theme['settings']['typography']['fontFamilies'], 'fontFamily', 'slug');
     assert_contains('Oswald', $bySlug['heading']);
     assert_contains('Source Sans 3', $bySlug['body']);
-    $joined = implode(' ', $warnings);
+    assert_eq([], $warnings, 'an applied writeback is not a delivered defect');
+    $joined = implode(' ', $repairs);
     assert_contains("fontFamilies slug 'heading'", $joined);
     assert_contains('wrote the design-direction family back', $joined);
 
-    [$again, $repeatWarnings] = ThemeJsonStep::repairFonts($theme, $preferred);
+    [$again, $repeatWarnings, $repeatRepairs] = ThemeJsonStep::repairFonts($theme, $preferred);
     assert_eq($theme, $again, 'font drift repair reaches a fixed point');
     assert_eq([], $repeatWarnings, 'fixed fonts emit no repeat repair warnings');
+    assert_eq([], $repeatRepairs, 'fixed fonts emit no repeat repair receipts');
 });
 
 test('repairColors falls back to neutral readable defaults without a direction hex', function () {
@@ -1389,7 +1462,10 @@ function theme_json_preset(array $presets, string $slug): array
 
 test('theme-json declares every artifact it writes', function () {
     $step = new ThemeJsonStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
-    assert_eq(['theme/theme.json', 'logs/theme-json-shape.txt', 'warnings.json'], $step->declaration()->writes);
+    assert_eq(
+        ['theme/theme.json', 'logs/theme-json-shape.txt', 'logs/theme-json-direction-bind.txt', 'warnings.json'],
+        $step->declaration()->writes,
+    );
 });
 
 test('theme-json declares design CSS only for the HTML-first graph', function () {
