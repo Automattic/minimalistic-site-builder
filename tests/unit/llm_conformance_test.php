@@ -195,6 +195,7 @@ test('a host with no cached_prefixes validation fails the structural checks', fu
 
     assert_true(!$byCheck['malformed_prefixes_rejected']->passed, 'malformed shapes must be rejected');
     assert_contains('list of strings', $byCheck['malformed_prefixes_rejected']->detail);
+    assert_contains('null', $byCheck['malformed_prefixes_rejected']->detail);
     assert_true(!$byCheck['oversized_prefix_list_rejected']->passed, 'a fourth layer must be rejected');
 });
 

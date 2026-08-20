@@ -137,6 +137,7 @@ final class LlmConformance
         // A non-list array, a null, and a list holding a non-string.
         $invalid = [
             'string-keyed array' => ['a' => 'x'],
+            'null'               => null,
             'non-string member'  => ['valid', 42],
         ];
         foreach ($invalid as $label => $value) {
