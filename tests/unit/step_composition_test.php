@@ -52,6 +52,9 @@ test('StepComposition htmlFirst matches the HTML-first step order and validates'
         $byId[$step->id()] = ['index' => $index, 'declaration' => $step->declaration()];
     }
     assert_true(!isset($byId['homepage-design']), 'retired homepage generator is absent');
+    $fontsPhp = $steps[array_search('fonts-php', array_map(static fn (Step $s) => $s->id(), $steps), true)];
+    $htmlFirstMode = new ReflectionProperty($fontsPhp, 'htmlFirst');
+    assert_true($htmlFirstMode->getValue($fontsPhp), 'HTML-first composition preserves design fallback fonts');
     assert_true(in_array('design/site.css', $byId['design-preview']['declaration']->writes, true));
     assert_eq(
         ['meta.json', 'siteSpec.json', 'designDirection.json', 'design/site.css', 'design/preview.html'],

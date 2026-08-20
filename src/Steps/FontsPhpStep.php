@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\BlockSerializer\Html\HtmlNode;
+use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Step;
@@ -40,6 +41,10 @@ final class FontsPhpStep implements Step
     /** HTML elements that never establish an inherited-family stack frame. */
     private const VOID_TAGS = HtmlNode::VOID_TAGS;
 
+    public function __construct(private bool $htmlFirst = false)
+    {
+    }
+
     public function id(): string
     {
         return 'fonts-php';
@@ -69,6 +74,12 @@ final class FontsPhpStep implements Step
 
     public function run(Project $project): void
     {
+        if ($this->htmlFirst) {
+            self::removeStaleFontsFile($project);
+            Narrator::write("  HTML-first design owns font availability; fonts.php not needed\n");
+            return;
+        }
+
         $theme = $project->readJson('theme/theme.json');
         $direction = DesignDirectionStep::dataFor($project);
         $warnings = [];
@@ -90,10 +101,7 @@ final class FontsPhpStep implements Step
             }
         }
         if ($requirements === []) {
-            $fontsFile = $project->themePath('fonts.php');
-            if (is_file($fontsFile) && !unlink($fontsFile)) {
-                throw new \RuntimeException("Could not remove stale file: {$fontsFile}");
-            }
+            self::removeStaleFontsFile($project);
             echo $bundled > 0
                 ? "  all {$bundled} Google family/families bundled as theme assets; fonts.php not needed\n"
                 : "  no Google-hosted families; fonts.php not needed\n";
@@ -103,6 +111,14 @@ final class FontsPhpStep implements Step
         $handle = ProjectStore::slugify($project->slug()) . '-fonts';
         $project->writeText('theme/fonts.php', rtrim(self::build($handle, $requirements)) . "\n");
         echo '  fonts-php: ' . count($requirements) . " family/families enqueued\n";
+    }
+
+    private static function removeStaleFontsFile(Project $project): void
+    {
+        $fontsFile = $project->themePath('fonts.php');
+        if (is_file($fontsFile) && !unlink($fontsFile)) {
+            throw new \RuntimeException("Could not remove stale file: {$fontsFile}");
+        }
     }
 
     /**

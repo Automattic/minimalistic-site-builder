@@ -329,6 +329,7 @@ test('G1 engine-support families reach final theme CSS after transform-site and 
         'list-navigation base' => '.wp-block-navigation.blocks-engine-list-navigation.wp-block-navigation-item.wp-block-navigation-link{display:list-item;font:inherit}',
         'list-navigation host' => '.wp-block-navigation.blocks-engine-list-navigation{display:flex!important}',
         'list-navigation mobile overlay' => '.wp-block-navigation.blocks-engine-list-navigation.wp-block-navigation__responsive-container.is-menu-open{background:rgba(0,0,0,.9)!important}',
+        'WordPress navigation compatibility' => '.desktop-nav.wp-block-navigation.wp-block-navigation-item__content',
         'nativeSearchTrigger' => 'flex:0024px!important;width:24px!important;height:80px!important',
         'nativeButton' => 'background-color:#fff!important;color:#000!important',
         'directFlexButton' => '.wp-block-buttons){display:block!important;gap:0!important;min-width:0;width:100%!important}',
@@ -447,6 +448,12 @@ test('G6 unknown engine-support placement warns while known placements carry sil
             'path' => 'assets/css/engine-after.css',
             'content' => ".engine-after{display:block}\n",
         ],
+        [
+            'kind' => 'css',
+            'source' => 'wordpress-compat',
+            'path' => 'assets/css/wordpress-compat.css',
+            'content' => ".wordpress-compat{display:block}\n",
+        ],
     ]];
     $method = new ReflectionMethod(TransformSiteStep::class, 'carriedCss');
     $method->setAccessible(true);
@@ -455,7 +462,7 @@ test('G6 unknown engine-support placement warns while known placements carry sil
     $carried = $method->invokeArgs(null, $args);
 
     assert_eq(".engine-before{display:block}\n", $carried['before-author']);
-    assert_eq(".engine-after{display:block}\n", $carried['after-author']);
+    assert_eq(".engine-after{display:block}\n.wordpress-compat{display:block}\n", $carried['after-author']);
     assert_true(!str_contains(implode("\n", $carried), 'engine-future'));
     assert_eq(1, count($warnings), 'known placements carry silently; unknown placement warns once');
     $warning = $warnings[0];

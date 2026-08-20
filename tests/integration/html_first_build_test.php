@@ -490,7 +490,6 @@ test('G4 HTML-first output gives every transformer marker class matching final t
             'theme/parts/footer.html',
             'theme/templates/page.html',
             'theme/templates/index.html',
-            'theme/fonts.php',
             'theme/functions.php',
             'plugin/pages/home.html',
             'plugin/pages.json',
@@ -498,6 +497,7 @@ test('G4 HTML-first output gives every transformer marker class matching final t
         ] as $path) {
             assert_true($project->exists($path), "missing HTML-first artifact {$path}");
         }
+        assert_true(!$project->exists('theme/fonts.php'), 'HTML-first design does not gain a webfont loader');
 
         assert_eq(html_first_preview_document(), $project->readText('design/preview.html'));
         assert_eq($homeBody, $project->readText('design/home-body.html'));

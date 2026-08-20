@@ -209,7 +209,10 @@ final class StepComposition
                 htmlFirst: true,
             ),
             new CustomMotionStep($llm, $renderer, $models['custom-motion'], $temps['custom-motion']),
-            new FontsPhpStep(),
+            // The validated design cannot load remote font faces. Preserve the
+            // exact fallback stack it rendered instead of adding webfonts only
+            // to the transformed theme and changing text geometry.
+            new FontsPhpStep(htmlFirst: true),
             new FinalizeThemeStep(),
             new ValidateThemeStep(htmlFirst: true),
         ]);
