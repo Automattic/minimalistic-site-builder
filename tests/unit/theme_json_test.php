@@ -773,6 +773,58 @@ test('repairAccentCaption stays quiet when no accent family shipped', function (
     assert_eq(null, $theme['styles']['elements']['caption']['typography']['fontFamily'] ?? null);
 });
 
+test('theme-json repairs malformed caption containers before accent wiring', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_accent_shape_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A neighborhood bakery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project, 'cinematic-safe-zone', [
+        'description' => 'Hand-lettered flavor cards.',
+        'type' => [
+            'accent' => [
+                'family' => 'Caveat',
+                'weights' => [400],
+                'italic' => false,
+                'axes' => [],
+                'character' => 'hand labels',
+            ],
+        ],
+    ]);
+
+    $payload = valid_theme_payload();
+    $payload['settings']['typography']['fontFamilies'][] = [
+        'slug' => 'accent',
+        'name' => 'Accent',
+        'fontFamily' => '"Caveat", cursive',
+    ];
+    $payload['styles']['elements'] = ['bad'];
+    $payload['styles']['blocks'] = ['bad'];
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $theme = $project->readJson('theme/theme.json');
+    assert_true(!array_key_exists(0, $theme['styles']['elements']), 'malformed elements list removed');
+    assert_true(!array_key_exists(0, $theme['styles']['blocks']), 'malformed blocks list removed');
+    assert_eq(
+        'var:preset|font-family|accent',
+        $theme['styles']['elements']['caption']['typography']['fontFamily'],
+    );
+    assert_eq(
+        'var:preset|font-family|accent',
+        $theme['styles']['blocks']['core/image']['typography']['fontFamily'],
+    );
+    $warnings = implode(' ', $project->readJson('warnings.json')['theme-json'] ?? []);
+    assert_contains('theme/theme.json styles.elements: authored ["bad"]', $warnings);
+    assert_contains('theme/theme.json styles.blocks: authored ["bad"]', $warnings);
+
+    [$fixed, $scaffoldWarnings] = ThemeJsonStep::repairScaffold($theme);
+    [$fixed, $accentWarnings] = ThemeJsonStep::repairAccentCaption($fixed);
+    assert_eq($theme, $fixed, 'repair order reaches a fixed point');
+    assert_eq([], array_merge($scaffoldWarnings, $accentWarnings));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('repairFonts adds an optional accent family from the direction', function () {
     [$theme, $warnings] = ThemeJsonStep::repairFonts(
         ['settings' => ['typography' => ['fontFamilies' => [

@@ -454,7 +454,6 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         [$theme, $colorWarnings] = self::repairColors($theme, $preferred);
         $preferredType = is_array($direction['type'] ?? null) ? $direction['type'] : [];
         [$theme, $fontWarnings] = self::repairFonts($theme, $preferredType);
-        [$theme, $accentCaptionWarnings] = self::repairAccentCaption($theme);
         [$theme, $sizeWarnings] = self::repairFontSizes($theme);
 
         // Last: the scaffold references the preset slugs repaired above. The
@@ -463,6 +462,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         if ($this->htmlFirst) {
             $theme = self::removeGeneratedControlTypography($theme);
         }
+        [$theme, $accentCaptionWarnings] = self::repairAccentCaption($theme);
         [$theme, $shapeRepairs, $shapeWarnings] = self::repairShapeWiring(
             $theme,
             DesignDirectionStep::shapeFor($project) ?? '',
