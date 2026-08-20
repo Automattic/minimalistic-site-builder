@@ -428,6 +428,21 @@ test('compose omits the photographic grade for transparent assets', function () 
     assert_contains('solid pure white background', $out);
 });
 
+test('compose preserves competing grade tokens for transparent assets', function () {
+    $subject = 'A badge on studio white, no grain';
+    $out = ImagePromptComposer::compose(
+        $subject,
+        'isolated accent',
+        'illustration',
+        '',
+        'warm Portra 400, visible 35mm grain',
+        true
+    );
+
+    assert_contains("{$subject}. Style: illustration", $out);
+    assert_true(!str_contains($out, 'Art direction'), 'transparent assets bypass the grade and its cleanup');
+});
+
 test('compose omits the transparency clause by default', function () {
     $out = ImagePromptComposer::compose('A sourdough loaf', 'menu item card', 'photorealistic', '');
     assert_true(!str_contains($out, 'transparent'), 'no transparency clause for opaque assets');
