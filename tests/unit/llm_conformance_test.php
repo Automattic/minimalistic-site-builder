@@ -575,3 +575,31 @@ test('a run that proved nothing exits non-zero', function () {
     assert_eq(1, $bad['exit']);
     assert_contains('checks FAILED', $bad['text']);
 });
+
+test('an empty batch reply is not waved through as a declining model', function () {
+    // The advisory downgrade covers a model that ignored the instruction. A
+    // host that returns nothing for a batch member is a different defect, and
+    // billing enough tokens must not excuse it.
+    $llm = new class extends ConformanceFakeBase {
+        protected function seenByModel(string $prompt, array $opts): string
+        {
+            return implode('', $this->prefixes($opts)) . $prompt;
+        }
+
+        public function completeBatch(array $requests): TextBatchResult
+        {
+            $texts = [];
+            foreach ($requests as $key => $request) {
+                $this->complete((string) $request['prompt'], $request); // still billed
+                $texts[$key] = '';
+            }
+            return new TextBatchResult($texts);
+        }
+    };
+
+    $byCheck = conformance_by_check(LlmConformance::live($llm));
+
+    assert_true($byCheck['cached_prefixes_counted_in_usage']->passed, 'the layers were billed');
+    assert_true(!$byCheck['cached_prefixes_reach_the_model']->passed, 'but an empty reply must still fail');
+    assert_true(!$byCheck['cached_prefixes_reach_the_model']->skipped, 'and must not be downgraded to advisory');
+});

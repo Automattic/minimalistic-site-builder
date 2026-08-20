@@ -98,7 +98,8 @@ final class LlmConformance
     }
 
     /**
-     * Checks that need model calls: three singles plus one two-member batch.
+     * Checks that need model calls: one single, plus three batches carrying
+     * four members between them. Five completions before retries.
      *
      * Both cached_prefixes probes read ONE request — the layered batch one.
      * They ask different questions (was it billed? did the model see it?) of
@@ -563,7 +564,9 @@ final class LlmConformance
         // forwards two of three layers still clears the ratio.)
         $usageProved = $probe['billed'] !== null
             && !BilledInput::looksDiscarded($probe['expected'], $probe['billed']);
-        if (count($missing) === 3 && $usageProved) {
+        // A blank reply is not a model declining to echo — it is no answer at
+        // all, which is its own defect and must not be waved through.
+        if (count($missing) === 3 && $usageProved && trim($reply) !== '') {
             return LlmConformanceFinding::skip(
                 $check,
                 'The model repeated none of the three nonces, but usage accounting for this same '
