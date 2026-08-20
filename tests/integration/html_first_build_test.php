@@ -633,9 +633,9 @@ test('G5 HTML-first build delivers only resolved header navigation destinations'
  */
 test('G6 HTML-first build resolves a list-shaped header navigation too', function () {
     $tmp = sys_get_temp_dir() . '/builder_html_first_nav_links_' . uniqid();
-    $previous = getenv('SITE_BUILD_LEGACY');
+    $previous = getenv('SITE_BUILD_HTML_FIRST');
     $previousHeaderArchetype = getenv('HEADER_ARCHETYPE');
-    putenv('SITE_BUILD_LEGACY');
+    putenv('SITE_BUILD_HTML_FIRST=1');
     putenv('HEADER_ARCHETYPE=standard-row');
     try {
         $pages = [
@@ -703,8 +703,8 @@ test('G6 HTML-first build resolves a list-shaped header navigation too', functio
         assert_eq(0, $headerBareAnchorCount, 'shared header bare #anchor count');
     } finally {
         $previous === false
-            ? putenv('SITE_BUILD_LEGACY')
-            : putenv('SITE_BUILD_LEGACY=' . $previous);
+            ? putenv('SITE_BUILD_HTML_FIRST')
+            : putenv('SITE_BUILD_HTML_FIRST=' . $previous);
         $previousHeaderArchetype === false
             ? putenv('HEADER_ARCHETYPE')
             : putenv('HEADER_ARCHETYPE=' . $previousHeaderArchetype);
