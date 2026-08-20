@@ -75,6 +75,14 @@ function load_wp_html_api(): bool
             require_once $file;
         }
     }
+    // kses.php judges a URL's scheme with array_any(), a PHP 8.4 builtin that
+    // WordPress polyfills here. Real WordPress always loads compat.php; without
+    // it wp_kses_bad_protocol() fatals on PHP 8.1, and the seeder catches that
+    // Throwable and stores an empty page.
+    $compat = dirname($dir) . '/compat.php';
+    if (is_file($compat)) {
+        require_once $compat;
+    }
     // kses.php supplies wp_kses_uri_attributes() and wp_kses_bad_protocol(),
     // which the seeder uses to judge URL schemes.
     $kses = dirname($dir) . '/kses.php';
