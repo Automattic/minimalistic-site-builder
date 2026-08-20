@@ -91,7 +91,7 @@ final class ValidateThemeStep implements Step
             // The direction is a set of promises made before generation that
             // every later step reads and nothing checks afterwards. This pass
             // already reads the same artifacts one line from here.
-            DirectionFidelity::problems($project),
+            DirectionFidelity::problems($project, $this->htmlFirst),
             PresetReferences::problems($project),
             self::styleElementProblems($project),
             self::headerBehaviorProblems($project),

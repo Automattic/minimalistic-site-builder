@@ -27,9 +27,23 @@ final class DirectionFidelity
     /**
      * Every broken promise, across every generated page.
      *
+     * Two of these checks are blocks-path only, and $htmlFirst turns them off:
+     *
+     * - `card-style--*` is a prompts/section.md marker, and section.md feeds
+     *   only SectionsStep. HTML-first authors its own markup and expresses the
+     *   card construction in the design CSS, so the class is legitimately
+     *   absent there.
+     * - the motion kit classes are placed by the same blocks prompts and
+     *   policed by MotionSanityStep, which skips the HTML-first graph outright
+     *   ("new CSS path does not use legacy motion fixup"). A page with no kit
+     *   classes on that path is correct, not a broken promise.
+     *
+     * Asking either question on HTML-first accuses a build that kept the
+     * promise by a different mechanism, which is worse than not asking.
+     *
      * @return list<string>
      */
-    public static function problems(Project $project): array
+    public static function problems(Project $project, bool $htmlFirst = false): array
     {
         $direction = DesignDirectionStep::dataFor($project);
         if ($direction === []) {
@@ -43,6 +57,9 @@ final class DirectionFidelity
                 continue;
             }
             array_push($problems, ...self::canvasProblems($direction, $markup, $file));
+            if ($htmlFirst) {
+                continue;
+            }
             array_push($problems, ...self::cardStyleProblems($direction, $markup, $file));
             array_push($problems, ...self::motionProblems($direction, $markup, $file));
         }

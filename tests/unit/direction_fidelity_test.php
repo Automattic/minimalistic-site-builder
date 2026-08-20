@@ -173,3 +173,28 @@ test('the walk is silent without a committed direction', function () {
     assert_eq([], DirectionFidelity::problems($project));
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('the blocks-only checks never accuse an HTML-first build', function () {
+    // card-style--* is a prompts/section.md marker and section.md feeds only
+    // SectionsStep; the motion kit classes are placed by the same blocks
+    // prompts and policed by MotionSanityStep, which skips HTML-first
+    // outright. A page with neither is correct on that graph.
+    $tmp = sys_get_temp_dir() . '/builder_fidelity_hf_' . uniqid();
+    $project = (new \Automattic\SiteBuild\ProjectStore($tmp))->create('demo');
+    $project->writeJson('designDirection.json', fidelity_direction());
+    $project->writeJson('theme/theme.json', fidelity_theme());
+    $project->writeJson('plugin/pages.json', ['pages' => [['slug' => 'home', 'front' => true]]]);
+    $project->writeText('plugin/pages/home.html',
+        '<!-- wp:group --><div class="wp-block-group card-body">'
+        . '<!-- wp:image --><figure class="wp-block-image"><img src="a.jpg" alt="a"/></figure>'
+        . '<!-- /wp:image --></div><!-- /wp:group -->');
+
+    assert_eq([], DirectionFidelity::problems($project, htmlFirst: true), 'silent on the CSS path');
+
+    $blocks = DirectionFidelity::problems($project, htmlFirst: false);
+    assert_eq(2, count($blocks), 'still asked on the blocks path');
+    assert_contains('card_style', implode(' ', $blocks));
+    assert_contains('motion', implode(' ', $blocks));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
