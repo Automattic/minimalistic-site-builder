@@ -99,29 +99,25 @@ final class StorefrontDegrade
         $warnings = [];
         $original = $markup;
 
-        $markup = (string) preg_replace(
-            '/<!--\s+wp:woocommerce\b.*?-->.*?<!--\s+\/wp:woocommerce\b.*?-->/is',
-            '',
-            $markup,
-        );
-        $markup = (string) preg_replace(
-            '/<!--\s+wp:woocommerce\/[\w-]+\s+.*?\/-->/is',
-            '',
-            $markup,
-        );
-        $markup = (string) preg_replace('/<\/?form\b[^>]*>/i', '', $markup);
-        $markup = (string) preg_replace('/<(input|textarea|select)\b[^>]*>.*?<\/\1>/is', '', $markup);
-        $markup = (string) preg_replace('/<(input|select)\b[^>]*\/?>/i', '', $markup);
-        $markup = (string) preg_replace(
-            '/(>(?:\s*)Add to cart(?:\s*)<)/i',
-            '>Enquire<',
-            $markup,
-        );
-        $markup = (string) preg_replace(
-            '/("text"\s*:\s*")Add to cart(")/i',
-            '$1Enquire$2',
-            $markup,
-        );
+        $replacements = [
+            ['/<!--\s+wp:woocommerce\b.*?-->.*?<!--\s+\/wp:woocommerce\b.*?-->/is', ''],
+            ['/<!--\s+wp:woocommerce\/[\w-]+\s+.*?\/-->/is', ''],
+            ['/<\/?form\b[^>]*>/i', ''],
+            ['/<(input|textarea|select)\b[^>]*>.*?<\/\1>/is', ''],
+            ['/<(input|select)\b[^>]*\/?>/i', ''],
+            ['/(>(?:\s*)Add to cart(?:\s*)<)/i', '>Enquire<'],
+            ['/("text"\s*:\s*")Add to cart(")/i', '$1Enquire$2'],
+        ];
+        foreach ($replacements as [$pattern, $replacement]) {
+            $replaced = preg_replace($pattern, $replacement, $markup);
+            if ($replaced === null) {
+                $error = preg_last_error_msg();
+                $warnings[] = "file='{$file}'; path=\"cart\"; authored=cart/checkout UI; delivered=unchanged; "
+                    . "disposition kept original markup because cart cleanup regex failed: {$error}";
+                return [$original, $warnings];
+            }
+            $markup = $replaced;
+        }
 
         if ($markup === $original) {
             return [$original, []];

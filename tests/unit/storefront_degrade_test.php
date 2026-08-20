@@ -77,6 +77,24 @@ test('StorefrontDegrade strips add-to-cart forms from markup', function () {
     assert_contains('stripped unbuildable cart', implode(' ', $warnings));
 });
 
+test('StorefrontDegrade preserves original markup when a cleanup regex fails', function () {
+    $originalLimit = ini_get('pcre.backtrack_limit');
+    ini_set('pcre.backtrack_limit', '1000');
+    try {
+        $markup = '<!-- wp:woocommerce/cart --><div>' . str_repeat('x', 2000);
+        [$out, $warnings] = StorefrontDegrade::markup($markup, 'theme/parts/shop.html');
+
+        assert_eq($markup, $out);
+        assert_contains("file='theme/parts/shop.html'", implode(' ', $warnings));
+        assert_contains('delivered=unchanged', implode(' ', $warnings));
+        assert_contains('cart cleanup regex failed', implode(' ', $warnings));
+    } finally {
+        if ($originalLimit !== false) {
+            ini_set('pcre.backtrack_limit', (string) $originalLimit);
+        }
+    }
+});
+
 test('site-spec normalizePages degrades a cart page to a catalog storefront', function () {
     $warnings = [];
     $pages = SiteSpecStep::normalizePages(
