@@ -99,7 +99,7 @@ Respond with ONLY a JSON object. No explanation, no commentary, no text before o
     },
     "image_grade": "One compact, concrete art-direction sentence applied to ALL of the site's imagery, per the Image Grade section above.",
     "motion": "One bounded motion profile chosen per the motion field above.",
-    "motion_note": "One short line of motion art direction, or an empty string.",
+    "motion_note": "One short line that names kit classes the profile can ship, or an empty string.",
     "surface": "One bounded surface — none, paper, concrete, film, or fabric — chosen per the surface field above.",
     "device": "One bounded device — none, hairline-rule, section-numeral, or stamp — chosen per the device field above.",
     "canvas": "One bounded canvas value chosen per the canvas field above.",

@@ -110,6 +110,10 @@ test('design-direction expands a picked seed into structured designDirection.jso
     foreach (['palette', 'type', 'image_grade', 'card_style', 'hero_blueprint'] as $field) {
         assert_contains($field, $llm->calls[1]['prompt']);
     }
+    assert_contains(
+        '"motion_note": "One short line that names kit classes the profile can ship, or an empty string."',
+        $llm->calls[1]['prompt'],
+    );
     $assigned = $written['hero_blueprint']['recipe'];
     assert_contains($assigned, $llm->calls[1]['prompt']);
     foreach (HeroComposition::RECIPES as $other) {
