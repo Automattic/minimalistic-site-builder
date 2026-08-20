@@ -69,7 +69,9 @@ test('StepComposition htmlFirst matches the HTML-first step order and validates'
 
 test('StepComposition default is the full blocks graph byte-for-byte', function () {
     $previous = getenv('SITE_BUILD_HTML_FIRST');
-    putenv('SITE_BUILD_HTML_FIRST');
+    // Env::get falls back to the .env map bootstrap.php loads, so clearing the
+    // process env alone leaves a developer's SITE_BUILD_HTML_FIRST=1 in force.
+    putenv('SITE_BUILD_HTML_FIRST=0');
     try {
         $d = composition_deps();
         $ids = array_map(

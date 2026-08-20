@@ -14,7 +14,9 @@ use Automattic\SiteBuild\Tests\FakeLlm;
 test('SiteBuilder pipeline exposes the default blocks step order and stop ids', function () {
     $tmp = sys_get_temp_dir() . '/builder_sb_' . uniqid();
     $previous = getenv('SITE_BUILD_HTML_FIRST');
-    putenv('SITE_BUILD_HTML_FIRST');
+    // Env::get falls back to the .env map bootstrap.php loads, so clearing the
+    // process env alone leaves a developer's SITE_BUILD_HTML_FIRST=1 in force.
+    putenv('SITE_BUILD_HTML_FIRST=0');
     try {
         $builder = make_test_builder(new FakeLlm(), $tmp);
 
