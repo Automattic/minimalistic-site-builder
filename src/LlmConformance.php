@@ -35,8 +35,9 @@ namespace Automattic\SiteBuild;
  * measurement that exposed the original defect.
  *
  * Structural checks spend nothing (they must be rejected before transport).
- * Live checks each spend one small completion. Pure apart from the calls it
- * makes into the supplied Llm — it never touches a Project or the filesystem.
+ * Four live checks spend five small completions before retries. Pure apart
+ * from the calls it makes into the supplied Llm — it never touches a Project
+ * or the filesystem.
  */
 final class LlmConformance
 {

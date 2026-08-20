@@ -20,7 +20,7 @@ final class LlmConformanceFinding
         public readonly string $check,
         public readonly bool $passed,
         public readonly string $detail,
-        /** TIER_STRUCTURAL needs no model; TIER_LIVE spends one completion. */
+        /** TIER_STRUCTURAL needs no model; TIER_LIVE spends one or more completions. */
         public readonly string $tier,
         /** True when the check could not run at all (host lacks the capability). */
         public readonly bool $skipped = false,
