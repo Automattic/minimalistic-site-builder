@@ -68,6 +68,13 @@ abstract class ConformanceFakeBase implements Llm, UsageReporting
         if (str_contains($seen, LlmConformance::PROBE_TOKEN)) {
             return LlmConformance::PROBE_TOKEN;
         }
+        // Stand in for a model that follows a plain instruction. The batch
+        // check pairs each response to its key by asking for the key as the
+        // answer, so a fake that ignored the instruction would read as a
+        // transport that swapped the values.
+        if (preg_match('/Reply with the single word: ([A-Za-z0-9_-]+)\./', $seen, $m) === 1) {
+            return $m[1];
+        }
         return 'MISSING';
     }
 
@@ -104,6 +111,25 @@ abstract class ConformanceFakeBase implements Llm, UsageReporting
             'output_tokens' => $this->outputTokens,
             'total_tokens'  => $this->inputTokens + $this->outputTokens,
         ];
+    }
+}
+
+/** Keys survive, values follow the other key: the handle/index mix-up. */
+final class SwapsBatchValuesFakeLlm extends ConformanceFakeBase
+{
+    protected function seenByModel(string $prompt, array $opts): string
+    {
+        return implode('', $this->prefixes($opts)) . $prompt;
+    }
+
+    public function completeBatch(array $requests): TextBatchResult
+    {
+        $texts = [];
+        foreach ($requests as $key => $request) {
+            $texts[$key] = $this->complete((string) $request['prompt'], $request);
+        }
+        $keys = array_keys($texts);
+        return new TextBatchResult(array_combine($keys, array_reverse(array_values($texts))));
     }
 }
 
@@ -277,4 +303,18 @@ test('usage-blind hosts skip the usage probe instead of failing it', function ()
     assert_true($byCheck['cached_prefixes_counted_in_usage']->passed, 'a skip must not fail the run');
     // The echo probe still covers the host, less strictly.
     assert_true($byCheck['cached_prefixes_reach_the_model']->passed);
+});
+
+test('a host that swaps batch values keeps the keys and is still caught', function () {
+    $llm = new SwapsBatchValuesFakeLlm();
+    $findings = LlmConformance::live($llm);
+    $batch = null;
+    foreach ($findings as $f) {
+        if ($f->check === 'batch_keys_round_trip') {
+            $batch = $f;
+        }
+    }
+    assert_true($batch !== null, 'batch check ran');
+    assert_true(!$batch->passed, 'a value swap must fail even though the keys match');
+    assert_contains('values did not follow', $batch->detail);
 });

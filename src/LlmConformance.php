@@ -392,6 +392,29 @@ final class LlmConformance
                 $tier,
             );
         }
-        return LlmConformanceFinding::pass($check, 'Batch results keyed identically to the requests.', $tier);
+        // Matching keys are not enough. A pool that mixes up handle and index
+        // returns the right key set with the values swapped, and every caller
+        // then writes each section into the other one's file. Each prompt asks
+        // for its own key as the answer, so the pairing is checkable.
+        $swapped = [];
+        foreach ($requests as $key => $_request) {
+            if (stripos((string) ($result->texts[$key] ?? ''), (string) $key) === false) {
+                $swapped[] = $key;
+            }
+        }
+        if ($swapped !== []) {
+            return LlmConformanceFinding::fail(
+                $check,
+                'Batch keys survived but their values did not follow: ' . implode(', ', $swapped)
+                . ' came back without the word the prompt asked that key to answer with. A caller '
+                . 'pairing by key would file each response under the wrong job.',
+                $tier,
+            );
+        }
+        return LlmConformanceFinding::pass(
+            $check,
+            'Batch results keyed identically to the requests, each carrying its own key\'s answer.',
+            $tier,
+        );
     }
 }
