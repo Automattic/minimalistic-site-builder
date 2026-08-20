@@ -478,27 +478,100 @@ test('compose sheds the site context under token pressure but keeps the grade', 
     assert_contains("Art direction for all site imagery: {$grade}.", $out);
 });
 
-test('stripCompetingGradeTokens drops studio white and no grain on a Portra grade', function () {
-    $subject = ImagePromptComposer::stripCompetingGradeTokens(
-        'A loaf on a studio white cyclorama, no grain, catalog-lit',
+test('stripCompetingGradeTokens drops a clause that is only grade talk', function () {
+    $result = ImagePromptComposer::stripCompetingGradeTokens(
+        'A loaf on a linen cloth, no grain, catalog-lit',
         'warm Portra 400, visible 35mm grain, available light',
     );
-    assert_true(!str_contains(strtolower($subject), 'studio white'));
-    assert_true(!str_contains(strtolower($subject), 'no grain'));
-    assert_true(!str_contains(strtolower($subject), 'catalog-lit'));
-    assert_contains('A loaf on a', $subject);
+    assert_eq('A loaf on a linen cloth', $result['subject']);
+    assert_eq(['no grain', 'catalog-lit'], $result['removed']);
+    assert_eq([], $result['kept']);
+});
+
+test('stripCompetingGradeTokens never cuts grade wording out of a scene clause', function () {
+    // Word-level removal turned this into "A loaf on a sweep" — a different
+    // backdrop, sent to the image service with nothing recording the change.
+    $result = ImagePromptComposer::stripCompetingGradeTokens(
+        'A loaf on a studio white sweep',
+        'Warm 35mm film grain',
+    );
+    assert_eq('A loaf on a studio white sweep', $result['subject'], 'the scene survives byte-for-byte');
+    assert_eq([], $result['removed']);
+    assert_eq(['A loaf on a studio white sweep'], $result['kept'], 'and the conflict is reported');
+});
+
+test('stripCompetingGradeTokens keeps the clauses around one it removes', function () {
+    // This used to collapse to "A loaf on,, resting on a wooden board".
+    $result = ImagePromptComposer::stripCompetingGradeTokens(
+        'A loaf on studio white, no grain, resting on a wooden board',
+        'Warm 35mm film grain',
+    );
+    assert_eq('A loaf on studio white, resting on a wooden board', $result['subject']);
+    assert_eq(['no grain'], $result['removed']);
+    assert_eq(['A loaf on studio white'], $result['kept']);
+});
+
+test('stripCompetingGradeTokens returns the authored subject when nothing is left', function () {
+    // This used to reduce to an empty string with nothing guarding it.
+    foreach (['no grain, catalog-lit', 'black and white', 'muted grey tones'] as $subject) {
+        $result = ImagePromptComposer::stripCompetingGradeTokens($subject, 'Warm 35mm film grain');
+        assert_eq($subject, $result['subject'], "'{$subject}' is delivered rather than emptied");
+        assert_eq([], $result['removed']);
+        assert_eq([$subject], $result['kept']);
+    }
+});
+
+test('stripCompetingGradeTokens reads the vocabulary, not the grade wording', function () {
+    // The lists used to arm only when the grade itself carried the trigger
+    // word, so a legally-worded grade disarmed all of them.
+    $result = ImagePromptComposer::stripCompetingGradeTokens(
+        'A ceramic bowl on a walnut table, no grain',
+        'muted pastel color, soft even daylight',
+    );
+    assert_eq('A ceramic bowl on a walnut table', $result['subject']);
+    assert_eq(['no grain'], $result['removed']);
+});
+
+test('stripCompetingGradeTokens never reads a negation as its own opposite', function () {
+    // "no grain" agrees with a clean grade. It still leaves the subject,
+    // because image-generation.md:63 keeps grade vocabulary out of subjects
+    // unconditionally — but it leaves as a whole clause, not as erased words.
+    $result = ImagePromptComposer::stripCompetingGradeTokens(
+        'A loaf on a linen cloth, no grain',
+        'Clean digital product shots, no grain, studio white',
+    );
+    assert_eq('A loaf on a linen cloth', $result['subject']);
+    assert_eq(['no grain'], $result['removed']);
+});
+
+test('stripCompetingGradeTokens leaves a subject in another language alone', function () {
+    // The vocabulary is English, so this is a documented no-op rather than a
+    // silent partial edit.
+    $subject = 'Un pan sobre un paño de lino junto a una ventana';
+    $result = ImagePromptComposer::stripCompetingGradeTokens($subject, 'Warm 35mm film grain');
+    assert_eq($subject, $result['subject']);
+    assert_eq([], $result['removed']);
+    assert_eq([], $result['kept']);
+});
+
+test('stripCompetingGradeTokens is idempotent over what it delivered', function () {
+    $grade = 'warm Portra 400, visible 35mm grain';
+    $once = ImagePromptComposer::stripCompetingGradeTokens('A loaf on a linen cloth, no grain', $grade);
+    $twice = ImagePromptComposer::stripCompetingGradeTokens($once['subject'], $grade);
+    assert_eq($once['subject'], $twice['subject']);
+    assert_eq([], $twice['removed']);
 });
 
 test('compose strips competing grade tokens before the API prompt is built', function () {
     $out = ImagePromptComposer::compose(
-        'A loaf on studio white, no grain',
+        'A loaf on a linen cloth, no grain',
         'menu item card',
         'photorealistic',
         '',
         'warm Portra 400, visible 35mm grain',
     );
-    assert_true(!str_contains(strtolower($out), 'studio white'));
-    assert_true(!str_contains(strtolower($out), 'no grain'));
+    assert_true(!str_contains($out, 'linen cloth, no grain'));
+    assert_contains('A loaf on a linen cloth', $out);
     assert_contains('Art direction for all site imagery: warm Portra 400, visible 35mm grain.', $out);
 });
 
@@ -509,6 +582,6 @@ test('stripCompetingGradeTokens accepts Unicode dash punctuation', function () {
         ['A product, studio–white, catalog—lit', 'warm available–light', 'A product'],
     ];
     foreach ($cases as [$subject, $grade, $expected]) {
-        assert_eq($expected, ImagePromptComposer::stripCompetingGradeTokens($subject, $grade));
+        assert_eq($expected, ImagePromptComposer::stripCompetingGradeTokens($subject, $grade)['subject']);
     }
 });
