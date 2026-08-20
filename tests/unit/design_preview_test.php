@@ -205,7 +205,7 @@ test('design-preview makes one configured text call and writes exact preview and
             return '[fix-templates] noop';
         }
     };
-    $composition = StepComposition::default(
+    $composition = StepComposition::htmlFirst(
         llm: $wiredLlm,
         renderer: new PromptRenderer(Package::promptsDir()),
         models: [

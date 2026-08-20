@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\Tests\FakeLlm;
 
-function legacy_fallback_block(string $heading, string $marker): string
+function blocks_fallback_block(string $heading, string $marker): string
 {
     return '<!-- wp:group {"layout":{"type":"constrained"}} -->'
         . '<div class="wp-block-group">'
@@ -12,10 +12,10 @@ function legacy_fallback_block(string $heading, string $marker): string
         . '</div><!-- /wp:group -->';
 }
 
-test('one failed inner design uses legacy sections while sibling pages stay transformed', function () {
+test('one failed inner design uses blocks-path sections while sibling pages stay transformed', function () {
     $tmp = sys_get_temp_dir() . '/builder_mixed_route_' . uniqid();
-    $previous = getenv('SITE_BUILD_LEGACY');
-    putenv('SITE_BUILD_LEGACY');
+    $previous = getenv('SITE_BUILD_HTML_FIRST');
+    putenv('SITE_BUILD_HTML_FIRST=1');
     try {
         $llm = new FakeLlm();
         $pages = [
@@ -30,7 +30,7 @@ test('one failed inner design uses legacy sections while sibling pages stay tran
         $llm->queueText('CONTACT-GARBAGE');
         $llm->queueText('CONTACT-REPAIR-GARBAGE');
         $llm->queueText('OK');
-        $llm->queueText(legacy_fallback_block('Visit', 'LEGACY-CONTACT'));
+        $llm->queueText(blocks_fallback_block('Visit', 'BLOCKS-CONTACT'));
         $llm->queueJson(['sections' => [[
             'slug' => 'visit', 'title' => 'Visit', 'role' => 'hero', 'type' => 'contact-details',
             'layout_archetype' => 'centered-stack', 'background' => 'base',
@@ -54,12 +54,12 @@ test('one failed inner design uses legacy sections while sibling pages stay tran
         assert_true($project->exists('design/contact.failed'));
         assert_contains('HTML-FIRST-HOME', $project->readText('plugin/pages/home.html'));
         assert_contains('HTML-FIRST-ABOUT', $project->readText('plugin/pages/about.html'));
-        assert_contains('LEGACY-CONTACT', $project->readText('plugin/pages/contact.html'));
+        assert_contains('BLOCKS-CONTACT', $project->readText('plugin/pages/contact.html'));
         assert_true(
             trim($project->readText('theme/parts/footer.html')) !== '',
             'multi-page full build lifts non-empty home-body footer part',
         );
-        assert_true(!str_contains($project->readText('plugin/pages/about.html'), 'LEGACY-CONTACT'));
+        assert_true(!str_contains($project->readText('plugin/pages/about.html'), 'BLOCKS-CONTACT'));
         assert_eq(['home', 'about', 'contact'], array_column(
             $project->readJson('plugin/pages.json')['pages'],
             'slug',
@@ -69,11 +69,11 @@ test('one failed inner design uses legacy sections while sibling pages stay tran
             $sectionCount += assert_html_first_page_sections_constrained($project, $slug);
         }
         assert_true($sectionCount >= 3, 'multi-page HTML-first build constrains every delivered section');
-        assert_eq(2, $llm->completeBatchCalls, 'page-generation and scoped legacy section batches only');
+        assert_eq(2, $llm->completeBatchCalls, 'page-generation and scoped blocks-path section batches only');
     } finally {
         $previous === false
-            ? putenv('SITE_BUILD_LEGACY')
-            : putenv('SITE_BUILD_LEGACY=' . $previous);
+            ? putenv('SITE_BUILD_HTML_FIRST')
+            : putenv('SITE_BUILD_HTML_FIRST=' . $previous);
         if (is_dir($tmp)) {
             exec('rm -rf ' . escapeshellarg($tmp));
         }

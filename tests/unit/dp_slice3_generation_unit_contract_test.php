@@ -440,7 +440,7 @@ test('TG7 section failures drop only failed sections and collapse total loss to 
             );
             assert_contains('FRONT-SURVIVOR', $project->readText('theme/parts/page-home--front-content.html'));
             $report = $project->readJson(TransformArtifacts::REPORT);
-            assert_true(in_array('inner_page_legacy_reroute', $report['fallback_codes'], true));
+            assert_true(in_array('inner_page_blocks_reroute', $report['fallback_codes'], true));
         } finally {
             dp3_contract_cleanup($tmp);
         }
@@ -448,8 +448,8 @@ test('TG7 section failures drop only failed sections and collapse total loss to 
 });
 
 test('TG8 composed graph validates both modes with explicit planner inputs declared', function () {
-    $previousLegacy = getenv('SITE_BUILD_LEGACY');
-    putenv('SITE_BUILD_LEGACY');
+    $previousHtmlFirst = getenv('SITE_BUILD_HTML_FIRST');
+    putenv('SITE_BUILD_HTML_FIRST=1');
     try {
         foreach (['page', 'section'] as $mode) {
             dp3_contract_with_mode($mode, function (): void {
@@ -471,9 +471,9 @@ test('TG8 composed graph validates both modes with explicit planner inputs decla
             });
         }
     } finally {
-        $previousLegacy === false
-            ? putenv('SITE_BUILD_LEGACY')
-            : putenv('SITE_BUILD_LEGACY=' . $previousLegacy);
+        $previousHtmlFirst === false
+            ? putenv('SITE_BUILD_HTML_FIRST')
+            : putenv('SITE_BUILD_HTML_FIRST=' . $previousHtmlFirst);
     }
 });
 

@@ -61,11 +61,11 @@ test('FallbackBuildPipeline reroutes only a malformed homepage after recording a
         new FallbackPipelineProbeStep('homepage-design'),
         new MalformedDesignException('missing style'),
     );
-    $legacy = new FallbackPipelineProbe(
+    $blocksTail = new FallbackPipelineProbe(
         new FallbackPipelineProbeStep('theme-json+page-plan'),
-        marker: 'legacy-tail.txt',
+        marker: 'blocks-tail.txt',
     );
-    $pipeline = new FallbackBuildPipeline($primary, $legacy);
+    $pipeline = new FallbackBuildPipeline($primary, $blocksTail);
     $started = [];
 
     $pipeline->runThrough(
@@ -79,9 +79,9 @@ test('FallbackBuildPipeline reroutes only a malformed homepage after recording a
     assert_eq(['homepage-design'], $pipeline->stepIds());
     assert_eq(['homepage-design'], $pipeline->stopIds());
     assert_eq(['homepage-design', 'theme-json+page-plan'], $started);
-    assert_eq('validate-theme', $project->readText('legacy-tail.txt'));
+    assert_eq('validate-theme', $project->readText('blocks-tail.txt'));
     $warning = implode("\n", $project->readJson('warnings.json')['homepage-design'] ?? []);
-    foreach (['design/home.html', 'homepage-design', 'legacy_reroute', 'legacy section pipeline'] as $needle) {
+    foreach (['design/home.html', 'homepage-design', 'blocks_reroute', 'blocks section pipeline'] as $needle) {
         assert_contains($needle, $warning);
     }
 
@@ -101,7 +101,7 @@ test('FallbackBuildPipeline rethrows wrong-step malformed and non-malformed home
             new FallbackPipelineProbe(new FallbackPipelineProbeStep($id), $failure),
             new FallbackPipelineProbe(
                 new FallbackPipelineProbeStep('theme-json+page-plan'),
-                marker: 'legacy-tail.txt',
+                marker: 'blocks-tail.txt',
             ),
         );
         $caught = null;
@@ -112,7 +112,7 @@ test('FallbackBuildPipeline rethrows wrong-step malformed and non-malformed home
         }
 
         assert_true($caught === $failure, "{$id} failure rethrown unchanged");
-        assert_true(!$project->exists('legacy-tail.txt'), "{$id} does not enter legacy tail");
+        assert_true(!$project->exists('blocks-tail.txt'), "{$id} does not enter blocks tail");
         assert_true(!$project->exists('warnings.json'), "{$id} does not record reroute warning");
         exec('rm -rf ' . escapeshellarg($tmp));
     }
