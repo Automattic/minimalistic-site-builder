@@ -32,12 +32,14 @@ namespace Automattic\SiteBuild;
  *
  * The usage probe is the stronger of the two, because it holds even when the
  * model declines to cooperate with the echo instruction, and it is the same
- * measurement that exposed the original defect.
+ * measurement that exposed the original defect. Both read ONE request — the
+ * layered batch one — so the echo can stand down when usage has already proved
+ * delivery, and so both travel the seam that authors sections.
  *
  * Structural checks spend nothing (they must be rejected before transport).
- * Four live checks spend five small completions before retries. Pure apart
- * from the calls it makes into the supplied Llm — it never touches a Project
- * or the filesystem.
+ * Five live checks spend five completions before retries, one of them carrying
+ * ~7,400 tokens of cached layers. Pure apart from the calls it makes into the
+ * supplied Llm — it never touches a Project or the filesystem.
  */
 final class LlmConformance
 {
@@ -45,10 +47,15 @@ final class LlmConformance
     public const PROBE_TOKEN = 'CONFORMANCE-PROBE-8F3A21D7';
 
     /**
-     * Filler sized so the probe prefix comfortably clears both the usage floor
-     * below and Anthropic's minimum cacheable prefix (1,024 tokens on
-     * Sonnet-tier). Deterministic so repeated runs are byte-identical and can
-     * actually hit a warm cache.
+     * Filler sized so each probe layer comfortably clears Anthropic's minimum
+     * cacheable prefix (1,024 tokens on Sonnet-tier), and so three of them are
+     * far too large to be mistaken for system-prompt overhead.
+     *
+     * Deterministic, so repeated runs are byte-identical and can actually hit a
+     * warm cache. That is safe only because the usage probe reads BILLED input:
+     * a cache hit moves those tokens from `input_tokens` to
+     * `cache_read_input_tokens`, and reading the raw field would make the check
+     * fail harder the better the caching worked.
      */
     private const FILLER_LINE = 'This paragraph is inert conformance filler and carries no instructions whatsoever. ';
     private const FILLER_REPEATS = 120;
@@ -152,6 +159,83 @@ final class LlmConformance
             }
         }
         return true;
+    }
+
+    /**
+     * Render a run the way the CLI prints it, and decide the exit code.
+     *
+     * Lives here rather than in bin/ so the verdict is testable without a
+     * transport — a gate's exit code deserves the same coverage as the checks
+     * it gates on.
+     *
+     * @param  list<LlmConformanceFinding> $findings
+     * @return array{text:string,exit:int}
+     */
+    public static function report(array $findings, bool $structuralOnly = false): array
+    {
+        $width = 0;
+        foreach ($findings as $finding) {
+            $width = max($width, strlen($finding->check));
+        }
+
+        $text = '';
+        $failed = 0;
+        $passed = 0;
+        $skipped = 0;
+        foreach ($findings as $finding) {
+            if ($finding->skipped) {
+                $mark = 'SKIP';
+                $skipped++;
+            } elseif ($finding->passed) {
+                $mark = 'PASS';
+                $passed++;
+            } else {
+                $mark = 'FAIL';
+                $failed++;
+            }
+            $text .= sprintf("  %-4s  %-{$width}s  [%s]\n", $mark, $finding->check, $finding->tier);
+            // A passing check's measurement is worth showing too — it is the
+            // evidence that the host was actually exercised rather than
+            // trivially satisfied.
+            $text .= sprintf("        %s\n", $finding->detail);
+        }
+
+        $total = count($findings);
+        $scope = $structuralOnly ? ' (structural only)' : '';
+
+        if ($failed > 0) {
+            return [
+                'text' => $text . sprintf(
+                    "\n%d of %d checks FAILED. This host's Llm does not satisfy the contract in src/Llm.php.\n",
+                    $failed,
+                    $total,
+                ),
+                'exit' => 1,
+            ];
+        }
+
+        // Nothing failed, but nothing was established either. A bad key does
+        // this, and so does an adapter that reports no usage and throws
+        // something unrecognisable when it refuses a request. Exiting 0 would
+        // hand a build the one verdict this suite must never give: green on no
+        // evidence.
+        if (self::inconclusive($findings)) {
+            return [
+                'text' => $text . sprintf(
+                    "\nAll %d checks were SKIPPED%s — this run proved nothing about the host. Check the "
+                    . "credentials, and have the adapter throw LlmRequestRejected for a refused request.\n",
+                    $total,
+                    $scope,
+                ),
+                'exit' => 1,
+            ];
+        }
+
+        $summary = $skipped > 0
+            ? sprintf("\n%d checks passed, %d skipped%s.\n", $passed, $skipped, $scope)
+            : sprintf("\nAll %d checks passed%s.\n", $total, $scope);
+
+        return ['text' => $text . $summary, 'exit' => 0];
     }
 
     /** The probe prefix: inert filler wrapped around the echo nonce. */

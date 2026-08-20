@@ -551,3 +551,27 @@ test('a host that refuses the cache-warm probe is caught', function () {
     assert_true(!$byCheck['cache_warm_probe_tolerated']->passed, 'the warm-probe shape must be checked');
     assert_contains('runtime warning', $byCheck['cache_warm_probe_tolerated']->detail);
 });
+
+test('a run that proved nothing exits non-zero', function () {
+    // The gate's own verdict. An adapter behind a bad key skips its way through
+    // the structural tier, and "0 checks passed, 2 skipped" used to exit 0 —
+    // green on no evidence, which is the failure this suite exists to remove.
+    $skipped = LlmConformance::structural(new NoValidationBadKeyFakeLlm());
+    $report = LlmConformance::report($skipped, true);
+
+    assert_eq(1, $report['exit'], 'an all-skipped run must not gate a build green');
+    assert_contains('proved nothing', $report['text']);
+    assert_contains('SKIP', $report['text']);
+
+    // A real pass still exits 0, and still shows what was measured.
+    $good = LlmConformance::run(new ConformantFakeLlm());
+    $ok = LlmConformance::report($good);
+    assert_eq(0, $ok['exit']);
+    assert_contains('All 7 checks passed', $ok['text']);
+    assert_contains('tokens for ~', $ok['text'], 'a pass reports its measurement');
+
+    // A failure names the check and exits 1.
+    $bad = LlmConformance::report(LlmConformance::run(new PrefixDroppingFakeLlm()));
+    assert_eq(1, $bad['exit']);
+    assert_contains('checks FAILED', $bad['text']);
+});
