@@ -59,11 +59,13 @@ final class SiteBuilder
         );
         $primary = new Pipeline($composition->steps(), $composition->seeds());
 
-        if (Env::get('SITE_BUILD_LEGACY') === '1') {
+        // The blocks graph is the default and generates no design document, so
+        // it has nothing to fall back from: only HTML-first gets the wrapper.
+        if (!StepComposition::htmlFirstSelected()) {
             return $primary;
         }
 
-        $legacyTail = StepComposition::legacyTail(
+        $blocksTail = StepComposition::blocksTail(
             llm: $this->llm,
             renderer: $renderer,
             models: $this->models,
@@ -74,7 +76,7 @@ final class SiteBuilder
 
         return new FallbackBuildPipeline(
             $primary,
-            new Pipeline($legacyTail->steps(), $legacyTail->seeds()),
+            new Pipeline($blocksTail->steps(), $blocksTail->seeds()),
         );
     }
 

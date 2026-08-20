@@ -11,21 +11,57 @@ use Automattic\SiteBuild\Tests\FakeLlm;
  * seeds projects the same way bin/build.php does.
  */
 
-test('SiteBuilder pipeline exposes the default step order and stop ids', function () {
+test('SiteBuilder pipeline exposes the default blocks step order and stop ids', function () {
     $tmp = sys_get_temp_dir() . '/builder_sb_' . uniqid();
-    $builder = make_test_builder(new FakeLlm(), $tmp);
+    $previous = getenv('SITE_BUILD_HTML_FIRST');
+    // Env::get falls back to the .env map bootstrap.php loads, so clearing the
+    // process env alone leaves a developer's SITE_BUILD_HTML_FIRST=1 in force.
+    putenv('SITE_BUILD_HTML_FIRST=0');
+    try {
+        $builder = make_test_builder(new FakeLlm(), $tmp);
 
-    assert_eq([
-        'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
-        'design-preview', 'theme-json', 'inner-pages-design', 'splice-home-design', 'assign-image-sources', 'transform-site', 'resolve-nav-links', 'section-rhythm', 'section-layout',
-        // normalize-layout MUST precede contrast-fix and motion-sanity: the
-        // attribute repair can activate previously-inert color/motion
-        // attributes, which those policy passes must be able to see.
-        'collect-images', 'normalize-layout', 'header-hero', 'contrast-fix', 'motion-sanity', 'fix-blocks', 'assemble-pages', 'fix-pages', 'page-styles', 'custom-motion',
-        'fonts-php', 'finalize-theme', 'validate-theme',
-    ], $builder->pipeline()->stepIds());
-    assert_true(in_array('site-spec', $builder->pipeline()->stopIds(), true));
-    assert_true(in_array('theme-json', $builder->pipeline()->stopIds(), true));
+        assert_eq([
+            'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
+            'theme-json+page-plan', 'sections', 'section-rhythm', 'copy-dedupe',
+            // normalize-layout MUST precede contrast-fix and motion-sanity: the
+            // attribute repair can activate previously-inert color/motion
+            // attributes, which those policy passes must be able to see.
+            'collect-images', 'normalize-layout', 'header-hero', 'contrast-fix', 'motion-sanity', 'fix-blocks',
+            'assemble-pages', 'page-styles', 'custom-motion', 'bundle-fonts', 'fonts-php', 'finalize-theme', 'validate-theme',
+        ], $builder->pipeline()->stepIds());
+        assert_true(in_array('site-spec', $builder->pipeline()->stopIds(), true));
+        assert_true(in_array('theme-json', $builder->pipeline()->stopIds(), true));
+    } finally {
+        $previous === false
+            ? putenv('SITE_BUILD_HTML_FIRST')
+            : putenv('SITE_BUILD_HTML_FIRST=' . $previous);
+    }
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('SITE_BUILD_HTML_FIRST=1 gives the HTML-first order with the blocks fallback wrapper', function () {
+    $tmp = sys_get_temp_dir() . '/builder_sb_html_first_' . uniqid();
+    $previous = getenv('SITE_BUILD_HTML_FIRST');
+    putenv('SITE_BUILD_HTML_FIRST=1');
+    try {
+        $builder = make_test_builder(new FakeLlm(), $tmp);
+        $pipeline = $builder->pipeline();
+
+        assert_eq([
+            'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
+            'design-preview', 'theme-json', 'inner-pages-design', 'splice-home-design', 'assign-image-sources', 'transform-site', 'resolve-nav-links', 'section-rhythm', 'section-layout',
+            'collect-images', 'normalize-layout', 'header-hero', 'contrast-fix', 'motion-sanity', 'fix-blocks', 'assemble-pages', 'fix-pages', 'page-styles', 'custom-motion',
+            'fonts-php', 'finalize-theme', 'validate-theme',
+        ], $pipeline->stepIds());
+        // Only HTML-first has a design document that can fail, so only it is
+        // wrapped for the runtime reroute onto the blocks tail.
+        assert_true($pipeline instanceof \Automattic\SiteBuild\FallbackBuildPipeline);
+    } finally {
+        $previous === false
+            ? putenv('SITE_BUILD_HTML_FIRST')
+            : putenv('SITE_BUILD_HTML_FIRST=' . $previous);
+    }
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

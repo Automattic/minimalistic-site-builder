@@ -210,6 +210,8 @@ test('sticky treatment rules are driver-scoped, alpha-synced, and fail closed to
     // never inherit a treatment-aware (possibly translucent) surface.
     $modal = header_asset_css_block($css, '.wp-block-navigation__responsive-container.is-menu-open');
     assert_contains('background-color: var(--header-scrolled-solid) !important', $modal);
+    assert_contains('--navigation-layout-justification-setting: flex-start', $modal);
+    assert_contains('justify-content: flex-start !important', $css);
     assert_true(
         !str_contains($modal, '--header-scrolled-surface'),
         'the menu modal must never paint the treatment-aware surface',

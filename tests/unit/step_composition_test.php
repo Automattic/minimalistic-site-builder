@@ -31,9 +31,9 @@ function composition_deps(): array
     ];
 }
 
-test('StepComposition default matches CLI step order and validates', function () {
+test('StepComposition htmlFirst matches the HTML-first step order and validates', function () {
     $d = composition_deps();
-    $c = StepComposition::default(
+    $c = StepComposition::htmlFirst(
         llm: $d['llm'],
         renderer: $d['renderer'],
         blockFixer: $d['blockFixer'],
@@ -52,6 +52,9 @@ test('StepComposition default matches CLI step order and validates', function ()
         $byId[$step->id()] = ['index' => $index, 'declaration' => $step->declaration()];
     }
     assert_true(!isset($byId['homepage-design']), 'retired homepage generator is absent');
+    $fontsPhp = $steps[array_search('fonts-php', array_map(static fn (Step $s) => $s->id(), $steps), true)];
+    $htmlFirstMode = new ReflectionProperty($fontsPhp, 'htmlFirst');
+    assert_true($htmlFirstMode->getValue($fontsPhp), 'HTML-first composition preserves design fallback fonts');
     assert_true(in_array('design/site.css', $byId['design-preview']['declaration']->writes, true));
     assert_eq(
         ['meta.json', 'siteSpec.json', 'designDirection.json', 'design/site.css', 'design/preview.html'],
@@ -67,9 +70,11 @@ test('StepComposition default matches CLI step order and validates', function ()
     assert_eq($byId['section-layout']['index'] + 1, $byId['collect-images']['index']);
 });
 
-test('StepComposition legacy env preserves the full legacy graph byte-for-byte', function () {
-    $previous = getenv('SITE_BUILD_LEGACY');
-    putenv('SITE_BUILD_LEGACY=1');
+test('StepComposition default is the full blocks graph byte-for-byte', function () {
+    $previous = getenv('SITE_BUILD_HTML_FIRST');
+    // Env::get falls back to the .env map bootstrap.php loads, so clearing the
+    // process env alone leaves a developer's SITE_BUILD_HTML_FIRST=1 in force.
+    putenv('SITE_BUILD_HTML_FIRST=0');
     try {
         $d = composition_deps();
         $ids = array_map(
@@ -91,8 +96,32 @@ test('StepComposition legacy env preserves the full legacy graph byte-for-byte',
         assert_true(!in_array('transform-site', $ids, true));
     } finally {
         $previous === false
-            ? putenv('SITE_BUILD_LEGACY')
-            : putenv('SITE_BUILD_LEGACY=' . $previous);
+            ? putenv('SITE_BUILD_HTML_FIRST')
+            : putenv('SITE_BUILD_HTML_FIRST=' . $previous);
+    }
+});
+
+test('SITE_BUILD_HTML_FIRST=1 routes the default composition to the HTML-first graph', function () {
+    $previous = getenv('SITE_BUILD_HTML_FIRST');
+    putenv('SITE_BUILD_HTML_FIRST=1');
+    try {
+        $d = composition_deps();
+        $ids = array_map(
+            static fn (Step $step): string => $step->id(),
+            StepComposition::default(
+                llm: $d['llm'],
+                renderer: $d['renderer'],
+                blockFixer: $d['blockFixer'],
+            )->steps(),
+        );
+
+        assert_true(StepComposition::htmlFirstSelected());
+        assert_true(in_array('transform-site', $ids, true));
+        assert_true(!in_array('sections', $ids, true));
+    } finally {
+        $previous === false
+            ? putenv('SITE_BUILD_HTML_FIRST')
+            : putenv('SITE_BUILD_HTML_FIRST=' . $previous);
     }
 });
 
@@ -154,7 +183,7 @@ test('StepComposition insertAfter inserts a host step', function () {
 
 test('StepComposition describe keeps theme and splice serial and page generation concurrent', function () {
     $d = composition_deps();
-    $rows = StepGraph::describe(StepComposition::default(
+    $rows = StepGraph::describe(StepComposition::htmlFirst(
         llm: $d['llm'],
         renderer: $d['renderer'],
         blockFixer: $d['blockFixer'],

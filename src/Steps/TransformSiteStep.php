@@ -25,7 +25,7 @@ use DOMNode;
 use DOMXPath;
 
 /**
- * Deterministically compile HTML-first design artifacts into legacy section
+ * Deterministically compile HTML-first design artifacts into blocks section
  * part paths. Generated-content failures are isolated to one section; every
  * removal is durable in both transform-report.json and warnings.json.
  */
@@ -493,17 +493,17 @@ final class TransformSiteStep implements Step
             );
             $plannedFailedPages = $this->pagePlanStep->runForSlugs($project, $failedSlugs);
             $sitePages = self::mergePagePlans($allPages, $deliveredPages, $plannedFailedPages);
-            $legacyPages = $this->sectionsStep->runForPages($project, $plannedFailedPages, $sitePages);
-            $legacyBySlug = [];
-            foreach ($legacyPages as $page) {
-                $legacyBySlug[(string) $page['slug']] = $page;
+            $blocksPages = $this->sectionsStep->runForPages($project, $plannedFailedPages, $sitePages);
+            $blocksBySlug = [];
+            foreach ($blocksPages as $page) {
+                $blocksBySlug[(string) $page['slug']] = $page;
             }
 
             foreach ($failedPages as $failedPage) {
                 $slug = (string) $failedPage['slug'];
                 $marker = 'design/' . $failedArtifacts[$slug] . '.failed';
                 $deliveredPaths = [];
-                foreach ((array) ($legacyBySlug[$slug]['sections'] ?? []) as $section) {
+                foreach ((array) ($blocksBySlug[$slug]['sections'] ?? []) as $section) {
                     if (!is_array($section)) {
                         continue;
                     }
@@ -517,14 +517,14 @@ final class TransformSiteStep implements Step
                 }
                 $deliveredValue = $deliveredPaths === [] ? 'removed' : implode(',', $deliveredPaths);
                 $fallbackCodes[] = $deliveredPaths === []
-                    ? 'inner_page_legacy_reroute_failed'
-                    : 'inner_page_legacy_reroute';
+                    ? 'inner_page_blocks_reroute_failed'
+                    : 'inner_page_blocks_reroute';
                 $outcome = self::contextRow(
                     source: $marker,
                     selector: "page[slug={$slug}]",
                     diagnosticCode: $deliveredPaths === []
-                        ? 'inner_page_legacy_reroute_failed'
-                        : 'inner_page_legacy_reroute',
+                        ? 'inner_page_blocks_reroute_failed'
+                        : 'inner_page_blocks_reroute',
                     authoredValue: $marker,
                     deliveredValue: $deliveredValue,
                     disposition: $deliveredPaths === [] ? 'dropped' : 'retained',
@@ -534,15 +534,15 @@ final class TransformSiteStep implements Step
                     $droppedFragments[] = $outcome;
                 }
                 $warningCode = $deliveredPaths === []
-                    ? 'inner_page_legacy_reroute_failed'
-                    : 'inner_page_legacy_reroute';
+                    ? 'inner_page_blocks_reroute_failed'
+                    : 'inner_page_blocks_reroute';
                 $warningDisposition = $deliveredPaths === [] ? 'dropped' : 'rerouted';
                 $warnings[] = "source {$marker} selector page[slug={$slug}] "
                     . 'block_path ' . ($deliveredPaths === [] ? 'pages.json' : implode(',', $deliveredPaths))
                     . " diagnostic_code {$warningCode} authored_value failed design marker "
                     . "delivered_value {$deliveredValue} disposition {$warningDisposition}";
             }
-            $deliveredPages = self::mergePagePlans($allPages, $deliveredPages, $legacyPages);
+            $deliveredPages = self::mergePagePlans($allPages, $deliveredPages, $blocksPages);
         }
 
         foreach ($outputs as $path => $content) {
@@ -552,14 +552,14 @@ final class TransformSiteStep implements Step
         // The HTML-first path has no in-flight above-fold contract (the
         // transformer produced the sections, not SectionsStep::run). Rebuild
         // the delivery-phase contract from the delivered parts so HeaderHeroStep
-        // reads the same artifact it does on the legacy path.
+        // reads the same artifact it does on the blocks path.
         $delivery = SectionsStep::deliveryContract($project, $deliveredPages);
         $project->writeJson('aboveFold.json', $delivery);
         // Legacy generation stamps the hero-composition marker during section
         // generation, so SectionRhythmStep (which caps the opening hero's top
         // padding only when it sees that marker) works. HeaderHeroStep re-stamps
         // it later here, but that runs AFTER section-rhythm — so stamp it now,
-        // mirroring the legacy hero unit, or the htmlFirst opening hero never caps.
+        // mirroring the blocks hero unit, or the htmlFirst opening hero never caps.
         $heroPart = (string) ($delivery['hero_part'] ?? '');
         $heroRel = 'theme/parts/' . $heroPart . '.html';
         if ($heroPart !== ''
@@ -1054,19 +1054,30 @@ final class TransformSiteStep implements Step
             foreach ($assets as $asset) {
                 if (!is_array($asset)
                     || ($asset['kind'] ?? null) !== 'css'
-                    || ($asset['source'] ?? null) !== 'engine-support'
                     || !is_string($asset['content'] ?? null)
                     || trim($asset['content']) === ''
                 ) {
                     continue;
                 }
-                $placement = $asset['stylesheet_placement'] ?? null;
-                if (!is_string($placement) || !array_key_exists($placement, $contents)) {
-                    if ($warnings !== null) {
-                        $warnings[] = self::unknownEngineSupportPlacementWarning($asset, $placement);
+
+                $source = $asset['source'] ?? null;
+                if ($source === 'wordpress-compat') {
+                    // ArtifactCompiler appends this final compatibility sheet
+                    // after authored CSS. It intentionally carries no generic
+                    // stylesheet_placement because its source fixes its order.
+                    $placement = 'after-author';
+                } elseif ($source === 'engine-support') {
+                    $placement = $asset['stylesheet_placement'] ?? null;
+                    if (!is_string($placement) || !array_key_exists($placement, $contents)) {
+                        if ($warnings !== null) {
+                            $warnings[] = self::unknownEngineSupportPlacementWarning($asset, $placement);
+                        }
+                        continue;
                     }
+                } else {
                     continue;
                 }
+
                 $content = $asset['content'];
                 if (isset($seen[$placement][$content])) {
                     continue;
@@ -1209,7 +1220,7 @@ final class TransformSiteStep implements Step
                 array_push($notes, ...$result->warnings, ...$result->repairs);
             } catch (\RuntimeException $error) {
                 $markup = SectionsStep::fallbackChrome($area);
-                $notes[] = "missing {$area}: legacy shell output unusable; deterministic minimal shell delivered";
+                $notes[] = "missing {$area}: blocks shell output unusable; deterministic minimal shell delivered";
             }
             $outputs[$path] = rtrim($markup) . "\n";
             $fallbackCodes[] = $diagnosticCode;
@@ -1224,7 +1235,7 @@ final class TransformSiteStep implements Step
             $authoredValue = $diagnosticCode === 'missing_shell_landmark' ? 'missing' : 'unusable transformed shell';
             $warnings[] = "source design/home.html selector {$area} diagnostic_code {$diagnosticCode} "
                 . "authored_value {$authoredValue} delivered_value {$path} "
-                . "disposition repaired via legacy {$area} prompt";
+                . "disposition repaired via blocks {$area} prompt";
             array_push($warnings, ...$notes);
             if ($batch !== null) {
                 array_push($warnings, ...$batch->notesFor($area));
