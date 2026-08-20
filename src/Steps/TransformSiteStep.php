@@ -1054,19 +1054,30 @@ final class TransformSiteStep implements Step
             foreach ($assets as $asset) {
                 if (!is_array($asset)
                     || ($asset['kind'] ?? null) !== 'css'
-                    || ($asset['source'] ?? null) !== 'engine-support'
                     || !is_string($asset['content'] ?? null)
                     || trim($asset['content']) === ''
                 ) {
                     continue;
                 }
-                $placement = $asset['stylesheet_placement'] ?? null;
-                if (!is_string($placement) || !array_key_exists($placement, $contents)) {
-                    if ($warnings !== null) {
-                        $warnings[] = self::unknownEngineSupportPlacementWarning($asset, $placement);
+
+                $source = $asset['source'] ?? null;
+                if ($source === 'wordpress-compat') {
+                    // ArtifactCompiler appends this final compatibility sheet
+                    // after authored CSS. It intentionally carries no generic
+                    // stylesheet_placement because its source fixes its order.
+                    $placement = 'after-author';
+                } elseif ($source === 'engine-support') {
+                    $placement = $asset['stylesheet_placement'] ?? null;
+                    if (!is_string($placement) || !array_key_exists($placement, $contents)) {
+                        if ($warnings !== null) {
+                            $warnings[] = self::unknownEngineSupportPlacementWarning($asset, $placement);
+                        }
+                        continue;
                     }
+                } else {
                     continue;
                 }
+
                 $content = $asset['content'];
                 if (isset($seen[$placement][$content])) {
                     continue;

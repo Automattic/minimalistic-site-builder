@@ -265,9 +265,9 @@ test('site-spec degrades a missing or implausible language with a durable warnin
     (new SiteSpecStep($llm, $renderer))->run($project);
     assert_eq('', $project->readJson('siteSpec.json')['language']);
     assert_eq(
-        'the language the user prompt is written in',
+        "the SITE SPEC's own language (never a language implied by the site's location or audience)",
         SiteSpecStep::languageOf($project),
-        'the empty field renders the follow-the-prompt instruction downstream',
+        'the empty field renders an instruction the copy prompts can actually resolve',
     );
 
     $llm->queueJson(['name' => 'Solo', 'language' => '12345']); // not a code or name

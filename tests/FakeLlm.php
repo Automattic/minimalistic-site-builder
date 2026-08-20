@@ -22,6 +22,8 @@ final class FakeLlm implements FinishReasonAwareLlm, UsageReporting
     public int $completeJsonCalls = 0;
     public int $completeBatchCalls = 0;
     public int $completeJsonBatchCalls = 0;
+    /** Set false to model a host that accepts but drops cached_prefixes. */
+    public bool $billCachedPrefixes = true;
     private int $usageRequests = 0;
     private int $usageInputTokens = 0;
     private int $usageOutputTokens = 0;
@@ -74,7 +76,7 @@ final class FakeLlm implements FinishReasonAwareLlm, UsageReporting
         }
         $response = array_shift($this->textQueue);
         $this->lastFinishReason = $response['finish_reason'];
-        $this->recordUsage($prompt, $response['text']);
+        $this->recordUsage($prompt, $response['text'], $opts);
         return $response['text'];
     }
 
@@ -94,7 +96,7 @@ final class FakeLlm implements FinishReasonAwareLlm, UsageReporting
             throw new \RuntimeException('FakeLlm: no queued json response');
         }
         $response = array_shift($this->jsonQueue);
-        $this->recordUsage($prompt, self::jsonUsageText($response));
+        $this->recordUsage($prompt, self::jsonUsageText($response), $opts);
         return $response;
     }
 
@@ -123,7 +125,7 @@ final class FakeLlm implements FinishReasonAwareLlm, UsageReporting
                 throw new \RuntimeException('FakeLlm: no queued json response');
             }
             $response = array_shift($this->jsonQueue);
-            $this->recordUsage((string) $req['prompt'], self::jsonUsageText($response));
+            $this->recordUsage((string) $req['prompt'], self::jsonUsageText($response), $opts);
             $out[$key] = $response;
         }
         return $out;
@@ -155,18 +157,39 @@ final class FakeLlm implements FinishReasonAwareLlm, UsageReporting
                 throw new \RuntimeException('FakeLlm: no queued text response');
             }
             $response = array_shift($this->textQueue)['text'];
-            $this->recordUsage((string) $req['prompt'], $response);
+            $this->recordUsage((string) $req['prompt'], $response, $opts);
             $out[$key] = $response;
         }
-        $notes = $this->batchNotes;
-        $this->batchNotes = [];
+        $notes = [];
+        foreach (array_keys($requests) as $key) {
+            if (!isset($this->batchNotes[$key])) {
+                continue;
+            }
+            $notes[$key] = $this->batchNotes[$key];
+            unset($this->batchNotes[$key]);
+        }
         return new \Automattic\SiteBuild\TextBatchResult($out, $notes);
     }
 
-    private function recordUsage(string $prompt, string $response): void
+    /**
+     * Bill a call the way a conformant host would: `cached_prefixes` are part
+     * of the input the model was handed, so they are part of the input usage.
+     * Counting only `prompt` would model a host that discards the layers, and
+     * SectionsStep's context-loss guard reads exactly this figure — so every
+     * fixture build would carry a spurious warning, and the guard's silent path
+     * would never be exercised.
+     *
+     * @param array<string,mixed> $opts the request's options, minus the prompt
+     */
+    private function recordUsage(string $prompt, string $response, array $opts = []): void
     {
         $this->usageRequests++;
         $this->usageInputTokens += self::syntheticTokenCount($prompt);
+        if ($this->billCachedPrefixes) {
+            foreach ($opts['cached_prefixes'] ?? [] as $prefix) {
+                $this->usageInputTokens += self::syntheticTokenCount((string) $prefix);
+            }
+        }
         $this->usageOutputTokens += self::syntheticTokenCount($response);
     }
 

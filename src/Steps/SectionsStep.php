@@ -22,6 +22,7 @@ use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\TextBatchResult;
 use Automattic\SiteBuild\TransformArtifacts;
+use Automattic\SiteBuild\UsageReporting;
 use Automattic\SiteBuild\Units\FooterUnit;
 use Automattic\SiteBuild\Units\GeneratedMarkup;
 use Automattic\SiteBuild\Units\HeaderUnit;
@@ -58,6 +59,21 @@ use Automattic\SiteBuild\Warnings;
 final class SectionsStep implements Step
 {
     private const CACHE_WARM_PROMPT = 'Warm the cached section context.';
+
+    /**
+     * Below this many estimated prefix tokens the warm-up probe cannot tell a
+     * discarded layer from ordinary system-prompt overhead, so it stays quiet.
+     * Real section layers run to thousands of tokens.
+     */
+    private const CONTEXT_PROBE_MIN_TOKENS = 500;
+
+    /**
+     * Fraction of the estimated prefix a conformant host must bill. Set low on
+     * purpose: a host that sent the layers bills MORE than this estimate (the
+     * system preamble and brief are extra), while a host that dropped them
+     * bills a rounding error. Only a collapse trips it.
+     */
+    private const CONTEXT_PROBE_RATIO = 0.5;
 
     /** Prefix for a page section part's request key and filename. */
     public const PART_PREFIX = SectionUnit::KEY_PREFIX;
@@ -160,7 +176,7 @@ final class SectionsStep implements Step
         $jobs = $jobPlan['jobs'];
         $initialContract = $jobPlan['contract'];
         $requests = self::requestsFor($jobs);
-        $this->warmSectionCache($requests);
+        array_push($warnings, ...$this->warmSectionCache($requests));
         $batchFailure = null;
         try {
             $batch = $this->llm->completeBatch($requests);
@@ -361,7 +377,7 @@ final class SectionsStep implements Step
             return $pages;
         }
         $requests = self::requestsFor($jobs);
-        $this->warmSectionCache($requests);
+        array_push($warnings, ...$this->warmSectionCache($requests));
         try {
             $batch = $this->llm->completeBatch($requests);
         } catch (\RuntimeException $error) {
@@ -671,13 +687,20 @@ final class SectionsStep implements Step
     }
 
     /**
-     * Warm the exact cached context used by the deterministic first section.
+     * Warm the exact cached context used by the deterministic first section,
+     * and use that same probe to verify the batch path actually SENT it.
      * A failed probe only forfeits first-window cache hits; it must not abort
      * the build or change the subsequent concurrent fan-out.
      *
+     * The sections themselves are generated through completeBatch(), so the
+     * one-member probe deliberately travels that same seam. Hosts may implement
+     * complete() and completeBatch() separately; measuring complete() would
+     * permit either path to lie about the one that actually authors sections.
+     *
      * @param array<string,array{prompt:string,model?:string,temperature?:float,cached_prefixes?:list<string>}> $requests
+     * @return list<string> context-loss warnings, empty when the host is conformant or unmeasurable
      */
-    private function warmSectionCache(array $requests): void
+    private function warmSectionCache(array $requests): array
     {
         foreach ($requests as $request) {
             if (!isset($request['cached_prefixes'])) {
@@ -690,13 +713,136 @@ final class SectionsStep implements Step
             $opts['tolerate_empty'] = true;
             $opts['log_label'] = 'section-cache-warm';
 
+            $before = $this->usageSnapshot();
+
             try {
-                $this->llm->complete(self::CACHE_WARM_PROMPT, $opts);
+                $this->llm->completeBatch([
+                    'section-cache-warm' => ['prompt' => self::CACHE_WARM_PROMPT] + $opts,
+                ]);
             } catch (\Throwable $e) {
                 Narrator::write("    section cache warm-up failed ({$e->getMessage()}); continuing uncached\n");
+                return [];
             }
-            return;
+
+            $after = $this->usageSnapshot();
+            if ($before === null || $after === null) {
+                return [];
+            }
+            $observed = self::billedInputDelta($before, $after);
+            $warning = self::contextLossWarning($request['cached_prefixes'], $observed);
+            if ($warning !== null) {
+                Narrator::write("    WARNING: {$warning}\n");
+                return [$warning];
+            }
+            return [];
         }
+        return [];
+    }
+
+    /** @return array<string,mixed>|null null when usage measurement is unavailable */
+    private function usageSnapshot(): ?array
+    {
+        if (!$this->llm instanceof UsageReporting) {
+            return null;
+        }
+        try {
+            return $this->llm->usageTotals();
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * Input tokens a host billed for a single call, from cumulative usage
+     * snapshots taken either side of it.
+     *
+     * Hosts disagree about what `input_tokens` means, and reading the wrong
+     * convention here would turn this guard's signal upside down. This repo's
+     * AnthropicClient folds cache reads and creations INTO `input_tokens`
+     * (see extractUsage()), while the raw Anthropic Messages API reports
+     * `usage.input_tokens` with both EXCLUDED. Under the second convention a
+     * conformant host bills a cached 2,400-token prefix almost entirely as
+     * `cache_creation_input_tokens` on the probe, and as
+     * `cache_read_input_tokens` on every section after it — leaving an
+     * `input_tokens` delta that looks exactly like a discarded layer, and
+     * shrinking further the better the caching works.
+     *
+     * Taking the larger of the two readings satisfies both conventions and
+     * double-counts neither: a folded total already exceeds its own cache
+     * components, and a raw total is corrected by them.
+     *
+     * The totals are cumulative and per-client, so this reads as one call's
+     * usage only while nothing else is spending on the same Llm. That holds
+     * here — SectionsStep is a standalone step in both compositions, never a
+     * ConcurrentGroup member, and the probe is sequential. A host that shared
+     * one client across parallel work would inflate the delta, which errs
+     * toward silence rather than toward a false accusation.
+     *
+     * @param array<string,mixed> $before cumulative totals before the call
+     * @param array<string,mixed> $after  cumulative totals after it
+     */
+    public static function billedInputDelta(array $before, array $after): int
+    {
+        $delta = static fn (string $key): int
+            => (int) ($after[$key] ?? 0) - (int) ($before[$key] ?? 0);
+
+        return max(
+            $delta('input_tokens'),
+            $delta('cache_read_input_tokens') + $delta('cache_creation_input_tokens'),
+        );
+    }
+
+    /**
+     * Decide whether a host discarded the cached context layers, from the
+     * input-token usage its own accounting reported for the warm-up probe.
+     *
+     * This exists because the Llm seam has no other way to tell. The layers
+     * carry the site spec, theme JSON, design direction and page outline;
+     * `prompt` carries only the per-section brief. A host that accepts
+     * `cached_prefixes` and drops them still returns perfectly well-formed
+     * markup, so the build cannot notice from the response — it can only
+     * notice that far too few input tokens were billed. That is exactly how
+     * the defect was found in production, after 19 of 21 sections had already
+     * been generated against no theme at all.
+     *
+     * Inconclusive cases return null rather than guessing. A host with small
+     * layers, or one whose tokenizer is unusually dense, must never be accused
+     * on thin evidence — this only fires when the gap is far too large to be
+     * anything else.
+     *
+     * Pure, so the threshold is unit-testable without a transport.
+     *
+     * @param list<string> $cachedPrefixes
+     * @param int          $observedInputTokens total billed input for the probe,
+     *                     cache reads and creations included — take it from
+     *                     billedInputDelta() rather than from a raw
+     *                     `input_tokens` field, whose meaning varies by host
+     */
+    public static function contextLossWarning(array $cachedPrefixes, int $observedInputTokens): ?string
+    {
+        $bytes = 0;
+        foreach ($cachedPrefixes as $prefix) {
+            $bytes += strlen($prefix);
+        }
+        // ~4 bytes per token is a deliberate under-estimate of the real count,
+        // which biases every comparison below toward staying silent.
+        $expected = intdiv($bytes, 4);
+        if ($expected < self::CONTEXT_PROBE_MIN_TOKENS) {
+            return null; // Layers too small to distinguish signal from overhead.
+        }
+        if ($observedInputTokens >= (int) ($expected * self::CONTEXT_PROBE_RATIO)) {
+            return null; // The host sent them.
+        }
+
+        return sprintf(
+            'file \'theme/parts/*.html\'; block=\'section cache layers\'; authored="%d cached_prefixes tokens '
+            . '(site spec, theme.json, design direction, page outline)"; delivered="%d input tokens billed by the '
+            . 'host"; disposition=the injected Llm appears to discard cached_prefixes, so every section below was '
+            . 'authored without the theme or the design direction. Fix the host adapter so completeBatch() '
+            . 'forwards cached_prefixes and reports their billed input usage',
+            $expected,
+            $observedInputTokens,
+        );
     }
 
     /**

@@ -139,6 +139,29 @@ function html_first_nav_defect_preview_document(): string
     );
 }
 
+/**
+ * The same header as html_first_nav_defect_preview_document(), but with the menu
+ * in a `<ul>` — which is what every project in the corpus actually authors.
+ * The list shape takes a different path through the transformer's navigation
+ * pattern than a run of bare anchors, so a gate built only on the bare-anchor
+ * shape cannot see a regression in this one.
+ */
+function html_first_nav_list_preview_document(): string
+{
+    return str_replace(
+        '<header class="site-header"><a class="brand" href="/">Hearth &amp; Crumb</a>'
+            . '<nav aria-label="Primary"><a href="/">Home</a></nav></header>',
+        '<header><div class="header-shell"><nav aria-label="Primary">'
+            . '<a class="brand" href="#hero">Hearth &amp; Crumb</a>'
+            . '<ul class="navlinks">'
+            . '<li><a class="is-current" href="#hero" aria-current="page">Home</a></li>'
+            . '<li><a href="#hero">About</a></li>'
+            . '</ul>'
+            . '</nav></div></header>',
+        html_first_preview_document('NAV-LINK-HERO'),
+    );
+}
+
 function html_first_queue_success(
     FakeLlm $llm,
     array $siteSpec,
@@ -467,7 +490,6 @@ test('G4 HTML-first output gives every transformer marker class matching final t
             'theme/parts/footer.html',
             'theme/templates/page.html',
             'theme/templates/index.html',
-            'theme/fonts.php',
             'theme/functions.php',
             'plugin/pages/home.html',
             'plugin/pages.json',
@@ -475,6 +497,7 @@ test('G4 HTML-first output gives every transformer marker class matching final t
         ] as $path) {
             assert_true($project->exists($path), "missing HTML-first artifact {$path}");
         }
+        assert_true(!$project->exists('theme/fonts.php'), 'HTML-first design does not gain a webfont loader');
 
         assert_eq(html_first_preview_document(), $project->readText('design/preview.html'));
         assert_eq($homeBody, $project->readText('design/home-body.html'));
@@ -571,8 +594,100 @@ test('G5 HTML-first build delivers only resolved header navigation destinations'
 
         $header = $project->readText('theme/parts/header.html');
         assert_contains('"url":"/"', $header, 'brand link inherits the front page root');
-        assert_true(!str_contains($header, '/#hero'), 'shared nav keeps no front-page placeholder');
+        assert_true(
+            !str_contains($header, '#hero'),
+            'shared nav keeps no front-page placeholder, bare or path-prefixed',
+        );
         assert_contains('"url":"/about/"', $header, 'About label resolves to the site page path');
+
+        $emptyHrefCount = 0;
+        foreach ($project->markupFiles() as $file) {
+            $markup = (string) file_get_contents($file);
+            $emptyHrefCount += preg_match_all('/\bhref\s*=\s*(["\'])#\1/i', $markup);
+            assert_eq(0, preg_match_all('/"url"\s*:\s*"#"/i', $markup), 'delivered block URL "#" count');
+        }
+        $headerBareAnchorCount = preg_match_all(
+            '/\bhref\s*=\s*(["\'])#[^"\']+\1/i',
+            $header,
+        ) + preg_match_all('/"url"\s*:\s*"#[^"]+"/i', $header);
+        assert_eq(0, $emptyHrefCount, 'delivered markup href="#" count');
+        assert_eq(0, $headerBareAnchorCount, 'shared header bare #anchor count');
+    } finally {
+        $previous === false
+            ? putenv('SITE_BUILD_HTML_FIRST')
+            : putenv('SITE_BUILD_HTML_FIRST=' . $previous);
+        $previousHeaderArchetype === false
+            ? putenv('HEADER_ARCHETYPE')
+            : putenv('HEADER_ARCHETYPE=' . $previousHeaderArchetype);
+        if (is_dir($tmp)) {
+            exec('rm -rf ' . escapeshellarg($tmp));
+        }
+    }
+});
+
+/**
+ * G5's fixture authors its menu as a run of bare anchors. Every project in
+ * the corpus authors a `<ul>`, which reaches core/navigation by a different
+ * route — silver-summit's shipped header carried three unresolved `#hero`
+ * destinations and a baked `aria-current` while G5 was green.
+ */
+test('G6 HTML-first build resolves a list-shaped header navigation too', function () {
+    $tmp = sys_get_temp_dir() . '/builder_html_first_nav_links_' . uniqid();
+    $previous = getenv('SITE_BUILD_HTML_FIRST');
+    $previousHeaderArchetype = getenv('HEADER_ARCHETYPE');
+    putenv('SITE_BUILD_HTML_FIRST=1');
+    putenv('HEADER_ARCHETYPE=standard-row');
+    try {
+        $pages = [
+            ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome visitors', 'children' => []],
+            ['title' => 'About', 'slug' => 'about', 'purpose' => 'Explain the bakery', 'children' => []],
+        ];
+        $llm = new FakeLlm();
+        html_first_queue_success(
+            $llm,
+            html_first_site_spec($pages),
+            html_first_home_body(),
+            html_first_nav_list_preview_document(),
+        );
+        $llm->queueText(
+            '<main><section id="team"><h1>About</h1><p>HTML-FIRST-ABOUT</p></section></main>',
+        );
+
+        $builder = html_first_integration_builder($llm, $tmp);
+        $project = $builder->createProject(
+            'A neighborhood bakery',
+            'demo',
+            multiPage: true,
+            pages: $pages,
+        );
+        $meta = $project->readJson('meta.json');
+        $meta['design_candidates'] = 1;
+        $meta['critique_rounds'] = 1;
+        $project->writeJson('meta.json', $meta);
+
+        $builder->pipeline()->runThrough($project);
+
+        $header = $project->readText('theme/parts/header.html');
+        assert_contains('"url":"/"', $header, 'brand link inherits the front page root');
+        // Every MENU destination is resolved. The brand anchor is hoisted out of
+        // the menu into its own block and still resolves to `/#hero` rather than
+        // `/` — a separate resolver behaviour for raw anchors, and the reason this
+        // guard names menu destinations instead of scanning the whole part.
+        preg_match_all('/"url":"([^"]*)"/', $header, $psMenuUrls);
+        assert_eq(
+            [],
+            array_values(array_filter($psMenuUrls[1], static fn (string $url): bool => str_contains($url, '#hero'))),
+            'no menu destination is left on a front-page placeholder',
+        );
+        assert_true(
+            !str_contains($header, 'href="#hero"'),
+            'no anchor is left on a bare unresolved fragment',
+        );
+        assert_contains('"url":"/about/"', $header, 'About label resolves to the site page path');
+        assert_true(
+            !str_contains($header, 'aria-current'),
+            'a shared header ships no design-time current-page marker',
+        );
 
         $emptyHrefCount = 0;
         foreach ($project->markupFiles() as $file) {

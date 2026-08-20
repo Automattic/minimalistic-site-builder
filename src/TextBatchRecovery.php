@@ -26,9 +26,12 @@ namespace Automattic\SiteBuild;
  * rejecting the entire theme. The transport callback owns the real calls,
  * usage accounting and logging; this orchestrator is pure apart from STDERR
  * notes. A retained abnormal member carries a keyed degradation note in the
- * TextBatchResult. The caller persists that note only when the corresponding
- * normalized output is actually delivered; this layer has no Project to write
- * to and structural salvage is not guaranteed to change balanced partial text.
+ * TextBatchResult. A one-token cache-warm request may set tolerate_empty; its
+ * expected output-limit response is accepted immediately because only input
+ * usage matters. The caller persists a degradation note only when the
+ * corresponding normalized output is actually delivered; this layer has no
+ * Project to write to and structural salvage is not guaranteed to change
+ * balanced partial text.
  */
 final class TextBatchRecovery
 {
@@ -175,7 +178,9 @@ final class TextBatchRecovery
                     $error = 'generation filled its entire ' . (int) $budget
                         . '-token output budget and the host reported no stop reason';
                 }
-                if ($error === null) {
+                $toleratedProbeLimit = (($requests[$key]['tolerate_empty'] ?? false) === true)
+                    && StopReasons::isOutputLimit($response['stop_reason'] ?? null);
+                if ($error === null || $toleratedProbeLimit) {
                     $texts[$key] = (string) $response['text'];
                     continue;
                 }

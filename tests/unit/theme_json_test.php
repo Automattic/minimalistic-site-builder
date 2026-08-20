@@ -1462,6 +1462,165 @@ test('theme-json scaffold never writes button, link or heading', function () {
     }
 });
 
+test('theme-json default graph preserves generated navigation, button and link typography', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_default_control_type_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A coaching studio']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project);
+
+    $payload = valid_theme_payload();
+    $payload['styles']['blocks']['core/navigation'] = [
+        'typography' => [
+            'fontWeight' => '600',
+            'letterSpacing' => '0.14em',
+            'textTransform' => 'uppercase',
+        ],
+        'elements' => ['link' => ['typography' => ['textDecoration' => 'none']]],
+    ];
+    $payload['styles']['elements']['button'] = [
+        'typography' => [
+            'fontWeight' => '700',
+            'letterSpacing' => '0.08em',
+            'textTransform' => 'uppercase',
+        ],
+        'color' => ['background' => 'var:preset|color|accent'],
+    ];
+    $payload['styles']['elements']['link'] = [
+        'color' => ['text' => 'var:preset|color|primary'],
+        'typography' => ['fontWeight' => '700', 'textDecoration' => 'underline'],
+        ':hover' => [
+            'color' => ['text' => 'var:preset|color|accent'],
+            'typography' => ['textDecoration' => 'none'],
+        ],
+    ];
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $theme = $project->readJson('theme/theme.json');
+    assert_eq(
+        '600',
+        $theme['styles']['blocks']['core/navigation']['typography']['fontWeight'] ?? null,
+        'default graph keeps generated navigation typography',
+    );
+    assert_eq(
+        '700',
+        $theme['styles']['elements']['button']['typography']['fontWeight'] ?? null,
+        'default graph keeps generated button typography',
+    );
+    assert_eq(
+        '700',
+        $theme['styles']['elements']['link']['typography']['fontWeight'] ?? null,
+        'default graph keeps generated link typography',
+    );
+    assert_eq(
+        'none',
+        $theme['styles']['blocks']['core/navigation']['elements']['link']['typography']['textDecoration'] ?? null,
+        'default graph keeps navigation sibling styles',
+    );
+    assert_eq(
+        'var:preset|color|accent',
+        $theme['styles']['elements']['button']['color']['background'] ?? null,
+        'default graph keeps button sibling styles',
+    );
+    assert_eq(
+        'var:preset|color|primary',
+        $theme['styles']['elements']['link']['color']['text'] ?? null,
+        'default graph keeps link color',
+    );
+    assert_eq(
+        'none',
+        $theme['styles']['elements']['link'][':hover']['typography']['textDecoration'] ?? null,
+        'default graph keeps link hover styles',
+    );
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json HTML-first graph removes generated navigation, button and link typography', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_html_control_type_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A coaching studio']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project);
+    $project->writeText(
+        'design/site.css',
+        file_get_contents(repo_path('tests/fixtures/design/tokens-rich.css')) ?: '',
+    );
+
+    $payload = valid_theme_payload();
+    $payload['styles']['blocks']['core/navigation'] = [
+        'typography' => [
+            'fontWeight' => '600',
+            'letterSpacing' => '0.14em',
+            'textTransform' => 'uppercase',
+        ],
+        'elements' => ['link' => ['typography' => ['textDecoration' => 'none']]],
+    ];
+    $payload['styles']['elements']['button'] = [
+        'typography' => [
+            'fontWeight' => '700',
+            'letterSpacing' => '0.08em',
+            'textTransform' => 'uppercase',
+        ],
+        'color' => ['background' => 'var:preset|color|accent'],
+    ];
+    $payload['styles']['elements']['link'] = [
+        'color' => ['text' => 'var:preset|color|primary'],
+        'typography' => ['fontWeight' => '700', 'textDecoration' => 'underline'],
+        ':hover' => [
+            'color' => ['text' => 'var:preset|color|accent'],
+            'typography' => ['textDecoration' => 'none'],
+        ],
+    ];
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+
+    (new ThemeJsonStep(
+        $llm,
+        new PromptRenderer(repo_path('prompts')),
+        htmlFirst: true,
+    ))->run($project);
+
+    $theme = $project->readJson('theme/theme.json');
+    assert_true(
+        !array_key_exists('typography', $theme['styles']['blocks']['core/navigation'] ?? []),
+        'HTML-first navigation inherits from carried design CSS',
+    );
+    assert_true(
+        !array_key_exists('typography', $theme['styles']['elements']['button'] ?? []),
+        'HTML-first buttons inherit from carried design CSS',
+    );
+    assert_true(
+        !array_key_exists('typography', $theme['styles']['elements']['link'] ?? []),
+        'HTML-first links inherit from carried design CSS',
+    );
+    assert_eq(
+        'none',
+        $theme['styles']['blocks']['core/navigation']['elements']['link']['typography']['textDecoration'] ?? null,
+        'HTML-first keeps navigation sibling styles',
+    );
+    assert_eq(
+        'var:preset|color|accent',
+        $theme['styles']['elements']['button']['color']['background'] ?? null,
+        'HTML-first keeps button sibling styles',
+    );
+    assert_eq(
+        'var:preset|color|primary',
+        $theme['styles']['elements']['link']['color']['text'] ?? null,
+        'HTML-first keeps link color',
+    );
+    assert_eq(
+        'none',
+        $theme['styles']['elements']['link'][':hover']['typography']['textDecoration'] ?? null,
+        'HTML-first keeps link hover styles',
+    );
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('theme-json scaffold adds no contextual block or element text colors', function () {
     $styles = ThemeJsonStep::applyScaffold([])['styles'];
     foreach ($styles['elements'] as $name => $element) {
