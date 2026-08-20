@@ -31,6 +31,26 @@ function composition_deps(): array
     ];
 }
 
+test('postImages names the phase every image entry point has to run', function () {
+    $images = new class implements Step {
+        public function id(): string { return 'generate-images'; }
+        public function label(): string { return 'Generate images'; }
+        public function declaration(): StepDeclaration
+        {
+            return new StepDeclaration(id: $this->id(), label: $this->label(), reads: [], writes: []);
+        }
+        public function run(Project $project): void {}
+    };
+
+    // bin/build.php and bin/images.php both run this list, so the screenshot
+    // cannot be added to one and forgotten in the other — and a host that
+    // generates images mirrors one name instead of inferring the set.
+    assert_eq(
+        ['generate-images', 'cover-contrast', 'theme-screenshot'],
+        array_map(static fn (Step $s) => $s->id(), StepComposition::postImages($images)),
+    );
+});
+
 test('StepComposition htmlFirst matches the HTML-first step order and validates', function () {
     $d = composition_deps();
     $c = StepComposition::htmlFirst(
@@ -43,7 +63,7 @@ test('StepComposition htmlFirst matches the HTML-first step order and validates'
         'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
         'design-preview', 'theme-json', 'inner-pages-design', 'splice-home-design', 'assign-image-sources', 'transform-site', 'resolve-nav-links', 'section-rhythm', 'section-layout',
         'collect-images', 'normalize-layout', 'header-hero', 'contrast-fix', 'motion-sanity', 'fix-blocks',
-        'assemble-pages', 'fix-pages', 'page-styles', 'custom-motion', 'fonts-php', 'finalize-theme', 'validate-theme',
+        'assemble-pages', 'fix-pages', 'page-styles', 'custom-motion', 'fonts-php', 'finalize-theme', 'theme-screenshot', 'validate-theme',
     ], array_map(static fn (Step $s) => $s->id(), $steps));
     StepGraph::validate($steps, $c->seeds());
 
@@ -90,7 +110,7 @@ test('StepComposition default is the full blocks graph byte-for-byte', function 
             'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
             'theme-json+page-plan', 'reconcile-palette', 'sections', 'section-rhythm', 'copy-dedupe',
             'collect-images', 'normalize-layout', 'header-hero', 'contrast-fix', 'motion-sanity', 'fix-blocks',
-            'assemble-pages', 'page-styles', 'custom-motion', 'bundle-fonts', 'fonts-php', 'finalize-theme', 'validate-theme',
+            'assemble-pages', 'page-styles', 'custom-motion', 'bundle-fonts', 'fonts-php', 'finalize-theme', 'theme-screenshot', 'validate-theme',
         ], $ids);
         assert_true(!in_array('homepage-design', $ids, true));
         assert_true(!in_array('transform-site', $ids, true));

@@ -18,11 +18,17 @@ We don't need to plan for backwards compatibility. This is a green field project
 
 Default blocks graph (`StepComposition::default()` → `StepComposition::blocks()`), where the model authors block markup directly:
 
-`scaffold-theme -> scaffold-plugin -> refine-prompt -> site-spec -> apply-identity -> design-direction -> (theme-json + page-plan, concurrent) -> reconcile-palette -> sections -> section-rhythm -> copy-dedupe -> collect-images -> normalize-layout -> header-hero -> contrast-fix -> motion-sanity -> fix-blocks -> assemble-pages -> page-styles -> custom-motion -> bundle-fonts -> fonts-php -> finalize-theme -> validate-theme`
+`scaffold-theme -> scaffold-plugin -> refine-prompt -> site-spec -> apply-identity -> design-direction -> (theme-json + page-plan, concurrent) -> reconcile-palette -> sections -> section-rhythm -> copy-dedupe -> collect-images -> normalize-layout -> header-hero -> contrast-fix -> motion-sanity -> fix-blocks -> assemble-pages -> page-styles -> custom-motion -> bundle-fonts -> fonts-php -> finalize-theme -> theme-screenshot -> validate-theme`
+
+Image generation is slow and networked, so it is in neither graph. The steps that depend on the real pixels are named once, in `StepComposition::postImages()`, and every entry point runs that list after the graph:
+
+`generate-images -> cover-contrast -> theme-screenshot`
+
+A host that generates images must run that phase too. Mirroring only the graph ships a theme whose cover text was checked against images that did not exist yet, and whose preview card is the palette poster `theme-screenshot` drew in-pipeline rather than the site's own hero.
 
 Set `SITE_BUILD_HTML_FIRST=1` for the HTML-first graph (`StepComposition::htmlFirst()`), where the model authors an HTML+CSS design that `transform-site` converts to blocks:
 
-`scaffold-theme -> scaffold-plugin -> refine-prompt -> site-spec -> apply-identity -> design-direction -> design-preview -> theme-json -> inner-pages-design -> splice-home-design -> assign-image-sources -> transform-site -> resolve-nav-links -> section-rhythm -> section-layout -> collect-images -> normalize-layout -> header-hero -> contrast-fix -> motion-sanity -> fix-blocks -> assemble-pages -> fix-pages -> page-styles -> custom-motion -> fonts-php -> finalize-theme -> validate-theme`
+`scaffold-theme -> scaffold-plugin -> refine-prompt -> site-spec -> apply-identity -> design-direction -> design-preview -> theme-json -> inner-pages-design -> splice-home-design -> assign-image-sources -> transform-site -> resolve-nav-links -> section-rhythm -> section-layout -> collect-images -> normalize-layout -> header-hero -> contrast-fix -> motion-sanity -> fix-blocks -> assemble-pages -> fix-pages -> page-styles -> custom-motion -> fonts-php -> finalize-theme -> theme-screenshot -> validate-theme`
 
 On that path `theme-json` reads CSS-derived design tokens. `assign-image-sources` gives every design `<img>` the theme asset path the rest of the image pipeline generates into. `contrast-fix` and `motion-sanity` stay addressable but skip only in explicit HTML-first composition mode. `normalize-layout`, `fix-blocks`, and `validate-theme` skip the width rules that assume the theme owns page width — here the carried design CSS does. `page-styles` scrubs and merges generated CSS, then runs `CssContrastCheck` and applies safe tail-only adjustments against delivered markup. Stale `design/site.css` bytes never select pipeline behavior.
 

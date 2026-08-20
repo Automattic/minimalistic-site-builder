@@ -9,6 +9,7 @@ use Automattic\SiteBuild\Steps\AssignImageSourcesStep;
 use Automattic\SiteBuild\Steps\BundleFontsStep;
 use Automattic\SiteBuild\Steps\CollectImagesStep;
 use Automattic\SiteBuild\Steps\ContrastFixStep;
+use Automattic\SiteBuild\Steps\CoverContrastStep;
 use Automattic\SiteBuild\Steps\CustomMotionStep;
 use Automattic\SiteBuild\Steps\DesignDirectionStep;
 use Automattic\SiteBuild\Steps\DesignPreviewStep;
@@ -34,6 +35,7 @@ use Automattic\SiteBuild\Steps\SectionsStep;
 use Automattic\SiteBuild\Steps\SiteSpecStep;
 use Automattic\SiteBuild\Steps\SpliceHomeDesignStep;
 use Automattic\SiteBuild\Steps\ThemeJsonStep;
+use Automattic\SiteBuild\Steps\ThemeScreenshotStep;
 use Automattic\SiteBuild\Steps\TransformSiteStep;
 use Automattic\SiteBuild\Steps\ValidateThemeStep;
 
@@ -215,6 +217,10 @@ final class StepComposition
             // to the transformed theme and changing text geometry.
             new FontsPhpStep(htmlFirst: true),
             new FinalizeThemeStep(),
+            // The theme's preview card. In-pipeline it composes a palette
+            // poster; a host that goes on to generate images re-runs this step
+            // so the real hero replaces it.
+            new ThemeScreenshotStep(),
             new ValidateThemeStep(htmlFirst: true),
         ]);
     }
@@ -338,6 +344,10 @@ final class StepComposition
             // Sole owner of functions.php: the deterministic loader that enqueues
             // style.css and require_once's the generated fonts.php.
             new FinalizeThemeStep(),
+            // The theme's preview card. In-pipeline it composes a palette
+            // poster; a host that goes on to generate images re-runs this step
+            // so the real hero replaces it.
+            new ThemeScreenshotStep(),
             // Last chance to catch contract drift introduced by serialization or
             // later append-only steps before the project is reported as complete.
             new ValidateThemeStep(),
@@ -368,6 +378,34 @@ final class StepComposition
         }
 
         throw new \LogicException('StepComposition::blocksTail: design-direction boundary missing');
+    }
+
+    /**
+     * The steps that run once the real image pixels exist, in order.
+     *
+     * Image generation is slow and networked, so it is not in either graph:
+     * every entry point runs it separately, and then has to run whatever
+     * depends on its output. Naming that phase here is what keeps those entry
+     * points in step — bin/build.php and bin/images.php both run this list,
+     * and a host that generates images mirrors one name instead of inferring
+     * a set. AGENTS.md publishes it alongside the two graphs.
+     *
+     * The caller builds the image step, because choosing an image client means
+     * reading the environment and this package leaves that to its hosts.
+     *
+     * @return Step[]
+     */
+    public static function postImages(Step $generateImages, ?BlockFixer $blockFixer = null): array
+    {
+        return [
+            $generateImages,
+            // Cover text was picked against an image that did not exist yet;
+            // re-check it against the real, dimmed pixels.
+            new CoverContrastStep($blockFixer ?? BlockFixers::default()),
+            // The pipeline drew a palette poster because no photo existed.
+            // Now one does, so the card becomes the site's own hero.
+            new ThemeScreenshotStep(),
+        ];
     }
 
     /** @return Step[] */

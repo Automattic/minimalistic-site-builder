@@ -1,11 +1,9 @@
 <?php
 declare(strict_types=1);
 
-use Automattic\SiteBuild\BlockFixers;
 use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\StepComposition;
 use Automattic\SiteBuild\Steps\CollectImagesStep;
-use Automattic\SiteBuild\Steps\CoverContrastStep;
-use Automattic\SiteBuild\Steps\GenerateImagesStep;
 use Automattic\SiteBuild\TransformArtifacts;
 
 /**
@@ -57,11 +55,14 @@ try {
     $llm = null;
 }
 
+// The whole post-image phase, not just the generation: everything downstream
+// of the real pixels — the cover-contrast recheck and the theme's preview card
+// — has to run here too, or a project that got its images this way keeps the
+// placeholders the pipeline left behind.
 $start = microtime(true);
-make_generate_images_step($llm)->run($project);
+foreach (StepComposition::postImages(make_generate_images_step($llm)) as $step) {
+    $step->run($project);
+}
 printf("  done in %.1fs\n", microtime(true) - $start);
-
-// With the real pixels on disk, verify cover text against the dimmed images.
-(new CoverContrastStep(BlockFixers::default()))->run($project);
 
 echo "Output: {$project->themePath('assets')}\n";

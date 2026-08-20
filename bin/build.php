@@ -1,11 +1,10 @@
 <?php
 declare(strict_types=1);
 
-use Automattic\SiteBuild\BlockFixers;
 use Automattic\SiteBuild\BuildReport;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Step;
-use Automattic\SiteBuild\Steps\CoverContrastStep;
+use Automattic\SiteBuild\StepComposition;
 
 /**
  * Build a site from a prompt.
@@ -288,11 +287,9 @@ if ($withImages && $until === null) {
     // Image generation goes through the Vertex proxy, not the LLM — its only
     // model use is the Llm rewriting safety-filtered prompts (small tier) and
     // regenerating. The tally comes from images.json below.
-    $runExtraStep(make_generate_images_step($llm));
-
-    // Now that the real pixels exist, re-check cover text against the actual
-    // (dimmed) images and raise dimRatio / flip text colors where needed.
-    $runExtraStep(new CoverContrastStep(BlockFixers::default()));
+    foreach (StepComposition::postImages(make_generate_images_step($llm)) as $step) {
+        $runExtraStep($step);
+    }
 
     $specs = $project->exists('images.json') ? $project->readJson('images.json') : [];
     $generated = 0;
