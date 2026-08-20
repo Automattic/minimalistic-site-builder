@@ -75,6 +75,24 @@ function environment(options) {
             return { height, bottom };
         },
     } : null;
+    const navigationLinks = (options.navigationLinks || []).map((definition) => {
+        const item = {
+            classList: fakeClassList(definition.itemClasses || []),
+        };
+        const attributes = new Map([['href', definition.href]]);
+        if (definition.ariaCurrent) {
+            attributes.set('aria-current', definition.ariaCurrent);
+        }
+        const anchor = {
+            parentElement: item,
+            getAttribute(name) { return attributes.get(name) || null; },
+            setAttribute(name, value) { attributes.set(name, String(value)); },
+            closest(selector) {
+                return selector === '.wp-block-navigation-item' ? item : null;
+            },
+        };
+        return { anchor, item };
+    });
 
     class FakeResizeObserver {
         constructor(callback) {
@@ -105,6 +123,12 @@ function environment(options) {
             }
             return header;
         },
+        querySelectorAll(selector) {
+            if (selector !== '.wp-block-navigation a[href]') {
+                return [];
+            }
+            return navigationLinks.map((entry) => entry.anchor);
+        },
         getElementById(id) {
             if (id !== 'wpadminbar') {
                 return null;
@@ -123,8 +147,10 @@ function environment(options) {
         Array,
         Error,
         Math,
+        URL,
         console,
         document,
+        location: new URL(options.locationHref || 'https://example.test/'),
         pageYOffset: options.pageYOffset || 0,
         innerWidth: options.width || 1200,
         addEventListener(type, callback, listenerOptions) {
@@ -158,6 +184,7 @@ function environment(options) {
         windowListeners,
         documentListeners,
         resizeObservers,
+        navigationLinks,
         adminBarLookups() { return adminBarLookups; },
         rerun() {
             vm.runInNewContext(source, context, { filename: sourcePath });
@@ -175,6 +202,63 @@ function environment(options) {
         },
         frameCount() { return animationFrames.size; },
     };
+}
+
+function testCurrentNavigationFallback() {
+    const root = environment({
+        noHeader: true,
+        locationHref: 'https://example.test/?preview=1',
+        navigationLinks: [
+            { href: '/' },
+            { href: '/about/' },
+            { href: '#hero' },
+            { href: 'https://outside.test/' },
+        ],
+    });
+    check(
+        root.navigationLinks[0].anchor.getAttribute('aria-current') === 'page',
+        'root navigation link did not receive runtime current state'
+    );
+    check(
+        root.navigationLinks[0].item.classList.contains('current-menu-item'),
+        'root navigation item did not receive WordPress current class'
+    );
+    for (const entry of root.navigationLinks.slice(1)) {
+        check(!entry.anchor.getAttribute('aria-current'), 'non-current navigation link received aria-current');
+        check(!entry.item.classList.contains('current-menu-item'), 'non-current navigation item received current class');
+    }
+
+    const inner = environment({
+        locationHref: 'https://example.test/about/?preview=1#section',
+        navigationLinks: [
+            { href: '/' },
+            { href: '/about' },
+        ],
+    });
+    check(
+        inner.navigationLinks[1].anchor.getAttribute('aria-current') === 'page',
+        'trailing-slash normalization missed current inner-page link'
+    );
+    check(
+        inner.navigationLinks[1].item.classList.contains('current-menu-item'),
+        'current inner-page item did not receive WordPress current class'
+    );
+
+    const serverOwned = environment({
+        locationHref: 'https://example.test/about/',
+        navigationLinks: [
+            { href: '/', ariaCurrent: 'page', itemClasses: ['current-menu-item'] },
+            { href: '/about/' },
+        ],
+    });
+    check(
+        !serverOwned.navigationLinks[1].anchor.getAttribute('aria-current'),
+        'fallback overrode server-owned current navigation state'
+    );
+    check(
+        !serverOwned.navigationLinks[1].item.classList.contains('current-menu-item'),
+        'fallback added a second current navigation item'
+    );
 }
 
 function testInitialAndScrollState() {
@@ -353,5 +437,6 @@ testLoadingAndRestoredState();
 testHeadTimeExecution();
 testDoubleInitGuard();
 testFailOpen();
+testCurrentNavigationFallback();
 
 process.stdout.write('header state driver runtime harness passed\n');
