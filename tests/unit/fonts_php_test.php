@@ -302,3 +302,16 @@ test('run skips and removes stale fonts.php when only system families are named'
     assert_true(!$project->exists('theme/fonts.php'), 'no fonts.php written');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('HTML-first run preserves design fallback fonts by removing the webfont loader', function () {
+    [$project, $tmp] = fp_project([
+        ['slug' => 'heading', 'fontFamily' => '"Oswald", Impact, sans-serif', 'name' => 'Heading'],
+        ['slug' => 'body', 'fontFamily' => '"Barlow", Helvetica, sans-serif', 'name' => 'Body'],
+    ]);
+    $project->writeText('theme/fonts.php', "<?php\n// stale\n");
+
+    (new FontsPhpStep(htmlFirst: true))->run($project);
+
+    assert_true(!$project->exists('theme/fonts.php'), 'HTML-first design does not gain a webfont loader');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

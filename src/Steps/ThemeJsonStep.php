@@ -456,6 +456,9 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         // Last: the scaffold references the preset slugs repaired above. The
         // committed shape is then authoritative over model-authored radii.
         [$theme, $scaffoldWarnings] = self::repairScaffold($theme);
+        if ($this->htmlFirst) {
+            $theme = self::removeGeneratedControlTypography($theme);
+        }
         [$theme, $shapeRepairs, $shapeWarnings] = self::repairShapeWiring(
             $theme,
             DesignDirectionStep::shapeFor($project) ?? '',
@@ -1624,6 +1627,41 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         $shapeWarnings = [];
         $theme = self::mergeScaffoldDefaultsAtPath(self::SCAFFOLD, $theme, '', $shapeWarnings);
         return [$theme, array_merge($colorWarnings, $shadowWarnings, $shapeWarnings)];
+    }
+
+    /**
+     * HTML-first builds deliver the design's authored CSS after theme.json.
+     * Semantic navigation/button/link typography here would invent a competing
+     * design-system default: where the design declares a value, carried CSS
+     * owns it; where it declares none, both source and delivery must inherit.
+     * The default blocks graph has no authored CSS carrier and never calls
+     * this repair.
+     *
+     * Pure and idempotent — unit-testable through the mode-specific step.
+     *
+     * @param array<mixed> $theme
+     * @return array<mixed>
+     */
+    private static function removeGeneratedControlTypography(array $theme): array
+    {
+        foreach ([
+            ['blocks', 'core/navigation'],
+            ['elements', 'button'],
+            ['elements', 'link'],
+        ] as [$family, $name]) {
+            $node = $theme['styles'][$family][$name] ?? null;
+            if (!is_array($node) || !array_key_exists('typography', $node)) {
+                continue;
+            }
+            unset($node['typography']);
+            if ($node === []) {
+                unset($theme['styles'][$family][$name]);
+            } else {
+                $theme['styles'][$family][$name] = $node;
+            }
+        }
+
+        return $theme;
     }
 
     /**
