@@ -8,6 +8,17 @@ use Automattic\SiteBuild\Steps\NormalizeLayoutStep;
 use Automattic\SiteBuild\Steps\SiteSpecStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
 
+test('shop prompt rules never require invented prices', function () {
+    assert_contains(
+        'prices only when the user supplied them',
+        file_get_contents(repo_path('prompts/site-spec.md')) ?: '',
+    );
+    assert_contains(
+        'prices only when SITE SPEC supplies them',
+        file_get_contents(repo_path('prompts/page-plan.md')) ?: '',
+    );
+});
+
 test('StorefrontDegrade rewrites a cart page to a catalog storefront', function () {
     [$pages, $warnings] = StorefrontDegrade::pages([
         ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Front', 'children' => []],
