@@ -2,7 +2,6 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\LlmConformance;
-use Automattic\SiteBuild\LlmConformanceFinding;
 use Automattic\SiteBuild\Narrator;
 
 /**
