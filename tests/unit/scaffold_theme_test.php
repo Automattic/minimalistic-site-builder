@@ -213,6 +213,65 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     assert_contains('.wp-site-blocks .wp-block-navigation__responsive-container-open:not(.always-shown)', $css);
     assert_contains('.wp-site-blocks .wp-block-navigation__responsive-container:not(.hidden-by-default):not(.is-menu-open)', $css);
 
+    assert_contains('.wp-site-blocks .wp-block-navigation__responsive-container.is-menu-open {', $css);
+    assert_contains('background-color: var(--wp--preset--color--base) !important;', $css);
+    assert_contains('color: var(--wp--preset--color--contrast) !important;', $css);
+    assert_contains('--navigation-layout-justification-setting: flex-start;', $css);
+    assert_contains('flex-direction: column !important;', $css);
+    $openBlock = substr($css, (int) strpos($css, '.wp-site-blocks .wp-block-navigation__responsive-container.is-menu-open {'));
+    assert_contains('justify-content: flex-start !important;', $openBlock);
+    assert_eq(
+        1,
+        preg_match(
+            '/\.wp-site-blocks \.wp-block-navigation__responsive-container\.is-menu-open\s*\{'
+                . '(?![^}]*z-index:)[^}]*\}/s',
+            $css,
+        ),
+        'overlay leaves Core z-index ownership intact',
+    );
+    assert_eq(
+        1,
+        preg_match(
+            '/\.wp-site-blocks \.wp-block-navigation__responsive-container\.is-menu-open\s+'
+                . '\.wp-block-navigation__responsive-dialog,\s*'
+                . '\.wp-site-blocks \.wp-block-navigation__responsive-container\.is-menu-open\s+'
+                . '\.wp-block-navigation__responsive-container-content\s*\{'
+                . '(?![^}]*margin:)[^}]*\}/s',
+            $css,
+        ),
+        'shared dialog geometry does not erase Core admin-bar margin',
+    );
+    assert_eq(
+        1,
+        preg_match(
+            '/\.wp-site-blocks \.wp-block-navigation__responsive-container\.is-menu-open\s+'
+                . '\.wp-block-navigation__responsive-container-content\s*\{'
+                . '(?=[^}]*margin:\s*0 !important;)[^}]*\}/s',
+            $css,
+        ),
+        'responsive content alone keeps the margin reset',
+    );
+    assert_eq(
+        1,
+        preg_match(
+            '/\.wp-site-blocks \.wp-block-navigation__responsive-container\.is-menu-open\s+'
+                . '\.wp-block-navigation-item__content:not\(\.wp-element-button\)\s*\{'
+                . '(?=[^}]*color:\s*inherit !important;)(?![^}]*color:[^;}]*contrast)[^}]*\}/s',
+            $css,
+        ),
+        'overlay links inherit the modal foreground without forcing contrast',
+    );
+    assert_eq(
+        1,
+        preg_match(
+            '/\.wp-site-blocks \.wp-block-navigation__responsive-container\.is-menu-open\s+'
+                . ':is\([^}]+\)\s*\{'
+                . '(?=[^}]*color:\s*inherit !important;)(?![^}]*color:[^;}]*contrast)[^}]*\}/s',
+            $css,
+        ),
+        'overlay close and submenu controls inherit the modal foreground without forcing contrast',
+    );
+
     // Hero topology and mobile behavior are code-owned. All recipe hooks ship
     // in the static stylesheet (unused hooks are inert), and the mobile rules
     // consume only the transformation marker normalized by HeroUnit.
