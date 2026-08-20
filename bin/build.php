@@ -35,13 +35,18 @@ use Automattic\SiteBuild\Steps\CoverContrastStep;
  * design already exists), and leaves the reused directory otherwise untouched.
  * Same id list as --until, group members included.
  *
- * Deterministic-tail recipe — re-run transform→theme against an already-built
- * project with NO LLM and NO image generation, iterating in seconds:
+ * Deterministic-tail recipe for the default blocks graph — re-run the passes
+ * that require NO LLM and NO image generation, in seconds:
  *
- *   php bin/build.php --slug=portfolio-new --from=transform-site --until=page-styles
+ *   php bin/build.php --slug=portfolio-new --from=section-rhythm --until=assemble-pages
+ *
+ * On an HTML-first project, page-styles is also deterministic, so its longer
+ * no-network tail is:
+ *
+ *   SITE_BUILD_HTML_FIRST=1 php bin/build.php --slug=portfolio-new --from=transform-site --until=page-styles
  *
  * Because --until stops before generate-images (and --with-images stays opt-in),
- * that resume makes zero network calls.
+ * both resumes make zero network calls.
  *
  * --multi-page lets the site plan inner pages (about, contact, …) beyond the
  * homepage. Off by default: the build produces ONLY the landing page.
