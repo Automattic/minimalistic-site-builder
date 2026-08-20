@@ -151,7 +151,8 @@ function conformance_by_check(array $findings): array
 }
 
 test('a conformant host passes every check', function () {
-    $findings = LlmConformance::run(new ConformantFakeLlm());
+    $llm = new ConformantFakeLlm();
+    $findings = LlmConformance::run($llm);
 
     assert_true(LlmConformance::passed($findings), 'conformant host should pass');
     $byCheck = conformance_by_check($findings);
@@ -163,6 +164,7 @@ test('a conformant host passes every check', function () {
         $byCheck['cached_prefixes_reach_the_model']->passed,
         'echo probe should recover the nonce',
     );
+    assert_eq(5, $llm->requests, 'full run should spend five completions before retries');
 });
 
 test('a host that drops cached_prefixes fails, and the failure names the field', function () {

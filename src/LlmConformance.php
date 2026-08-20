@@ -91,7 +91,7 @@ final class LlmConformance
     }
 
     /**
-     * Checks that need a real completion. One small call each.
+     * Checks that need model calls: three singles plus one two-member batch.
      *
      * @return list<LlmConformanceFinding>
      */

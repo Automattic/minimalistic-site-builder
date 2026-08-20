@@ -14,7 +14,7 @@ use Automattic\SiteBuild\Narrator;
  * Every host that supplies its own Llm (wpcom, Studio, the coding-agent
  * harness) should run this against its adapter before wiring it up, and keep
  * it in that host's CI. The structural pass costs nothing and is safe to run
- * on every commit; the live pass spends four small completions.
+ * on every commit; the live pass spends five small completions before retries.
  *
  * Exits non-zero when any check fails, so it can gate a build.
  */
