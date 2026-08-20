@@ -100,6 +100,13 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     private const FALLBACK_FONTS = [
         'heading' => 'system-ui, sans-serif',
         'body'    => 'system-ui, sans-serif',
+        // The accent slot only ever donates its tail: replacePrimaryFamily
+        // swaps the first entry for the direction's family, so whatever sits
+        // here first is discarded. The tail is the neutral stack rather than
+        // `cursive` because an accent face is whatever the direction picked —
+        // Caveat is cursive, Bebas Neue is not — and guessing the wrong
+        // generic is worse than degrading to the same stack as the siblings.
+        'accent'  => 'system-ui, sans-serif',
     ];
     /**
      * The type scale the scaffold wires roles to. Every slug SCAFFOLD does
@@ -1470,6 +1477,18 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                     . Warnings::value($family) . '; malformed entry removed';
                 continue;
             }
+            // An optional slot exists only because the direction committed to
+            // it. prompts/theme-json.md:71 asks for exactly heading and body
+            // unless the direction names an accent, so a third family the model
+            // invented on its own ships a face nothing chose — and
+            // repairAccentCaption would then put it on every caption.
+            if (in_array($slug, self::OPTIONAL_FONTS, true) && !isset($preferred[$slug])) {
+                $warnings[] = "theme.json fontFamilies slug '{$slug}': authored "
+                    . Warnings::value(trim($family))
+                    . '; delivered removed; disposition designDirection.json committed no type.'
+                    . $slug . '.family, and the type pairing is the direction\'s call';
+                continue;
+            }
             $entry['slug'] = $slug;
             $entry['fontFamily'] = trim($family);
             if (isset($preferred[$slug])) {
@@ -1482,9 +1501,15 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                 . ($nonObjects === 1 ? 'y' : 'ies');
         }
         $families = $entries;
-        $slugs = array_column($families, 'slug');
-        foreach (self::REQUIRED_FONTS as $needed) {
-            if (in_array($needed, $slugs, true)) {
+        // One pass over both slot kinds. A required slot is filled whether or
+        // not the direction named a family; an optional one only when it did,
+        // which is the single line of difference between them.
+        foreach (array_merge(self::REQUIRED_FONTS, self::OPTIONAL_FONTS) as $needed) {
+            $optional = in_array($needed, self::OPTIONAL_FONTS, true);
+            if (in_array($needed, array_column($families, 'slug'), true)) {
+                continue;
+            }
+            if ($optional && !isset($preferred[$needed])) {
                 continue;
             }
             $stack = isset($preferred[$needed])
@@ -1494,15 +1519,6 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $warnings[] = isset($preferred[$needed])
                 ? "theme.json fontFamilies missing slug '{$needed}'; filled from designDirection.json with {$stack}"
                 : "theme.json fontFamilies missing slug '{$needed}'; filled with the system stack";
-        }
-
-        foreach (self::OPTIONAL_FONTS as $optional) {
-            if (!isset($preferred[$optional]) || in_array($optional, array_column($families, 'slug'), true)) {
-                continue;
-            }
-            $stack = self::replacePrimaryFamily('cursive, system-ui, sans-serif', $preferred[$optional]);
-            $families[] = ['slug' => $optional, 'name' => ucfirst($optional), 'fontFamily' => $stack];
-            $warnings[] = "theme.json fontFamilies missing slug '{$optional}'; filled from designDirection.json with {$stack}";
         }
 
         $theme['settings']['typography']['fontFamilies'] = $families;

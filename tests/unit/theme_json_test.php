@@ -825,6 +825,106 @@ test('theme-json repairs malformed caption containers before accent wiring', fun
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('repairFonts drops a third family the direction never committed', function () {
+    // prompts/theme-json.md:71 asks for exactly heading and body unless the
+    // direction names an accent, so a model-invented third face ships a font
+    // nobody chose — and repairAccentCaption would put it on every caption.
+    [$theme, $warnings] = ThemeJsonStep::repairFonts(
+        ['settings' => ['typography' => ['fontFamilies' => [
+            ['slug' => 'heading', 'fontFamily' => '"Oswald", sans-serif', 'name' => 'Heading'],
+            ['slug' => 'body', 'fontFamily' => '"Inter", sans-serif', 'name' => 'Body'],
+            ['slug' => 'accent', 'fontFamily' => '"Caveat", cursive', 'name' => 'Accent'],
+        ]]]],
+        [
+            'heading' => ['family' => 'Oswald'],
+            'body' => ['family' => 'Inter'],
+        ],
+    );
+    $slugs = array_column($theme['settings']['typography']['fontFamilies'], 'slug');
+    assert_eq(['heading', 'body'], $slugs, 'only the two committed families ship');
+    $joined = implode(' ', $warnings);
+    assert_contains("fontFamilies slug 'accent'", $joined);
+    assert_contains('Caveat', $joined);
+    assert_contains('committed no type.accent.family', $joined);
+
+    [$again, $repeat] = ThemeJsonStep::repairFonts($theme, [
+        'heading' => ['family' => 'Oswald'],
+        'body' => ['family' => 'Inter'],
+    ]);
+    assert_eq($theme, $again, 'the drop reaches a fixed point');
+    assert_eq([], $repeat);
+});
+
+test('repairFonts keeps a model accent the direction did commit', function () {
+    [$theme, $warnings] = ThemeJsonStep::repairFonts(
+        ['settings' => ['typography' => ['fontFamilies' => [
+            ['slug' => 'heading', 'fontFamily' => '"Oswald", sans-serif', 'name' => 'Heading'],
+            ['slug' => 'body', 'fontFamily' => '"Inter", sans-serif', 'name' => 'Body'],
+            ['slug' => 'accent', 'fontFamily' => '"Caveat", cursive', 'name' => 'Accent'],
+        ]]]],
+        [
+            'heading' => ['family' => 'Oswald'],
+            'body' => ['family' => 'Inter'],
+            'accent' => ['family' => 'Caveat'],
+        ],
+    );
+    $bySlug = array_column($theme['settings']['typography']['fontFamilies'], 'fontFamily', 'slug');
+    assert_contains('Caveat', $bySlug['accent']);
+    assert_eq([], $warnings);
+});
+
+test('the accent caption wiring survives the HTML-first typography strip', function () {
+    // HTML-first authoring prompts never write fontFamily presets, so
+    // styles.elements.caption is the whole mechanism that references the
+    // accent face on that graph. removeGeneratedControlTypography runs one
+    // line earlier and must not take it with the nav/button/link typography.
+    $tmp = sys_get_temp_dir() . '/builder_tj_accent_htmlfirst_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A neighborhood bakery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    $project->writeText('design/site.css', ':root{--x:1}body{color:#111;background:#fff}');
+    seed_test_design_direction($project, 'cinematic-safe-zone', [
+        'description' => 'Hand-lettered flavor cards.',
+        'type' => [
+            'accent' => [
+                'family' => 'Caveat',
+                'weights' => [400],
+                'italic' => false,
+                'axes' => [],
+                'character' => 'hand labels',
+            ],
+        ],
+    ]);
+
+    $payload = valid_theme_payload();
+    $payload['settings']['typography']['fontFamilies'][] = [
+        'slug' => 'accent',
+        'name' => 'Accent',
+        'fontFamily' => '"Caveat", cursive',
+    ];
+    $payload['styles']['elements']['button']['typography'] = ['fontFamily' => 'var:preset|font-family|heading'];
+    $payload['styles']['elements']['link']['typography'] = ['fontFamily' => 'var:preset|font-family|heading'];
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts')), htmlFirst: true))->run($project);
+
+    $theme = $project->readJson('theme/theme.json');
+    assert_eq(
+        'var:preset|font-family|accent',
+        $theme['styles']['elements']['caption']['typography']['fontFamily'],
+        'HTML-first captions still reference the accent family',
+    );
+    assert_true(
+        !isset($theme['styles']['elements']['button']['typography']),
+        'the control typography strip still ran',
+    );
+    assert_true(
+        !isset($theme['styles']['elements']['link']['typography']),
+        'the control typography strip still ran',
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('repairFonts adds an optional accent family from the direction', function () {
     [$theme, $warnings] = ThemeJsonStep::repairFonts(
         ['settings' => ['typography' => ['fontFamilies' => [
