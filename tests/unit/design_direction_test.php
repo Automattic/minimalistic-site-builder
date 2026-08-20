@@ -1243,6 +1243,13 @@ test('directionFor returns nothing when no direction was committed', function ()
 });
 
 test('normalize commits optional accent type and leaves an empty accent valid', function () {
+    $prompt = file_get_contents(repo_path('prompts/design-direction.md')) ?: '';
+    assert_eq(1, preg_match(
+        '/"accent":\s*\{\s*"family":\s*"",\s*"weights":\s*\[\],\s*'
+            . '"italic":\s*false,\s*"axes":\s*\{\},\s*"character":\s*""\s*\}/',
+        $prompt,
+    ), 'the empty-accent prompt example is warning-free');
+
     $withAccent = DesignDirectionStep::normalize([
         'description' => 'Caveat on flavor labels.',
         'type' => [
@@ -1256,13 +1263,18 @@ test('normalize commits optional accent type and leaves an empty accent valid', 
     assert_eq([400, 700], $withAccent['type']['accent']['weights']);
     assert_contains('accent — Caveat', DesignDirectionStep::format($withAccent));
 
+    $repairs = [];
+    $warnings = [];
     $empty = DesignDirectionStep::normalize([
         'description' => 'Two faces only.',
         'type' => [
             'heading' => ['family' => 'Oswald', 'weights' => [700], 'italic' => false, 'axes' => [], 'character' => ''],
             'body' => ['family' => 'Source Sans 3', 'weights' => [400], 'italic' => false, 'axes' => [], 'character' => ''],
+            'accent' => ['family' => '', 'weights' => [], 'italic' => false, 'axes' => [], 'character' => ''],
         ],
-    ], 'cinematic-safe-zone');
+        'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
+    ], 'cinematic-safe-zone', '', $repairs, $warnings);
     assert_eq('', $empty['type']['accent']['family']);
     assert_true(!str_contains(DesignDirectionStep::format($empty), 'accent —'));
+    assert_eq([], $warnings, 'valid empty accent emits no durable warning');
 });

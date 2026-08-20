@@ -92,7 +92,7 @@ Respond with ONLY a JSON object. No explanation, no commentary, no text before o
         "weights": [],
         "italic": false,
         "axes": {},
-        "character": "Optional script, condensed, or mono for flavor names, prices, folio. Empty family means no third face."
+        "character": ""
       }
     },
     "image_grade": "One compact, concrete art-direction sentence applied to ALL of the site's imagery, per the Image Grade section above.",
