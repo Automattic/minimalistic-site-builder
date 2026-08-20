@@ -84,66 +84,140 @@ final class Motion
     }
 
     /**
-     * Map a free-text motion note onto kit classes the committed profile can
-     * actually ship. An unmappable note is not a promise.
+     * The classes a site-wide motion note may name. `hero-entrance` is excluded
+     * on purpose: prompts/section.md treats it as hero-only, and the direction
+     * is read by every section, so naming it here would license it everywhere.
      *
-     * @return array{note:string,classes:list<string>}
+     * @return string[]
      */
-    public static function mapNote(mixed $raw, string $profile): array
+    public static function noteClasses(): array
     {
-        $note = is_string($raw) ? trim($raw) : '';
-        if ($note === '') {
-            return ['note' => '', 'classes' => []];
+        return array_values(array_diff(self::kitClasses(), ['hero-entrance']));
+    }
+
+    /**
+     * Class pairs prompts/section.md forbids on one block because each pair
+     * fights over the same transform. A note that names both would hand the
+     * section prompts a combination they are told to refuse.
+     */
+    public const NOTE_CONFLICTS = [
+        ['ambient-drift', 'hover-lift'],
+        ['ken-burns', 'hover-reveal'],
+    ];
+
+    /**
+     * Read a motion note as the bounded list of kit classes it is.
+     *
+     * The note names classes; it is not art direction to be interpreted. Every
+     * token must be a kit class exactly, so a phrase the kit cannot ship drops
+     * whole rather than turning on whichever class its letters happen to
+     * contain — the old substring table read "do not fade in" as a fade and
+     * "surprise" as `rise`.
+     *
+     * Accepts a JSON list, or one string of comma/space separated names, since
+     * models write both. Budgets follow prompts/section.md: one entrance class
+     * (which also keeps `stagger-children` away from any `reveal-*`), one
+     * ambient effect per page, one hover response, and neither forbidden pair.
+     *
+     * @return array{note:string,classes:list<string>,dropped:list<string>}
+     */
+    public static function validateNote(mixed $raw, string $profile): array
+    {
+        $empty = ['note' => '', 'classes' => [], 'dropped' => []];
+        $tokens = self::noteTokens($raw);
+        if ($tokens === []) {
+            return $empty;
         }
 
         $allowed = self::allowedClasses($profile);
-        if ($allowed === []) {
-            return ['note' => '', 'classes' => []];
-        }
-
-        $haystack = strtolower($note);
-        $mapped = [];
-        foreach (self::notePhrases() as $class => $phrases) {
-            if (!in_array($class, $allowed, true)) {
+        $permitted = array_intersect(self::noteClasses(), $allowed);
+        $kept = [];
+        $dropped = [];
+        foreach ($tokens as $token) {
+            if (in_array($token, $kept, true)) {
                 continue;
             }
-            $aliases = array_merge([$class, str_replace('-', ' ', $class)], $phrases);
-            foreach ($aliases as $phrase) {
-                if ($phrase !== '' && str_contains($haystack, $phrase)) {
-                    $mapped[] = $class;
-                    break;
-                }
+            if (in_array($token, self::kitClasses(), true) && !in_array($token, self::noteClasses(), true)) {
+                $dropped[] = $token . ' (hero-only; a site-wide note cannot license it)';
+                continue;
             }
+            if (!in_array($token, self::noteClasses(), true)) {
+                $dropped[] = $token . ' (not a motion-kit class)';
+                continue;
+            }
+            if (!in_array($token, $permitted, true)) {
+                $dropped[] = $token . " (the {$profile} profile does not ship it)";
+                continue;
+            }
+            $bucket = self::noteBucket($token);
+            $taken = array_filter($kept, static fn (string $c): bool => self::noteBucket($c) === $bucket);
+            if ($taken !== []) {
+                $dropped[] = $token . ' (' . $bucket . ' budget already spent on ' . reset($taken) . ')';
+                continue;
+            }
+            $clash = self::conflictWith($token, $kept);
+            if ($clash !== null) {
+                $dropped[] = $token . ' (fights ' . $clash . ' over the same transform)';
+                continue;
+            }
+            $kept[] = $token;
         }
 
-        $mapped = array_values(array_unique($mapped));
-        if ($mapped === []) {
-            return ['note' => '', 'classes' => []];
+        if ($kept === []) {
+            return ['note' => '', 'classes' => [], 'dropped' => $dropped];
         }
 
         return [
-            'note' => 'Use kit classes: ' . implode(', ', $mapped) . '.',
-            'classes' => $mapped,
+            'note' => 'Use kit classes: ' . implode(', ', $kept) . '.',
+            'classes' => $kept,
+            'dropped' => $dropped,
         ];
     }
 
-    /** @return array<string,list<string>> */
-    private static function notePhrases(): array
+    /**
+     * Split an authored note into candidate class tokens. Separators only —
+     * no interpretation, so an unmappable phrase yields tokens that simply
+     * fail the membership test.
+     *
+     * @return list<string>
+     */
+    private static function noteTokens(mixed $raw): array
     {
-        return [
-            'hero-entrance' => ['hero entrance', 'hero arrive', 'hero focus', 'focus pull'],
-            'ken-burns' => ['ken burns', 'hero image breathe', 'image breathe', 'slow zoom', 'breathe'],
-            'stagger-children' => ['one by one', 'cards rise', 'stagger', 'cascade'],
-            'reveal-up' => ['rise', 'arrive from below', 'settle up'],
-            'reveal-fade' => ['fade in', 'soft fade', 'fade'],
-            'reveal-scale' => ['scale in', 'zoom settle'],
-            'hover-lift' => [
-                'press on', 'overshoot', 'hover lift', 'lift on hover', 'labels press',
-                'buttons press', 'press', 'inset',
-            ],
-            'hover-reveal' => ['hover reveal', 'image reveal on hover'],
-            'gradient-shift' => ['gradient shift', 'gradient drift'],
-            'ambient-drift' => ['ambient drift', 'slow float'],
-        ];
+        $parts = [];
+        foreach (is_array($raw) ? $raw : [$raw] as $item) {
+            if (!is_string($item)) {
+                continue;
+            }
+            foreach (preg_split('/[\s,;]+/u', strtolower(trim($item))) ?: [] as $token) {
+                $token = trim($token, " \t\"'.`");
+                if ($token !== '') {
+                    $parts[] = $token;
+                }
+            }
+        }
+        return $parts;
+    }
+
+    /** Which prompts/section.md budget a class draws from. */
+    private static function noteBucket(string $class): string
+    {
+        if (in_array($class, self::AMBIENT_CLASSES, true)) {
+            return 'ambient';
+        }
+        return in_array($class, self::HOVER_CLASSES, true) ? 'hover' : 'entrance';
+    }
+
+    /** The already-kept class a candidate is forbidden to sit beside, if any. */
+    private static function conflictWith(string $class, array $kept): ?string
+    {
+        foreach (self::NOTE_CONFLICTS as [$a, $b]) {
+            if ($class === $a && in_array($b, $kept, true)) {
+                return $b;
+            }
+            if ($class === $b && in_array($a, $kept, true)) {
+                return $a;
+            }
+        }
+        return null;
     }
 }

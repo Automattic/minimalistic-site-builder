@@ -111,7 +111,7 @@ test('design-direction expands a picked seed into structured designDirection.jso
         assert_contains($field, $llm->calls[1]['prompt']);
     }
     assert_contains(
-        '"motion_note": "One short line that names kit classes the profile can ship, or an empty string."',
+        '"motion_note": ["Zero or more motion-kit class names the profile ships, chosen per the motion_note field above."],',
         $llm->calls[1]['prompt'],
     );
     $assigned = $written['hero_blueprint']['recipe'];
@@ -153,7 +153,7 @@ test('design-direction persists an unmappable motion-note warning and reaches a 
         'field motion_note',
         'a cinematic wipe nobody ships',
         'delivered ""',
-        'disposition note could not be expressed as a kit class and was stripped',
+        'named no motion-kit class the calm profile ships',
     ] as $context) {
         assert_contains($context, $motionWarning);
     }
@@ -1032,19 +1032,23 @@ test('normalize commits a motion profile: valid values pass, anything else defau
     $mapped = DesignDirectionStep::normalize([
         'description' => 'x',
         'motion' => 'calm',
-        'motion_note' => 'buttons press',
+        'motion_note' => ['hover-lift'],
     ], 'cinematic-safe-zone');
-    assert_contains('hover-lift', $mapped['motion_note']);
-    assert_eq('', DesignDirectionStep::normalize(['description' => 'x', 'motion_note' => ' a note '], 'cinematic-safe-zone')['motion_note']);
+    assert_contains('hover-lift', $mapped['motion_note'], 'a named kit class survives');
+    assert_eq(
+        '',
+        DesignDirectionStep::normalize(['description' => 'x', 'motion_note' => ' a note '], 'cinematic-safe-zone')['motion_note'],
+        'prose names no class',
+    );
 
     $repairs = [];
     $warnings = [];
-    $nonString = DesignDirectionStep::normalize([
+    $unusable = DesignDirectionStep::normalize([
         'description' => 'x',
         'motion' => 'calm',
-        'motion_note' => ['hover-lift'],
+        'motion_note' => 42,
     ], 'cinematic-safe-zone', '', $repairs, $warnings);
-    assert_eq('', $nonString['motion_note']);
+    assert_eq('', $unusable['motion_note']);
     assert_eq([], $repairs, 'type loss is a degradation, not a successful repair');
     $motionWarnings = array_values(array_filter(
         $warnings,
@@ -1054,12 +1058,28 @@ test('normalize commits a motion profile: valid values pass, anything else defau
     foreach ([
         "file='designDirection.json'",
         'path="motion_note"',
-        'authored=["hover-lift"]',
+        'authored=42',
         'delivered=""',
-        'disposition=non-string motion note removed',
+        'disposition=motion note was neither a class list nor a string and was removed',
     ] as $context) {
         assert_contains($context, $motionWarnings[0]);
     }
+
+    // A list carrying a class the profile cannot ship keeps the rest and says
+    // what it dropped, rather than discarding the whole commitment.
+    $partialWarnings = [];
+    $partialRepairs = [];
+    $partial = DesignDirectionStep::normalize([
+        'description' => 'x',
+        'motion' => 'minimal',
+        'motion_note' => ['hover-lift', 'ken-burns'],
+    ], 'cinematic-safe-zone', '', $partialRepairs, $partialWarnings);
+    assert_contains('hover-lift', $partial['motion_note']);
+    assert_true(
+        !str_contains($partial['motion_note'], 'ken-burns'),
+        'a class the minimal profile cannot ship never reaches the note',
+    );
+    assert_contains('ken-burns', implode(' ', $partialWarnings));
 });
 
 test('format renders the motion commitment with its executable meaning', function () {

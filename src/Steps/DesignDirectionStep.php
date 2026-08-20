@@ -592,26 +592,38 @@ final class DesignDirectionStep implements Step
                 . '; disposition repaired invalid profile';
         }
 
+        // motion_note names kit classes; it is not art direction to interpret.
+        // Every token must be a class exactly, so a phrase the kit cannot ship
+        // drops whole instead of turning on whichever class its letters
+        // happen to contain.
         $rawMotionNote = $raw['motion_note'] ?? null;
-        $authoredNote = is_string($rawMotionNote) ? trim($rawMotionNote) : '';
-        $mappedNote = Motion::mapNote($authoredNote, $motion);
-        $motionNote = $mappedNote['note'];
+        $authoredNote = self::describeNote($rawMotionNote);
+        $validated = Motion::validateNote($rawMotionNote, $motion);
+        $motionNote = $validated['note'];
+        $notePresent = $rawMotionNote !== null && $rawMotionNote !== '' && $rawMotionNote !== [];
         if (
             array_key_exists('motion_note', $raw)
             && $rawMotionNote !== null
             && !is_string($rawMotionNote)
+            && !is_array($rawMotionNote)
         ) {
             $warnings[] = "file='designDirection.json'; path=\"motion_note\"; authored="
                 . Warnings::value($rawMotionNote)
-                . '; delivered=""; disposition=non-string motion note removed';
-        } elseif ($authoredNote !== '' && $motionNote === '') {
+                . '; delivered=""; disposition=motion note was neither a class list nor a string and was removed';
+        } elseif ($notePresent && $validated['classes'] === []) {
             $warnings[] = 'designDirection.json: field motion_note authored '
                 . Warnings::value($authoredNote)
-                . '; delivered ""; disposition note could not be expressed as a kit class and was stripped';
-        } elseif ($authoredNote !== '' && $motionNote !== $authoredNote) {
+                . '; delivered ""; disposition named no motion-kit class the '
+                . $motion . ' profile ships (' . implode('; ', $validated['dropped']) . ')';
+        } elseif ($validated['dropped'] !== []) {
+            $warnings[] = 'designDirection.json: field motion_note authored '
+                . Warnings::value($authoredNote)
+                . '; delivered ' . self::describe($motionNote)
+                . '; disposition dropped ' . implode('; ', $validated['dropped']);
+        } elseif ($notePresent && $motionNote !== $authoredNote) {
             $repairs[] = 'designDirection.json: field motion_note authored '
                 . self::describe($authoredNote) . ' delivered ' . self::describe($motionNote)
-                . '; disposition mapped onto existing motion-kit classes';
+                . '; disposition rendered the committed classes as the note line';
         }
 
         // The corner language is a fixed list; anything unrecognized falls
@@ -1005,6 +1017,16 @@ final class DesignDirectionStep implements Step
         }
 
         return $head . ($facts === [] ? '' : "\n\n" . implode("\n", $facts));
+    }
+
+    /** A motion note as one readable string, whether authored as a list or a line. */
+    private static function describeNote(mixed $raw): string
+    {
+        if (is_array($raw)) {
+            $parts = array_filter($raw, 'is_string');
+            return implode(', ', array_map('trim', $parts));
+        }
+        return is_string($raw) ? trim($raw) : '';
     }
 
     private static function formatNumber(float $value): string
