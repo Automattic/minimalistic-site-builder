@@ -1000,7 +1000,7 @@ test('repairColors overwrites a drifted hex with the direction value', function 
     assert_eq('#E08A3C', $bySlug['accent']);
     $joined = implode(' ', $warnings);
     assert_contains("palette slug 'secondary'", $joined);
-    assert_contains('no longer matched the named color', $joined);
+    assert_contains('hue distance exceeded 30 degrees', $joined);
 
     [$again, $repeatWarnings] = ThemeJsonStep::repairColors($theme, $preferred);
     assert_eq($theme, $again, 'palette drift repair reaches a fixed point');

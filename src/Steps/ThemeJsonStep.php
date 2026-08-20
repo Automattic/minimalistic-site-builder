@@ -1415,7 +1415,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                     . '; disposition wrote the design-direction hex back'
                     . (in_array($slug, ['secondary', 'accent'], true)
                         && self::hueDistance($authored, $preferred) > 30.0
-                        ? '; the model hex no longer matched the named color'
+                        ? '; hue distance exceeded 30 degrees'
                         : '');
             }
             $entries[] = $entry;
