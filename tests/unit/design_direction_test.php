@@ -979,6 +979,30 @@ test('normalize commits a motion profile: valid values pass, anything else defau
     ], 'cinematic-safe-zone');
     assert_contains('hover-lift', $mapped['motion_note']);
     assert_eq('', DesignDirectionStep::normalize(['description' => 'x', 'motion_note' => ' a note '], 'cinematic-safe-zone')['motion_note']);
+
+    $repairs = [];
+    $warnings = [];
+    $nonString = DesignDirectionStep::normalize([
+        'description' => 'x',
+        'motion' => 'calm',
+        'motion_note' => ['hover-lift'],
+    ], 'cinematic-safe-zone', '', $repairs, $warnings);
+    assert_eq('', $nonString['motion_note']);
+    assert_eq([], $repairs, 'type loss is a degradation, not a successful repair');
+    $motionWarnings = array_values(array_filter(
+        $warnings,
+        static fn (string $warning): bool => str_contains($warning, 'path="motion_note"'),
+    ));
+    assert_eq(1, count($motionWarnings));
+    foreach ([
+        "file='designDirection.json'",
+        'path="motion_note"',
+        'authored=["hover-lift"]',
+        'delivered=""',
+        'disposition=non-string motion note removed',
+    ] as $context) {
+        assert_contains($context, $motionWarnings[0]);
+    }
 });
 
 test('format renders the motion commitment with its executable meaning', function () {

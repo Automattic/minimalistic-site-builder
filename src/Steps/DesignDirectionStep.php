@@ -592,10 +592,19 @@ final class DesignDirectionStep implements Step
                 . '; disposition repaired invalid profile';
         }
 
-        $authoredNote = is_string($raw['motion_note'] ?? null) ? trim($raw['motion_note']) : '';
+        $rawMotionNote = $raw['motion_note'] ?? null;
+        $authoredNote = is_string($rawMotionNote) ? trim($rawMotionNote) : '';
         $mappedNote = Motion::mapNote($authoredNote, $motion);
         $motionNote = $mappedNote['note'];
-        if ($authoredNote !== '' && $motionNote === '') {
+        if (
+            array_key_exists('motion_note', $raw)
+            && $rawMotionNote !== null
+            && !is_string($rawMotionNote)
+        ) {
+            $warnings[] = "file='designDirection.json'; path=\"motion_note\"; authored="
+                . Warnings::value($rawMotionNote)
+                . '; delivered=""; disposition=non-string motion note removed';
+        } elseif ($authoredNote !== '' && $motionNote === '') {
             $warnings[] = 'designDirection.json: field motion_note authored '
                 . Warnings::value($authoredNote)
                 . '; delivered ""; disposition note could not be expressed as a kit class and was stripped';
