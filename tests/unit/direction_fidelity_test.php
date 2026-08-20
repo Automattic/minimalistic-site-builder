@@ -116,3 +116,29 @@ test('direction-fidelity never aborts when the home page is missing', function (
     assert_true($project->exists('logs/direction-fidelity.txt'));
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('direction-fidelity replaces stale warnings after a clean rerun', function () {
+    [$project, $tmp] = fidelity_project(
+        ['description' => 'x', 'motion' => 'calm'],
+        '<!-- wp:group --><div class="wp-block-group"></div><!-- /wp:group -->',
+    );
+
+    try {
+        $project->addWarnings('other-step', ['keep this warning']);
+        quietly(fn () => (new DirectionFidelityStep())->run($project));
+        assert_true(isset($project->readJson('warnings.json')['direction-fidelity']));
+
+        $project->writeText(
+            'plugin/pages/home.html',
+            '<!-- wp:group {"className":"reveal-up"} -->'
+                . '<div class="wp-block-group reveal-up"></div><!-- /wp:group -->',
+        );
+        quietly(fn () => (new DirectionFidelityStep())->run($project));
+
+        $warnings = $project->readJson('warnings.json');
+        assert_true(!array_key_exists('direction-fidelity', $warnings));
+        assert_eq(['keep this warning'], $warnings['other-step']);
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});

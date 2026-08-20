@@ -105,7 +105,7 @@ final class DirectionFidelityStep implements Step
             $report[] = '- ' . $warning;
         }
         $project->writeText('logs/' . self::REPORT_FILE, implode("\n", $report) . "\n");
-        $project->addWarnings($this->id(), $warnings);
+        $project->replaceWarnings($this->id(), $warnings);
 
         if ($repairs !== []) {
             Narrator::write('  [direction-fidelity] repaired ' . count($repairs)
