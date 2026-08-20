@@ -713,7 +713,7 @@ final class SectionsStep implements Step
             $opts['tolerate_empty'] = true;
             $opts['log_label'] = 'section-cache-warm';
 
-            $before = $this->llm instanceof UsageReporting ? $this->llm->usageTotals() : null;
+            $before = $this->usageSnapshot();
 
             try {
                 $this->llm->completeBatch([
@@ -724,10 +724,11 @@ final class SectionsStep implements Step
                 return [];
             }
 
-            if ($before === null) {
+            $after = $this->usageSnapshot();
+            if ($before === null || $after === null) {
                 return [];
             }
-            $observed = self::billedInputDelta($before, $this->llm->usageTotals());
+            $observed = self::billedInputDelta($before, $after);
             $warning = self::contextLossWarning($request['cached_prefixes'], $observed);
             if ($warning !== null) {
                 Narrator::write("    WARNING: {$warning}\n");
@@ -736,6 +737,19 @@ final class SectionsStep implements Step
             return [];
         }
         return [];
+    }
+
+    /** @return array<string,mixed>|null null when usage measurement is unavailable */
+    private function usageSnapshot(): ?array
+    {
+        if (!$this->llm instanceof UsageReporting) {
+            return null;
+        }
+        try {
+            return $this->llm->usageTotals();
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     /**

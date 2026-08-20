@@ -2,11 +2,14 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\AnthropicClient;
+use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\OpenAiCompatibleClient;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Steps\SectionsStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
+use Automattic\SiteBuild\TextBatchResult;
+use Automattic\SiteBuild\UsageReporting;
 use Automattic\SiteBuild\Units\SectionUnit;
 
 const SECTION_CACHE_PROBE_PROMPT = 'Warm the cached section context.';
@@ -82,6 +85,48 @@ function queue_section_cache_parts(FakeLlm $llm, bool $includeProbe = true): voi
     $llm->queueText('<!-- wp:group --><!-- wp:paragraph --><p>Footer</p><!-- /wp:paragraph --><!-- /wp:group -->');
     $llm->queueText('<!-- wp:group --><!-- wp:heading --><h1>Hero</h1><!-- /wp:heading --><!-- /wp:group -->');
     $llm->queueText('<!-- wp:group --><!-- wp:heading --><h2>About</h2><!-- /wp:heading --><!-- /wp:group -->');
+}
+
+function section_cache_throwing_usage_reporter(FakeLlm $llm, int $throwOnCall): Llm
+{
+    return new class ($llm, $throwOnCall) implements Llm, UsageReporting {
+        private int $usageCalls = 0;
+
+        public function __construct(
+            private FakeLlm $llm,
+            private int $throwOnCall,
+        ) {
+        }
+
+        public function usageTotals(): array
+        {
+            $this->usageCalls++;
+            if ($this->usageCalls === $this->throwOnCall) {
+                throw new RuntimeException('usage reporting unavailable');
+            }
+            return $this->llm->usageTotals();
+        }
+
+        public function complete(string $prompt, array $opts = []): string
+        {
+            return $this->llm->complete($prompt, $opts);
+        }
+
+        public function completeJson(string $prompt, array $opts = []): array
+        {
+            return $this->llm->completeJson($prompt, $opts);
+        }
+
+        public function completeJsonBatch(array $requests): array
+        {
+            return $this->llm->completeJsonBatch($requests);
+        }
+
+        public function completeBatch(array $requests): TextBatchResult
+        {
+            return $this->llm->completeBatch($requests);
+        }
+    };
 }
 
 test('section prompt freezes build, page, and brief layer boundaries', function () {
@@ -208,6 +253,29 @@ test('section cache warm-up failure is non-fatal', function () {
         assert_true($project->exists('theme/parts/page-home--hero.html'));
         assert_true($project->exists('theme/parts/page-home--about.html'));
     });
+});
+
+test('section cache usage reporting failure is non-fatal and inconclusive', function () {
+    foreach ([1 => 'before', 2 => 'after'] as $throwOnCall => $phase) {
+        with_project('builder_section_cache_', function ($project) use ($throwOnCall, $phase) {
+            seed_section_cache_project($project);
+            $inner = new FakeLlm();
+            queue_section_cache_parts($inner);
+            $llm = section_cache_throwing_usage_reporter($inner, $throwOnCall);
+
+            (new SectionsStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+            assert_eq(2, $inner->completeBatchCalls, "{$phase} snapshot failure keeps probe and generation");
+            assert_true($project->exists('theme/parts/page-home--hero.html'));
+            assert_true($project->exists('theme/parts/page-home--about.html'));
+            $warnings = $project->exists('warnings.json') ? $project->readJson('warnings.json') : [];
+            $sectionWarnings = implode("\n", $warnings['sections'] ?? []);
+            assert_true(
+                !str_contains($sectionWarnings, 'discard cached_prefixes'),
+                "{$phase} snapshot failure cannot prove context loss",
+            );
+        });
+    }
 });
 
 test('section cache warm-up is skipped when the front hero is the only section', function () {
