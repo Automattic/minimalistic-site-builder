@@ -307,3 +307,87 @@ test('finalize-theme ships no shape kit for sharp and prunes a stale one', funct
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('finalize-theme ships and enqueues the surface overlay', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    $project->writeJson('designDirection.json', ['description' => 'x', 'surface' => 'paper']);
+    $project->writeJson('theme/theme.json', ['settings' => ['color' => ['palette' => [
+        ['slug' => 'base', 'color' => '#EFE8DA'],
+    ]]]]);
+    finalize_static_header($project);
+
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+
+    $css = $project->readText('theme/assets/surface/surface.css');
+    assert_contains('position: fixed', $css);
+    assert_contains('mix-blend-mode: soft-light', $css);
+    $php = $project->readText('theme/functions.php');
+    assert_contains('assets/surface/surface.css', $php);
+
+    $project->writeJson('designDirection.json', ['description' => 'x', 'surface' => 'none']);
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+    assert_true(!$project->exists('theme/assets/surface/surface.css'), 'stale overlay pruned');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('finalize-theme keeps a corrupt required theme artifact fatal', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    $project->writeJson('designDirection.json', ['description' => 'x', 'surface' => 'paper']);
+    $project->writeText('theme/theme.json', '{');
+    $classes = 'header-behavior-overlay-to-solid header-start-transparent '
+        . 'header-scrolled-contrast header-foreground-base';
+    $header = '<!-- wp:group {"className":"' . $classes . '","textColor":"base"} -->'
+        . '<div class="wp-block-group ' . $classes . ' has-base-color has-text-color">'
+        . '<!-- wp:site-title /--></div><!-- /wp:group -->';
+    $project->writeText('theme/parts/header.html', $header);
+    $project->writeText('headerBehavior.json', '"static"');
+
+    $error = assert_throws(fn () => quietly(fn () => (new FinalizeThemeStep())->run($project)));
+    assert_contains('File is not valid JSON', $error->getMessage());
+    assert_true(!$project->exists('theme/functions.php'), 'fatal artifact failure writes no partial wiring');
+    assert_eq($header, $project->readText('theme/parts/header.html'), 'fatal preflight leaves header bytes unchanged');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('finalize-theme fails when a stale surface overlay cannot be removed', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    $project->writeJson('designDirection.json', ['description' => 'x', 'surface' => 'none']);
+    $project->writeText('theme/assets/surface/surface.css', 'stale');
+    finalize_static_header($project);
+    $surfaceDir = $project->themePath('assets/surface');
+    chmod($surfaceDir, 0555);
+
+    try {
+        $error = assert_throws(fn () => quietly(fn () => (new FinalizeThemeStep())->run($project)));
+        assert_contains('Could not remove stale overlay stylesheet:', $error->getMessage());
+        assert_true($project->exists('theme/assets/surface/surface.css'), 'failed prune keeps stale file visible');
+        assert_true(!$project->exists('theme/functions.php'), 'failed prune does not write loader');
+    } finally {
+        chmod($surfaceDir, 0775);
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('finalize-theme tunes the overlay to a dark page base', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    $project->writeJson('designDirection.json', ['description' => 'x', 'surface' => 'concrete']);
+    $project->writeJson('theme/theme.json', ['settings' => ['color' => ['palette' => [
+        ['slug' => 'base', 'color' => '#16181A'],
+    ]]]]);
+    finalize_static_header($project);
+
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+
+    $css = $project->readText('theme/assets/surface/surface.css');
+    assert_contains('mix-blend-mode: soft-light', $css);
+    assert_contains('opacity: 0.48', $css, 'a dark base carries the heavier grain');
+    assert_true(!str_contains($css, 'feTurbulence'));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

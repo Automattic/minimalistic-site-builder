@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\HeaderBehavior;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\OverlayKit;
+use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\PageScope;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
@@ -93,6 +94,14 @@ final class FinalizeThemeStep implements Step
 
     public function run(Project $project): void
     {
+        // Every read that can fail happens before the first write. A corrupt
+        // theme.json is fatal (AGENTS.md:53 puts a corrupt required artifact in
+        // the fatal list), and discovering that halfway through would leave the
+        // theme half-written — a pruned kit with no functions.php naming it.
+        $shape = DesignDirectionStep::shapeFor($project);
+        $surface = DesignDirectionStep::surfaceFor($project);
+        $surfaceCss = Surface::kitCss($surface, self::paletteBase($project));
+
         $profile = DesignDirectionStep::motionProfileFor($project);
         $motion = $profile !== 'none' && $project->exists('theme/assets/motion/motion.css')
             ? $profile
@@ -111,10 +120,13 @@ final class FinalizeThemeStep implements Step
         }
         self::pruneMotionKit($project, $motion);
         self::pruneHeaderKit($project, $header);
-        $shape = DesignDirectionStep::shapeFor($project);
         $overlays = [];
         if (self::writeOverlayKit($project, self::shapeKit(), ShapeMarkup::kitCss($shape))) {
             $overlays[] = self::shapeKit();
+        }
+        if (self::writeOverlayKit($project, self::surfaceKit(), $surfaceCss)) {
+            $overlays[] = self::surfaceKit();
+            array_push($headerWarnings, ...self::claimedPseudoElementWarnings($project, $surface));
         }
         if ($headerWarnings !== []) {
             $project->addWarnings($this->id(), $headerWarnings);
@@ -129,6 +141,9 @@ final class FinalizeThemeStep implements Step
         Narrator::write($header
             ? "  header: '{$headerBehavior}' state kit enqueued\n"
             : "  header: static (kit not shipped)\n");
+        Narrator::write($surfaceCss !== null
+            ? "  surface: '{$surface}' overlay enqueued\n"
+            : "  surface: {$surface} (kit not shipped)\n");
         Narrator::write($overlays !== []
             ? "  shape: '{$shape}' corner kit enqueued\n"
             : '  shape: ' . ($shape ?? 'none committed') . " (kit not shipped)\n");
@@ -149,13 +164,57 @@ final class FinalizeThemeStep implements Step
      * another copy of this wiring.
      */
     /**
+     * The surface overlay claims `body::before`, so if the generated
+     * stylesheet was already using it, something lost its layer. Silence there
+     * would mean a design's own decoration vanishing with nothing said.
+     *
+     * @return list<string>
+     */
+    private static function claimedPseudoElementWarnings(Project $project, string $surface): array
+    {
+        if (!$project->exists('theme/style.css')) {
+            return [];
+        }
+        $css = $project->readText('theme/style.css');
+        if (preg_match('/\bbody\s*::?before\b/i', $css) !== 1) {
+            return [];
+        }
+        return ["file='theme/style.css'; path=\"body::before\"; authored=generated design rule;"
+            . " delivered=overridden; disposition the '{$surface}' surface overlay claims body::before"
+            . ' and resets it, so a generated rule on the same pseudo-element no longer renders'];
+    }
+
+    /** Page-background hex from the delivered theme, or null. */
+    private static function paletteBase(Project $project): ?string
+    {
+        if (!$project->exists('theme/theme.json')) {
+            return null;
+        }
+        foreach ($project->readJson('theme/theme.json')['settings']['color']['palette'] ?? [] as $entry) {
+            if (is_array($entry) && ($entry['slug'] ?? '') === 'base' && is_string($entry['color'] ?? null)) {
+                return $entry['color'];
+            }
+        }
+        return null;
+    }
+
+    /**
      * Every overlay kit this step knows how to ship, in load order.
      *
      * @return list<OverlayKit>
      */
     public static function overlayKits(): array
     {
-        return [self::shapeKit()];
+        return [self::shapeKit(), self::surfaceKit()];
+    }
+
+    public static function surfaceKit(): OverlayKit
+    {
+        return new OverlayKit(
+            'surface',
+            "// Committed page surface: a fixed overlay, never on a scrolling\n"
+                . '// container. Loads after generated style.css.',
+        );
     }
 
     public static function shapeKit(): OverlayKit
