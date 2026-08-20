@@ -984,6 +984,7 @@ test('repairFonts does not invent an accent family when the direction left it em
 });
 
 test('repairColors overwrites a drifted hex with the direction value', function () {
+    $preferred = ['secondary' => '#8A5A2B', 'accent' => '#E08A3C'];
     [$theme, $warnings] = ThemeJsonStep::repairColors(
         ['settings' => ['color' => ['palette' => [
             ['slug' => 'base', 'color' => '#FFFFFF', 'name' => 'Base'],
@@ -992,7 +993,7 @@ test('repairColors overwrites a drifted hex with the direction value', function 
             ['slug' => 'secondary', 'color' => '#00FF00', 'name' => 'Secondary'],
             ['slug' => 'accent', 'color' => '#0000FF', 'name' => 'Accent'],
         ]]]],
-        ['secondary' => '#8A5A2B', 'accent' => '#E08A3C'],
+        $preferred,
     );
     $bySlug = array_column($theme['settings']['color']['palette'], 'color', 'slug');
     assert_eq('#8A5A2B', $bySlug['secondary']);
@@ -1000,18 +1001,23 @@ test('repairColors overwrites a drifted hex with the direction value', function 
     $joined = implode(' ', $warnings);
     assert_contains("palette slug 'secondary'", $joined);
     assert_contains('no longer matched the named color', $joined);
+
+    [$again, $repeatWarnings] = ThemeJsonStep::repairColors($theme, $preferred);
+    assert_eq($theme, $again, 'palette drift repair reaches a fixed point');
+    assert_eq([], $repeatWarnings, 'fixed palette emits no repeat repair warnings');
 });
 
 test('repairFonts writes the direction family back when the primary face drifted', function () {
+    $preferred = [
+        'heading' => ['family' => 'Oswald', 'weights' => [700], 'italic' => false, 'axes' => [], 'character' => ''],
+        'body' => ['family' => 'Source Sans 3', 'weights' => [400], 'italic' => false, 'axes' => [], 'character' => ''],
+    ];
     [$theme, $warnings] = ThemeJsonStep::repairFonts(
         ['settings' => ['typography' => ['fontFamilies' => [
             ['slug' => 'heading', 'fontFamily' => '"Fraunces", serif', 'name' => 'Heading'],
             ['slug' => 'body', 'fontFamily' => '"Inter", sans-serif', 'name' => 'Body'],
         ]]]],
-        [
-            'heading' => ['family' => 'Oswald', 'weights' => [700], 'italic' => false, 'axes' => [], 'character' => ''],
-            'body' => ['family' => 'Source Sans 3', 'weights' => [400], 'italic' => false, 'axes' => [], 'character' => ''],
-        ],
+        $preferred,
     );
     $bySlug = array_column($theme['settings']['typography']['fontFamilies'], 'fontFamily', 'slug');
     assert_contains('Oswald', $bySlug['heading']);
@@ -1019,6 +1025,10 @@ test('repairFonts writes the direction family back when the primary face drifted
     $joined = implode(' ', $warnings);
     assert_contains("fontFamilies slug 'heading'", $joined);
     assert_contains('wrote the design-direction family back', $joined);
+
+    [$again, $repeatWarnings] = ThemeJsonStep::repairFonts($theme, $preferred);
+    assert_eq($theme, $again, 'font drift repair reaches a fixed point');
+    assert_eq([], $repeatWarnings, 'fixed fonts emit no repeat repair warnings');
 });
 
 test('repairColors falls back to neutral readable defaults without a direction hex', function () {
