@@ -130,6 +130,50 @@ final class LlmConformance
      * The contract says cached_prefixes must be a list of strings. A host that
      * accepts anything else will mangle or silently discard real layers.
      */
+    /**
+     * Whether a throwable is the host rejecting the request itself, rather
+     * than a transport that happened to fail.
+     *
+     * The structural tier is advertised as zero-spend and safe on every
+     * commit, so it runs where a key may be absent or wrong. Bad credentials,
+     * a DNS failure and a timeout all throw, and counting those as "rejected"
+     * reports a green structural run for an adapter that validated nothing —
+     * the false confidence is worse than no check.
+     *
+     * Two independent signals, either is enough:
+     *
+     *   - the host never sent anything (its own request counter did not move),
+     *     which only a local rejection can produce;
+     *   - the message names the field, which both reference clients do.
+     *
+     * A host that reports no usage and throws something opaque is
+     * unclassifiable, and the caller reports the check as skipped rather than
+     * passed.
+     */
+    private static function rejectedBeforeTransport(\Throwable $e, ?int $requestsBefore, ?int $requestsAfter): ?bool
+    {
+        if ($requestsBefore !== null && $requestsAfter !== null) {
+            return $requestsAfter === $requestsBefore;
+        }
+        if (stripos($e->getMessage(), 'cached_prefixes') !== false) {
+            return true;
+        }
+        return null;
+    }
+
+    /** Cumulative request count when the host exposes one, else null. */
+    private static function requestCount(Llm $llm): ?int
+    {
+        if (!$llm instanceof UsageReporting) {
+            return null;
+        }
+        try {
+            return (int) ($llm->usageTotals()['requests'] ?? 0);
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
     private static function checkMalformedPrefixesRejected(Llm $llm): LlmConformanceFinding
     {
         $check = 'malformed_prefixes_rejected';
@@ -141,12 +185,21 @@ final class LlmConformance
             'null'               => null,
             'non-string member'  => ['valid', 42],
         ];
+        $unclassified = [];
         foreach ($invalid as $label => $value) {
+            $before = self::requestCount($llm);
             try {
                 $llm->complete('Conformance probe.', ['cached_prefixes' => $value]);
                 $accepted[] = $label;
-            } catch (\Throwable) {
-                $rejected++;
+            } catch (\Throwable $e) {
+                $local = self::rejectedBeforeTransport($e, $before, self::requestCount($llm));
+                if ($local === true) {
+                    $rejected++;
+                } elseif ($local === false) {
+                    $accepted[] = $label . ' (sent it, then failed downstream)';
+                } else {
+                    $unclassified[] = $label . ': ' . $e->getMessage();
+                }
             }
         }
         if ($accepted !== []) {
@@ -155,6 +208,15 @@ final class LlmConformance
                 'Host accepted malformed cached_prefixes (' . implode(', ', $accepted)
                 . '). The contract requires a list of strings; rejecting bad input early is what stops '
                 . 'a mistyped layer from being silently dropped.',
+                LlmConformanceFinding::TIER_STRUCTURAL,
+            );
+        }
+        if ($unclassified !== []) {
+            return LlmConformanceFinding::skip(
+                $check,
+                'Could not tell rejection from transport failure. The host threw, but it reports no '
+                . 'request count and the error does not name cached_prefixes, so this run proves '
+                . 'nothing either way: ' . implode('; ', $unclassified),
                 LlmConformanceFinding::TIER_STRUCTURAL,
             );
         }
@@ -172,16 +234,28 @@ final class LlmConformance
     private static function checkOversizedPrefixListRejected(Llm $llm): LlmConformanceFinding
     {
         $check = 'oversized_prefix_list_rejected';
+        $before = self::requestCount($llm);
         try {
             $llm->complete('Conformance probe.', [
                 'cached_prefixes' => ['one', 'two', 'three', 'four'],
             ]);
-        } catch (\Throwable) {
-            return LlmConformanceFinding::pass(
-                $check,
-                'Rejected a four-layer cached_prefixes list, per the three-layer cap.',
-                LlmConformanceFinding::TIER_STRUCTURAL,
-            );
+        } catch (\Throwable $e) {
+            $local = self::rejectedBeforeTransport($e, $before, self::requestCount($llm));
+            if ($local === true) {
+                return LlmConformanceFinding::pass(
+                    $check,
+                    'Rejected a four-layer cached_prefixes list, per the three-layer cap.',
+                    LlmConformanceFinding::TIER_STRUCTURAL,
+                );
+            }
+            if ($local === null) {
+                return LlmConformanceFinding::skip(
+                    $check,
+                    'Could not tell rejection from transport failure. The host threw, but it reports no '
+                    . 'request count and the error does not name cached_prefixes: ' . $e->getMessage(),
+                    LlmConformanceFinding::TIER_STRUCTURAL,
+                );
+            }
         }
         return LlmConformanceFinding::fail(
             $check,
