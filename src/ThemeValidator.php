@@ -15,17 +15,6 @@ final class ThemeValidator
     private const HTML_HREF_PATTERN =
         '/\bhref\s*=\s*(?:(["\'])(.*?)\1|([^\s"\'=<>`]+))/is';
 
-    /**
-     * The form-placeholder contract, kept in step with prompts/jetpack-form.md.
-     * Both sides of a contract in one file beats two files that drift.
-     */
-    private const FORM_MARKER = 'JP_FORM:';
-    private const FORM_PLACEHOLDER_CLASS = 'jetpack-form-placeholder';
-    private const FORM_PURPOSES = ['contact', 'booking', 'rsvp', 'enquiry', 'newsletter-signup'];
-    private const FORM_TYPES = [
-        'text', 'email', 'tel', 'url', 'date', 'textarea', 'checkbox', 'select', 'radio',
-    ];
-
     private const HTML_SRC_PATTERN =
         '/\bsrc\s*=\s*(?:(["\'])(.*?)\1|([^\s"\'=<>`]+))/is';
 
@@ -684,156 +673,48 @@ final class ThemeValidator
     }
 
     /**
-     * Whether every JP_FORM spec in one file is one a host can actually parse.
+     * Whether every form placeholder in one file is one a host can parse.
      *
-     * The library invents this grammar and teaches it to the model, so it is
-     * the library's job to check what came back. A spec written with the wrong
-     * separator, or a label carrying one of the reserved ones, cannot be
-     * substituted by any host — and because it is ordinary paragraph text, no
-     * other step notices. It reaches the visitor as literal grey body copy.
-     *
-     * Off the flag there is no host to substitute anything, so the marker
-     * appearing at all means a section invented it.
+     * The grammar lives in FormPlaceholder, which is also what the host reads
+     * it with, so this check and the substitution downstream cannot disagree.
+     * They would disagree silently: a placeholder is ordinary paragraph text,
+     * so a spec no host can read reaches the visitor as literal grey body copy
+     * with nothing else in the pipeline noticing.
      *
      * @return list<string>
      */
     private static function formPlaceholderProblems(Project $project, string $rel): array
     {
         $markup = $project->readText($rel);
-        if (!str_contains($markup, self::FORM_MARKER)) {
+        $markers = FormPlaceholder::markerCount($markup);
+        if ($markers === 0) {
             return [];
         }
 
         if (!Steps\SectionsStep::formPlaceholders($project)) {
-            return ["{$rel}: contains a " . self::FORM_MARKER . ' marker but this build has no'
+            return ["{$rel}: contains a " . FormPlaceholder::MARKER . ' marker but this build has no'
                 . ' form host — disposition: rebuild the section, or enable form placeholders'];
         }
 
         $problems = [];
-        foreach (self::formPlaceholderSpecs($markup) as $spec) {
-            $problem = self::formSpecProblem($spec);
-            if ($problem !== null) {
-                $problems[] = "{$rel}: unparseable form spec \"{$spec}\" ({$problem})"
+        $placeholders = FormPlaceholder::find($markup);
+        foreach ($placeholders as $placeholder) {
+            $parsed = FormPlaceholder::parse($placeholder['spec']);
+            if (is_string($parsed)) {
+                $problems[] = "{$rel}: unparseable form spec \"{$placeholder['spec']}\" ({$parsed})"
                     . ' — disposition: no host can substitute this; regenerate the section';
             }
         }
 
-        // A marker outside a placeholder block is text the host never looks at.
-        $inBlocks = count(self::formPlaceholderSpecs($markup));
-        $total = substr_count($markup, self::FORM_MARKER);
-        if ($total > $inBlocks) {
-            $problems[] = "{$rel}: " . ( $total - $inBlocks ) . ' form marker(s) outside a '
-                . self::FORM_PLACEHOLDER_CLASS . ' block — disposition: the host only'
-                . ' substitutes markers in that block, so these would ship as visible text';
+        // A marker outside a placeholder block is text the host never reads.
+        $loose = $markers - count($placeholders);
+        if ($loose > 0) {
+            $problems[] = "{$rel}: {$loose} form marker(s) outside a "
+                . FormPlaceholder::CLASS_NAME . ' block — disposition: the host only substitutes'
+                . ' markers inside that block, so these would ship as visible text';
         }
 
         return $problems;
-    }
-
-    /**
-     * The spec text of every form placeholder block in some markup.
-     *
-     * @return list<string>
-     */
-    private static function formPlaceholderSpecs(string $markup): array
-    {
-        $pattern = '/<p[^>]*class="[^"]*\b' . preg_quote(self::FORM_PLACEHOLDER_CLASS, '/')
-            . '\b[^"]*"[^>]*>(.*?)<\/p>/is';
-        if (preg_match_all($pattern, $markup, $matches) < 1) {
-            return [];
-        }
-
-        $specs = [];
-        foreach ($matches[1] as $text) {
-            $text = trim(html_entity_decode(strip_tags($text), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
-            if (str_starts_with($text, self::FORM_MARKER)) {
-                $specs[] = $text;
-            }
-        }
-
-        return $specs;
-    }
-
-    /**
-     * Split a spec's field list on commas that separate fields.
-     *
-     * A `select`'s choices are a comma-separated list of their own, inside
-     * parentheses, so a naive explode(',') cuts fields in half. Depth counting
-     * is the whole trick.
-     *
-     * @return list<string>
-     */
-    private static function splitFields(string $fields): array
-    {
-        $out = [];
-        $current = '';
-        $depth = 0;
-        foreach (str_split($fields) as $char) {
-            if ($char === '(') {
-                $depth++;
-            } elseif ($char === ')') {
-                $depth = max(0, $depth - 1);
-            }
-            if ($char === ',' && $depth === 0) {
-                $out[] = $current;
-                $current = '';
-                continue;
-            }
-            $current .= $char;
-        }
-        $out[] = $current;
-
-        return array_values(array_filter(array_map('trim', $out), static fn ($f) => $f !== ''));
-    }
-
-    /**
-     * Why a spec cannot be parsed, or null when it can.
-     *
-     * Mirrors the contract in prompts/jetpack-form.md exactly:
-     * `JP_FORM: purpose | fields | submit-label`, fields being
-     * `label:type` or `label:type:required`, with parenthesised choices for
-     * select and radio.
-     */
-    private static function formSpecProblem(string $spec): ?string
-    {
-        $body = trim(substr($spec, strlen(self::FORM_MARKER)));
-        $parts = explode('|', $body);
-        if (count($parts) !== 3) {
-            return count($parts) . ' pipe-separated parts, expected 3';
-        }
-
-        [$purpose, $fields, $submit] = array_map('trim', $parts);
-        if (!in_array($purpose, self::FORM_PURPOSES, true)) {
-            return "unknown purpose '{$purpose}'";
-        }
-        if ($submit === '') {
-            return 'empty submit label';
-        }
-
-        $fieldList = self::splitFields($fields);
-        if ($fieldList === []) {
-            return 'no fields';
-        }
-        foreach ($fieldList as $field) {
-            // A select's choices are comma-separated inside parentheses, so the
-            // type and its options are dropped before splitting on ':'.
-            $bare = preg_replace('/\([^)]*\)/', '', $field) ?? $field;
-            $bits = explode(':', $bare);
-            if (count($bits) < 2 || count($bits) > 3) {
-                return "field '{$field}' is not label:type[:required]";
-            }
-            if (trim($bits[0]) === '') {
-                return "field '{$field}' has no label";
-            }
-            if (!in_array(trim($bits[1]), self::FORM_TYPES, true)) {
-                return "field '{$field}' has unknown type '" . trim($bits[1]) . "'";
-            }
-            if (count($bits) === 3 && trim($bits[2]) !== 'required') {
-                return "field '{$field}' third part is '" . trim($bits[2]) . "', expected 'required'";
-            }
-        }
-
-        return null;
     }
 
     /**

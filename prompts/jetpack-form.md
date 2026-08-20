@@ -15,7 +15,7 @@ class, whose only text is the form spec:
 
 ```html
 <!-- wp:paragraph {"className":"jetpack-form-placeholder"} -->
-<p class="jetpack-form-placeholder">JP_FORM: contact | name:text:required, email:email:required, message:textarea:required | Send message</p>
+<p class="jetpack-form-placeholder">JP_FORM: contact | Name:text:required, Email:email:required, Message:textarea:required | Send message</p>
 <!-- /wp:paragraph -->
 ```
 
@@ -33,8 +33,11 @@ JP_FORM: purpose | fields | submit-label
 
 **Field format:** `label:type` or `label:type:required`
 
-- `label` — The visitor-facing field label, written in the site's language.
-  Keep it short and plain. It may not contain `,` `:` or `|`.
+- `label` — The visitor-facing field label, written in the site's language and
+  capitalised the way it will be READ on the page: `Name`, `Email`,
+  `Piece description` — not `name` or `piece description`. The host prints it
+  verbatim above the input. Keep it short and plain.
+  A label may not contain `,` `:` or `|`.
 - `type` — One of: `text`, `email`, `tel`, `url`, `date`, `textarea`,
   `checkbox`, `select`, `radio`
 - `required` — Add this third part only for fields the visitor must fill.
@@ -69,6 +72,6 @@ not contain `,` `:` or `|`. Every other type takes no choices.
 <!-- /wp:heading -->
 
 <!-- wp:paragraph {"className":"jetpack-form-placeholder"} -->
-<p class="jetpack-form-placeholder">JP_FORM: booking | name:text:required, email:email:required, date:date:required, party size:select(1, 2, 3, 4 or more):required, notes:textarea | Request booking</p>
+<p class="jetpack-form-placeholder">JP_FORM: booking | Name:text:required, Email:email:required, Date:date:required, Party size:select(1, 2, 3, 4 or more):required, Notes:textarea | Request booking</p>
 <!-- /wp:paragraph -->
 ```

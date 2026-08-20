@@ -50,9 +50,16 @@ test('the form spec grammar is unambiguous enough to parse', function () {
 
     // The host splits on these separators, so a label carrying one would make
     // the spec unparseable. The contract has to say so.
-    assert_contains('may not contain `,` `:` or `|`', $contract, 'separators are reserved');
+    assert_contains('A label may not contain `,` `:` or `|`', $contract, 'separators are reserved');
     assert_contains('`label:type` or `label:type:required`', $contract, 'the field form is stated');
-    assert_contains('party size:select(1, 2, 3, 4 or more):required', $contract, 'choices have a worked example');
+    assert_contains('Party size:select(1, 2, 3, 4 or more):required', $contract, 'choices have a worked example');
+    // Labels reach the visitor verbatim, so the examples have to model the
+    // casing the rule asks for rather than contradict it.
+    assert_contains('capitalised the way it will be READ on the page', $contract, 'label casing is stated');
+    assert_true(
+        !str_contains($contract, 'JP_FORM: contact | name:text'),
+        'no example shows a lowercased label',
+    );
 });
 
 test('both form modes stay inside the cached build layer of the section prompt', function () {
