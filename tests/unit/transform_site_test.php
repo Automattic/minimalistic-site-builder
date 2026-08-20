@@ -779,7 +779,7 @@ test('transform-site reroutes only failed inner pages through scoped legacy plan
     assert_contains('theme/parts/page-about--legacy-about.html', $warnings);
     assert_contains('disposition rerouted', $warnings);
     $report = $mixed->readJson(TransformArtifacts::REPORT);
-    assert_true(in_array('inner_page_legacy_reroute', $report['fallback_codes'], true));
+    assert_true(in_array('inner_page_blocks_reroute', $report['fallback_codes'], true));
     assert_eq([], $report['dropped_fragments']);
 
     transform_site_cleanup($controlTmp);
@@ -817,13 +817,13 @@ test('transform-site degrades scoped legacy generation failure without aborting 
     assert_contains('source design/about.failed', $transformWarning);
     assert_contains('selector page[slug=about]', $transformWarning);
     assert_contains('block_path pages.json', $transformWarning);
-    assert_contains('diagnostic_code inner_page_legacy_reroute_failed', $transformWarning);
+    assert_contains('diagnostic_code inner_page_blocks_reroute_failed', $transformWarning);
     assert_contains('authored_value failed design marker', $transformWarning);
     assert_contains('delivered_value removed', $transformWarning);
     assert_contains('disposition dropped', $transformWarning);
     $report = $project->readJson(TransformArtifacts::REPORT);
-    assert_true(in_array('inner_page_legacy_reroute_failed', $report['fallback_codes'], true));
-    assert_eq('inner_page_legacy_reroute_failed', $report['dropped_fragments'][0]['diagnostic_code']);
+    assert_true(in_array('inner_page_blocks_reroute_failed', $report['fallback_codes'], true));
+    assert_eq('inner_page_blocks_reroute_failed', $report['dropped_fragments'][0]['diagnostic_code']);
     assert_eq('removed', $report['dropped_fragments'][0]['delivered_value']);
     assert_eq('dropped', $report['dropped_fragments'][0]['disposition']);
     transform_site_cleanup($tmp);
