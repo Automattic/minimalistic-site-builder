@@ -337,13 +337,30 @@ html.header-state-js
     }
 }
 
-/* A WordPress responsive-nav modal must never expose content behind its text. */
+/* A WordPress responsive-nav modal must never expose content behind its text.
+ * It also must not inherit the desktop row justification (nav-at-end headers
+ * otherwise glue labels to the viewport edge and clip them). */
 .site-header-shell
     :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid)
     .wp-block-navigation__responsive-container.is-menu-open {
+    --navigation-layout-justification-setting: flex-start;
+    --navigation-layout-justify: flex-start;
     color: var(--header-foreground) !important;
     background-color: var(--header-scrolled-solid) !important;
     background-image: none !important;
+}
+
+.site-header-shell
+    :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid)
+    .wp-block-navigation__responsive-container.is-menu-open
+    .wp-block-navigation__responsive-container-content,
+.site-header-shell
+    :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid)
+    .wp-block-navigation__responsive-container.is-menu-open
+    :is(.wp-block-navigation__container, .wp-block-page-list) {
+    align-items: stretch !important;
+    justify-content: flex-start !important;
+    text-align: start !important;
 }
 
 /* Measured by header.js, including restored-scroll and responsive layouts. */
