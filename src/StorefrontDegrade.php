@@ -21,13 +21,19 @@ final class StorefrontDegrade
      */
     public static function pages(array $pages): array
     {
-        $warnings = [];
         $used = [];
-        foreach ($pages as $page) {
-            if (is_array($page) && is_string($page['slug'] ?? null)) {
-                $used[$page['slug']] = true;
-            }
-        }
+        self::collectUsedSlugs($pages, $used);
+        return self::rewritePages($pages, $used);
+    }
+
+    /**
+     * @param array<int,array<string,mixed>> $pages
+     * @param array<string,true>             $used
+     * @return array{0:array<int,array<string,mixed>>,1:list<string>}
+     */
+    private static function rewritePages(array $pages, array &$used): array
+    {
+        $warnings = [];
 
         $out = [];
         foreach ($pages as $page) {
@@ -35,7 +41,7 @@ final class StorefrontDegrade
                 continue;
             }
             $children = is_array($page['children'] ?? null) ? $page['children'] : [];
-            [$children, $childWarnings] = self::pages($children);
+            [$children, $childWarnings] = self::rewritePages($children, $used);
             array_push($warnings, ...$childWarnings);
 
             if (!self::pageLooksLikeCart($page)) {
@@ -59,6 +65,26 @@ final class StorefrontDegrade
         }
 
         return [$out, $warnings];
+    }
+
+    /**
+     * @param array<int,array<string,mixed>> $pages
+     * @param array<string,true>             $used
+     */
+    private static function collectUsedSlugs(array $pages, array &$used): void
+    {
+        foreach ($pages as $page) {
+            if (!is_array($page)) {
+                continue;
+            }
+            if (is_string($page['slug'] ?? null)) {
+                $used[$page['slug']] = true;
+            }
+            self::collectUsedSlugs(
+                is_array($page['children'] ?? null) ? $page['children'] : [],
+                $used,
+            );
+        }
     }
 
     /**
@@ -139,6 +165,11 @@ final class StorefrontDegrade
                 return $slug;
             }
         }
-        return 'catalog';
+        $n = 2;
+        do {
+            $slug = "catalog-{$n}";
+            $n++;
+        } while (isset($used[$slug]));
+        return $slug;
     }
 }

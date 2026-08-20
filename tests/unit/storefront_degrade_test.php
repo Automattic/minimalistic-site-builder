@@ -30,6 +30,28 @@ test('StorefrontDegrade page rewrite reaches a fixed point', function () {
     assert_eq([], $warnings);
 });
 
+test('StorefrontDegrade keeps rewritten slugs unique across the whole tree', function () {
+    [$pages] = StorefrontDegrade::pages([
+        ['title' => 'Shop', 'slug' => 'shop', 'purpose' => 'Catalog', 'children' => [
+            ['title' => 'Cart', 'slug' => 'cart', 'purpose' => 'Shopping cart', 'children' => []],
+        ]],
+        ['title' => 'Products', 'slug' => 'products', 'purpose' => 'Catalog', 'children' => []],
+        ['title' => 'Catalog', 'slug' => 'catalog', 'purpose' => 'Catalog', 'children' => []],
+        ['title' => 'Checkout', 'slug' => 'checkout', 'purpose' => 'Pay for the cart', 'children' => []],
+    ]);
+
+    assert_eq('catalog-2', $pages[0]['children'][0]['slug']);
+    assert_eq('catalog-3', $pages[3]['slug']);
+    $slugs = [
+        $pages[0]['slug'],
+        $pages[0]['children'][0]['slug'],
+        $pages[1]['slug'],
+        $pages[2]['slug'],
+        $pages[3]['slug'],
+    ];
+    assert_eq(count($slugs), count(array_unique($slugs)));
+});
+
 test('StorefrontDegrade strips add-to-cart forms from markup', function () {
     $markup = '<!-- wp:group --><div class="wp-block-group">'
         . '<form><input type="number" name="quantity" />'
