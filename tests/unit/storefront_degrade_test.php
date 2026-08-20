@@ -2,9 +2,11 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\StorefrontDegrade;
 use Automattic\SiteBuild\Steps\NormalizeLayoutStep;
 use Automattic\SiteBuild\Steps\SiteSpecStep;
+use Automattic\SiteBuild\Tests\FakeLlm;
 
 test('StorefrontDegrade rewrites a cart page to a catalog storefront', function () {
     [$pages, $warnings] = StorefrontDegrade::pages([
@@ -77,6 +79,29 @@ test('site-spec normalizePages degrades a cart page to a catalog storefront', fu
     );
     assert_eq('shop', $pages[1]['slug']);
     assert_contains('checkout', implode(' ', $warnings));
+});
+
+test('site-spec does not warn about a discarded model cart page', function () {
+    with_project('builder_cart_pages_', function ($project): void {
+        $project->writeJson('meta.json', [
+            'prompt' => 'A catalog site',
+            'multi_page' => true,
+            'pages' => ['Home', 'About'],
+            'site_spec' => [
+                'name' => 'Catalog',
+                'language' => 'en',
+                'pages' => [
+                    ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Front'],
+                    ['title' => 'Checkout', 'slug' => 'checkout', 'purpose' => 'Pay for the cart'],
+                ],
+            ],
+        ]);
+
+        (new SiteSpecStep(new FakeLlm(), new PromptRenderer(repo_path('prompts'))))->run($project);
+
+        assert_eq(['home', 'about'], array_column($project->readJson('siteSpec.json')['pages'], 'slug'));
+        assert_true(!$project->exists('warnings.json'));
+    });
 });
 
 test('normalize-layout degrades cart markup on a part and records a warning', function () {

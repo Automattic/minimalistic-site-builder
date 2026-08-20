@@ -287,11 +287,14 @@ final class SiteSpecStep implements Step
         // may rely on at least a homepage entry existing. A caller-fixed list
         // wins over whatever tree the model returned — the model's tree can
         // contribute only per-page purposes.
-        $spec['pages'] = self::normalizePages($spec['pages'] ?? null, $spec, $multiPage, $warnings);
+        $pageWarnings = [];
+        $spec['pages'] = self::normalizePages($spec['pages'] ?? null, $spec, $multiPage, $pageWarnings);
         if ($requested !== []) {
             $spec['pages'] = self::forcePages($requested, $spec['pages']);
             [$spec['pages'], $cartWarnings] = \Automattic\SiteBuild\StorefrontDegrade::pages($spec['pages']);
             array_push($warnings, ...$cartWarnings);
+        } else {
+            array_push($warnings, ...$pageWarnings);
         }
 
         // `invented` lists which identity values the model made up; keep only
