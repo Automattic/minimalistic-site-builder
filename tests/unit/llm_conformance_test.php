@@ -181,6 +181,60 @@ final class NoValidationBadKeyFakeLlm implements Llm, UsageReporting
     }
 }
 
+/**
+ * Fully conformant, but reports usage the way the raw Anthropic Messages API
+ * does: cached tokens land in cache_creation_input_tokens and are EXCLUDED
+ * from input_tokens.
+ */
+final class RawUsageConventionFakeLlm extends ConformanceFakeBase
+{
+    public int $cacheCreationTokens = 0;
+
+    protected function seenByModel(string $prompt, array $opts): string
+    {
+        return implode('', $this->prefixes($opts)) . $prompt;
+    }
+
+    public function complete(string $prompt, array $opts = []): string
+    {
+        $layers = implode('', $this->prefixes($opts));
+        $this->requests++;
+        $this->inputTokens += (int) ceil(strlen($prompt) / 4);
+        $this->cacheCreationTokens += (int) ceil(strlen($layers) / 4);
+        $this->outputTokens += 4;
+        return $this->reply($layers . $prompt);
+    }
+
+    public function usageTotals(): array
+    {
+        return parent::usageTotals() + [
+            'cache_read_input_tokens'     => 0,
+            'cache_creation_input_tokens' => $this->cacheCreationTokens,
+        ];
+    }
+}
+
+/** Honours cached_prefixes in complete(), drops them in completeBatch(). */
+final class BatchDropsPrefixesFakeLlm extends ConformanceFakeBase
+{
+    private bool $inBatch = false;
+
+    protected function seenByModel(string $prompt, array $opts): string
+    {
+        return ($this->inBatch ? '' : implode('', $this->prefixes($opts))) . $prompt;
+    }
+
+    public function completeBatch(array $requests): TextBatchResult
+    {
+        $this->inBatch = true;
+        try {
+            return parent::completeBatch($requests);
+        } finally {
+            $this->inBatch = false;
+        }
+    }
+}
+
 /** A host with no input validation at all. */
 final class PermissiveFakeLlm extends ConformanceFakeBase
 {
@@ -399,4 +453,101 @@ test('a host that swaps batch values keeps the keys and is still caught', functi
     assert_true($batch !== null, 'batch check ran');
     assert_true(!$batch->passed, 'a value swap must fail even though the keys match');
     assert_contains('values did not follow', $batch->detail);
+});
+
+test('a conformant host is not accused for reporting the raw-API usage convention', function () {
+    // The provider's own field name is the likeliest thing for a host to pass
+    // through, and under that convention a cached prefix is billed almost
+    // entirely OUTSIDE input_tokens. Reading the raw field alone failed this
+    // host with "the layers are not reaching the model" — the opposite of the
+    // truth, on the load-bearing check.
+    $byCheck = conformance_by_check(LlmConformance::live(new RawUsageConventionFakeLlm()));
+
+    assert_true(
+        $byCheck['cached_prefixes_counted_in_usage']->passed,
+        'billed input must count cache creations: ' . $byCheck['cached_prefixes_counted_in_usage']->detail,
+    );
+    assert_true(!$byCheck['cached_prefixes_counted_in_usage']->skipped, 'and it must be measured, not skipped');
+});
+
+test('a host that honours complete() but drops the layers in completeBatch is caught by usage', function () {
+    // Sections are authored through completeBatch. While the usage probe ran on
+    // complete(), this host passed it — only the echo probe caught it, and the
+    // echo is the weaker signal.
+    $byCheck = conformance_by_check(LlmConformance::live(new BatchDropsPrefixesFakeLlm()));
+
+    assert_true(
+        !$byCheck['cached_prefixes_counted_in_usage']->passed,
+        'the usage probe must travel the path production uses',
+    );
+    assert_contains('completeBatch', $byCheck['cached_prefixes_counted_in_usage']->detail);
+});
+
+test('the echo is advisory when the model declines but usage proves delivery', function () {
+    $llm = new class extends ConformanceFakeBase {
+        protected function seenByModel(string $prompt, array $opts): string
+        {
+            return implode('', $this->prefixes($opts)) . $prompt;
+        }
+
+        /** A model that ignores the echo instruction entirely. */
+        protected function reply(string $seen): string
+        {
+            return str_contains($seen, LlmConformance::PROBE_TOKEN) ? 'MISSING' : parent::reply($seen);
+        }
+    };
+
+    $byCheck = conformance_by_check(LlmConformance::live($llm));
+
+    assert_true($byCheck['cached_prefixes_counted_in_usage']->passed, 'usage answered the question');
+    assert_true($byCheck['cached_prefixes_reach_the_model']->skipped, 'so the echo must not fail a good host');
+    assert_true(LlmConformance::passed(LlmConformance::live($llm)), 'and the run stays green');
+});
+
+test('a partial echo stays fatal even when the host bills enough', function () {
+    // Forwards two of three layers: enough billed input to clear the ratio, but
+    // the missing nonce is positive evidence of selective forwarding. This is
+    // the case the advisory downgrade must not swallow.
+    $llm = new class extends ConformanceFakeBase {
+        protected function seenByModel(string $prompt, array $opts): string
+        {
+            $layers = $this->prefixes($opts);
+            if (count($layers) === 3) {
+                array_pop($layers);
+            }
+            return implode('', $layers) . $prompt;
+        }
+    };
+
+    $byCheck = conformance_by_check(LlmConformance::live($llm));
+
+    assert_true($byCheck['cached_prefixes_counted_in_usage']->passed, 'two of three layers clears the ratio');
+    assert_true(!$byCheck['cached_prefixes_reach_the_model']->passed, 'but a dropped layer must still fail');
+    assert_contains('layer 3', $byCheck['cached_prefixes_reach_the_model']->detail);
+});
+
+test('a host that refuses the cache-warm probe is caught', function () {
+    // SectionsStep swallows this failure by design (a warm-up must never abort
+    // a build), which is exactly why the suite has to be the one that shouts.
+    $llm = new class extends ConformanceFakeBase {
+        protected function seenByModel(string $prompt, array $opts): string
+        {
+            return implode('', $this->prefixes($opts)) . $prompt;
+        }
+
+        public function completeBatch(array $requests): TextBatchResult
+        {
+            foreach ($requests as $request) {
+                if (($request['tolerate_empty'] ?? false) === true) {
+                    throw new \RuntimeException('max_tokens must be at least 16');
+                }
+            }
+            return parent::completeBatch($requests);
+        }
+    };
+
+    $byCheck = conformance_by_check(LlmConformance::live($llm));
+
+    assert_true(!$byCheck['cache_warm_probe_tolerated']->passed, 'the warm-probe shape must be checked');
+    assert_contains('runtime warning', $byCheck['cache_warm_probe_tolerated']->detail);
 });

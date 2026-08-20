@@ -54,13 +54,12 @@ final class LlmConformance
     private const FILLER_REPEATS = 120;
 
     /**
-     * Minimum input tokens a conforming host must report for the usage probe.
-     * The prefix alone is ~2,400 tokens; a host that drops it lands near 60.
-     * The floor sits far below the true figure so provider-specific tokenizer
-     * differences and system-preamble variation can never make this flaky —
-     * it only has to separate "prefix present" from "prefix discarded".
+     * How little a host must bill before the layers cannot have been sent is
+     * BilledInput's call, not this suite's — SectionsStep's runtime guard asks
+     * the same question of the same numbers, and the two answers must not
+     * drift. A host that trips the warning in a build should have failed here
+     * first.
      */
-    private const USAGE_FLOOR_TOKENS = 800;
 
     /**
      * Run every check the supplied host can support.
@@ -94,14 +93,22 @@ final class LlmConformance
     /**
      * Checks that need model calls: three singles plus one two-member batch.
      *
+     * Both cached_prefixes probes read ONE request — the layered batch one.
+     * They ask different questions (was it billed? did the model see it?) of
+     * the same call, which is what production actually makes, and which costs
+     * a call less than asking them separately.
+     *
      * @return list<LlmConformanceFinding>
      */
     public static function live(Llm $llm): array
     {
+        $probe = self::layeredProbe($llm);
+
         return [
-            self::checkPrefixesCountedInUsage($llm),
-            self::checkPrefixesReachTheModel($llm),
+            self::checkPrefixesCountedInUsage($probe),
+            self::checkPrefixesReachTheModel($probe),
             self::checkBlankPrefixesTolerated($llm),
+            self::checkCacheWarmProbeTolerated($llm),
             self::checkBatchKeysRoundTrip($llm),
         ];
     }
@@ -153,6 +160,48 @@ final class LlmConformance
         $token = $layer === null ? self::PROBE_TOKEN : self::PROBE_TOKEN . '-L' . $layer;
         return str_repeat(self::FILLER_LINE, self::FILLER_REPEATS)
             . "\n\nPROBE TOKEN: " . $token . "\n\n";
+    }
+
+    /**
+     * Send the layered probe once and keep everything both prefix checks need.
+     *
+     * @return array{reply:?string,error:?string,billed:?int,expected:int}
+     */
+    private static function layeredProbe(Llm $llm): array
+    {
+        $request  = self::layeredProbeRequest();
+        $expected = BilledInput::estimateTokens($request['cached_prefixes']);
+
+        $before = self::usageSnapshot($llm);
+        $reply = null;
+        $error = null;
+        try {
+            $result = $llm->completeBatch(['probe' => $request]);
+            $reply  = (string) ($result->texts['probe'] ?? '');
+        } catch (\Throwable $e) {
+            $error = $e->getMessage();
+        }
+        $after = self::usageSnapshot($llm);
+
+        return [
+            'reply'    => $reply,
+            'error'    => $error,
+            'billed'   => ($before !== null && $after !== null) ? BilledInput::delta($before, $after) : null,
+            'expected' => $expected,
+        ];
+    }
+
+    /** Cumulative usage totals when the host reports them, else null. */
+    private static function usageSnapshot(Llm $llm): ?array
+    {
+        if (!$llm instanceof UsageReporting) {
+            return null;
+        }
+        try {
+            return $llm->usageTotals();
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     /**
@@ -346,17 +395,27 @@ final class LlmConformance
     }
 
     /**
-     * THE check. A prefix of known size must show up in reported input usage.
+     * THE check. Layers of known size must show up in billed input usage.
      *
      * This is the measurement that exposed the original production defect, and
      * unlike the echo probe it does not depend on the model following an
      * instruction — a host cannot pass it while discarding the layers.
+     *
+     * It reads the layered batch request, not a single complete(). Sections are
+     * authored through completeBatch, and a host may build that body separately;
+     * measuring complete() would let the path that actually runs lie freely.
+     * SectionsStep::warmSectionCache() probes the same seam for the same reason.
+     *
+     * @param array{reply:?string,error:?string,billed:?int,expected:int} $probe
      */
-    private static function checkPrefixesCountedInUsage(Llm $llm): LlmConformanceFinding
+    private static function checkPrefixesCountedInUsage(array $probe): LlmConformanceFinding
     {
         $check = 'cached_prefixes_counted_in_usage';
         $tier = LlmConformanceFinding::TIER_LIVE;
-        if (!$llm instanceof UsageReporting) {
+        if ($probe['error'] !== null) {
+            return LlmConformanceFinding::fail($check, 'Probe call failed: ' . $probe['error'], $tier);
+        }
+        if ($probe['billed'] === null) {
             return LlmConformanceFinding::skip(
                 $check,
                 'Host does not implement UsageReporting, so input-token accounting cannot be observed. '
@@ -364,44 +423,41 @@ final class LlmConformance
                 $tier,
             );
         }
-        $before = (int) ($llm->usageTotals()['input_tokens'] ?? 0);
-        try {
-            $llm->complete('Reply with the single word: ok.', [
-                'cached_prefixes' => [self::probePrefix()],
-                'max_tokens'      => 16,
-            ]);
-        } catch (\Throwable $e) {
-            return LlmConformanceFinding::fail($check, 'Probe call failed: ' . $e->getMessage(), $tier);
-        }
-        $delta = (int) ($llm->usageTotals()['input_tokens'] ?? 0) - $before;
-        if ($delta < self::USAGE_FLOOR_TOKENS) {
+        $billed = $probe['billed'];
+        $expected = $probe['expected'];
+        if (BilledInput::looksDiscarded($expected, $billed)) {
             return LlmConformanceFinding::fail(
                 $check,
-                "Sent a ~2,400-token cached prefix but the host reported only {$delta} input tokens "
-                . '(floor ' . self::USAGE_FLOOR_TOKENS . '). The prefix is not reaching the model. '
-                . 'Every SectionUnit request ships the site spec, theme JSON, design direction and page '
-                . 'outline this way, so sections would be generated with none of that context.',
+                "Sent ~{$expected} tokens of cached_prefixes through completeBatch but the host billed "
+                . "only {$billed} input tokens. The layers are not reaching the model. Every SectionUnit "
+                . 'request ships the site spec, theme JSON, design direction and page outline this way, '
+                . 'so sections would be generated with none of that context. If the layers ARE being '
+                . 'sent, the other possibility is usage accounting: input_tokens must include cached '
+                . 'reads and creations (see UsageReporting), or a conformant host reports a fraction of '
+                . 'what it actually billed.',
                 $tier,
             );
         }
         return LlmConformanceFinding::pass(
             $check,
-            "Cached prefix accounted for in input usage ({$delta} tokens reported).",
+            "Cached layers accounted for in billed input ({$billed} tokens for ~{$expected} sent).",
             $tier,
         );
     }
 
-    /** A nonce hidden in the prefix must come back, proving the model saw it. */
-    private static function checkPrefixesReachTheModel(Llm $llm): LlmConformanceFinding
+    /**
+     * A nonce hidden in the prefix must come back, proving the model saw it.
+     *
+     * @param array{reply:?string,error:?string,billed:?int,expected:int} $probe
+     */
+    private static function checkPrefixesReachTheModel(array $probe): LlmConformanceFinding
     {
         $check = 'cached_prefixes_reach_the_model';
         $tier = LlmConformanceFinding::TIER_LIVE;
-        try {
-            $result = $llm->completeBatch(['probe' => self::layeredProbeRequest()]);
-            $reply = (string) ($result->texts['probe'] ?? '');
-        } catch (\Throwable $e) {
-            return LlmConformanceFinding::fail($check, 'Probe call failed: ' . $e->getMessage(), $tier);
+        if ($probe['error'] !== null || $probe['reply'] === null) {
+            return LlmConformanceFinding::fail($check, 'Probe call failed: ' . (string) $probe['error'], $tier);
         }
+        $reply = $probe['reply'];
         $missing = [];
         $at = [];
         foreach ([1, 2, 3] as $layer) {
@@ -411,6 +467,27 @@ final class LlmConformance
                 continue;
             }
             $at[$layer] = $pos;
+        }
+        // Review asked whether a passing usage probe should make this advisory,
+        // and the answer splits on WHICH layers came back. Nothing at all is
+        // what a model that ignored the instruction looks like, and the usage
+        // probe measured this very request, so it has already proved the layers
+        // arrived — failing there would punish a conformant host for a model's
+        // mood. SOME of them is different: that is positive evidence of
+        // selective forwarding, which no amount of billed input excuses, and it
+        // stays fatal. (Billing alone cannot separate the two: a host that
+        // forwards two of three layers still clears the ratio.)
+        $usageProved = $probe['billed'] !== null
+            && !BilledInput::looksDiscarded($probe['expected'], $probe['billed']);
+        if (count($missing) === 3 && $usageProved) {
+            return LlmConformanceFinding::skip(
+                $check,
+                'The model repeated none of the three nonces, but usage accounting for this same '
+                . "request bills {$probe['billed']} input tokens against ~{$probe['expected']} sent, so "
+                . 'the layers did reach it. Treating this as advisory: the echo depends on the model '
+                . 'following an instruction, and the stronger probe has already answered the question.',
+                $tier,
+            );
         }
         if ($missing !== []) {
             return LlmConformanceFinding::fail(
@@ -462,6 +539,50 @@ final class LlmConformance
             );
         }
         return LlmConformanceFinding::pass($check, 'All-blank cached_prefixes handled as an uncached request.', $tier);
+    }
+
+    /**
+     * The cache-warm probe SectionsStep sends before every section batch must
+     * survive: one batch member, max_tokens 1, tolerate_empty true.
+     *
+     * That probe is what warms the section cache AND what raises the runtime
+     * warning when a host discards the layers — the guard this suite is the CI
+     * half of. A host that refuses the shape (or regenerates instead of
+     * accepting an output-limited empty answer) makes warmSectionCache() throw,
+     * and it catches, prints "continuing uncached" and returns no warning. The
+     * protection would switch itself off silently, which is the failure mode
+     * this whole issue is about, so the contract clause it rests on gets its
+     * own check.
+     */
+    private static function checkCacheWarmProbeTolerated(Llm $llm): LlmConformanceFinding
+    {
+        $check = 'cache_warm_probe_tolerated';
+        $tier = LlmConformanceFinding::TIER_LIVE;
+        try {
+            $llm->completeBatch([
+                'section-cache-warm' => [
+                    'prompt'          => 'Warm the cached section context.',
+                    'cached_prefixes' => [self::probePrefix()],
+                    'max_tokens'      => 1,
+                    'tolerate_empty'  => true,
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            return LlmConformanceFinding::fail(
+                $check,
+                'The cache-warm probe raised: ' . $e->getMessage() . '. SectionsStep sends exactly this '
+                . 'shape (one batch member, max_tokens 1, tolerate_empty true) before every section '
+                . 'batch. A host that refuses it loses first-window cache hits AND the runtime warning '
+                . 'that catches a host discarding cached_prefixes — the probe fails, the guard stays '
+                . 'quiet, and nothing tells anyone.',
+                $tier,
+            );
+        }
+        return LlmConformanceFinding::pass(
+            $check,
+            'Cache-warm probe (max_tokens 1, tolerate_empty) accepted through completeBatch.',
+            $tier,
+        );
     }
 
     /**

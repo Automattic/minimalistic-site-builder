@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\AboveFoldContract;
 use Automattic\SiteBuild\AboveFoldPartFacts;
+use Automattic\SiteBuild\BilledInput;
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\FooterComposition;
@@ -66,14 +67,6 @@ final class SectionsStep implements Step
      * Real section layers run to thousands of tokens.
      */
     private const CONTEXT_PROBE_MIN_TOKENS = 500;
-
-    /**
-     * Fraction of the estimated prefix a conformant host must bill. Set low on
-     * purpose: a host that sent the layers bills MORE than this estimate (the
-     * system preamble and brief are extra), while a host that dropped them
-     * bills a rounding error. Only a collapse trips it.
-     */
-    private const CONTEXT_PROBE_RATIO = 0.5;
 
     /** Prefix for a page section part's request key and filename. */
     public const PART_PREFIX = SectionUnit::KEY_PREFIX;
@@ -756,20 +749,10 @@ final class SectionsStep implements Step
      * Input tokens a host billed for a single call, from cumulative usage
      * snapshots taken either side of it.
      *
-     * Hosts disagree about what `input_tokens` means, and reading the wrong
-     * convention here would turn this guard's signal upside down. This repo's
-     * AnthropicClient folds cache reads and creations INTO `input_tokens`
-     * (see extractUsage()), while the raw Anthropic Messages API reports
-     * `usage.input_tokens` with both EXCLUDED. Under the second convention a
-     * conformant host bills a cached 2,400-token prefix almost entirely as
-     * `cache_creation_input_tokens` on the probe, and as
-     * `cache_read_input_tokens` on every section after it — leaving an
-     * `input_tokens` delta that looks exactly like a discarded layer, and
-     * shrinking further the better the caching works.
-     *
-     * Taking the larger of the two readings satisfies both conventions and
-     * double-counts neither: a folded total already exceeds its own cache
-     * components, and a raw total is corrected by them.
+     * The reading itself lives on BilledInput, which documents why the raw
+     * `input_tokens` field cannot be trusted on its own and which
+     * LlmConformance's usage probe shares — the CI gate and this runtime guard
+     * must answer the same question the same way.
      *
      * The totals are cumulative and per-client, so this reads as one call's
      * usage only while nothing else is spending on the same Llm. That holds
@@ -783,13 +766,7 @@ final class SectionsStep implements Step
      */
     public static function billedInputDelta(array $before, array $after): int
     {
-        $delta = static fn (string $key): int
-            => (int) ($after[$key] ?? 0) - (int) ($before[$key] ?? 0);
-
-        return max(
-            $delta('input_tokens'),
-            $delta('cache_read_input_tokens') + $delta('cache_creation_input_tokens'),
-        );
+        return BilledInput::delta($before, $after);
     }
 
     /**
@@ -820,17 +797,11 @@ final class SectionsStep implements Step
      */
     public static function contextLossWarning(array $cachedPrefixes, int $observedInputTokens): ?string
     {
-        $bytes = 0;
-        foreach ($cachedPrefixes as $prefix) {
-            $bytes += strlen($prefix);
-        }
-        // ~4 bytes per token is a deliberate under-estimate of the real count,
-        // which biases every comparison below toward staying silent.
-        $expected = intdiv($bytes, 4);
+        $expected = BilledInput::estimateTokens($cachedPrefixes);
         if ($expected < self::CONTEXT_PROBE_MIN_TOKENS) {
             return null; // Layers too small to distinguish signal from overhead.
         }
-        if ($observedInputTokens >= (int) ($expected * self::CONTEXT_PROBE_RATIO)) {
+        if (!BilledInput::looksDiscarded($expected, $observedInputTokens)) {
             return null; // The host sent them.
         }
 
