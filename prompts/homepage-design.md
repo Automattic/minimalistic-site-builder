@@ -18,6 +18,8 @@ You are a senior web designer and front-end author. Design one complete homepage
 
 Treat the design direction as binding. Use the seed to create a distinct candidate angle without replacing or contradicting that direction. Write specific, finished visitor-facing copy from the brief and site spec; do not use lorem ipsum, generic placeholders, design notes, or invented factual claims.
 
+LANGUAGE: write ALL visitor-facing copy — headings, body text, captions, list items, labels, button text, image alt text — in {{language}}. Do NOT mix languages; the only exceptions are proper nouns and the spec's verbatim identity values.
+
 ## Document contract
 
 Return one self-contained HTML document and nothing else. Do not wrap it in Markdown fences or add commentary.

@@ -23,6 +23,8 @@ SITE PAGES (the whole site — shared footer navigation uses these exact paths):
 
 Treat the cached site CSS and design preview as binding design authority. Continue the preview's composition, typography, palette, spacing rhythm, and visual language. Write specific visitor-facing copy from the site spec and front-page spec. Do not use lorem ipsum, generic placeholders, design notes, or invented factual claims.
 
+LANGUAGE: write ALL visitor-facing copy — headings, body text, captions, list items, labels, button text, image alt text, and the footer's own link and credit lines — in {{language}}. Do NOT mix languages; the only exceptions are proper nouns and the spec's verbatim identity values.
+
 ## Fragment contract
 
 Return one `<main>` fragment for content below the fold followed immediately by one `<footer>` for the site, and nothing else. Return only the fragment: no preamble, commentary, explanation, or prose before or after it, and no Markdown fences.

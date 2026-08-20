@@ -527,6 +527,44 @@ test('page-generation prompts freeze fold-seeded inner and below-fold home contr
     assert_true(!str_contains($source, 'homeReference('), 'full-home source helper is retired');
 });
 
+test('every page request pins the copy language, and the pin never names the user prompt', function () {
+    $pages = [
+        inner_page('home', 'Home', 'Welcome'),
+        inner_page('about', 'About', 'Explain the studio'),
+    ];
+
+    [$project, $llm, $tmp] = inner_pages_fixture($pages); // fixture spec says "English"
+    $llm->queueText(inner_pages_home_body());
+    $llm->queueText('<main><p>ABOUT</p></main>');
+    inner_pages_run($project, $llm);
+    assert_eq(2, count($llm->calls), 'one home-body request plus one inner page');
+    foreach ($llm->calls as $call) {
+        assert_contains('in English', $call['prompt']);
+    }
+    inner_pages_cleanup($tmp);
+
+    // A host-supplied spec arrives without "language". The fallback must name
+    // the SITE SPEC, which every page request carries, and never the user
+    // prompt, which none of them carry — an unresolvable pin leaves the site's
+    // address as the strongest language signal in context (BIGR-849).
+    [$project, $llm, $tmp] = inner_pages_fixture($pages);
+    $spec = $project->readJson('siteSpec.json');
+    unset($spec['language']);
+    $project->writeJson('siteSpec.json', $spec);
+    $llm->queueText(inner_pages_home_body());
+    $llm->queueText('<main><p>ABOUT</p></main>');
+    inner_pages_run($project, $llm);
+    foreach ($llm->calls as $call) {
+        assert_contains("in the SITE SPEC's own language", $call['prompt']);
+        assert_contains("never a language implied by the site's location or audience", $call['prompt']);
+        assert_true(
+            !str_contains($call['prompt'], 'the language the user prompt is written in'),
+            'a page prompt must not point the model at a document it was never given',
+        );
+    }
+    inner_pages_cleanup($tmp);
+});
+
 test('inner-pages-design deterministically suffixes reserved inner slugs without overwriting artifacts', function () {
     [$project, $llm, $tmp] = inner_pages_fixture([
         inner_page('landing', 'Landing', 'Front page'),

@@ -314,7 +314,17 @@ test('sections falls back to a descriptive language phrase for specs without one
     $renderer = new PromptRenderer(repo_path('prompts'));
     $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
 
-    assert_contains('in the language the user prompt is written in', sections_request_text($reqs['page-home--hero']));
+    // The fallback must name the SITE SPEC, which every section request
+    // carries — not the user prompt, which none of them carry.
+    foreach (['header', 'footer', 'page-home--hero', 'page-home--about'] as $key) {
+        $text = sections_request_text($reqs[$key]);
+        assert_contains("in the SITE SPEC's own language", $text);
+        assert_contains("never a language implied by the site's location or audience", $text);
+        assert_true(
+            !str_contains($text, 'the language the user prompt is written in'),
+            'a section prompt must not point the model at a document it was never given',
+        );
+    }
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
