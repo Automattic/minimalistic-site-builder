@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\ContrastMath;
+use Automattic\SiteBuild\DirectionFidelity;
 use Automattic\SiteBuild\HeaderBehavior;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\PresetReferences;
@@ -68,6 +69,8 @@ final class ValidateThemeStep implements Step
                 'theme/parts/*',
                 'theme/templates/*',
                 'plugin/pages/*',
+                'plugin/pages.json',
+                'designDirection.json',
             ],
             writes: [
                 'warnings.json',
@@ -85,6 +88,10 @@ final class ValidateThemeStep implements Step
             ThemeValidator::typographyWarnings($project),
             ThemeValidator::planWarnings($project),
             ThemeValidator::aboveFoldWarnings($project),
+            // The direction is a set of promises made before generation that
+            // every later step reads and nothing checks afterwards. This pass
+            // already reads the same artifacts one line from here.
+            DirectionFidelity::problems($project),
             PresetReferences::problems($project),
             self::styleElementProblems($project),
             self::headerBehaviorProblems($project),
