@@ -125,6 +125,59 @@ test('design-direction expands a picked seed into structured designDirection.jso
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('design-direction persists an unmappable motion-note warning and reaches a fixed point', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $llm->queueJson(['seeds' => designdir_seeds()]);
+    $authored = designdir_direction();
+    $authored['motion'] = 'calm';
+    $authored['motion_note'] = 'a cinematic wipe nobody ships';
+    $llm->queueJson(['direction' => $authored]);
+
+    (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $written = $project->readJson('designDirection.json');
+    assert_eq('', $written['motion_note']);
+    foreach (['title', 'palette', 'type', 'image_grade', 'card_style'] as $sibling) {
+        assert_eq($authored[$sibling], $written[$sibling], "{$sibling} survives motion-note removal");
+    }
+
+    $motionWarning = '';
+    foreach ($project->readJson('warnings.json')['design-direction'] ?? [] as $warning) {
+        if (str_contains($warning, 'field motion_note')) {
+            $motionWarning = $warning;
+            break;
+        }
+    }
+    foreach ([
+        'designDirection.json',
+        'field motion_note',
+        'a cinematic wipe nobody ships',
+        'delivered ""',
+        'disposition note could not be expressed as a kit class and was stripped',
+    ] as $context) {
+        assert_contains($context, $motionWarning);
+    }
+
+    $repairs = [];
+    $warnings = [];
+    $normalizedAgain = DesignDirectionStep::normalize(
+        $written,
+        $written['hero_blueprint']['recipe'],
+        $written['concept_seed'],
+        $repairs,
+        $warnings,
+    );
+    assert_eq(
+        json_encode($written, JSON_THROW_ON_ERROR),
+        json_encode($normalizedAgain, JSON_THROW_ON_ERROR),
+        'serialized delivered direction is a fixed point',
+    );
+    assert_eq([], $repairs);
+    assert_eq([], $warnings);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('design-direction sends the seed call to the seed model and keeps the hot temperature on both calls', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
     $llm->queueJson(['seeds' => designdir_seeds()]);
