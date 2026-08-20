@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\AboveFoldContract;
 use Automattic\SiteBuild\CardStyle;
+use Automattic\SiteBuild\ConceptSeeds;
 use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\HeroBlueprint;
@@ -149,8 +150,8 @@ final class DesignDirectionStep implements Step
         $spec = $project->readText('siteSpec.json');
         $specData = $project->readJson('siteSpec.json');
 
-        $seed = $this->chooseSeed($prompt, $spec);
         $warnings = [];
+        $seed = $this->chooseSeed($prompt, $spec, $warnings);
         $recipe = self::selectHeroRecipe(
             $meta,
             (string) ($specData['slug'] ?? $project->slug()),
@@ -296,14 +297,17 @@ final class DesignDirectionStep implements Step
      *
      * Precedence: the DESIGN_DIRECTION_CHOICE env var forces seed N (1-based;
      * out of range — including a failed seed call — fails loud, because a
-     * forced eval must not silently drift); otherwise a uniform random pick.
+     * forced eval must not silently drift, so it indexes the round as the
+     * model wrote it); otherwise a uniform random pick over the DISTINCT
+     * seeds, since a world the model described twice would otherwise be twice
+     * as likely to win (see ConceptSeeds).
      * Without a forced choice, any seed failure (transport error, no usable
      * seeds) degrades to SEED_FALLBACK — seeding must never abort a build.
      * The step's hot temperature is applied here too: the seed spread is now
      * the pipeline's variety source, and the small models still support
      * sampling.
      */
-    private function chooseSeed(string $brief, string $spec): string
+    private function chooseSeed(string $brief, string $spec, array &$warnings = []): string
     {
         $forced = Env::get(self::CHOICE_ENV);
         $isForced = $forced !== null && $forced !== '';
@@ -323,7 +327,7 @@ final class DesignDirectionStep implements Step
             }
             $payload = $this->llm->completeJson($rendered, $opts);
             foreach (is_array($payload['seeds'] ?? null) ? $payload['seeds'] : [] as $raw) {
-                $seed = self::normalizeSeed($raw);
+                $seed = ConceptSeeds::normalize($raw);
                 if ($seed !== null) {
                     $seeds[] = $seed;
                 }
@@ -345,33 +349,35 @@ final class DesignDirectionStep implements Step
                     count($seeds),
                 ));
             }
-            return $seeds[$n - 1];
+            return $seeds[$n - 1]['text'];
         }
 
         if ($seeds === []) {
             return self::SEED_FALLBACK;
         }
-        return $seeds[random_int(0, count($seeds) - 1)];
+        $sharedGround = ConceptSeeds::sharedGround($seeds);
+        if ($sharedGround !== null) {
+            $warnings[] = 'design-direction: every concept seed is ' . $sharedGround
+                . '-grounded, so the round explored one half of an open brief; '
+                . 'picked from it anyway; disposition tolerated';
+        }
+        $pool = ConceptSeeds::distinct($seeds, $warnings);
+        return $pool[random_int(0, count($pool) - 1)]['text'];
     }
 
     /**
-     * Validate and coerce one raw seed ("Title — one vivid sentence"). The
-     * prompt asks for bare strings; an object carrying a `title` key is
-     * tolerated. Returns null when nothing non-empty is present. Pure —
-     * unit-testable.
+     * One raw seed as the text the prompts consume ("Title — one vivid
+     * sentence"), dropping the coordinates only this step's pick uses. The
+     * seeds prompt is shared with the homepage-design tournament, which wants
+     * the sentence and nothing else. Returns null when nothing usable is
+     * present. Pure — unit-testable.
      *
      * @param mixed $raw
      */
     public static function normalizeSeed($raw): ?string
     {
-        if (is_array($raw)) {
-            $raw = $raw['title'] ?? null;
-        }
-        if (!is_string($raw)) {
-            return null;
-        }
-        $seed = trim($raw);
-        return $seed === '' ? null : $seed;
+        $seed = ConceptSeeds::normalize($raw);
+        return $seed === null ? null : $seed['text'];
     }
 
     /**
