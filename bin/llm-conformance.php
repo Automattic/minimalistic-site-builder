@@ -38,11 +38,15 @@ foreach ($findings as $finding) {
 }
 
 $failed = 0;
+$passed = 0;
+$skipped = 0;
 foreach ($findings as $finding) {
     if ($finding->skipped) {
         $mark = 'SKIP';
+        $skipped++;
     } elseif ($finding->passed) {
         $mark = 'PASS';
+        $passed++;
     } else {
         $mark = 'FAIL';
         $failed++;
@@ -59,4 +63,13 @@ if ($failed > 0) {
     exit(1);
 }
 
-printf("\nAll %d checks passed%s.\n", $total, $structuralOnly ? ' (structural only)' : '');
+if ($skipped > 0) {
+    printf(
+        "\n%d checks passed, %d skipped%s.\n",
+        $passed,
+        $skipped,
+        $structuralOnly ? ' (structural only)' : '',
+    );
+} else {
+    printf("\nAll %d checks passed%s.\n", $total, $structuralOnly ? ' (structural only)' : '');
+}
