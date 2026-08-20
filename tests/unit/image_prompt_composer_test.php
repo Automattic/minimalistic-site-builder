@@ -487,3 +487,13 @@ test('compose strips competing grade tokens before the API prompt is built', fun
     assert_contains('Art direction for all site imagery: warm Portra 400, visible 35mm grain.', $out);
 });
 
+test('stripCompetingGradeTokens accepts Unicode dash punctuation', function () {
+    $cases = [
+        ['A portrait, no‑grain', 'tri‑x contrast', 'A portrait'],
+        ['A city, neon—soaked', 'black–and—white documentary', 'A city'],
+        ['A product, studio–white, catalog—lit', 'warm available–light', 'A product'],
+    ];
+    foreach ($cases as [$subject, $grade, $expected]) {
+        assert_eq($expected, ImagePromptComposer::stripCompetingGradeTokens($subject, $grade));
+    }
+});

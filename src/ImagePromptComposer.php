@@ -215,14 +215,18 @@ final class ImagePromptComposer
     {
         $grade = strtolower($imageGrade);
         $fights = [];
-        if (preg_match('/\b(?:grain|portra|35mm|film|kodachrome|tri-?x)\b/i', $grade) === 1) {
-            $fights[] = '/\b(?:no[- ]grains?|grainless|digitally clean)\b/iu';
+        $separator = '(?:\h|\p{Pd})';
+        if (preg_match('/\b(?:grain|portra|35mm|film|kodachrome|tri(?:\p{Pd})?x)\b/iu', $grade) === 1) {
+            $fights[] = '/\b(?:no' . $separator . 'grains?|grainless|digitally' . $separator . 'clean)\b/iu';
         }
-        if (preg_match('/\b(?:grain|portra|35mm|film|kodachrome|warm|golden|available light)\b/i', $grade) === 1) {
-            $fights[] = '/\b(?:studio[- ]white|seamless white|cyclorama|flash[- ]hard|hard on-camera flash|catalog[- ]lit)\b/iu';
+        if (preg_match('/\b(?:grain|portra|35mm|film|kodachrome|warm|golden|available' . $separator . 'light)\b/iu', $grade) === 1) {
+            $fights[] = '/\b(?:studio' . $separator . 'white|seamless' . $separator . 'white|cyclorama'
+                . '|flash' . $separator . 'hard|hard' . $separator . 'on' . $separator . 'camera'
+                . $separator . 'flash|catalog' . $separator . 'lit)\b/iu';
         }
-        if (preg_match('/\b(?:charcoal|monochrome|black[- ]and[- ]white|b&w|desaturat)/i', $grade) === 1) {
-            $fights[] = '/\b(?:saturated neon|neon-soaked|hyper-saturated|vivid neon)\b/iu';
+        if (preg_match('/\b(?:charcoal|monochrome|black' . $separator . 'and' . $separator . 'white|b&w|desaturat)/iu', $grade) === 1) {
+            $fights[] = '/\b(?:saturated' . $separator . 'neon|neon' . $separator . 'soaked'
+                . '|hyper' . $separator . 'saturated|vivid' . $separator . 'neon)\b/iu';
         }
         foreach ($fights as $pattern) {
             $subject = (string) preg_replace($pattern, '', $subject);
