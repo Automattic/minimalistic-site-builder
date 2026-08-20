@@ -96,3 +96,97 @@ test('a project that never went through createProject defaults to no placeholder
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('the placeholder block survives the passes that rewrite generated markup', function () {
+    // The whole design rests on this: the marker has to still be there when the
+    // host looks for it. The section prompt warns that a deterministic pass
+    // re-serializes every block from its comment JSON and drops classes the
+    // attributes do not produce, so pin that `className` is one it does keep.
+    $markup = '<!-- wp:paragraph {"className":"jetpack-form-placeholder"} -->' . "\n"
+        . '<p class="jetpack-form-placeholder">'
+        . 'JP_FORM: contact | name:text:required, email:email:required, message:textarea | Send'
+        . '</p>' . "\n"
+        . '<!-- /wp:paragraph -->';
+
+    $sanitized = Automattic\SiteBuild\MarkupSanitizer::sanitize($markup);
+    $fixed     = Automattic\SiteBuild\LayoutFixer::fix(
+        $sanitized,
+        Automattic\SiteBuild\LayoutFixer::ROLE_SECTION,
+        860.0,
+    )['markup'];
+
+    assert_contains('jetpack-form-placeholder', $fixed, 'the class the host locates the block by');
+    assert_contains(
+        'JP_FORM: contact | name:text:required, email:email:required, message:textarea | Send',
+        $fixed,
+        'the spec text, pipes and all, reaches the host unaltered',
+    );
+});
+
+/** A page whose only content is one form placeholder paragraph. */
+function jp_form_page(string $spec): string
+{
+    return '<!-- wp:paragraph {"className":"jetpack-form-placeholder"} -->'
+        . '<p class="jetpack-form-placeholder">' . $spec . '</p>'
+        . '<!-- /wp:paragraph -->';
+}
+
+/** Validate a project carrying one placeholder page, with the flag on or off. */
+function jp_form_validate(string $spec, bool $placeholders): string
+{
+    [$project, $tmp] = validator_project();
+    if ($placeholders) {
+        $project->writeJson('meta.json', ['prompt' => 'x', 'form_placeholders' => true]);
+    }
+    $project->writeText('plugin/pages/contact.html', jp_form_page($spec));
+    $joined = implode(' ', Automattic\SiteBuild\ThemeValidator::validate($project));
+    exec('rm -rf ' . escapeshellarg($tmp));
+
+    return $joined;
+}
+
+test('a well-formed spec passes validation, options and all', function () {
+    $joined = jp_form_validate(
+        'JP_FORM: booking | name:text:required, party size:select(1, 2, 3 or more):required, notes:textarea | Book',
+        true,
+    );
+
+    assert_true(!str_contains($joined, 'form spec'), "clean spec was flagged: {$joined}");
+    assert_true(!str_contains($joined, 'form marker'), "clean spec was flagged: {$joined}");
+});
+
+test('a spec a host could not parse is caught instead of shipping as body text', function () {
+    // Dashes where the contract says pipes: still a paragraph, so nothing else
+    // in the pipeline would ever notice.
+    $joined = jp_form_validate('JP_FORM: contact - name, email - Send', true);
+    assert_contains('unparseable form spec', $joined);
+    assert_contains('pipe-separated parts', $joined);
+
+    assert_contains('unknown purpose', jp_form_validate('JP_FORM: signup | email:email | Go', true));
+    assert_contains('unknown type', jp_form_validate('JP_FORM: contact | name:fullname | Go', true));
+    assert_contains('no fields', jp_form_validate('JP_FORM: contact |  | Go', true));
+    assert_contains(
+        "expected 'required'",
+        jp_form_validate('JP_FORM: contact | name:text:optional | Go', true),
+    );
+});
+
+test('a marker in a build with no host to substitute it is a problem', function () {
+    $joined = jp_form_validate('JP_FORM: contact | email:email:required | Send', false);
+
+    assert_contains('no form host', $joined);
+});
+
+test('a marker loose in the markup is caught, since the host only reads the block', function () {
+    [$project, $tmp] = validator_project();
+    $project->writeJson('meta.json', ['prompt' => 'x', 'form_placeholders' => true]);
+    $project->writeText(
+        'plugin/pages/contact.html',
+        jp_form_page('JP_FORM: contact | email:email:required | Send')
+        . '<!-- wp:paragraph --><p>JP_FORM: rsvp | name:text | Yes</p><!-- /wp:paragraph -->',
+    );
+    $joined = implode(' ', Automattic\SiteBuild\ThemeValidator::validate($project));
+    exec('rm -rf ' . escapeshellarg($tmp));
+
+    assert_contains('outside a jetpack-form-placeholder block', $joined);
+});

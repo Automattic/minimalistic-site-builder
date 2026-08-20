@@ -73,21 +73,21 @@ use Automattic\SiteBuild\Steps\CoverContrastStep;
 require_once __DIR__ . '/../src/bootstrap.php';
 
 $args = parse_cli_args($argv, [
-    '--slug'               => 'value',
-    '--provider'           => 'value',
-    '--until'              => 'value',
-    '--from'               => 'value',
-    '--pages'              => 'value',
-    '--port'               => 'value',
-    '--writing-direction'  => 'value',
-    '--hero-canvas'        => 'value',
-    '--hero-media-modes'   => 'value',
-    '--max-hero-images'    => 'value',
-    '--hero-copy-capacity' => 'value',
-    '--with-images'        => 'bool',
+    '--slug'                     => 'value',
+    '--provider'                 => 'value',
+    '--until'                    => 'value',
+    '--from'                     => 'value',
+    '--pages'                    => 'value',
+    '--port'                     => 'value',
+    '--writing-direction'        => 'value',
+    '--hero-canvas'              => 'value',
+    '--hero-media-modes'         => 'value',
+    '--max-hero-images'          => 'value',
+    '--hero-copy-capacity'       => 'value',
+    '--with-images'              => 'bool',
     '--use-jetpack-placeholders' => 'bool',
-    '--multi-page'         => 'bool',
-    '--serve'              => 'toggle',
+    '--multi-page'               => 'bool',
+    '--serve'                    => 'toggle',
 ], maxPositionals: 1);
 if ($args['unknown'] !== null) {
     Narrator::write("Unknown argument: {$args['unknown']}\n");

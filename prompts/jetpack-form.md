@@ -53,6 +53,9 @@ not contain `,` `:` or `|`. Every other type takes no choices.
 - The placeholder paragraph's text is the ENTIRE spec: no heading, no extra
   copy, no markup inside it. Any surrounding heading or lead-in paragraph is a
   normal sibling block, outside the placeholder.
+- The placeholder block carries `className` and NOTHING else — no font size, no
+  colour, no spacing. It is never styled, because it is not copy: the host
+  replaces the whole block before a visitor sees it.
 - Keep writing the section's other blocks as usual. The placeholder replaces
   only the form itself.
 - Never emit `<form>`, `<input>`, `<textarea>`, `<select>`, or any

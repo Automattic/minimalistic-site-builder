@@ -55,7 +55,11 @@ php bin/build.php "A Persian poetry archive" --writing-direction=rtl --hero-canv
 
 Hero composition is selected from a reviewed code-owned catalog after filtering
 the optional caller constraints `--hero-canvas`, `--hero-media-modes`,
-`--max-hero-images`, and `--hero-copy-capacity`. `--writing-direction=ltr|rtl`
+`--max-hero-images`, and `--hero-copy-capacity`.
+`--use-jetpack-placeholders` is for hosts that own a form backend: a section
+that needs a form reserves its place with a `JP_FORM` placeholder block the
+host substitutes after the build, instead of the default of emitting no form
+markup at all. `--writing-direction=ltr|rtl`
 is an explicit caller override; otherwise the site language determines logical
 direction. The selected recipe and normalized blueprint are persisted in
 `designDirection.json`, while `aboveFold.json` records the two-phase shared

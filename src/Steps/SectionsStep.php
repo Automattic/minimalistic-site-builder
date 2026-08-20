@@ -899,27 +899,6 @@ final class SectionsStep implements Step
      *   contract:array<string,mixed>
      * }
      */
-    /**
-     * Whether this build's host owns a real form backend.
-     *
-     * Set by the caller at createProject time (CLI: --use-jetpack-placeholders).
-     * When true, sections reserve a form's place with a JP_FORM placeholder the
-     * host replaces later; when false they follow the default no-form-markup
-     * rule, because a form without a backend silently discards what visitors
-     * type.
-     */
-    public static function formPlaceholders(Project $project): bool
-    {
-        // Standalone callers can drive this step against a project that never
-        // went through createProject, so a missing meta is the default, not an
-        // error.
-        if (!$project->exists('meta.json')) {
-            return false;
-        }
-
-        return (bool) ($project->readJson('meta.json')['form_placeholders'] ?? false);
-    }
-
     private function jobPlan(
         Project $project,
         array &$repairs = [],
@@ -1065,6 +1044,28 @@ final class SectionsStep implements Step
         }
 
         return ['jobs' => $jobs, 'contract' => $contract];
+    }
+
+    /**
+     * Whether this build's host owns a real form backend.
+     *
+     * Set by the caller at createProject time (CLI: --use-jetpack-placeholders).
+     * When true, sections reserve a form's place with a JP_FORM placeholder the
+     * host replaces later; when false they follow the default no-form-markup
+     * rule, because a form without a backend silently discards what visitors
+     * type.
+     */
+    public static function formPlaceholders(Project $project): bool
+    {
+        // The graph always seeds meta.json, but this step is also driven
+        // directly — runForPages() from the transform path, and the test
+        // fixtures — against projects that never went through
+        // createProject. There a missing meta is the default, not an error.
+        if (!$project->exists('meta.json')) {
+            return false;
+        }
+
+        return (bool) ($project->readJson('meta.json')['form_placeholders'] ?? false);
     }
 
     /** The portable routing rule: position and front flag, never mutable role prose. */
