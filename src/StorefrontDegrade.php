@@ -50,7 +50,7 @@ final class StorefrontDegrade
             $out[] = [
                 'title' => 'Shop',
                 'slug' => $slug,
-                'purpose' => 'Product catalog. Visitors inquire by contact. There is no cart or checkout.',
+                'purpose' => 'Product catalog. Visitors inquire by contact.',
                 'children' => $children,
             ];
             $warnings[] = "file='siteSpec.json'; path=\"pages.{$authoredSlug}\"; authored="

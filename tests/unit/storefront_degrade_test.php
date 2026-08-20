@@ -19,6 +19,17 @@ test('StorefrontDegrade rewrites a cart page to a catalog storefront', function 
     assert_contains('catalog storefront', implode(' ', $warnings));
 });
 
+test('StorefrontDegrade page rewrite reaches a fixed point', function () {
+    [$once] = StorefrontDegrade::pages([
+        ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Front', 'children' => []],
+        ['title' => 'Cart', 'slug' => 'cart', 'purpose' => 'Shopping cart and checkout', 'children' => []],
+    ]);
+    [$twice, $warnings] = StorefrontDegrade::pages($once);
+
+    assert_eq($once, $twice);
+    assert_eq([], $warnings);
+});
+
 test('StorefrontDegrade strips add-to-cart forms from markup', function () {
     $markup = '<!-- wp:group --><div class="wp-block-group">'
         . '<form><input type="number" name="quantity" />'
