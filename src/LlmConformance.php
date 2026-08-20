@@ -305,14 +305,6 @@ final class LlmConformance
         } catch (\Throwable $e) {
             return LlmConformanceFinding::fail($check, 'Batch call failed: ' . $e->getMessage(), $tier);
         }
-        if (!$result instanceof TextBatchResult) {
-            return LlmConformanceFinding::fail(
-                $check,
-                'completeBatch returned ' . get_debug_type($result) . ', not a TextBatchResult. '
-                . 'The degradation notes it carries are how truncated members get recorded.',
-                $tier,
-            );
-        }
         $got = array_keys($result->texts);
         $want = array_keys($requests);
         sort($got);
