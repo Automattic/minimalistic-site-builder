@@ -687,10 +687,17 @@ final class SectionsStep implements Step
     }
 
     /**
-     * Warm the exact cached context used by the deterministic first section,
-     * and use that same probe to verify the batch path actually SENT it.
-     * A failed probe only forfeits first-window cache hits; it must not abort
-     * the build or change the subsequent concurrent fan-out.
+     * Warm the cached context the batch is about to reuse, and use that same
+     * probe to verify the batch path actually SENT it. A failed probe only
+     * forfeits first-window cache hits; it must not abort the build or change
+     * the subsequent concurrent fan-out.
+     *
+     * The probe uses the most deeply layered request in the batch, which is a
+     * section: its leading layer is byte-identical to the one the header,
+     * footer and hero open with, so priming it covers every markup call rather
+     * than only the sections. Warming a chrome request instead would prime that
+     * shared layer alone and leave the section build/page layers cold — the
+     * batch fans out concurrently, so nothing else can prime them in time.
      *
      * The sections themselves are generated through completeBatch(), so the
      * one-member probe deliberately travels that same seam. Hosts may implement
@@ -702,41 +709,65 @@ final class SectionsStep implements Step
      */
     private function warmSectionCache(array $requests): array
     {
+        $request = self::deepestLayeredRequest($requests);
+        if ($request === null) {
+            return [];
+        }
+
+        $opts = $request;
+        unset($opts['prompt']);
+        $opts['max_tokens'] = 1;
+        $opts['tolerate_empty'] = true;
+        $opts['log_label'] = 'section-cache-warm';
+
+        $before = $this->usageSnapshot();
+
+        try {
+            $this->llm->completeBatch([
+                'section-cache-warm' => ['prompt' => self::CACHE_WARM_PROMPT] + $opts,
+            ]);
+        } catch (\Throwable $e) {
+            Narrator::write("    section cache warm-up failed ({$e->getMessage()}); continuing uncached\n");
+            return [];
+        }
+
+        $after = $this->usageSnapshot();
+        if ($before === null || $after === null) {
+            return [];
+        }
+        $observed = self::billedInputDelta($before, $after);
+        $warning = self::contextLossWarning($request['cached_prefixes'], $observed);
+        if ($warning !== null) {
+            Narrator::write("    WARNING: {$warning}\n");
+            return [$warning];
+        }
+        return [];
+    }
+
+    /**
+     * The request carrying the most cached prefix bytes, so one probe primes
+     * the largest reusable context in the batch. Every markup unit's layers
+     * start with the same site layer, so the deepest request's prefixes are a
+     * superset of every other request's.
+     *
+     * @param array<string,array{prompt:string,model?:string,temperature?:float,cached_prefixes?:list<string>}> $requests
+     * @return array{prompt:string,cached_prefixes:list<string>}|null null when no request carries layers
+     */
+    private static function deepestLayeredRequest(array $requests): ?array
+    {
+        $deepest = null;
+        $deepestBytes = 0;
         foreach ($requests as $request) {
             if (!isset($request['cached_prefixes'])) {
                 continue;
             }
-
-            $opts = $request;
-            unset($opts['prompt']);
-            $opts['max_tokens'] = 1;
-            $opts['tolerate_empty'] = true;
-            $opts['log_label'] = 'section-cache-warm';
-
-            $before = $this->usageSnapshot();
-
-            try {
-                $this->llm->completeBatch([
-                    'section-cache-warm' => ['prompt' => self::CACHE_WARM_PROMPT] + $opts,
-                ]);
-            } catch (\Throwable $e) {
-                Narrator::write("    section cache warm-up failed ({$e->getMessage()}); continuing uncached\n");
-                return [];
+            $bytes = array_sum(array_map('strlen', $request['cached_prefixes']));
+            if ($deepest === null || $bytes > $deepestBytes) {
+                $deepest = $request;
+                $deepestBytes = $bytes;
             }
-
-            $after = $this->usageSnapshot();
-            if ($before === null || $after === null) {
-                return [];
-            }
-            $observed = self::billedInputDelta($before, $after);
-            $warning = self::contextLossWarning($request['cached_prefixes'], $observed);
-            if ($warning !== null) {
-                Narrator::write("    WARNING: {$warning}\n");
-                return [$warning];
-            }
-            return [];
         }
-        return [];
+        return $deepest;
     }
 
     /** @return array<string,mixed>|null null when usage measurement is unavailable */

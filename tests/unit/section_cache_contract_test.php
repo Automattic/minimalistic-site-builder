@@ -10,6 +10,9 @@ use Automattic\SiteBuild\Steps\SectionsStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
 use Automattic\SiteBuild\TextBatchResult;
 use Automattic\SiteBuild\UsageReporting;
+use Automattic\SiteBuild\Units\FooterUnit;
+use Automattic\SiteBuild\Units\HeaderUnit;
+use Automattic\SiteBuild\Units\HeroUnit;
 use Automattic\SiteBuild\Units\SectionUnit;
 
 const SECTION_CACHE_PROBE_PROMPT = 'Warm the cached section context.';
@@ -129,32 +132,66 @@ function section_cache_throwing_usage_reporter(FakeLlm $llm, int $throwOnCall): 
     };
 }
 
-test('section prompt freezes build, page, and brief layer boundaries', function () {
-    $template = (string) file_get_contents(repo_path('prompts/section.md'));
-    $buildMarker = '<!-- section-cache-layer:build -->';
-    $pageMarker = '<!-- section-cache-layer:page -->';
-    $briefMarker = '<!-- section-cache-layer:brief -->';
+test('every markup prompt freezes the same leading site layer', function () {
+    $siteMarker = '<!-- cache-layer:site -->';
+    $unitMarker = '<!-- cache-layer:unit -->';
 
-    assert_eq(1, substr_count($template, $buildMarker));
-    assert_eq(1, substr_count($template, $pageMarker));
-    assert_eq(1, substr_count($template, $briefMarker));
+    foreach (['header.md', 'footer.md', 'hero.md'] as $name) {
+        $template = (string) file_get_contents(repo_path('prompts/' . $name));
+        assert_eq(1, substr_count($template, $siteMarker), "{$name} opens exactly one site layer");
+        assert_eq(1, substr_count($template, $unitMarker), "{$name} opens exactly one unit layer");
+        assert_true(str_starts_with($template, $siteMarker), "{$name} has nothing before its site layer");
+        assert_true(strpos($template, $siteMarker) < strpos($template, $unitMarker));
+
+        [, $afterSite] = explode($siteMarker, $template, 2);
+        [$site, $unit] = explode($unitMarker, $afterSite, 2);
+        assert_eq('{{site_context}}', trim($site), "{$name} site layer is the shared partial alone");
+        assert_true(
+            !str_contains($unit, '{{site_context}}'),
+            "{$name} does not repeat the shared context in its varying layer",
+        );
+    }
+
+    $shared = (string) file_get_contents(repo_path('prompts/site-context.md'));
+    foreach (['{{site_spec}}', '{{theme_json}}', '{{design_direction}}'] as $placeholder) {
+        assert_contains($placeholder, $shared);
+    }
+});
+
+test('section prompt freezes site, build, page, and brief layer boundaries', function () {
+    $template = (string) file_get_contents(repo_path('prompts/section.md'));
+    $siteMarker = '<!-- cache-layer:site -->';
+    $buildMarker = '<!-- cache-layer:build -->';
+    $pageMarker = '<!-- cache-layer:page -->';
+    $briefMarker = '<!-- cache-layer:brief -->';
+
+    foreach ([$siteMarker, $buildMarker, $pageMarker, $briefMarker] as $marker) {
+        assert_eq(1, substr_count($template, $marker));
+    }
+    assert_true(str_starts_with($template, $siteMarker), 'the shared layer leads, so chrome can reuse it');
+    assert_true(strpos($template, $siteMarker) < strpos($template, $buildMarker));
     assert_true(strpos($template, $buildMarker) < strpos($template, $pageMarker));
     assert_true(strpos($template, $pageMarker) < strpos($template, $briefMarker));
 
-    [, $afterBuild] = explode($buildMarker, $template, 2);
+    [, $afterSite] = explode($siteMarker, $template, 2);
+    [$site, $afterBuild] = explode($buildMarker, $afterSite, 2);
     [$build, $afterPage] = explode($pageMarker, $afterBuild, 2);
     [$page, $brief] = explode($briefMarker, $afterPage, 2);
 
+    assert_eq('{{site_context}}', trim($site));
     foreach ([
-        '{{site_spec}}',
         '{{language}}',
-        '{{theme_json}}',
-        '{{design_direction}}',
         '{{card_style}}',
         '{{image_instructions}}',
         '{{block_markup_output_contract}}',
     ] as $placeholder) {
         assert_contains($placeholder, $build);
+    }
+    foreach (['{{site_spec}}', '{{theme_json}}', '{{design_direction}}'] as $placeholder) {
+        assert_true(
+            !str_contains($build . $page . $brief, $placeholder),
+            "{$placeholder} lives only in the shared site layer",
+        );
     }
     foreach (['{{page_title}}', '{{outline}}', '{{site_pages}}'] as $placeholder) {
         assert_contains($placeholder, $page);
@@ -167,7 +204,7 @@ test('section prompt freezes build, page, and brief layer boundaries', function 
     }
 });
 
-test('section request contract exposes two stable cached prefixes and a varying brief', function () {
+test('section request contract exposes three stable cached prefixes and a varying brief', function () {
     $unit = new SectionUnit(
         new FakeLlm(),
         new PromptRenderer(repo_path('prompts')),
@@ -177,22 +214,22 @@ test('section request contract exposes two stable cached prefixes and a varying 
     $hero = $unit->request(section_cache_input());
     $about = $unit->request(section_cache_input('about', 'About'));
 
-    assert_eq(2, count($hero['cached_prefixes'] ?? []));
-    assert_eq($hero['cached_prefixes'], $about['cached_prefixes'], 'same build/page produces byte-identical layers');
+    assert_eq(3, count($hero['cached_prefixes'] ?? []));
+    assert_eq($hero['cached_prefixes'], $about['cached_prefixes'], 'same site/build/page produces byte-identical layers');
     assert_true($hero['prompt'] !== $about['prompt'], 'per-section brief remains variable');
     assert_eq('cache-model', $hero['model'] ?? null);
     assert_eq(0.4, $hero['temperature'] ?? null);
     assert_contains('CACHE-SPEC-SENTINEL', $hero['cached_prefixes'][0]);
     assert_contains('CACHE-DIRECTION-SENTINEL', $hero['cached_prefixes'][0]);
-    assert_contains('ASSIGNED CARD STYLE (authoritative machine contract): flush', $hero['cached_prefixes'][0]);
-    assert_contains('FULL PAGE OUTLINE', $hero['cached_prefixes'][1]);
+    assert_contains('ASSIGNED CARD STYLE (authoritative machine contract): flush', $hero['cached_prefixes'][1]);
+    assert_contains('FULL PAGE OUTLINE', $hero['cached_prefixes'][2]);
     assert_contains('SECTION TO BUILD', $hero['prompt']);
     foreach ($hero['cached_prefixes'] as $prefix) {
         assert_true(str_ends_with($prefix, "\n\n"), 'every cached prefix carries its explicit separator');
         assert_true(!str_ends_with($prefix, "\n\n\n"), 'cached prefix separator is exactly two newlines');
     }
-    assert_true(!str_contains(implode('', $hero['cached_prefixes']), '<!-- section-cache-layer:'));
-    assert_true(!str_contains($hero['prompt'], '<!-- section-cache-layer:'));
+    assert_true(!str_contains(implode('', $hero['cached_prefixes']), '<!-- cache-layer:'));
+    assert_true(!str_contains($hero['prompt'], '<!-- cache-layer:'));
 });
 
 test('section cached prefixes assemble byte-equally across Anthropic and OpenAI', function () {
@@ -211,6 +248,64 @@ test('section cached prefixes assemble byte-equally across Anthropic and OpenAI'
 
     assert_eq(implode('', $request['cached_prefixes']) . $request['prompt'], $anthropicText);
     assert_eq($anthropicText, $openAiText, 'providers receive byte-identical assembled user prompts');
+});
+
+test('every markup unit opens with the same primeable site layer', function () {
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    $llm = new FakeLlm();
+    $input = section_cache_input();
+
+    $section = (new SectionUnit($llm, $renderer))->request($input);
+    $header = (new HeaderUnit($llm, $renderer))->request($input + [
+        'hero_brief' => 'A text-led hero.',
+        'nav_rule' => '- Use wp:page-list.',
+        'above_fold_contract' => test_above_fold_contract(),
+        'header_behavior' => 'DETERMINISTIC HEADER BEHAVIOR: static.',
+    ]);
+    $footer = (new FooterUnit($llm, $renderer))->request($input + [
+        'final_section_brief' => 'A quiet closing section.',
+        'composition_archetype' => 'typographic-billboard',
+        'page_count' => 1,
+    ]);
+    // The hero's own consistent blueprint/contract fixture, carrying this
+    // test's site context so the shared layer can be compared byte-for-byte.
+    $hero = (new HeroUnit($llm, $renderer))->request(array_merge(hero_unit_contract_input(), [
+        'site_spec' => $input['site_spec'],
+        'theme_json' => $input['theme_json'],
+        'design_direction' => $input['design_direction'],
+    ]));
+
+    $site = $section['cached_prefixes'][0];
+    foreach (['header' => $header, 'footer' => $footer, 'hero' => $hero] as $name => $request) {
+        assert_eq($site, $request['cached_prefixes'][0], "{$name} reuses the section's site layer byte-for-byte");
+        assert_eq(1, count($request['cached_prefixes']), "{$name} adds no further reusable layer");
+    }
+    assert_contains('CACHE-SPEC-SENTINEL', $site);
+    assert_contains('CACHE-DIRECTION-SENTINEL', $site);
+    assert_contains('cache-theme-sentinel', $site);
+    // Warming a section primes the chrome layer too; the reverse would leave
+    // the section build and page layers cold.
+    assert_true(count($section['cached_prefixes']) > count($header['cached_prefixes']));
+});
+
+test('a fully layered section still fits the Anthropic breakpoint budget', function () {
+    $request = (new SectionUnit(
+        new FakeLlm(),
+        new PromptRenderer(repo_path('prompts')),
+    ))->request(section_cache_input());
+
+    $body = AnthropicClient::bodyFor($request, 'claude-sonnet-4-6', 16000);
+    $content = $body['messages'][0]['content'];
+
+    assert_eq(4, count($content), 'three cached layers plus the varying brief');
+    $marked = array_values(array_filter(
+        $content,
+        static fn (array $block): bool => isset($block['cache_control']),
+    ));
+    // Anthropic allows four breakpoints per request; the section is the
+    // deepest markup prompt and must leave one in reserve.
+    assert_eq(3, count($marked), 'one breakpoint stays unspent');
+    assert_true(!isset($content[3]['cache_control']), 'the varying brief is never a breakpoint');
 });
 
 test('sections skips the uncached hero and warms the first ordinary section prefixes', function () {
@@ -278,7 +373,7 @@ test('section cache usage reporting failure is non-fatal and inconclusive', func
     }
 });
 
-test('section cache warm-up is skipped when the front hero is the only section', function () {
+test('a hero-only front page still warms the layer its chrome shares', function () {
     with_project('builder_section_cache_', function ($project) {
         seed_section_cache_project($project);
         $plan = $project->readJson('pages.json');
@@ -286,14 +381,17 @@ test('section cache warm-up is skipped when the front hero is the only section',
         $project->writeJson('pages.json', $plan);
 
         $llm = new FakeLlm();
+        $llm->queueText('OK'); // cache warm-up probe
         $llm->queueText('<!-- wp:group --><!-- wp:site-title /--><!-- /wp:group -->');
         $llm->queueText('<!-- wp:group --><!-- wp:paragraph --><p>Footer</p><!-- /wp:paragraph --><!-- /wp:group -->');
         $llm->queueText('<!-- wp:group --><!-- wp:heading --><h1>Hero</h1><!-- /wp:heading --><!-- /wp:group -->');
 
         (new SectionsStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
 
-        assert_eq(0, $llm->completeCalls, 'no cache probe is sent without an ordinary SectionUnit request');
-        assert_eq(1, $llm->completeBatchCalls);
+        // Header, footer and hero all open with the same site layer, so the
+        // probe pays for it once instead of three concurrent calls missing it.
+        assert_eq(0, $llm->completeCalls, 'the probe travels the batch seam, not complete()');
+        assert_eq(2, $llm->completeBatchCalls, 'one warm-up batch, then the parts batch');
         assert_true($project->exists('theme/parts/page-home--hero.html'));
     });
 });

@@ -108,7 +108,7 @@ function assert_hero_unit_root_marker(string $markup, string $marker): void
     assert_eq(1, substr_count($document->ownHtml($root), $marker), 'saved root HTML carries the marker once');
 }
 
-test('HeroUnit exposes one isolated assigned recipe and no section cache prefixes', function () {
+test('HeroUnit exposes one isolated assigned recipe behind the shared site layer', function () {
     $renderer = new PromptRenderer(repo_path('prompts'));
     $markers = [
         'cinematic-safe-zone' => 'landscape cover stage',
@@ -123,10 +123,14 @@ test('HeroUnit exposes one isolated assigned recipe and no section cache prefixe
         $request = (new HeroUnit(new FakeLlm(), $renderer))->request(
             hero_unit_contract_input($recipe)
         );
-        $prompt = $request['prompt'];
+        $prompt = markup_request_text($request);
         $blueprint = HeroBlueprint::defaultFor($recipe);
 
-        assert_true(!array_key_exists('cached_prefixes', $request), "{$recipe} remains a flat portable request");
+        assert_eq(1, count($request['cached_prefixes']), "{$recipe} carries only the shared site layer");
+        assert_true(
+            !str_contains($request['prompt'], 'SITE SPEC (JSON):'),
+            "{$recipe} keeps the reusable site context out of its varying brief",
+        );
         assert_contains("ASSIGNED HERO COMPOSITION for this build: **{$recipe}**", $prompt);
         assert_contains('hero-composition--' . $recipe, $prompt);
         assert_contains('hero-mobile--' . $blueprint['mobile_transformation'], $prompt);
@@ -155,7 +159,8 @@ test('HeroUnit exposes one isolated assigned recipe and no section cache prefixe
 
 test('HeroUnit prompt bounds the standfirst without absorbing overflow', function () {
     $prompt = (new HeroUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts'))))
-        ->request(hero_unit_contract_input())['prompt'];
+        ->request(hero_unit_contract_input());
+    $prompt = markup_request_text($prompt);
 
     assert_contains('one sentence, about two set lines', $prompt, 'semantic length guidance stays primary');
     assert_contains('no more than roughly 180 characters', $prompt, 'the character guidance is an upper bound');
@@ -165,7 +170,8 @@ test('HeroUnit prompt bounds the standfirst without absorbing overflow', functio
 
 test('HeroUnit prompt rejects generic headline registers without inventing differentiation', function () {
     $prompt = (new HeroUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts'))))
-        ->request(hero_unit_contract_input())['prompt'];
+        ->request(hero_unit_contract_input());
+    $prompt = markup_request_text($prompt);
 
     assert_contains('Never open with "Welcome to" (in any language)', $prompt);
     assert_contains('never let the headline be a bare category label', $prompt);
@@ -178,7 +184,7 @@ test('HeroUnit keeps portable identity and exact action facts in self-contained 
     $input = hero_unit_contract_input();
     $unit = new HeroUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
     $request = $unit->request($input);
-    $prompt = $request['prompt'];
+    $prompt = markup_request_text($request);
 
     assert_eq('page-home--hero', $unit->key($input));
     assert_eq(
@@ -281,7 +287,11 @@ test('HeroUnit generate returns a JSON-serializable repairs and warnings envelop
     $result = $unit->generate(hero_unit_contract_input());
 
     assert_eq('page-home--hero', $llm->calls[0]['opts']['log_label'] ?? null);
-    assert_true(!array_key_exists('cached_prefixes', $llm->calls[0]['opts']));
+    assert_eq(
+        1,
+        count($llm->calls[0]['opts']['cached_prefixes'] ?? []),
+        'the shared site layer reaches the transport on the single-call path too',
+    );
     assert_eq([], $result->warnings);
     assert_eq([], $result->repairs);
     assert_eq($result->toArray(), json_decode((string) json_encode($result), true));

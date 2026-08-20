@@ -1,13 +1,8 @@
-You are a WordPress block-theme developer AND the design lead. Build the site FOOTER template part as Gutenberg block markup (block grammar with <!-- wp:... --> comment delimiters).
+<!-- cache-layer:site -->
+{{site_context}}
 
-SITE SPEC (JSON):
-{{site_spec}}
-
-THEME TOKENS (theme.json):
-{{theme_json}}
-
-DESIGN DIRECTION (the committed creative concept for THIS site — the footer is its closing note, not an afterthought):
-{{design_direction}}
+<!-- cache-layer:unit -->
+You are a WordPress block-theme developer AND the design lead. Build the site FOOTER template part as Gutenberg block markup (block grammar with <!-- wp:... --> comment delimiters). The DESIGN DIRECTION above is this site's committed concept: the footer is its closing note, not an afterthought.
 
 HOMEPAGE OUTLINE (for context):
 {{outline}}
