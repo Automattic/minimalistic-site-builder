@@ -69,7 +69,11 @@ test('one failed inner design uses blocks-path sections while sibling pages stay
             $sectionCount += assert_html_first_page_sections_constrained($project, $slug);
         }
         assert_true($sectionCount >= 3, 'multi-page HTML-first build constrains every delivered section');
-        assert_eq(2, $llm->completeBatchCalls, 'page-generation and scoped blocks-path section batches only');
+        assert_eq(
+            3,
+            $llm->completeBatchCalls,
+            'page generation, scoped section cache warm, and scoped blocks-path section batches only',
+        );
     } finally {
         $previous === false
             ? putenv('SITE_BUILD_HTML_FIRST')

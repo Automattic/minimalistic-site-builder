@@ -666,8 +666,8 @@ test('sections writes header, footer and a part per page section', function () {
 
     (new SectionsStep($llm, $renderer))->run($project);
 
-    assert_eq(1, $llm->completeBatchCalls, 'all parts sent through one concurrent batch');
-    assert_eq(1, $llm->completeCalls, 'step sends exactly one single cache warm-up probe');
+    assert_eq(2, $llm->completeBatchCalls, 'cache warm and all parts use the batch seam');
+    assert_eq(0, $llm->completeCalls, 'the single-completion seam cannot mask a broken batch adapter');
     assert_eq(0, $llm->remaining(), 'one queued response per part, all consumed');
     foreach (['parts/header.html', 'parts/footer.html', 'parts/page-home--hero.html', 'parts/page-home--about.html'] as $rel) {
         assert_true($project->exists('theme/' . $rel), "{$rel} written");
