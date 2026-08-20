@@ -223,6 +223,37 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     assert_eq(
         1,
         preg_match(
+            '/\.wp-site-blocks \.wp-block-navigation__responsive-container\.is-menu-open\s*\{'
+                . '(?![^}]*z-index:)[^}]*\}/s',
+            $css,
+        ),
+        'overlay leaves Core z-index ownership intact',
+    );
+    assert_eq(
+        1,
+        preg_match(
+            '/\.wp-site-blocks \.wp-block-navigation__responsive-container\.is-menu-open\s+'
+                . '\.wp-block-navigation__responsive-dialog,\s*'
+                . '\.wp-site-blocks \.wp-block-navigation__responsive-container\.is-menu-open\s+'
+                . '\.wp-block-navigation__responsive-container-content\s*\{'
+                . '(?![^}]*margin:)[^}]*\}/s',
+            $css,
+        ),
+        'shared dialog geometry does not erase Core admin-bar margin',
+    );
+    assert_eq(
+        1,
+        preg_match(
+            '/\.wp-site-blocks \.wp-block-navigation__responsive-container\.is-menu-open\s+'
+                . '\.wp-block-navigation__responsive-container-content\s*\{'
+                . '(?=[^}]*margin:\s*0 !important;)[^}]*\}/s',
+            $css,
+        ),
+        'responsive content alone keeps the margin reset',
+    );
+    assert_eq(
+        1,
+        preg_match(
             '/\.wp-site-blocks \.wp-block-navigation__responsive-container\.is-menu-open\s+'
                 . '\.wp-block-navigation-item__content:not\(\.wp-element-button\)\s*\{'
                 . '(?=[^}]*color:\s*inherit !important;)(?![^}]*color:[^;}]*contrast)[^}]*\}/s',

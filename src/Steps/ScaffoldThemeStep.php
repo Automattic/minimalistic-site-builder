@@ -321,7 +321,6 @@ final class ScaffoldThemeStep implements Step
             color: var(--wp--preset--color--contrast) !important;
             background-color: var(--wp--preset--color--base) !important;
             background-image: none !important;
-            z-index: 10000;
         }
         .wp-site-blocks .wp-block-navigation__responsive-container.is-menu-open
             .wp-block-navigation__responsive-dialog,
@@ -329,13 +328,13 @@ final class ScaffoldThemeStep implements Step
             .wp-block-navigation__responsive-container-content {
             width: 100% !important;
             max-width: none !important;
-            margin: 0 !important;
             color: inherit !important;
             background-color: transparent !important;
             background-image: none !important;
         }
         .wp-site-blocks .wp-block-navigation__responsive-container.is-menu-open
             .wp-block-navigation__responsive-container-content {
+            margin: 0 !important;
             align-items: stretch !important;
             justify-content: flex-start !important;
             text-align: start !important;
