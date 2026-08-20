@@ -101,6 +101,19 @@ test('StepComposition default is the full blocks graph byte-for-byte', function 
     }
 });
 
+test('StepComposition blocksTail keeps the final direction fidelity audit', function () {
+    $d = composition_deps();
+    $c = StepComposition::blocksTail(
+        llm: $d['llm'],
+        renderer: $d['renderer'],
+        blockFixer: $d['blockFixer'],
+    );
+    $ids = array_map(static fn (Step $step): string => $step->id(), $c->steps());
+
+    assert_eq(['finalize-theme', 'direction-fidelity', 'validate-theme'], array_slice($ids, -3));
+    StepGraph::validate($c->steps(), $c->seeds());
+});
+
 test('SITE_BUILD_HTML_FIRST=1 routes the default composition to the HTML-first graph', function () {
     $previous = getenv('SITE_BUILD_HTML_FIRST');
     putenv('SITE_BUILD_HTML_FIRST=1');
