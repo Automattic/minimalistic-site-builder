@@ -75,24 +75,35 @@ function environment(options) {
             return { height, bottom };
         },
     } : null;
-    const navigationLinks = (options.navigationLinks || []).map((definition) => {
-        const item = {
-            classList: fakeClassList(definition.itemClasses || []),
-        };
-        const attributes = new Map([['href', definition.href]]);
-        if (definition.ariaCurrent) {
-            attributes.set('aria-current', definition.ariaCurrent);
-        }
-        const anchor = {
-            parentElement: item,
-            getAttribute(name) { return attributes.get(name) || null; },
-            setAttribute(name, value) { attributes.set(name, String(value)); },
-            closest(selector) {
-                return selector === '.wp-block-navigation-item' ? item : null;
+    const navigationBlockDefinitions = options.navigationBlocks
+        || [options.navigationLinks || []];
+    const navigationBlocks = navigationBlockDefinitions.map((definitions) => {
+        const links = definitions.map((definition) => {
+            const item = {
+                classList: fakeClassList(definition.itemClasses || []),
+            };
+            const attributes = new Map([['href', definition.href]]);
+            if (definition.ariaCurrent) {
+                attributes.set('aria-current', definition.ariaCurrent);
+            }
+            const anchor = {
+                parentElement: item,
+                getAttribute(name) { return attributes.get(name) || null; },
+                setAttribute(name, value) { attributes.set(name, String(value)); },
+                closest(selector) {
+                    return selector === '.wp-block-navigation-item' ? item : null;
+                },
+            };
+            return { anchor, item };
+        });
+        return {
+            links,
+            querySelectorAll(selector) {
+                return selector === 'a[href]' ? links.map((entry) => entry.anchor) : [];
             },
         };
-        return { anchor, item };
     });
+    const navigationLinks = navigationBlocks.flatMap((block) => block.links);
 
     class FakeResizeObserver {
         constructor(callback) {
@@ -124,10 +135,12 @@ function environment(options) {
             return header;
         },
         querySelectorAll(selector) {
-            if (selector !== '.wp-block-navigation a[href]') {
-                return [];
+            if (selector === '.wp-block-navigation') {
+                return navigationBlocks;
             }
-            return navigationLinks.map((entry) => entry.anchor);
+            return selector === '.wp-block-navigation a[href]'
+                ? navigationLinks.map((entry) => entry.anchor)
+                : [];
         },
         getElementById(id) {
             if (id !== 'wpadminbar') {
@@ -184,6 +197,7 @@ function environment(options) {
         windowListeners,
         documentListeners,
         resizeObservers,
+        navigationBlocks,
         navigationLinks,
         adminBarLookups() { return adminBarLookups; },
         rerun() {
@@ -258,6 +272,42 @@ function testCurrentNavigationFallback() {
     check(
         !serverOwned.navigationLinks[1].item.classList.contains('current-menu-item'),
         'fallback added a second current navigation item'
+    );
+}
+
+function testCurrentNavigationFallbackIsScopedPerBlock() {
+    const env = environment({
+        noHeader: true,
+        locationHref: 'https://example.test/about/',
+        navigationBlocks: [
+            [
+                { href: '/' },
+                { href: '/about/' },
+            ],
+            [
+                { href: '/', ariaCurrent: 'page', itemClasses: ['current-menu-item'] },
+                { href: '/about/' },
+            ],
+        ],
+    });
+
+    check(
+        env.navigationBlocks[0].links[1].anchor.getAttribute('aria-current') === 'page',
+        'testCurrentNavigationFallbackIsScopedPerBlock: unmarked header navigation did not receive runtime current state'
+    );
+    check(
+        env.navigationBlocks[0].links[1].item.classList.contains('current-menu-item'),
+        'testCurrentNavigationFallbackIsScopedPerBlock: unmarked header navigation item did not receive WordPress current class'
+    );
+    check(
+        env.navigationBlocks[1].links[0].anchor.getAttribute('aria-current') === 'page'
+            && env.navigationBlocks[1].links[0].item.classList.contains('current-menu-item'),
+        'testCurrentNavigationFallbackIsScopedPerBlock: WordPress-owned footer navigation state was changed'
+    );
+    check(
+        !env.navigationBlocks[1].links[1].anchor.getAttribute('aria-current')
+            && !env.navigationBlocks[1].links[1].item.classList.contains('current-menu-item'),
+        'testCurrentNavigationFallbackIsScopedPerBlock: fallback added a second current footer navigation item'
     );
 }
 
@@ -438,5 +488,6 @@ testHeadTimeExecution();
 testDoubleInitGuard();
 testFailOpen();
 testCurrentNavigationFallback();
+testCurrentNavigationFallbackIsScopedPerBlock();
 
 process.stdout.write('header state driver runtime harness passed\n');
