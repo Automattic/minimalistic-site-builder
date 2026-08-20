@@ -121,7 +121,7 @@ final class ConceptSeeds
             $pool[] = $seed;
         }
 
-        if ($pool === [] || count($pool) < 2) {
+        if (count($pool) < 2) {
             // Nothing distinct enough to narrow to. Keep the round whole and
             // say so; see the guard note above.
             if ($dropped !== []) {
@@ -137,10 +137,10 @@ final class ConceptSeeds
 
         foreach ($dropped as $drop) {
             $warnings[] = sprintf(
-                'design-direction: concept seed "%s" repeats "%s" (%s) — one idea wearing two names; '
+                'design-direction: concept seed %s repeats %s (%s) — one idea wearing two names; '
                     . 'dropped from the pick; disposition dropped',
-                self::shortTitle($drop['seed']['text']),
-                self::shortTitle($drop['twin']['text']),
+                Warnings::value(self::shortTitle($drop['seed']['text'])),
+                Warnings::value(self::shortTitle($drop['twin']['text'])),
                 $drop['key'],
             );
         }
