@@ -36,7 +36,9 @@ function make_integration_builder(FakeLlm $llm, string $outputRoot): SiteBuilder
 function blocks_integration_pipeline(SiteBuilder $builder): \Automattic\SiteBuild\BuildPipeline
 {
     $previous = getenv('SITE_BUILD_HTML_FIRST');
-    putenv('SITE_BUILD_HTML_FIRST');
+    // Env::get falls back to the .env map bootstrap.php loads, so clearing the
+    // process env alone leaves a developer's SITE_BUILD_HTML_FIRST=1 in force.
+    putenv('SITE_BUILD_HTML_FIRST=0');
     try {
         return $builder->pipeline();
     } finally {
