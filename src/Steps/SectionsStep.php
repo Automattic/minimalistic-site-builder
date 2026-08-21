@@ -707,7 +707,7 @@ final class SectionsStep implements Step
      * permit either path to lie about the one that actually authors sections.
      *
      * @param array<string,array{prompt:string,model?:string,temperature?:float,cached_prefixes?:list<string>}> $requests
-     * @return list<string> context-loss warnings, empty when the host is conformant or unmeasurable
+     * @return list<string> context-loss and shared-layer-divergence warnings, empty when the host is conformant and the batch agrees, or when the probe failed
      */
     private function warmMarkupCache(array $requests): array
     {
@@ -735,9 +735,13 @@ final class SectionsStep implements Step
             return [];
         }
 
+        foreach ($diverged as $warning) {
+            Narrator::write("    WARNING: {$warning}\n");
+        }
+
         $after = $this->usageSnapshot();
         if ($before === null || $after === null) {
-            return [];
+            return $diverged;
         }
         $observed = self::billedInputDelta($before, $after);
         $warning = self::contextLossWarning($request['cached_prefixes'], $observed);
@@ -783,7 +787,6 @@ final class SectionsStep implements Step
                 strlen($layer),
                 strlen($primed),
             );
-            Narrator::write("    WARNING: {$warnings[count($warnings) - 1]}\n");
         }
         return $warnings;
     }

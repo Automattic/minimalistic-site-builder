@@ -614,7 +614,7 @@ final class LlmConformance
      * It reads the layered batch request, not a single complete(). Sections are
      * authored through completeBatch, and a host may build that body separately;
      * measuring complete() would let the path that actually runs lie freely.
-     * SectionsStep::warmSectionCache() probes the same seam for the same reason.
+     * SectionsStep::warmMarkupCache() probes the same seam for the same reason.
      *
      * @param array{reply:?string,error:?string,billed:?int,expected:int} $probe
      */
@@ -760,7 +760,7 @@ final class LlmConformance
      * That probe is what warms the section cache AND what raises the runtime
      * warning when a host discards the layers — the guard this suite is the CI
      * half of. A host that refuses the shape (or regenerates instead of
-     * accepting an output-limited empty answer) makes warmSectionCache() throw,
+     * accepting an output-limited empty answer) makes warmMarkupCache() throw,
      * and it catches, prints "continuing uncached" and returns no warning. The
      * protection would switch itself off silently, which is the failure mode
      * this whole issue is about, so the contract clause it rests on gets its
