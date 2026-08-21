@@ -25,7 +25,7 @@ Return one complete HTML document and nothing else. Do not wrap it in Markdown f
 
 - Include `<!doctype html>`, one `<html>`, one `<head>`, and one `<body>`.
 - Body must contain exactly two direct elements in this order: one `<header>`, then one `<main>`. Do not place visitor-facing text directly in body.
-- `<header>` must contain exactly one `<nav>`. Use text or CSS for identity; do not add a logo image.
+- `<header>` must contain exactly one `<nav>`. Use text or CSS for identity; do not add a logo image. The identity text is the home link — do NOT put a Home item (or the front page's title) in `<nav>`. Nav lists SITE PAGES except the front page.
 - The header renders on EVERY page, so each link must resolve everywhere: page links use the SITE PAGES paths verbatim, and a link to a homepage section is root-relative — `href="/#anchor"`, NEVER a bare `href="#anchor"`, which is dead on every page except the homepage itself. No `href="#"` placeholders. External links use only an exact URL present in the SITE SPEC; otherwise omit the link or render its label as plain text.
 - `<main>` must contain exactly one direct element: `<section id="hero">`. Do not place visitor-facing text directly in main.
 - Hero is whole page body and whole first fold. Emit no content sections, feature grids, testimonials, galleries, pricing, articles, calls-to-action below hero, or other body siblings.

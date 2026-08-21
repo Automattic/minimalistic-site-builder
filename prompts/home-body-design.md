@@ -10,7 +10,7 @@ You are a senior web designer and front-end author. Design the finished homepage
 
 ## Site pages
 
-SITE PAGES (the whole site — shared footer navigation uses these exact paths):
+SITE PAGES (the whole site — shared footer navigation uses these exact paths, except the front page: do NOT put a Home item in the footer nav; the site name already links home):
 {{site_pages}}
 
 ## Established site CSS
@@ -37,7 +37,7 @@ Return one `<main>` fragment for content below the fold followed immediately by 
 - Do not add a second `h1`; the design preview owns the homepage heading.
 - Prefer established site classes from the site CSS and minimize new page-specific classes. Do not emit a `<style>` element.
 - Inside `<main>`, when a button or link leads to another page of THIS site, use that page's path from SITE PAGES verbatim (e.g. `href="/menu/"`) — never a path that isn't in the list. A deep link to another page includes that owning page's path (e.g. `href="/page/#anchor"`). A bare `href="#anchor"` is valid only when that exact section ID exists in the homepage `<main>`. Do not link the page to itself. An external link uses an exact URL supplied by the SITE SPEC; when none was supplied, omit the link or render its label as plain text. NEVER emit `href="#"`.
-- The footer renders on EVERY page, so each link must resolve everywhere: page links use the SITE PAGES paths verbatim, and a link to a homepage section is root-relative — `href="/#anchor"`, NEVER a bare `href="#anchor"`, which is dead on every page except the homepage itself. No `href="#"` placeholders. External links use only an exact URL present in the SITE SPEC; otherwise omit the link or render its label as plain text.
+- The footer renders on EVERY page, so each link must resolve everywhere: page links use the SITE PAGES paths verbatim except the front page (the site name is the home link — do NOT put a Home item in footer `<nav>`). A link to a homepage section is root-relative — `href="/#anchor"`, NEVER a bare `href="#anchor"`, which is dead on every page except the homepage itself. No `href="#"` placeholders. External links use only an exact URL present in the SITE SPEC; otherwise omit the link or render its label as plain text.
 
 ## Supported HTML slice
 

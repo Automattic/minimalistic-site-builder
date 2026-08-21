@@ -78,14 +78,17 @@ final class SectionsStep implements Step
     }
 
     /** {{nav_rule}} for header.md when the site has inner pages to list. */
-    private const NAV_RULE_MULTI = '- Navigation default: the `wp:navigation` should contain `<!-- wp:page-list /-->`'
-        . ' so it auto-reflects the site\'s pages — do NOT hand-author `wp:navigation-link` entries unless a curated'
-        . ' menu is clearly wanted (split-nav is the exception: it requires hand-authored links).';
+    private const NAV_RULE_MULTI = '- Navigation: NEVER include the homepage in `wp:navigation`. `wp:site-title` and'
+        . ' `wp:site-logo` already link home — a Home item is redundant. Do NOT use `<!-- wp:page-list /-->`'
+        . ' (it lists every page, including Home) and do NOT emit `wp:home-link`. Hand-author'
+        . ' `wp:navigation-link` entries for SITE PAGES except the front page (split-nav splits those'
+        . ' same inner pages across the two navs).';
 
     /** {{nav_rule}} when the site is the homepage alone — a page-list would render one self-referential "Home" link. */
     private const NAV_RULE_SINGLE = '- Navigation: this site is ONE page, so a page-list would render a single'
-        . ' self-referential "Home" link — do NOT use `<!-- wp:page-list /-->`, and do NOT link to the page itself.'
-        . ' Either omit navigation entirely (the wordmark carries the header) or hand-author a small `wp:navigation`'
+        . ' self-referential "Home" link — do NOT use `<!-- wp:page-list /-->`, do NOT emit `wp:home-link`,'
+        . ' and do NOT link to the page itself. The wordmark (`wp:site-title` / `wp:site-logo`) already links home.'
+        . ' Either omit navigation entirely or hand-author a small `wp:navigation`'
         . ' of `wp:navigation-link` items targeting section anchors from the HOMEPAGE OUTLINE (each outline line ends'
         . ' with its [#anchor]; a link\'s "url" is that anchor, e.g. href="#menu-highlights").';
 

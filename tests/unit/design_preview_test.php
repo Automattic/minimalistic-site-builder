@@ -273,6 +273,8 @@ test('G4 design-preview renders a labelled SITE PAGES list and shared-header lin
     assert_contains('- "Home" — / (front page): Welcome visitors', $prompt);
     assert_contains('- "Classes" — /classes/: Explain bread classes', $prompt);
     assert_contains('page links use the SITE PAGES paths verbatim', $prompt);
+    assert_contains('do NOT put a Home item', $prompt);
+    assert_contains('Nav lists SITE PAGES except the front page', $prompt);
     assert_contains('href="/#anchor"', $prompt);
     assert_contains('NEVER a bare `href="#anchor"`', $prompt);
     assert_contains('No `href="#"` placeholders', $prompt);

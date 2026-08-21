@@ -1041,12 +1041,13 @@ test('fallback chrome relies on the template-part landmark instead of nesting on
     );
 });
 
-test('chrome nav rules follow the page count: anchors for one page, page-list for several', function () {
+test('chrome nav rules follow the page count: anchors for one page, inner pages for several', function () {
     [$project, $tmp] = sections_fixture(); // homepage only
     $renderer = new PromptRenderer(repo_path('prompts'));
     $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
 
     assert_contains('do NOT use `<!-- wp:page-list /-->`', $reqs['header']['prompt']);
+    assert_contains('already links home', $reqs['header']['prompt']);
     assert_contains('href="#menu-highlights"', $reqs['header']['prompt']);
     assert_contains('This site is ONE page: NEVER use `wp:page-list`', $reqs['footer']['prompt']);
     assert_contains('root-relative `/#anchor`', $reqs['footer']['prompt']);
@@ -1063,9 +1064,12 @@ test('chrome nav rules follow the page count: anchors for one page, page-list fo
     ]]);
     $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
 
-    assert_contains('should contain `<!-- wp:page-list /-->`', $reqs['header']['prompt']);
-    assert_true(!str_contains($reqs['header']['prompt'], 'do NOT use `<!-- wp:page-list /-->`'), 'multi-page header keeps the page-list default');
-    assert_contains('`wp:navigation` that contains `<!-- wp:page-list /-->`', $reqs['footer']['prompt']);
+    assert_contains('NEVER include the homepage in `wp:navigation`', $reqs['header']['prompt']);
+    assert_contains('Do NOT use `<!-- wp:page-list /-->`', $reqs['header']['prompt']);
+    assert_contains('SITE PAGES except the front page', $reqs['header']['prompt']);
+    assert_contains('SITE PAGES except the front page', $reqs['footer']['prompt']);
+    assert_contains('NEVER include Home', $reqs['footer']['prompt']);
+    assert_contains('never a bare `wp:page-list`', $reqs['footer']['prompt']);
     assert_true(!str_contains($reqs['footer']['prompt'], 'This site is ONE page'), 'multi-page footer may list pages');
     exec('rm -rf ' . escapeshellarg($tmp));
 });

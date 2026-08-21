@@ -54,7 +54,10 @@ final class FooterComposition
 
     /** Footer utility/action behavior when sibling pages offer useful destinations. */
     private const NAV_RULE_MULTI = '- This site has multiple pages. Site-wide utility navigation is a '
-        . '`wp:navigation` that contains `<!-- wp:page-list /-->`, never a bare `wp:page-list`. A footer button may use one purposeful canonical SITE PAGES destination — '
+        . '`wp:navigation` of hand-authored `wp:navigation-link` entries for SITE PAGES except the front page. '
+        . 'NEVER include Home — `wp:site-title` already links home. Do NOT use `<!-- wp:page-list /-->` '
+        . '(it lists every page, including Home), do NOT emit `wp:home-link`, and never a bare `wp:page-list`. '
+        . 'A footer button may use one purposeful canonical SITE PAGES destination — '
         . 'the page holding what this site actually asks visitors to do next — '
         . 'but never a generic Home/back action merely to fill the design; '
         . 'a spec-backed mailto: action is also valid.';
