@@ -58,15 +58,13 @@ use Automattic\SiteBuild\TransformArtifacts;
  * The model's CSS is validated (validate()) before writing: every selector must
  * be scoped under a documented class, colors must come from theme preset custom
  * properties, and only @media at-rules are allowed. When validation fails on
- * declaration-level offences only (a raw-color shadow, a --motion-* override,
- * or a shape-owned corner radius), the offending declarations are dropped
- * (dropOffendingDeclarations()) and the rest of the appendix ships — one lost
- * decoration beats every used utility losing its CSS. Structural problems
- * (unbalanced braces, disallowed at-rules, unscoped selectors) still reject the
- * whole appendix: it is logged and skipped rather than failing the build — a
- * utility class without its CSS still renders as a plain block, so degrading
- * (loudly) beats losing a finished build at its final step over decorative
- * styling.
+ * an unscoped style rule or a declaration-level offence (a raw-color shadow, a
+ * --motion-* override, or a shape-owned corner radius), only that rule or
+ * declaration is dropped and the rest of the appendix ships. Document-level
+ * defects and any residual problem still reject the whole appendix: it is
+ * logged and skipped rather than failing the build — a utility class without
+ * its CSS still renders as a plain block, so degrading loudly beats losing a
+ * finished build at its final step over decorative styling.
  */
 final class PageStylesStep implements Step
 {
@@ -355,15 +353,23 @@ CSS;
 
         $problems = self::validate($css);
         if ($problems !== []) {
-            // Before giving up on the whole appendix, drop the offending
-            // declarations individually: a raw-color shadow or a --motion-*
-            // override is one bad line, while a skipped appendix costs every
-            // used utility its CSS (masonry renders as a stack, overlaps
-            // disappear). Structural problems — unbalanced braces, disallowed
-            // at-rules, unscoped selectors — survive the salvage and still
-            // reject everything below.
-            [$salvaged, $dropped] = self::dropOffendingDeclarations($css);
-            if ($dropped === [] || self::validate($salvaged) !== []) {
+            // Braces and the size budget describe the document, not one rule.
+            // They must reject before any local repair could disguise them.
+            $documentProblems = array_values(array_filter(
+                $problems,
+                static fn (string $problem): bool => $problem === 'unbalanced braces'
+                    || str_starts_with($problem, 'more than '),
+            ));
+            $salvaged = $css;
+            $droppedRules = [];
+            $droppedDeclarations = [];
+            if ($documentProblems === []) {
+                [$salvaged, $droppedRules] = self::dropUnscopedRules($salvaged);
+                [$salvaged, $droppedDeclarations] = self::dropOffendingDeclarations($salvaged);
+            }
+            $remainingProblems = self::validate($salvaged);
+            $dropCount = count($droppedRules) + count($droppedDeclarations);
+            if ($documentProblems !== [] || trim($salvaged) === '' || $remainingProblems !== []) {
                 file_put_contents(
                     $project->logPath(self::LOG_FILE),
                     "REJECTED CSS:\n{$css}\n\nPROBLEMS:\n- " . implode("\n- ", $problems) . "\n"
@@ -376,22 +382,25 @@ CSS;
                     implode(', ', $used),
                     self::LOG_FILE,
                 )]);
+                self::addDropWarnings($project, $droppedRules, $droppedDeclarations);
                 return;
             }
             file_put_contents(
                 $project->logPath(self::LOG_FILE),
-                "SALVAGED CSS (offending declarations dropped):\n{$salvaged}\n\nDROPPED:\n- "
-                . implode("\n- ", $dropped) . "\n"
+                "SALVAGED CSS (offending rules/declarations dropped):\n{$salvaged}\n\nDROPPED:\n- "
+                . implode("\n- ", [...$droppedRules, ...$droppedDeclarations]) . "\n"
             );
-            echo '  page-styles: dropped ' . count($dropped)
-                . ' offending declaration(s), kept the rest — see logs/' . self::LOG_FILE . "\n";
-            $project->addWarnings($this->id(), array_map(
-                static fn (string $declaration): string =>
-                    "theme/style.css page-styles appendix: authored declaration `{$declaration}`; "
-                    . 'delivered removed; disposition dropped offending CSS declaration; see logs/'
-                    . self::LOG_FILE,
-                $dropped,
-            ));
+            echo '  page-styles: dropped ' . $dropCount
+                . ' offending rule(s)/declaration(s), kept the rest — see logs/' . self::LOG_FILE . "\n";
+            // Keep this summary string: BuildReport and the design-quality
+            // loop grep for it. Actionable per-drop detail follows it.
+            $project->addWarnings($this->id(), [sprintf(
+                'model CSS appendix rejected (%s); layout utility class(es) %s ship without their CSS — see logs/%s',
+                $dropCount . ' rule(s)/declaration(s) dropped',
+                implode(', ', $used),
+                self::LOG_FILE,
+            )]);
+            self::addDropWarnings($project, $droppedRules, $droppedDeclarations);
             $css = $salvaged;
         }
         $project->writeText(
@@ -4084,17 +4093,172 @@ CSS;
         }
 
         // Every style rule's selector must be scoped under a documented class.
-        $allowed = implode('|', array_map(
-            static fn (string $c): string => preg_quote($c, '/'),
-            array_keys(self::CLASSES)
-        ));
-        $isScoped = static fn (string $selector): bool =>
-            preg_match('/^\.(?:' . $allowed . ')(?![\w-])/', $selector) === 1;
-        foreach (CssChecks::unscopedSelectors($stripped, $isScoped) as $selector) {
+        foreach (self::unscopedSelectors($stripped) as $selector) {
             $problems[] = "selector not scoped under a documented utility class: {$selector}";
         }
 
         return $problems;
+    }
+
+    /**
+     * Remove unscoped style rules while retaining valid siblings, including
+     * siblings nested in @media. Other at-rules pass through so validate()
+     * still rejects unsupported document structure rather than broadening this
+     * targeted repair.
+     *
+     * @return array{0:string,1:list<string>} [salvaged CSS, dropped selectors]
+     */
+    private static function dropUnscopedRules(string $css): array
+    {
+        $dropped = [];
+        $error = null;
+        $salvaged = self::filterScopedRuleList($css, $dropped, $error);
+        return $salvaged === null ? [$css, []] : [$salvaged, $dropped];
+    }
+
+    /**
+     * Return unscoped selector branches without splitting commas inside
+     * functional pseudo-classes. Malformed CSS falls back to the legacy check
+     * so scanner failure cannot weaken validation.
+     *
+     * @return list<string>
+     */
+    private static function unscopedSelectors(string $css): array
+    {
+        $unscoped = [];
+        $error = null;
+        if (self::filterScopedRuleList($css, $unscoped, $error) === null) {
+            return CssChecks::unscopedSelectors($css, self::selectorIsScoped(...));
+        }
+        return $unscoped;
+    }
+
+    /**
+     * @param list<string> $dropped
+     */
+    private static function filterScopedRuleList(
+        string $css,
+        array &$dropped,
+        ?string &$error,
+    ): ?string {
+        $length = strlen($css);
+        $offset = 0;
+        $statementStart = 0;
+        $out = '';
+        $state = CssSyntaxScanner::state();
+
+        while ($offset < $length) {
+            $topLevel = CssSyntaxScanner::isTopLevel($state);
+            $byte = $css[$offset];
+            if ($topLevel && $byte === '}') {
+                $error = "unexpected closing brace at byte {$offset}";
+                return null;
+            }
+            if ($topLevel && $byte === ';') {
+                $statement = substr($css, $statementStart, $offset + 1 - $statementStart);
+                if (!self::isTriviaOrAtRuleStatement($statement)) {
+                    $error = "unexpected top-level statement at byte {$statementStart}";
+                    return null;
+                }
+                $out .= $statement;
+                $statementStart = ++$offset;
+                $state = CssSyntaxScanner::state();
+                continue;
+            }
+            if ($topLevel && $byte === '{') {
+                $close = self::matchingBrace($css, $offset, $error);
+                if ($close === null) {
+                    return null;
+                }
+                $prelude = substr($css, $statementStart, $offset - $statementStart);
+                $body = substr($css, $offset + 1, $close - $offset - 1);
+                $atRule = self::atRuleName($prelude);
+                if ($atRule === 'media') {
+                    $body = self::filterScopedRuleList($body, $dropped, $error);
+                    if ($body === null) {
+                        return null;
+                    }
+                    if (!self::isCssTrivia($body)) {
+                        $out .= $prelude . '{' . $body . '}';
+                    }
+                } elseif ($atRule !== null) {
+                    $out .= $prelude . '{' . $body . '}';
+                } else {
+                    $branches = self::splitSelectorList($prelude, $error);
+                    if ($branches === null) {
+                        return null;
+                    }
+                    $unscoped = [];
+                    foreach ($branches as $branch) {
+                        $selector = trim((string) preg_replace('/\/\*.*?\*\//s', '', $branch));
+                        if (!self::selectorIsScoped($selector)) {
+                            $unscoped[] = $selector;
+                        }
+                    }
+                    if ($unscoped === []) {
+                        $out .= $prelude . '{' . $body . '}';
+                    } else {
+                        array_push($dropped, ...$unscoped);
+                    }
+                }
+                $offset = $close + 1;
+                $statementStart = $offset;
+                $state = CssSyntaxScanner::state();
+                continue;
+            }
+
+            $next = CssSyntaxScanner::consume($css, $offset, $state);
+            if ($next === null) {
+                $error = "invalid CSS escape or delimiter at byte {$offset}";
+                return null;
+            }
+            $offset = $next;
+        }
+
+        if (!CssSyntaxScanner::isComplete($state)) {
+            $error = 'unterminated CSS string, comment, or function';
+            return null;
+        }
+        $tail = substr($css, $statementStart);
+        if (!self::isCssTrivia($tail)) {
+            $error = "unterminated CSS rule at byte {$statementStart}";
+            return null;
+        }
+        return $out . $tail;
+    }
+
+    private static function selectorIsScoped(string $selector): bool
+    {
+        $allowed = implode('|', array_map(
+            static fn (string $class): string => preg_quote($class, '/'),
+            array_keys(self::CLASSES),
+        ));
+        return preg_match('/^\.(?:' . $allowed . ')(?![\w-])/', $selector) === 1;
+    }
+
+    /**
+     * @param list<string> $rules
+     * @param list<string> $declarations
+     */
+    private static function addDropWarnings(
+        Project $project,
+        array $rules,
+        array $declarations,
+    ): void {
+        foreach ($rules as $selector) {
+            $project->addWarnings('page-styles', [
+                "theme/style.css page-styles appendix: authored rule selector `{$selector}`; "
+                . 'delivered removed; disposition dropped unscoped CSS rule; defect selector not scoped '
+                . 'under a documented utility class; see logs/' . self::LOG_FILE,
+            ]);
+        }
+        $project->addWarnings('page-styles', array_map(
+            static fn (string $declaration): string =>
+                "theme/style.css page-styles appendix: authored declaration `{$declaration}`; "
+                . 'delivered removed; disposition dropped offending CSS declaration; see logs/'
+                . self::LOG_FILE,
+            $declarations,
+        ));
     }
 
     /**
