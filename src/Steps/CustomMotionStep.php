@@ -38,9 +38,10 @@ use Automattic\SiteBuild\Warnings;
  * `from`/`0%` keyframe step, so an entrance can start invisible but nothing
  * can END hidden), no resource-loading value forms (url(), image-set(), …) or
  * @import/@font-face, and the whole block is capped. Shape-owned radius
- * declarations are removed individually before validation so the remaining
- * requested motion can still ship; every removal is recorded durably.
- * Rejected CSS is logged and skipped — the build never fails over decoration.
+ * declarations and profile-owned `--motion-*` custom properties are removed
+ * individually before validation so the remaining requested motion can still
+ * ship; every removal is recorded durably. Rejected CSS is logged and skipped
+ * — the build never fails over decoration.
  */
 final class CustomMotionStep implements Step
 {
@@ -113,30 +114,46 @@ final class CustomMotionStep implements Step
             $this->llm->complete($rendered, $this->withOptions(['log_label' => $this->id()]))
         );
 
-        // Corner language is a closed build-owned commitment. Keep the
-        // requested motion whenever possible by removing only offending
-        // radius declarations, including declarations inside keyframes,
-        // before applying the rest of the CSS policy below.
+        // Corner language and the committed motion profile are closed
+        // build-owned commitments. Keep the requested animation whenever
+        // possible by removing only those declarations, including inside
+        // keyframes, before applying the rest of the CSS policy below.
         [$css, $droppedShapeDeclarations] = self::dropShapeOwnedDeclarations($css, $shapeTagged);
-        if ($droppedShapeDeclarations !== []) {
+        [$css, $droppedMotionDeclarations] = self::dropProfileOwnedMotionDeclarations($css);
+        foreach (
+            [
+                'shape-owned corner' => $droppedShapeDeclarations,
+                'profile-owned motion custom property' => $droppedMotionDeclarations,
+            ] as $kind => $dropped
+        ) {
+            if ($dropped === []) {
+                continue;
+            }
             $project->addWarnings($this->id(), array_map(
                 static fn (string $declaration): string =>
                     "file='theme/style.css'; block='generated custom-motion CSS'; authored="
                     . Warnings::value($declaration)
-                    . '; delivered=removed; disposition=dropped a shape-owned corner declaration '
+                    . "; delivered=removed; disposition=dropped a {$kind} declaration "
                     . 'before validating and appending the remaining motion CSS — see logs/' . self::LOG_FILE,
-                $droppedShapeDeclarations,
+                $dropped,
             ));
         }
         $problems = self::validate($css, $shapeTagged);
+        $preValidationDropLog = implode('', [
+            $droppedShapeDeclarations === []
+                ? ''
+                : "\nSHAPE-OWNED DECLARATIONS REMOVED BEFORE VALIDATION:\n- "
+                    . implode("\n- ", $droppedShapeDeclarations) . "\n",
+            $droppedMotionDeclarations === []
+                ? ''
+                : "\nPROFILE-OWNED MOTION DECLARATIONS REMOVED BEFORE VALIDATION:\n- "
+                    . implode("\n- ", $droppedMotionDeclarations) . "\n",
+        ]);
         if ($problems !== []) {
             file_put_contents(
                 $project->logPath(self::LOG_FILE),
                 "REJECTED CSS:\n{$css}\n"
-                . ($droppedShapeDeclarations === []
-                    ? ''
-                    : "\nSHAPE-OWNED DECLARATIONS REMOVED BEFORE VALIDATION:\n- "
-                        . implode("\n- ", $droppedShapeDeclarations) . "\n")
+                . $preValidationDropLog
                 . "\nPROBLEMS:\n- " . implode("\n- ", $problems) . "\n"
             );
             echo '  custom-motion: CSS rejected (' . count($problems)
@@ -150,15 +167,15 @@ final class CustomMotionStep implements Step
             return;
         }
 
-        if ($droppedShapeDeclarations !== []) {
+        $droppedCount = count($droppedShapeDeclarations) + count($droppedMotionDeclarations);
+        if ($droppedCount > 0) {
             file_put_contents(
                 $project->logPath(self::LOG_FILE),
-                "SALVAGED CSS (shape-owned declarations removed):\n{$css}\n\nDROPPED:\n- "
-                . implode("\n- ", $droppedShapeDeclarations) . "\n"
+                "SALVAGED CSS (profile-owned declarations removed):\n{$css}\n"
+                . $preValidationDropLog
             );
-            echo '  custom-motion: dropped ' . count($droppedShapeDeclarations)
-                . ' shape-owned declaration(s), kept the remaining motion — see logs/'
-                . self::LOG_FILE . "\n";
+            echo "  custom-motion: dropped {$droppedCount} profile-owned declaration(s), "
+                . 'kept the remaining motion — see logs/' . self::LOG_FILE . "\n";
         }
 
         // The reduced-motion wrapper is added HERE, deterministically, so a
@@ -267,6 +284,12 @@ final class CustomMotionStep implements Step
         if ($resource !== null) {
             $problems[] = $resource;
         }
+        foreach (CssChecks::scanDeclarations($stripped) as $declaration) {
+            if (str_starts_with(strtolower($declaration['property']), '--motion-')) {
+                $problems[] = 'motion custom properties are profile-owned and cannot be overridden: '
+                    . trim($declaration['raw']);
+            }
+        }
         foreach (CssChecks::hiddenContentProblems($stripped) as $problem) {
             $problems[] = $problem;
         }
@@ -349,6 +372,27 @@ final class CustomMotionStep implements Step
         [$repaired, $dropped] = CssChecks::dropDeclarations(
             $css,
             static fn (array $declaration): bool => isset($ownedStarts[$declaration['start']]),
+        );
+        return [
+            $repaired,
+            array_map(static fn (array $declaration): string => trim($declaration['raw']), $dropped),
+        ];
+    }
+
+    /**
+     * Remove only `--motion-*` custom properties. The committed profile owns
+     * those values on `:root`; a local override retunes the element and
+     * everything under it. Selectors, at-rules, and every other declaration
+     * survive for the normal validator to assess.
+     *
+     * @return array{0:string,1:list<string>} repaired CSS and dropped declarations
+     */
+    public static function dropProfileOwnedMotionDeclarations(string $css): array
+    {
+        [$repaired, $dropped] = CssChecks::dropDeclarations(
+            $css,
+            static fn (array $declaration): bool =>
+                str_starts_with(strtolower($declaration['property']), '--motion-'),
         );
         return [
             $repaired,
