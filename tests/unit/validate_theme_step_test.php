@@ -108,6 +108,10 @@ test('validate-theme declaration rejects an incomplete theme graph', function ()
         'theme/parts/*',
         'theme/templates/*',
         'plugin/pages/*',
+        // The direction fidelity walk reads the promises and the pages it
+        // measures them against.
+        'plugin/pages.json',
+        'designDirection.json',
     ], (new ValidateThemeStep())->declaration()->reads);
 
     // The HTML-first linter dry-runs a normalization that consults the design's
