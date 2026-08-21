@@ -1195,10 +1195,7 @@ final class TransformSiteStep implements Step
                         break;
                     }
                 }
-                $footerArchetype = SectionsStep::footerArchetype(
-                    $project->readText('siteSpec.json'),
-                    DesignDirectionStep::readFor($project),
-                );
+                $footerArchetype = FooterComposition::archetypeForProject($project);
                 $input += [
                     'final_section_brief' => SectionsStep::finalSectionBrief($frontSections),
                     'composition_archetype' => $footerArchetype,

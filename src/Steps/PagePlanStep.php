@@ -25,11 +25,12 @@ use Automattic\SiteBuild\StepDeclaration;
  * ConcurrentGroup).
  *
  * Input:  meta.json (user prompt) + siteSpec.json (with its `pages` tree).
- * Output: pages.json — { "pages": [ { slug, title, path, front, parent,
+ * Output: pages.json — { "footer_archetype": "<catalog id>", "pages": [ { slug, title, path, front, parent,
  *         menu_order, purpose, sections: [ { slug, title, role, type, purpose,
  *         content_notes, layout_archetype, background, vertical_density,
  *         handoff, primary_action } ] } ] }, a FLAT list in display order, parents before
- *         children; warnings.json records every generated value removed or
+ *         children; footer_archetype is the pick hashed at plan time so later
+ *         direction rewrites cannot retarget the footer; warnings.json records every generated value removed or
  *         replaced by a deterministic fallback.
  *
  * Each page's plan enriches the spec's purpose into concrete section briefs,
@@ -596,14 +597,24 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         // close on its surface. The plan prompt says so, but the page requests
         // fan out concurrently and the model still lands on it often enough
         // that the seam merges — this is the deterministic floor.
+        // Hash the direction as it stands NOW, then persist the pick so later
+        // steps (reconcile-palette rewrites those hexes) cannot retarget the
+        // footer recipe by rehashing mutated prose (BIGR-850).
+        $footerArchetype = FooterComposition::archetypeFor(
+            $project->readText('siteSpec.json'),
+            DesignDirectionStep::readFor($project),
+        );
         $out = self::withClosingBandOffFooterSurface(
             $out,
-            FooterComposition::surface(FooterComposition::archetypeForProject($project)),
+            FooterComposition::surface($footerArchetype),
             $warnings,
         );
 
         $project->addWarnings($this->id(), $warnings);
-        $project->writeJson('pages.json', ['pages' => $out]);
+        $project->writeJson('pages.json', [
+            'pages' => $out,
+            'footer_archetype' => $footerArchetype,
+        ]);
     }
 
     /**

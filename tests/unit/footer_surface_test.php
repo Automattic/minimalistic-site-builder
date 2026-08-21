@@ -86,6 +86,34 @@ test('footer surface rejects an unknown archetype', function () {
     assert_true($error instanceof InvalidArgumentException, get_class($error));
 });
 
+test('a persisted footer_archetype survives later design-direction rewrites', function () {
+    with_project('builder_footer_persist_', function ($project): void {
+        $project->writeText('siteSpec.json', '{"name":"Seed"}');
+        seed_test_design_direction($project);
+        $hashed = FooterComposition::archetypeFor(
+            $project->readText('siteSpec.json'),
+            \Automattic\SiteBuild\Steps\DesignDirectionStep::readFor($project),
+        );
+        $pinned = $hashed === 'split-ledger' ? 'typographic-billboard' : 'split-ledger';
+        $project->writeJson('pages.json', [
+            'pages' => [footer_seam_page('home', ['image', 'contrast'])],
+            'footer_archetype' => $pinned,
+        ]);
+
+        assert_eq($pinned, FooterComposition::archetypeForProject($project));
+
+        $direction = $project->readJson('designDirection.json');
+        $direction['description'] .= ' Retinted to #ABCDEF so a rehash would move.';
+        $project->writeJson('designDirection.json', $direction);
+
+        assert_eq(
+            $pinned,
+            FooterComposition::archetypeForProject($project),
+            'sections must keep the plan-time footer after direction prose changes',
+        );
+    });
+});
+
 test('the footer archetype is decided from the site, not from any page plan', function () {
     // The surface has to be known before page-plan fires so every page can be
     // told what to avoid; seeding on planned sections made that impossible.
