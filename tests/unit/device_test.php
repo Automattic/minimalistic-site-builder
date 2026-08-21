@@ -29,7 +29,13 @@ test('Device kitCss is class-gated and absent for none', function () {
     assert_contains('content: "01"', $numeral);
     assert_true(!str_contains($numeral, 'counter-increment'), 'no inert counter machinery');
     assert_true(!str_contains($numeral, 'body {'), 'the kit never restyles body');
-    assert_contains('@media (max-width: 480px)', $numeral, 'the numeral has a narrow-width escape');
+    // Mobile-first: the gutter is only added above the breakpoint, so the kit
+    // never overrides the section's own inset on a narrow screen.
+    assert_contains('@media (min-width: 481px)', $numeral, 'the gutter is gated to wide screens');
+    assert_true(
+        strpos($numeral, 'padding-left') > strpos($numeral, '@media (min-width: 481px)'),
+        'padding-left lives inside the wide-screen block, never at base width',
+    );
 
     $stamp = Device::kitCss('stamp');
     assert_true(is_string($stamp));
