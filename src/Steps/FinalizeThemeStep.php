@@ -112,10 +112,10 @@ final class FinalizeThemeStep implements Step
         self::pruneMotionKit($project, $motion);
         self::pruneHeaderKit($project, $header);
         $shape = DesignDirectionStep::shapeFor($project);
-        $overlays = [];
-        if (self::writeOverlayKit($project, self::shapeKit(), ShapeMarkup::kitCss($shape))) {
-            $overlays[] = self::shapeKit();
-        }
+        // Per kit, not `$overlays !== []`: the catalog-wide predicate would
+        // report shape on a second kit's behalf as soon as one joins the list.
+        $shapeShipped = self::writeOverlayKit($project, self::shapeKit(), ShapeMarkup::kitCss($shape));
+        $overlays = $shapeShipped ? [self::shapeKit()] : [];
         if ($headerWarnings !== []) {
             $project->addWarnings($this->id(), $headerWarnings);
         }
@@ -129,27 +129,16 @@ final class FinalizeThemeStep implements Step
         Narrator::write($header
             ? "  header: '{$headerBehavior}' state kit enqueued\n"
             : "  header: static (kit not shipped)\n");
-        Narrator::write($overlays !== []
+        Narrator::write($shapeShipped
             ? "  shape: '{$shape}' corner kit enqueued\n"
             : '  shape: ' . ($shape ?? 'none committed') . " (kit not shipped)\n");
     }
 
     /**
-     * Write the build-owned corner-language stylesheet for a rounded shape
-     * commitment: contained media surfaces theme.json cannot reach (the media
-     * half of core/media-text, the core/cover canvas). `sharp` and an absent
-     * commitment ship no kit — those surfaces are square by default — and any
-     * kit left by an earlier finalize run is pruned so the shape cannot go
-     * stale.
-     */
-    /**
-     * The corner-language kit. Kits are described here rather than spelled out
-     * at each of their four use sites (declaration, write, enqueue, editor
-     * mirror), so adding the next CSS commitment is one entry instead of
-     * another copy of this wiring.
-     */
-    /**
-     * Every overlay kit this step knows how to ship, in load order.
+     * Every overlay kit this step knows how to ship, in load order. Describing
+     * a kit as data rather than spelling it out at each of its four use sites
+     * (declaration, write, enqueue, editor mirror) is what keeps the next CSS
+     * commitment to one entry instead of another copy of this wiring.
      *
      * @return list<OverlayKit>
      */
@@ -158,6 +147,11 @@ final class FinalizeThemeStep implements Step
         return [self::shapeKit()];
     }
 
+    /**
+     * The corner-language kit: contained media surfaces theme.json cannot reach
+     * (the media half of core/media-text, the core/cover canvas). `sharp` and an
+     * absent commitment resolve to no CSS, so the kit is pruned instead.
+     */
     public static function shapeKit(): OverlayKit
     {
         return new OverlayKit(
