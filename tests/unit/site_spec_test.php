@@ -434,6 +434,36 @@ test('site-spec with requested pages fixes the tree — the model contributes on
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('site-spec leaves a caller-requested Cart page named and routed as asked', function () {
+    // REQUESTED_SCOPE promises a caller-fixed list survives unchanged — same
+    // order, same slugs, same titles. That promise outranks the cart rename:
+    // the page keeps its name and its route, and its CONTENTS degrade later,
+    // where StorefrontDegrade::markup strips the purchase controls.
+    [$project, $llm, $tmp] = make_sitespec_fixture(multiPage: true, pages: ['Home', 'Cart', 'Contact']);
+    $llm->queueJson([
+        'name' => 'Hearth & Crumb', 'language' => 'en',
+        'pages' => [
+            ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome visitors', 'children' => []],
+            ['title' => 'Cart', 'slug' => 'cart', 'purpose' => 'Basket and checkout', 'children' => []],
+            ['title' => 'Contact', 'slug' => 'contact', 'purpose' => 'Find us', 'children' => []],
+        ],
+    ]);
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $pages = $project->readJson('siteSpec.json')['pages'];
+    assert_eq(['home', 'cart', 'contact'], array_column($pages, 'slug'), 'the requested route survives');
+    assert_eq(['Home', 'Cart', 'Contact'], array_column($pages, 'title'), 'the requested title survives');
+
+    $warnings = $project->exists('warnings.json')
+        ? implode(' ', $project->readJson('warnings.json')['site-spec'] ?? [])
+        : '';
+    assert_true(
+        !str_contains($warnings, 'catalog storefront'),
+        'no rewrite is claimed for a page the caller pinned',
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('site-spec requested pages: caller-stated purposes win over the model\'s', function () {
     [$project, $llm, $tmp] = make_sitespec_fixture(multiPage: true, pages: [
         ['title' => 'Home', 'slug' => 'home'],

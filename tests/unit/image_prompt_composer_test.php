@@ -428,6 +428,21 @@ test('compose omits the photographic grade for transparent assets', function () 
     assert_contains('solid pure white background', $out);
 });
 
+test('compose preserves competing grade tokens for transparent assets', function () {
+    $subject = 'A badge on studio white, no grain';
+    $out = ImagePromptComposer::compose(
+        $subject,
+        'isolated accent',
+        'illustration',
+        '',
+        'warm Portra 400, visible 35mm grain',
+        true
+    );
+
+    assert_contains("{$subject}. Style: illustration", $out);
+    assert_true(!str_contains($out, 'Art direction'), 'transparent assets bypass the grade and its cleanup');
+});
+
 test('compose omits the transparency clause by default', function () {
     $out = ImagePromptComposer::compose('A sourdough loaf', 'menu item card', 'photorealistic', '');
     assert_true(!str_contains($out, 'transparent'), 'no transparency clause for opaque assets');
@@ -461,4 +476,288 @@ test('compose sheds the site context under token pressure but keeps the grade', 
     assert_true(GeminiImage::estimateTokens($out) <= GeminiImage::MAX_PROMPT_TOKENS, 'within token cap');
     assert_contains("{$subject}. Style: photorealistic", $out);
     assert_contains("Art direction for all site imagery: {$grade}.", $out);
+});
+
+test('stripCompetingGradeTokens drops a clause that is only grade talk', function () {
+    $result = ImagePromptComposer::stripCompetingGradeTokens(
+        'A loaf on a linen cloth, no grain, catalog-lit',
+        'warm Portra 400, visible 35mm grain, available light',
+    );
+    assert_eq('A loaf on a linen cloth', $result['subject']);
+    assert_eq(['no grain', 'catalog-lit'], $result['removed']);
+    assert_eq([], $result['kept']);
+});
+
+test('stripCompetingGradeTokens never cuts grade wording out of a scene clause', function () {
+    // Word-level removal turned this into "A loaf on a sweep" — a different
+    // backdrop, sent to the image service with nothing recording the change.
+    $result = ImagePromptComposer::stripCompetingGradeTokens(
+        'A loaf on a studio white sweep',
+        'Warm 35mm film grain',
+    );
+    assert_eq('A loaf on a studio white sweep', $result['subject'], 'the scene survives byte-for-byte');
+    assert_eq([], $result['removed']);
+    assert_eq(['A loaf on a studio white sweep'], $result['kept'], 'and the conflict is reported');
+});
+
+test('stripCompetingGradeTokens keeps the clauses around one it removes', function () {
+    // This used to collapse to "A loaf on,, resting on a wooden board".
+    $result = ImagePromptComposer::stripCompetingGradeTokens(
+        'A loaf on studio white, no grain, resting on a wooden board',
+        'Warm 35mm film grain',
+    );
+    assert_eq('A loaf on studio white, resting on a wooden board', $result['subject']);
+    assert_eq(['no grain'], $result['removed']);
+    assert_eq(['A loaf on studio white'], $result['kept']);
+});
+
+test('stripCompetingGradeTokens returns the authored subject when nothing is left', function () {
+    // This used to reduce to an empty string with nothing guarding it.
+    foreach (['no grain, catalog-lit', 'black and white', 'muted grey tones'] as $subject) {
+        $result = ImagePromptComposer::stripCompetingGradeTokens($subject, 'Warm 35mm film grain');
+        assert_eq($subject, $result['subject'], "'{$subject}' is delivered rather than emptied");
+        assert_eq([], $result['removed']);
+        assert_eq([$subject], $result['kept']);
+    }
+});
+
+test('stripCompetingGradeTokens reads the vocabulary, not the grade wording', function () {
+    // The lists used to arm only when the grade itself carried the trigger
+    // word, so a legally-worded grade disarmed all of them.
+    $result = ImagePromptComposer::stripCompetingGradeTokens(
+        'A ceramic bowl on a walnut table, no grain',
+        'muted pastel color, soft even daylight',
+    );
+    assert_eq('A ceramic bowl on a walnut table', $result['subject']);
+    assert_eq(['no grain'], $result['removed']);
+});
+
+test('stripCompetingGradeTokens never reads a negation as its own opposite', function () {
+    // "no grain" agrees with a clean grade. It still leaves the subject,
+    // because image-generation.md:63 keeps grade vocabulary out of subjects
+    // unconditionally — but it leaves as a whole clause, not as erased words.
+    $result = ImagePromptComposer::stripCompetingGradeTokens(
+        'A loaf on a linen cloth, no grain',
+        'Clean digital product shots, no grain, studio white',
+    );
+    assert_eq('A loaf on a linen cloth', $result['subject']);
+    assert_eq(['no grain'], $result['removed']);
+});
+
+test('stripCompetingGradeTokens leaves a subject in another language alone', function () {
+    // The vocabulary is English, so this is a documented no-op rather than a
+    // silent partial edit.
+    $subject = 'Un pan sobre un paño de lino junto a una ventana';
+    $result = ImagePromptComposer::stripCompetingGradeTokens($subject, 'Warm 35mm film grain');
+    assert_eq($subject, $result['subject']);
+    assert_eq([], $result['removed']);
+    assert_eq([], $result['kept']);
+});
+
+test('stripCompetingGradeTokens is idempotent over what it delivered', function () {
+    $grade = 'warm Portra 400, visible 35mm grain';
+    $once = ImagePromptComposer::stripCompetingGradeTokens('A loaf on a linen cloth, no grain', $grade);
+    $twice = ImagePromptComposer::stripCompetingGradeTokens($once['subject'], $grade);
+    assert_eq($once['subject'], $twice['subject']);
+    assert_eq([], $twice['removed']);
+});
+
+test('compose strips competing grade tokens before the API prompt is built', function () {
+    $out = ImagePromptComposer::compose(
+        'A loaf on a linen cloth, no grain',
+        'menu item card',
+        'photorealistic',
+        '',
+        'warm Portra 400, visible 35mm grain',
+    );
+    assert_true(!str_contains($out, 'linen cloth, no grain'));
+    assert_contains('A loaf on a linen cloth', $out);
+    assert_contains('Art direction for all site imagery: warm Portra 400, visible 35mm grain.', $out);
+});
+
+test('stripCompetingGradeTokens accepts Unicode dash punctuation', function () {
+    $cases = [
+        ['A portrait, no‑grain', 'tri‑x contrast', 'A portrait'],
+        ['A city, neon—soaked', 'black–and—white documentary', 'A city'],
+        ['A product, studio–white, catalog—lit', 'warm available–light', 'A product'],
+    ];
+    foreach ($cases as [$subject, $grade, $expected]) {
+        assert_eq($expected, ImagePromptComposer::stripCompetingGradeTokens($subject, $grade)['subject']);
+    }
+});
+
+test('stripCompetingGradeTokens removes a grade clause carrying an intensity adjective', function () {
+    // How much grain is not what the picture shows. Real subjects write
+    // "fine 35mm grain" far more often than the bare term, and an adjective
+    // alone used to hold the whole clause, so the pass fired on 3% of a real
+    // corpus while reporting a conflict on the rest.
+    $cases = [
+        'fine 35mm grain',
+        'heavy 35mm film grain',
+        'visible 35mm film grain',
+        'faint film grain',
+        'subtle film grain',
+        'gentle 35mm grain',
+        'strictly monochrome no colour',
+        'natural available light',
+        'monochrome black-and-white with 35mm grain',
+    ];
+    foreach ($cases as $clause) {
+        $result = ImagePromptComposer::stripCompetingGradeTokens(
+            "A ceramic bowl on a walnut table, {$clause}",
+            'muted pastel color, soft even daylight',
+        );
+        assert_eq('A ceramic bowl on a walnut table', $result['subject'], "'{$clause}' is grade talk only");
+        assert_eq([$clause], $result['removed']);
+        assert_eq([], $result['kept']);
+    }
+});
+
+test('stripCompetingGradeTokens keeps an adjective clause that also names the scene', function () {
+    // The adjectives above only ever apply to a clause that already matched
+    // grade vocabulary. A scene noun beside one still holds the clause, so
+    // widening the filler list cannot start cutting into a subject.
+    $cases = [
+        'A monochrome colour chart pinned to the wall',
+        'A fine grain of sand between two fingers',
+        'Warm light raking across the grain of an oak plank',
+        'A hard black and white tile floor',
+    ];
+    foreach ($cases as $subject) {
+        $result = ImagePromptComposer::stripCompetingGradeTokens($subject, 'warm Portra 400, visible 35mm grain');
+        assert_eq($subject, $result['subject'], "the scene in '{$subject}' survives byte-for-byte");
+        assert_eq([], $result['removed']);
+    }
+});
+
+test('stripCompetingGradeTokens keeps a clause whose only grade word names material', function () {
+    // Wood and leather have a grain, a landscape has a sweep. "fine grain" is
+    // a walnut finish as often as a film stock, so an ambiguous term alone is
+    // not enough to drop a clause — only a term that can only be photographic.
+    $cases = [
+        'Fine grain, hand-rubbed walnut finish',
+        'The grain is fine and natural, close-up',
+        'Natural grain, a dovetail joint',
+        'Deep grain, oiled oak',
+        'The grain is visible, a chisel resting on it',
+        'The sweep is soft and deep, dancers mid-turn',
+    ];
+    foreach ($cases as $subject) {
+        $result = ImagePromptComposer::stripCompetingGradeTokens($subject, 'warm Portra 400, visible 35mm grain');
+        assert_eq($subject, $result['subject'], "'{$subject}' describes material, not grade");
+        assert_eq([], $result['removed']);
+    }
+
+    // A photographic anchor beside the ambiguous term still strips.
+    $film = ImagePromptComposer::stripCompetingGradeTokens(
+        'A loaf on a board, fine film grain',
+        'clean digital product shots',
+    );
+    assert_eq('A loaf on a board', $film['subject']);
+    assert_eq(['fine film grain'], $film['removed']);
+});
+
+test('stripCompetingGradeTokens returns a subject it found no grade in byte-for-byte', function () {
+    // Rejoining re-punctuates, so a subject with no grade wording at all came
+    // back edited with nothing in removed or kept to record it — a delivered
+    // change with no receipt, which is the defect this pass exists to prevent.
+    $cases = [
+        'A loaf,on a board',
+        'A cat.  A dog.  A bird.',
+        'A loaf on a board;',
+        "A red bicycle.\nA blue door.",
+        'Two friends laughing, arm in arm , outdoors',
+    ];
+    foreach ($cases as $subject) {
+        $result = ImagePromptComposer::stripCompetingGradeTokens($subject, 'warm Portra 400, visible 35mm grain');
+        assert_eq($subject, $result['subject'], "'{$subject}' is delivered exactly as authored");
+        assert_eq([], $result['removed']);
+        assert_eq([], $result['kept']);
+    }
+});
+
+test('stripCompetingGradeTokens reports nothing for a subject it could not read', function () {
+    // Punctuation only, and bytes preg_split rejects. No clause is examined,
+    // so claiming the subject "names photographic grade" is a false receipt —
+    // and on the invalid-UTF-8 case it put raw bad bytes in warnings.json.
+    foreach ([',,,', ';', "\xC3\x28 a loaf on a linen cloth, no grain"] as $subject) {
+        $result = ImagePromptComposer::stripCompetingGradeTokens($subject, 'warm Portra 400, visible 35mm grain');
+        assert_eq([], $result['kept'], 'no conflict is reported for a subject that was never read');
+        assert_eq([], $result['removed']);
+    }
+});
+
+test('stripCompetingGradeTokens keeps a clause PCRE could not read', function () {
+    // A run long enough to exhaust the PCRE JIT stack. Both passes over a
+    // clause can fail on it, and both must fail the same way — toward keeping
+    // the text. The match pass already does (a failed preg_match reads as "no
+    // term", so the clause survives here); clauseIsOnlyGrade's replace pass is
+    // guarded to match it, because `(string) null` there is an empty residue,
+    // which is the "only grade talk" signal that deletes the whole clause.
+    $clause = 'black' . str_repeat(' ', 60000) . 'andx a ceramic vase on a walnut table';
+    $result = ImagePromptComposer::stripCompetingGradeTokens("A scene, {$clause}", 'black and white');
+    assert_true(
+        str_contains($result['subject'], 'a ceramic vase on a walnut table'),
+        'a clause PCRE could not read keeps its scene instead of losing it'
+    );
+});
+
+test('stripCompetingGradeTokens judges an ambiguous term by its own clause only', function () {
+    $grade = 'clean digital product shots, studio white';
+
+    // "subtle grain" beside a walnut table is the walnut, and stays.
+    $material = ImagePromptComposer::stripCompetingGradeTokens(
+        'A ceramic bowl on a walnut table, subtle grain',
+        $grade,
+    );
+    assert_eq('A ceramic bowl on a walnut table, subtle grain', $material['subject']);
+    assert_eq([], $material['removed']);
+
+    // A photographic word ELSEWHERE in the subject does not make it film
+    // stock. Reading the whole subject deleted an oak table's grain because
+    // the framing clause happened to say monochrome, so each clause is judged
+    // on what it says itself.
+    $elsewhere = ImagePromptComposer::stripCompetingGradeTokens(
+        'A monochrome photograph of an oak table, fine grain, overhead framing',
+        $grade,
+    );
+    assert_eq(
+        'A monochrome photograph of an oak table, fine grain, overhead framing',
+        $elsewhere['subject'],
+        'the oak keeps its grain',
+    );
+    assert_eq([], $elsewhere['removed']);
+
+    // An outright photographic term in the clause itself does strip it.
+    $photographic = ImagePromptComposer::stripCompetingGradeTokens(
+        'A ceramic bowl on a walnut table, subtle film grain',
+        $grade,
+    );
+    assert_eq('A ceramic bowl on a walnut table', $photographic['subject']);
+    assert_eq(['subtle film grain'], $photographic['removed']);
+
+    // So does a negation: material is never described by the grain it lacks.
+    $negated = ImagePromptComposer::stripCompetingGradeTokens(
+        'A ceramic bowl on a walnut table, no grain',
+        $grade,
+    );
+    assert_eq('A ceramic bowl on a walnut table', $negated['subject']);
+    assert_eq(['no grain'], $negated['removed']);
+});
+
+test('stripCompetingGradeTokens does not re-punctuate around a clause it only reported', function () {
+    // A kept clause still routed the whole subject through the rejoin, which
+    // re-punctuates every OTHER clause. With nothing removed there is no
+    // authored-vs-delivered row, so the kept row asserted "delivered
+    // unchanged" over a subject that had just been changed.
+    $cases = [
+        'A loaf,on a board, a black and white cat',
+        'A vase (studio white sweep) on a table,beside a lamp',
+    ];
+    foreach ($cases as $subject) {
+        $result = ImagePromptComposer::stripCompetingGradeTokens($subject, 'warm Portra 400, visible 35mm grain');
+        assert_eq($subject, $result['subject'], "'{$subject}' is delivered exactly as authored");
+        assert_eq([], $result['removed']);
+        assert_true($result['kept'] !== [], 'the conflict is still reported');
+    }
 });

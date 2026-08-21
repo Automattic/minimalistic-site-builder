@@ -36,7 +36,7 @@ Use only headings, paragraphs, lists, block quotes, code, tables, images, button
 
 - Device: when the DESIGN DIRECTION carries a **Device** fact naming a class, put that class on the root element of exactly ONE band, and never the hero — the build ships the CSS for it and strips the class from any extra band or from the hero. When there is no Device fact, never invent one.
 
-There are no forms or form controls, no SVG, no custom elements, and no JavaScript. Do not emit `<form>`, `<input>`, `<textarea>`, `<select>`, `<button>` with scripted behavior, `<svg>`, `<script>`, inline event handlers, or `javascript:` URLs. Express layout, ornament, and interaction states with HTML and CSS only.
+There are no forms or form controls, no SVG, no custom elements, and no JavaScript. Do not emit `<form>`, `<input>`, `<textarea>`, `<select>`, `<button>` with scripted behavior, `<svg>`, `<script>`, inline event handlers, or `javascript:` URLs. Express layout, ornament, and interaction states with HTML and CSS only. A shop is a catalog storefront: no cart, checkout, quantity input, add-to-cart control, price-per-unit purchase flow, or WooCommerce block — product cards that invite a contact enquiry are the whole store.
 
 Use `<button>` only for a real non-scripted action. Prefer an `<a>` link styled as a button for navigation or a CTA.
 

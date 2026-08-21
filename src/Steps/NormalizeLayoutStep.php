@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\StorefrontDegrade;
 use Automattic\SiteBuild\Units\GeneratedMarkup;
 
 /**
@@ -53,8 +54,13 @@ final class NormalizeLayoutStep implements Step
                 'siteSpec.json',
                 'theme/theme.json',
                 'theme/parts/*',
+                // Read only when it exists: a relabelled purchase CTA needs
+                // somewhere to send an enquiry, and pages.json is where the
+                // build's routes live. Absent, the CTA's destination is
+                // reported instead of invented.
+                'pages.json',
             ],
-            writes: ['theme/parts/*'],
+            writes: ['theme/parts/*', 'warnings.json'],
             concurrent: false,
         );
     }
@@ -76,6 +82,34 @@ final class NormalizeLayoutStep implements Step
             // No carrier classes: align:wide promotion stays fix-blocks' alone.
             widePartCarrierClasses: [],
         );
+        // Where a relabelled purchase CTA should send an enquiry, when this
+        // build has a contact page at all.
+        $contactRoute = StorefrontDegrade::contactRouteFromPages(
+            $project->exists('pages.json')
+                ? (array) ($project->readJson('pages.json')['pages'] ?? [])
+                : [],
+        );
+        $cartWarnings = [];
+        foreach ($project->themeFiles() as $rel) {
+            $path = 'theme/' . $rel;
+            if (!$project->exists($path)) {
+                continue;
+            }
+            [$markup, $degraded] = StorefrontDegrade::markup(
+                $project->readText($path),
+                $path,
+                $contactRoute,
+            );
+            if ($degraded === []) {
+                continue;
+            }
+            $project->writeText($path, $markup);
+            array_push($notes, ...$degraded);
+            array_push($cartWarnings, ...$degraded);
+        }
+        if ($cartWarnings !== []) {
+            $project->addWarnings($this->id(), $cartWarnings);
+        }
         $report = $notes === []
             ? "No layout/rhythm normalization needed.\n"
             : '- ' . implode("\n- ", $notes) . "\n";
