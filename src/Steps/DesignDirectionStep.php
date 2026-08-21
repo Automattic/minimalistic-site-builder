@@ -921,7 +921,7 @@ final class DesignDirectionStep implements Step
         $deviceClass = Device::className($device);
         if ($device !== null && $device !== 'none' && $deviceClass !== null) {
             $deviceMeaning = match ($device) {
-                'hairline-rule'  => 'a 1px accent rule on ONE non-hero band',
+                'hairline-rule'  => 'a 1px rule in the current text color on ONE non-hero band',
                 'section-numeral'=> 'a folio numeral on ONE non-hero band',
                 'stamp'          => 'a rotated stamp mark on ONE non-hero band',
                 default          => 'the committed one-band CSS device',

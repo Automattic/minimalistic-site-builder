@@ -47,8 +47,10 @@ use Automattic\SiteBuild\StepDeclaration;
  * token is removed from the block's own class="…" HTML (tokenized, so odd
  * whitespace can't shelter one) so the fixer can't resurrect it.
  *
- * HTML-first composition mode skips this legacy class pass. Mode is injected
- * by StepComposition; stale design artifacts never choose behavior.
+ * HTML-first composition mode skips the legacy motion pass but still runs the
+ * device budget: that graph ships the device CSS and its prompts promise the
+ * build strips an over-budget or hero-placed device. Mode is injected by
+ * StepComposition; stale design artifacts never choose behavior.
  */
 final class MotionSanityStep implements Step
 {
@@ -81,12 +83,17 @@ final class MotionSanityStep implements Step
 
     public function run(Project $project): void
     {
+        // The html-first path skips the legacy motion fixup, but the device
+        // budget is not motion work: prompts/homepage-design.md and
+        // prompts/inner-section-design.md both tell the model the build strips
+        // a device off the hero or off a second band, and FinalizeThemeStep
+        // ships the device CSS in that graph too. Transform keeps authored
+        // classes (BlockFactory), so the guard still has markup to read here.
         if ($this->htmlFirst) {
             $project->addWarnings('fixup_skipped', [
                 'step=motion-sanity; signal=composition-mode:html-first; disposition=skipped; '
                     . 'reason=new CSS path does not use legacy motion fixup',
             ]);
-            return;
         }
 
         $profile = DesignDirectionStep::motionProfileFor($project);
@@ -103,6 +110,7 @@ final class MotionSanityStep implements Step
                     $budget,
                     $rel === $group['hero'],
                     $deviceClass,
+                    $this->htmlFirst,
                 );
                 if ($result['markup'] !== $markup) {
                     $project->writeText('theme/' . $rel, $result['markup']);
@@ -115,21 +123,38 @@ final class MotionSanityStep implements Step
 
         // Each strip removed an authored class from the delivered markup —
         // deliberate policy enforcement, but still a change the build shipped
-        // through; record it durably for the later repair pass.
+        // through; record it durably for the later repair pass. Device drops
+        // are named as such: every device note quotes its `device--` token,
+        // and no motion note ever carries that prefix.
+        $isDeviceNote = static fn (string $row): bool => str_contains($row, Device::CLASS_PREFIX);
         $project->addWarnings($this->id(), array_map(
-            static fn (string $row): string => "motion class stripped: {$row}",
+            static fn (string $row): string => $isDeviceNote($row)
+                ? "device class stripped: {$row}"
+                : "motion class stripped: {$row}",
             $report,
         ));
 
+        $devices = count(array_filter($report, $isDeviceNote));
+        $motions = count($report) - $devices;
+
+        // In html-first only the device guard ran, so staying silent when it
+        // found nothing keeps the step's skip contract intact.
+        if ($this->htmlFirst) {
+            if ($report !== []) {
+                $project->writeText('logs/' . self::REPORT_FILE, implode("\n", $report) . "\n");
+            }
+            echo sprintf("  device: %d class(es) stripped\n", $devices);
+            return;
+        }
+
         if ($report === []) {
-            $report[] = "Motion profile '{$profile}': all motion classes within budget.";
+            $report[] = "Motion profile '{$profile}': all motion and device classes within budget.";
         }
         $project->writeText('logs/' . self::REPORT_FILE, implode("\n", $report) . "\n");
 
-        $removed = count($report) - (str_starts_with($report[0], 'Motion profile') ? 1 : 0);
         echo sprintf(
-            "  motion: profile '%s', %d class(es) stripped (details: logs/%s)\n",
-            $profile, $removed, self::REPORT_FILE
+            "  motion: profile '%s', %d motion + %d device class(es) stripped (details: logs/%s)\n",
+            $profile, $motions, $devices, self::REPORT_FILE
         );
     }
 
@@ -217,6 +242,9 @@ final class MotionSanityStep implements Step
      *        or null when it committed none. prompts/page-plan.md budgets it to
      *        one non-hero band per page, and nothing was checking that after
      *        the model wrote the markup.
+     * @param bool $deviceOnly hold the device budget and leave motion classes
+     *        untouched — the html-first path ships the device CSS but does not
+     *        use the legacy motion fixup.
      * @return array{markup:string, notes:string[]}
      */
     public static function sanitize(
@@ -225,6 +253,7 @@ final class MotionSanityStep implements Step
         array &$budget,
         bool $heroAllowed = true,
         ?string $deviceClass = null,
+        bool $deviceOnly = false,
     ): array
     {
         $doc = BlockMarkup::parse($markup);
@@ -234,6 +263,9 @@ final class MotionSanityStep implements Step
 
         foreach ($doc->indices() as $i) {
             self::enforceDeviceBudget($doc, $i, $deviceClass, $heroAllowed, $budget, $notes);
+            if ($deviceOnly) {
+                continue;
+            }
             $attrs = $doc->attrs($i) ?? [];
             $className = $attrs['className'] ?? null;
             $jsonTokens = is_string($className)

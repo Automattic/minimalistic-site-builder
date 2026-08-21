@@ -48,16 +48,16 @@ final class Device
 
                 CSS,
             'section-numeral' => <<<CSS
-                body {
-                    counter-reset: device-folio;
-                }
+                /* The folio mark is literal, not a CSS counter. Exactly one band
+                   per page carries the device, so a counter could only ever
+                   render 01 — and its counter-reset had to sit on body, which
+                   add_editor_style then leaked into the editor. */
                 .device--section-numeral {
-                    counter-increment: device-folio;
                     position: relative;
                     padding-left: 4.5rem;
                 }
                 .device--section-numeral::before {
-                    content: counter(device-folio, decimal-leading-zero);
+                    content: "01";
                     position: absolute;
                     left: var(--wp--preset--spacing--md, 1.5rem);
                     top: var(--wp--preset--spacing--lg, 3rem);
@@ -66,6 +66,20 @@ final class Device
                     letter-spacing: 0.16em;
                     color: currentColor;
                     opacity: 0.65;
+                }
+                /* The 4.5rem gutter stacks on the section's own theme.json inset.
+                   That reads as an indent at desktop, but at 320px it left the
+                   band far narrower than its neighbours, so the numeral takes its
+                   own row instead — the same escape the stamp needed. */
+                @media (max-width: 480px) {
+                    .device--section-numeral {
+                        padding-left: 0;
+                    }
+                    .device--section-numeral::before {
+                        position: static;
+                        display: block;
+                        margin: 0 0 0.5rem;
+                    }
                 }
 
                 CSS,

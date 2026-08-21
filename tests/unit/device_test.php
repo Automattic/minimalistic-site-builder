@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\Device;
+use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Steps\MotionSanityStep;
 
 test('Device catalog is the bounded utility list', function () {
@@ -23,7 +24,12 @@ test('Device kitCss is class-gated and absent for none', function () {
 
     $numeral = Device::kitCss('section-numeral');
     assert_true(is_string($numeral));
-    assert_contains('counter-increment', $numeral);
+    // One band per page carries the device, so the folio mark is literal and
+    // no counter-reset is parked on body for add_editor_style to leak.
+    assert_contains('content: "01"', $numeral);
+    assert_true(!str_contains($numeral, 'counter-increment'), 'no inert counter machinery');
+    assert_true(!str_contains($numeral, 'body {'), 'the kit never restyles body');
+    assert_contains('@media (max-width: 480px)', $numeral, 'the numeral has a narrow-width escape');
 
     $stamp = Device::kitCss('stamp');
     assert_true(is_string($stamp));
@@ -90,4 +96,40 @@ test('the device budget also catches a class living only in saved HTML', functio
     $budget = MotionSanityStep::newBudget();
     $out = MotionSanityStep::sanitize($markup, 'calm', $budget, true, 'device--stamp');
     assert_true(!str_contains($out['markup'], 'device--stamp'), 'hero drop reaches the saved HTML');
+});
+
+test('the html-first path holds the device budget it promised the model', function () {
+    // prompts/homepage-design.md and prompts/inner-section-design.md both tell
+    // the model the build strips a device off the hero or off a second band,
+    // and FinalizeThemeStep ships the CSS in that graph. The step skips the
+    // legacy motion fixup, so the device guard has to run there on its own.
+    $tmp = sys_get_temp_dir() . '/builder_device_htmlfirst_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('designDirection.json', ['motion' => 'none', 'device' => 'stamp']);
+
+    $band = static fn (string $class): string =>
+        '<!-- wp:group {"className":"' . $class . '"} --><div class="wp-block-group ' . $class
+        . '"><!-- wp:paragraph --><p>Band</p><!-- /wp:paragraph --></div><!-- /wp:group -->';
+    $project->writeText(
+        'theme/parts/section.html',
+        $band('device--stamp reveal-up') . $band('device--stamp'),
+    );
+
+    try {
+        quietly(fn () => (new MotionSanityStep(htmlFirst: true))->run($project));
+        $out = $project->readText('theme/parts/section.html');
+
+        // One surviving band carries it twice: in className and in its saved
+        // HTML. The second band is gone from both.
+        assert_eq(2, substr_count($out, 'device--stamp'), 'exactly one band keeps the device');
+        // Motion is still the new CSS path's business, not this step's: the
+        // profile is 'none', so a motion pass would have taken reveal-up too.
+        assert_contains('reveal-up', $out, 'the motion fixup stays skipped');
+
+        $warnings = $project->readJson('warnings.json');
+        assert_contains('device class stripped', implode(' ', $warnings['motion-sanity'] ?? []));
+        assert_eq(1, count($warnings['fixup_skipped'] ?? []), 'the skip contract is still recorded');
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
 });
