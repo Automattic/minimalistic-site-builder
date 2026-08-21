@@ -15,7 +15,7 @@ use Automattic\SiteBuild\Tests\FakeLlm;
 /** @return array{0:Project,1:FakeLlm,2:string} */
 function design_preview_fixture(): array
 {
-    $tmp = sys_get_temp_dir() . '/builder_design_preview_' . uniqid();
+    $tmp = sys_get_temp_dir() . '/builder_design_preview_' . getmypid() . '_' . uniqid('', true);
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', [
         'prompt' => 'A neighborhood bakery with seasonal bread and classes',
