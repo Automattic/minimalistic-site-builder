@@ -63,7 +63,7 @@ use Automattic\SiteBuild\Warnings;
  *  6. Home nav — the site title and logo already link home, so a Home item
  *     in the header or footer nav is removed (wp:home-link, a navigation-link
  *     whose label is the front page title, a wp:page-list which always
- *     includes Home, or an HTML `<nav>` anchor with that label). Inner pages stay.
+ *     includes Home, or an HTML anchor with that label in the chrome). Inner pages stay.
  *  7. Nav collapse — WordPress's hamburger only engages below 600px, while
  *     an over-wide title/nav row wraps into a 2-3 row header across the
  *     whole tablet range. When the estimated single-row width exceeds the
@@ -546,7 +546,7 @@ final class HeaderHeroStep implements Step
         $footerRel = 'parts/footer.html';
         if ($project->exists('theme/' . $footerRel) || isset($writes[$footerRel])) {
             $footer = $writes[$footerRel] ?? $project->readText('theme/' . $footerRel);
-            $home = HeaderNav::withoutHomeItems($footer, $pages, 'footer');
+            $home = HeaderNav::withoutHomeItems($footer, $pages, 'footer', $siteName);
             $writes[$footerRel] = $home['markup'];
             foreach ($home['notes'] as $note) {
                 $report[] = "[{$footerRel}] {$note}";
@@ -630,7 +630,7 @@ final class HeaderHeroStep implements Step
         array $theme = [],
         array $pages = [],
     ): array {
-        $home = HeaderNav::withoutHomeItems($markup, $pages);
+        $home = HeaderNav::withoutHomeItems($markup, $pages, 'header', $siteName);
         $markup = $home['markup'];
         $notes = $home['notes'];
         $warnings = $home['warnings'];

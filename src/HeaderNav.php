@@ -14,7 +14,9 @@ namespace Automattic\SiteBuild;
  * landmark; the strip covers both.
  *
  * Callers pass the site's pages so the front page title is language-accurate
- * and a replaced page-list can keep the inner pages. Idempotent.
+ * and a replaced page-list can keep the inner pages. The site name is never
+ * treated as a Home label (the wordmark may share the front page's title).
+ * Idempotent.
  */
 final class HeaderNav
 {
@@ -23,17 +25,27 @@ final class HeaderNav
      * @param 'header'|'footer' $part
      * @return array{markup:string,notes:list<string>,warnings:list<string>}
      */
-    public static function withoutHomeItems(string $markup, array $pages, string $part = 'header'): array
-    {
+    public static function withoutHomeItems(
+        string $markup,
+        array $pages,
+        string $part = 'header',
+        string $siteName = '',
+    ): array {
         $front = self::frontPage($pages);
         $notes = [];
         $warnings = [];
 
-        [$markup, $blockNotes, $blockWarnings] = self::withoutHomeBlocks($markup, $front, $pages, $part);
+        [$markup, $blockNotes, $blockWarnings] = self::withoutHomeBlocks(
+            $markup,
+            $front,
+            $pages,
+            $part,
+            $siteName,
+        );
         array_push($notes, ...$blockNotes);
         array_push($warnings, ...$blockWarnings);
 
-        [$markup, $htmlNotes] = self::withoutHtmlHomeAnchors($markup, $front, $part);
+        [$markup, $htmlNotes] = self::withoutHtmlHomeAnchors($markup, $front, $part, $siteName);
         array_push($notes, ...$htmlNotes);
 
         return [
@@ -88,13 +100,18 @@ final class HeaderNav
      * @param 'header'|'footer' $part
      * @return array{0:string,1:list<string>,2:list<string>}
      */
-    private static function withoutHomeBlocks(string $markup, array $front, array $pages, string $part): array
-    {
+    private static function withoutHomeBlocks(
+        string $markup,
+        array $front,
+        array $pages,
+        string $part,
+        string $siteName,
+    ): array {
         $document = BlockMarkup::parse($markup);
         $edits = [];
+        $pageLists = [];
         $notes = [];
         $warnings = [];
-        $innerLinks = self::innerPageLinks($pages);
         $nav = self::navPhrase($part);
 
         foreach ($document->indices() as $index) {
@@ -111,10 +128,20 @@ final class HeaderNav
                 ];
                 continue;
             }
-            if ($name === 'navigation-link' && self::isHomeNavigationLink($document->attrs($index) ?? [], $front)) {
+            if (($name === 'navigation-link' || $name === 'navigation-submenu')
+                && self::isHomeNavigationLink($document->attrs($index) ?? [], $front, $siteName)
+            ) {
                 $edit = self::blockSpan($document, $index, $markup);
                 if ($edit === null) {
-                    $warnings[] = self::unprovenWarning($part, 'wp:navigation-link', $document->openingComment($index));
+                    $warnings[] = self::unprovenWarning($part, 'wp:' . $name, $document->openingComment($index));
+                    continue;
+                }
+                $children = $document->children($index);
+                if ($children !== [] && !$document->isVoid($index)) {
+                    $edits[] = $edit + [
+                        'replacement' => $document->innerHtml($index),
+                        'note' => "unwrapped Home {$name} in {$nav}; kept nested destinations",
+                    ];
                     continue;
                 }
                 $edits[] = $edit + [
@@ -130,15 +157,23 @@ final class HeaderNav
                     $warnings[] = self::unprovenWarning($part, 'wp:page-list', $document->openingComment($index));
                     continue;
                 }
-                $edits[] = $edit + [
-                    'replacement' => $innerLinks,
-                    'note' => $innerLinks === ''
-                        ? "removed wp:page-list from {$nav} (it would render a self-referential Home link)"
-                        : "replaced wp:page-list in {$nav} with inner-page links (page-list always includes the front page)",
-                ];
+                $pageLists[] = $edit;
             }
         }
 
+        $inner = self::innerPageLinkComments($pages, $front);
+        $chunks = self::partitionLinks($inner, max(1, count($pageLists)));
+        foreach ($pageLists as $i => $edit) {
+            $replacement = implode('', $chunks[$i] ?? []);
+            $edits[] = $edit + [
+                'replacement' => $replacement,
+                'note' => $replacement === ''
+                    ? "removed wp:page-list from {$nav} (it would render a self-referential Home link)"
+                    : "replaced wp:page-list in {$nav} with inner-page links (page-list always includes the front page)",
+            ];
+        }
+
+        $edits = self::outermostEdits($edits);
         usort($edits, static fn (array $a, array $b): int => $b['start'] <=> $a['start']);
         foreach ($edits as $edit) {
             $markup = substr_replace(
@@ -155,8 +190,10 @@ final class HeaderNav
 
     /**
      * @param list<array<string,mixed>> $pages
+     * @param array{title:string,path:string,slug:string} $front
+     * @return list<string>
      */
-    private static function innerPageLinks(array $pages): string
+    private static function innerPageLinkComments(array $pages, array $front): array
     {
         $links = [];
         foreach ($pages as $page) {
@@ -165,16 +202,65 @@ final class HeaderNav
             }
             $title = trim((string) ($page['title'] ?? $page['label'] ?? ''));
             $path = trim((string) ($page['path'] ?? ''));
-            if ($title === '' || $path === '') {
+            if ($title === '' || $path === '' || self::labelsMatch($title, $front['title'])) {
                 continue;
             }
-            $attrs = json_encode(
+            $links[] = BlockMarkup::serializeComment(
+                'navigation-link',
                 ['label' => $title, 'url' => $path, 'kind' => 'custom'],
-                JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR,
+                true,
             );
-            $links[] = '<!-- wp:navigation-link ' . $attrs . ' /-->';
         }
-        return implode('', $links);
+        return $links;
+    }
+
+    /**
+     * Split inner-page links across N page-list slots in document order
+     * (split-nav's two navs each get a slice, not a full copy).
+     *
+     * @param list<string> $links
+     * @return list<list<string>>
+     */
+    private static function partitionLinks(array $links, int $slots): array
+    {
+        if ($slots <= 1) {
+            return [$links];
+        }
+        if ($links === []) {
+            return array_fill(0, $slots, []);
+        }
+        $size = (int) ceil(count($links) / $slots);
+        $chunks = array_values(array_chunk($links, max(1, $size)));
+        while (count($chunks) < $slots) {
+            $chunks[] = [];
+        }
+        return $chunks;
+    }
+
+    /**
+     * Keep the outermost splice when a parent and a nested child both matched.
+     * Inner edits run first (higher start) and would stale the parent's end.
+     *
+     * @param list<array{start:int,end:int,replacement:string,note:string}> $edits
+     * @return list<array{start:int,end:int,replacement:string,note:string}>
+     */
+    private static function outermostEdits(array $edits): array
+    {
+        $kept = [];
+        foreach ($edits as $edit) {
+            foreach ($edits as $other) {
+                if ($other === $edit) {
+                    continue;
+                }
+                $contains = $other['start'] <= $edit['start'] && $other['end'] >= $edit['end'];
+                $strict = $other['start'] < $edit['start'] || $other['end'] > $edit['end'];
+                if ($contains && $strict) {
+                    continue 2;
+                }
+            }
+            $kept[] = $edit;
+        }
+        return $kept;
     }
 
     /** @return array{start:int,end:int}|null */
@@ -199,10 +285,17 @@ final class HeaderNav
     }
 
     /** @param array<string,mixed> $attrs @param array{title:string,path:string,slug:string} $front */
-    private static function isHomeNavigationLink(array $attrs, array $front): bool
+    private static function isHomeNavigationLink(array $attrs, array $front, string $siteName): bool
     {
         $label = is_string($attrs['label'] ?? null) ? $attrs['label'] : '';
-        return self::labelsMatch($label, $front['title']);
+        if ($siteName !== '' && self::labelsMatch($label, $siteName)) {
+            return false;
+        }
+        if (!self::labelsMatch($label, $front['title'])) {
+            return false;
+        }
+        $url = is_string($attrs['url'] ?? null) ? $attrs['url'] : '';
+        return self::isHomeUrl($url, $front);
     }
 
     /**
@@ -210,8 +303,12 @@ final class HeaderNav
      * @param 'header'|'footer' $part
      * @return array{0:string,1:list<string>}
      */
-    private static function withoutHtmlHomeAnchors(string $markup, array $front, string $part): array
-    {
+    private static function withoutHtmlHomeAnchors(
+        string $markup,
+        array $front,
+        string $part,
+        string $siteName,
+    ): array {
         $notes = [];
         $edits = [];
         $nav = self::navPhrase($part);
@@ -225,7 +322,13 @@ final class HeaderNav
                 $anchor['innerStart'],
                 $anchor['innerEnd'] - $anchor['innerStart'],
             ));
+            if ($siteName !== '' && self::labelsMatch($label, $siteName)) {
+                continue;
+            }
             if (!self::labelsMatch($label, $front['title'])) {
+                continue;
+            }
+            if (!self::isHomeUrl($anchor['href'], $front)) {
                 continue;
             }
             $edits[] = self::expandWrapper($markup, $anchor['start'], $anchor['end']);
@@ -283,7 +386,7 @@ final class HeaderNav
     }
 
     /**
-     * @return list<array{start:int,end:int,innerStart:int,innerEnd:int}>
+     * @return list<array{start:int,end:int,innerStart:int,innerEnd:int,href:string}>
      */
     private static function anchorsIn(string $markup, int $from, int $to): array
     {
@@ -312,6 +415,7 @@ final class HeaderNav
                 'end' => $closeEnd + 1,
                 'innerStart' => $innerStart,
                 'innerEnd' => $close,
+                'href' => self::anchorHref($open),
             ];
         }
         return $anchors;
@@ -378,6 +482,46 @@ final class HeaderNav
         $text = html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $collapsed = preg_replace('/\s+/u', ' ', trim($text));
         return $collapsed ?? trim($text);
+    }
+
+    private static function anchorHref(string $openTag): string
+    {
+        if (preg_match('/\bhref\s*=\s*(["\'])(.*?)\\1/i', $openTag, $match) === 1) {
+            return html_entity_decode($match[2], ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        }
+        if (preg_match('/\bhref\s*=\s*([^\s>]+)/i', $openTag, $match) === 1) {
+            return html_entity_decode($match[1], ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        }
+        return '';
+    }
+
+    /** @param array{title:string,path:string,slug:string} $front */
+    private static function isHomeUrl(string $url, array $front): bool
+    {
+        $url = trim($url);
+        if ($url === '' || $url === '#' || $url === '/') {
+            return true;
+        }
+        if (str_starts_with($url, '#')) {
+            return false;
+        }
+        $fragment = parse_url($url, PHP_URL_FRAGMENT);
+        if (is_string($fragment) && $fragment !== '') {
+            return false;
+        }
+        $path = parse_url($url, PHP_URL_PATH);
+        $path = is_string($path) ? $path : strtok($url, '?#');
+        $normalized = trim((string) $path);
+        $normalized = $normalized === '' || $normalized === '/' ? '/' : rtrim($normalized, '/');
+        if ($normalized === '/') {
+            return true;
+        }
+        $frontPath = $front['path'] === '/' ? '/' : rtrim($front['path'], '/');
+        if ($normalized === $frontPath) {
+            return true;
+        }
+        $slug = $front['slug'];
+        return $slug !== '' && $normalized === '/' . $slug;
     }
 
     private static function labelsMatch(string $left, string $right): bool

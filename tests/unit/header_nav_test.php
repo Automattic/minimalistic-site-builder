@@ -106,6 +106,53 @@ test('HeaderNav replaces a header page-list with inner-page links', function () 
     assert_contains('{"label":"Visit","url":"/visit/","kind":"custom"}', $result['markup']);
 });
 
+test('HeaderNav serializes replaced page-list labels the way Gutenberg comments require', function () {
+    $pages = [
+        ['title' => 'Home', 'slug' => 'home', 'path' => '/', 'front' => true],
+        ['title' => 'A -- B <i>', 'slug' => 'ab', 'path' => '/a-b/', 'front' => false],
+    ];
+    $markup = '<!-- wp:navigation --><!-- wp:page-list /--><!-- /wp:navigation -->';
+
+    $result = HeaderNav::withoutHomeItems($markup, $pages);
+
+    assert_true(!str_contains($result['markup'], 'wp:page-list'));
+    assert_true(!str_contains($result['markup'], 'A -- B'), 'double hyphen stays escaped in the comment JSON');
+    assert_contains('\\u002d\\u002d', $result['markup']);
+    assert_contains('\\u003C', $result['markup']);
+    assert_contains('<!-- wp:navigation-link', $result['markup']);
+});
+
+test('HeaderNav replacing a nested page-list does not eat the following sibling', function () {
+    $markup = '<!-- wp:navigation -->'
+        . '<!-- wp:page-list -->'
+        . '<!-- wp:navigation-link {"label":"Home","url":"/","kind":"custom"} /-->'
+        . '<!-- /wp:page-list -->'
+        . '<!-- /wp:navigation -->'
+        . '<!-- wp:paragraph --><p>keep me</p><!-- /wp:paragraph -->';
+
+    $result = HeaderNav::withoutHomeItems($markup, header_nav_pages());
+
+    assert_true(!str_contains($result['markup'], 'wp:page-list'));
+    assert_contains('<p>keep me</p>', $result['markup']);
+    assert_contains('"label":"Menu"', $result['markup']);
+});
+
+test('HeaderNav does not re-emit an inner page whose title matches the front page', function () {
+    $pages = [
+        ['title' => 'Home', 'slug' => 'home', 'path' => '/', 'front' => true],
+        ['title' => 'Home', 'slug' => 'home-again', 'path' => '/home-again/', 'front' => false],
+        ['title' => 'Menu', 'slug' => 'menu', 'path' => '/menu/', 'front' => false],
+    ];
+    $markup = '<!-- wp:navigation --><!-- wp:page-list /--><!-- /wp:navigation -->';
+
+    $result = HeaderNav::withoutHomeItems($markup, $pages);
+    $again = HeaderNav::withoutHomeItems($result['markup'], $pages);
+
+    assert_eq($result['markup'], $again['markup']);
+    assert_true(!str_contains($result['markup'], '"url":"/home-again/"'));
+    assert_contains('"label":"Menu"', $result['markup']);
+});
+
 test('HeaderNav drops a one-page page-list instead of leaving a self Home link', function () {
     $pages = [
         ['title' => 'Home', 'slug' => 'home', 'path' => '/', 'front' => true],
@@ -234,6 +281,71 @@ test('HeaderNav strips Home from footer nav and names the footer in repairs', fu
     assert_contains('"label":"Visit"', $result['markup']);
     assert_contains('footer navigation', $result['notes'][0]);
     assert_true(!str_contains(implode("\n", $result['notes']), 'header navigation'));
+});
+
+test('HeaderNav does not strip a wordmark whose label is the site name even when that is the front title', function () {
+    $pages = [
+        ['title' => 'Northstar', 'slug' => 'home', 'path' => '/', 'front' => true],
+        ['title' => 'Menu', 'slug' => 'menu', 'path' => '/menu/', 'front' => false],
+    ];
+    $markup = '<header><a class="brand" href="/">Northstar</a>'
+        . '<nav><a href="/">Northstar</a><a href="/menu/">Menu</a></nav></header>';
+
+    $withoutName = HeaderNav::withoutHomeItems($markup, $pages);
+    assert_true(!str_contains($withoutName['markup'], '>Northstar</a>'), 'front title matching the brand is Home without a site name');
+
+    $result = HeaderNav::withoutHomeItems($markup, $pages, 'header', 'Northstar');
+
+    assert_contains('<a class="brand" href="/">Northstar</a>', $result['markup']);
+    assert_contains('<a href="/">Northstar</a>', $result['markup']);
+    assert_contains('<a href="/menu/">Menu</a>', $result['markup']);
+});
+
+test('HeaderNav keeps a front-title navigation-link that does not point home', function () {
+    $markup = '<!-- wp:navigation -->'
+        . '<!-- wp:navigation-link {"label":"Home","url":"/menu/","kind":"custom"} /-->'
+        . '<!-- /wp:navigation -->';
+
+    $result = HeaderNav::withoutHomeItems($markup, header_nav_pages());
+
+    assert_contains('"label":"Home"', $result['markup']);
+    assert_contains('"url":"/menu/"', $result['markup']);
+    assert_eq([], $result['notes']);
+});
+
+test('HeaderNav splits inner pages across two page-lists instead of duplicating them', function () {
+    $markup = '<!-- wp:navigation -->'
+        . '<!-- wp:page-list /-->'
+        . '<!-- /wp:navigation -->'
+        . '<!-- wp:site-title /-->'
+        . '<!-- wp:navigation -->'
+        . '<!-- wp:page-list /-->'
+        . '<!-- /wp:navigation -->';
+
+    $result = HeaderNav::withoutHomeItems($markup, header_nav_pages());
+
+    assert_true(!str_contains($result['markup'], 'wp:page-list'));
+    assert_eq(1, substr_count($result['markup'], '"label":"Menu"'));
+    assert_eq(1, substr_count($result['markup'], '"label":"Visit"'));
+    $menuAt = strpos($result['markup'], '"label":"Menu"');
+    $visitAt = strpos($result['markup'], '"label":"Visit"');
+    $titleAt = strpos($result['markup'], 'wp:site-title');
+    assert_true($menuAt !== false && $visitAt !== false && $titleAt !== false);
+    assert_true($menuAt < $titleAt && $titleAt < $visitAt, 'left nav gets the first inner page, right nav the rest');
+});
+
+test('HeaderNav unwraps a Home navigation parent and keeps nested destinations', function () {
+    $markup = '<!-- wp:navigation -->'
+        . '<!-- wp:navigation-link {"label":"Home","url":"/","kind":"custom"} -->'
+        . '<!-- wp:navigation-link {"label":"Menu","url":"/menu/","kind":"custom"} /-->'
+        . '<!-- /wp:navigation-link -->'
+        . '<!-- /wp:navigation -->';
+
+    $result = HeaderNav::withoutHomeItems($markup, header_nav_pages());
+
+    assert_contains('"label":"Menu"', $result['markup']);
+    assert_true(!str_contains($result['markup'], '"label":"Home"'));
+    assert_contains('unwrapped Home', $result['notes'][0]);
 });
 
 test('HeaderNav footer warnings point at the footer part', function () {
