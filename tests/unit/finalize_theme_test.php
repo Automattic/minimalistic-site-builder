@@ -290,11 +290,12 @@ test('finalize-theme ships and enqueues the shape kit for a rounded commitment',
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('finalize-theme fails loudly when a stale overlay kit cannot be pruned', function () {
+test('finalize-theme omits a stale overlay kit from the loader when it cannot be pruned', function () {
     $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
     $project = (new ProjectStore($tmp))->create('Forno Vero');
     $project->writeJson('designDirection.json', ['description' => 'x', 'shape' => 'sharp']);
     $project->writeText('theme/assets/shape/shape.css', '.wp-block-cover { border-radius: 1.25rem; }');
+    $project->writeText('theme/functions.php', "wp_enqueue_style('forno-vero-shape', 'stale');\n");
     finalize_static_header($project);
 
     $dir = $project->themePath('assets/shape');
@@ -302,15 +303,12 @@ test('finalize-theme fails loudly when a stale overlay kit cannot be pruned', fu
         if (!chmod($dir, 0555) || is_writable($dir)) {
             skip_test('cannot make the kit directory read-only on this platform');
         }
-        // Silently shrugging here would leave the sheet loading while the build
-        // reported it pruned, so the unlink failure must abort the step.
-        $e = assert_throws(
-            fn () => quietly(fn () => (new FinalizeThemeStep())->run($project)),
-            'an unprunable stale kit must abort finalize',
-        );
-        assert_contains('Could not remove stale overlay stylesheet', $e->getMessage());
-        assert_true(is_file($dir . '/shape.css'), 'the sheet is still there — that is the point');
-        assert_true(!$project->exists('theme/functions.php'), 'fatal prune failure does not write partial wiring');
+        quietly(fn () => (new FinalizeThemeStep())->run($project));
+        assert_true(is_file($dir . '/shape.css'), 'leftover bytes remain on disk');
+        $php = $project->readText('theme/functions.php');
+        assert_true(!str_contains($php, 'forno-vero-shape'), 'the rewritten loader does not enqueue the leftover');
+        $warning = implode(' ', $project->readJson('warnings.json')['finalize-theme'] ?? []);
+        assert_contains('leftover bytes could not be deleted', $warning);
     } finally {
         @chmod($dir, 0755);
         remove_tree($tmp);
@@ -359,6 +357,28 @@ test('finalize-theme ships and enqueues the surface overlay', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('finalize-theme warns when generated CSS already claimed body::before', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    $project->writeJson('designDirection.json', ['description' => 'x', 'surface' => 'paper']);
+    $project->writeJson('theme/theme.json', ['settings' => ['color' => ['palette' => [
+        ['slug' => 'base', 'color' => '#0B1B33'],
+        ['slug' => 'contrast', 'color' => '#7EC8E3'],
+    ]]]]);
+    $project->writeText('theme/style.css', 'body:where(.page)::before { content: "deco"; }');
+    finalize_static_header($project);
+
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+
+    $css = $project->readText('theme/assets/surface/surface.css');
+    assert_contains('rgba(11,27,51,', $css);
+    assert_contains('rgba(126,200,227,', $css);
+    $warning = implode(' ', $project->readJson('warnings.json')['finalize-theme'] ?? []);
+    assert_contains('html body::before', $warning);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('finalize-theme ships the device kit and prunes it for none', function () {
     $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
     $project = (new ProjectStore($tmp))->create('Forno Vero');
@@ -387,6 +407,33 @@ test('finalize-theme ships the device kit and prunes it for none', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('finalize-theme ships surface and device kits independently', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    $project->writeJson('designDirection.json', [
+        'description' => 'x',
+        'surface' => 'paper',
+        'device' => 'stamp',
+        'shape' => 'soft',
+    ]);
+    $project->writeJson('theme/theme.json', ['settings' => ['color' => ['palette' => [
+        ['slug' => 'base', 'color' => '#EFE8DA'],
+    ]]]]);
+    finalize_static_header($project);
+
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+
+    $php = $project->readText('theme/functions.php');
+    assert_true($project->exists('theme/assets/surface/surface.css'));
+    assert_true($project->exists('theme/assets/device/device.css'));
+    assert_true($project->exists('theme/assets/shape/shape.css'));
+    assert_contains('forno-vero-surface', $php);
+    assert_contains('forno-vero-device', $php);
+    assert_contains('forno-vero-shape', $php);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('finalize-theme keeps a corrupt required theme artifact fatal', function () {
     $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
     $project = (new ProjectStore($tmp))->create('Forno Vero');
@@ -408,20 +455,24 @@ test('finalize-theme keeps a corrupt required theme artifact fatal', function ()
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('finalize-theme fails when a stale surface overlay cannot be removed', function () {
+test('finalize-theme omits a stale surface overlay from the loader when it cannot be removed', function () {
     $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
     $project = (new ProjectStore($tmp))->create('Forno Vero');
     $project->writeJson('designDirection.json', ['description' => 'x', 'surface' => 'none']);
     $project->writeText('theme/assets/surface/surface.css', 'stale');
+    $project->writeText('theme/functions.php', "wp_enqueue_style('forno-vero-surface', 'stale');\n");
     finalize_static_header($project);
     $surfaceDir = $project->themePath('assets/surface');
-    chmod($surfaceDir, 0555);
-
     try {
-        $error = assert_throws(fn () => quietly(fn () => (new FinalizeThemeStep())->run($project)));
-        assert_contains('Could not remove stale overlay stylesheet:', $error->getMessage());
+        if (!chmod($surfaceDir, 0555) || is_writable($surfaceDir)) {
+            skip_test('cannot make the kit directory read-only on this platform');
+        }
+        quietly(fn () => (new FinalizeThemeStep())->run($project));
         assert_true($project->exists('theme/assets/surface/surface.css'), 'failed prune keeps stale file visible');
-        assert_true(!$project->exists('theme/functions.php'), 'failed prune does not write loader');
+        $php = $project->readText('theme/functions.php');
+        assert_true(!str_contains($php, 'forno-vero-surface'), 'rewritten loader does not enqueue leftover overlay');
+        $warning = implode(' ', $project->readJson('warnings.json')['finalize-theme'] ?? []);
+        assert_contains('leftover bytes could not be deleted', $warning);
     } finally {
         chmod($surfaceDir, 0775);
         exec('rm -rf ' . escapeshellarg($tmp));
@@ -443,6 +494,8 @@ test('finalize-theme tunes the overlay to a dark page base', function () {
     assert_contains('mix-blend-mode: soft-light', $css);
     assert_contains('opacity: 0.48', $css, 'a dark base carries the heavier grain');
     assert_true(!str_contains($css, 'feTurbulence'));
+    assert_contains('z-index: 1', $css);
+    assert_contains('@supports (mix-blend-mode: soft-light)', $css);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

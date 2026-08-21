@@ -20,20 +20,28 @@ final class Surface
     }
 
     /**
+     * WCAG normal-text floor the contrast pipeline must clear before this
+     * overlay ships. 7:1 (AAA) leaves 4.5:1 after a 0.26–0.48 soft-light sheet.
+     */
+    public static function contrastFloor(?string $surface): float
+    {
+        $surface = self::explicit($surface);
+        if ($surface === null || $surface === 'none') {
+            return ContrastMath::NORMAL_TEXT;
+        }
+        return 7.0;
+    }
+
+    /**
      * Build-owned overlay for a committed surface.
      *
      * The texture carries both a dark and a light ink, under `soft-light`.
-     * Picking one blend mode from the page's base color gave the whole site
-     * one recipe, so a `multiply` texture chosen for a light base faded out on
-     * every dark band, and an `overlay` texture chosen for a dark base faded
-     * out on every light one — the texture disappeared on exactly the sections
-     * that used the opposite color. With both inks present, whichever one
-     * contrasts with the band underneath is the one that reads.
-     *
-     * `$baseHex` still tunes the overall opacity, since a dark page carries a
-     * grain that a light one would wear too heavily.
+     * Inks are the delivered `base`/`contrast` pair so a cool or neon
+     * direction is not hue-shifted by a hardcoded kraft recipe. Opacity is
+     * still tuned from the page's base: a dark page carries grain that a
+     * light one would wear too heavily.
      */
-    public static function kitCss(?string $surface, ?string $baseHex = null): ?string
+    public static function kitCss(?string $surface, ?string $baseHex = null, ?string $contrastHex = null): ?string
     {
         $surface = self::explicit($surface);
         if ($surface === null || $surface === 'none') {
@@ -41,42 +49,43 @@ final class Surface
         }
 
         $dark = self::isDark($baseHex);
-        // Both inks, always. The opacity is the only thing the page's base
-        // still decides.
+        [$darkRgb, $lightRgb] = self::inkPair($baseHex, $contrastHex);
+        $midRgb = [
+            (int) round(($darkRgb[0] + $lightRgb[0]) / 2),
+            (int) round(($darkRgb[1] + $lightRgb[1]) / 2),
+            (int) round(($darkRgb[2] + $lightRgb[2]) / 2),
+        ];
         [$opacity, $background] = match ($surface) {
             'paper' => [
                 $dark ? '0.40' : '0.32',
-                self::paperLayers('rgba(48,36,22,0.12)', 'rgba(48,36,22,0.07)')
-                    . ', ' . self::paperLayers('rgba(239,232,218,0.14)', 'rgba(239,232,218,0.08)'),
+                self::paperLayers(self::rgba($darkRgb, 0.12), self::rgba($darkRgb, 0.07))
+                    . ', ' . self::paperLayers(self::rgba($lightRgb, 0.14), self::rgba($lightRgb, 0.08)),
             ],
             'concrete' => [
                 $dark ? '0.48' : '0.34',
-                self::concreteLayers('rgba(40,40,40,0.16)', 'rgba(70,70,70,0.10)', 'rgba(40,40,40,0.05)')
+                self::concreteLayers(self::rgba($darkRgb, 0.16), self::rgba($darkRgb, 0.10), self::rgba($darkRgb, 0.05))
                     . ', ' . self::concreteLayers(
-                        'rgba(239,232,218,0.20)',
-                        'rgba(140,143,140,0.16)',
-                        'rgba(216,162,43,0.07)',
+                        self::rgba($lightRgb, 0.20),
+                        self::rgba($midRgb, 0.16),
+                        self::rgba($midRgb, 0.07),
                     ),
             ],
             'film' => [
                 $dark ? '0.38' : '0.28',
-                self::filmLayers('rgba(20,20,20,0.12)', 'rgba(20,20,20,0.06)')
-                    . ', ' . self::filmLayers('rgba(255,255,255,0.12)', 'rgba(255,255,255,0.06)'),
+                self::filmLayers(self::rgba($darkRgb, 0.12), self::rgba($darkRgb, 0.06))
+                    . ', ' . self::filmLayers(self::rgba($lightRgb, 0.12), self::rgba($lightRgb, 0.06)),
             ],
             'fabric' => [
                 $dark ? '0.36' : '0.26',
-                self::fabricLayers('rgba(40,32,24,0.10)', 'rgba(40,32,24,0.07)')
-                    . ', ' . self::fabricLayers('rgba(239,232,218,0.10)', 'rgba(239,232,218,0.07)'),
+                self::fabricLayers(self::rgba($darkRgb, 0.10), self::rgba($darkRgb, 0.07))
+                    . ', ' . self::fabricLayers(self::rgba($lightRgb, 0.10), self::rgba($lightRgb, 0.07)),
             ],
             default => [null, null],
         };
         if ($opacity === null || $background === null) {
             return null;
         }
-        // soft-light darkens under a dark ink and lightens under a light one,
-        // on any backdrop, which is what lets one sheet serve every band.
         $blend = 'soft-light';
-
         $mode = $dark ? 'dark' : 'light';
         return "/* Committed '{$surface}' page surface ({$mode}). "
             . "CSS-only grain — written by the build, never by a model. */\n"
@@ -90,6 +99,37 @@ final class Surface
             return false;
         }
         return ContrastMath::luminance($rgb) < 0.28;
+    }
+
+    /**
+     * Darker and lighter inks from the delivered palette. Missing halves
+     * fall back to a warm pair so a fontless or pre-theme run still ships.
+     *
+     * @return array{0: array{0:int,1:int,2:int}, 1: array{0:int,1:int,2:int}}
+     */
+    private static function inkPair(?string $baseHex, ?string $contrastHex): array
+    {
+        $fallbackDark = [48, 36, 22];
+        $fallbackLight = [239, 232, 218];
+        $baseRgb = ContrastMath::hexToRgb((string) $baseHex);
+        $contrastRgb = ContrastMath::hexToRgb((string) $contrastHex);
+        if ($baseRgb !== null && $contrastRgb !== null) {
+            return ContrastMath::luminance($baseRgb) <= ContrastMath::luminance($contrastRgb)
+                ? [$baseRgb, $contrastRgb]
+                : [$contrastRgb, $baseRgb];
+        }
+        if ($baseRgb !== null) {
+            return self::isDark($baseHex)
+                ? [$baseRgb, $fallbackLight]
+                : [$fallbackDark, $baseRgb];
+        }
+        return [$fallbackDark, $fallbackLight];
+    }
+
+    /** @param array{0:int,1:int,2:int} $rgb */
+    private static function rgba(array $rgb, float $alpha): string
+    {
+        return sprintf('rgba(%d,%d,%d,%.2f)', $rgb[0], $rgb[1], $rgb[2], $alpha);
     }
 
     private static function paperLayers(string $a, string $b): string
@@ -119,55 +159,63 @@ final class Surface
     }
 
     /**
-     * Claim `body::before` outright.
+     * Claim `html body::before` outright.
      *
-     * The generated design CSS may already be using this pseudo-element, and
-     * whatever it set that this rule does not set would still apply — a
-     * `display: none`, a `transform`, or a width would leave the texture
-     * invisible while the build reported it shipped. So every property that
-     * could suppress or displace the layer is written here, not just the ones
-     * the texture needs. FinalizeThemeStep warns when the generated stylesheet
-     * had it first, because a claimed pseudo-element is a loss for whatever
-     * was using it.
+     * Specificity (0,0,3) beats a generated `body::before` and a page-scoped
+     * `body:where(.page)::before`. z-index sits above in-flow content and
+     * below `.site-header-shell` (1000) so sticky chrome and submenus stay
+     * un-blended. The sheet is gated on mix-blend-mode support — without it
+     * this is a fog, not grain — and it does not print or show to users who
+     * asked for less transparency.
      */
     private static function overlayCss(string $opacity, string $blend, string $background): string
     {
         return <<<CSS
-            body::before {
-                content: "";
-                display: block;
-                visibility: visible;
-                position: fixed;
-                inset: 0;
-                width: auto;
-                height: auto;
-                max-width: none;
-                max-height: none;
-                margin: 0;
-                padding: 0;
-                border: 0;
-                border-radius: 0;
-                transform: none;
-                clip-path: none;
-                filter: none;
-                -webkit-mask-image: none;
-                mask-image: none;
-                pointer-events: none;
-                z-index: 9999;
-                opacity: {$opacity};
-                mix-blend-mode: {$blend};
-                background-color: transparent;
-                background-image: {$background};
-                background-repeat: repeat;
-                background-attachment: scroll;
-            }
+@supports (mix-blend-mode: soft-light) {
+html body::before {
+    content: "";
+    display: block;
+    visibility: visible;
+    position: fixed;
+    inset: 0;
+    width: auto;
+    height: auto;
+    max-width: none;
+    max-height: none;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    transform: none;
+    clip-path: none;
+    filter: none;
+    -webkit-mask-image: none;
+    mask-image: none;
+    pointer-events: none;
+    z-index: 1;
+    opacity: {$opacity};
+    mix-blend-mode: {$blend};
+    background-color: transparent;
+    background-image: {$background};
+    background-repeat: repeat;
+    background-attachment: scroll;
+}
+}
 
-            CSS;
+@media (prefers-reduced-transparency: reduce) {
+html body::before {
+    display: none;
+    content: none;
+}
+}
+
+@media print {
+html body::before {
+    display: none;
+    content: none;
+}
+}
+
+CSS;
     }
-
-    /**
-     * Hover that actually reads: the motion kit's -2px lift is invisible,
-     * and a mustard underline is the one interaction the profiles allow
-     * without inventing keyframes.
-     */
 }

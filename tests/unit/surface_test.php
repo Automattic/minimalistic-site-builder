@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\Surface;
 
 test('Surface catalog is the bounded overlay list', function () {
@@ -18,7 +19,12 @@ test('Surface kitCss ships a fixed overlay for each real surface and nothing for
     assert_true(is_string($paper));
     assert_contains('position: fixed', $paper);
     assert_contains('pointer-events: none', $paper);
-    assert_contains('body::before', $paper);
+    assert_contains('html body::before', $paper);
+    assert_contains('@supports (mix-blend-mode: soft-light)', $paper);
+    assert_contains('prefers-reduced-transparency: reduce', $paper);
+    assert_contains('@media print', $paper);
+    assert_contains('z-index: 1', $paper);
+    assert_true(!str_contains($paper, 'z-index: 9999'));
     assert_true(!str_contains($paper, 'feTurbulence'), 'SVG filters do not paint as CSS backgrounds');
     assert_contains('repeating-linear-gradient', $paper);
 
@@ -31,15 +37,26 @@ test('Surface kitCss ships a fixed overlay for each real surface and nothing for
 });
 
 test('Surface kitCss carries both inks so no band loses the texture', function () {
-    // One blend mode picked from the page base gave the whole site one
-    // recipe, and the texture vanished on every band of the opposite color.
     foreach (['#16181A', '#EFE8DA'] as $base) {
         $css = Surface::kitCss('concrete', $base);
         assert_true(is_string($css));
         assert_contains('mix-blend-mode: soft-light', $css, "one blend serves both on {$base}");
-        assert_contains('rgba(40,40,40', $css, "dark ink present on {$base}");
-        assert_contains('rgba(239,232,218', $css, "light ink present on {$base}");
+        assert_contains('rgba(', $css, "inks present on {$base}");
     }
+});
+
+test('Surface kitCss derives inks from the delivered palette pair', function () {
+    $css = (string) Surface::kitCss('paper', '#0B1B33', '#7EC8E3');
+    assert_contains('rgba(11,27,51,', $css, 'dark ink is the cooler base');
+    assert_contains('rgba(126,200,227,', $css, 'light ink is the cooler contrast');
+    assert_true(!str_contains($css, 'rgba(239,232,218'), 'warm paper fallback is not used');
+});
+
+test('Surface contrastFloor budgets AAA when a sheet will ship', function () {
+    assert_eq(ContrastMath::NORMAL_TEXT, Surface::contrastFloor('none'));
+    assert_eq(ContrastMath::NORMAL_TEXT, Surface::contrastFloor(null));
+    assert_eq(7.0, Surface::contrastFloor('paper'));
+    assert_eq(7.0, Surface::contrastFloor('concrete'));
 });
 
 test('Surface kitCss still tunes opacity to the page base', function () {
