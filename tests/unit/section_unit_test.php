@@ -116,7 +116,7 @@ test('SectionUnit generates normalized markup from self-contained input', functi
     assert_eq('page-unit-page--unit-section', $llm->calls[0]['opts']['log_label'] ?? null);
 
     $sent = $llm->calls[0]['opts'] + ['prompt' => $llm->calls[0]['prompt']];
-    assert_eq(2, count($sent['cached_prefixes'] ?? []), 'direct execution forwards both cache layers');
+    assert_eq(3, count($sent['cached_prefixes'] ?? []), 'direct execution forwards every cache layer');
     $prompt = section_unit_request_text($sent);
     assert_contains('Role:     hero', $prompt);
     assert_contains('ASSIGNED CARD STYLE (authoritative machine contract): flush', $prompt);
@@ -296,7 +296,7 @@ test('SectionUnit gives standalone requests the authoritative machine card style
     );
     assert_contains(
         'ASSIGNED CARD STYLE (authoritative machine contract): framed',
-        $request['cached_prefixes'][0] ?? '',
+        $request['cached_prefixes'][1] ?? '',
         'the site-wide machine assignment remains in the stable build cache layer',
     );
 });
@@ -345,10 +345,12 @@ test('SectionUnit layered request loses only cache marker separators', function 
         'neighbors'        => $input['neighbors'],
     ]);
     $rendered = $renderer->render('section.md', [
-        'site_spec'         => $input['site_spec'],
+        'site_context'      => rtrim($renderer->render('site-context.md', [
+            'site_spec'        => $input['site_spec'],
+            'theme_json'       => $input['theme_json'],
+            'design_direction' => $input['design_direction'],
+        ]), "\r\n"),
         'language'          => $input['language'],
-        'theme_json'        => $input['theme_json'],
-        'design_direction'  => $input['design_direction'],
         'card_style'        => $input['card_style'],
         'outline'           => $input['outline'],
         'site_pages'        => $input['site_pages'],
@@ -363,16 +365,18 @@ test('SectionUnit layered request loses only cache marker separators', function 
         'composition'       => $composition,
         'header_contract'   => $input['header_contract'],
         'image_instructions' => $renderer->render('image-generation.md', []),
+        'form_instructions'  => $renderer->render('no-forms.md', []),
         'block_markup_output_contract' => rtrim(
             $renderer->render('block-markup-output-contract.md', []),
             "\r\n",
         ),
     ]);
-    $withoutMarkers = rtrim(str_replace([
-        "<!-- section-cache-layer:build -->\n",
-        "<!-- section-cache-layer:page -->\n",
-        "<!-- section-cache-layer:brief -->\n",
-    ], '', $rendered), "\r\n");
+    $withoutMarkers = rtrim(ltrim(str_replace([
+        "<!-- cache-layer:site -->\n",
+        "<!-- cache-layer:build -->\n",
+        "<!-- cache-layer:page -->\n",
+        "<!-- cache-layer:brief -->\n",
+    ], '', $rendered), "\r\n"), "\r\n");
 
     assert_eq($withoutMarkers, section_unit_request_text($request));
 });

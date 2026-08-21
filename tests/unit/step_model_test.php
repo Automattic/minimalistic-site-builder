@@ -117,7 +117,9 @@ test('sections passes the configured model into every part request', function ()
         ],
     ]]]);
     $llm = new FakeLlm();
-    // Header, footer, then the uncached dedicated hero in request order.
+    // The shared-layer warm-up probe, then header, footer and the dedicated
+    // hero in request order.
+    $llm->queueText('OK');
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
     $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
@@ -125,7 +127,7 @@ test('sections passes the configured model into every part request', function ()
 
     (new SectionsStep($llm, $renderer, 'claude-opus-4-8'))->run($project);
 
-    assert_true(count($llm->calls) === 3, 'hero-only builds skip cache warming and send one request per part');
+    assert_true(count($llm->calls) === 4, 'one warm-up for the shared layer, then one request per part');
     foreach ($llm->calls as $call) {
         assert_eq('claude-opus-4-8', $call['opts']['model'] ?? null);
     }
@@ -195,6 +197,7 @@ test('sections passes the configured temperature into every part request', funct
         ],
     ]]]);
     $llm = new FakeLlm();
+    $llm->queueText('OK'); // shared-layer warm-up probe
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
     $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
@@ -202,7 +205,7 @@ test('sections passes the configured temperature into every part request', funct
 
     (new SectionsStep($llm, $renderer, null, 0.9))->run($project);
 
-    assert_true(count($llm->calls) === 3, 'hero-only builds skip cache warming and send one request per part');
+    assert_true(count($llm->calls) === 4, 'one warm-up for the shared layer, then one request per part');
     foreach ($llm->calls as $call) {
         assert_eq(0.9, $call['opts']['temperature'] ?? null);
     }
