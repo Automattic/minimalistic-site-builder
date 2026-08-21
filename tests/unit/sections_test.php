@@ -230,7 +230,10 @@ test('footer composition is stable, varied, and shared with the closing-section 
     );
     $archetype = $match[1];
     assert_true(in_array($archetype, SectionsStep::FOOTER_ARCHETYPES, true));
-    $surface = FooterComposition::surface($archetype);
+    $pages = $project->readJson('pages.json')['pages'];
+    // The prompt must carry the surface the footer is actually painted, which
+    // is the archetype's preference only when no page closes on it.
+    $surface = FooterComposition::resolveSurface($archetype, SectionsStep::closingBackgrounds($pages));
     assert_contains("ASSIGNED FOOTER SURFACE: **{$surface}**", $footer);
     $closingPrompt = sections_request_text($reqs['page-home--about']);
     assert_contains(
@@ -238,20 +241,20 @@ test('footer composition is stable, varied, and shared with the closing-section 
         $closingPrompt
     );
     assert_contains('This section owns its planned narrative, facts, imagery, and primary CTA', $closingPrompt);
-    assert_contains('otherwise make one decisive color or image cut', $closingPrompt);
+    assert_contains('planned NOT to use that surface', $closingPrompt);
+    assert_contains('make one decisive color or image cut at the boundary', $closingPrompt);
 
-    $pages = $project->readJson('pages.json')['pages'];
     $siteSpec = $project->readText('siteSpec.json');
     $direction = \Automattic\SiteBuild\Steps\DesignDirectionStep::readFor($project);
     assert_eq(
-        SectionsStep::footerArchetype($pages, $siteSpec, $direction),
-        SectionsStep::footerArchetype($pages, $siteSpec, $direction),
+        SectionsStep::footerArchetype($siteSpec, $direction),
+        SectionsStep::footerArchetype($siteSpec, $direction),
         'identical build context always selects the same composition'
     );
 
     $picks = [];
     foreach (range(1, 30) as $n) {
-        $pick = SectionsStep::footerArchetype($pages, "{\"name\":\"Site {$n}\"}", "Direction {$n}");
+        $pick = SectionsStep::footerArchetype("{\"name\":\"Site {$n}\"}", "Direction {$n}");
         $picks[$pick] = true;
     }
     assert_true(count($picks) >= 4, 'different site identities spread across the footer catalog');
@@ -989,11 +992,13 @@ test('sections keeps the assigned surface when generated footer markup is unusab
     [$project, $tmp] = sections_fixture();
     $pages = $project->readJson('pages.json')['pages'];
     $archetype = SectionsStep::footerArchetype(
-        $pages,
         $project->readText('siteSpec.json'),
         \Automattic\SiteBuild\Steps\DesignDirectionStep::readFor($project)
     );
-    $surface = FooterComposition::surface($archetype);
+    // The deterministic fallback part must land on the resolved surface, not
+    // the archetype's raw preference — the closing sections were planned
+    // against the resolved one.
+    $surface = FooterComposition::resolveSurface($archetype, SectionsStep::closingBackgrounds($pages));
 
     $llm = new FakeLlm();
     $llm->queueText('OK');
@@ -1133,5 +1138,56 @@ test('sections persists an exhausted abnormal batch note even when balanced mark
     $joined = implode(' ', $project->readJson('warnings.json')['sections'] ?? []);
     assert_contains("part 'page-home--hero': model response remained abnormally terminated", $joined);
     assert_contains('max_tokens', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('the footer never takes the surface a page closes on', function () {
+    [$project, $tmp] = sections_fixture();
+
+    // Force the collision the resolver exists to break: plan the front page's
+    // closing section on exactly the surface this build's archetype prefers.
+    $preferred = FooterComposition::surface(FooterComposition::archetypeFor(
+        $project->readText('siteSpec.json'),
+        \Automattic\SiteBuild\Steps\DesignDirectionStep::readFor($project),
+    ));
+    $pages = $project->readJson('pages.json');
+    $pages['pages'][0]['sections'][1]['background'] = $preferred;
+    $project->writeJson('pages.json', $pages);
+
+    $llm = new FakeLlm();
+    $llm->queueText('OK'); // cache warm-up probe
+    $llm->queueText('<!-- wp:group --><!-- wp:site-title /--><!-- /wp:group -->');
+    $llm->queueText('<!-- wp:group --><!-- wp:site-title /--><!-- /wp:group -->');
+    $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
+    $llm->queueText('<!-- wp:heading --><h2>About</h2><!-- /wp:heading -->');
+
+    (new SectionsStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $footer = $project->readText('theme/parts/footer.html');
+    assert_eq(1, preg_match('/"backgroundColor":"([a-z-]+)"/', $footer, $m), 'footer declares a root surface');
+    assert_true(
+        $m[1] !== $preferred,
+        "footer took '{$m[1]}', the same surface the page closes on — the band has no boundary"
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('every page-plan request is told which surface its closing section must avoid', function () {
+    [$project, $tmp] = sections_fixture();
+    $project->writeJson('meta.json', ['prompt' => 'Demo prompt']);
+
+    $surface = FooterComposition::surface(FooterComposition::archetypeFor(
+        $project->readText('siteSpec.json'),
+        \Automattic\SiteBuild\Steps\DesignDirectionStep::readFor($project),
+    ));
+    $rule = FooterComposition::closingSectionRule($surface);
+
+    $planStep = new \Automattic\SiteBuild\Steps\PagePlanStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    $requests = $planStep->requests($project);
+
+    assert_true($requests !== [], 'page-plan builds a request per page');
+    foreach ($requests as $slug => $request) {
+        assert_contains($rule, sections_request_text($request), "page '{$slug}' carries the footer surface rule");
+    }
     exec('rm -rf ' . escapeshellarg($tmp));
 });

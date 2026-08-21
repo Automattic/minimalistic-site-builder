@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\BlocksEngine\PhpTransformer\ArtifactCompiler\ArtifactCompiler;
 use Automattic\BlocksEngine\PhpTransformer\Contract\TransformerResult;
 use Automattic\SiteBuild\DesignMarkupSanitizer;
+use Automattic\SiteBuild\FooterComposition;
 use Automattic\SiteBuild\HeroComposition;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
@@ -1180,12 +1181,16 @@ final class TransformSiteStep implements Step
                         break;
                     }
                 }
+                $footerArchetype = SectionsStep::footerArchetype(
+                    $project->readText('siteSpec.json'),
+                    DesignDirectionStep::readFor($project),
+                );
                 $input += [
                     'final_section_brief' => SectionsStep::finalSectionBrief($frontSections),
-                    'composition_archetype' => SectionsStep::footerArchetype(
-                        $pages,
-                        $project->readText('siteSpec.json'),
-                        DesignDirectionStep::readFor($project),
+                    'composition_archetype' => $footerArchetype,
+                    'surface' => FooterComposition::resolveSurface(
+                        $footerArchetype,
+                        SectionsStep::closingBackgrounds($pages),
                     ),
                     'page_count' => count($pages),
                 ];
