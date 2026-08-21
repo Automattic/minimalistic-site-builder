@@ -1065,9 +1065,23 @@ test('chrome nav rules follow the page count: anchors for one page, page-list fo
 
     assert_contains('should contain `<!-- wp:page-list /-->`', $reqs['header']['prompt']);
     assert_true(!str_contains($reqs['header']['prompt'], 'do NOT use `<!-- wp:page-list /-->`'), 'multi-page header keeps the page-list default');
-    assert_contains('A compact `wp:page-list` is permitted', $reqs['footer']['prompt']);
+    assert_contains('`wp:navigation` that contains `<!-- wp:page-list /-->`', $reqs['footer']['prompt']);
     assert_true(!str_contains($reqs['footer']['prompt'], 'This site is ONE page'), 'multi-page footer may list pages');
     exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('a closing section left on the footer surface is briefed for a continuous seam', function () {
+    // resolveSurface picks the fewest collisions, not zero, and a host adapter
+    // calling this directly never runs the plan-level move. Telling that author
+    // it was planned off the surface briefs a cut with nothing to cut against.
+    $shared = SectionsStep::footerNeighborContract('editorial-colophon', 'base', 'base');
+    assert_contains('shares that exact surface', $shared);
+    assert_contains('hand off continuously through spacing', $shared);
+    assert_true(!str_contains($shared, 'planned NOT to use'), 'no false claim when the surfaces match');
+
+    $cut = SectionsStep::footerNeighborContract('editorial-colophon', 'base', 'tinted');
+    assert_contains('planned NOT to use that surface', $cut);
+    assert_contains('make one decisive color or image cut', $cut);
 });
 
 test('section prompts carry the slug as the anchor and the outline exposes it', function () {

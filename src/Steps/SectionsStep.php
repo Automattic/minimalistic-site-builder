@@ -1204,7 +1204,8 @@ final class SectionsStep implements Step
         $above = $describe($sections[$i - 1] ?? null) ?? 'the site header (this is the first section)';
         $below = $describe($sections[$i + 1] ?? null);
         if ($below === null) {
-            $below = self::footerNeighborContract($footerArchetype, $footerSurface);
+            $own = is_array($sections[$i] ?? null) ? (string) ($sections[$i]['background'] ?? '') : '';
+            $below = self::footerNeighborContract($footerArchetype, $footerSurface, $own);
         }
         return "Above: {$above}\nBelow: {$below}";
     }
@@ -1218,18 +1219,30 @@ final class SectionsStep implements Step
      * composition; '' for the surface falls back to the archetype's preference.
      * Pure — unit-testable.
      */
-    public static function footerNeighborContract(string $archetype, string $surface = ''): string
-    {
+    public static function footerNeighborContract(
+        string $archetype,
+        string $surface = '',
+        string $sectionBackground = '',
+    ): string {
         if ($archetype === '') {
             return 'the site footer (this is the last section)';
         }
         FooterComposition::assertKnown($archetype);
         $surface = $surface !== '' ? $surface : FooterComposition::surface($archetype);
+        // resolveSurface() picks the fewest collisions, not zero, and a host
+        // adapter calling this directly never runs the plan-level move. So the
+        // section really can be sitting on the footer's surface, and telling
+        // its author it was planned off one would brief a cut that has nothing
+        // to cut against.
+        $seam = $sectionBackground !== '' && $sectionBackground === $surface
+            ? 'This section shares that exact surface, so hand off continuously through spacing and rhythm rather '
+                . 'than a colour cut, and never restate the footer band.'
+            : 'This section was planned NOT to use that surface, so make one decisive color or image cut at the '
+                . 'boundary and never restate the footer band.';
         return "the site footer (this is the last section) — assigned {$archetype} composition opening on the "
             . "exact **{$surface}** background surface. "
             . 'This section owns its planned narrative, facts, imagery, and primary CTA; the footer owns persistent '
-            . 'identity, compact site-wide utility, and credit. This section was planned NOT to use that surface, so '
-            . 'make one decisive color or image cut at the boundary and never restate the footer band. Do not repeat '
+            . "identity, compact site-wide utility, and credit. {$seam} Do not repeat "
             . 'copy, contact/hours clusters, CTA, or a second signature ornament.';
     }
 

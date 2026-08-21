@@ -270,7 +270,8 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             'site_pages'       => self::sitePagesList($sitePages ?? $pages),
             // One footer part renders below every page here, and these requests
             // fan out concurrently blind to each other — so this is the only
-            // point where the whole site can be steered off the footer's band.
+            // point where the MODEL can be steered off it. The deterministic
+            // floor in consumeResults() is what guarantees the result.
             'footer_surface_rule' => FooterComposition::closingSectionRule(
                 FooterComposition::surface(FooterComposition::archetypeFor($siteSpec, $designDirection)),
             ),
@@ -633,10 +634,13 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 . $replacement . '" so the site footer\'s "' . $footerSurface . '" band below reads as its own '
                 . 'surface; this supersedes any background named earlier in this line.');
             $pages[$index]['sections'] = $sections;
-            $warnings[] = "page '{$slug}' closing section '" . (string) ($last['slug'] ?? '')
-                . "': planned background={$footerSurface}; delivered={$replacement}; "
-                . "disposition=the footer renders on {$footerSurface} directly below it, so the planned band "
-                . 'would have left that page with no visible footer boundary';
+            $warnings[] = self::valueLossWarning(
+                self::sectionPath($slug, (int) $lastKey) . '.background',
+                $footerSurface,
+                $replacement,
+                "the footer renders on {$footerSurface} directly below it, so the planned band would have left "
+                . 'that page with no visible footer boundary',
+            );
         }
         return $pages;
     }

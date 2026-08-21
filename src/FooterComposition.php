@@ -53,8 +53,8 @@ final class FooterComposition
     private const SURFACE_CANDIDATES = ['base', 'contrast'];
 
     /** Footer utility/action behavior when sibling pages offer useful destinations. */
-    private const NAV_RULE_MULTI = '- This site has multiple pages. A compact `wp:page-list` is permitted for '
-        . 'site-wide utility navigation. A footer button may use one purposeful canonical SITE PAGES destination — '
+    private const NAV_RULE_MULTI = '- This site has multiple pages. Site-wide utility navigation is a '
+        . '`wp:navigation` that contains `<!-- wp:page-list /-->`, never a bare `wp:page-list`. A footer button may use one purposeful canonical SITE PAGES destination — '
         . 'the page holding what this site actually asks visitors to do next — '
         . 'but never a generic Home/back action merely to fill the design; '
         . 'a spec-backed mailto: action is also valid.';
@@ -143,8 +143,9 @@ final class FooterComposition
     /**
      * The planning constraint every page receives so its closing section does
      * not land on the footer's surface. Page plans are one concurrent request
-     * per page, blind to each other, so this is the only place the whole site
-     * can be coordinated against a single footer.
+     * per page, blind to each other, so this is the only place the MODEL can
+     * be told about a single footer. withClosingBandOffFooterSurface() is the
+     * deterministic counterpart, and it is the one that guarantees the result.
      */
     public static function closingSectionRule(string $surface): string
     {
