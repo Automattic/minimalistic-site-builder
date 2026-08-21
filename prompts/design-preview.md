@@ -53,6 +53,9 @@ Emit exactly one `<img>` in whole document, inside `<section id="hero">`. Omit `
 - Never place a `device--hairline-rule`, `device--section-numeral`, or `device--stamp` class in this
   document. This is the hero and fold, and the DESIGN DIRECTION's device belongs on ONE later
   non-hero band; the build strips it from the hero.
+- No forms or form controls. A shop is a catalog storefront: no cart, checkout, quantity input,
+  add-to-cart control, or purchase flow — product cards that invite a contact enquiry are the
+  whole store.
 - No HTML comments. No CSS comments.
 
 Return only finished HTML document.
