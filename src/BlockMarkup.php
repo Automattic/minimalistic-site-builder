@@ -14,10 +14,10 @@ use Automattic\SiteBuild\BlockSerializer\Json\JsJsonEncoder;
  * Parses a markup document into a flat node list (tree via parent indices),
  * exposing each block's comment JSON attributes for inspection, and lets a
  * caller replace a node's attributes. render() reproduces the document
- * byte-for-byte except for explicit opening-comment rewrites and the bounded
- * own-HTML class edits exposed below. Attribute edits otherwise leave saved
- * HTML out of sync with comment JSON; callers rely on the block fixer
- * (re-serialization from attributes) running afterwards to re-sync it.
+ * byte-for-byte except for explicit opening-comment rewrites, the bounded
+ * own-HTML class edits, and spliceOwnHtml() slices. Attribute edits otherwise
+ * leave saved HTML out of sync with comment JSON; callers rely on the block
+ * fixer (re-serialization from attributes) running afterwards to re-sync it.
  *
  * The comment grammar (delimiter regex, attribute escaping) mirrors
  * WordPress core's WP_Block_Parser / serialize_block_attributes().
@@ -73,6 +73,9 @@ final class BlockMarkup
      *      and vice versa
      */
     private array $innerEdits = [];
+
+    /** @var list<array{start:int, length:int, content:string}> */
+    private array $htmlSplices = [];
 
     /**
      * @param string|null $delimiterView same-length lexical view used only to
@@ -584,9 +587,33 @@ final class BlockMarkup
         ];
     }
 
+    /**
+     * Replace a slice of this node's own HTML. Offsets are relative to
+     * ownHtml(). Comment-delimiter rewrites stay on a disjoint range; do not
+     * overlap a class-token edit on the same node.
+     */
+    public function spliceOwnHtml(int $i, int $relativeStart, int $relativeLength, string $replacement): void
+    {
+        $n = $this->nodes[$i];
+        $end = $n['children'] !== []
+            ? $this->nodes[$n['children'][0]]['offset']
+            : $n['innerEnd'];
+        $ownLength = $end - $n['innerStart'];
+        if ($relativeStart < 0
+            || $relativeLength < 0
+            || $relativeStart + $relativeLength > $ownLength) {
+            throw new \InvalidArgumentException('splice must stay inside the block own HTML');
+        }
+        $this->htmlSplices[] = [
+            'start'   => $n['innerStart'] + $relativeStart,
+            'length'  => $relativeLength,
+            'content' => $replacement,
+        ];
+    }
+
     public function isMutated(): bool
     {
-        return $this->mutations !== [] || $this->innerEdits !== [];
+        return $this->mutations !== [] || $this->innerEdits !== [] || $this->htmlSplices !== [];
     }
 
     /** The document with every mutation applied at its original offsets. */
@@ -649,6 +676,9 @@ final class BlockMarkup
         }
         foreach ($regions as $region) {
             $ops[] = $region;
+        }
+        foreach ($this->htmlSplices as $splice) {
+            $ops[] = $splice;
         }
         usort($ops, static fn (array $a, array $b) => $b['start'] <=> $a['start']);
 

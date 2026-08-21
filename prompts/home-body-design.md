@@ -51,6 +51,7 @@ Every image needs meaningful `alt` text written as a usable image generation pro
 
 ## Responsive contract
 
+- Do not stagger a row of siblings (different top margins, translateY offsets, or nth-child even/odd vertical offsets) unless SITE SPEC is clearly a photography or gallery site (photographer, photography, photojournalism, or a gallery). Keep card and image rows level for every other site.
 - Follow the mobile-first behavior established by the site CSS.
 - Reuse its grid, flex, bounded content widths, responsive spacing, focus states, readable contrast, and reduced-motion behavior.
 - Keep images, navigation, tables, long words, and multi-column layouts usable on narrow screens.

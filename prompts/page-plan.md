@@ -68,7 +68,7 @@ Layout archetypes (pick the one that best serves each section's content):
 - full-bleed-cover — a full-width cover image or gradient with overlaid text
 - asymmetric-split — two unequal columns (e.g. 34/66 or 40/60), never 50/50
 - centered-stack — a single constrained, centered column carried by type and whitespace (display lines center; wrapping body copy stays start-aligned — left for LTR, right for RTL)
-- offset-grid — a staggered grid whose items deliberately don't line up in neat rows
+- offset-grid — a staggered grid whose items deliberately don't line up in neat rows. Use ONLY when the site is clearly a photography or gallery site (SITE SPEC area/topic is photography, a photographer, photojournalism, or a gallery). For every other site, pick a level row (equal-card-grid, mixed-width-editorial, or list-with-thumbnails) instead of offsetting sibling tops.
 - mixed-width-editorial — a magazine-like row mixing wide and narrow items
 - equal-card-grid — the classic equal-height card row
 - list-with-thumbnails — stacked rows, each a small image beside text

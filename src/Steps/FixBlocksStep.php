@@ -10,8 +10,10 @@ use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\BlockSerializer\AlignmentClassLoss;
 use Automattic\SiteBuild\BlockSerializer\AlignmentClassLossDetector;
 use Automattic\SiteBuild\LayoutFixer;
+use Automattic\SiteBuild\PhotographySite;
 use Automattic\SiteBuild\PhpBlockFixer;
 use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\StaggeredChildren;
 use Automattic\SiteBuild\ShapeMarkup;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
@@ -56,6 +58,8 @@ final class FixBlocksStep implements Step
             reads: [
                 'designDirection.json',
                 ...($this->htmlFirst ? ['design/site.css'] : []),
+                'meta.json',
+                'siteSpec.json',
                 'theme/theme.json',
                 'theme/parts/*',
             ],
@@ -444,20 +448,34 @@ final class FixBlocksStep implements Step
         $excluded = array_fill_keys($excluded, true);
         $contentSize = self::themeContentSize($project);
         $spacingSlugs = self::themeSpacingSlugs($project);
+        $siteSpec = $project->exists('siteSpec.json') ? $project->readJson('siteSpec.json') : [];
+        $meta = $project->exists('meta.json') ? $project->readJson('meta.json') : [];
+        $flattenStaggeredChildren = !PhotographySite::matches(
+            is_array($siteSpec) ? $siteSpec : [],
+            (string) ($meta['prompt'] ?? ''),
+        );
         foreach ($project->themeFiles() as $rel) {
             if (isset($excluded[$rel])) {
                 continue;
             }
             $markup = $project->readText('theme/' . $rel);
+            $role = LayoutFixer::roleFor($rel);
             $result = LayoutFixer::fix(
                 $markup,
-                LayoutFixer::roleFor($rel),
+                $role,
                 $contentSize,
                 $spacingSlugs,
                 $htmlFirst,
                 $wideMeasureRootClasses,
             );
             $normalized = $result['markup'];
+            if ($flattenStaggeredChildren && $role === LayoutFixer::ROLE_SECTION) {
+                $flat = StaggeredChildren::flatten($normalized);
+                $normalized = $flat['markup'];
+                foreach ($flat['notes'] as $note) {
+                    $notes[] = "{$rel}: {$note}";
+                }
+            }
             if ($rel === 'parts/footer.html' && $widePartCarrierClasses !== []) {
                 $wide = self::promoteOutermostWidePartCarrier($normalized, $widePartCarrierClasses);
                 if ($wide !== $normalized) {
