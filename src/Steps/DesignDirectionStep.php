@@ -278,6 +278,7 @@ final class DesignDirectionStep implements Step
             'type'             => [
                 'heading' => self::emptyTypeSlot(),
                 'body'    => self::emptyTypeSlot(),
+                'accent'  => self::emptyTypeSlot(),
             ],
             'image_grade'      => '',
             'canvas'           => $canvas,
@@ -606,6 +607,7 @@ final class DesignDirectionStep implements Step
             'type'             => [
                 'heading' => self::normalizeTypeSlot($type['heading'] ?? null, 'heading', $warnings),
                 'body'    => self::normalizeTypeSlot($type['body'] ?? null, 'body', $warnings),
+                'accent'  => self::normalizeTypeSlot($type['accent'] ?? null, 'accent', $warnings),
             ],
             'image_grade'      => trim((string) ($raw['image_grade'] ?? '')),
             // Anything that isn't an explicit "framed" commitment is full-bleed:
@@ -829,7 +831,7 @@ final class DesignDirectionStep implements Step
 
         $type = is_array($direction['type'] ?? null) ? $direction['type'] : [];
         $pair = [];
-        foreach (['heading', 'body'] as $slot) {
+        foreach (['heading', 'body', 'accent'] as $slot) {
             $typeSlot = is_array($type[$slot] ?? null) ? $type[$slot] : [];
             $family = is_string($typeSlot['family'] ?? null) ? trim($typeSlot['family']) : '';
             if ($family === '') {
