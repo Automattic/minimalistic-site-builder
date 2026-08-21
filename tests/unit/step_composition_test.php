@@ -46,7 +46,7 @@ test('postImages names the phase every image entry point has to run', function (
     // cannot be added to one and forgotten in the other — and a host that
     // generates images mirrors one name instead of inferring the set.
     assert_eq(
-        ['generate-images', 'cover-contrast', 'theme-screenshot'],
+        ['generate-images', 'theme-screenshot', 'cover-contrast'],
         array_map(static fn (Step $s) => $s->id(), StepComposition::postImages($images)),
     );
 });
@@ -133,7 +133,7 @@ test('the fidelity walk needs no graph position of its own', function () {
     );
     $ids = array_map(static fn (Step $step): string => $step->id(), $c->steps());
 
-    assert_eq(['finalize-theme', 'validate-theme'], array_slice($ids, -2));
+    assert_eq(['theme-screenshot', 'validate-theme'], array_slice($ids, -2));
     assert_true(!in_array('direction-fidelity', $ids, true), 'no separate step exists');
     StepGraph::validate($c->steps(), $c->seeds());
 });

@@ -111,7 +111,12 @@ final class ThemeScreenshotStep implements Step
         // the delivered theme, and warnings.json is the repair pass's queue.
         $undecodable = [];
         foreach (self::heroCandidates($project) as $filename) {
-            $photo = ThemeScreenshot::cover($project->readText('theme/assets/' . $filename));
+            try {
+                $photo = ThemeScreenshot::cover($project->readText('theme/assets/' . $filename));
+            } catch (\Throwable) {
+                $undecodable[] = 'assets/' . $filename;
+                continue;
+            }
             if ($photo !== null) {
                 self::writeCard($project, self::PHOTO_PATH, $photo);
                 $project->replaceWarnings($this->id(), []);
@@ -125,9 +130,10 @@ final class ThemeScreenshotStep implements Step
             ? ContrastFixStep::paletteMap($project->readJson('theme/theme.json'))
             : [];
         $poster = ThemeScreenshot::poster($palette);
-        $delivered = $poster === null ? 'no preview card' : 'a palette poster';
+        $delivered = $poster === null ? 'removed' : 'a palette poster';
+        $deliveredFile = $poster === null ? 'removed' : self::POSTER_PATH;
         $warnings = $undecodable === [] ? [] : [
-            "file='theme/screenshot.jpg'; source=" . implode(', ', $undecodable)
+            "file='{$deliveredFile}'; source=" . implode(', ', $undecodable)
             . "; authored=cropped photo; delivered={$delivered}; "
             . 'disposition=no generated image would decode',
         ];
@@ -147,9 +153,11 @@ final class ThemeScreenshotStep implements Step
      */
     private static function writeCard(Project $project, string $path, string $bytes): void
     {
-        $project->writeText($path, $bytes);
+        // Remove the other card first: WordPress prefers .png over .jpg, so a
+        // leftover poster would outrank a photo that has already been written.
         $other = $path === self::PHOTO_PATH ? self::POSTER_PATH : self::PHOTO_PATH;
         @unlink($project->path($other));
+        $project->writeText($path, $bytes);
     }
 
     /**
@@ -164,11 +172,16 @@ final class ThemeScreenshotStep implements Step
     {
         $ordered = [];
         foreach ([...self::frontPageAssets($project), ...self::generatedAssets($project)] as $filename) {
+            $safe = self::assetFilename($filename);
+            if ($safe === null) {
+                continue;
+            }
+            $rel = 'theme/assets/' . $safe;
             if (
-                GeminiImage::mimeForFilename($filename) === 'image/jpeg'
-                && $project->exists('theme/assets/' . $filename)
+                GeminiImage::mimeForFilename($safe) === 'image/jpeg'
+                && is_file($project->path($rel))
             ) {
-                $ordered[$filename] = true;
+                $ordered[$safe] = true;
             }
         }
         return array_keys($ordered);
@@ -226,10 +239,29 @@ final class ThemeScreenshotStep implements Step
         $filenames = [];
         foreach ((array) $project->readJson('images.json') as $spec) {
             $filename = is_array($spec) ? (string) ($spec['filename'] ?? '') : '';
-            if ($filename !== '' && ($spec['status'] ?? '') === 'completed') {
-                $filenames[] = $filename;
+            $safe = self::assetFilename($filename);
+            if ($safe !== null && ($spec['status'] ?? '') === 'completed') {
+                $filenames[] = $safe;
             }
         }
         return $filenames;
+    }
+
+    /**
+     * A theme-assets filename that cannot walk out of theme/assets/.
+     * images.json is generated, but a host-merged or truncated spec must not
+     * become a path; basename alone still leaves ".." and odd separators.
+     */
+    private static function assetFilename(string $filename): ?string
+    {
+        $normalized = str_replace('\\', '/', $filename);
+        $base = basename($normalized);
+        if ($base === '' || $base === '.' || $base === '..' || $base !== $normalized) {
+            return null;
+        }
+        if (preg_match('/^[A-Za-z0-9._-]+\.[A-Za-z0-9]+$/', $base) !== 1) {
+            return null;
+        }
+        return $base;
     }
 }

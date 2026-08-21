@@ -28,10 +28,10 @@ namespace Automattic\SiteBuild;
  * the opposite case — PNG stores the poster in a few kilobytes and JPEG would
  * ring at every edge.
  *
- * Both run on Imagick when the extension is loaded and on GD otherwise, the
- * same two-runtime arrangement ImageTransparency and GeminiImage already use.
- * A host with neither extension gets null from both and ships no screenshot;
- * that is a missing preview card, never a failed build.
+ * Both prefer Imagick and fall through to GD the way GeminiImage::toJpeg
+ * does, so a loaded-but-broken wand still produces a card. A host with
+ * neither extension gets null from both and ships no screenshot; that is a
+ * missing preview card, never a failed build.
  */
 final class ThemeScreenshot
 {
@@ -56,8 +56,14 @@ final class ThemeScreenshot
      */
     public static function cover(string $bytes): ?string
     {
+        // Same fall-through as GeminiImage::toJpeg: Imagick is preferred, but a
+        // loaded-and-broken wand (policy.xml, missing JPEG delegate) must not
+        // skip a GD crop of the same bytes.
         if (extension_loaded('imagick')) {
-            return self::coverWithImagick($bytes);
+            $out = self::coverWithImagick($bytes);
+            if ($out !== null) {
+                return $out;
+            }
         }
         if (function_exists('imagecreatetruecolor')) {
             return self::coverWithGd($bytes);
@@ -100,7 +106,10 @@ final class ThemeScreenshot
         ];
 
         if (extension_loaded('imagick')) {
-            return self::drawWithImagick($rects);
+            $out = self::drawWithImagick($rects);
+            if ($out !== null) {
+                return $out;
+            }
         }
         if (function_exists('imagecreatetruecolor')) {
             return self::drawWithGd($rects);
@@ -124,6 +133,8 @@ final class ThemeScreenshot
      */
     private static function coverWithImagick(string $bytes): ?string
     {
+        $im = null;
+        $flat = null;
         try {
             $im = new \Imagick();
             $im->readImageBlob($bytes);
@@ -134,6 +145,7 @@ final class ThemeScreenshot
             // $flat is independent, and a full-size hero is megabytes per copy;
             // drop the source before the crop and encode rather than after.
             $im->clear();
+            $im = null;
             $flat->cropThumbnailImage(self::WIDTH, self::HEIGHT);
             // A crop leaves the canvas offset behind it; reset the page so the
             // written image is the crop and nothing else.
@@ -141,68 +153,97 @@ final class ThemeScreenshot
             $flat->setImageFormat('jpeg');
             $flat->setImageCompressionQuality(self::JPEG_QUALITY);
             $out = $flat->getImageBlob();
-            $flat->clear();
             return $out === '' ? null : $out;
         } catch (\Throwable) {
             return null;
+        } finally {
+            if ($flat instanceof \Imagick) {
+                $flat->clear();
+            }
+            if ($im instanceof \Imagick) {
+                $im->clear();
+            }
         }
     }
 
     private static function coverWithGd(string $bytes): ?string
     {
-        $src = @imagecreatefromstring($bytes);
-        if ($src === false) {
-            return null;
-        }
-        $sw = imagesx($src);
-        $sh = imagesy($src);
-        if ($sw < 1 || $sh < 1) {
-            imagedestroy($src);
-            return null;
-        }
+        $src = null;
+        $dst = null;
+        $buffering = false;
+        try {
+            $src = @imagecreatefromstring($bytes);
+            if ($src === false) {
+                return null;
+            }
+            $sw = imagesx($src);
+            $sh = imagesy($src);
+            if ($sw < 1 || $sh < 1) {
+                return null;
+            }
 
-        // The largest centred source rectangle with the target's aspect ratio:
-        // whichever axis is proportionally longer is the one that gets cropped.
-        if ($sw * self::HEIGHT > $sh * self::WIDTH) {
-            $ch = $sh;
-            $cw = (int) round($sh * self::WIDTH / self::HEIGHT);
-        } else {
-            $cw = $sw;
-            $ch = (int) round($sw * self::HEIGHT / self::WIDTH);
-        }
-        $dst = imagecreatetruecolor(self::WIDTH, self::HEIGHT);
-        imagefilledrectangle(
-            $dst,
-            0,
-            0,
-            self::WIDTH - 1,
-            self::HEIGHT - 1,
-            (int) imagecolorallocate($dst, 255, 255, 255)
-        );
-        imagecopyresampled(
-            $dst,
-            $src,
-            0,
-            0,
-            intdiv($sw - $cw, 2),
-            intdiv($sh - $ch, 2),
-            self::WIDTH,
-            self::HEIGHT,
-            $cw,
-            $ch
-        );
-        imagedestroy($src);
+            // The largest centred source rectangle with the target's aspect ratio:
+            // whichever axis is proportionally longer is the one that gets cropped.
+            if ($sw * self::HEIGHT > $sh * self::WIDTH) {
+                $ch = $sh;
+                $cw = (int) round($sh * self::WIDTH / self::HEIGHT);
+            } else {
+                $cw = $sw;
+                $ch = (int) round($sw * self::HEIGHT / self::WIDTH);
+            }
+            $dst = imagecreatetruecolor(self::WIDTH, self::HEIGHT);
+            if ($dst === false) {
+                return null;
+            }
+            imagefilledrectangle(
+                $dst,
+                0,
+                0,
+                self::WIDTH - 1,
+                self::HEIGHT - 1,
+                (int) imagecolorallocate($dst, 255, 255, 255)
+            );
+            $copied = imagecopyresampled(
+                $dst,
+                $src,
+                0,
+                0,
+                intdiv($sw - $cw, 2),
+                intdiv($sh - $ch, 2),
+                self::WIDTH,
+                self::HEIGHT,
+                $cw,
+                $ch
+            );
+            if ($copied !== true) {
+                return null;
+            }
 
-        ob_start();
-        $ok = imagejpeg($dst, null, self::JPEG_QUALITY);
-        $out = (string) ob_get_clean();
-        imagedestroy($dst);
-        return $ok && $out !== '' ? $out : null;
+            ob_start();
+            $buffering = true;
+            $ok = imagejpeg($dst, null, self::JPEG_QUALITY);
+            $out = (string) ob_get_clean();
+            $buffering = false;
+            return $ok && $out !== '' ? $out : null;
+        } catch (\Throwable) {
+            if ($buffering) {
+                ob_end_clean();
+            }
+            return null;
+        } finally {
+            if ($src instanceof \GdImage) {
+                imagedestroy($src);
+            }
+            if ($dst instanceof \GdImage) {
+                imagedestroy($dst);
+            }
+        }
     }
 
     /** @param list<array{0:int,1:int,2:int,3:int,4:array{0:int,1:int,2:int}}> $rects */
     private static function drawWithImagick(array $rects): ?string
     {
+        $im = null;
         try {
             $im = new \Imagick();
             $im->newImage(self::WIDTH, self::HEIGHT, 'white', 'png');
@@ -213,26 +254,46 @@ final class ThemeScreenshot
             }
             $im->drawImage($draw);
             $out = $im->getImageBlob();
-            $im->clear();
             return $out === '' ? null : $out;
         } catch (\Throwable) {
             return null;
+        } finally {
+            if ($im instanceof \Imagick) {
+                $im->clear();
+            }
         }
     }
 
     /** @param list<array{0:int,1:int,2:int,3:int,4:array{0:int,1:int,2:int}}> $rects */
     private static function drawWithGd(array $rects): ?string
     {
-        $im = imagecreatetruecolor(self::WIDTH, self::HEIGHT);
-        foreach ($rects as [$x, $y, $w, $h, $rgb]) {
-            $color = (int) imagecolorallocate($im, $rgb[0], $rgb[1], $rgb[2]);
-            imagefilledrectangle($im, $x, $y, $x + $w - 1, $y + $h - 1, $color);
+        $im = null;
+        $buffering = false;
+        try {
+            $im = imagecreatetruecolor(self::WIDTH, self::HEIGHT);
+            if ($im === false) {
+                return null;
+            }
+            foreach ($rects as [$x, $y, $w, $h, $rgb]) {
+                $color = (int) imagecolorallocate($im, $rgb[0], $rgb[1], $rgb[2]);
+                imagefilledrectangle($im, $x, $y, $x + $w - 1, $y + $h - 1, $color);
+            }
+            ob_start();
+            $buffering = true;
+            $ok = imagepng($im, null, 6);
+            $out = (string) ob_get_clean();
+            $buffering = false;
+            return $ok && $out !== '' ? $out : null;
+        } catch (\Throwable) {
+            if ($buffering) {
+                ob_end_clean();
+            }
+            return null;
+        } finally {
+            if ($im instanceof \GdImage) {
+                imagedestroy($im);
+            }
         }
-        ob_start();
-        $ok = imagepng($im, null, 6);
-        $out = (string) ob_get_clean();
-        imagedestroy($im);
-        return $ok && $out !== '' ? $out : null;
     }
 
     /**
@@ -259,8 +320,13 @@ final class ThemeScreenshot
     private static function parseHex(string $value): ?array
     {
         $hex = ltrim(trim($value), '#');
-        if (in_array(strlen($hex), [4, 8], true)) {
-            $hex = substr($hex, 0, strlen($hex) - 2);
+        // #RGBA and #RRGGBBAA: drop the alpha digits. Four-digit form is one
+        // nibble of alpha; eight-digit is two. Stripping two chars from both
+        // leaves #RGBA as two digits, which ContrastMath cannot read.
+        if (strlen($hex) === 4) {
+            $hex = substr($hex, 0, 3);
+        } elseif (strlen($hex) === 8) {
+            $hex = substr($hex, 0, 6);
         }
         return ContrastMath::hexToRgb($hex);
     }

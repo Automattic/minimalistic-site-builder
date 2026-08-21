@@ -241,6 +241,22 @@ shot_test('theme-screenshot reads the post-generation asset URLs too', function 
     assert_color_near([120, 60, 200], screenshot_pixel(screenshot_card($project), 600, 450));
 });
 
+shot_test('theme-screenshot ignores path-shaped images.json filenames', function (Project $project) {
+    // A host-merged spec must not walk out of theme/assets/ and must not
+    // abort the build. The escaped file is a valid JPEG sitting one directory
+    // up; the card has to be the poster, not that crop.
+    $project->writeText('theme/outside.jpg', screenshot_fixture(255, 0, 0));
+    screenshot_front_page($project, '<p>No images in the content.</p>');
+    $project->writeJson('images.json', [
+        ['filename' => '../outside.jpg', 'status' => 'completed'],
+    ]);
+    screenshot_theme_json($project, ['base' => '#FFFFFF', 'contrast' => '#111111']);
+
+    quietly(fn () => (new ThemeScreenshotStep())->run($project));
+
+    assert_true($project->exists('theme/screenshot.png'), 'an escaped filename does not become the card');
+});
+
 shot_test('theme-screenshot falls back to images.json when the front page has no photo', function (Project $project) {
     // A site whose only picture lives in the shared header never appears
     // in the page content; the generated-image manifest still names it.
@@ -280,6 +296,18 @@ shot_test('theme-screenshot composes a palette poster when the build generated n
     assert_color_near([141, 153, 174], screenshot_pixel($png, 200, 700), 2, 'card');
     // A build without images is a normal build, not a degraded one.
     assert_true(!$project->exists('warnings.json'), 'the poster path warns about nothing');
+});
+
+shot_test('theme-screenshot reads 4-digit hex palette colours', function (Project $project) {
+    // #RGBA is one alpha nibble; dropping two characters would leave two
+    // hex digits and fall back to the greys. ContrastMath expands the RGB.
+    screenshot_theme_json($project, ['base' => '#FEC', 'contrast' => '#123F']);
+
+    quietly(fn () => (new ThemeScreenshotStep())->run($project));
+
+    $png = screenshot_card($project);
+    assert_color_near([17, 34, 51], screenshot_pixel($png, 1100, 100), 2, 'hero band from #123F');
+    assert_color_near([255, 238, 204], screenshot_pixel($png, 600, 600), 2, 'page background from #FEC');
 });
 
 shot_test('theme-screenshot survives a palette it cannot read', function (Project $project) {

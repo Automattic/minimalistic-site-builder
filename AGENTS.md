@@ -22,7 +22,7 @@ Default blocks graph (`StepComposition::default()` → `StepComposition::blocks(
 
 Image generation is slow and networked, so it is in neither graph. The steps that depend on the real pixels are named once, in `StepComposition::postImages()`, and every entry point runs that list after the graph:
 
-`generate-images -> cover-contrast -> theme-screenshot`
+`generate-images -> theme-screenshot -> cover-contrast`
 
 A host that generates images must run that phase too. Mirroring only the graph ships a theme whose cover text was checked against images that did not exist yet, and whose preview card is the palette poster `theme-screenshot` drew in-pipeline rather than the site's own hero.
 

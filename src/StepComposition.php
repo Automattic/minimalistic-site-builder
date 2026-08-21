@@ -399,12 +399,15 @@ final class StepComposition
     {
         return [
             $generateImages,
+            // The pipeline drew a palette poster because no photo existed.
+            // Now one does, so the card becomes the site's own hero. Before
+            // cover-contrast: that step is fatal when the generation stamp is
+            // missing or incomplete, and the screenshot does not read its
+            // output — sitting behind it would keep the poster on a cover miss.
+            new ThemeScreenshotStep(),
             // Cover text was picked against an image that did not exist yet;
             // re-check it against the real, dimmed pixels.
             new CoverContrastStep($blockFixer ?? BlockFixers::default()),
-            // The pipeline drew a palette poster because no photo existed.
-            // Now one does, so the card becomes the site's own hero.
-            new ThemeScreenshotStep(),
         ];
     }
 
