@@ -142,9 +142,9 @@ test('TG5 section mode stitches whole-page HTML then real transform and assemble
     putenv('SITE_BUILD_HTML_FIRST=1');
     try {
         assert_eq(
-            'f4118719db3167b40f31cf917a1de4c37357eb3494804a99d5afd1555723f3e1',
+            '0f9a907dbe0ae68a32daba582280428c853cc14f3aff78eba3629cbe5569b37f',
             hash_file('sha256', repo_path('src/Steps/TransformSiteStep.php')),
-            'transform-site source stays frozen after steering rerouted closing bands off the footer surface',
+            'transform-site source stays frozen after one accessor for the footer archetype',
         );
         assert_eq(
             '8b1b1c02cfb91397c67410ea63380821c84d578b486028a108c8fd846133e692',
