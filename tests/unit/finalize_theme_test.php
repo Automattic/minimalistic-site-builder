@@ -290,6 +290,33 @@ test('finalize-theme ships and enqueues the shape kit for a rounded commitment',
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('finalize-theme fails loudly when a stale overlay kit cannot be pruned', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    $project->writeJson('designDirection.json', ['description' => 'x', 'shape' => 'sharp']);
+    $project->writeText('theme/assets/shape/shape.css', '.wp-block-cover { border-radius: 1.25rem; }');
+    finalize_static_header($project);
+
+    $dir = $project->themePath('assets/shape');
+    try {
+        if (!chmod($dir, 0555) || is_writable($dir)) {
+            skip_test('cannot make the kit directory read-only on this platform');
+        }
+        // Silently shrugging here would leave the sheet loading while the build
+        // reported it pruned, so the unlink failure must abort the step.
+        $e = assert_throws(
+            fn () => quietly(fn () => (new FinalizeThemeStep())->run($project)),
+            'an unprunable stale kit must abort finalize',
+        );
+        assert_contains('Could not remove stale overlay stylesheet', $e->getMessage());
+        assert_true(is_file($dir . '/shape.css'), 'the sheet is still there — that is the point');
+        assert_true(!$project->exists('theme/functions.php'), 'fatal prune failure does not write partial wiring');
+    } finally {
+        @chmod($dir, 0755);
+        remove_tree($tmp);
+    }
+});
+
 test('finalize-theme ships no shape kit for sharp and prunes a stale one', function () {
     $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
     $project = (new ProjectStore($tmp))->create('Forno Vero');
