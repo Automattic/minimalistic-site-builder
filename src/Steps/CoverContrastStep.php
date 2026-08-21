@@ -9,6 +9,7 @@ use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\ContrastFix;
 use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\Units\GeneratedMarkup;
@@ -110,7 +111,12 @@ final class CoverContrastStep implements Step
         $palette = ContrastFixStep::paletteMap($themeJson);
         $gradients = ContrastFixStep::gradientMap($themeJson);
         $globalLink = $themeJson['styles']['elements']['link']['color']['text'] ?? null;
-        $helper = new ContrastFix($palette, $gradients, fontSizes: ContrastFixStep::fontSizeMap($themeJson));
+        $helper = new ContrastFix(
+            $palette,
+            $gradients,
+            fontSizes: ContrastFixStep::fontSizeMap($themeJson),
+            normalText: Surface::contrastFloor(DesignDirectionStep::surfaceFor($project)),
+        );
         $linkDefault = is_string($globalLink) ? $helper->resolveColorValue($globalLink) : null;
 
         $report = [];

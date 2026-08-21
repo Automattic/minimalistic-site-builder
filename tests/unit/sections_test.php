@@ -78,10 +78,18 @@ test('sections requests one part per header/footer/page-section', function () {
     $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
 
     assert_eq(['header', 'footer', 'page-home--hero', 'page-home--about'], array_keys($reqs));
-    assert_true(!array_key_exists('cached_prefixes', $reqs['header']), 'header is not cached');
-    assert_true(!array_key_exists('cached_prefixes', $reqs['footer']), 'footer is not cached');
-    assert_true(!array_key_exists('cached_prefixes', $reqs['page-home--hero']), 'the dedicated hero request is not cached');
-    assert_eq(2, count($reqs['page-home--about']['cached_prefixes'] ?? []), 'ordinary sections retain both cache layers');
+    foreach (['header', 'footer', 'page-home--hero'] as $chrome) {
+        assert_eq(1, count($reqs[$chrome]['cached_prefixes'] ?? []), "{$chrome} carries only the shared site layer");
+    }
+    assert_eq(3, count($reqs['page-home--about']['cached_prefixes'] ?? []), 'ordinary sections add their build and page layers');
+    $site = $reqs['page-home--about']['cached_prefixes'][0];
+    foreach (['header', 'footer', 'page-home--hero'] as $chrome) {
+        assert_eq(
+            $site,
+            $reqs[$chrome]['cached_prefixes'][0],
+            "{$chrome} opens with the byte-identical layer one warm-up primes",
+        );
+    }
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -141,11 +149,12 @@ test('sections fans out across every page and gives each section its own page co
         array_keys($reqs)
     );
 
-    assert_true(!array_key_exists('cached_prefixes', $reqs['page-home--hero']));
+    assert_eq(1, count($reqs['page-home--hero']['cached_prefixes'] ?? []), 'the hero carries only the shared layer');
     $homePrefixes = $reqs['page-home--home-details']['cached_prefixes'] ?? [];
     $menuPrefixes = $reqs['page-menu--menu-hero']['cached_prefixes'] ?? [];
-    assert_eq($homePrefixes[0] ?? null, $menuPrefixes[0] ?? null, 'build layer is byte-identical across pages');
-    assert_true(($homePrefixes[1] ?? null) !== ($menuPrefixes[1] ?? null), 'page layer differs across pages');
+    assert_eq($homePrefixes[0] ?? null, $menuPrefixes[0] ?? null, 'site layer is byte-identical across pages');
+    assert_eq($homePrefixes[1] ?? null, $menuPrefixes[1] ?? null, 'build layer is byte-identical across pages');
+    assert_true(($homePrefixes[2] ?? null) !== ($menuPrefixes[2] ?? null), 'page layer differs across pages');
 
     // Each section sees ITS page's outline, not another page's.
     $menuBreads = sections_request_text($reqs['page-menu--breads']);
@@ -155,11 +164,11 @@ test('sections fans out across every page and gives each section its own page co
 
     // Every part knows the whole site's page list (for internal links / nav).
     assert_contains('/menu/', sections_request_text($reqs['page-home--hero']));
-    assert_contains('/menu/', $reqs['header']['prompt']);
-    assert_contains('/menu/', $reqs['footer']['prompt']);
+    assert_contains('/menu/', sections_request_text($reqs['header']));
+    assert_contains('/menu/', sections_request_text($reqs['footer']));
 
     // The header is briefed on the FRONT page's hero and outline.
-    assert_contains('1. Hero (hero)', $reqs['header']['prompt']);
+    assert_contains('1. Hero (hero)', sections_request_text($reqs['header']));
 
     // Role and free-form semantic type remain distinct in each section brief.
     assert_true((bool) preg_match('/Role:\s+closing/', $reqs['page-menu--breads']['prompt']));
@@ -190,8 +199,8 @@ test('sections passes the design direction and the front-page edge briefs to chr
     $renderer = new PromptRenderer(repo_path('prompts'));
     $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
 
-    assert_contains('Archivo Silencioso', $reqs['header']['prompt']);
-    assert_contains('Archivo Silencioso', $reqs['footer']['prompt']);
+    assert_contains('Archivo Silencioso', sections_request_text($reqs['header']));
+    assert_contains('Archivo Silencioso', sections_request_text($reqs['footer']));
     assert_contains('Full-viewport cover photo.', $reqs['header']['prompt']);
     assert_contains('Title: About', $reqs['footer']['prompt']);
     assert_contains('Role: closing', $reqs['footer']['prompt']);
@@ -221,7 +230,10 @@ test('footer composition is stable, varied, and shared with the closing-section 
     );
     $archetype = $match[1];
     assert_true(in_array($archetype, SectionsStep::FOOTER_ARCHETYPES, true));
-    $surface = FooterComposition::surface($archetype);
+    $pages = $project->readJson('pages.json')['pages'];
+    // The prompt must carry the surface the footer is actually painted, which
+    // is the archetype's preference only when no page closes on it.
+    $surface = FooterComposition::resolveSurface($archetype, SectionsStep::closingBackgrounds($pages));
     assert_contains("ASSIGNED FOOTER SURFACE: **{$surface}**", $footer);
     $closingPrompt = sections_request_text($reqs['page-home--about']);
     assert_contains(
@@ -229,20 +241,20 @@ test('footer composition is stable, varied, and shared with the closing-section 
         $closingPrompt
     );
     assert_contains('This section owns its planned narrative, facts, imagery, and primary CTA', $closingPrompt);
-    assert_contains('otherwise make one decisive color or image cut', $closingPrompt);
+    assert_contains('planned NOT to use that surface', $closingPrompt);
+    assert_contains('make one decisive color or image cut at the boundary', $closingPrompt);
 
-    $pages = $project->readJson('pages.json')['pages'];
     $siteSpec = $project->readText('siteSpec.json');
     $direction = \Automattic\SiteBuild\Steps\DesignDirectionStep::readFor($project);
     assert_eq(
-        SectionsStep::footerArchetype($pages, $siteSpec, $direction),
-        SectionsStep::footerArchetype($pages, $siteSpec, $direction),
+        SectionsStep::footerArchetype($siteSpec, $direction),
+        SectionsStep::footerArchetype($siteSpec, $direction),
         'identical build context always selects the same composition'
     );
 
     $picks = [];
     foreach (range(1, 30) as $n) {
-        $pick = SectionsStep::footerArchetype($pages, "{\"name\":\"Site {$n}\"}", "Direction {$n}");
+        $pick = SectionsStep::footerArchetype("{\"name\":\"Site {$n}\"}", "Direction {$n}");
         $picks[$pick] = true;
     }
     assert_true(count($picks) >= 4, 'different site identities spread across the footer catalog');
@@ -980,11 +992,13 @@ test('sections keeps the assigned surface when generated footer markup is unusab
     [$project, $tmp] = sections_fixture();
     $pages = $project->readJson('pages.json')['pages'];
     $archetype = SectionsStep::footerArchetype(
-        $pages,
         $project->readText('siteSpec.json'),
         \Automattic\SiteBuild\Steps\DesignDirectionStep::readFor($project)
     );
-    $surface = FooterComposition::surface($archetype);
+    // The deterministic fallback part must land on the resolved surface, not
+    // the archetype's raw preference — the closing sections were planned
+    // against the resolved one.
+    $surface = FooterComposition::resolveSurface($archetype, SectionsStep::closingBackgrounds($pages));
 
     $llm = new FakeLlm();
     $llm->queueText('OK');
@@ -1051,9 +1065,23 @@ test('chrome nav rules follow the page count: anchors for one page, page-list fo
 
     assert_contains('should contain `<!-- wp:page-list /-->`', $reqs['header']['prompt']);
     assert_true(!str_contains($reqs['header']['prompt'], 'do NOT use `<!-- wp:page-list /-->`'), 'multi-page header keeps the page-list default');
-    assert_contains('A compact `wp:page-list` is permitted', $reqs['footer']['prompt']);
+    assert_contains('`wp:navigation` that contains `<!-- wp:page-list /-->`', $reqs['footer']['prompt']);
     assert_true(!str_contains($reqs['footer']['prompt'], 'This site is ONE page'), 'multi-page footer may list pages');
     exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('a closing section left on the footer surface is briefed for a continuous seam', function () {
+    // resolveSurface picks the fewest collisions, not zero, and a host adapter
+    // calling this directly never runs the plan-level move. Telling that author
+    // it was planned off the surface briefs a cut with nothing to cut against.
+    $shared = SectionsStep::footerNeighborContract('editorial-colophon', 'base', 'base');
+    assert_contains('shares that exact surface', $shared);
+    assert_contains('hand off continuously through spacing', $shared);
+    assert_true(!str_contains($shared, 'planned NOT to use'), 'no false claim when the surfaces match');
+
+    $cut = SectionsStep::footerNeighborContract('editorial-colophon', 'base', 'tinted');
+    assert_contains('planned NOT to use that surface', $cut);
+    assert_contains('make one decisive color or image cut', $cut);
 });
 
 test('section prompts carry the slug as the anchor and the outline exposes it', function () {
@@ -1124,5 +1152,128 @@ test('sections persists an exhausted abnormal batch note even when balanced mark
     $joined = implode(' ', $project->readJson('warnings.json')['sections'] ?? []);
     assert_contains("part 'page-home--hero': model response remained abnormally terminated", $joined);
     assert_contains('max_tokens', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('the footer never takes the surface a page closes on', function () {
+    [$project, $tmp] = sections_fixture();
+
+    // Force the collision the resolver exists to break: plan the front page's
+    // closing section on exactly the surface this build's archetype prefers.
+    $preferred = FooterComposition::surface(FooterComposition::archetypeFor(
+        $project->readText('siteSpec.json'),
+        \Automattic\SiteBuild\Steps\DesignDirectionStep::readFor($project),
+    ));
+    $pages = $project->readJson('pages.json');
+    $pages['pages'][0]['sections'][1]['background'] = $preferred;
+    $project->writeJson('pages.json', $pages);
+
+    $llm = new FakeLlm();
+    $llm->queueText('OK'); // cache warm-up probe
+    $llm->queueText('<!-- wp:group --><!-- wp:site-title /--><!-- /wp:group -->');
+    $llm->queueText('<!-- wp:group --><!-- wp:site-title /--><!-- /wp:group -->');
+    $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
+    $llm->queueText('<!-- wp:heading --><h2>About</h2><!-- /wp:heading -->');
+
+    (new SectionsStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $footer = $project->readText('theme/parts/footer.html');
+    assert_eq(1, preg_match('/"backgroundColor":"([a-z-]+)"/', $footer, $m), 'footer declares a root surface');
+    assert_true(
+        $m[1] !== $preferred,
+        "footer took '{$m[1]}', the same surface the page closes on — the band has no boundary"
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('the floor is not applied to the inner-page design plan', function () {
+    // runForSlugs serves two callers. InnerPagesDesignStep plans pages that
+    // become HTML designs carrying the design's OWN footer, and an explicitly
+    // selected plan must pass through untouched and silent — so the floor
+    // belongs at the reroute call site, not inside the planner.
+    [$project, $tmp] = sections_fixture();
+    $project->writeJson('meta.json', ['prompt' => 'Demo prompt']);
+
+    $surface = FooterComposition::surface(FooterComposition::archetypeFor(
+        $project->readText('siteSpec.json'),
+        \Automattic\SiteBuild\Steps\DesignDirectionStep::readFor($project),
+    ));
+
+    $llm = new FakeLlm();
+    $llm->queueJson(['sections' => [
+        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'purpose' => 'Open the page.', 'content_notes' => 'Real copy for the demo site.', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Sits under the header.', 'primary_action' => null],
+        ['slug' => 'closing', 'title' => 'Next Step', 'type' => 'cta', 'purpose' => 'Close the page.', 'content_notes' => 'Real closing copy for the demo site.', 'layout_archetype' => 'centered-stack', 'background' => $surface, 'vertical_density' => 'standard', 'handoff' => "Closes on the {$surface} band before the footer.", 'primary_action' => null],
+    ]]);
+
+    $planned = (new \Automattic\SiteBuild\Steps\PagePlanStep($llm, new PromptRenderer(repo_path('prompts'))))
+        ->runForSlugs($project, ['home']);
+
+    $sections = array_values($planned[0]['sections']);
+    $closing = $sections[count($sections) - 1];
+    assert_eq($surface, $closing['background'], 'the design plan keeps exactly what was selected');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('the html-first reroute steers its closing bands off the footer surface', function () {
+    // TransformSiteStep reroutes failed design pages through the BLOCKS path,
+    // so their footer is the one FooterUnit regenerates and the floor applies.
+    $surface = FooterComposition::surface(FooterComposition::archetypeFor('{"name":"Demo"}', 'DIRECTION'));
+    $pages = [[
+        'slug' => 'home',
+        'sections' => [
+            ['slug' => 'hero', 'background' => 'image', 'handoff' => 'Opens the page.'],
+            ['slug' => 'closing', 'background' => $surface, 'handoff' => 'Closes the page.'],
+        ],
+    ]];
+
+    $warnings = [];
+    $out = \Automattic\SiteBuild\Steps\PagePlanStep::withClosingBandOffFooterSurface($pages, $surface, $warnings);
+
+    $sections = array_values($out[0]['sections']);
+    assert_true(
+        $sections[count($sections) - 1]['background'] !== $surface,
+        'the rerouted page must not close on the surface its regenerated footer takes'
+    );
+    assert_eq(1, count($warnings), 'the move is recorded');
+});
+
+test('page-plan steers pages off the same surface the footer is actually painted', function () {
+    // page-plan and sections derive the footer surface independently from the
+    // same two files. Nothing else pins them together, so a change to either
+    // seed would silently stop the two steps coordinating — with every other
+    // test still green.
+    [$project, $tmp] = sections_fixture();
+    $project->writeJson('meta.json', ['prompt' => 'Demo prompt']);
+
+    $planStep = new \Automattic\SiteBuild\Steps\PagePlanStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    $planRequests = $planStep->requests($project);
+    $planText = sections_request_text((array) reset($planRequests));
+    assert_eq(1, preg_match('/on the exact \*\*([a-z-]+)\*\* background/', $planText, $avoided), 'plan names a surface');
+
+    $footerPrompt = (new SectionsStep(new FakeLlm(), new PromptRenderer(repo_path('prompts'))))
+        ->requests($project)['footer']['prompt'];
+    assert_eq(1, preg_match('/ASSIGNED FOOTER SURFACE: \*\*([a-z-]+)\*\*/', $footerPrompt, $painted), 'footer names a surface');
+
+    assert_eq($avoided[1], $painted[1], 'the surface pages are steered off is the one the footer takes');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('every page-plan request is told which surface its closing section must avoid', function () {
+    [$project, $tmp] = sections_fixture();
+    $project->writeJson('meta.json', ['prompt' => 'Demo prompt']);
+
+    $surface = FooterComposition::surface(FooterComposition::archetypeFor(
+        $project->readText('siteSpec.json'),
+        \Automattic\SiteBuild\Steps\DesignDirectionStep::readFor($project),
+    ));
+    $rule = FooterComposition::closingSectionRule($surface);
+
+    $planStep = new \Automattic\SiteBuild\Steps\PagePlanStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    $requests = $planStep->requests($project);
+
+    assert_true($requests !== [], 'page-plan builds a request per page');
+    foreach ($requests as $slug => $request) {
+        assert_contains($rule, sections_request_text($request), "page '{$slug}' carries the footer surface rule");
+    }
     exec('rm -rf ' . escapeshellarg($tmp));
 });

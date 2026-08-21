@@ -190,6 +190,23 @@ test('malformed attrs (missing closing brace) cannot swallow later blocks', func
     assert_contains('<!-- wp:paragraph {"textColor":"contrast"} -->', $out);
 });
 
+test('spliceOwnHtml replaces a slice of own HTML without touching copy', function () {
+    $src = '<!-- wp:group -->'
+        . '<div class="wp-block-group" style="margin-top:3rem">Mention margin-top:3rem</div>'
+        . '<!-- /wp:group -->';
+    $doc = BlockMarkup::parse($src);
+    $own = $doc->ownHtml(0);
+    $slice = ' style="margin-top:3rem"';
+    $pos = strpos($own, $slice);
+    assert_true($pos !== false);
+    $doc->spliceOwnHtml(0, $pos, strlen($slice), '');
+    $out = $doc->render();
+    assert_eq(
+        '<!-- wp:group --><div class="wp-block-group">Mention margin-top:3rem</div><!-- /wp:group -->',
+        $out,
+    );
+});
+
 test('replaceInOwnHtml rewrites class attributes only, never text content', function () {
     $src = '<!-- wp:paragraph {"textColor":"secondary"} -->'
         . '<p class="has-secondary-color has-text-color">Mention has-secondary-color here</p>'

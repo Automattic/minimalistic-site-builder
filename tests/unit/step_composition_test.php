@@ -88,7 +88,7 @@ test('StepComposition default is the full blocks graph byte-for-byte', function 
 
         assert_eq([
             'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
-            'theme-json+page-plan', 'sections', 'section-rhythm', 'copy-dedupe',
+            'theme-json+page-plan', 'reconcile-palette', 'sections', 'section-rhythm', 'copy-dedupe',
             'collect-images', 'normalize-layout', 'header-hero', 'contrast-fix', 'motion-sanity', 'fix-blocks',
             'assemble-pages', 'page-styles', 'custom-motion', 'bundle-fonts', 'fonts-php', 'finalize-theme', 'validate-theme',
         ], $ids);
@@ -99,6 +99,23 @@ test('StepComposition default is the full blocks graph byte-for-byte', function 
             ? putenv('SITE_BUILD_HTML_FIRST')
             : putenv('SITE_BUILD_HTML_FIRST=' . $previous);
     }
+});
+
+test('the fidelity walk needs no graph position of its own', function () {
+    // It runs inside validate-theme, which already sits one line later, is
+    // already the documented non-gating advisory pass, and already reads the
+    // artifacts these checks read.
+    $d = composition_deps();
+    $c = StepComposition::blocksTail(
+        llm: $d['llm'],
+        renderer: $d['renderer'],
+        blockFixer: $d['blockFixer'],
+    );
+    $ids = array_map(static fn (Step $step): string => $step->id(), $c->steps());
+
+    assert_eq(['finalize-theme', 'validate-theme'], array_slice($ids, -2));
+    assert_true(!in_array('direction-fidelity', $ids, true), 'no separate step exists');
+    StepGraph::validate($c->steps(), $c->seeds());
 });
 
 test('SITE_BUILD_HTML_FIRST=1 routes the default composition to the HTML-first graph', function () {

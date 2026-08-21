@@ -43,7 +43,7 @@ Return one `<main>` fragment for content below the fold followed immediately by 
 
 Use only headings, paragraphs, lists, block quotes, code, tables, images, buttons, links, and semantic or presentational wrappers such as `main`, `section`, `nav`, `article`, `aside`, `div`, `span`, and `footer`.
 
-There are no forms or form controls, no SVG, no custom elements, and no JavaScript. Do not emit `<form>`, `<input>`, `<textarea>`, `<select>`, `<button>` with scripted behavior, `<svg>`, `<script>`, inline event handlers, or `javascript:` URLs. Express layout, ornament, and interaction states with HTML and CSS only.
+There are no forms or form controls, no SVG, no custom elements, and no JavaScript. Do not emit `<form>`, `<input>`, `<textarea>`, `<select>`, `<button>` with scripted behavior, `<svg>`, `<script>`, inline event handlers, or `javascript:` URLs. Express layout, ornament, and interaction states with HTML and CSS only. A shop is a catalog storefront: no cart, checkout, quantity input, add-to-cart control, price-per-unit purchase flow, or WooCommerce block — product cards that invite a contact enquiry are the whole store.
 
 Use `<button>` only for a real non-scripted action. Prefer an `<a>` link styled as a button for navigation or a CTA.
 
@@ -51,6 +51,7 @@ Every image needs meaningful `alt` text written as a usable image generation pro
 
 ## Responsive contract
 
+- Do not stagger a row of siblings (different top margins, translateY offsets, or nth-child even/odd vertical offsets) unless SITE SPEC is clearly a photography or gallery site (photographer, photography, photojournalism, or a gallery). Keep card and image rows level for every other site.
 - Follow the mobile-first behavior established by the site CSS.
 - Reuse its grid, flex, bounded content widths, responsive spacing, focus states, readable contrast, and reduced-motion behavior.
 - Keep images, navigation, tables, long words, and multi-column layouts usable on narrow screens.

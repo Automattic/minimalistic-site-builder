@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\FooterComposition;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\GeneratedJsonException;
@@ -924,6 +925,10 @@ test('page-plan writes pages.json with sections per page', function () {
     (new PagePlanStep($llm, $renderer))->run($project);
 
     $plan = $project->readJson('pages.json');
+    assert_true(
+        in_array($plan['footer_archetype'] ?? null, FooterComposition::ARCHETYPES, true),
+        'page-plan persists the footer pick so later direction rewrites cannot retarget it'
+    );
     assert_eq(3, count($plan['pages']));
     assert_eq('home', $plan['pages'][0]['slug']);
     assert_eq(true, $plan['pages'][0]['front']);
@@ -1169,8 +1174,8 @@ test('page-plan repairs every invalid page in ONE batched round', function () {
         plan_section(['slug' => 'm2', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']),
     ]]);
     $llm->queueJson(['sections' => [
-        plan_section(['slug' => 'a1', 'layout_archetype' => 'offset-grid', 'background' => 'base']),
-        plan_section(['slug' => 'a2', 'layout_archetype' => 'offset-grid', 'background' => 'contrast']),
+        plan_section(['slug' => 'a1', 'layout_archetype' => 'mixed-width-editorial', 'background' => 'base']),
+        plan_section(['slug' => 'a2', 'layout_archetype' => 'mixed-width-editorial', 'background' => 'contrast']),
     ]]);
     // Both repairs come back fixed, in page order.
     $llm->queueJson(['sections' => [
@@ -1178,15 +1183,15 @@ test('page-plan repairs every invalid page in ONE batched round', function () {
         plan_section(['slug' => 'm2', 'layout_archetype' => 'asymmetric-split', 'background' => 'contrast']),
     ]]);
     $llm->queueJson(['sections' => [
-        plan_section(['slug' => 'a1', 'layout_archetype' => 'offset-grid', 'background' => 'base']),
-        plan_section(['slug' => 'a2', 'layout_archetype' => 'mixed-width-editorial', 'background' => 'contrast']),
+        plan_section(['slug' => 'a1', 'layout_archetype' => 'mixed-width-editorial', 'background' => 'base']),
+        plan_section(['slug' => 'a2', 'layout_archetype' => 'list-with-thumbnails', 'background' => 'contrast']),
     ]]);
 
     (new PagePlanStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
 
     $pages = $project->readJson('pages.json')['pages'];
     assert_eq('asymmetric-split', $pages[1]['sections'][1]['layout_archetype']);
-    assert_eq('mixed-width-editorial', $pages[2]['sections'][1]['layout_archetype']);
+    assert_eq('list-with-thumbnails', $pages[2]['sections'][1]['layout_archetype']);
 
     // The whole point: two failing pages cost ONE extra round-trip, not two.
     assert_eq(2, $llm->completeJsonBatchCalls, 'the initial fan-out plus ONE batched repair round');
@@ -1884,3 +1889,104 @@ test('normalize rejects every CTA fragment form that names no planned section (B
     $crossPage = PagePlanStep::normalize($sections, actionContext: $actionContext, pageSlug: 'home');
     assert_eq('/menu/#closing', $crossPage[0]['primary_action']['destination']);
 });
+
+test('PagePlanStep remaps ineligible offset-grid to a level row, never a cover', function () {
+    $warnings = [];
+    $sections = PagePlanStep::normalize([
+        plan_section(['slug' => 'story', 'layout_archetype' => 'centered-stack', 'background' => 'base']),
+        plan_section(['slug' => 'proof', 'layout_archetype' => 'offset-grid', 'background' => 'contrast']),
+        plan_section(['slug' => 'visit', 'layout_archetype' => 'mixed-width-editorial', 'background' => 'base']),
+    ], true, null, [], $warnings, 'home', allowOffsetGrid: false);
+
+    assert_eq('equal-card-grid', $sections[1]['layout_archetype']);
+    assert_true($sections[1]['layout_archetype'] !== 'full-bleed-cover');
+    assert_eq('centered-stack', $sections[0]['layout_archetype']);
+    assert_eq('mixed-width-editorial', $sections[2]['layout_archetype']);
+});
+
+test('PagePlanStep honors the equal-card-grid cap when remapping offset-grid', function () {
+    $warnings = [];
+    $sections = PagePlanStep::normalize([
+        plan_section(['slug' => 'a', 'layout_archetype' => 'equal-card-grid', 'background' => 'base']),
+        plan_section(['slug' => 'b', 'layout_archetype' => 'offset-grid', 'background' => 'contrast']),
+        plan_section(['slug' => 'c', 'layout_archetype' => 'equal-card-grid', 'background' => 'base']),
+    ], true, null, [], $warnings, 'home', allowOffsetGrid: false);
+
+    assert_eq('mixed-width-editorial', $sections[1]['layout_archetype']);
+    assert_eq(2, count(array_filter($sections, fn ($s) => $s['layout_archetype'] === 'equal-card-grid')));
+});
+
+test('PagePlanStep remaps offset-grid away from non-photography sites', function () {
+    $warnings = [];
+    $sections = PagePlanStep::normalize([
+        plan_section(['layout_archetype' => 'full-bleed-cover', 'background' => 'image']),
+        plan_section(['slug' => 'proof', 'layout_archetype' => 'offset-grid', 'background' => 'contrast']),
+        plan_section(['slug' => 'visit', 'layout_archetype' => 'centered-stack', 'background' => 'base']),
+    ], true, null, [], $warnings, 'home', allowOffsetGrid: false);
+
+    assert_eq('full-bleed-cover', $sections[0]['layout_archetype']);
+    assert_true($sections[1]['layout_archetype'] !== 'offset-grid', 'offset-grid is not delivered');
+    assert_eq('centered-stack', $sections[2]['layout_archetype']);
+    assert_true($sections[0]['layout_archetype'] !== $sections[1]['layout_archetype']);
+    assert_true($sections[1]['layout_archetype'] !== $sections[2]['layout_archetype']);
+    assert_true($warnings !== []);
+    $joined = implode("\n", $warnings);
+    assert_contains("pages[slug='home'].sections[1].layout_archetype", $joined);
+    assert_contains('offset-grid', $joined);
+    assert_contains('photography', $joined);
+});
+
+test('PagePlanStep does not remap an interior offset-grid into a full-bleed cover', function () {
+    $warnings = [];
+    $sections = PagePlanStep::normalize([
+        plan_section(['slug' => 'intro', 'layout_archetype' => 'offset-grid', 'background' => 'base']),
+        plan_section(['slug' => 'visit', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']),
+    ], false, null, [], $warnings, 'about', allowOffsetGrid: false);
+
+    assert_true($sections[0]['layout_archetype'] !== 'offset-grid');
+    assert_true($sections[0]['layout_archetype'] !== 'full-bleed-cover', 'interior opening stays compact');
+    assert_eq('centered-stack', $sections[1]['layout_archetype']);
+});
+
+test('PagePlanStep keeps offset-grid on a photography site', function () {
+    $warnings = [];
+    $sections = PagePlanStep::normalize([
+        plan_section(['layout_archetype' => 'full-bleed-cover', 'background' => 'image']),
+        plan_section(['slug' => 'proof', 'layout_archetype' => 'offset-grid', 'background' => 'contrast']),
+        plan_section(['slug' => 'visit', 'layout_archetype' => 'centered-stack', 'background' => 'base']),
+    ], true, null, [], $warnings, 'home', allowOffsetGrid: true);
+
+    assert_eq('offset-grid', $sections[1]['layout_archetype']);
+    assert_eq([], $warnings);
+});
+
+test('PagePlanStep does not pad a thin front plan with offset-grid on non-photography sites', function () {
+    $pages = [[
+        'slug' => 'home',
+        'path' => '/',
+        'front' => true,
+        'sections' => [plan_section(['slug' => 'hero'])],
+    ]];
+    $warnings = [];
+    $padded = PagePlanStep::padThinFrontPlan($pages, null, [], $warnings, allowOffsetGrid: false);
+    $archetypes = array_column($padded[0]['sections'], 'layout_archetype');
+    assert_true(!in_array('offset-grid', $archetypes, true), 'padding must not introduce offset-grid');
+    assert_true(count($padded[0]['sections']) >= 3);
+});
+
+test('page-plan and section-composition restrict offset-grid to photography sites', function () {
+    $pagePlan = (string) file_get_contents(repo_path('prompts/page-plan.md'));
+    $composition = (string) file_get_contents(repo_path('prompts/section-composition.md'));
+    $section = (string) file_get_contents(repo_path('prompts/section.md'));
+
+    foreach ([$pagePlan, $composition] as $prompt) {
+        assert_contains('offset-grid', $prompt);
+        assert_contains('photography', $prompt);
+        assert_contains('gallery', $prompt);
+    }
+    assert_contains('staggered-grid', $section);
+    assert_contains('photography', $section);
+    assert_contains('gallery', $section);
+    assert_contains('every SECOND column', $section, 'the staggered construction is still documented for photography and gallery');
+});
+

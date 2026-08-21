@@ -22,6 +22,7 @@ use Automattic\SiteBuild\Steps\MotionSanityStep;
 use Automattic\SiteBuild\Steps\NormalizeLayoutStep;
 use Automattic\SiteBuild\Steps\PagePlanStep;
 use Automattic\SiteBuild\Steps\PageStylesStep;
+use Automattic\SiteBuild\Steps\ReconcilePaletteStep;
 use Automattic\SiteBuild\Steps\RefinePromptStep;
 use Automattic\SiteBuild\Steps\ResolveNavLinksStep;
 use Automattic\SiteBuild\Steps\ScaffoldPluginStep;
@@ -264,6 +265,13 @@ final class StepComposition
                 new ThemeJsonStep($llm, $renderer, $models['theme-json'], $temps['theme-json']),
                 new PagePlanStep($llm, $renderer, $models['page-plan'], $temps['page-plan']),
             ]),
+            // Both members of that group commit to colors without seeing the
+            // other's output: theme-json may author a hex the direction only
+            // proposed, and the concurrent page plan quotes the proposed one
+            // into its content_notes. Resync both artifacts to the delivered
+            // palette here, while they are still only prompt context — every
+            // markup prompt below replays them (BIGR-850).
+            new ReconcilePaletteStep(),
             // Generate the header, footer, and every page's section parts in one
             // concurrent batch, then resolve each page's vertical seams while the
             // parts are still separate files ordered by the plan; the assemble

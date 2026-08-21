@@ -1039,3 +1039,190 @@ test('generate-images re-run copies an already-completed content image to the pl
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+/**
+ * Build a project whose only image carries the given SUBJECT, plus an optional
+ * site-wide grade. The grade pass reads both, so the two together are the whole
+ * input to the warnings and the request log.
+ */
+function grade_subject_fixture(string $subject, string $grade, string $file = 'hero.jpg'): array
+{
+    $tmp = sys_get_temp_dir() . '/builder_gi_grade_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeText(
+        'theme/parts/hero.html',
+        '<!-- wp:image --><figure class="wp-block-image">'
+            . '<img src="theme:./assets/' . $file . '" '
+            . 'alt="AI_IMAGE: ' . $subject . ' | wide feature image | photorealistic | landscape"/>'
+            . '</figure><!-- /wp:image -->'
+    );
+    (new CollectImagesStep())->run($project);
+    if ($grade !== '') {
+        $project->writeJson('designDirection.json', [
+            'title'       => 'Archivo',
+            'description' => 'Photography.',
+            'image_grade' => $grade,
+        ]);
+    }
+    return [$project, $tmp];
+}
+
+/** The one image transcript this run wrote. */
+function grade_image_log(object $project): string
+{
+    $files = glob($project->logPath('images') . '/*') ?: [];
+    return $files === [] ? '' : (string) file_get_contents($files[0]);
+}
+
+test('generate-images records a dropped grade clause and what it delivered instead', function () {
+    [$project, $tmp] = grade_subject_fixture(
+        'A loaf on a linen cloth, fine 35mm grain',
+        'clean digital product shots, studio white'
+    );
+
+    (new GenerateImagesStep(new FakeImageClient('JPEGDATA')))->run($project);
+
+    // Rung 4: the removal changed delivered output, so it owes an actionable
+    // row — the file, what was cut, and the disposition.
+    $warnings = $project->readJson('warnings.json')['generate-images'] ?? [];
+    assert_eq(1, count($warnings));
+    assert_contains("images.json 'hero.jpg'", $warnings[0]);
+    assert_contains('authored subject clause(s) "fine 35mm grain"', $warnings[0]);
+    assert_contains('delivered removed', $warnings[0]);
+    assert_contains('prompts/image-generation.md:63', $warnings[0]);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images writes a readable row for a subject longer than the value cap', function () {
+    // Warnings::value caps a value at 160 characters. Subjects are specced as
+    // 1-3 sentences and the grade tag sits at the end, so reporting the whole
+    // authored and delivered subject printed the same truncated head twice —
+    // "authored X; delivered X" — with the entire difference cut off.
+    $long = 'Portrait of a woman in her forties in a linen work shirt standing beside a tall studio'
+        . ' shelf of paper samples and bound specimen books, arms loosely crossed, calm direct gaze'
+        . ' slightly off-camera, soft north-facing window light from the left, fine 35mm grain';
+    [$project, $tmp] = grade_subject_fixture($long, 'clean digital product shots, studio white');
+
+    (new GenerateImagesStep(new FakeImageClient('JPEGDATA')))->run($project);
+
+    $warnings = $project->readJson('warnings.json')['generate-images'] ?? [];
+    assert_eq(1, count($warnings));
+    assert_contains('"fine 35mm grain"', $warnings[0], 'the clause that was cut survives the cap');
+    // The defect: the row must not carry two renderings of a value long enough
+    // to truncate, because they come out identical and say nothing.
+    assert_true(
+        !str_contains($warnings[0], 'Portrait of a woman'),
+        'the row reports the clause, not two truncated copies of the whole subject'
+    );
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images sends the stripped subject and logs it beside the authored one', function () {
+    [$project, $tmp] = grade_subject_fixture(
+        'A loaf on a linen cloth, fine 35mm grain',
+        'clean digital product shots, studio white'
+    );
+    $images = new FakeImageClient('JPEGDATA');
+
+    (new GenerateImagesStep($images))->run($project);
+
+    // The prompt the endpoint actually received carries the stripped subject.
+    assert_contains('A loaf on a linen cloth. Style: photorealistic', $images->calls[0]['prompt']);
+    assert_true(
+        !str_contains($images->calls[0]['prompt'], 'fine 35mm grain'),
+        'the competing clause never reaches the image model'
+    );
+
+    // And the transcript says the two differ, rather than showing an authored
+    // SUBJECT beside a PROMPT built from a different one.
+    $log = grade_image_log($project);
+    assert_contains('A loaf on a linen cloth, fine 35mm grain', $log);   // authored, still recorded
+    assert_contains('SUBJECT DELIVERED', $log);
+    assert_contains('A loaf on a linen cloth', $log);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images reports a grade clause it could not remove and delivers it whole', function () {
+    [$project, $tmp] = grade_subject_fixture(
+        'A loaf on a studio white sweep',
+        'warm Portra 400, visible 35mm grain'
+    );
+    $images = new FakeImageClient('JPEGDATA');
+
+    (new GenerateImagesStep($images))->run($project);
+
+    // Isolated-loss side: nothing is cut, the scene ships byte-for-byte, and
+    // the surviving conflict is still recorded.
+    assert_contains('A loaf on a studio white sweep. Style: photorealistic', $images->calls[0]['prompt']);
+    $warnings = $project->readJson('warnings.json')['generate-images'] ?? [];
+    assert_eq(1, count($warnings));
+    assert_contains('subject clause "A loaf on a studio white sweep"', $warnings[0]);
+    assert_contains('delivered unchanged', $warnings[0]);
+    assert_contains('names photographic grade but also names the scene', $warnings[0]);
+    // Nothing was rewritten, so the log must not claim a different delivery.
+    assert_true(!str_contains(grade_image_log($project), 'SUBJECT DELIVERED'), 'no receipt without a change');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images leaves a transparent asset out of the grade pass entirely', function () {
+    [$project, $tmp] = grade_subject_fixture(
+        'A badge on studio white, fine 35mm grain',
+        'warm Portra 400, visible 35mm grain',
+        'badge.png'
+    );
+    $images = new FakeImageClient('PNGDATA');
+
+    (new GenerateImagesStep($images))->run($project);
+
+    // The isolation clause owns the backdrop and no grade is appended, so
+    // there is nothing to compete with and nothing to warn about.
+    assert_contains('A badge on studio white, fine 35mm grain', $images->calls[0]['prompt']);
+    assert_true(!$project->exists('warnings.json'), 'a bypassed asset writes no grade row');
+    assert_true(!str_contains(grade_image_log($project), 'SUBJECT DELIVERED'));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images runs no grade pass when the direction committed to no grade', function () {
+    [$project, $tmp] = grade_subject_fixture('A loaf on a linen cloth, fine 35mm grain', '');
+    $images = new FakeImageClient('JPEGDATA');
+
+    (new GenerateImagesStep($images))->run($project);
+
+    assert_contains('A loaf on a linen cloth, fine 35mm grain', $images->calls[0]['prompt']);
+    assert_true(!$project->exists('warnings.json'), 'no grade means no conflict to report');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images records a grade clause cut from a repaired subject', function () {
+    // The repair pass hands back a brand new subject after the first batch has
+    // already been reported. A rewrite that reintroduces grade wording is
+    // stripped before it ships, so it owes the same receipt the authored one
+    // does — it was going out with only a log line behind it.
+    [$project, $tmp] = grade_subject_fixture('A protester at a barricade', 'clean digital product shots, studio white');
+    $images = new FakeImageClient('JPEGDATA');
+    $images->filterPromptSubstrings = ['A protester at a barricade'];
+    $llm = new FakeLlm();
+    $llm->queueText('A crowd in a public square, fine 35mm grain, catalog-lit');
+
+    (new GenerateImagesStep($images, $llm, 'small-model'))->run($project);
+
+    // The authored subject was clean, so the only rows come from the rewrite.
+    $warnings = $project->readJson('warnings.json')['generate-images'] ?? [];
+    $rows = implode(' | ', $warnings);
+    assert_contains('fine 35mm grain', $rows, 'the clause cut from the rewrite is recorded');
+    assert_contains('catalog-lit', $rows);
+    assert_contains('delivered removed', $rows);
+
+    // And what actually shipped is the stripped rewrite.
+    $repaired = $images->batches[1][0]['prompt'];
+    assert_contains('A crowd in a public square', $repaired);
+    assert_true(!str_contains($repaired, 'fine 35mm grain'), 'the competing clause never reaches the model');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

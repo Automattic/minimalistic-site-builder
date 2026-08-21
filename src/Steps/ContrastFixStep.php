@@ -7,6 +7,7 @@ use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\ContrastFix;
 use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\HeaderBehavior;
+use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
@@ -64,7 +65,7 @@ final class ContrastFixStep implements Step
             label: $this->label(),
             // Templates are only scanned when they exist; in the default graph
             // they are written by assemble-pages, which runs after this step.
-            reads: ['theme/theme.json', 'pages.json', 'theme/parts/*'],
+            reads: ['theme/theme.json', 'pages.json', 'designDirection.json', 'theme/parts/*'],
             writes: ['theme/theme.json', 'theme/parts/*', 'warnings.json'],
             concurrent: false,
         );
@@ -105,6 +106,7 @@ final class ContrastFixStep implements Step
             is_string($defaultText) ? $defaultText : null,
             is_string($headingText) ? $headingText : null,
             self::fontSizeMap($themeJson),
+            Surface::contrastFloor(DesignDirectionStep::surfaceFor($project)),
         );
 
         foreach ($project->themeFiles() as $rel) {
