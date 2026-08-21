@@ -45,11 +45,16 @@ final class DirectionFidelity
      */
     public static function problems(Project $project, bool $htmlFirst = false): array
     {
-        $direction = DesignDirectionStep::dataFor($project);
+        $direction = self::decodeJsonObject($project, 'designDirection.json');
+        if ($direction === null) {
+            return ["file='designDirection.json'; path=\"designDirection\"; authored=<invalid JSON>; delivered=unchanged; disposition=direction fidelity walk skipped because the direction is not valid JSON"];
+        }
         if ($direction === []) {
             return [];
         }
-        $theme = $project->exists('theme/theme.json') ? $project->readJson('theme/theme.json') : [];
+        // Invalid theme.json is already a ThemeValidator warning; do not
+        // throw here and abort the rest of validate-theme.
+        $theme = self::decodeJsonObject($project, 'theme/theme.json') ?? [];
 
         $problems = self::typeProblems($direction, $theme);
         foreach (self::pageMarkups($project) as $file => $markup) {
@@ -82,13 +87,17 @@ final class DirectionFidelity
     public static function typeProblems(array $direction, array $theme): array
     {
         $type = is_array($direction['type'] ?? null) ? $direction['type'] : [];
-        $committed = is_string($type['heading']['family'] ?? null) ? trim($type['heading']['family']) : '';
+        $heading = is_array($type['heading'] ?? null) ? $type['heading'] : [];
+        $committed = is_string($heading['family'] ?? null) ? trim($heading['family']) : '';
         if ($committed === '') {
             return [];
         }
 
+        $settings = is_array($theme['settings'] ?? null) ? $theme['settings'] : [];
+        $typography = is_array($settings['typography'] ?? null) ? $settings['typography'] : [];
+        $families = is_array($typography['fontFamilies'] ?? null) ? $typography['fontFamilies'] : [];
         $slugs = [];
-        foreach ($theme['settings']['typography']['fontFamilies'] ?? [] as $entry) {
+        foreach ($families as $entry) {
             if (is_array($entry) && is_string($entry['slug'] ?? null)) {
                 $slugs[$entry['slug']] = FontCatalog::primaryFamily((string) ($entry['fontFamily'] ?? '')) ?? '';
             }
@@ -124,15 +133,20 @@ final class DirectionFidelity
     private static function headingRenderPaths(array $theme): array
     {
         $paths = [];
+        $styles = is_array($theme['styles'] ?? null) ? $theme['styles'] : [];
+        $elements = is_array($styles['elements'] ?? null) ? $styles['elements'] : [];
         foreach (['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'heading'] as $element) {
-            $slug = self::familySlug($theme['styles']['elements'][$element]['typography']['fontFamily'] ?? null);
+            $elementStyles = is_array($elements[$element] ?? null) ? $elements[$element] : [];
+            $typography = is_array($elementStyles['typography'] ?? null) ? $elementStyles['typography'] : [];
+            $slug = self::familySlug($typography['fontFamily'] ?? null);
             if ($slug !== null) {
                 $paths["styles.elements.{$element}"] = $slug;
             }
         }
-        $siteTitle = self::familySlug(
-            $theme['styles']['blocks']['core/site-title']['typography']['fontFamily'] ?? null,
-        );
+        $blocks = is_array($styles['blocks'] ?? null) ? $styles['blocks'] : [];
+        $siteTitleBlock = is_array($blocks['core/site-title'] ?? null) ? $blocks['core/site-title'] : [];
+        $siteTitleTypography = is_array($siteTitleBlock['typography'] ?? null) ? $siteTitleBlock['typography'] : [];
+        $siteTitle = self::familySlug($siteTitleTypography['fontFamily'] ?? null);
         if ($siteTitle !== null) {
             $paths['styles.blocks.core/site-title'] = $siteTitle;
         }
@@ -209,9 +223,10 @@ final class DirectionFidelity
     {
         $assigned = DesignDirectionStep::normalizeCardStyle($direction['card_style'] ?? null);
         $target = 'card-style--' . $assigned;
+        $tokens = self::placedClassTokens($markup);
         $hasImageCards = preg_match('/<!-- wp:image\b/', $markup) === 1
-            && preg_match('/card-body|card-flush|<!-- wp:group\b/', $markup) === 1;
-        if (!$hasImageCards || str_contains($markup, $target)) {
+            && (in_array('card-body', $tokens, true) || in_array('card-flush', $tokens, true));
+        if (!$hasImageCards || in_array($target, $tokens, true)) {
             return [];
         }
         return ["file='{$file}'; path=\"card_style\"; authored=" . Warnings::value($assigned)
@@ -254,6 +269,45 @@ final class DirectionFidelity
     }
 
     /**
+     * Decode a project JSON object without throwing. Missing file → [].
+     * Present but not an array → null, so the caller can warn instead of
+     * aborting validate-theme the way Project::readJson would.
+     *
+     * @return array<mixed>|null
+     */
+    private static function decodeJsonObject(Project $project, string $rel): ?array
+    {
+        if (!$project->exists($rel)) {
+            return [];
+        }
+        $decoded = json_decode($project->readText($rel), true);
+        return is_array($decoded) ? $decoded : null;
+    }
+
+    /**
+     * Class tokens actually placed on blocks: the className attribute and
+     * the root tag's class attribute. A name printed inside a paragraph or
+     * code sample is not a placed class.
+     *
+     * @return list<string>
+     */
+    private static function placedClassTokens(string $markup): array
+    {
+        $document = BlockMarkup::parse($markup);
+        $tokens = [];
+        foreach ($document->indices() as $i) {
+            $attrs = $document->attrs($i) ?? [];
+            if (is_string($attrs['className'] ?? null)) {
+                array_push($tokens, ...(preg_split('/\s+/', trim($attrs['className']), -1, PREG_SPLIT_NO_EMPTY) ?: []));
+            }
+            if (preg_match('/class\s*=\s*(["\'])([^"\']*)\1/i', $document->ownHtml($i), $m) === 1) {
+                array_push($tokens, ...(preg_split('/\s+/', trim($m[2]), -1, PREG_SPLIT_NO_EMPTY) ?: []));
+            }
+        }
+        return $tokens;
+    }
+
+    /**
      * Every generated page, not just the front one — inner pages drift too,
      * and a warning that does not say which page cannot be acted on.
      *
@@ -261,11 +315,12 @@ final class DirectionFidelity
      */
     public static function pageMarkups(Project $project): array
     {
-        if (!$project->exists('plugin/pages.json')) {
+        $decoded = self::decodeJsonObject($project, 'plugin/pages.json');
+        if ($decoded === null || $decoded === []) {
             return [];
         }
         $pages = [];
-        foreach ((array) ($project->readJson('plugin/pages.json')['pages'] ?? []) as $page) {
+        foreach ((array) ($decoded['pages'] ?? []) as $page) {
             if (!is_array($page)) {
                 continue;
             }

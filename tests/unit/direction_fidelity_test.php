@@ -129,6 +129,65 @@ test('a static profile is never asked to prove movement', function () {
     }
 });
 
+test('malformed theme.json does not abort the walk', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fidelity_bad_theme_' . uniqid();
+    $project = (new \Automattic\SiteBuild\ProjectStore($tmp))->create('demo');
+    $project->writeJson('designDirection.json', fidelity_direction());
+    $project->writeText('theme/theme.json', '{not json');
+    $project->writeJson('plugin/pages.json', ['pages' => [['slug' => 'home', 'front' => true]]]);
+    $project->writeText('plugin/pages/home.html', '<!-- wp:paragraph --><p>Daily.</p><!-- /wp:paragraph -->');
+
+    $problems = DirectionFidelity::problems($project);
+    assert_true(is_array($problems), 'invalid theme.json must not throw');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('malformed designDirection.json does not abort the walk', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fidelity_bad_dir_' . uniqid();
+    $project = (new \Automattic\SiteBuild\ProjectStore($tmp))->create('demo');
+    $project->writeText('designDirection.json', '{not json');
+
+    $problems = DirectionFidelity::problems($project);
+    assert_eq(1, count($problems));
+    assert_contains('designDirection.json', $problems[0]);
+    assert_contains('not valid JSON', $problems[0]);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('a non-array fontFamilies list does not abort the heading check', function () {
+    $theme = fidelity_theme();
+    $theme['settings']['typography']['fontFamilies'] = 'Oswald';
+    $problems = DirectionFidelity::typeProblems(fidelity_direction(), $theme);
+    assert_eq(1, count($problems));
+    assert_contains('no heading family slug', $problems[0]);
+});
+
+test('an image in a group is not a card', function () {
+    $markup = '<!-- wp:group --><div class="wp-block-group">'
+        . '<!-- wp:image --><figure class="wp-block-image"><img src="a.jpg" alt="a"/></figure>'
+        . '<!-- /wp:image --></div><!-- /wp:group -->';
+    assert_eq([], DirectionFidelity::cardStyleProblems(
+        fidelity_direction(),
+        $markup,
+        'plugin/pages/about.html',
+    ));
+});
+
+test('a card-style class name printed in a paragraph does not satisfy the promise', function () {
+    $markup = '<!-- wp:group --><div class="wp-block-group card-body">'
+        . '<!-- wp:image --><figure class="wp-block-image"><img src="a.jpg" alt="a"/></figure>'
+        . '<!-- /wp:image -->'
+        . '<!-- wp:paragraph --><p>card-style--flush</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->';
+    $problems = DirectionFidelity::cardStyleProblems(
+        fidelity_direction(),
+        $markup,
+        'plugin/pages/about.html',
+    );
+    assert_eq(1, count($problems), 'a printed class name does not satisfy the promise');
+    assert_contains('card-style--flush', $problems[0]);
+});
+
 test('image cards with no committed card class are reported per page', function () {
     $markup = '<!-- wp:group --><div class="wp-block-group card-body">'
         . '<!-- wp:image --><figure class="wp-block-image"><img src="a.jpg" alt="a"/></figure>'
