@@ -65,6 +65,16 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     /** The most default-looking archetype is capped so it can't dominate a page. */
     private const MAX_EQUAL_CARD_GRIDS = 2;
 
+    /**
+     * Level replacements for an ineligible offset-grid. Matches the page-plan
+     * prompt: never a cover, prefer a card row, honor the grid cap.
+     */
+    private const LEVEL_ROW_ARCHETYPES = [
+        'equal-card-grid',
+        'mixed-width-editorial',
+        'list-with-thumbnails',
+    ];
+
     /** Whitespace-led pauses are accents, not a page's default cadence. */
     private const MAX_SPACIOUS_SECTIONS = 2;
 
@@ -2314,7 +2324,11 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         if (!$allowOffsetGrid) {
             foreach ($archetypes as $i => $archetype) {
                 if ($archetype === 'offset-grid') {
-                    $archetypes[$i] = $pick($i, 'offset-grid');
+                    $exclude = ['offset-grid'];
+                    if (!$front && $i === 0) {
+                        $exclude[] = 'full-bleed-cover';
+                    }
+                    $archetypes[$i] = self::pickLevelRow($archetypes, (int) $i, ...$exclude);
                 }
             }
         }
@@ -2464,7 +2478,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             if (!$front && $i === 0) {
                 $exclude[] = 'full-bleed-cover';
             }
-            $replacement = self::pickArchetype($archetypes, (int) $i, false, ...$exclude);
+            $replacement = self::pickLevelRow($archetypes, (int) $i, ...$exclude);
             $archetypes[$i] = $replacement;
             $sections[$i]['layout_archetype'] = $replacement;
             $slug = trim((string) ($section['slug'] ?? '')) ?: "section-{$i}";
@@ -2476,6 +2490,35 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             );
         }
         return $sections;
+    }
+
+    /**
+     * @param list<string> $archetypes
+     */
+    private static function pickLevelRow(array $archetypes, int $i, string ...$exclude): string
+    {
+        $grids = 0;
+        foreach ($archetypes as $j => $archetype) {
+            if ($archetype === 'equal-card-grid' && $j !== $i) {
+                $grids++;
+            }
+        }
+        foreach (self::LEVEL_ROW_ARCHETYPES as $candidate) {
+            if (in_array($candidate, $exclude, true)) {
+                continue;
+            }
+            if ($candidate === 'equal-card-grid' && $grids >= self::MAX_EQUAL_CARD_GRIDS) {
+                continue;
+            }
+            if ($candidate === ($archetypes[$i - 1] ?? null)) {
+                continue;
+            }
+            if ($candidate === ($archetypes[$i + 1] ?? null)) {
+                continue;
+            }
+            return $candidate;
+        }
+        return self::pickArchetype($archetypes, $i, false, 'full-bleed-cover', ...$exclude);
     }
 
     /**

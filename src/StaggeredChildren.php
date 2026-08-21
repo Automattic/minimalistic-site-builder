@@ -20,10 +20,18 @@ final class StaggeredChildren
     public static function flatten(string $markup): array
     {
         try {
-            $document = BlockMarkup::parse($markup);
+            return self::flattenDocument($markup);
         } catch (\Throwable) {
             return ['markup' => $markup, 'notes' => []];
         }
+    }
+
+    /**
+     * @return array{markup:string, notes:list<string>}
+     */
+    private static function flattenDocument(string $markup): array
+    {
+        $document = BlockMarkup::parse($markup);
 
         $notes = [];
         foreach ($document->indices() as $parent) {
@@ -55,6 +63,16 @@ final class StaggeredChildren
                 }
             }
             if (count(array_unique($tops, SORT_STRING)) < 2 || $carriers === []) {
+                continue;
+            }
+            $recipeSized = false;
+            foreach ($tops as $top) {
+                if (self::isRecipeStaggerOffset($top)) {
+                    $recipeSized = true;
+                    break;
+                }
+            }
+            if (!$recipeSized) {
                 continue;
             }
 
@@ -103,6 +121,18 @@ final class StaggeredChildren
         $first = $inner[0];
         $nested = self::topMargin($document, $first);
         return [$nested, $nested === '' ? null : $first];
+    }
+
+    /**
+     * The staggered-grid recipe pushes every second card by 3rem or 4rem.
+     * Preset spacing on one column of a split is not that pattern.
+     */
+    private static function isRecipeStaggerOffset(string $top): bool
+    {
+        if ($top === '' || preg_match('/^(\d+(?:\.\d+)?)rem$/i', $top, $match) !== 1) {
+            return false;
+        }
+        return (float) $match[1] >= 2.0;
     }
 
     private static function topMargin(BlockMarkup $document, int $i): string

@@ -1885,6 +1885,32 @@ test('normalize rejects every CTA fragment form that names no planned section (B
     assert_eq('/menu/#closing', $crossPage[0]['primary_action']['destination']);
 });
 
+test('PagePlanStep remaps ineligible offset-grid to a level row, never a cover', function () {
+    $warnings = [];
+    $sections = PagePlanStep::normalize([
+        plan_section(['slug' => 'story', 'layout_archetype' => 'centered-stack', 'background' => 'base']),
+        plan_section(['slug' => 'proof', 'layout_archetype' => 'offset-grid', 'background' => 'contrast']),
+        plan_section(['slug' => 'visit', 'layout_archetype' => 'mixed-width-editorial', 'background' => 'base']),
+    ], true, null, [], $warnings, 'home', allowOffsetGrid: false);
+
+    assert_eq('equal-card-grid', $sections[1]['layout_archetype']);
+    assert_true($sections[1]['layout_archetype'] !== 'full-bleed-cover');
+    assert_eq('centered-stack', $sections[0]['layout_archetype']);
+    assert_eq('mixed-width-editorial', $sections[2]['layout_archetype']);
+});
+
+test('PagePlanStep honors the equal-card-grid cap when remapping offset-grid', function () {
+    $warnings = [];
+    $sections = PagePlanStep::normalize([
+        plan_section(['slug' => 'a', 'layout_archetype' => 'equal-card-grid', 'background' => 'base']),
+        plan_section(['slug' => 'b', 'layout_archetype' => 'offset-grid', 'background' => 'contrast']),
+        plan_section(['slug' => 'c', 'layout_archetype' => 'equal-card-grid', 'background' => 'base']),
+    ], true, null, [], $warnings, 'home', allowOffsetGrid: false);
+
+    assert_eq('mixed-width-editorial', $sections[1]['layout_archetype']);
+    assert_eq(2, count(array_filter($sections, fn ($s) => $s['layout_archetype'] === 'equal-card-grid')));
+});
+
 test('PagePlanStep remaps offset-grid away from non-photography sites', function () {
     $warnings = [];
     $sections = PagePlanStep::normalize([

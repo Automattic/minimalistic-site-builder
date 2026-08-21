@@ -61,6 +61,21 @@ test('StaggeredChildren leaves a level card row byte-identical', function () {
     assert_eq([], $result['notes']);
 });
 
+test('StaggeredChildren leaves a two-column split with preset top spacing byte-identical', function () {
+    $left = '<!-- wp:paragraph {"style":{"spacing":{"margin":{"top":"var:preset|spacing|md"}}}} -->'
+        . '<p>Copy</p><!-- /wp:paragraph -->';
+    $right = '<!-- wp:image --><figure class="wp-block-image"><img alt=""/></figure><!-- /wp:image -->';
+    $markup = stagger_row(
+        stagger_column($left, '40%')
+        . stagger_column($right, '60%')
+    );
+
+    $result = StaggeredChildren::flatten($markup);
+
+    assert_eq($markup, $result['markup'], 'asymmetric-split preset spacing is not a staggered grid');
+    assert_eq([], $result['notes']);
+});
+
 test('StaggeredChildren leaves uniformly offset siblings byte-identical', function () {
     $markup = stagger_row(
         stagger_column(stagger_card('One', '2rem'))
