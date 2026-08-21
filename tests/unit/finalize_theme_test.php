@@ -334,3 +334,31 @@ test('finalize-theme ships no shape kit for sharp and prunes a stale one', funct
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('finalize-theme ships the device kit and prunes it for none', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    $project->writeJson('designDirection.json', ['description' => 'x', 'device' => 'stamp']);
+    finalize_static_header($project);
+
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+
+    assert_contains('.device--stamp', $project->readText('theme/assets/device/device.css'));
+    $php = $project->readText('theme/functions.php');
+    assert_contains(
+        "wp_enqueue_style('forno-vero-device', get_theme_file_uri('assets/device/device.css'), "
+            . "array('forno-vero-style'), \$ver);",
+        $php,
+    );
+    assert_contains("add_editor_style(array('style.css', 'assets/device/device.css'));", $php);
+
+    $project->writeJson('designDirection.json', ['description' => 'x', 'device' => 'none']);
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+    assert_true(!$project->exists('theme/assets/device/device.css'), 'stale device kit pruned');
+    $php = $project->readText('theme/functions.php');
+    assert_true(!str_contains($php, 'forno-vero-device'), 'stale device enqueue pruned');
+    assert_true(!str_contains($php, 'assets/device/device.css'), 'stale editor device style pruned');
+    assert_contains("add_editor_style('style.css');", $php);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

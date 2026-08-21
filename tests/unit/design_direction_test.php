@@ -1233,6 +1233,52 @@ test('shapeFor returns only an explicit valid commitment', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('normalize commits a catalog device', function () {
+    $direction = DesignDirectionStep::normalize([
+        'description' => 'A stamp on the menu.',
+        'device' => 'stamp',
+    ], 'cinematic-safe-zone');
+    assert_eq('stamp', $direction['device']);
+    assert_contains('device--stamp', DesignDirectionStep::format($direction));
+
+    $warnings = [];
+    assert_eq('none', DesignDirectionStep::normalizeDevice('twine', $warnings));
+    assert_contains('unbuildable motif', implode(' ', $warnings));
+});
+
+test('the direction description is never edited to remove motif words', function () {
+    // Deleting motif words mid-sentence left broken English in the text every
+    // downstream prompt reads through format(): "Kraft labels with twine and
+    // tape corners on the loaf" came out as "Kraft labels with and on the
+    // loaf". prompts/design-direction.md already says twine and tape are not
+    // devices, so it owns the rule and the description ships as authored.
+    $authored = 'Kraft labels with twine and tape corners on the loaf.';
+    $repairs = [];
+    $warnings = [];
+    $direction = DesignDirectionStep::normalize([
+        'description' => $authored,
+        'device' => 'none',
+    ], 'cinematic-safe-zone', '', $repairs, $warnings);
+
+    assert_eq($authored, $direction['description'], 'the sentence stays readable');
+    assert_true(
+        !str_contains(implode(' ', $warnings), 'unbuildable motif phrases removed'),
+        'no removal is claimed',
+    );
+});
+
+test('a description naming the accent font is left alone', function () {
+    // The removal list carried "rotated caveat", and Caveat is a real font a
+    // direction can commit to (#290). A direction that used it in the
+    // narrative had the phrase deleted and was warned it was unbuildable.
+    $authored = 'Flavor labels in a rotated Caveat, hand-written on kraft.';
+    $direction = DesignDirectionStep::normalize([
+        'description' => $authored,
+        'device' => 'none',
+    ], 'cinematic-safe-zone');
+    assert_eq($authored, $direction['description']);
+});
+
 test('directionFor returns nothing when no direction was committed', function () {
     $project = new Project(sys_get_temp_dir() . '/design-direction-absent-' . uniqid());
     try {
