@@ -493,6 +493,23 @@ final class TransformSiteStep implements Step
                 $failedPages,
             );
             $plannedFailedPages = $this->pagePlanStep->runForSlugs($project, $failedSlugs);
+            // These pages reroute to the blocks path below, so their footer is
+            // the one FooterUnit regenerates — steer their closing bands off
+            // its surface. The inner-page design path shares runForSlugs but
+            // keeps the design's own footer, so the floor belongs here rather
+            // than inside the planner.
+            $rerouteWarnings = [];
+            $plannedFailedPages = PagePlanStep::withClosingBandOffFooterSurface(
+                $plannedFailedPages,
+                FooterComposition::surface(SectionsStep::footerArchetype(
+                    $project->readText('siteSpec.json'),
+                    DesignDirectionStep::readFor($project),
+                )),
+                $rerouteWarnings,
+            );
+            if ($rerouteWarnings !== []) {
+                $project->addWarnings($this->id(), $rerouteWarnings);
+            }
             $sitePages = self::mergePagePlans($allPages, $deliveredPages, $plannedFailedPages);
             $blocksPages = $this->sectionsStep->runForPages($project, $plannedFailedPages, $sitePages);
             $blocksBySlug = [];

@@ -1172,6 +1172,57 @@ test('the footer never takes the surface a page closes on', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('the floor is not applied to the inner-page design plan', function () {
+    // runForSlugs serves two callers. InnerPagesDesignStep plans pages that
+    // become HTML designs carrying the design's OWN footer, and an explicitly
+    // selected plan must pass through untouched and silent — so the floor
+    // belongs at the reroute call site, not inside the planner.
+    [$project, $tmp] = sections_fixture();
+    $project->writeJson('meta.json', ['prompt' => 'Demo prompt']);
+
+    $surface = FooterComposition::surface(FooterComposition::archetypeFor(
+        $project->readText('siteSpec.json'),
+        \Automattic\SiteBuild\Steps\DesignDirectionStep::readFor($project),
+    ));
+
+    $llm = new FakeLlm();
+    $llm->queueJson(['sections' => [
+        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'purpose' => 'Open the page.', 'content_notes' => 'Real copy for the demo site.', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Sits under the header.', 'primary_action' => null],
+        ['slug' => 'closing', 'title' => 'Next Step', 'type' => 'cta', 'purpose' => 'Close the page.', 'content_notes' => 'Real closing copy for the demo site.', 'layout_archetype' => 'centered-stack', 'background' => $surface, 'vertical_density' => 'standard', 'handoff' => "Closes on the {$surface} band before the footer.", 'primary_action' => null],
+    ]]);
+
+    $planned = (new \Automattic\SiteBuild\Steps\PagePlanStep($llm, new PromptRenderer(repo_path('prompts'))))
+        ->runForSlugs($project, ['home']);
+
+    $sections = array_values($planned[0]['sections']);
+    $closing = $sections[count($sections) - 1];
+    assert_eq($surface, $closing['background'], 'the design plan keeps exactly what was selected');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('the html-first reroute steers its closing bands off the footer surface', function () {
+    // TransformSiteStep reroutes failed design pages through the BLOCKS path,
+    // so their footer is the one FooterUnit regenerates and the floor applies.
+    $surface = FooterComposition::surface(FooterComposition::archetypeFor('{"name":"Demo"}', 'DIRECTION'));
+    $pages = [[
+        'slug' => 'home',
+        'sections' => [
+            ['slug' => 'hero', 'background' => 'image', 'handoff' => 'Opens the page.'],
+            ['slug' => 'closing', 'background' => $surface, 'handoff' => 'Closes the page.'],
+        ],
+    ]];
+
+    $warnings = [];
+    $out = \Automattic\SiteBuild\Steps\PagePlanStep::withClosingBandOffFooterSurface($pages, $surface, $warnings);
+
+    $sections = array_values($out[0]['sections']);
+    assert_true(
+        $sections[count($sections) - 1]['background'] !== $surface,
+        'the rerouted page must not close on the surface its regenerated footer takes'
+    );
+    assert_eq(1, count($warnings), 'the move is recorded');
+});
+
 test('page-plan steers pages off the same surface the footer is actually painted', function () {
     // page-plan and sections derive the footer surface independently from the
     // same two files. Nothing else pins them together, so a change to either
@@ -1181,7 +1232,8 @@ test('page-plan steers pages off the same surface the footer is actually painted
     $project->writeJson('meta.json', ['prompt' => 'Demo prompt']);
 
     $planStep = new \Automattic\SiteBuild\Steps\PagePlanStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
-    $planText = sections_request_text((array) reset($planStep->requests($project)));
+    $planRequests = $planStep->requests($project);
+    $planText = sections_request_text((array) reset($planRequests));
     assert_eq(1, preg_match('/on the exact \*\*([a-z-]+)\*\* background/', $planText, $avoided), 'plan names a surface');
 
     $footerPrompt = (new SectionsStep(new FakeLlm(), new PromptRenderer(repo_path('prompts'))))
