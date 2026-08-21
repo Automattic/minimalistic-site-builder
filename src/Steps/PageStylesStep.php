@@ -20,6 +20,7 @@ use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\TransformArtifacts;
 
 /**
@@ -493,7 +494,8 @@ CSS;
         $uaBlockEnd = self::uaBlockEndCss($authorChunks, $markup);
         // Contrast is a judgment on the DESIGN's colors: the wrap policy has
         // none, and including it would only add unverified-selector findings.
-        $findings = CssContrastCheck::check($design, $markup);
+        $floor = Surface::contrastFloor(DesignDirectionStep::surfaceFor($project));
+        $findings = CssContrastCheck::check($design, $markup, $floor);
         // A resumed build hands this step the tail an earlier revision of the
         // code merged. Appending a second one leaves both in the cascade, and
         // a stale copy of a sibling page's rules is exactly the foreign CSS
@@ -512,6 +514,7 @@ CSS;
             $design,
             $markup,
             $findings,
+            $floor,
         );
         // Wrap policy first, so a design that deliberately hyphenates still
         // wins; the foundation ships even when the design contributed no CSS
@@ -531,6 +534,7 @@ CSS;
             $design,
             $markup,
             $findings,
+            $floor,
         );
         if ($merged === $currentStyle) {
             Narrator::write("  deterministic page CSS already merged\n");

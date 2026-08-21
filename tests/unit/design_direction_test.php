@@ -1233,6 +1233,21 @@ test('shapeFor returns only an explicit valid commitment', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('normalize commits a catalog surface and falls unknown textures back to none', function () {
+    $direction = DesignDirectionStep::normalize([
+        'description' => 'Paper ground.',
+        'surface' => 'Paper',
+    ], 'cinematic-safe-zone');
+    assert_eq('paper', $direction['surface']);
+    assert_contains('**Surface**: paper', DesignDirectionStep::format($direction));
+
+    $warnings = [];
+    $none = DesignDirectionStep::normalizeSurface('kraft', $warnings);
+    assert_eq('none', $none);
+    assert_contains('unsupported texture', implode(' ', $warnings));
+    assert_eq('none', DesignDirectionStep::normalizeSurface(null));
+});
+
 test('normalize commits a catalog device', function () {
     $direction = DesignDirectionStep::normalize([
         'description' => 'A stamp on the menu.',

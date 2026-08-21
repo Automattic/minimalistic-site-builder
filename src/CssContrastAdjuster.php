@@ -31,6 +31,7 @@ final class CssContrastAdjuster
         string $css,
         string $markup,
         array $findings,
+        float $normalText = ContrastMath::NORMAL_TEXT,
     ): string
     {
         $warnings = [];
@@ -71,9 +72,9 @@ final class CssContrastAdjuster
                 continue;
             }
 
-            $currentFindings = CssContrastCheck::check($adjusted, $markup);
+            $currentFindings = CssContrastCheck::check($adjusted, $markup, $normalText);
             $current = self::matchingFinding($currentFindings, $finding);
-            $repair = self::repairBackground($adjusted, $markup, $currentFindings, $finding);
+            $repair = self::repairBackground($adjusted, $markup, $currentFindings, $finding, $normalText);
             if ($repair['css'] !== null) {
                 $adjusted = $repair['css'];
                 $warnings[] = self::receipt(
@@ -222,10 +223,11 @@ final class CssContrastAdjuster
         string $adjustedDesign,
         string $markup,
         array $findings,
+        float $normalText = ContrastMath::NORMAL_TEXT,
     ): string {
         $designDeclarations = self::stylesheetDeclarations($adjustedDesign);
         $designProperties = self::customProperties($designDeclarations);
-        $deliveredFindings = CssContrastCheck::check($adjustedDesign, $markup);
+        $deliveredFindings = CssContrastCheck::check($adjustedDesign, $markup, $normalText);
         $moves = [];
         foreach ($findings as $finding) {
             if (($finding['status'] ?? null) !== 'fail'
@@ -296,6 +298,7 @@ final class CssContrastAdjuster
         string $markup,
         array $before,
         array $finding,
+        float $normalText,
     ): array {
         $declarations = self::stylesheetDeclarations($css);
         $customProperties = self::customProperties($declarations);
@@ -322,7 +325,7 @@ final class CssContrastAdjuster
             );
         }
 
-        $candidates = self::passingBackgrounds($foreground, $background['rgb']);
+        $candidates = self::passingBackgrounds($foreground, $background['rgb'], $normalText);
         $withinCap = array_values(array_filter(
             $candidates,
             static fn (array $candidate): bool => $candidate['distance'] <= self::MAX_BACKGROUND_OKLAB_DISTANCE,
@@ -350,7 +353,7 @@ final class CssContrastAdjuster
                         . $replacement
                         . substr($trial, $target['value_end']);
                 }
-                $after = CssContrastCheck::check($trial, $markup);
+                $after = CssContrastCheck::check($trial, $markup, $normalText);
                 $delivered = self::matchingFinding($after, $finding);
                 if ($delivered === null || $delivered['status'] !== 'pass') {
                     continue;
@@ -434,7 +437,7 @@ final class CssContrastAdjuster
      * @param array{0:int,1:int,2:int} $background
      * @return list<array{rgb:array{0:int,1:int,2:int},distance:float}>
      */
-    private static function passingBackgrounds(array $foreground, array $background): array
+    private static function passingBackgrounds(array $foreground, array $background, float $normalText): array
     {
         $candidates = [];
         foreach ([[0, 0, 0], [255, 255, 255]] as $target) {
@@ -451,7 +454,7 @@ final class CssContrastAdjuster
                     $foreground['alpha'],
                     $candidate,
                 );
-                if (ContrastMath::ratio($rendered, $candidate) >= ContrastMath::NORMAL_TEXT) {
+                if (ContrastMath::ratio($rendered, $candidate) >= $normalText) {
                     $candidates[] = [
                         'rgb' => $candidate,
                         'distance' => self::oklabDistance($background, $candidate),
