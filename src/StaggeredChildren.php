@@ -99,7 +99,14 @@ final class StaggeredChildren
         }
         $attrs = $document->attrs($i) ?? [];
         $layout = $attrs['layout'] ?? null;
-        if (!is_array($layout) || ($layout['type'] ?? '') !== 'flex') {
+        if (!is_array($layout)) {
+            return false;
+        }
+        $type = (string) ($layout['type'] ?? '');
+        if ($type === 'grid') {
+            return true;
+        }
+        if ($type !== 'flex') {
             return false;
         }
         return ($layout['orientation'] ?? 'horizontal') !== 'vertical';
@@ -111,16 +118,21 @@ final class StaggeredChildren
     private static function topMarginCarrier(BlockMarkup $document, int $child): array
     {
         $own = self::topMargin($document, $child);
-        if ($own !== '') {
+        if (self::isRecipeStaggerOffset($own)) {
             return [$own, $child];
         }
-        $inner = $document->children($child);
-        if ($inner === []) {
-            return ['', null];
+        $firstNonEmpty = $own === '' ? null : [$own, $child];
+        foreach ($document->children($child) as $inner) {
+            $top = self::topMargin($document, $inner);
+            if ($top === '') {
+                continue;
+            }
+            $firstNonEmpty ??= [$top, $inner];
+            if (self::isRecipeStaggerOffset($top)) {
+                return [$top, $inner];
+            }
         }
-        $first = $inner[0];
-        $nested = self::topMargin($document, $first);
-        return [$nested, $nested === '' ? null : $first];
+        return $firstNonEmpty ?? ['', null];
     }
 
     /**
@@ -156,6 +168,12 @@ final class StaggeredChildren
 
     private static function clearTopMargin(BlockMarkup $document, int $i): void
     {
+        self::clearCommentTopMargin($document, $i);
+        self::clearInlineMarginTop($document, $i);
+    }
+
+    private static function clearCommentTopMargin(BlockMarkup $document, int $i): void
+    {
         $attrs = $document->attrs($i) ?? [];
         $style = $attrs['style'] ?? null;
         if (!is_array($style)) {
@@ -186,5 +204,45 @@ final class StaggeredChildren
             $attrs['style'] = $style;
         }
         $document->setAttrs($i, $attrs);
+    }
+
+    private static function clearInlineMarginTop(BlockMarkup $document, int $i): void
+    {
+        $own = $document->ownHtml($i);
+        $tag = MarkupScan::wrapperTag($own, 0);
+        if ($tag === null
+            || preg_match(
+                '/[\x20\t\r\n\f]style\s*=\s*(["\'])(.*?)\1/i',
+                $tag,
+                $match,
+                PREG_OFFSET_CAPTURE
+            ) !== 1) {
+            return;
+        }
+        $value = $match[2][0];
+        $stripped = self::withoutTopMarginDeclaration($value);
+        if ($stripped === $value) {
+            return;
+        }
+        if (trim($stripped, " \t;") === '') {
+            $document->spliceOwnHtml($i, $match[0][1], strlen($match[0][0]), '');
+            return;
+        }
+        $document->spliceOwnHtml($i, $match[2][1], strlen($value), $stripped);
+    }
+
+    private static function withoutTopMarginDeclaration(string $style): string
+    {
+        $kept = [];
+        foreach (MarkupScan::parseInlineStyle($style) as $declaration) {
+            if ($declaration['property'] === 'margin-top') {
+                continue;
+            }
+            if ($declaration['property'] === '' && $declaration['value'] === null) {
+                continue;
+            }
+            $kept[] = $declaration['segment'];
+        }
+        return implode(';', $kept);
     }
 }

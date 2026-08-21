@@ -30,6 +30,16 @@ test('PhotographySite rejects a bakery even when the copy mentions photos', func
     ]));
 });
 
+test('PhotographySite rejects a bakery even when the description mentions photography', function () {
+    assert_true(!PhotographySite::matches([
+        'name'        => 'Hearth & Crumb',
+        'site_type'   => 'business storefront',
+        'topic'       => 'sourdough bakery',
+        'area'        => 'bakery',
+        'description' => 'Warm photography of the pastry case.',
+    ]));
+});
+
 test('PhotographySite rejects architecture and food portfolios that are visual work but not photography sites', function () {
     assert_true(!PhotographySite::matches([
         'name'                    => 'Atelier',

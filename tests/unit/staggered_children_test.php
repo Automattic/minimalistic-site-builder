@@ -1,13 +1,15 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\LayoutFixer;
 use Automattic\SiteBuild\StaggeredChildren;
 
-function stagger_card(string $title, string $top = ''): string
+function stagger_card(string $title, string $top = '', bool $htmlStyle = false): string
 {
     $margin = $top === '' ? '' : '"style":{"spacing":{"margin":{"top":"' . $top . '"}}},';
+    $styleAttr = ($htmlStyle && $top !== '') ? ' style="margin-top:' . $top . '"' : '';
     return '<!-- wp:group {' . $margin . '"layout":{"type":"constrained"}} -->'
-        . '<div class="wp-block-group">'
+        . '<div class="wp-block-group"' . $styleAttr . '>'
         . '<!-- wp:heading --><h2>' . $title . '</h2><!-- /wp:heading -->'
         . '</div><!-- /wp:group -->';
 }
@@ -85,6 +87,101 @@ test('StaggeredChildren leaves uniformly offset siblings byte-identical', functi
     $result = StaggeredChildren::flatten($markup);
 
     assert_eq($markup, $result['markup'], 'a shared top margin is not a stagger');
+    assert_eq([], $result['notes']);
+});
+
+test('StaggeredChildren clears matching inline margin-top so LayoutFixer cannot mirror it back', function () {
+    $markup = stagger_row(
+        stagger_column(stagger_card('One', '', true))
+        . stagger_column(stagger_card('Two', '3rem', true))
+        . stagger_column(stagger_card('Three', '', true))
+    );
+
+    $first = StaggeredChildren::flatten($markup);
+
+    assert_true(!str_contains($first['markup'], '"top":"3rem"'), 'comment offset is removed');
+    assert_true(!str_contains($first['markup'], 'margin-top:3rem'), 'inline offset is removed');
+    assert_contains('Two', $first['markup']);
+    assert_true($first['notes'] !== []);
+
+    $fixed = LayoutFixer::fix($first['markup'], LayoutFixer::ROLE_SECTION, 860.0);
+    $mirrored = array_values(array_filter(
+        $fixed['notes'],
+        static fn (string $note): bool => str_contains($note, 'mirrored'),
+    ));
+    assert_eq([], $mirrored, 'LayoutFixer has no HTML-only margin-top to restore');
+
+    $second = StaggeredChildren::flatten($fixed['markup']);
+    assert_eq([], $second['notes'], 'flattening reaches a fixed point with LayoutFixer');
+    assert_true(!str_contains($second['markup'], 'margin-top:3rem'));
+    assert_true(!str_contains($second['markup'], '"top":"3rem"'));
+});
+
+test('StaggeredChildren keeps unrelated inline styles when stripping margin-top', function () {
+    $left = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group"><!-- wp:heading --><h2>One</h2><!-- /wp:heading --></div><!-- /wp:group -->';
+    $right = '<!-- wp:group {"style":{"spacing":{"margin":{"top":"3rem","bottom":"1rem"}}}} -->'
+        . '<div class="wp-block-group" style="margin-top:3rem;margin-bottom:1rem">'
+        . '<!-- wp:heading --><h2>Two</h2><!-- /wp:heading --></div><!-- /wp:group -->';
+    $markup = stagger_row(stagger_column($left) . stagger_column($right));
+
+    $result = StaggeredChildren::flatten($markup);
+
+    assert_true(!str_contains($result['markup'], '"top":"3rem"'));
+    assert_true(!str_contains($result['markup'], 'margin-top:3rem'));
+    assert_contains('"bottom":"1rem"', $result['markup']);
+    assert_contains('margin-bottom:1rem', $result['markup']);
+});
+
+test('StaggeredChildren flattens a grid group of cards', function () {
+    $markup = '<!-- wp:group {"layout":{"type":"grid","columnCount":3}} -->'
+        . '<div class="wp-block-group">'
+        . stagger_card('One')
+        . stagger_card('Two', '3rem')
+        . stagger_card('Three')
+        . '</div><!-- /wp:group -->';
+
+    $result = StaggeredChildren::flatten($markup);
+
+    assert_true(!str_contains($result['markup'], '"top":"3rem"'));
+    assert_contains('One', $result['markup']);
+    assert_contains('Two', $result['markup']);
+    assert_true($result['notes'] !== []);
+});
+
+test('StaggeredChildren flattens an offset on a later child of the column', function () {
+    $kicker = '<!-- wp:paragraph --><p>Kicker</p><!-- /wp:paragraph -->';
+    $markup = stagger_row(
+        stagger_column($kicker . stagger_card('One'))
+        . stagger_column($kicker . stagger_card('Two', '3rem'))
+    );
+
+    $result = StaggeredChildren::flatten($markup);
+
+    assert_true(!str_contains($result['markup'], '"top":"3rem"'));
+    assert_contains('Kicker', $result['markup']);
+    assert_contains('One', $result['markup']);
+    assert_contains('Two', $result['markup']);
+    assert_true($result['notes'] !== []);
+});
+
+test('StaggeredChildren does not treat a nested heading margin as a row stagger', function () {
+    $card = static function (string $title, string $headingTop): string {
+        $attr = $headingTop === '' ? '' : '{"style":{"spacing":{"margin":{"top":"' . $headingTop . '"}}}} ';
+        $style = $headingTop === '' ? '' : ' style="margin-top:' . $headingTop . '"';
+        return '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+            . '<div class="wp-block-group">'
+            . '<!-- wp:heading ' . $attr . '--><h2' . $style . '>' . $title . '</h2><!-- /wp:heading -->'
+            . '</div><!-- /wp:group -->';
+    };
+    $markup = stagger_row(
+        stagger_column($card('One', ''))
+        . stagger_column($card('Two', '3rem'))
+    );
+
+    $result = StaggeredChildren::flatten($markup);
+
+    assert_eq($markup, $result['markup'], 'heading offsets inside a card are not a staggered row');
     assert_eq([], $result['notes']);
 });
 

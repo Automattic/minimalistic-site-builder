@@ -9,10 +9,10 @@ namespace Automattic\SiteBuild;
  * whose product is pictures on a wall.
  *
  * `subject_is_visual_work` is broader (art, food, architecture) and is not
- * used. Photography tokens may appear anywhere in the spec or prompt.
- * Gallery is matched only as a site-kind word (area, topic, site_type,
- * title, name, prompt), so a bakery whose description mentions "a gallery
- * of loaves" stays false.
+ * used. Photography and gallery are both matched only as site-kind words
+ * (area, topic, site_type, title, name, prompt). A bakery whose description
+ * mentions "warm photography of the pastry case" or "a gallery of loaves"
+ * stays false.
  */
 final class PhotographySite
 {
@@ -29,11 +29,10 @@ final class PhotographySite
             (string) ($siteSpec['name'] ?? ''),
             $prompt,
         ]));
-        $haystack = $kind . "\n" . strtolower((string) ($siteSpec['description'] ?? ''));
 
         if (preg_match(
             '/\bphotograph(?:s|er|ers|y|ic)?\b|\bphotojournalis[mt]\b|\bphotoshoots?\b/u',
-            $haystack
+            $kind
         ) === 1) {
             return true;
         }
