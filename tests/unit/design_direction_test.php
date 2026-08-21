@@ -137,9 +137,13 @@ test('design-direction persists an unmappable motion-note warning and reaches a 
 
     $written = $project->readJson('designDirection.json');
     assert_eq('', $written['motion_note']);
-    foreach (['title', 'palette', 'type', 'image_grade', 'card_style'] as $sibling) {
+    foreach (['title', 'palette', 'image_grade', 'card_style'] as $sibling) {
         assert_eq($authored[$sibling], $written[$sibling], "{$sibling} survives motion-note removal");
     }
+    foreach (['heading', 'body'] as $face) {
+        assert_eq($authored['type'][$face], $written['type'][$face], "type.{$face} survives motion-note removal");
+    }
+    assert_eq('', $written['type']['accent']['family'], 'no accent face is invented');
 
     $motionWarning = '';
     foreach ($project->readJson('warnings.json')['design-direction'] ?? [] as $warning) {
