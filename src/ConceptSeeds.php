@@ -75,8 +75,9 @@ final class ConceptSeeds
 
     /**
      * The seed's coordinates as one comparable key, or null when it did not
-     * declare all three. A seed missing a coordinate is never dropped: an
-     * unstated axis is not evidence of sameness.
+     * declare all three. A seed missing a coordinate is never dropped on the
+     * triple: an unstated axis is not evidence of sameness. Byte-identical
+     * text still is, because the pick lands on the sentence.
      *
      * @param array{text:string,ground:?string,register:?string,accent:?string} $seed
      */
@@ -96,9 +97,11 @@ final class ConceptSeeds
      * least two seeds survive, because a brief that fixes the palette, era and
      * mood SHOULD produce one world three times — that is the model obeying the
      * user, not collapsing — and a pool of one distinct world is not worth
-     * narrowing further. And every drop is recorded, so a run where the spread
-     * keeps collapsing is visible in the build's warnings instead of only in
-     * the sameness of the finished sites.
+     * narrowing further. An unstated axis is not evidence of sameness, but
+     * byte-identical text is: the pick lands on the sentence, so two copies of
+     * it still win twice as often. And every drop is recorded, so a run where
+     * the spread keeps collapsing is visible in the build's warnings instead of
+     * only in the sameness of the finished sites.
      *
      * @param list<array{text:string,ground:?string,register:?string,accent:?string}> $seeds
      * @param list<string> $warnings
@@ -109,15 +112,27 @@ final class ConceptSeeds
         $pool = [];
         $dropped = [];
         $seen = [];
+        $seenText = [];
         foreach ($seeds as $seed) {
             $key = self::axisKey($seed);
+            $text = $seed['text'];
+            $twin = null;
+            $dropKey = null;
             if ($key !== null && isset($seen[$key])) {
-                $dropped[] = ['seed' => $seed, 'twin' => $seen[$key], 'key' => $key];
+                $twin = $seen[$key];
+                $dropKey = $key;
+            } elseif (isset($seenText[$text])) {
+                $twin = $seenText[$text];
+                $dropKey = $key ?? 'same text';
+            }
+            if ($twin !== null) {
+                $dropped[] = ['seed' => $seed, 'twin' => $twin, 'key' => $dropKey];
                 continue;
             }
             if ($key !== null) {
                 $seen[$key] = $seed;
             }
+            $seenText[$text] = $seed;
             $pool[] = $seed;
         }
 
@@ -149,12 +164,11 @@ final class ConceptSeeds
     }
 
     /**
-     * The one ground a whole round shares, or null when it spans both (or when
-     * no seed named one). The prompt asks for at least one light-grounded and
-     * one dark-grounded world whenever the brief leaves the mood open, and a
-     * round that answers with three of a kind is the spread narrowing before
-     * the pick ever happens — worth saying out loud even when the seeds are
-     * otherwise distinct enough to keep.
+     * The one ground a whole round shares, or null when it spans both, when
+     * any seed left ground unstated, or when fewer than two seeds arrived.
+     * One named ground is not a round-wide claim: a small model dropping or
+     * misspelling `ground` on two of three is not exotic, and "every seed is
+     * light-grounded" must not be derived from a single vote.
      *
      * @param list<array{text:string,ground:?string,register:?string,accent:?string}> $seeds
      */
@@ -165,9 +179,10 @@ final class ConceptSeeds
         }
         $grounds = [];
         foreach ($seeds as $seed) {
-            if ($seed['ground'] !== null) {
-                $grounds[$seed['ground']] = true;
+            if ($seed['ground'] === null) {
+                return null;
             }
+            $grounds[$seed['ground']] = true;
         }
         return count($grounds) === 1 ? (string) array_key_first($grounds) : null;
     }

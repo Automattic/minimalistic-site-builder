@@ -4,7 +4,7 @@ declare(strict_types=1);
 use Automattic\SiteBuild\ConceptSeeds;
 
 /** @return array{text:string,ground:?string,register:?string,accent:?string} */
-function seed_at(string $title, ?string $ground, ?string $register, ?string $accent): array
+function concept_seed_at(string $title, ?string $ground, ?string $register, ?string $accent): array
 {
     return ['text' => $title, 'ground' => $ground, 'register' => $register, 'accent' => $accent];
 }
@@ -48,9 +48,9 @@ test('ConceptSeeds::normalize rejects what carries no seed text', function () {
 
 test('ConceptSeeds::distinct drops the seed that repeats an earlier world, and says so', function () {
     $seeds = [
-        seed_at('Hearth Light — a warm heritage bakery.', 'light', 'heritage', 'warm'),
-        seed_at('Copper Morning — a warm heritage bakery.', 'light', 'heritage', 'warm'),
-        seed_at('Night Kitchen — a dark modernist counter.', 'dark', 'modernist', 'cool'),
+        concept_seed_at('Hearth Light — a warm heritage bakery.', 'light', 'heritage', 'warm'),
+        concept_seed_at('Copper Morning — a warm heritage bakery.', 'light', 'heritage', 'warm'),
+        concept_seed_at('Night Kitchen — a dark modernist counter.', 'dark', 'modernist', 'cool'),
     ];
     $warnings = [];
     $pool = ConceptSeeds::distinct($seeds, $warnings);
@@ -70,9 +70,9 @@ test('ConceptSeeds::distinct keeps a round whose seeds all describe one world', 
     // world three times: that is the model obeying the user, and narrowing to a
     // single seed would not make the round any wider.
     $seeds = [
-        seed_at('One', 'dark', 'editorial', 'jewel'),
-        seed_at('Two', 'dark', 'editorial', 'jewel'),
-        seed_at('Three', 'dark', 'editorial', 'jewel'),
+        concept_seed_at('One', 'dark', 'editorial', 'jewel'),
+        concept_seed_at('Two', 'dark', 'editorial', 'jewel'),
+        concept_seed_at('Three', 'dark', 'editorial', 'jewel'),
     ];
     $warnings = [];
     $pool = ConceptSeeds::distinct($seeds, $warnings);
@@ -86,9 +86,9 @@ test('ConceptSeeds::distinct keeps a round whose seeds all describe one world', 
 test('ConceptSeeds::distinct never drops a seed that left a coordinate unstated', function () {
     // An unstated axis is not evidence of sameness.
     $seeds = [
-        seed_at('One', 'light', 'heritage', 'warm'),
-        seed_at('Two', 'light', 'heritage', null),
-        seed_at('Three', null, null, null),
+        concept_seed_at('One', 'light', 'heritage', 'warm'),
+        concept_seed_at('Two', 'light', 'heritage', null),
+        concept_seed_at('Three', null, null, null),
     ];
     $warnings = [];
     assert_eq(3, count(ConceptSeeds::distinct($seeds, $warnings)));
@@ -97,17 +97,60 @@ test('ConceptSeeds::distinct never drops a seed that left a coordinate unstated'
 
 test('ConceptSeeds::sharedGround reports a round that explores one half of the brief', function () {
     $light = [
-        seed_at('One', 'light', 'heritage', 'warm'),
-        seed_at('Two', 'light', 'modernist', 'cool'),
+        concept_seed_at('One', 'light', 'heritage', 'warm'),
+        concept_seed_at('Two', 'light', 'modernist', 'cool'),
     ];
     assert_eq('light', ConceptSeeds::sharedGround($light));
 
     $both = [
-        seed_at('One', 'light', 'heritage', 'warm'),
-        seed_at('Two', 'dark', 'modernist', 'cool'),
+        concept_seed_at('One', 'light', 'heritage', 'warm'),
+        concept_seed_at('Two', 'dark', 'modernist', 'cool'),
     ];
     assert_eq(null, ConceptSeeds::sharedGround($both));
 
-    assert_eq(null, ConceptSeeds::sharedGround([seed_at('Alone', 'dark', 'editorial', 'jewel')]), 'one seed shares nothing');
-    assert_eq(null, ConceptSeeds::sharedGround([seed_at('One', null, null, null), seed_at('Two', null, null, null)]));
+    assert_eq(null, ConceptSeeds::sharedGround([concept_seed_at('Alone', 'dark', 'editorial', 'jewel')]), 'one seed shares nothing');
+    assert_eq(null, ConceptSeeds::sharedGround([concept_seed_at('One', null, null, null), concept_seed_at('Two', null, null, null)]));
+});
+
+test('ConceptSeeds::distinct drops a byte-identical seed even when no coordinates were named', function () {
+    // A null axis key is not evidence of sameness, but the pick lands on the
+    // sentence. Two copies of the same sentence are one world wearing two slots.
+    $seeds = [
+        concept_seed_at('Hearth Light — a warm heritage bakery.', null, null, null),
+        concept_seed_at('Hearth Light — a warm heritage bakery.', null, null, null),
+        concept_seed_at('Night Kitchen — a late diner.', null, null, null),
+    ];
+    $warnings = [];
+    $pool = ConceptSeeds::distinct($seeds, $warnings);
+
+    assert_eq(2, count($pool), 'the repeat never reaches the pick');
+    assert_eq('Hearth Light — a warm heritage bakery.', $pool[0]['text']);
+    assert_eq('Night Kitchen — a late diner.', $pool[1]['text']);
+    assert_eq(1, count($warnings));
+    assert_contains('Hearth Light', $warnings[0]);
+    assert_contains('disposition dropped', $warnings[0]);
+});
+
+test('ConceptSeeds::distinct keeps three byte-identical seeds as one world', function () {
+    $seeds = [
+        concept_seed_at('Hearth Light — a warm heritage bakery.', null, null, null),
+        concept_seed_at('Hearth Light — a warm heritage bakery.', null, null, null),
+        concept_seed_at('Hearth Light — a warm heritage bakery.', null, null, null),
+    ];
+    $warnings = [];
+    $pool = ConceptSeeds::distinct($seeds, $warnings);
+
+    assert_eq(3, count($pool), 'the round is kept whole');
+    assert_eq(1, count($warnings));
+    assert_contains('describe one world', $warnings[0]);
+    assert_contains('disposition tolerated', $warnings[0]);
+});
+
+test('ConceptSeeds::sharedGround does not let one named ground speak for the round', function () {
+    $seeds = [
+        concept_seed_at('One', 'light', 'heritage', 'warm'),
+        concept_seed_at('Two', null, null, null),
+        concept_seed_at('Three', null, null, null),
+    ];
+    assert_eq(null, ConceptSeeds::sharedGround($seeds), 'a missing ground is not a vote');
 });

@@ -32,10 +32,11 @@ use Automattic\SiteBuild\Warnings;
  *         blueprint).
  *
  * Two calls. First, a cheap seed call (small model, hot sampling) brainstorms
- * THREE concept seeds — each one string: an evocative title plus one vivid
+ * THREE concept seeds — each an object: an evocative title plus one vivid
  * sentence committing the seed's visual world (palette family, typography
- * character, imagery treatment, mood) — with divergence across the set
- * enforced in the prompt. One seed is picked uniformly at random, then the
+ * character, imagery treatment, mood), plus ground/register/accent
+ * coordinates — with divergence across the set enforced in the prompt and
+ * checked after. One seed is picked uniformly at random, then the
  * main call expands ONLY that seed into the full direction. The random pick
  * over a divergent seed spread is the pipeline's variety injection — repeated
  * builds of one brief land on different concepts — while the expensive
@@ -355,13 +356,24 @@ final class DesignDirectionStep implements Step
         if ($seeds === []) {
             return self::SEED_FALLBACK;
         }
-        $sharedGround = ConceptSeeds::sharedGround($seeds);
-        if ($sharedGround !== null) {
-            $warnings[] = 'design-direction: every concept seed is ' . $sharedGround
-                . '-grounded, so the round explored one half of an open brief; '
-                . 'picked from it anyway; disposition tolerated';
-        }
         $pool = ConceptSeeds::distinct($seeds, $warnings);
+        $sharedGround = ConceptSeeds::sharedGround($pool);
+        if ($sharedGround !== null) {
+            $triples = [];
+            foreach ($pool as $seed) {
+                $key = ConceptSeeds::axisKey($seed);
+                if ($key !== null) {
+                    $triples[$key] = true;
+                }
+            }
+            // distinct() already records a collapsed round (one world, kept
+            // whole). A second row that restates the shared ground is the
+            // same event, and "open brief" is a claim this step never checked.
+            if (count($triples) > 1) {
+                $warnings[] = 'design-direction: every concept seed is ' . $sharedGround
+                    . '-grounded; picked from it anyway; disposition tolerated';
+            }
+        }
         return $pool[random_int(0, count($pool) - 1)]['text'];
     }
 

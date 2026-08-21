@@ -33,7 +33,7 @@ Read the site description and site spec to determine how much design direction h
 - **Specific brief** (the user describes a palette, style, mood, or era): honor those choices in ALL 3 seeds and vary only what the user left open. If that leaves two seeds sharing all three coordinates, report them honestly as they are; never invent a divergence the user ruled out.
 - **In between**: scale accordingly. Lock in what the user specified, explore what they didn't.
 
-A common failure: three seeds that all orbit the topic's OBVIOUS mood — for a bakery, three variations of warm-cream-and-amber coziness. Unless the user fixed the mood, pull the three seeds apart: at least one light-grounded and one dark-grounded world, accent families from different parts of the color wheel, and different registers (heritage/artisanal, modernist/graphic, editorial/documentary, one unexpected). If two seeds would lead a designer to roughly the same palette and atmosphere, replace one. Every seed must still be true to the topic — divergent, not arbitrary.
+A common failure: three seeds that all orbit the topic's OBVIOUS mood — for a bakery, three variations of warm-cream-and-amber coziness. Unless the user fixed the mood, pull the three seeds apart: at least one light-grounded and one dark-grounded world, accent families from different parts of the color wheel, and different registers (heritage, modernist, editorial, expressive, utilitarian). If two seeds would lead a designer to roughly the same palette and atmosphere, replace one. Every seed must still be true to the topic — divergent, not arbitrary.
 
 ## Output Format
 
