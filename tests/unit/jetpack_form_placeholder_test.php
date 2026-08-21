@@ -66,7 +66,7 @@ test('both form modes stay inside the cached build layer of the section prompt',
     $section = (string) file_get_contents(repo_path('prompts/section.md'));
 
     $formPos = strpos($section, '{{form_instructions}}');
-    $pageLayer = strpos($section, '<!-- section-cache-layer:page -->');
+    $pageLayer = strpos($section, '<!-- cache-layer:page -->');
     assert_true($formPos !== false, 'the section prompt renders form instructions');
     assert_true(
         $pageLayer !== false && $formPos < $pageLayer,

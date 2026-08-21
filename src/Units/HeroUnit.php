@@ -40,7 +40,7 @@ final class HeroUnit extends AbstractPageSectionUnit
             ? $this->renderer->render('image-generation.md', [])
             : '';
 
-        return $this->renderedRequest('hero.md', $this->commonVars($input) + [
+        return $this->siteLayeredRequest('hero.md', $this->commonVars($input) + [
             'site_pages' => $this->inputString($input, 'site_pages'),
             'page_title' => $this->pageString($input, 'title'),
             'page_path' => $this->pageString($input, 'path', '/'),

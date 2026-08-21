@@ -33,7 +33,7 @@ final class FooterUnit extends AbstractMarkupUnit
             ? $this->renderer->render('image-generation.md', [])
             : '';
 
-        return $this->renderedRequest('footer.md', $this->commonVars($input) + [
+        return $this->siteLayeredRequest('footer.md', $this->commonVars($input) + [
             'site_pages' => $this->inputString($input, 'site_pages'),
             'nav_rule' => FooterComposition::navigationRule($pageCount),
             'composition' => $this->renderer->render('footer-composition.md', [

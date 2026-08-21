@@ -10,6 +10,16 @@ use Automattic\SiteBuild\PromptRenderer;
 abstract class AbstractMarkupUnit implements MarkupUnit
 {
     private const OUTPUT_CONTRACT_TEMPLATE = 'block-markup-output-contract.md';
+    private const SITE_CONTEXT_TEMPLATE = 'site-context.md';
+
+    /**
+     * Frozen cache-layer markers. Every markup prompt opens with the site
+     * layer — byte-identical across header, footer, hero and section, so one
+     * warm-up primes it for all of them — and each unit splits the rest into
+     * whatever further layers it can reuse.
+     */
+    protected const SITE_LAYER_MARKER = '<!-- cache-layer:site -->';
+    protected const UNIT_LAYER_MARKER = '<!-- cache-layer:unit -->';
 
     public function __construct(
         protected Llm $llm,
@@ -66,14 +76,22 @@ abstract class AbstractMarkupUnit implements MarkupUnit
         return $input[$key];
     }
 
-    /** Accept JSON text from the CLI adapter or a decoded object from HTTP. */
+    /**
+     * Accept JSON text from the CLI adapter or a decoded object from HTTP.
+     *
+     * Both shapes must render to the same bytes: the site layer is a shared
+     * cache prefix, and a step reading siteSpec.json as text would otherwise
+     * never match one that read it as an array. writeJson() encodes with these
+     * exact flags and appends a newline, so trimming the terminator is all it
+     * takes to make the two agree.
+     */
     final protected function inputJson(array $input, string $key): string
     {
         if (!array_key_exists($key, $input)) {
             throw new \InvalidArgumentException("unit input '{$key}' must be JSON text or an array");
         }
         if (is_string($input[$key])) {
-            return $input[$key];
+            return rtrim($input[$key], "\r\n");
         }
         if (!is_array($input[$key])) {
             throw new \InvalidArgumentException("unit input '{$key}' must be JSON text or an array");
@@ -112,18 +130,99 @@ abstract class AbstractMarkupUnit implements MarkupUnit
     }
 
     /**
-     * The context shared by header, footer, and section prompts.
+     * The context shared by header, footer, hero, and section prompts.
      *
-     * @return array{site_spec:string,language:string,theme_json:string,design_direction:string,outline:string}
+     * site_context is the rendered shared cache layer: the same site spec,
+     * theme tokens and design direction those four prompts all open with, in
+     * one arrangement so the bytes match and the layer is cacheable once.
+     *
+     * @return array{site_context:string,language:string,outline:string}
      */
     final protected function commonVars(array $input): array
     {
         return [
-            'site_spec'        => $this->inputJson($input, 'site_spec'),
-            'language'         => $this->inputString($input, 'language'),
-            'theme_json'       => $this->inputJson($input, 'theme_json'),
-            'design_direction' => $this->inputString($input, 'design_direction'),
-            'outline'          => $this->inputString($input, 'outline'),
+            'site_context' => rtrim($this->renderer->render(self::SITE_CONTEXT_TEMPLATE, [
+                'site_spec'        => $this->inputJson($input, 'site_spec'),
+                'theme_json'       => $this->inputJson($input, 'theme_json'),
+                'design_direction' => $this->inputString($input, 'design_direction'),
+            ]), "\r\n"),
+            'language' => $this->inputString($input, 'language'),
+            'outline'  => $this->inputString($input, 'outline'),
         ];
+    }
+
+    /**
+     * Split a rendered prompt at its frozen cache-layer markers.
+     *
+     * Every layer but the last is a reusable prefix: newline-trimmed with
+     * exactly "\n\n" appended, so adjacent Anthropic content blocks and an
+     * OpenAI-compatible concatenation assemble to the same text. The final
+     * layer is the varying prompt and is newline-trimmed only.
+     *
+     * Marker order and uniqueness are programming invariants of the template,
+     * not generated content, so a violation throws.
+     *
+     * @param  list<string> $markers ordered, one per layer
+     * @return list<string> one layer per marker, in the same order
+     */
+    final protected static function cacheLayers(string $rendered, array $markers): array
+    {
+        foreach ($markers as $marker) {
+            if (substr_count($rendered, $marker) !== 1) {
+                throw new \RuntimeException("markup prompt must contain exactly one {$marker} marker");
+            }
+        }
+
+        $positions = array_map(
+            static fn (string $marker): int => (int) strpos($rendered, $marker),
+            $markers,
+        );
+        $sorted = $positions;
+        sort($sorted);
+        if ($positions !== $sorted) {
+            throw new \RuntimeException('markup prompt cache layer markers are out of order');
+        }
+
+        $rest = $rendered;
+        $layers = [];
+        foreach ($markers as $index => $marker) {
+            [$before, $rest] = explode($marker, $rest, 2);
+            if ($index === 0) {
+                if (trim($before, "\r\n") !== '') {
+                    throw new \RuntimeException('markup prompt has content before its first cache layer');
+                }
+                continue;
+            }
+            // Remove only newlines belonging to the marker separators;
+            // preserve every other byte, including indentation.
+            $layers[] = rtrim(ltrim($before, "\r\n"), "\r\n") . "\n\n";
+        }
+        $layers[] = trim($rest, "\r\n");
+
+        foreach ($layers as $layer) {
+            if (trim($layer) === '') {
+                throw new \RuntimeException('markup prompt cache layers must not be empty');
+            }
+        }
+        return $layers;
+    }
+
+    /**
+     * Render a chrome prompt (header, footer, hero) as two layers: the shared
+     * site context every markup call reuses, and this unit's own brief.
+     *
+     * @param array<string,string> $vars
+     * @return array{prompt:string,model?:string,temperature?:float,cached_prefixes:list<string>}
+     */
+    final protected function siteLayeredRequest(string $template, array $vars): array
+    {
+        $request = $this->renderedRequest($template, $vars);
+        [$site, $unit] = self::cacheLayers(
+            $request['prompt'],
+            [self::SITE_LAYER_MARKER, self::UNIT_LAYER_MARKER],
+        );
+        $request['cached_prefixes'] = [$site];
+        $request['prompt'] = $unit;
+        return $request;
     }
 }
