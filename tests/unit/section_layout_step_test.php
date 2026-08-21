@@ -7,6 +7,7 @@ use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Steps\SectionLayoutStep;
 use Automattic\SiteBuild\Units\GeneratedMarkup;
 use Automattic\SiteBuild\Steps\SectionRhythmStep;
+use Automattic\SiteBuild\TransformArtifacts;
 
 /** @param array<mixed> $attrs */
 function section_layout_group(array $attrs, string $inner, string $wrapperAttrs = ''): string
@@ -570,20 +571,31 @@ test('section layout wide-class parser counts only var(--wide-size) horizontal m
     );
 });
 
-/** @return array{target:array<mixed>,root:array<mixed>} fixture alignment attrs */
-function section_layout_author_width_attrs(string $css): array
-{
+/**
+ * @param string $css        written to design/site.css
+ * @param string $carriedCss written to the transformer's carried stylesheet
+ * @param string $targetClass class the authored-width child carries
+ * @return array{target:array<mixed>,root:array<mixed>} fixture alignment attrs
+ */
+function section_layout_author_width_attrs(
+    string $css,
+    string $carriedCss = '',
+    string $targetClass = 'measure',
+): array {
     [$project, $tmp] = section_layout_project([[
         'slug' => 'home',
         'sections' => [['slug' => 'story', 'background' => 'base', 'vertical_density' => 'standard']],
     ]]);
     try {
         $project->writeText('design/site.css', $css);
+        if ($carriedCss !== '') {
+            $project->writeText(TransformArtifacts::CARRIED_CSS_BEFORE_AUTHOR, $carriedCss);
+        }
         $project->writeText(
             'theme/parts/page-home--story.html',
             '<!-- wp:group --><div class="wp-block-group">'
-                . '<!-- wp:group {"anchor":"measure","className":"measure"} -->'
-                . '<div id="measure" class="wp-block-group measure">'
+                . '<!-- wp:group {"anchor":"measure","className":"' . $targetClass . '"} -->'
+                . '<div id="measure" class="wp-block-group ' . $targetClass . '">'
                 . '<!-- wp:paragraph --><p>Authored measure</p><!-- /wp:paragraph -->'
                 . '</div><!-- /wp:group --></div><!-- /wp:group -->',
         );
@@ -623,6 +635,55 @@ test('A1 section layout preserves a left-aligned author-owned max-width', functi
         SectionLayoutStep::AUTHOR_WIDTH_START_CLASS,
         $attrs['root']['className'] ?? '',
         'page styles can preserve this root authored inset',
+    );
+});
+
+/**
+ * A design may declare a measure inline rather than in a rule — azure-garden's
+ * "What clients say afterward" is `<h2 style="margin:0;max-width:20ch">`, with
+ * no class for any selector to reach. The transformer carries that inline
+ * geometry into a generated `.be-inline-geometry-*` rule, so the width is still
+ * a stylesheet declaration by the time this step runs; it just is not in
+ * design/site.css. Reading only site.css leaves the child unclassified, and
+ * WordPress's constrained layout then centres it with
+ * `margin-inline:auto !important`, which outranks the block's own non-important
+ * inline `margin-left:0`. Measured: left 65px in the design, 407px in the theme.
+ */
+test('A5 section layout pins a measure whose width the design authored inline', function () {
+    $attrs = section_layout_author_width_attrs(
+        '',
+        '.be-inline-geometry-demo{max-width:20ch !important}',
+        'be-inline-geometry-demo',
+    );
+    assert_contains(
+        SectionLayoutStep::AUTHOR_WIDTH_CHILD_START_CLASS,
+        $attrs['target']['className'] ?? '',
+        'an inline-authored measure carries the same start marker as a ruled one',
+    );
+    assert_true(
+        !isset($attrs['target']['align']),
+        'the pin never becomes an align promotion',
+    );
+});
+
+/**
+ * The carried stylesheet must not override what the design actually said: an
+ * inline measure the design centred stays centred, exactly as A2's ruled
+ * equivalent does.
+ */
+test('A6 an inline-authored measure with two auto margins keeps WordPress centring', function () {
+    $attrs = section_layout_author_width_attrs(
+        '',
+        '.be-inline-geometry-demo{max-width:20ch !important;margin-left:auto !important;'
+            . 'margin-right:auto !important}',
+        'be-inline-geometry-demo',
+    );
+    assert_true(
+        !str_contains(
+            (string) ($attrs['target']['className'] ?? ''),
+            SectionLayoutStep::AUTHOR_WIDTH_CHILD_START_CLASS,
+        ),
+        'two authored auto margins still mean the default centring, not a start pin',
     );
 });
 

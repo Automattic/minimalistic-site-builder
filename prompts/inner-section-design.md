@@ -35,6 +35,8 @@ Use the full outline to understand this section's position, neighboring sections
 
 Write specific visitor-facing copy grounded in the site spec, page spec, and section spec. Keep copy consistent across the full page outline. Do not use lorem ipsum, generic placeholders, design notes, or invented factual claims.
 
+LANGUAGE: write ALL visitor-facing copy — headings, body text, captions, list items, labels, button text, image alt text — in {{language}}. Do NOT mix languages; the only exceptions are proper nouns and the spec's verbatim identity values.
+
 ## Fragment contract
 
 Return exactly one closed root `<section id="{{section_slug}}">...</section>` and nothing else. The root section ID must match `{{section_slug}}` exactly.
@@ -48,6 +50,8 @@ Return exactly one closed root `<section id="{{section_slug}}">...</section>` an
 ## Supported HTML slice
 
 Use only headings, paragraphs, lists, block quotes, code, tables, images, buttons, links, and semantic or presentational wrappers such as `section`, `nav`, `article`, `aside`, `div`, and `span`.
+
+- Device: when the DESIGN DIRECTION carries a **Device** fact naming a class, put that class on the root element of exactly ONE band, and never the hero — the build ships the CSS for it and strips the class from any extra band or from the hero. When there is no Device fact, never invent one.
 
 There are no forms or form controls, no SVG, no custom elements, and no JavaScript. Do not emit `<form>`, `<input>`, `<textarea>`, `<select>`, `<button>` with scripted behavior, `<svg>`, inline event handlers, or `javascript:` URLs. Express layout, ornament, and interaction states with the established HTML classes only. A form the brief or plan genuinely asks for (contact, booking, RSVP, signup) must NOT silently disappear because of this rule: reserve its place with a `<div class="jetpack-form-placeholder">` containing the heading the form would have and one short line naming what it will collect (e.g. "Booking form: name, email, message") — a later build step replaces that placeholder with the working form.
 

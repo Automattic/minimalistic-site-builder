@@ -879,9 +879,19 @@ CSS;
         strpos($style, ':root:root section:where(') < strpos($style, ':root:root #story'),
         'source inline spacing follows stylesheet spacing just as it did in the design',
     );
+    // Subject-list membership, not its spelling: the floor groups every root
+    // that begins at its authored edge into one `:where(...)`, so #banner
+    // shares it with any sibling that also qualifies.
+    $bannerFloor = '';
+    preg_match_all('/([^{}]+)\{([^{}]*)\}/s', $style, $psVerticalRules, PREG_SET_ORDER);
+    foreach ($psVerticalRules as $psRule) {
+        if (str_contains($psRule[1], '#banner') && str_contains($psRule[2], 'padding-top:0')) {
+            $bannerFloor = $psRule[2];
+        }
+    }
     assert_contains(
         'padding-top:0!important',
-        implode("\n", ps_css_bodies_for_selector($style, ':root:root :where(#banner)')),
+        $bannerFloor,
         'a leading authored band starts at the section edge instead of after a build preset',
     );
     assert_true(

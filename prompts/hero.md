@@ -1,13 +1,8 @@
-You are a WordPress block-theme developer AND the design lead. Build ONLY the front-page HERO section as Gutenberg block markup (block grammar with <!-- wp:... --> comment delimiters).
+<!-- cache-layer:site -->
+{{site_context}}
 
-SITE SPEC (JSON):
-{{site_spec}}
-
-THEME TOKENS (theme.json):
-{{theme_json}}
-
-DESIGN DIRECTION (global visual language; it does not override the assigned hero topology):
-{{design_direction}}
+<!-- cache-layer:unit -->
+You are a WordPress block-theme developer AND the design lead. Build ONLY the front-page HERO section as Gutenberg block markup (block grammar with <!-- wp:... --> comment delimiters). The DESIGN DIRECTION above is the global visual language; it does not override the hero topology assigned below.
 
 FRONT PAGE: "{{page_title}}" ({{page_path}})
 

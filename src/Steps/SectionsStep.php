@@ -22,6 +22,7 @@ use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\TextBatchResult;
 use Automattic\SiteBuild\TransformArtifacts;
+use Automattic\SiteBuild\UsageReporting;
 use Automattic\SiteBuild\Units\FooterUnit;
 use Automattic\SiteBuild\Units\GeneratedMarkup;
 use Automattic\SiteBuild\Units\HeaderUnit;
@@ -58,6 +59,21 @@ use Automattic\SiteBuild\Warnings;
 final class SectionsStep implements Step
 {
     private const CACHE_WARM_PROMPT = 'Warm the cached section context.';
+
+    /**
+     * Below this many estimated prefix tokens the warm-up probe cannot tell a
+     * discarded layer from ordinary system-prompt overhead, so it stays quiet.
+     * Real section layers run to thousands of tokens.
+     */
+    private const CONTEXT_PROBE_MIN_TOKENS = 500;
+
+    /**
+     * Fraction of the estimated prefix a conformant host must bill. Set low on
+     * purpose: a host that sent the layers bills MORE than this estimate (the
+     * system preamble and brief are extra), while a host that dropped them
+     * bills a rounding error. Only a collapse trips it.
+     */
+    private const CONTEXT_PROBE_RATIO = 0.5;
 
     /** Prefix for a page section part's request key and filename. */
     public const PART_PREFIX = SectionUnit::KEY_PREFIX;
@@ -133,6 +149,7 @@ final class SectionsStep implements Step
             id: $this->id(),
             label: $this->label(),
             reads: [
+                'meta.json',
                 'siteSpec.json',
                 'theme/theme.json',
                 'pages.json',
@@ -160,7 +177,7 @@ final class SectionsStep implements Step
         $jobs = $jobPlan['jobs'];
         $initialContract = $jobPlan['contract'];
         $requests = self::requestsFor($jobs);
-        $this->warmSectionCache($requests);
+        array_push($warnings, ...$this->warmSectionCache($requests));
         $batchFailure = null;
         try {
             $batch = $this->llm->completeBatch($requests);
@@ -218,11 +235,17 @@ final class SectionsStep implements Step
                 } elseif ($key === 'footer') {
                     // This is an error handler: an unknown archetype falls
                     // back to the default surface instead of throwing again.
+                    // The resolved surface on the job wins when present — the
+                    // fallback part must land on the same band the closing
+                    // sections were planned against.
                     $assignedArchetype = (string) ($job['input']['composition_archetype'] ?? '');
-                    $footerSurface = $key === 'footer'
-                        && in_array($assignedArchetype, FooterComposition::ARCHETYPES, true)
-                        ? FooterComposition::surface($assignedArchetype)
-                        : null;
+                    $resolvedSurface = (string) ($job['input']['surface'] ?? '');
+                    $footerSurface = match (true) {
+                        $resolvedSurface !== '' => $resolvedSurface,
+                        in_array($assignedArchetype, FooterComposition::ARCHETYPES, true)
+                            => FooterComposition::surface($assignedArchetype),
+                        default => null,
+                    };
                     $footerPageCount = $key === 'footer' && is_int($job['input']['page_count'] ?? null)
                         ? $job['input']['page_count']
                         : null;
@@ -361,7 +384,7 @@ final class SectionsStep implements Step
             return $pages;
         }
         $requests = self::requestsFor($jobs);
-        $this->warmSectionCache($requests);
+        array_push($warnings, ...$this->warmSectionCache($requests));
         try {
             $batch = $this->llm->completeBatch($requests);
         } catch (\RuntimeException $error) {
@@ -445,7 +468,8 @@ final class SectionsStep implements Step
         $siteSpecData = $project->readJson('siteSpec.json');
         $designDirection = DesignDirectionStep::readFor($project);
         $blueprint = DesignDirectionStep::heroBlueprintFor($project);
-        $footerArchetype = self::footerArchetype($pages, $siteSpec, $designDirection);
+        $footerArchetype = self::footerArchetype($siteSpec, $designDirection);
+        $footerSurface = FooterComposition::resolveSurface($footerArchetype, self::closingBackgrounds($pages));
         $contract = AboveFoldContract::resolve(
             pages: $pages,
             blueprint: $blueprint,
@@ -458,7 +482,7 @@ final class SectionsStep implements Step
             ],
             footerContext: [
                 'archetype' => $footerArchetype,
-                'surface' => FooterComposition::surface($footerArchetype),
+                'surface' => $footerSurface,
             ],
             forcedHeaderArchetype: Env::get(AboveFoldContract::HEADER_ARCHETYPE_ENV),
             designCss: self::designCss($project),
@@ -671,32 +695,199 @@ final class SectionsStep implements Step
     }
 
     /**
-     * Warm the exact cached context used by the deterministic first section.
-     * A failed probe only forfeits first-window cache hits; it must not abort
-     * the build or change the subsequent concurrent fan-out.
+     * Warm the cached context the batch is about to reuse, and use that same
+     * probe to verify the batch path actually SENT it. A failed probe only
+     * forfeits first-window cache hits; it must not abort the build or change
+     * the subsequent concurrent fan-out.
+     *
+     * The probe uses the most deeply layered request in the batch — a section
+     * whenever the batch has one. Its leading layer is byte-identical to the
+     * one the header, footer and hero open with, so priming it covers every
+     * markup call rather than only the sections. Warming a chrome request
+     * instead would prime that shared layer alone and leave the section
+     * build/page layers cold — the batch fans out concurrently, so nothing
+     * else can prime them in time. A hero-only front page has no section, so
+     * there the probe is a chrome request and the shared layer is all there is
+     * to prime.
+     *
+     * The sections themselves are generated through completeBatch(), so the
+     * one-member probe deliberately travels that same seam. Hosts may implement
+     * complete() and completeBatch() separately; measuring complete() would
+     * permit either path to lie about the one that actually authors sections.
      *
      * @param array<string,array{prompt:string,model?:string,temperature?:float,cached_prefixes?:list<string>}> $requests
+     * @return list<string> context-loss warnings, empty when the host is conformant or unmeasurable
      */
-    private function warmSectionCache(array $requests): void
+    private function warmSectionCache(array $requests): array
     {
+        $request = self::deepestLayeredRequest($requests);
+        if ($request === null) {
+            return [];
+        }
+
+        $opts = $request;
+        unset($opts['prompt']);
+        $opts['max_tokens'] = 1;
+        $opts['tolerate_empty'] = true;
+        $opts['log_label'] = 'section-cache-warm';
+
+        $before = $this->usageSnapshot();
+
+        try {
+            $this->llm->completeBatch([
+                'section-cache-warm' => ['prompt' => self::CACHE_WARM_PROMPT] + $opts,
+            ]);
+        } catch (\Throwable $e) {
+            Narrator::write("    section cache warm-up failed ({$e->getMessage()}); continuing uncached\n");
+            return [];
+        }
+
+        $after = $this->usageSnapshot();
+        if ($before === null || $after === null) {
+            return [];
+        }
+        $observed = self::billedInputDelta($before, $after);
+        $warning = self::contextLossWarning($request['cached_prefixes'], $observed);
+        if ($warning !== null) {
+            Narrator::write("    WARNING: {$warning}\n");
+            return [$warning];
+        }
+        return [];
+    }
+
+    /**
+     * The request carrying the most cached prefix bytes, so one probe primes
+     * the largest reusable context in the batch. Every markup unit's layers
+     * open with the same site layer, so priming any request covers that shared
+     * layer for all of them; picking the deepest one also primes the section
+     * build and page layers sitting behind it. It is not a superset of every
+     * request — sections on other pages carry their own page layer, which this
+     * probe leaves cold.
+     *
+     * @param array<string,array{prompt:string,model?:string,temperature?:float,cached_prefixes?:list<string>}> $requests
+     * @return array{prompt:string,cached_prefixes:list<string>}|null null when no request carries layers
+     */
+    private static function deepestLayeredRequest(array $requests): ?array
+    {
+        $deepest = null;
+        $deepestBytes = 0;
         foreach ($requests as $request) {
             if (!isset($request['cached_prefixes'])) {
                 continue;
             }
-
-            $opts = $request;
-            unset($opts['prompt']);
-            $opts['max_tokens'] = 1;
-            $opts['tolerate_empty'] = true;
-            $opts['log_label'] = 'section-cache-warm';
-
-            try {
-                $this->llm->complete(self::CACHE_WARM_PROMPT, $opts);
-            } catch (\Throwable $e) {
-                Narrator::write("    section cache warm-up failed ({$e->getMessage()}); continuing uncached\n");
+            $bytes = array_sum(array_map('strlen', $request['cached_prefixes']));
+            if ($deepest === null || $bytes > $deepestBytes) {
+                $deepest = $request;
+                $deepestBytes = $bytes;
             }
-            return;
         }
+        return $deepest;
+    }
+
+    /** @return array<string,mixed>|null null when usage measurement is unavailable */
+    private function usageSnapshot(): ?array
+    {
+        if (!$this->llm instanceof UsageReporting) {
+            return null;
+        }
+        try {
+            return $this->llm->usageTotals();
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * Input tokens a host billed for a single call, from cumulative usage
+     * snapshots taken either side of it.
+     *
+     * Hosts disagree about what `input_tokens` means, and reading the wrong
+     * convention here would turn this guard's signal upside down. This repo's
+     * AnthropicClient folds cache reads and creations INTO `input_tokens`
+     * (see extractUsage()), while the raw Anthropic Messages API reports
+     * `usage.input_tokens` with both EXCLUDED. Under the second convention a
+     * conformant host bills a cached 2,400-token prefix almost entirely as
+     * `cache_creation_input_tokens` on the probe, and as
+     * `cache_read_input_tokens` on every section after it — leaving an
+     * `input_tokens` delta that looks exactly like a discarded layer, and
+     * shrinking further the better the caching works.
+     *
+     * Taking the larger of the two readings satisfies both conventions and
+     * double-counts neither: a folded total already exceeds its own cache
+     * components, and a raw total is corrected by them.
+     *
+     * The totals are cumulative and per-client, so this reads as one call's
+     * usage only while nothing else is spending on the same Llm. That holds
+     * here — SectionsStep is a standalone step in both compositions, never a
+     * ConcurrentGroup member, and the probe is sequential. A host that shared
+     * one client across parallel work would inflate the delta, which errs
+     * toward silence rather than toward a false accusation.
+     *
+     * @param array<string,mixed> $before cumulative totals before the call
+     * @param array<string,mixed> $after  cumulative totals after it
+     */
+    public static function billedInputDelta(array $before, array $after): int
+    {
+        $delta = static fn (string $key): int
+            => (int) ($after[$key] ?? 0) - (int) ($before[$key] ?? 0);
+
+        return max(
+            $delta('input_tokens'),
+            $delta('cache_read_input_tokens') + $delta('cache_creation_input_tokens'),
+        );
+    }
+
+    /**
+     * Decide whether a host discarded the cached context layers, from the
+     * input-token usage its own accounting reported for the warm-up probe.
+     *
+     * This exists because the Llm seam has no other way to tell. The layers
+     * carry the site spec, theme JSON, design direction and page outline;
+     * `prompt` carries only the per-section brief. A host that accepts
+     * `cached_prefixes` and drops them still returns perfectly well-formed
+     * markup, so the build cannot notice from the response — it can only
+     * notice that far too few input tokens were billed. That is exactly how
+     * the defect was found in production, after 19 of 21 sections had already
+     * been generated against no theme at all.
+     *
+     * Inconclusive cases return null rather than guessing. A host with small
+     * layers, or one whose tokenizer is unusually dense, must never be accused
+     * on thin evidence — this only fires when the gap is far too large to be
+     * anything else.
+     *
+     * Pure, so the threshold is unit-testable without a transport.
+     *
+     * @param list<string> $cachedPrefixes
+     * @param int          $observedInputTokens total billed input for the probe,
+     *                     cache reads and creations included — take it from
+     *                     billedInputDelta() rather than from a raw
+     *                     `input_tokens` field, whose meaning varies by host
+     */
+    public static function contextLossWarning(array $cachedPrefixes, int $observedInputTokens): ?string
+    {
+        $bytes = 0;
+        foreach ($cachedPrefixes as $prefix) {
+            $bytes += strlen($prefix);
+        }
+        // ~4 bytes per token is a deliberate under-estimate of the real count,
+        // which biases every comparison below toward staying silent.
+        $expected = intdiv($bytes, 4);
+        if ($expected < self::CONTEXT_PROBE_MIN_TOKENS) {
+            return null; // Layers too small to distinguish signal from overhead.
+        }
+        if ($observedInputTokens >= (int) ($expected * self::CONTEXT_PROBE_RATIO)) {
+            return null; // The host sent them.
+        }
+
+        return sprintf(
+            'file \'theme/parts/*.html\'; block=\'section cache layers\'; authored="%d cached_prefixes tokens '
+            . '(site spec, theme.json, design direction, page outline)"; delivered="%d input tokens billed by the '
+            . 'host"; disposition=the injected Llm appears to discard cached_prefixes, so every section below was '
+            . 'authored without the theme or the design direction. Fix the host adapter so completeBatch() '
+            . 'forwards cached_prefixes and reports their billed input usage',
+            $expected,
+            $observedInputTokens,
+        );
     }
 
     /**
@@ -775,16 +966,20 @@ final class SectionsStep implements Step
         }
 
         $common = [
-            'site_spec'        => $siteSpec,
-            'language'         => SiteSpecStep::languageOf($project),
-            'theme_json'       => $themeJsonText,
-            'design_direction' => $designDirection,
+            'site_spec'         => $siteSpec,
+            'language'          => SiteSpecStep::languageOf($project),
+            'theme_json'        => $themeJsonText,
+            'design_direction'  => $designDirection,
             // Unlike design_direction's prose, this value is a portable,
             // machine-readable execution contract consumed by SectionUnit's
             // delivery boundary. Old/missing directions retain the documented
             // flush default without making section generation fatal.
-            'card_style'       => $cardStyle,
-            'site_pages'       => PagePlanStep::sitePagesList($pages),
+            'card_style'        => $cardStyle,
+            'site_pages'        => PagePlanStep::sitePagesList($pages),
+            // A host capability, not a site fact: it says whether a real form
+            // backend exists to replace the placeholders, so it stays in the
+            // caller-owned meta rather than in the spec the model authors.
+            'form_placeholders' => self::formPlaceholders($project),
         ];
 
         // Select the footer first: a singleton hero's lower edge must name the
@@ -792,7 +987,8 @@ final class SectionsStep implements Step
         // AboveFoldContract then owns the complete top relation; no unit
         // derives mode or header archetype independently.
         $frontSections = (array) (self::frontPage($pages)['sections'] ?? []);
-        $footerArchetype = self::footerArchetype($pages, $siteSpec, $designDirection);
+        $footerArchetype = self::footerArchetype($siteSpec, $designDirection);
+        $footerSurface = FooterComposition::resolveSurface($footerArchetype, self::closingBackgrounds($pages));
         $contract = AboveFoldContract::resolve(
             pages: $pages,
             blueprint: $blueprint,
@@ -809,7 +1005,7 @@ final class SectionsStep implements Step
             ],
             footerContext: [
                 'archetype' => $footerArchetype,
-                'surface' => FooterComposition::surface($footerArchetype),
+                'surface' => $footerSurface,
             ],
             forcedHeaderArchetype: Env::get(AboveFoldContract::HEADER_ARCHETYPE_ENV),
             designCss: self::designCss($project),
@@ -844,6 +1040,7 @@ final class SectionsStep implements Step
                     'outline' => self::outline($frontSections),
                     'final_section_brief' => self::finalSectionBrief($frontSections),
                     'composition_archetype' => $footerArchetype,
+                    'surface' => $footerSurface,
                     'page_count' => count($pages),
                 ],
                 'file'  => 'parts/footer.html',
@@ -866,7 +1063,7 @@ final class SectionsStep implements Step
                         'front' => (bool) ($page['front'] ?? false),
                     ],
                     'section'   => $section,
-                    'neighbors' => self::neighbors($sections, $i, $footerArchetype),
+                    'neighbors' => self::neighbors($sections, $i, $footerArchetype, $footerSurface),
                     'header_contract' => $opening
                         ? ($frontHero
                             ? $frontContract
@@ -893,6 +1090,26 @@ final class SectionsStep implements Step
         }
 
         return ['jobs' => $jobs, 'contract' => $contract];
+    }
+
+    /**
+     * Whether this build's host owns a real form backend.
+     *
+     * Set by the caller at createProject time (CLI: --use-jetpack-placeholders).
+     * True picks prompts/jetpack-form.md for every section, false picks
+     * prompts/no-forms.md; those two files carry the reasoning.
+     */
+    public static function formPlaceholders(Project $project): bool
+    {
+        // The graph always seeds meta.json, but this step is also driven
+        // directly — runForPages() from the transform path, and the test
+        // fixtures — against projects that never went through
+        // createProject. There a missing meta is the default, not an error.
+        if (!$project->exists('meta.json')) {
+            return false;
+        }
+
+        return (bool) ($project->readJson('meta.json')['form_placeholders'] ?? false);
     }
 
     /** The portable routing rule: position and front flag, never mutable role prose. */
@@ -969,8 +1186,12 @@ final class SectionsStep implements Step
      *
      * @param array<int,array<string,mixed>> $sections
      */
-    public static function neighbors(array $sections, int $i, string $footerArchetype = ''): string
-    {
+    public static function neighbors(
+        array $sections,
+        int $i,
+        string $footerArchetype = '',
+        string $footerSurface = '',
+    ): string {
         $describe = function (?array $s): ?string {
             if (!is_array($s)) {
                 return null;
@@ -983,30 +1204,45 @@ final class SectionsStep implements Step
         $above = $describe($sections[$i - 1] ?? null) ?? 'the site header (this is the first section)';
         $below = $describe($sections[$i + 1] ?? null);
         if ($below === null) {
-            $below = self::footerNeighborContract($footerArchetype);
+            $own = is_array($sections[$i] ?? null) ? (string) ($sections[$i]['background'] ?? '') : '';
+            $below = self::footerNeighborContract($footerArchetype, $footerSurface, $own);
         }
         return "Above: {$above}\nBelow: {$below}";
     }
 
     /**
      * The footer-side contract injected as every page's final section neighbor.
-     * The same archetype is sent to FooterUnit, so the two independently
-     * generated parts agree about content ownership and the visual handoff.
-     * Passing '' preserves the compact legacy description for direct callers
-     * whose adapter has not assigned a footer composition. Pure — unit-testable.
+     * The same archetype and resolved surface are sent to FooterUnit, so the two
+     * independently generated parts agree about content ownership and the visual
+     * handoff. Passing '' for the archetype preserves the compact legacy
+     * description for direct callers whose adapter has not assigned a footer
+     * composition; '' for the surface falls back to the archetype's preference.
+     * Pure — unit-testable.
      */
-    public static function footerNeighborContract(string $archetype): string
-    {
+    public static function footerNeighborContract(
+        string $archetype,
+        string $surface = '',
+        string $sectionBackground = '',
+    ): string {
         if ($archetype === '') {
             return 'the site footer (this is the last section)';
         }
         FooterComposition::assertKnown($archetype);
-        $surface = FooterComposition::surface($archetype);
+        $surface = $surface !== '' ? $surface : FooterComposition::surface($archetype);
+        // resolveSurface() picks the fewest collisions, not zero, and a host
+        // adapter calling this directly never runs the plan-level move. So the
+        // section really can be sitting on the footer's surface, and telling
+        // its author it was planned off one would brief a cut that has nothing
+        // to cut against.
+        $seam = $sectionBackground !== '' && $sectionBackground === $surface
+            ? 'This section shares that exact surface, so hand off continuously through spacing and rhythm rather '
+                . 'than a colour cut, and never restate the footer band.'
+            : 'This section was planned NOT to use that surface, so make one decisive color or image cut at the '
+                . 'boundary and never restate the footer band.';
         return "the site footer (this is the last section) — assigned {$archetype} composition opening on the "
             . "exact **{$surface}** background surface. "
             . 'This section owns its planned narrative, facts, imagery, and primary CTA; the footer owns persistent '
-            . 'identity, compact site-wide utility, and credit. If this section also uses that exact solid surface, '
-            . 'hand off continuously through spacing; otherwise make one decisive color or image cut. Do not repeat '
+            . "identity, compact site-wide utility, and credit. {$seam} Do not repeat "
             . 'copy, contact/hours clusters, CTA, or a second signature ornament.';
     }
 
@@ -1135,22 +1371,37 @@ final class SectionsStep implements Step
     }
 
     /**
-     * @param array<int,array<string,mixed>> $pages
+     * The footer composition for this build. Seeded on the site alone so
+     * page-plan can learn the footer's surface before it plans the closing
+     * sections that have to differ from it.
      */
-    public static function footerArchetype(array $pages, string $siteSpec, string $designDirection): string
+    public static function footerArchetype(string $siteSpec, string $designDirection): string
     {
-        $front = self::frontPage($pages);
-        $seed = $siteSpec . "\n"
-            . $designDirection . "\n"
-            . (string) ($front['slug'] ?? '') . "\n"
-            . (string) ($front['title'] ?? '') . "\n"
-            . self::outline((array) ($front['sections'] ?? []));
-        $bucket = 0;
-        $count = count(self::FOOTER_ARCHETYPES);
-        foreach (str_split(hash('sha256', $seed, true)) as $byte) {
-            $bucket = (($bucket * 256) + ord($byte)) % $count;
+        return FooterComposition::archetypeFor($siteSpec, $designDirection);
+    }
+
+    /**
+     * What each page's last section closes on, in page order. One footer part
+     * renders below all of them, so the surface has to clear the whole list —
+     * not just the front page's.
+     *
+     * @param array<int,array<string,mixed>> $pages
+     * @return list<string>
+     */
+    public static function closingBackgrounds(array $pages): array
+    {
+        $backgrounds = [];
+        foreach ($pages as $page) {
+            $sections = array_values(array_filter(
+                (array) ($page['sections'] ?? []),
+                'is_array'
+            ));
+            $last = end($sections);
+            if (is_array($last) && is_string($last['background'] ?? null)) {
+                $backgrounds[] = $last['background'];
+            }
         }
-        return self::FOOTER_ARCHETYPES[$bucket];
+        return $backgrounds;
     }
 
     /** The exact, single-archetype directive rendered into footer.md. */

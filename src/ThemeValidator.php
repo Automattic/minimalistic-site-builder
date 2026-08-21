@@ -91,14 +91,34 @@ final class ThemeValidator
             }
         }
 
-        // The design prompts reserve a requested form with a
-        // jetpack-form-placeholder container so the request survives for the
-        // form step. One surviving into delivered markup means that step has
-        // not run: visitors would see the stub, so the loss must be reported,
-        // not silent.
+        // HTML-first design stubs reserve a requested form with a
+        // jetpack-form-placeholder container so the request survives for a
+        // later form step. JP_FORM paragraph specs are a different contract
+        // (FormPlaceholder) and are checked below; a leftover HTML stub means
+        // that step has not run and visitors would see the placeholder.
         foreach ($checked as $rel) {
-            if ($project->exists($rel) && str_contains($project->readText($rel), 'jetpack-form-placeholder')) {
-                $problems[] = "{$rel}: contains an unmaterialized jetpack-form-placeholder — the requested form was never built";
+            if (!$project->exists($rel)) {
+                continue;
+            }
+            $markup = $project->readText($rel);
+            if (!str_contains($markup, 'jetpack-form-placeholder')) {
+                continue;
+            }
+            if (FormPlaceholder::find($markup) !== [] || FormPlaceholder::markerCount($markup) > 0) {
+                continue;
+            }
+            $problems[] = "{$rel}: contains an unmaterialized jetpack-form-placeholder — the requested form was never built";
+        }
+
+        // A form placeholder is a spec a host has to parse. The library owns
+        // that grammar, so the library checks it: a malformed one is invisible
+        // to every downstream step and ships as literal grey body text on the
+        // page. Off the flag, the marker must not appear at all.
+        foreach ($checked as $rel) {
+            if ($project->exists($rel)) {
+                foreach (self::formPlaceholderProblems($project, $rel) as $problem) {
+                    $problems[] = $problem;
+                }
             }
         }
 
@@ -685,6 +705,51 @@ final class ThemeValidator
         // href and block-JSON "url" mirror each other, so the same broken
         // destination would otherwise be reported twice.
         return array_values(array_unique($problems));
+    }
+
+    /**
+     * Whether every form placeholder in one file is one a host can parse.
+     *
+     * The grammar lives in FormPlaceholder, which is also what the host reads
+     * it with, so this check and the substitution downstream cannot disagree.
+     * They would disagree silently: a placeholder is ordinary paragraph text,
+     * so a spec no host can read reaches the visitor as literal grey body copy
+     * with nothing else in the pipeline noticing.
+     *
+     * @return list<string>
+     */
+    private static function formPlaceholderProblems(Project $project, string $rel): array
+    {
+        $markup = $project->readText($rel);
+        $markers = FormPlaceholder::markerCount($markup);
+        if ($markers === 0) {
+            return [];
+        }
+
+        if (!Steps\SectionsStep::formPlaceholders($project)) {
+            return ["{$rel}: contains a " . FormPlaceholder::MARKER . ' marker but this build has no'
+                . ' form host — disposition: rebuild the section, or enable form placeholders'];
+        }
+
+        $problems = [];
+        $placeholders = FormPlaceholder::find($markup);
+        foreach ($placeholders as $placeholder) {
+            $parsed = FormPlaceholder::parse($placeholder['spec']);
+            if (is_string($parsed)) {
+                $problems[] = "{$rel}: unparseable form spec \"{$placeholder['spec']}\" ({$parsed})"
+                    . ' — disposition: no host can substitute this; regenerate the section';
+            }
+        }
+
+        // A marker outside a placeholder block is text the host never reads.
+        $loose = $markers - count($placeholders);
+        if ($loose > 0) {
+            $problems[] = "{$rel}: {$loose} form marker(s) outside a "
+                . FormPlaceholder::CLASS_NAME . ' block — disposition: the host only substitutes'
+                . ' markers inside that block, so these would ship as visible text';
+        }
+
+        return $problems;
     }
 
     /**

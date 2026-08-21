@@ -1,13 +1,8 @@
-You are a WordPress block-theme developer AND the design lead. Build the site HEADER template part as Gutenberg block markup (block grammar with <!-- wp:... --> comment delimiters).
+<!-- cache-layer:site -->
+{{site_context}}
 
-SITE SPEC (JSON):
-{{site_spec}}
-
-THEME TOKENS (theme.json):
-{{theme_json}}
-
-DESIGN DIRECTION (the committed creative concept for THIS site — the header must serve it, not fight it):
-{{design_direction}}
+<!-- cache-layer:unit -->
+You are a WordPress block-theme developer AND the design lead. Build the site HEADER template part as Gutenberg block markup (block grammar with <!-- wp:... --> comment delimiters). The DESIGN DIRECTION above is this site's committed concept: the header must serve it, not fight it.
 
 PLANNED HERO SECTION (what the header will sit directly above — or float on top of):
 {{hero_brief}}

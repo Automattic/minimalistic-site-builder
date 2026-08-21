@@ -718,10 +718,11 @@ test('theme-json fills a missing required color slug from the direction, then de
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
-    // The direction committed an accent hex — the fill honors it.
+    // The direction committed an accent hex that clears the 4.5:1 floor its
+    // slug carries on this base — the fill honors it.
     $project->writeJson('designDirection.json', [
         'description' => 'Warm hearth tones.',
-        'palette'     => ['accent' => '#C0FFEE'],
+        'palette'     => ['accent' => '#B4541E'],
         'hero_blueprint' => \Automattic\SiteBuild\HeroBlueprint::defaultFor('cinematic-safe-zone'),
     ]);
 
@@ -739,10 +740,443 @@ test('theme-json fills a missing required color slug from the direction, then de
 
     $palette = $project->readJson('theme/theme.json')['settings']['color']['palette'];
     $bySlug = array_column($palette, 'color', 'slug');
-    assert_eq('#C0FFEE', $bySlug['accent'], 'the direction hex fills the gap');
+    assert_eq('#B4541E', $bySlug['accent'], 'the direction hex fills the gap');
     $joined = implode(' ', $project->readJson('warnings.json')['theme-json'] ?? []);
     assert_contains("palette missing slug 'accent'", $joined);
     exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('repairAccentCaption wires captions to the accent family when one shipped', function () {
+    [$theme] = ThemeJsonStep::repairAccentCaption([
+        'settings' => ['typography' => ['fontFamilies' => [
+            ['slug' => 'heading', 'fontFamily' => 'Oswald, sans-serif'],
+            ['slug' => 'body', 'fontFamily' => 'Source Sans 3, sans-serif'],
+            ['slug' => 'accent', 'fontFamily' => '"Caveat", cursive'],
+        ]]],
+    ]);
+    assert_eq(
+        'var:preset|font-family|accent',
+        $theme['styles']['elements']['caption']['typography']['fontFamily'],
+    );
+    assert_eq(
+        'var:preset|font-family|accent',
+        $theme['styles']['blocks']['core/image']['typography']['fontFamily'],
+    );
+});
+
+test('repairAccentCaption stays quiet when no accent family shipped', function () {
+    [$theme] = ThemeJsonStep::repairAccentCaption([
+        'settings' => ['typography' => ['fontFamilies' => [
+            ['slug' => 'heading', 'fontFamily' => 'Oswald, sans-serif'],
+            ['slug' => 'body', 'fontFamily' => 'Source Sans 3, sans-serif'],
+        ]]],
+    ]);
+    assert_eq(null, $theme['styles']['elements']['caption']['typography']['fontFamily'] ?? null);
+});
+
+test('repairAccentCaption records the caption family it overrides', function () {
+    // The direction's accent wins over a model-authored caption face, but the
+    // override is a repair like any other and has to reach warnings.json.
+    $theme = [
+        'settings' => ['typography' => ['fontFamilies' => [
+            ['slug' => 'heading', 'fontFamily' => 'Oswald, sans-serif'],
+            ['slug' => 'body', 'fontFamily' => 'Source Sans 3, sans-serif'],
+            ['slug' => 'accent', 'fontFamily' => '"Caveat", cursive'],
+        ]]],
+        'styles' => ['elements' => ['caption' => ['typography' => [
+            'fontFamily' => 'var:preset|font-family|body',
+            'fontSize' => 'var:preset|font-size|caption',
+        ]]]],
+    ];
+    [$repaired, $warnings] = ThemeJsonStep::repairAccentCaption($theme);
+    assert_eq(1, count($warnings), 'the overridden caption family is recorded');
+    $joined = implode(' ', $warnings);
+    assert_contains('styles.elements.caption.typography.fontFamily: authored', $joined);
+    assert_contains('var:preset|font-family|body', $joined);
+    assert_contains('delivered var:preset|font-family|accent', $joined);
+    assert_eq(
+        'var:preset|font-size|caption',
+        $repaired['styles']['elements']['caption']['typography']['fontSize'],
+        'sibling caption typography survives the override',
+    );
+
+    // A build that authored nothing there is not an override, so it stays out
+    // of the ledger — and a second pass never re-reports the first one.
+    [$again, $repeat] = ThemeJsonStep::repairAccentCaption($repaired);
+    assert_eq($repaired, $again, 'the override reaches a fixed point');
+    assert_eq([], $repeat);
+});
+
+test('theme-json repairs malformed caption containers before accent wiring', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_accent_shape_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A neighborhood bakery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project, 'cinematic-safe-zone', [
+        'description' => 'Hand-lettered flavor cards.',
+        'type' => [
+            'accent' => [
+                'family' => 'Caveat',
+                'weights' => [400],
+                'italic' => false,
+                'axes' => [],
+                'character' => 'hand labels',
+            ],
+        ],
+    ]);
+
+    $payload = valid_theme_payload();
+    $payload['settings']['typography']['fontFamilies'][] = [
+        'slug' => 'accent',
+        'name' => 'Accent',
+        'fontFamily' => '"Caveat", cursive',
+    ];
+    $payload['styles']['elements'] = ['bad'];
+    $payload['styles']['blocks'] = ['bad'];
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $theme = $project->readJson('theme/theme.json');
+    assert_true(!array_key_exists(0, $theme['styles']['elements']), 'malformed elements list removed');
+    assert_true(!array_key_exists(0, $theme['styles']['blocks']), 'malformed blocks list removed');
+    assert_eq(
+        'var:preset|font-family|accent',
+        $theme['styles']['elements']['caption']['typography']['fontFamily'],
+    );
+    assert_eq(
+        'var:preset|font-family|accent',
+        $theme['styles']['blocks']['core/image']['typography']['fontFamily'],
+    );
+    $warnings = implode(' ', $project->readJson('warnings.json')['theme-json'] ?? []);
+    assert_contains('theme/theme.json styles.elements: authored ["bad"]', $warnings);
+    assert_contains('theme/theme.json styles.blocks: authored ["bad"]', $warnings);
+
+    [$fixed, $scaffoldWarnings] = ThemeJsonStep::repairScaffold($theme);
+    [$fixed, $accentWarnings] = ThemeJsonStep::repairAccentCaption($fixed);
+    assert_eq($theme, $fixed, 'repair order reaches a fixed point');
+    assert_eq([], array_merge($scaffoldWarnings, $accentWarnings));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('repairFonts drops a third family the direction never committed', function () {
+    // prompts/theme-json.md:71 asks for exactly heading and body unless the
+    // direction names an accent, so a model-invented third face ships a font
+    // nobody chose — and repairAccentCaption would put it on every caption.
+    [$theme, $warnings] = ThemeJsonStep::repairFonts(
+        ['settings' => ['typography' => ['fontFamilies' => [
+            ['slug' => 'heading', 'fontFamily' => '"Oswald", sans-serif', 'name' => 'Heading'],
+            ['slug' => 'body', 'fontFamily' => '"Inter", sans-serif', 'name' => 'Body'],
+            ['slug' => 'accent', 'fontFamily' => '"Caveat", cursive', 'name' => 'Accent'],
+        ]]]],
+        [
+            'heading' => ['family' => 'Oswald'],
+            'body' => ['family' => 'Inter'],
+        ],
+    );
+    $slugs = array_column($theme['settings']['typography']['fontFamilies'], 'slug');
+    assert_eq(['heading', 'body'], $slugs, 'only the two committed families ship');
+    $joined = implode(' ', $warnings);
+    assert_contains("fontFamilies slug 'accent'", $joined);
+    assert_contains('Caveat', $joined);
+    assert_contains('committed no type.accent.family', $joined);
+
+    [$again, $repeat] = ThemeJsonStep::repairFonts($theme, [
+        'heading' => ['family' => 'Oswald'],
+        'body' => ['family' => 'Inter'],
+    ]);
+    assert_eq($theme, $again, 'the drop reaches a fixed point');
+    assert_eq([], $repeat);
+});
+
+test('repairFonts keeps a model accent the direction did commit', function () {
+    [$theme, $warnings] = ThemeJsonStep::repairFonts(
+        ['settings' => ['typography' => ['fontFamilies' => [
+            ['slug' => 'heading', 'fontFamily' => '"Oswald", sans-serif', 'name' => 'Heading'],
+            ['slug' => 'body', 'fontFamily' => '"Inter", sans-serif', 'name' => 'Body'],
+            ['slug' => 'accent', 'fontFamily' => '"Caveat", cursive', 'name' => 'Accent'],
+        ]]]],
+        [
+            'heading' => ['family' => 'Oswald'],
+            'body' => ['family' => 'Inter'],
+            'accent' => ['family' => 'Caveat'],
+        ],
+    );
+    $bySlug = array_column($theme['settings']['typography']['fontFamilies'], 'fontFamily', 'slug');
+    assert_contains('Caveat', $bySlug['accent']);
+    assert_eq([], $warnings);
+});
+
+test('the accent caption wiring survives the HTML-first typography strip', function () {
+    // HTML-first authoring prompts never write fontFamily presets, so
+    // styles.elements.caption is the whole mechanism that references the
+    // accent face on that graph. removeGeneratedControlTypography runs one
+    // line earlier and must not take it with the nav/button/link typography.
+    $tmp = sys_get_temp_dir() . '/builder_tj_accent_htmlfirst_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A neighborhood bakery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    $project->writeText('design/site.css', ':root{--x:1}body{color:#111;background:#fff}');
+    seed_test_design_direction($project, 'cinematic-safe-zone', [
+        'description' => 'Hand-lettered flavor cards.',
+        'type' => [
+            'accent' => [
+                'family' => 'Caveat',
+                'weights' => [400],
+                'italic' => false,
+                'axes' => [],
+                'character' => 'hand labels',
+            ],
+        ],
+    ]);
+
+    $payload = valid_theme_payload();
+    $payload['settings']['typography']['fontFamilies'][] = [
+        'slug' => 'accent',
+        'name' => 'Accent',
+        'fontFamily' => '"Caveat", cursive',
+    ];
+    $payload['styles']['elements']['button']['typography'] = ['fontFamily' => 'var:preset|font-family|heading'];
+    $payload['styles']['elements']['link']['typography'] = ['fontFamily' => 'var:preset|font-family|heading'];
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts')), htmlFirst: true))->run($project);
+
+    $theme = $project->readJson('theme/theme.json');
+    assert_eq(
+        'var:preset|font-family|accent',
+        $theme['styles']['elements']['caption']['typography']['fontFamily'],
+        'HTML-first captions still reference the accent family',
+    );
+    assert_true(
+        !isset($theme['styles']['elements']['button']['typography']),
+        'the control typography strip still ran',
+    );
+    assert_true(
+        !isset($theme['styles']['elements']['link']['typography']),
+        'the control typography strip still ran',
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('repairFonts adds an optional accent family from the direction', function () {
+    [$theme, $warnings] = ThemeJsonStep::repairFonts(
+        ['settings' => ['typography' => ['fontFamilies' => [
+            ['slug' => 'heading', 'fontFamily' => 'Oswald, sans-serif', 'name' => 'Heading'],
+            ['slug' => 'body', 'fontFamily' => 'Source Sans 3, sans-serif', 'name' => 'Body'],
+        ]]]],
+        ['accent' => ['family' => 'Caveat', 'weights' => [400], 'italic' => false, 'axes' => [], 'character' => '']],
+    );
+    $bySlug = array_column($theme['settings']['typography']['fontFamilies'], 'fontFamily', 'slug');
+    assert_contains('Caveat', $bySlug['accent']);
+    assert_contains("missing slug 'accent'", implode(' ', $warnings));
+});
+
+test('repairFonts does not invent an accent family when the direction left it empty', function () {
+    [$theme] = ThemeJsonStep::repairFonts(
+        ['settings' => ['typography' => ['fontFamilies' => [
+            ['slug' => 'heading', 'fontFamily' => 'Oswald, sans-serif', 'name' => 'Heading'],
+            ['slug' => 'body', 'fontFamily' => 'Source Sans 3, sans-serif', 'name' => 'Body'],
+        ]]]],
+        ['accent' => ['family' => '', 'weights' => [], 'italic' => false, 'axes' => [], 'character' => '']],
+    );
+    $slugs = array_column($theme['settings']['typography']['fontFamilies'], 'slug');
+    assert_true(!in_array('accent', $slugs, true));
+});
+
+test('repairColors overwrites a drifted hex with the direction value', function () {
+    // Both direction hexes clear the floor prompts/theme-json.md states for
+    // their slug on this base, so neither is held back by the contrast gate.
+    $preferred = ['secondary' => '#8A5A2B', 'accent' => '#B4541E'];
+    [$theme, $warnings, $repairs] = ThemeJsonStep::repairColors(
+        ['settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#FFFFFF', 'name' => 'Base'],
+            ['slug' => 'contrast', 'color' => '#111111', 'name' => 'Contrast'],
+            ['slug' => 'primary', 'color' => '#111111', 'name' => 'Primary'],
+            ['slug' => 'secondary', 'color' => '#00FF00', 'name' => 'Secondary'],
+            ['slug' => 'accent', 'color' => '#0000FF', 'name' => 'Accent'],
+        ]]]],
+        $preferred,
+    );
+    $bySlug = array_column($theme['settings']['color']['palette'], 'color', 'slug');
+    assert_eq('#8A5A2B', $bySlug['secondary']);
+    assert_eq('#B4541E', $bySlug['accent']);
+    assert_eq([], $warnings, 'an applied writeback is not a delivered defect');
+    $joined = implode(' ', $repairs);
+    assert_contains("palette slug 'secondary'", $joined);
+    assert_contains('hue distance exceeded 30 degrees', $joined);
+
+    [$again, $repeatWarnings, $repeatRepairs] = ThemeJsonStep::repairColors($theme, $preferred);
+    assert_eq($theme, $again, 'palette drift repair reaches a fixed point');
+    assert_eq([], $repeatWarnings, 'fixed palette emits no repeat repair warnings');
+    assert_eq([], $repeatRepairs, 'fixed palette emits no repeat repair receipts');
+});
+
+test('repairColors keeps a model hex the direction would make unreadable', function () {
+    // prompts/theme-json.md lets the model nudge a hex to clear WCAG. Here it
+    // darkened secondary to 7.46:1; the direction's own hex scores 4.48:1,
+    // under the 4.5 floor that file states for secondary on base.
+    $preferred = ['secondary' => '#777777'];
+    [$theme, $warnings, $repairs] = ThemeJsonStep::repairColors(
+        ['settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#FFFFFF', 'name' => 'Base'],
+            ['slug' => 'contrast', 'color' => '#111111', 'name' => 'Contrast'],
+            ['slug' => 'primary', 'color' => '#111111', 'name' => 'Primary'],
+            ['slug' => 'secondary', 'color' => '#555555', 'name' => 'Secondary'],
+            ['slug' => 'accent', 'color' => '#B4541E', 'name' => 'Accent'],
+        ]]]],
+        $preferred,
+    );
+    $bySlug = array_column($theme['settings']['color']['palette'], 'color', 'slug');
+    assert_eq('#555555', $bySlug['secondary'], 'the readable model hex survives the writeback');
+    assert_eq([], $repairs, 'a rejected writeback is not a repair');
+    $joined = implode(' ', $warnings);
+    assert_contains("palette slug 'secondary'", $joined);
+    assert_contains('kept the model hex', $joined);
+    assert_contains('#777777', $joined);
+    assert_contains('4.48:1', $joined);
+    assert_contains('7.46:1', $joined);
+
+    [$again] = ThemeJsonStep::repairColors($theme, $preferred);
+    assert_eq($theme, $again, 'a rejected writeback reaches a fixed point too');
+});
+
+test('repairColors will not fill a missing slug with an unreadable direction hex', function () {
+    // The gate the writeback applies is not skippable by omitting the slug:
+    // #777777 scores 4.48:1 on white, under the 4.5 floor secondary carries,
+    // so the neutral default ships instead of an unreadable caption color.
+    [$theme, $warnings, $repairs] = ThemeJsonStep::repairColors(
+        ['settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#FFFFFF', 'name' => 'Base'],
+            ['slug' => 'contrast', 'color' => '#111111', 'name' => 'Contrast'],
+            ['slug' => 'primary', 'color' => '#111111', 'name' => 'Primary'],
+            ['slug' => 'accent', 'color' => '#B4541E', 'name' => 'Accent'],
+        ]]]],
+        ['secondary' => '#777777'],
+    );
+    $bySlug = array_column($theme['settings']['color']['palette'], 'color', 'slug');
+    assert_eq('#444444', $bySlug['secondary'], 'the neutral default outranks an unreadable direction hex');
+    assert_eq([], $repairs, 'a gated fill is not a writeback receipt');
+    $joined = implode(' ', $warnings);
+    assert_contains("palette missing slug 'secondary'", $joined);
+    assert_contains('4.48:1', $joined);
+    assert_contains('below the 4.5:1 floor', $joined);
+});
+
+test('repairColors never fills a gap with a hex that reads worse than the one it replaced', function () {
+    // The neutral defaults are tuned for a light page. On a dark delivered base
+    // #444444 scores 1.94:1, so a gate that always fell back to it would make
+    // the slug less readable, not more. A readable direction hex is taken
+    // outright; an unreadable one still wins when the neutral is worse.
+    [$readable] = ThemeJsonStep::repairColors(
+        ['settings' => ['color' => ['palette' => [
+            ['slug' => 'contrast', 'color' => '#FFFFFF', 'name' => 'Contrast'],
+            ['slug' => 'primary', 'color' => '#EEEEEE', 'name' => 'Primary'],
+            ['slug' => 'accent', 'color' => '#FFB4A2', 'name' => 'Accent'],
+        ]]]],
+        ['base' => '#111111', 'secondary' => '#C9C4BC'],
+    );
+    $bySlug = array_column($readable['settings']['color']['palette'], 'color', 'slug');
+    assert_eq('#111111', $bySlug['base']);
+    assert_eq('#C9C4BC', $bySlug['secondary'], '10.89:1 clears the floor and is taken outright');
+
+    // #6A6A6A fails the 4.5 floor at 3.49:1, but the neutral it would be
+    // swapped for is worse still, so the direction hex has to survive.
+    [$degraded, $warnings] = ThemeJsonStep::repairColors(
+        ['settings' => ['color' => ['palette' => [
+            ['slug' => 'contrast', 'color' => '#FFFFFF', 'name' => 'Contrast'],
+            ['slug' => 'primary', 'color' => '#EEEEEE', 'name' => 'Primary'],
+            ['slug' => 'accent', 'color' => '#FFB4A2', 'name' => 'Accent'],
+        ]]]],
+        ['base' => '#111111', 'secondary' => '#6A6A6A'],
+    );
+    $bySlug = array_column($degraded['settings']['color']['palette'], 'color', 'slug');
+    assert_eq('#6A6A6A', $bySlug['secondary'], 'the better-reading hex survives even when it fails the floor');
+    $joined = implode(' ', $warnings);
+    assert_contains('3.49:1', $joined);
+    assert_contains('below the 4.5:1 floor', $joined);
+});
+
+test('repairColors reports hue drift on the branch where the named color is lost', function () {
+    // The writeback is rejected, so the delivered hex stays far from the color
+    // the direction named — that is the case worth naming in warnings.json.
+    [, $warnings] = ThemeJsonStep::repairColors(
+        ['settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#FFFFFF', 'name' => 'Base'],
+            ['slug' => 'contrast', 'color' => '#111111', 'name' => 'Contrast'],
+            ['slug' => 'primary', 'color' => '#111111', 'name' => 'Primary'],
+            ['slug' => 'secondary', 'color' => '#1B5E20', 'name' => 'Secondary'],
+            ['slug' => 'accent', 'color' => '#B4541E', 'name' => 'Accent'],
+        ]]]],
+        ['secondary' => '#E88AA0'],
+    );
+    $joined = implode(' ', $warnings);
+    assert_contains('kept the model hex', $joined);
+    assert_contains('hue distance exceeded 30 degrees', $joined);
+});
+
+test('repairColors judges each slug against the floor its own role carries', function () {
+    // accent is judged by "base on accent >= 4.5:1" (button labels), so a
+    // direction accent that clears 4.5 lands even though it would fail the
+    // 7:1 that contrast carries.
+    [$theme, $warnings] = ThemeJsonStep::repairColors(
+        ['settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#FFFFFF', 'name' => 'Base'],
+            ['slug' => 'contrast', 'color' => '#111111', 'name' => 'Contrast'],
+            ['slug' => 'primary', 'color' => '#111111', 'name' => 'Primary'],
+            ['slug' => 'secondary', 'color' => '#555555', 'name' => 'Secondary'],
+            ['slug' => 'accent', 'color' => '#0000FF', 'name' => 'Accent'],
+        ]]]],
+        ['accent' => '#B4541E'],
+    );
+    $bySlug = array_column($theme['settings']['color']['palette'], 'color', 'slug');
+    assert_eq('#B4541E', $bySlug['accent'], '4.97:1 clears the accent floor');
+    assert_eq([], $warnings);
+});
+
+test('repairColors measures against the base the writeback itself delivers', function () {
+    // The direction moves the page to a dark base, so the model's near-black
+    // secondary stops being readable and its own secondary is the right call.
+    [$theme, $warnings] = ThemeJsonStep::repairColors(
+        ['settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#FFFFFF', 'name' => 'Base'],
+            ['slug' => 'contrast', 'color' => '#111111', 'name' => 'Contrast'],
+            ['slug' => 'primary', 'color' => '#111111', 'name' => 'Primary'],
+            ['slug' => 'secondary', 'color' => '#222222', 'name' => 'Secondary'],
+            ['slug' => 'accent', 'color' => '#B4541E', 'name' => 'Accent'],
+        ]]]],
+        ['base' => '#111111', 'secondary' => '#C9C4BC'],
+    );
+    $bySlug = array_column($theme['settings']['color']['palette'], 'color', 'slug');
+    assert_eq('#111111', $bySlug['base']);
+    assert_eq('#C9C4BC', $bySlug['secondary'], 'judged on the delivered base, not the authored one');
+    assert_eq([], $warnings);
+});
+
+test('repairFonts writes the direction family back when the primary face drifted', function () {
+    $preferred = [
+        'heading' => ['family' => 'Oswald', 'weights' => [700], 'italic' => false, 'axes' => [], 'character' => ''],
+        'body' => ['family' => 'Source Sans 3', 'weights' => [400], 'italic' => false, 'axes' => [], 'character' => ''],
+    ];
+    [$theme, $warnings, $repairs] = ThemeJsonStep::repairFonts(
+        ['settings' => ['typography' => ['fontFamilies' => [
+            ['slug' => 'heading', 'fontFamily' => '"Fraunces", serif', 'name' => 'Heading'],
+            ['slug' => 'body', 'fontFamily' => '"Inter", sans-serif', 'name' => 'Body'],
+        ]]]],
+        $preferred,
+    );
+    $bySlug = array_column($theme['settings']['typography']['fontFamilies'], 'fontFamily', 'slug');
+    assert_contains('Oswald', $bySlug['heading']);
+    assert_contains('Source Sans 3', $bySlug['body']);
+    assert_eq([], $warnings, 'an applied writeback is not a delivered defect');
+    $joined = implode(' ', $repairs);
+    assert_contains("fontFamilies slug 'heading'", $joined);
+    assert_contains('wrote the design-direction family back', $joined);
+
+    [$again, $repeatWarnings, $repeatRepairs] = ThemeJsonStep::repairFonts($theme, $preferred);
+    assert_eq($theme, $again, 'font drift repair reaches a fixed point');
+    assert_eq([], $repeatWarnings, 'fixed fonts emit no repeat repair warnings');
+    assert_eq([], $repeatRepairs, 'fixed fonts emit no repeat repair receipts');
 });
 
 test('repairColors falls back to neutral readable defaults without a direction hex', function () {
@@ -1103,7 +1537,10 @@ function theme_json_preset(array $presets, string $slug): array
 
 test('theme-json declares every artifact it writes', function () {
     $step = new ThemeJsonStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
-    assert_eq(['theme/theme.json', 'logs/theme-json-shape.txt', 'warnings.json'], $step->declaration()->writes);
+    assert_eq(
+        ['theme/theme.json', 'logs/theme-json-shape.txt', 'logs/theme-json-direction-bind.txt', 'warnings.json'],
+        $step->declaration()->writes,
+    );
 });
 
 test('theme-json declares design CSS only for the HTML-first graph', function () {
@@ -1460,6 +1897,165 @@ test('theme-json scaffold never writes button, link or heading', function () {
     foreach ($modelElements as $name => $expected) {
         assert_eq($expected, $wired['styles']['elements'][$name], "{$name} preserved");
     }
+});
+
+test('theme-json default graph preserves generated navigation, button and link typography', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_default_control_type_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A coaching studio']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project);
+
+    $payload = valid_theme_payload();
+    $payload['styles']['blocks']['core/navigation'] = [
+        'typography' => [
+            'fontWeight' => '600',
+            'letterSpacing' => '0.14em',
+            'textTransform' => 'uppercase',
+        ],
+        'elements' => ['link' => ['typography' => ['textDecoration' => 'none']]],
+    ];
+    $payload['styles']['elements']['button'] = [
+        'typography' => [
+            'fontWeight' => '700',
+            'letterSpacing' => '0.08em',
+            'textTransform' => 'uppercase',
+        ],
+        'color' => ['background' => 'var:preset|color|accent'],
+    ];
+    $payload['styles']['elements']['link'] = [
+        'color' => ['text' => 'var:preset|color|primary'],
+        'typography' => ['fontWeight' => '700', 'textDecoration' => 'underline'],
+        ':hover' => [
+            'color' => ['text' => 'var:preset|color|accent'],
+            'typography' => ['textDecoration' => 'none'],
+        ],
+    ];
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $theme = $project->readJson('theme/theme.json');
+    assert_eq(
+        '600',
+        $theme['styles']['blocks']['core/navigation']['typography']['fontWeight'] ?? null,
+        'default graph keeps generated navigation typography',
+    );
+    assert_eq(
+        '700',
+        $theme['styles']['elements']['button']['typography']['fontWeight'] ?? null,
+        'default graph keeps generated button typography',
+    );
+    assert_eq(
+        '700',
+        $theme['styles']['elements']['link']['typography']['fontWeight'] ?? null,
+        'default graph keeps generated link typography',
+    );
+    assert_eq(
+        'none',
+        $theme['styles']['blocks']['core/navigation']['elements']['link']['typography']['textDecoration'] ?? null,
+        'default graph keeps navigation sibling styles',
+    );
+    assert_eq(
+        'var:preset|color|accent',
+        $theme['styles']['elements']['button']['color']['background'] ?? null,
+        'default graph keeps button sibling styles',
+    );
+    assert_eq(
+        'var:preset|color|primary',
+        $theme['styles']['elements']['link']['color']['text'] ?? null,
+        'default graph keeps link color',
+    );
+    assert_eq(
+        'none',
+        $theme['styles']['elements']['link'][':hover']['typography']['textDecoration'] ?? null,
+        'default graph keeps link hover styles',
+    );
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json HTML-first graph removes generated navigation, button and link typography', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_html_control_type_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A coaching studio']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project);
+    $project->writeText(
+        'design/site.css',
+        file_get_contents(repo_path('tests/fixtures/design/tokens-rich.css')) ?: '',
+    );
+
+    $payload = valid_theme_payload();
+    $payload['styles']['blocks']['core/navigation'] = [
+        'typography' => [
+            'fontWeight' => '600',
+            'letterSpacing' => '0.14em',
+            'textTransform' => 'uppercase',
+        ],
+        'elements' => ['link' => ['typography' => ['textDecoration' => 'none']]],
+    ];
+    $payload['styles']['elements']['button'] = [
+        'typography' => [
+            'fontWeight' => '700',
+            'letterSpacing' => '0.08em',
+            'textTransform' => 'uppercase',
+        ],
+        'color' => ['background' => 'var:preset|color|accent'],
+    ];
+    $payload['styles']['elements']['link'] = [
+        'color' => ['text' => 'var:preset|color|primary'],
+        'typography' => ['fontWeight' => '700', 'textDecoration' => 'underline'],
+        ':hover' => [
+            'color' => ['text' => 'var:preset|color|accent'],
+            'typography' => ['textDecoration' => 'none'],
+        ],
+    ];
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+
+    (new ThemeJsonStep(
+        $llm,
+        new PromptRenderer(repo_path('prompts')),
+        htmlFirst: true,
+    ))->run($project);
+
+    $theme = $project->readJson('theme/theme.json');
+    assert_true(
+        !array_key_exists('typography', $theme['styles']['blocks']['core/navigation'] ?? []),
+        'HTML-first navigation inherits from carried design CSS',
+    );
+    assert_true(
+        !array_key_exists('typography', $theme['styles']['elements']['button'] ?? []),
+        'HTML-first buttons inherit from carried design CSS',
+    );
+    assert_true(
+        !array_key_exists('typography', $theme['styles']['elements']['link'] ?? []),
+        'HTML-first links inherit from carried design CSS',
+    );
+    assert_eq(
+        'none',
+        $theme['styles']['blocks']['core/navigation']['elements']['link']['typography']['textDecoration'] ?? null,
+        'HTML-first keeps navigation sibling styles',
+    );
+    assert_eq(
+        'var:preset|color|accent',
+        $theme['styles']['elements']['button']['color']['background'] ?? null,
+        'HTML-first keeps button sibling styles',
+    );
+    assert_eq(
+        'var:preset|color|primary',
+        $theme['styles']['elements']['link']['color']['text'] ?? null,
+        'HTML-first keeps link color',
+    );
+    assert_eq(
+        'none',
+        $theme['styles']['elements']['link'][':hover']['typography']['textDecoration'] ?? null,
+        'HTML-first keeps link hover styles',
+    );
+
+    exec('rm -rf ' . escapeshellarg($tmp));
 });
 
 test('theme-json scaffold adds no contextual block or element text colors', function () {

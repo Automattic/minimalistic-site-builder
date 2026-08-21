@@ -213,6 +213,65 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     assert_contains('.wp-site-blocks .wp-block-navigation__responsive-container-open:not(.always-shown)', $css);
     assert_contains('.wp-site-blocks .wp-block-navigation__responsive-container:not(.hidden-by-default):not(.is-menu-open)', $css);
 
+    assert_contains('.wp-site-blocks .wp-block-navigation__responsive-container.is-menu-open {', $css);
+    assert_contains('background-color: var(--wp--preset--color--base) !important;', $css);
+    assert_contains('color: var(--wp--preset--color--contrast) !important;', $css);
+    assert_contains('--navigation-layout-justification-setting: flex-start;', $css);
+    assert_contains('flex-direction: column !important;', $css);
+    $openBlock = substr($css, (int) strpos($css, '.wp-site-blocks .wp-block-navigation__responsive-container.is-menu-open {'));
+    assert_contains('justify-content: flex-start !important;', $openBlock);
+    assert_eq(
+        1,
+        preg_match(
+            '/\.wp-site-blocks \.wp-block-navigation__responsive-container\.is-menu-open\s*\{'
+                . '(?![^}]*z-index:)[^}]*\}/s',
+            $css,
+        ),
+        'overlay leaves Core z-index ownership intact',
+    );
+    assert_eq(
+        1,
+        preg_match(
+            '/\.wp-site-blocks \.wp-block-navigation__responsive-container\.is-menu-open\s+'
+                . '\.wp-block-navigation__responsive-dialog,\s*'
+                . '\.wp-site-blocks \.wp-block-navigation__responsive-container\.is-menu-open\s+'
+                . '\.wp-block-navigation__responsive-container-content\s*\{'
+                . '(?![^}]*margin:)[^}]*\}/s',
+            $css,
+        ),
+        'shared dialog geometry does not erase Core admin-bar margin',
+    );
+    assert_eq(
+        1,
+        preg_match(
+            '/\.wp-site-blocks \.wp-block-navigation__responsive-container\.is-menu-open\s+'
+                . '\.wp-block-navigation__responsive-container-content\s*\{'
+                . '(?=[^}]*margin:\s*0 !important;)[^}]*\}/s',
+            $css,
+        ),
+        'responsive content alone keeps the margin reset',
+    );
+    assert_eq(
+        1,
+        preg_match(
+            '/\.wp-site-blocks \.wp-block-navigation__responsive-container\.is-menu-open\s+'
+                . '\.wp-block-navigation-item__content:not\(\.wp-element-button\)\s*\{'
+                . '(?=[^}]*color:\s*inherit !important;)(?![^}]*color:[^;}]*contrast)[^}]*\}/s',
+            $css,
+        ),
+        'overlay links inherit the modal foreground without forcing contrast',
+    );
+    assert_eq(
+        1,
+        preg_match(
+            '/\.wp-site-blocks \.wp-block-navigation__responsive-container\.is-menu-open\s+'
+                . ':is\([^}]+\)\s*\{'
+                . '(?=[^}]*color:\s*inherit !important;)(?![^}]*color:[^;}]*contrast)[^}]*\}/s',
+            $css,
+        ),
+        'overlay close and submenu controls inherit the modal foreground without forcing contrast',
+    );
+
     // Hero topology and mobile behavior are code-owned. All recipe hooks ship
     // in the static stylesheet (unused hooks are inert), and the mobile rules
     // consume only the transformation marker normalized by HeroUnit.
@@ -315,6 +374,32 @@ test('scaffold-theme copies the trusted adaptive-header kit verbatim', function 
             "{$file} copied byte-for-byte"
         );
     }
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('scaffold-theme unbullets a page-list rendered outside a navigation', function () {
+    // Core ships `.wp-block-page-list { box-sizing: border-box }` and nothing
+    // else — its flex/list-style rules are all scoped under
+    // `.wp-block-navigation`. Footers use the block bare (4 of 7 demo builds),
+    // so the UA stylesheet's discs and 40px indent ship to the visitor.
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+
+    (new ScaffoldThemeStep())->run($project);
+    $css = $project->readText('theme/style.css');
+
+    // Pull the standalone rule specifically: the pre-existing
+    // `.is-menu-open … .wp-block-page-list` rule must not be able to satisfy
+    // this assertion, or the reset could be deleted without a failure.
+    $matched = preg_match(
+        '~(?<!\S)\.wp-site-blocks\s+\.wp-block-page-list\s*\{(?<body>[^}]*)\}~',
+        $css,
+        $rule
+    );
+    assert_eq(1, $matched, 'a standalone .wp-block-page-list reset exists');
+    assert_contains('list-style: none', $rule['body']);
+    assert_contains('padding-inline-start: 0', $rule['body']);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\GeminiImage;
+use Automattic\SiteBuild\JsonDecoder;
 use Automattic\SiteBuild\MediaReferenceRemoval;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
@@ -513,16 +514,14 @@ final class CollectImagesStep implements Step
         /** @var array<string,array<string,mixed>> $byPrompt semantic prompt => spec */
         $byPrompt = [];
 
-        $imageFor = static function (string $literal, bool $json) use (&$byPrompt, $canonicalSrcBySubject): ?array {
-            $semantic = self::decodeRecoveredLiteral($literal, $json);
+        $imageFor = static function (string $semantic) use (&$byPrompt, $canonicalSrcBySubject): ?array {
             $body = trim(substr($semantic, strlen('AI_IMAGE:')));
-            $subject = trim(explode('|', $body, 2)[0]);
-            if ($subject === '') {
-                return null;
-            }
-
             $promptKey = 'AI_IMAGE:' . $body;
             if (!isset($byPrompt[$promptKey])) {
+                [$subject, $aspectRatio] = self::recoverSubjectAndRatio($body);
+                if ($subject === '') {
+                    return null;
+                }
                 $src = $canonicalSrcBySubject[self::normalizeSubject($subject)]
                     ?? 'theme:./assets/' . self::synthesizeFilename($subject, $promptKey);
                 $byPrompt[$promptKey] = [
@@ -531,76 +530,108 @@ final class CollectImagesStep implements Step
                     'subject'     => $subject,
                     'pageContext' => '',
                     'style'       => '',
-                    'aspectRatio' => self::sniffAspectRatio($body),
+                    'aspectRatio' => $aspectRatio,
                 ];
             }
             return $byPrompt[$promptKey];
         };
 
-        // Block-comment JSON. Match "src" as well as "url" so any block that
-        // puts the prompt in a JSON source field gets the same repair. Leading
-        // whitespace inside the value is tolerated (and dropped on rewrite) so
-        // every shape ThemeValidator flags as a JSON source is also repaired.
-        $jsonPattern = '/(?P<prefix>"(?:url|src)"\s*:\s*")\s*'
-            . '(?P<lit>AI_IMAGE:(?:[^"\\\\]|\\\\.)*)(?P<suffix>")/is';
-        $content = (string) preg_replace_callback(
-            $jsonPattern,
-            static function (array $match) use ($imageFor): string {
-                $image = $imageFor($match['lit'], true);
-                return $image === null
-                    ? $match[0]
-                    : $match['prefix'] . $image['src'] . $match['suffix'];
-            },
-            $content
-        );
+        // One rule per SOURCE SYNTAX, not per malformed shape. There are only
+        // three ways this grammar writes a source value (a JSON "url"/"src"
+        // field, a quoted src= attribute, an unquoted src= attribute), so each
+        // pattern captures the whole value for its syntax and stays frozen;
+        // whether that value is a spec, and under which wrappers (comments,
+        // entities, whitespace), is decided by specFromSourceValue(). The
+        // model's next creative wrapper lands there as plain string handling,
+        // not as another regex. A value that is a real path no-ops.
+        // The passes run in listed order over the same content, but the order
+        // is incidental: a repaired value no longer carries AI_IMAGE:, so later
+        // passes no-op on it. By default a rule splices the resolved path
+        // between its captured prefix and suffix; the unquoted rule overrides
+        // 'rewrite' to also add the quotes the model omitted.
+        // ThemeValidator::unresolvedImageSourceProblems() keeps its own two
+        // anchored detections of these same syntaxes; they must stay a subset
+        // of what these rules repair, which the "recovers every source shape
+        // the validator flags" test in collect_images_test.php pins.
+        $spliceInPlace = static fn (array $match, array $image): string =>
+            $match['prefix'] . $image['src'] . $match['suffix'];
+        $rules = [
+            // JSON source field in a block comment. Match "src" as well as
+            // "url" so any block that puts the prompt in a JSON source field
+            // gets the same repair.
+            [
+                'pattern' => '/(?P<prefix>"(?:url|src)"\s*:\s*")'
+                    . '(?P<raw>(?:[^"\\\\]|\\\\.)*)(?P<suffix>")/is',
+                'json'    => true,
+            ],
+            // Quoted src= attribute in rendered HTML. Keep the replacement
+            // scoped to src= so an identical AI_IMAGE alt remains available to
+            // the canonical parser above.
+            [
+                'pattern' => '/(?P<prefix>\bsrc\s*=\s*(?P<quote>["\']))'
+                    . '(?P<raw>.*?)(?P<suffix>\k<quote>)/is',
+                'json'    => false,
+            ],
+            // Unquoted src=AI_IMAGE:… — the value necessarily ends at the first
+            // whitespace or ">", so a piped spec loses everything past the
+            // subject's first word (and no wrapper can survive in it, which is
+            // why this one keeps its AI_IMAGE anchor); a truncated recovery
+            // still beats shipping the raw prompt (or, with images requested,
+            // failing the whole build at the gate). The rewrite adds the
+            // quotes the model omitted.
+            [
+                'pattern' => '/\bsrc\s*=\s*(?P<raw>AI_IMAGE:[^\s>"\'`=]*)/i',
+                'json'    => false,
+                'rewrite' => static fn (array $match, array $image): string =>
+                    'src="' . $image['src'] . '"',
+            ],
+        ];
 
-        // Rendered HTML. Keep the replacement scoped to src= so an identical
-        // AI_IMAGE alt remains available to the canonical parser above.
-        // Leading whitespace inside the quotes is tolerated, mirroring the
-        // validator's detection.
-        $srcPattern = '/(?P<prefix>\bsrc\s*=\s*(?P<quote>["\']))\s*'
-            . '(?P<lit>AI_IMAGE:.*?)(?P<suffix>\k<quote>)/is';
-        $content = (string) preg_replace_callback(
-            $srcPattern,
-            static function (array $match) use ($imageFor): string {
-                $image = $imageFor($match['lit'], false);
-                return $image === null
-                    ? $match[0]
-                    : $match['prefix'] . $image['src'] . $match['suffix'];
-            },
-            $content
-        );
-
-        // Unquoted src=AI_IMAGE:… — the value necessarily ends at the first
-        // whitespace or ">", so a piped spec loses everything past the subject's
-        // first word; a truncated recovery still beats shipping the raw prompt
-        // (or, with images requested, failing the whole build at the gate).
-        // The rewrite adds the quotes the model omitted.
-        $bareSrcPattern = '/\bsrc\s*=\s*(?P<lit>AI_IMAGE:[^\s>"\'`=]*)/i';
-        $content = (string) preg_replace_callback(
-            $bareSrcPattern,
-            static function (array $match) use ($imageFor): string {
-                $image = $imageFor($match['lit'], false);
-                return $image === null
-                    ? $match[0]
-                    : 'src="' . $image['src'] . '"';
-            },
-            $content
-        );
+        foreach ($rules as $rule) {
+            $rewrite = $rule['rewrite'] ?? $spliceInPlace;
+            $content = (string) preg_replace_callback(
+                $rule['pattern'],
+                static function (array $match) use ($imageFor, $rule, $rewrite): string {
+                    // Cheap bail for the common case: a real path. The literal
+                    // token requirement matches the file-level guard in
+                    // parseAndNormalize(), so nothing new is excluded.
+                    if (stripos($match['raw'], 'AI_IMAGE') === false) {
+                        return $match[0];
+                    }
+                    $spec = self::specFromSourceValue($match['raw'], $rule['json']);
+                    if ($spec === null) {
+                        return $match[0];
+                    }
+                    $image = $imageFor($spec);
+                    return $image === null ? $match[0] : $rewrite($match, $image);
+                },
+                $content
+            );
+        }
 
         return ['content' => $content, 'images' => array_values($byPrompt)];
     }
 
-    /** Decode one captured URL/source value to the prompt text it represents. */
-    private static function decodeRecoveredLiteral(string $literal, bool $json): string
+    /**
+     * The AI_IMAGE spec carried by one source value, or null when the value
+     * is an ordinary path. All wrapper creativity is normalized away HERE, in
+     * plain string handling (JSON escapes, HTML entities, an HTML comment
+     * wrapped around the spec, stray whitespace), so the source-syntax
+     * patterns in recoverPlaceholders() never change for a new wrapper.
+     */
+    private static function specFromSourceValue(string $raw, bool $json): ?string
     {
         if ($json) {
-            $decoded = json_decode('"' . $literal . '"', true);
+            $decoded = json_decode('"' . $raw . '"', true);
             if (is_string($decoded)) {
-                $literal = $decoded;
+                $raw = $decoded;
             }
         }
-        return trim(html_entity_decode($literal, ENT_QUOTES | ENT_HTML5));
+        $value = trim(html_entity_decode($raw, ENT_QUOTES | ENT_HTML5));
+        // The model sometimes wraps the whole spec in an HTML comment inside
+        // the value (src="<!-- AI_IMAGE: {…} -->"); peel it and re-trim.
+        $value = trim((string) preg_replace('/\A<!--\s*|\s*-->\z/', '', $value));
+        return str_starts_with($value, 'AI_IMAGE:') ? $value : null;
     }
 
     /**
@@ -708,6 +739,39 @@ final class CollectImagesStep implements Step
     {
         $slug = rtrim(substr(ProjectStore::slugify($subject), 0, 40), '-') ?: 'image';
         return $slug . '-' . substr(sha1($literal), 0, 8) . '.jpg';
+    }
+
+    /**
+     * The subject and aspect ratio a recovered AI_IMAGE body carries.
+     *
+     * Two shapes reach here. The documented one is pipe-delimited: "subject |
+     * page context | style | ratio", where the subject is the first field.
+     * The model also emits an object form, {"prompt":…,"alt":…,"width":…,
+     * "height":…}, usually wrapped in a comment inside src; there the prompt is
+     * the subject and the dimensions give the aspect. Either way a usable
+     * subject is what keeps the image from being dropped and the raw spec
+     * shipped as a src.
+     *
+     * @return array{0:string,1:string} subject, aspect ratio
+     */
+    private static function recoverSubjectAndRatio(string $body): array
+    {
+        if (str_starts_with($body, '{')) {
+            $object = JsonDecoder::decode($body);
+            if ($object !== null) {
+                $subject = trim((string) ($object['prompt'] ?? $object['alt'] ?? ''));
+                $width   = (int) ($object['width'] ?? 0);
+                $height  = (int) ($object['height'] ?? 0);
+                // Route the dimensions through the same numeric-ratio mapping
+                // the rest of the class uses rather than classifying inline.
+                $ratio   = $width > 0 && $height > 0
+                    ? GeminiImage::aspectRatio($width . ':' . $height)
+                    : self::sniffAspectRatio($body);
+                return [$subject, $ratio];
+            }
+        }
+
+        return [trim(explode('|', $body, 2)[0]), self::sniffAspectRatio($body)];
     }
 
     /**

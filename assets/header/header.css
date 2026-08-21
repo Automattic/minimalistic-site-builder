@@ -169,7 +169,16 @@ html.header-state-js
         .wp-block-navigation__responsive-container-open,
         .wp-block-navigation__responsive-container-close
     ) {
-    color: var(--header-foreground) !important;
+    /* Not !important: an authored colour has to win here. A design that
+     paints its own header — calm-lantern's is dark purple in BOTH
+     states — carries that colour inline on the navigation block, and
+     forcing --header-foreground over it rendered near-black text on
+     purple at roughly 1.2:1. This still supplies the readable default
+     wherever nothing else states a colour; it just stops overriding a
+     design that did. The submenu and open-overlay rules below keep
+     their !important: those panels paint their own opaque background,
+     so pairing the foreground to it is self-consistent. */
+  color: var(--header-foreground);
 }
 
 /* Core gives unstyled desktop submenus a white panel. Give every nested menu
@@ -337,13 +346,30 @@ html.header-state-js
     }
 }
 
-/* A WordPress responsive-nav modal must never expose content behind its text. */
+/* A WordPress responsive-nav modal must never expose content behind its text.
+ * It also must not inherit the desktop row justification (nav-at-end headers
+ * otherwise glue labels to the viewport edge and clip them). */
 .site-header-shell
     :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid)
     .wp-block-navigation__responsive-container.is-menu-open {
+    --navigation-layout-justification-setting: flex-start;
+    --navigation-layout-justify: flex-start;
     color: var(--header-foreground) !important;
     background-color: var(--header-scrolled-solid) !important;
     background-image: none !important;
+}
+
+.site-header-shell
+    :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid)
+    .wp-block-navigation__responsive-container.is-menu-open
+    .wp-block-navigation__responsive-container-content,
+.site-header-shell
+    :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid)
+    .wp-block-navigation__responsive-container.is-menu-open
+    :is(.wp-block-navigation__container, .wp-block-page-list) {
+    align-items: stretch !important;
+    justify-content: flex-start !important;
+    text-align: start !important;
 }
 
 /* Measured by header.js, including restored-scroll and responsive layouts. */

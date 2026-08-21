@@ -554,3 +554,41 @@ test('nav link resolver quotes a rewritten unquoted href before decoded whitespa
     assert_true(!str_contains($result['markup'], 'onmouseover'));
     assert_eq('/contact/', $result['repairs'][0]['delivered']);
 });
+
+/**
+ * sunny-ember's header CTA is `<a class="nav-cta" href="#contact">Book a session</a>`
+ * inside the menu list. Its label matches no page, and the `contact` anchor
+ * appears on more than one page, so the anchor-owner fallback finds two owners
+ * and gives up — which DELETED the item. As a raw anchor it merely stayed
+ * unresolved and still rendered; as a navigation-link it disappeared entirely,
+ * because core/navigation renders inner blocks and drops stray text.
+ *
+ * The site has a real `contact` page. A fragment that names a page slug is a
+ * destination, so it resolves there instead of being dropped.
+ */
+test('nav link resolver resolves an ambiguous fragment that names a page slug', function () {
+    $resolver = new DeterministicNavLinkResolver();
+    // `contact` is an anchor on two pages AND the slug of a third page.
+    $pages = [
+        ['label' => 'Home', 'path' => '/', 'anchors' => ['hero', 'contact']],
+        ['label' => 'Testimonials', 'path' => '/testimonials/', 'anchors' => ['contact']],
+        ['label' => 'Contact', 'path' => '/contact/', 'anchors' => ['form']],
+    ];
+    $input = '<!-- wp:navigation {"overlayMenu":"never"} -->' . "\n"
+        . '<!-- wp:navigation-link {"label":"Book a session","url":"#contact","kind":"custom"} /-->' . "\n"
+        . '<!-- /wp:navigation -->';
+
+    $result = $resolver->resolve($input, $pages, 'theme/parts/header.html', null);
+
+    assert_contains(
+        '"url":"/contact/"',
+        $result['markup'],
+        'the CTA resolves to the page the fragment names',
+    );
+    assert_contains(
+        'Book a session',
+        $result['markup'],
+        'the CTA survives as a navigation-link rather than being unwrapped away',
+    );
+    assert_eq([], $result['warnings'], 'a resolvable destination records no loss');
+});

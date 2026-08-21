@@ -174,6 +174,25 @@ test('fontRequirements unions committed direction variants with observed usage',
     );
 });
 
+test('fontRequirements unions a committed accent family with heading and body', function () {
+    $theme = [
+        'settings' => ['typography' => ['fontFamilies' => [
+            ['slug' => 'heading', 'fontFamily' => '"Oswald", sans-serif', 'name' => 'Heading'],
+            ['slug' => 'body', 'fontFamily' => '"Source Sans 3", sans-serif', 'name' => 'Body'],
+            ['slug' => 'accent', 'fontFamily' => '"Caveat", cursive', 'name' => 'Accent'],
+        ]]],
+    ];
+    $direction = ['type' => [
+        'heading' => ['family' => 'Oswald', 'weights' => [700], 'italic' => false, 'axes' => []],
+        'body' => ['family' => 'Source Sans 3', 'weights' => [400], 'italic' => false, 'axes' => []],
+        'accent' => ['family' => 'Caveat', 'weights' => [400, 700], 'italic' => false, 'axes' => []],
+    ]];
+
+    $requirements = FontsPhpStep::fontRequirements($theme, '', $direction);
+    assert_true(isset($requirements['Caveat']));
+    assert_eq([400, 700], $requirements['Caveat']['weights']);
+});
+
 test('fontRequirements attributes semantic strong and emphasis to the inherited family', function () {
     $theme = [
         'settings' => ['typography' => ['fontFamilies' => [
@@ -300,5 +319,18 @@ test('run skips and removes stale fonts.php when only system families are named'
     (new FontsPhpStep())->run($project);
 
     assert_true(!$project->exists('theme/fonts.php'), 'no fonts.php written');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('HTML-first run preserves design fallback fonts by removing the webfont loader', function () {
+    [$project, $tmp] = fp_project([
+        ['slug' => 'heading', 'fontFamily' => '"Oswald", Impact, sans-serif', 'name' => 'Heading'],
+        ['slug' => 'body', 'fontFamily' => '"Barlow", Helvetica, sans-serif', 'name' => 'Body'],
+    ]);
+    $project->writeText('theme/fonts.php', "<?php\n// stale\n");
+
+    (new FontsPhpStep(htmlFirst: true))->run($project);
+
+    assert_true(!$project->exists('theme/fonts.php'), 'HTML-first design does not gain a webfont loader');
     exec('rm -rf ' . escapeshellarg($tmp));
 });

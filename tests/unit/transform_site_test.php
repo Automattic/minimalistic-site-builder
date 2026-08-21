@@ -329,6 +329,7 @@ test('G1 engine-support families reach final theme CSS after transform-site and 
         'list-navigation base' => '.wp-block-navigation.blocks-engine-list-navigation.wp-block-navigation-item.wp-block-navigation-link{display:list-item;font:inherit}',
         'list-navigation host' => '.wp-block-navigation.blocks-engine-list-navigation{display:flex!important}',
         'list-navigation mobile overlay' => '.wp-block-navigation.blocks-engine-list-navigation.wp-block-navigation__responsive-container.is-menu-open{background:rgba(0,0,0,.9)!important}',
+        'WordPress navigation compatibility' => '.desktop-nav.wp-block-navigation.wp-block-navigation-item__content',
         'nativeSearchTrigger' => 'flex:0024px!important;width:24px!important;height:80px!important',
         'nativeButton' => 'background-color:#fff!important;color:#000!important',
         'directFlexButton' => '.wp-block-buttons){display:block!important;gap:0!important;min-width:0;width:100%!important}',
@@ -340,13 +341,20 @@ test('G1 engine-support families reach final theme CSS after transform-site and 
     transform_site_cleanup($tmp);
 });
 
-test('G2 CSS-owned flex nav items beat WordPress flow margins without important', function () {
+/**
+ * The subject here is the flow reset for CSS-owned flex ITEMS, not navigation.
+ * The row is deliberately not a `<nav>`: a nav landmark holding a brand anchor
+ * beside a link cluster is now hoisted into a carrier group with a real
+ * core/navigation, which has no synthetic paragraphs to reset. A toolbar row
+ * still takes the css-owned path this test exists to cover.
+ */
+test('G2 CSS-owned flex link row items beat WordPress flow margins without important', function () {
     [$project, $llm, $tmp] = transform_site_fixture(
-        '<!doctype html><html><body><header><nav class="site-nav">'
+        '<!doctype html><html><body><header><div class="site-nav">'
         . '<a class="brand" href="/">Northstar</a><div class="navlinks">'
         . '<a class="active" href="/">Home</a><a href="/services">Services</a>'
         . '<a href="/about">About</a><a href="/contact">Contact</a>'
-        . '</div></nav></header><main><section id="hero"><h1>Welcome</h1></section></main>'
+        . '</div></div></header><main><section id="hero"><h1>Welcome</h1></section></main>'
         . '<footer><p>Footer</p></footer></body></html>',
     );
     $project->writeText(
@@ -363,7 +371,7 @@ test('G2 CSS-owned flex nav items beat WordPress flow margins without important'
     assert_contains('.navlinks{display:flex;align-items:center}', preg_replace('/\s+/', '', $style));
     transform_site_assert_flow_reset_wins(
         $style,
-        'G2 nav synthetic paragraph flex items',
+        'G2 link row synthetic paragraph flex items',
     );
 
     transform_site_cleanup($tmp);
@@ -440,6 +448,12 @@ test('G6 unknown engine-support placement warns while known placements carry sil
             'path' => 'assets/css/engine-after.css',
             'content' => ".engine-after{display:block}\n",
         ],
+        [
+            'kind' => 'css',
+            'source' => 'wordpress-compat',
+            'path' => 'assets/css/wordpress-compat.css',
+            'content' => ".wordpress-compat{display:block}\n",
+        ],
     ]];
     $method = new ReflectionMethod(TransformSiteStep::class, 'carriedCss');
     $method->setAccessible(true);
@@ -448,7 +462,7 @@ test('G6 unknown engine-support placement warns while known placements carry sil
     $carried = $method->invokeArgs(null, $args);
 
     assert_eq(".engine-before{display:block}\n", $carried['before-author']);
-    assert_eq(".engine-after{display:block}\n", $carried['after-author']);
+    assert_eq(".engine-after{display:block}\n.wordpress-compat{display:block}\n", $carried['after-author']);
     assert_true(!str_contains(implode("\n", $carried), 'engine-future'));
     assert_eq(1, count($warnings), 'known placements carry silently; unknown placement warns once');
     $warning = $warnings[0];
@@ -746,8 +760,8 @@ test('transform-site reroutes only failed inner pages through scoped legacy plan
     transform_site_run($mixed, $mixedLlm);
 
     assert_eq(1, $mixedLlm->completeJsonBatchCalls, 'one scoped page-plan JSON batch, no repair');
-    assert_eq(1, $mixedLlm->completeCalls, 'one existing section cache warm');
-    assert_eq(1, $mixedLlm->completeBatchCalls, 'one scoped section batch');
+    assert_eq(0, $mixedLlm->completeCalls, 'the cache warm stays off the single-completion seam');
+    assert_eq(2, $mixedLlm->completeBatchCalls, 'one cache warm plus one scoped section batch');
     assert_eq(3, count($mixedLlm->calls), 'one plan + one warm + one failed-page section request');
     assert_eq('Warm the cached section context.', $mixedLlm->calls[1]['prompt']);
     $allPrompts = implode("\n", array_column($mixedLlm->calls, 'prompt'));
@@ -772,7 +786,7 @@ test('transform-site reroutes only failed inner pages through scoped legacy plan
     assert_contains('theme/parts/page-about--legacy-about.html', $warnings);
     assert_contains('disposition rerouted', $warnings);
     $report = $mixed->readJson(TransformArtifacts::REPORT);
-    assert_true(in_array('inner_page_legacy_reroute', $report['fallback_codes'], true));
+    assert_true(in_array('inner_page_blocks_reroute', $report['fallback_codes'], true));
     assert_eq([], $report['dropped_fragments']);
 
     transform_site_cleanup($controlTmp);
@@ -810,13 +824,13 @@ test('transform-site degrades scoped legacy generation failure without aborting 
     assert_contains('source design/about.failed', $transformWarning);
     assert_contains('selector page[slug=about]', $transformWarning);
     assert_contains('block_path pages.json', $transformWarning);
-    assert_contains('diagnostic_code inner_page_legacy_reroute_failed', $transformWarning);
+    assert_contains('diagnostic_code inner_page_blocks_reroute_failed', $transformWarning);
     assert_contains('authored_value failed design marker', $transformWarning);
     assert_contains('delivered_value removed', $transformWarning);
     assert_contains('disposition dropped', $transformWarning);
     $report = $project->readJson(TransformArtifacts::REPORT);
-    assert_true(in_array('inner_page_legacy_reroute_failed', $report['fallback_codes'], true));
-    assert_eq('inner_page_legacy_reroute_failed', $report['dropped_fragments'][0]['diagnostic_code']);
+    assert_true(in_array('inner_page_blocks_reroute_failed', $report['fallback_codes'], true));
+    assert_eq('inner_page_blocks_reroute_failed', $report['dropped_fragments'][0]['diagnostic_code']);
     assert_eq('removed', $report['dropped_fragments'][0]['delivered_value']);
     assert_eq('dropped', $report['dropped_fragments'][0]['disposition']);
     transform_site_cleanup($tmp);
