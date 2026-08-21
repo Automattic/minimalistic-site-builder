@@ -1230,3 +1230,39 @@ test('header flex rows without alignment are promoted to the wide band (BIGR-778
     assert_true(!str_contains(LayoutFixer::fix($stack, LayoutFixer::ROLE_HEADER)['markup'], '"align":"wide"'));
     assert_true(!str_contains(LayoutFixer::fix($header, LayoutFixer::ROLE_SECTION)['markup'], '"align":"wide"'));
 });
+
+test('rewriting a footer row align syncs the saved HTML align class', function () {
+    // lumen authored a self-consistent full-bleed footer; evenOutFooterRows
+    // levels every structural row to align:wide but left class="alignfull" in
+    // the saved HTML. Re-serialization cannot derive that token from the
+    // attributes, so it preserves it as an explicit className — and the class
+    // beats the attribute in CSS, so the row breaks out of the band and clips
+    // its first link off the viewport.
+    $footer = '<!-- wp:group {"align":"full","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group alignfull">'
+        . '<!-- wp:group {"align":"full","layout":{"type":"flex","flexWrap":"wrap"}} -->'
+        . '<div class="wp-block-group alignfull"><!-- wp:paragraph --><p>Links</p><!-- /wp:paragraph --></div>'
+        . '<!-- /wp:group --></div><!-- /wp:group -->';
+
+    $fixed = LayoutFixer::fix($footer, LayoutFixer::ROLE_FOOTER)['markup'];
+
+    assert_contains('"align":"wide"', $fixed, 'the row is levelled to the canonical width');
+    assert_true(
+        !str_contains($fixed, 'wp-block-group alignfull"><!-- wp:paragraph'),
+        'the rewritten row must not keep a contradicting alignfull class in its saved HTML'
+    );
+    assert_contains('wp-block-group alignwide"><!-- wp:paragraph', $fixed, 'the class follows the attribute');
+});
+
+test('a footer row whose align the fixer never rewrote keeps its saved HTML class', function () {
+    // The sync follows only an attribute the fixer actually changed; a lone
+    // full-bleed root keeps its own class.
+    $footer = '<!-- wp:group {"align":"full","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group alignfull"><!-- wp:site-title /--></div>'
+        . '<!-- /wp:group -->';
+
+    $fixed = LayoutFixer::fix($footer, LayoutFixer::ROLE_FOOTER)['markup'];
+
+    assert_contains('"align":"full"', $fixed);
+    assert_contains('wp-block-group alignfull', $fixed);
+});

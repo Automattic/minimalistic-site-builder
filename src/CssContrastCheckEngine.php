@@ -25,12 +25,12 @@ final class CssContrastCheckEngine
      *     suggested: ?string
      * }>
      */
-    public static function check(string $css, string $markup): array
+    public static function check(string $css, string $markup, float $normalText = ContrastMath::NORMAL_TEXT): array
     {
         try {
             $findings = [];
             $seen = [];
-            foreach (self::analysis($css, $markup) as $entry) {
+            foreach (self::analysis($css, $markup, $normalText) as $entry) {
                 $key = serialize($entry['finding']);
                 if (isset($seen[$key])) {
                     continue;
@@ -49,7 +49,7 @@ final class CssContrastCheckEngine
     {
         try {
             $targets = [];
-            foreach (self::analysis($css, $markup) as $entry) {
+            foreach (self::analysis($css, $markup, ContrastMath::NORMAL_TEXT) as $entry) {
                 if ($entry['finding'] !== $finding || $entry['target'] === null) {
                     continue;
                 }
@@ -96,7 +96,7 @@ final class CssContrastCheckEngine
      *   order:int
      * }>
      */
-    private static function analysis(string $css, string $markup): array
+    private static function analysis(string $css, string $markup, float $normalText): array
     {
         $prepared = [];
         $entries = [];
@@ -167,7 +167,7 @@ final class CssContrastCheckEngine
             }
             $renderedFg = ContrastMath::compositeOver($fg['rgb'], $fg['alpha'], $bg['rgb']);
             $ratio = ContrastMath::ratio($renderedFg, $bg['rgb']);
-            if ($ratio >= ContrastMath::NORMAL_TEXT) {
+            if ($ratio >= $normalText) {
                 $entries[] = [
                     'finding' => [
                         'selector' => $selector,
@@ -189,7 +189,7 @@ final class CssContrastCheckEngine
                     'fg' => $fgDeclaration['value'],
                     'bg' => $bgDeclaration['value'],
                     'ratio' => $ratio,
-                    'suggested' => self::nudge($fg['rgb'], $fg['alpha'], $bg['rgb']),
+                    'suggested' => self::nudge($fg['rgb'], $fg['alpha'], $bg['rgb'], $normalText),
                 ],
                 'target' => $fgDeclaration['declaration'],
                 'order' => $fgDeclaration['source_order'],
@@ -434,15 +434,15 @@ final class CssContrastCheckEngine
      * @param array{0:int,1:int,2:int} $fg
      * @param array{0:int,1:int,2:int} $bg
      */
-    private static function nudge(array $fg, float $alpha, array $bg): string
+    private static function nudge(array $fg, float $alpha, array $bg, float $normalText): string
     {
-        $black = self::firstPassingNudge($fg, $alpha, $bg, [0, 0, 0]);
-        $white = self::firstPassingNudge($fg, $alpha, $bg, [255, 255, 255]);
+        $black = self::firstPassingNudge($fg, $alpha, $bg, [0, 0, 0], $normalText);
+        $white = self::firstPassingNudge($fg, $alpha, $bg, [255, 255, 255], $normalText);
         $winner = $black['step'] <= $white['step'] ? $black : $white;
         if ($winner['step'] === PHP_INT_MAX) {
             $rendered = ContrastMath::compositeOver($fg, $alpha, $bg);
-            $black = self::firstPassingNudge($rendered, 1.0, $bg, [0, 0, 0]);
-            $white = self::firstPassingNudge($rendered, 1.0, $bg, [255, 255, 255]);
+            $black = self::firstPassingNudge($rendered, 1.0, $bg, [0, 0, 0], $normalText);
+            $white = self::firstPassingNudge($rendered, 1.0, $bg, [255, 255, 255], $normalText);
             $winner = $black['step'] <= $white['step'] ? $black : $white;
             $alpha = 1.0;
         }
@@ -460,7 +460,7 @@ final class CssContrastCheckEngine
      * @param array{0:int,1:int,2:int} $target
      * @return array{step:int,rgb:array{0:int,1:int,2:int}}
      */
-    private static function firstPassingNudge(array $fg, float $alpha, array $bg, array $target): array
+    private static function firstPassingNudge(array $fg, float $alpha, array $bg, array $target, float $normalText): array
     {
         for ($step = 1; $step <= 255; $step++) {
             $candidate = [];
@@ -470,7 +470,7 @@ final class CssContrastCheckEngine
                 );
             }
             $rendered = ContrastMath::compositeOver($candidate, $alpha, $bg);
-            if (ContrastMath::ratio($rendered, $bg) >= ContrastMath::NORMAL_TEXT) {
+            if (ContrastMath::ratio($rendered, $bg) >= $normalText) {
                 return ['step' => $step, 'rgb' => $candidate];
             }
         }

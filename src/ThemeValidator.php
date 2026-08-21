@@ -82,11 +82,26 @@ final class ThemeValidator
             }
         }
 
-        // Raw form controls are dead UI: nothing generated serves a submission,
-        // so a section that emits them silently discards whatever visitors type.
+        // The model never authors form controls. Without a host behind them
+        // they are dead UI that discards whatever visitors type; with one, the
+        // form is the host's to render from a placeholder. Either way, raw
+        // markup here means a section ignored its instructions.
         foreach ($checked as $rel) {
             if ($project->exists($rel) && preg_match('/<(form|input|textarea|select)\b/i', $project->readText($rel), $m)) {
-                $problems[] = "{$rel}: contains form markup (<" . strtolower($m[1]) . '>) — the site has no form backend';
+                $problems[] = "{$rel}: contains form markup (<" . strtolower($m[1])
+                    . '>) — sections never author form controls';
+            }
+        }
+
+        // A form placeholder is a spec a host has to parse. The library owns
+        // that grammar, so the library checks it: a malformed one is invisible
+        // to every downstream step and ships as literal grey body text on the
+        // page. Off the flag, the marker must not appear at all.
+        foreach ($checked as $rel) {
+            if ($project->exists($rel)) {
+                foreach (self::formPlaceholderProblems($project, $rel) as $problem) {
+                    $problems[] = $problem;
+                }
             }
         }
 
@@ -655,6 +670,51 @@ final class ThemeValidator
         // href and block-JSON "url" mirror each other, so the same broken
         // destination would otherwise be reported twice.
         return array_values(array_unique($problems));
+    }
+
+    /**
+     * Whether every form placeholder in one file is one a host can parse.
+     *
+     * The grammar lives in FormPlaceholder, which is also what the host reads
+     * it with, so this check and the substitution downstream cannot disagree.
+     * They would disagree silently: a placeholder is ordinary paragraph text,
+     * so a spec no host can read reaches the visitor as literal grey body copy
+     * with nothing else in the pipeline noticing.
+     *
+     * @return list<string>
+     */
+    private static function formPlaceholderProblems(Project $project, string $rel): array
+    {
+        $markup = $project->readText($rel);
+        $markers = FormPlaceholder::markerCount($markup);
+        if ($markers === 0) {
+            return [];
+        }
+
+        if (!Steps\SectionsStep::formPlaceholders($project)) {
+            return ["{$rel}: contains a " . FormPlaceholder::MARKER . ' marker but this build has no'
+                . ' form host — disposition: rebuild the section, or enable form placeholders'];
+        }
+
+        $problems = [];
+        $placeholders = FormPlaceholder::find($markup);
+        foreach ($placeholders as $placeholder) {
+            $parsed = FormPlaceholder::parse($placeholder['spec']);
+            if (is_string($parsed)) {
+                $problems[] = "{$rel}: unparseable form spec \"{$placeholder['spec']}\" ({$parsed})"
+                    . ' — disposition: no host can substitute this; regenerate the section';
+            }
+        }
+
+        // A marker outside a placeholder block is text the host never reads.
+        $loose = $markers - count($placeholders);
+        if ($loose > 0) {
+            $problems[] = "{$rel}: {$loose} form marker(s) outside a "
+                . FormPlaceholder::CLASS_NAME . ' block — disposition: the host only substitutes'
+                . ' markers inside that block, so these would ship as visible text';
+        }
+
+        return $problems;
     }
 
     /**

@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\FooterComposition;
 use Automattic\SiteBuild\FooterSectionIdentity;
 use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\GeneratedJsonFallbackStep;
@@ -259,12 +260,21 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         $blueprint = DesignDirectionStep::heroBlueprintFor($project);
         $projection = HeroComposition::planProjection($blueprint);
 
+        $siteSpec = $project->readText('siteSpec.json');
+        $designDirection = DesignDirectionStep::readFor($project);
         $shared = [
             'user_prompt'      => (string) ($meta['prompt'] ?? ''),
-            'site_spec'        => $project->readText('siteSpec.json'),
+            'site_spec'        => $siteSpec,
             'language'         => SiteSpecStep::languageOf($project),
-            'design_direction' => DesignDirectionStep::readFor($project),
+            'design_direction' => $designDirection,
             'site_pages'       => self::sitePagesList($sitePages ?? $pages),
+            // One footer part renders below every page here, and these requests
+            // fan out concurrently blind to each other — so this is the only
+            // point where the MODEL can be steered off it. The deterministic
+            // floor in consumeResults() is what guarantees the result.
+            'footer_surface_rule' => FooterComposition::closingSectionRule(
+                FooterComposition::surface(FooterComposition::archetypeFor($siteSpec, $designDirection)),
+            ),
         ];
 
         $requests = [];
@@ -567,8 +577,69 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         // Only removals, fallback substitutions, and other delivered-value
         // losses reach the durable queue. Exact recipe projection repairs are
         // recorded in the report above instead.
+        // Last: one footer part renders below every page here, so no page may
+        // close on its surface. The plan prompt says so, but the page requests
+        // fan out concurrently and the model still lands on it often enough
+        // that the seam merges — this is the deterministic floor.
+        $out = self::withClosingBandOffFooterSurface(
+            $out,
+            FooterComposition::surface(FooterComposition::archetypeForProject($project)),
+            $warnings,
+        );
+
         $project->addWarnings($this->id(), $warnings);
         $project->writeJson('pages.json', ['pages' => $out]);
+    }
+
+    /**
+     * Move any page's LAST section off the footer's surface, so the footer
+     * always reads as its own band. Bands above the closing one are deliberate
+     * page rhythm and are never touched; `tinted` and `image` already differ
+     * from an exact solid surface and are left alone. Pure — unit-testable.
+     *
+     * @param array<int,array<string,mixed>> $pages
+     * @param list<string> $warnings
+     * @return array<int,array<string,mixed>>
+     */
+    public static function withClosingBandOffFooterSurface(
+        array $pages,
+        string $footerSurface,
+        array &$warnings = [],
+    ): array {
+        // A light footer takes a soft tint above it; forcing contrast would end
+        // every non-compliant page on a dark band.
+        $replacement = $footerSurface === 'base' ? 'tinted' : 'base';
+
+        foreach ($pages as $index => $page) {
+            $sections = $page['sections'] ?? null;
+            if (!is_array($sections) || $sections === []) {
+                continue;
+            }
+            $keys = array_keys($sections);
+            $lastKey = end($keys);
+            $last = $sections[$lastKey];
+            if (!is_array($last) || ($last['background'] ?? null) !== $footerSurface) {
+                continue;
+            }
+            $slug = (string) ($page['slug'] ?? '');
+            $sections[$lastKey]['background'] = $replacement;
+            // The plan's own handoff prose names the background it chose, and
+            // both the section author and the footer author read that line —
+            // correct it in place or they get two contradictory briefs.
+            $handoff = trim((string) ($last['handoff'] ?? ''));
+            $sections[$lastKey]['handoff'] = trim($handoff . ' Build correction: this section\'s background is now "'
+                . $replacement . '" so the site footer\'s "' . $footerSurface . '" band below reads as its own '
+                . 'surface; this supersedes any background named earlier in this line.');
+            $pages[$index]['sections'] = $sections;
+            $warnings[] = self::valueLossWarning(
+                self::sectionPath($slug, (int) $lastKey) . '.background',
+                $footerSurface,
+                $replacement,
+                "the footer renders on {$footerSurface} directly below it, so the planned band would have left "
+                . 'that page with no visible footer boundary',
+            );
+        }
+        return $pages;
     }
 
     /**
