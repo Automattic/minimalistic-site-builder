@@ -763,7 +763,7 @@ test('transform-site reroutes only failed inner pages through scoped legacy plan
     assert_eq(0, $mixedLlm->completeCalls, 'the cache warm stays off the single-completion seam');
     assert_eq(2, $mixedLlm->completeBatchCalls, 'one cache warm plus one scoped section batch');
     assert_eq(3, count($mixedLlm->calls), 'one plan + one warm + one failed-page section request');
-    assert_eq('Warm the cached section context.', $mixedLlm->calls[1]['prompt']);
+    assert_eq('Warm the cached markup context.', $mixedLlm->calls[1]['prompt']);
     $allPrompts = implode("\n", array_column($mixedLlm->calls, 'prompt'));
     assert_true(!str_contains($allPrompts, 'Build the site HEADER template part'));
     assert_true(!str_contains($allPrompts, 'Build the site FOOTER template part'));

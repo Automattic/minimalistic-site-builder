@@ -59,7 +59,7 @@ use Automattic\SiteBuild\Warnings;
  */
 final class SectionsStep implements Step
 {
-    private const CACHE_WARM_PROMPT = 'Warm the cached section context.';
+    private const CACHE_WARM_PROMPT = 'Warm the cached markup context.';
 
     /**
      * Below this many estimated prefix tokens the warm-up probe cannot tell a
@@ -170,7 +170,7 @@ final class SectionsStep implements Step
         $jobs = $jobPlan['jobs'];
         $initialContract = $jobPlan['contract'];
         $requests = self::requestsFor($jobs);
-        array_push($warnings, ...$this->warmSectionCache($requests));
+        array_push($warnings, ...$this->warmMarkupCache($requests));
         $batchFailure = null;
         try {
             $batch = $this->llm->completeBatch($requests);
@@ -377,7 +377,7 @@ final class SectionsStep implements Step
             return $pages;
         }
         $requests = self::requestsFor($jobs);
-        array_push($warnings, ...$this->warmSectionCache($requests));
+        array_push($warnings, ...$this->warmMarkupCache($requests));
         try {
             $batch = $this->llm->completeBatch($requests);
         } catch (\RuntimeException $error) {
@@ -709,27 +709,29 @@ final class SectionsStep implements Step
      * @param array<string,array{prompt:string,model?:string,temperature?:float,cached_prefixes?:list<string>}> $requests
      * @return list<string> context-loss warnings, empty when the host is conformant or unmeasurable
      */
-    private function warmSectionCache(array $requests): array
+    private function warmMarkupCache(array $requests): array
     {
         $request = self::deepestLayeredRequest($requests);
         if ($request === null) {
             return [];
         }
 
+        $diverged = self::requestsOutsideSharedLayer($requests, $request['cached_prefixes'][0] ?? '');
+
         $opts = $request;
         unset($opts['prompt']);
         $opts['max_tokens'] = 1;
         $opts['tolerate_empty'] = true;
-        $opts['log_label'] = 'section-cache-warm';
+        $opts['log_label'] = 'markup-cache-warm';
 
         $before = $this->usageSnapshot();
 
         try {
             $this->llm->completeBatch([
-                'section-cache-warm' => ['prompt' => self::CACHE_WARM_PROMPT] + $opts,
+                'markup-cache-warm' => ['prompt' => self::CACHE_WARM_PROMPT] + $opts,
             ]);
         } catch (\Throwable $e) {
-            Narrator::write("    section cache warm-up failed ({$e->getMessage()}); continuing uncached\n");
+            Narrator::write("    markup cache warm-up failed ({$e->getMessage()}); continuing uncached\n");
             return [];
         }
 
@@ -741,9 +743,49 @@ final class SectionsStep implements Step
         $warning = self::contextLossWarning($request['cached_prefixes'], $observed);
         if ($warning !== null) {
             Narrator::write("    WARNING: {$warning}\n");
-            return [$warning];
+            $diverged[] = $warning;
         }
-        return [];
+        return $diverged;
+    }
+
+    /**
+     * Warn for every request whose leading layer is not the one the probe primed.
+     *
+     * Nothing notices otherwise: the request still generates correct markup,
+     * pays full price, and writes a cache entry no one reads. The four units
+     * here share one $common and agree by construction, but a host that mirrors
+     * jobPlan() by hand passes the same spec as an array in one place and as
+     * text in another, and the two render layers that differ by bytes.
+     *
+     * Pure, like contextLossWarning(), so it is testable without a transport.
+     *
+     * @param array<string,array{prompt:string,cached_prefixes?:list<string>}> $requests
+     * @return list<string> one warning per diverging request, empty when they agree
+     */
+    public static function requestsOutsideSharedLayer(array $requests, string $primed): array
+    {
+        if ($primed === '') {
+            return [];
+        }
+
+        $warnings = [];
+        foreach ($requests as $key => $request) {
+            $layer = $request['cached_prefixes'][0] ?? null;
+            if ($layer === null || $layer === $primed) {
+                continue;
+            }
+            $warnings[] = sprintf(
+                'file \'theme/parts/*.html\'; block=\'%s cache layers\'; authored="a site layer of %d bytes"; '
+                . 'delivered="the warm-up primed a different %d-byte layer"; disposition=this request cannot read '
+                . 'the primed cache and pays full price. The inputs behind it disagree with the rest of the batch, '
+                . 'usually because the same site spec or theme.json reached one unit as text and another as an array',
+                $key,
+                strlen($layer),
+                strlen($primed),
+            );
+            Narrator::write("    WARNING: {$warnings[count($warnings) - 1]}\n");
+        }
+        return $warnings;
     }
 
     /**
@@ -755,8 +797,11 @@ final class SectionsStep implements Step
      * request — sections on other pages carry their own page layer, which this
      * probe leaves cold.
      *
+     * Returns the request whole: `model` is part of the cache key, so a probe
+     * that lost it would write an entry the batch cannot read.
+     *
      * @param array<string,array{prompt:string,model?:string,temperature?:float,cached_prefixes?:list<string>}> $requests
-     * @return array{prompt:string,cached_prefixes:list<string>}|null null when no request carries layers
+     * @return array{prompt:string,model?:string,temperature?:float,cached_prefixes:list<string>}|null null when no request carries layers
      */
     private static function deepestLayeredRequest(array $requests): ?array
     {
@@ -849,11 +894,11 @@ final class SectionsStep implements Step
         }
 
         return sprintf(
-            'file \'theme/parts/*.html\'; block=\'section cache layers\'; authored="%d cached_prefixes tokens '
-            . '(site spec, theme.json, design direction, page outline)"; delivered="%d input tokens billed by the '
-            . 'host"; disposition=the injected Llm appears to discard cached_prefixes, so every section below was '
-            . 'authored without the theme or the design direction. Fix the host adapter so completeBatch() '
-            . 'forwards cached_prefixes and reports their billed input usage',
+            'file \'theme/parts/*.html\'; block=\'markup cache layers\'; authored="%d cached_prefixes tokens '
+            . '(site spec, theme.json, design direction, and the page outline when the probe is a section)"; '
+            . 'delivered="%d input tokens billed by the host"; disposition=the injected Llm appears to discard '
+            . 'cached_prefixes, so the markup below was authored without the theme or the design direction. '
+            . 'Fix the host adapter so completeBatch() forwards cached_prefixes and reports their billed input usage',
             $expected,
             $observedInputTokens,
         );

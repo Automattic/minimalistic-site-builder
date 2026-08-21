@@ -13,13 +13,17 @@ abstract class AbstractMarkupUnit implements MarkupUnit
     private const SITE_CONTEXT_TEMPLATE = 'site-context.md';
 
     /**
-     * Frozen cache-layer markers. Every markup prompt opens with the site
-     * layer — byte-identical across header, footer, hero and section, so one
-     * warm-up primes it for all of them — and each unit splits the rest into
-     * whatever further layers it can reuse.
+     * Frozen cache-layer markers. The four markup templates each open with the
+     * site layer, byte-identical across them, so one warm-up primes it for all
+     * four; each unit splits the rest into whatever further layers it can
+     * reuse. A unit that calls renderedRequest() directly gets no layers, so
+     * a new template has to declare these to be cached.
      */
     protected const SITE_LAYER_MARKER = '<!-- cache-layer:site -->';
     protected const UNIT_LAYER_MARKER = '<!-- cache-layer:unit -->';
+
+    /** What every marker starts with, defused in substituted values. */
+    private const LAYER_MARKER_PREFIX = '<!-- cache-layer:';
 
     public function __construct(
         protected Llm $llm,
@@ -51,6 +55,19 @@ abstract class AbstractMarkupUnit implements MarkupUnit
      */
     final protected function renderedRequest(string $template, array $vars): array
     {
+        // A cache-layer marker inside an authored value (the site spec, the
+        // design direction, the outline) would make cacheLayers() count two and
+        // throw, from a call site with no catch: the build would die on a string
+        // somebody wrote. Defused here, only the template can open a layer.
+        $vars = array_map(
+            static fn (string $value): string => str_replace(
+                self::LAYER_MARKER_PREFIX,
+                '<!-- cache layer:',
+                $value,
+            ),
+            $vars,
+        );
+
         // Keep the response contract in one shared fragment while each prompt
         // controls where it belongs (the section places it in its build layer).
         $vars['block_markup_output_contract'] = rtrim(
@@ -159,8 +176,9 @@ abstract class AbstractMarkupUnit implements MarkupUnit
      * OpenAI-compatible concatenation assemble to the same text. The final
      * layer is the varying prompt and is newline-trimmed only.
      *
-     * Marker order and uniqueness are programming invariants of the template,
-     * not generated content, so a violation throws.
+     * Marker order and uniqueness are invariants of the template: renderedRequest()
+     * defuses the marker prefix in every substituted value, so generated content
+     * cannot introduce one. A violation is therefore a broken template, and throws.
      *
      * @param  list<string> $markers ordered, one per layer
      * @return list<string> one layer per marker, in the same order
