@@ -1477,11 +1477,9 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                     . Warnings::value($family) . '; malformed entry removed';
                 continue;
             }
-            // An optional slot exists only because the direction committed to
-            // it. prompts/theme-json.md:71 asks for exactly heading and body
-            // unless the direction names an accent, so a third family the model
-            // invented on its own ships a face nothing chose — and
-            // repairAccentCaption would then put it on every caption.
+            // An uncommitted accent ships a face nothing chose, and
+            // repairAccentCaption would then put it on every caption. Guard
+            // covers OPTIONAL_FONTS only — any other invented slug still ships.
             if (in_array($slug, self::OPTIONAL_FONTS, true) && !isset($preferred[$slug])) {
                 $warnings[] = "theme.json fontFamilies slug '{$slug}': authored "
                     . Warnings::value(trim($family))
@@ -1545,30 +1543,30 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         if (!$hasAccent) {
             return [$theme, []];
         }
-        if (!is_array($theme['styles'] ?? null)) {
-            $theme['styles'] = [];
+        $accent = 'var:preset|font-family|accent';
+        $warnings = [];
+        foreach ([['elements', 'caption'], ['blocks', 'core/image']] as [$group, $name]) {
+            $node = &$theme;
+            foreach (['styles', $group, $name, 'typography'] as $key) {
+                if (!is_array($node[$key] ?? null)) {
+                    $node[$key] = [];
+                }
+                $node = &$node[$key];
+            }
+            // The committed accent wins over a model choice here, but an
+            // overridden valid value is a repair like any other: record it so
+            // warnings.json still explains every face the build changed.
+            $authored = $node['fontFamily'] ?? null;
+            if ($authored !== null && $authored !== $accent) {
+                $warnings[] = "theme/theme.json styles.{$group}.{$name}.typography.fontFamily: authored "
+                    . Warnings::value($authored)
+                    . "; delivered {$accent}"
+                    . '; disposition the committed type.accent family owns caption typography';
+            }
+            $node['fontFamily'] = $accent;
+            unset($node);
         }
-        if (!is_array($theme['styles']['elements'] ?? null)) {
-            $theme['styles']['elements'] = [];
-        }
-        if (!is_array($theme['styles']['elements']['caption'] ?? null)) {
-            $theme['styles']['elements']['caption'] = [];
-        }
-        if (!is_array($theme['styles']['elements']['caption']['typography'] ?? null)) {
-            $theme['styles']['elements']['caption']['typography'] = [];
-        }
-        $theme['styles']['elements']['caption']['typography']['fontFamily'] = 'var:preset|font-family|accent';
-        if (!is_array($theme['styles']['blocks'] ?? null)) {
-            $theme['styles']['blocks'] = [];
-        }
-        if (!is_array($theme['styles']['blocks']['core/image'] ?? null)) {
-            $theme['styles']['blocks']['core/image'] = [];
-        }
-        if (!is_array($theme['styles']['blocks']['core/image']['typography'] ?? null)) {
-            $theme['styles']['blocks']['core/image']['typography'] = [];
-        }
-        $theme['styles']['blocks']['core/image']['typography']['fontFamily'] = 'var:preset|font-family|accent';
-        return [$theme, []];
+        return [$theme, $warnings];
     }
 
     private static function replacePrimaryFamily(string $stack, string $family): string

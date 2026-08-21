@@ -773,6 +773,39 @@ test('repairAccentCaption stays quiet when no accent family shipped', function (
     assert_eq(null, $theme['styles']['elements']['caption']['typography']['fontFamily'] ?? null);
 });
 
+test('repairAccentCaption records the caption family it overrides', function () {
+    // The direction's accent wins over a model-authored caption face, but the
+    // override is a repair like any other and has to reach warnings.json.
+    $theme = [
+        'settings' => ['typography' => ['fontFamilies' => [
+            ['slug' => 'heading', 'fontFamily' => 'Oswald, sans-serif'],
+            ['slug' => 'body', 'fontFamily' => 'Source Sans 3, sans-serif'],
+            ['slug' => 'accent', 'fontFamily' => '"Caveat", cursive'],
+        ]]],
+        'styles' => ['elements' => ['caption' => ['typography' => [
+            'fontFamily' => 'var:preset|font-family|body',
+            'fontSize' => 'var:preset|font-size|caption',
+        ]]]],
+    ];
+    [$repaired, $warnings] = ThemeJsonStep::repairAccentCaption($theme);
+    assert_eq(1, count($warnings), 'the overridden caption family is recorded');
+    $joined = implode(' ', $warnings);
+    assert_contains('styles.elements.caption.typography.fontFamily: authored', $joined);
+    assert_contains('var:preset|font-family|body', $joined);
+    assert_contains('delivered var:preset|font-family|accent', $joined);
+    assert_eq(
+        'var:preset|font-size|caption',
+        $repaired['styles']['elements']['caption']['typography']['fontSize'],
+        'sibling caption typography survives the override',
+    );
+
+    // A build that authored nothing there is not an override, so it stays out
+    // of the ledger — and a second pass never re-reports the first one.
+    [$again, $repeat] = ThemeJsonStep::repairAccentCaption($repaired);
+    assert_eq($repaired, $again, 'the override reaches a fixed point');
+    assert_eq([], $repeat);
+});
+
 test('theme-json repairs malformed caption containers before accent wiring', function () {
     $tmp = sys_get_temp_dir() . '/builder_tj_accent_shape_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
