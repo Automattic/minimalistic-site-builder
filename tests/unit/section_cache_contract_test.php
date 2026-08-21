@@ -288,6 +288,39 @@ test('every markup unit opens with the same primeable site layer', function () {
     assert_true(count($section['cached_prefixes']) > count($header['cached_prefixes']));
 });
 
+test('the site layer is the same bytes whether a step read JSON as text or as an array', function () {
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    $llm = new FakeLlm();
+    $spec = ['name' => 'CACHE-SPEC-SENTINEL', 'slug' => 'cache-spec'];
+    $theme = ['cache-theme-sentinel' => true, 'settings' => ['layout' => ['contentSize' => '40rem']]];
+
+    // Exactly what writeJson() puts on disk, so this is readText() vs readJson()
+    // of one file: SectionsStep takes the text, TransformSiteStep the array.
+    $encode = static fn (array $data): string => (string) json_encode(
+        $data,
+        JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
+    ) . "\n";
+
+    $asText = section_cache_input() + [];
+    $asText['site_spec'] = $encode($spec);
+    $asText['theme_json'] = $encode($theme);
+
+    $asArray = $asText;
+    $asArray['site_spec'] = $spec;
+    $asArray['theme_json'] = $theme;
+
+    $fromText = (new SectionUnit($llm, $renderer))->request($asText);
+    $fromArray = (new SectionUnit($llm, $renderer))->request($asArray);
+
+    assert_eq(
+        $fromText['cached_prefixes'][0],
+        $fromArray['cached_prefixes'][0],
+        'a one-byte terminator difference would be a second cache entry for the same context',
+    );
+    assert_contains('CACHE-SPEC-SENTINEL', $fromText['cached_prefixes'][0]);
+    assert_contains('cache-theme-sentinel', $fromText['cached_prefixes'][0]);
+});
+
 test('a fully layered section still fits the Anthropic breakpoint budget', function () {
     $request = (new SectionUnit(
         new FakeLlm(),

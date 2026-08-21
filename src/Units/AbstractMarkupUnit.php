@@ -76,14 +76,22 @@ abstract class AbstractMarkupUnit implements MarkupUnit
         return $input[$key];
     }
 
-    /** Accept JSON text from the CLI adapter or a decoded object from HTTP. */
+    /**
+     * Accept JSON text from the CLI adapter or a decoded object from HTTP.
+     *
+     * Both shapes must render to the same bytes: the site layer is a shared
+     * cache prefix, and a step reading siteSpec.json as text would otherwise
+     * never match one that read it as an array. writeJson() encodes with these
+     * exact flags and appends a newline, so trimming the terminator is all it
+     * takes to make the two agree.
+     */
     final protected function inputJson(array $input, string $key): string
     {
         if (!array_key_exists($key, $input)) {
             throw new \InvalidArgumentException("unit input '{$key}' must be JSON text or an array");
         }
         if (is_string($input[$key])) {
-            return $input[$key];
+            return rtrim($input[$key], "\r\n");
         }
         if (!is_array($input[$key])) {
             throw new \InvalidArgumentException("unit input '{$key}' must be JSON text or an array");
