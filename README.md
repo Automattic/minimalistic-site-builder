@@ -1,10 +1,11 @@
 # builder2
 
 Generates a complete multi-page WordPress site from a one-line prompt: a block
-theme (theme.json + templates + header/footer parts) plus a companion content
-plugin that seeds every generated page on activation and removes them on
-deactivation. The site spec carries a page tree (home, menu, about, …); every
-page gets its own planned and generated sections. Optionally turns the
+theme (theme.json + templates + header/footer parts + the preview screenshot
+WordPress shows on the theme card) plus a companion content plugin that seeds
+every generated page on activation and removes them on deactivation. The site
+spec carries a page tree (home, menu, about, …); every page gets its own
+planned and generated sections. Optionally turns the
 `AI_IMAGE` placeholders it emits into real assets via Google Gemini (through
 the WPCOM AI proxy).
 
