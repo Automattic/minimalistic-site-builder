@@ -105,6 +105,10 @@ test('design-direction expands a picked seed into structured designDirection.jso
     // The seed prompt carries the user's words and the factual spec.
     assert_eq(2, count($llm->calls), 'exactly two calls: seeds + expansion');
     assert_contains('cozy neighborhood bakery', $llm->calls[0]['prompt']);
+    assert_true(
+        !str_contains($llm->calls[0]['prompt'], '`"luxury"`'),
+        'a brief that did not name luxury does not offer it as a label',
+    );
     assert_contains('Hearth & Crumb', $llm->calls[0]['prompt']);
     assert_contains('title', $llm->calls[0]['prompt']);
 
@@ -314,6 +318,21 @@ test('DESIGN_DIRECTION_CHOICE with a failed seed call fails loud (a forced eval 
     } finally {
         putenv('DESIGN_DIRECTION_CHOICE');
     }
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('design-direction offers a locked extra label only when the brief named that look', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $project->writeJson('meta.json', ['prompt' => 'A luxury bakery in Lisbon']);
+    $llm->queueJson(['seeds' => designdir_seeds()]);
+    $llm->queueJson(['direction' => designdir_direction()]);
+
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    (new DesignDirectionStep($llm, $renderer))->run($project);
+
+    assert_contains('`"luxury"`', $llm->calls[0]['prompt']);
+    assert_contains('This brief already named a look', $llm->calls[0]['prompt']);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

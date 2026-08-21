@@ -33,6 +33,29 @@ final class ConceptSeeds
     public const ACCENTS = ['warm', 'cool', 'earth', 'jewel', 'neutral'];
 
     /**
+     * Looks a brief may lock that are not on the universal lists. Canonical
+     * word => phrases in the user's prompt that count as naming it. Topic
+     * clichés do not belong here — only words the user actually wrote.
+     *
+     * @var array<string,list<string>>
+     */
+    private const EXTRA_REGISTERS = [
+        'brutalist' => ['brutalist', 'brutalism'],
+        'luxury'    => ['luxury', 'luxurious', 'luxe'],
+        'playful'   => ['playful', 'whimsical'],
+        'art-deco'  => ['art-deco', 'art deco', 'artdeco'],
+    ];
+
+    /**
+     * @var array<string,list<string>>
+     */
+    private const EXTRA_ACCENTS = [
+        'pastel' => ['pastel', 'pastels'],
+        'neon'   => ['neon'],
+        'gold'   => ['gold', 'gilt'],
+    ];
+
+    /**
      * Coerce one raw seed into `{text, ground, register, accent}`.
      *
      * The prompt asks for an object; a bare string (the older shape, and what
@@ -41,10 +64,14 @@ final class ConceptSeeds
      * as a value of its own: an invented word must never make two identical
      * seeds look like two ideas, nor two different ones collide.
      *
+     * `$locked` is extra register/accent words this brief named. They join
+     * the universal lists for this round only.
+     *
      * @param mixed $raw
+     * @param array{registers?:list<string>,accents?:list<string>} $locked
      * @return array{text:string,ground:?string,register:?string,accent:?string}|null
      */
-    public static function normalize($raw): ?array
+    public static function normalize($raw, array $locked = []): ?array
     {
         if (is_string($raw)) {
             $text = trim($raw);
@@ -65,11 +92,64 @@ final class ConceptSeeds
         if ($text === null) {
             return null;
         }
+        $registers = array_values(array_unique([
+            ...self::REGISTERS,
+            ...($locked['registers'] ?? []),
+        ]));
+        $accents = array_values(array_unique([
+            ...self::ACCENTS,
+            ...($locked['accents'] ?? []),
+        ]));
         return [
             'text'     => $text,
             'ground'   => self::axis($raw['ground'] ?? null, self::GROUNDS),
-            'register' => self::axis($raw['register'] ?? null, self::REGISTERS),
-            'accent'   => self::axis($raw['accent'] ?? null, self::ACCENTS),
+            'register' => self::axis($raw['register'] ?? null, $registers),
+            'accent'   => self::axis($raw['accent'] ?? null, $accents),
+        ];
+    }
+
+    /**
+     * Extra register and accent words this brief named, in catalog order.
+     *
+     * @return array{registers:list<string>,accents:list<string>}
+     */
+    public static function lockedFromBrief(string $brief): array
+    {
+        return [
+            'registers' => self::namedInBrief($brief, self::EXTRA_REGISTERS),
+            'accents'   => self::namedInBrief($brief, self::EXTRA_ACCENTS),
+        ];
+    }
+
+    /**
+     * Prompt paragraph listing locked extras, or empty when the brief named none.
+     */
+    public static function lockedLabelsPrompt(string $brief): string
+    {
+        $locked = self::lockedFromBrief($brief);
+        $lines = [];
+        if ($locked['registers'] !== []) {
+            $lines[] = '- `register`: ' . self::quotedWords($locked['registers']);
+        }
+        if ($locked['accents'] !== []) {
+            $lines[] = '- `accent`: ' . self::quotedWords($locked['accents']);
+        }
+        if ($lines === []) {
+            return '';
+        }
+        return "This brief already named a look. For this round you may also use these words, and you should when a seed is that look:\n"
+            . implode("\n", $lines);
+    }
+
+    /**
+     * @return array{user_prompt:string,site_spec:string,locked_labels:string}
+     */
+    public static function seedPromptVars(string $brief, string $spec): array
+    {
+        return [
+            'user_prompt'   => $brief,
+            'site_spec'     => $spec,
+            'locked_labels' => self::lockedLabelsPrompt($brief),
         ];
     }
 
@@ -207,6 +287,44 @@ final class ConceptSeeds
             return null;
         }
         $value = strtolower(trim($raw));
+        $value = preg_replace('/\s+/', '-', $value) ?? $value;
         return in_array($value, $vocabulary, true) ? $value : null;
+    }
+
+    /**
+     * @param array<string,list<string>> $catalog
+     * @return list<string>
+     */
+    private static function namedInBrief(string $brief, array $catalog): array
+    {
+        $named = [];
+        foreach ($catalog as $canonical => $aliases) {
+            foreach ($aliases as $alias) {
+                if (self::briefHas($brief, $alias)) {
+                    $named[] = $canonical;
+                    break;
+                }
+            }
+        }
+        return $named;
+    }
+
+    private static function briefHas(string $brief, string $needle): bool
+    {
+        $haystack = strtolower(str_replace('-', ' ', $brief));
+        $phrase = strtolower(str_replace('-', ' ', $needle));
+        return preg_match(
+            '/(?<![a-z0-9])' . preg_quote($phrase, '/') . '(?![a-z0-9])/',
+            $haystack,
+        ) === 1;
+    }
+
+    /** @param list<string> $words */
+    private static function quotedWords(array $words): string
+    {
+        return implode(', ', array_map(
+            static fn (string $word): string => '`"'.$word.'"`',
+            $words,
+        ));
     }
 }

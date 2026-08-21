@@ -154,3 +154,61 @@ test('ConceptSeeds::sharedGround does not let one named ground speak for the rou
     ];
     assert_eq(null, ConceptSeeds::sharedGround($seeds), 'a missing ground is not a vote');
 });
+
+test('ConceptSeeds::lockedFromBrief stays empty when the user did not name a look', function () {
+    $locked = ConceptSeeds::lockedFromBrief('A cozy neighborhood bakery');
+    assert_eq([], $locked['registers']);
+    assert_eq([], $locked['accents']);
+    assert_eq('', ConceptSeeds::lockedLabelsPrompt('A cozy neighborhood bakery'));
+});
+
+test('ConceptSeeds::lockedFromBrief picks up a look the user named, not the topic cliché', function () {
+    $luxury = ConceptSeeds::lockedFromBrief('A luxury bakery in Lisbon');
+    assert_eq(['luxury'], $luxury['registers']);
+    assert_eq([], $luxury['accents']);
+    assert_contains('`"luxury"`', ConceptSeeds::lockedLabelsPrompt('A luxury bakery in Lisbon'));
+    assert_contains('register', ConceptSeeds::lockedLabelsPrompt('A luxury bakery in Lisbon'));
+
+    $pastel = ConceptSeeds::lockedFromBrief('pastel neon signage for a night cafe');
+    assert_eq(['pastel', 'neon'], $pastel['accents']);
+
+    $brutalism = ConceptSeeds::lockedFromBrief('Brutalism, please — a concrete studio.');
+    assert_eq(['brutalist'], $brutalism['registers']);
+
+    $deco = ConceptSeeds::lockedFromBrief('an art-deco hotel bar');
+    assert_eq(['art-deco'], $deco['registers']);
+});
+
+test('ConceptSeeds::lockedFromBrief does not treat food-organic as a design look', function () {
+    $locked = ConceptSeeds::lockedFromBrief('An organic bakery');
+    assert_eq([], $locked['registers']);
+    assert_eq([], $locked['accents']);
+});
+
+test('ConceptSeeds::normalize accepts a locked extra label and still drops one the brief did not name', function () {
+    $locked = ['registers' => ['brutalist'], 'accents' => ['pastel']];
+    $kept = ConceptSeeds::normalize(
+        ['seed' => 'Concrete Loaf', 'ground' => 'dark', 'register' => 'Brutalist', 'accent' => 'Pastel'],
+        $locked,
+    );
+    assert_eq('brutalist', $kept['register']);
+    assert_eq('pastel', $kept['accent']);
+
+    $foreign = ConceptSeeds::normalize(
+        ['seed' => 'Concrete Loaf', 'register' => 'brutalist', 'accent' => 'pastel'],
+    );
+    assert_eq(null, $foreign['register'], 'brutalist is not on the universal list');
+    assert_eq(null, $foreign['accent']);
+});
+
+test('ConceptSeeds::distinct drops a repeat that used a locked extra label', function () {
+    $seeds = [
+        concept_seed_at('One', 'light', 'luxury', 'warm'),
+        concept_seed_at('Two', 'light', 'luxury', 'warm'),
+        concept_seed_at('Three', 'dark', 'modernist', 'cool'),
+    ];
+    $warnings = [];
+    $pool = ConceptSeeds::distinct($seeds, $warnings);
+    assert_eq(2, count($pool));
+    assert_contains('light/luxury/warm', $warnings[0]);
+});

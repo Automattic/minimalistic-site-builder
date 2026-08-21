@@ -321,10 +321,10 @@ final class DesignDirectionStep implements Step
 
         $seeds = [];
         try {
-            $rendered = $this->renderer->render('design-direction-seeds.md', [
-                'user_prompt' => $brief,
-                'site_spec'   => $spec,
-            ]);
+            $rendered = $this->renderer->render(
+                'design-direction-seeds.md',
+                ConceptSeeds::seedPromptVars($brief, $spec),
+            );
             $opts = ['log_label' => 'design-direction-seeds'];
             if ($this->seedModel !== null) {
                 $opts['model'] = $this->seedModel;
@@ -333,8 +333,9 @@ final class DesignDirectionStep implements Step
                 $opts['temperature'] = $this->temperature;
             }
             $payload = $this->llm->completeJson($rendered, $opts);
+            $locked = ConceptSeeds::lockedFromBrief($brief);
             foreach (is_array($payload['seeds'] ?? null) ? $payload['seeds'] : [] as $raw) {
-                $seed = ConceptSeeds::normalize($raw);
+                $seed = ConceptSeeds::normalize($raw, $locked);
                 if ($seed !== null) {
                     $seeds[] = $seed;
                 }
