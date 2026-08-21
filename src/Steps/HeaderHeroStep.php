@@ -18,6 +18,7 @@ use Automattic\SiteBuild\PlaygroundArtifact;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\StorefrontDegrade;
 use Automattic\SiteBuild\Units\GeneratedMarkup;
 use Automattic\SiteBuild\Warnings;
 
@@ -535,6 +536,28 @@ final class HeaderHeroStep implements Step
         // final contract describe the same delivered state at the boundary.
         foreach ($writes as $rel => $markup) {
             $project->writeText('theme/' . $rel, $markup);
+        }
+        // Reconcile can restore a planned "Add to cart" label onto a button
+        // StorefrontDegrade already relabelled, because the href is still /cart
+        // on a one-page build with no contact route. Degrade again after those
+        // writes so the catalog storefront is what assemble-pages copies.
+        $contactRoute = StorefrontDegrade::contactRouteFromPages($pages);
+        foreach ($project->themeFiles() as $rel) {
+            $path = 'theme/' . $rel;
+            if (!$project->exists($path)) {
+                continue;
+            }
+            [$markup, $degraded] = StorefrontDegrade::markup(
+                $project->readText($path),
+                $path,
+                $contactRoute,
+            );
+            if ($degraded === []) {
+                continue;
+            }
+            $project->writeText($path, $markup);
+            array_push($warnings, ...$degraded);
+            $report[] = "[{$rel}] storefront cart UI degraded after header/hero reconcile";
         }
         $pagesArtifact = $project->readJson('pages.json');
         $pagesArtifact['pages'] = $pages;

@@ -105,6 +105,9 @@ final class ImagePromptComposer
         $pageContext = trim($pageContext);
         $siteContext = trim($siteContext);
         $imageGrade  = trim($imageGrade);
+        if ($imageGrade !== '' && !$transparent) {
+            $subject = self::stripCompetingGradeTokens($subject, $imageGrade)['subject'];
+        }
 
         // Style is appended to the subject as a suffix; absent when no style.
         $styleClause = $style !== '' ? ". Style: {$style}" : '';
@@ -200,6 +203,264 @@ final class ImagePromptComposer
         // limit (sheds trailing context first — see class doc).
         $prompt = (string) preg_replace("/\n{3,}/", "\n\n", trim($prompt));
         return GeminiImage::fitToTokens($prompt, GeminiImage::MAX_PROMPT_TOKENS);
+    }
+
+    /**
+     * Photographic-grade vocabulary a subject must never carry.
+     *
+     * prompts/image-generation.md:63 states the rule unconditionally: the
+     * subject describes content and composition, never grade or style
+     * treatment, because one site-wide grade is appended to every image. So
+     * this list is not keyed on what the grade happens to say. Keying it that
+     * way both disarmed on a legally-worded grade ("muted pastel color, soft
+     * even daylight" left "no grain, catalog-lit" standing) and read negations
+     * backwards, treating a subject that agreed with the grade as fighting it.
+     */
+    private const GRADE_VOCABULARY = [
+        'grain', 'grainy', 'grainless', 'film', 'film grain', 'filmic', '35mm', 'portra', 'kodachrome',
+        'tri-x', 'black and white', 'b&w', 'monochrome', 'greyscale', 'grayscale',
+        'desaturated', 'muted grey tones', 'muted gray tones', 'sepia', 'duotone',
+        'golden hour', 'available light', 'studio white', 'seamless white', 'cyclorama',
+        'sweep', 'catalog-lit', 'catalog lit', 'flash-hard', 'hard on-camera flash',
+        'digitally clean', 'colour graded', 'color graded', 'color grading',
+        'saturated neon', 'neon-soaked', 'hyper-saturated', 'vivid neon',
+        'high-contrast', 'low-contrast', 'washed out', 'crushed blacks',
+    ];
+
+    /**
+     * Words that carry no scene content, so a clause left holding only these
+     * after its grade vocabulary is removed was never describing anything.
+     *
+     * The second group is how much of the grade, not what the scene is: real
+     * subjects write "fine 35mm grain" and "heavy 35mm film grain" far more
+     * often than the bare term, and without these an adjective alone kept the
+     * clause. They only ever apply to a clause that already matched grade
+     * vocabulary, so a scene noun beside one ("a monochrome colour chart")
+     * still holds the clause.
+     */
+    private const FILLER_WORDS = [
+        'a', 'an', 'the', 'no', 'not', 'without', 'with', 'of', 'on', 'in', 'at', 'to',
+        'and', 'or', 'but', 'for', 'from', 'by', 'over', 'under', 'into', 'onto',
+        'is', 'are', 'was', 'were', 'be', 'all', 'its', 'it', 'very', 'quite', 'rather',
+        'shot', 'shots', 'image', 'images', 'photo', 'photos', 'photograph',
+        'photographed', 'rendered', 'look', 'style', 'treatment', 'tone', 'tones',
+        'fine', 'faint', 'subtle', 'gentle', 'soft', 'heavy', 'strong', 'deep', 'hard',
+        'visible', 'slight', 'slightly', 'strictly', 'natural', 'warm', 'cool',
+        'color', 'colour', 'grade', 'graded', 'grading', 'lighting', 'lit',
+    ];
+
+    /**
+     * Remove clauses of the subject that say nothing but photographic grade.
+     *
+     * Whole clauses only. Erasing matched words in place left grammar behind
+     * and, worse, silently changed the scene — "a studio white sweep" became
+     * "a sweep", a different backdrop sent to the image service. So a clause is
+     * dropped only when grade vocabulary is all it holds; a clause that also
+     * names something real is kept byte-for-byte and reported instead, and if
+     * every clause would go the original subject is returned untouched.
+     *
+     * The vocabulary is English, matching prompts/image-generation.md's own
+     * examples. On a site written in another language nothing matches and this
+     * is a no-op, which is why an unedited subject still reports what it saw.
+     *
+     * @return array{subject:string,removed:list<string>,kept:list<string>}
+     */
+    public static function stripCompetingGradeTokens(string $subject, string $imageGrade): array
+    {
+        $original = trim($subject);
+        if ($original === '') {
+            return ['subject' => $original, 'removed' => [], 'kept' => []];
+        }
+
+        $clauses = self::splitClauses($original);
+        if ($clauses === []) {
+            // Nothing could be read — punctuation only, or bytes preg_split
+            // rejected. No clause was examined, so there is no conflict to
+            // report and nothing to deliver but what was authored.
+            return ['subject' => $original, 'removed' => [], 'kept' => []];
+        }
+
+        $matchesPer = array_map(self::gradeVocabularyIn(...), $clauses);
+
+        $removed = [];
+        $kept = [];
+        $survivors = [];
+        foreach ($clauses as $index => $clause) {
+            $matches = $matchesPer[$index];
+            if ($matches === []) {
+                $survivors[] = $clause;
+                continue;
+            }
+            $isGrade = self::namesGradeOutright($matches) || self::negatesGrade($clause);
+            if ($isGrade && self::clauseIsOnlyGrade($clause, $matches)) {
+                $removed[] = trim($clause['text']);
+                continue;
+            }
+            // Grade wording woven into a phrase that also names the scene.
+            // There is no edit here that does not risk changing the subject.
+            $kept[] = trim($clause['text']);
+            $survivors[] = $clause;
+        }
+
+        if ($survivors === []) {
+            // The subject was grade talk end to end. Delivering an empty
+            // subject is worse than delivering the authored one.
+            return ['subject' => $original, 'removed' => [], 'kept' => [$original]];
+        }
+
+        if ($removed === []) {
+            // Nothing was dropped, so there is nothing to rejoin around.
+            // Rebuilding anyway re-punctuates every other clause, and with no
+            // removal there is no authored-vs-delivered row to record it —
+            // the kept row would assert "delivered unchanged" over a subject
+            // we had just changed.
+            return ['subject' => $original, 'removed' => [], 'kept' => $kept];
+        }
+
+        return [
+            'subject' => self::joinClauses($survivors),
+            'removed' => $removed,
+            'kept' => $kept,
+        ];
+    }
+
+    /**
+     * Split a subject into clauses, keeping each one's trailing separator so
+     * the surviving text can be rejoined without inventing punctuation.
+     *
+     * @return list<array{text:string,separator:string}>
+     */
+    private static function splitClauses(string $subject): array
+    {
+        $parts = preg_split('/([,;]|\.\s+)/u', $subject, -1, PREG_SPLIT_DELIM_CAPTURE) ?: [];
+        $clauses = [];
+        for ($i = 0; $i < count($parts); $i += 2) {
+            $text = $parts[$i];
+            if (trim($text) === '') {
+                continue;
+            }
+            $clauses[] = ['text' => $text, 'separator' => $parts[$i + 1] ?? ''];
+        }
+        return $clauses;
+    }
+
+    /** @param list<array{text:string,separator:string}> $clauses */
+    private static function joinClauses(array $clauses): string
+    {
+        $out = '';
+        foreach ($clauses as $index => $clause) {
+            $out .= trim($clause['text']);
+            if ($index === count($clauses) - 1) {
+                continue;
+            }
+            $separator = trim($clause['separator']);
+            $out .= ($separator === '' || $separator === '.') ? '. ' : $separator . ' ';
+        }
+        return trim($out, " \t,;");
+    }
+
+    /**
+     * The grade terms a clause contains, longest first so a multi-word term is
+     * consumed before one of its own words matches.
+     *
+     * @param array{text:string,separator:string} $clause
+     * @return list<string>
+     */
+    private static function gradeVocabularyIn(array $clause): array
+    {
+        $terms = self::GRADE_VOCABULARY;
+        usort($terms, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
+        $found = [];
+        foreach ($terms as $term) {
+            if (preg_match(self::termPattern($term), $clause['text']) === 1) {
+                $found[] = $term;
+            }
+        }
+        return $found;
+    }
+
+    /**
+     * A whole-word pattern for one grade term. Any Unicode dash or horizontal
+     * space stands in for the separators, so "neon-soaked" with a real em dash
+     * and "no-grain" with a non-breaking hyphen match the same as plain ASCII.
+     */
+    private static function termPattern(string $term): string
+    {
+        $separator = '(?:\h|\p{Pd})+';
+        $escaped = array_map(
+            static fn (string $word): string => preg_quote($word, '/'),
+            preg_split('/[\s-]+/u', $term) ?: [$term],
+        );
+        return '/(?<![\w-])' . implode($separator, $escaped) . '(?![\w-])/iu';
+    }
+
+    /**
+     * Terms that also name ordinary subject matter: wood and leather have a
+     * grain, a landscape has a sweep, a cat is black and white. On their own
+     * they are not enough to call a clause grade talk — "fine grain" is a
+     * walnut finish as often as a film stock. A clause carrying only these is
+     * kept and reported instead of dropped.
+     */
+    private const AMBIGUOUS_VOCABULARY = [
+        'grain', 'grainy', 'grainless', 'film', 'sweep', 'black and white',
+    ];
+
+    /**
+     * Whether a clause's matches include a term that can only be photographic.
+     * "fine film grain" says film stock; "fine grain" alone does not.
+     *
+     * @param list<string> $matches
+     */
+    private static function namesGradeOutright(array $matches): bool
+    {
+        foreach ($matches as $term) {
+            if (!in_array($term, self::AMBIGUOUS_VOCABULARY, true)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Whether a clause negates its grade term. "no grain" and "without grain"
+     * only mean anything about a photograph — material is never described by
+     * the grain it lacks — so a negated ambiguous term is grade talk on its own.
+     *
+     * @param array{text:string,separator:string} $clause
+     */
+    private static function negatesGrade(array $clause): bool
+    {
+        return preg_match('/(?<![\w-])(no|not|without|never)(?![\w-])/iu', $clause['text']) === 1;
+    }
+
+    /**
+     * Whether removing the grade terms leaves a clause with nothing that names
+     * anything — the test for "this clause was only grade talk".
+     *
+     * @param array{text:string,separator:string} $clause
+     * @param list<string> $matches
+     */
+    private static function clauseIsOnlyGrade(array $clause, array $matches): bool
+    {
+        $residue = $clause['text'];
+        foreach ($matches as $term) {
+            $replaced = preg_replace(self::termPattern($term), ' ', $residue);
+            if ($replaced === null) {
+                // The residue could not be computed, so "nothing is left" is
+                // not something we know. Keep the clause: the sibling match
+                // above already fails this way, and the alternative is
+                // deleting a scene we never managed to read.
+                return false;
+            }
+            $residue = $replaced;
+        }
+        $residue = strtolower((string) preg_replace('/[^\p{L}\p{N}\s]+/u', ' ', $residue));
+        foreach (preg_split('/\s+/u', trim($residue)) ?: [] as $word) {
+            if ($word !== '' && !in_array($word, self::FILLER_WORDS, true)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

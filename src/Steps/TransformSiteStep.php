@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\BlocksEngine\PhpTransformer\ArtifactCompiler\ArtifactCompiler;
 use Automattic\BlocksEngine\PhpTransformer\Contract\TransformerResult;
 use Automattic\SiteBuild\DesignMarkupSanitizer;
+use Automattic\SiteBuild\FooterComposition;
 use Automattic\SiteBuild\HeroComposition;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
@@ -492,6 +493,20 @@ final class TransformSiteStep implements Step
                 $failedPages,
             );
             $plannedFailedPages = $this->pagePlanStep->runForSlugs($project, $failedSlugs);
+            // These pages reroute to the blocks path below, so their footer is
+            // the one FooterUnit regenerates — steer their closing bands off
+            // its surface. The inner-page design path shares runForSlugs but
+            // keeps the design's own footer, so the floor belongs here rather
+            // than inside the planner.
+            $rerouteWarnings = [];
+            $plannedFailedPages = PagePlanStep::withClosingBandOffFooterSurface(
+                $plannedFailedPages,
+                FooterComposition::surface(FooterComposition::archetypeForProject($project)),
+                $rerouteWarnings,
+            );
+            if ($rerouteWarnings !== []) {
+                $project->addWarnings($this->id(), $rerouteWarnings);
+            }
             $sitePages = self::mergePagePlans($allPages, $deliveredPages, $plannedFailedPages);
             $blocksPages = $this->sectionsStep->runForPages($project, $plannedFailedPages, $sitePages);
             $blocksBySlug = [];
@@ -1180,12 +1195,16 @@ final class TransformSiteStep implements Step
                         break;
                     }
                 }
+                $footerArchetype = SectionsStep::footerArchetype(
+                    $project->readText('siteSpec.json'),
+                    DesignDirectionStep::readFor($project),
+                );
                 $input += [
                     'final_section_brief' => SectionsStep::finalSectionBrief($frontSections),
-                    'composition_archetype' => SectionsStep::footerArchetype(
-                        $pages,
-                        $project->readText('siteSpec.json'),
-                        DesignDirectionStep::readFor($project),
+                    'composition_archetype' => $footerArchetype,
+                    'surface' => FooterComposition::resolveSurface(
+                        $footerArchetype,
+                        SectionsStep::closingBackgrounds($pages),
                     ),
                     'page_count' => count($pages),
                 ];

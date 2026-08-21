@@ -110,6 +110,31 @@ function with_project(string $prefix, callable $fn): mixed
     });
 }
 
+/**
+ * The complete text one markup request sends: its cached prefix layers in
+ * order, then the varying prompt. Assert against this whenever a test cares
+ * about what the model was told, not about which layer carried it.
+ *
+ * @param array{prompt:string,cached_prefixes?:list<string>} $request
+ */
+function markup_request_text(array $request): string
+{
+    return implode('', $request['cached_prefixes'] ?? []) . $request['prompt'];
+}
+
+/**
+ * The complete text one recorded FakeLlm call sent, layers included.
+ *
+ * @param array{prompt:string,opts:array<mixed>} $call
+ */
+function llm_call_text(array $call): string
+{
+    return markup_request_text([
+        'prompt' => $call['prompt'],
+        'cached_prefixes' => $call['opts']['cached_prefixes'] ?? [],
+    ]);
+}
+
 /** Run $fn with its output buffered and discarded — even when it throws. */
 function quietly(callable $fn): mixed
 {

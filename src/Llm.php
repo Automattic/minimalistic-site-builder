@@ -8,6 +8,24 @@ namespace Automattic\SiteBuild;
  * return the model's text. Keeping this an interface lets steps depend on the
  * contract while tests inject a fake and production injects the real transport
  * (AnthropicClient or OpenAiCompatibleClient via make_llm() / LLM_PROVIDER).
+ *
+ * Two obligations bind every implementation, not just its callers.
+ *
+ * REFUSE WHAT YOU CANNOT HONOUR. An option documented below that arrives in a
+ * shape this contract does not allow must raise LlmRequestRejected before any
+ * transport call — never be coerced, truncated or ignored. The cost of the
+ * alternative is on record: a host that accepted `cached_prefixes` and dropped
+ * them produced a whole site whose sections never saw the theme, and nothing
+ * failed or warned (BIGR-842). Silence is the expensive failure here, so the
+ * cap and the shape below are the implementation's to enforce, and
+ * CachedPrefixes::normalize() enforces them for both reference clients.
+ *
+ * REPORT WHAT YOU BILLED. Implementations that also implement UsageReporting
+ * must count cached input in `input_tokens` — see that interface, which
+ * documents the convention and why providers disagree about it.
+ *
+ * LlmConformance is the executable form of both, runnable by any host against
+ * its own adapter: `php bin/llm-conformance.php`.
  */
 interface Llm
 {

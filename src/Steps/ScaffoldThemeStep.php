@@ -384,6 +384,15 @@ final class ScaffoldThemeStep implements Step
             color: var(--wp--preset--color--accent) !important;
         }
 
+        /* Core gives a page-list flex and list-style only under
+           `.wp-block-navigation`; bare, it keeps the UA <ul> discs and indent,
+           which footers ship as a bulleted link column. Inside a navigation
+           this is a no-op, so it is safe to apply everywhere. */
+        .wp-site-blocks .wp-block-page-list {
+            list-style: none;
+            padding-inline-start: 0;
+        }
+
         /* The root block-gap margin would open a page-background band between every pair
            of top-level template parts — above the hero (behind the transparent overlay
            header, where light text lands on the page background) and as a visible stripe

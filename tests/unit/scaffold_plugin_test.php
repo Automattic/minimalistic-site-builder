@@ -83,6 +83,10 @@ function wp_stub_reset(): void
     $GLOBALS['wp_filters'] = ['content_save_pre' => ['wp_filter_post_kses' => 10]];
 }
 
+if (!defined('OBJECT')) {
+    define('OBJECT', 'OBJECT');
+}
+
 if (!function_exists('get_option')) {
     function get_option(string $key, $default = false)
     {
@@ -117,11 +121,16 @@ if (!function_exists('get_option')) {
         }
         return $id;
     }
-    function get_page_by_path(string $path)
+    function get_page_by_path(string $path, $output = OBJECT, string $post_type = 'page')
     {
         foreach ($GLOBALS['wp_posts'] as $id => $post) {
-            if (($post['post_name'] ?? '') === $path && ($post['post_type'] ?? '') === 'page') {
-                return (object) ['ID' => $id, 'post_status' => (string) ($post['post_status'] ?? '')];
+            if (($post['post_name'] ?? '') === $path && ($post['post_type'] ?? '') === $post_type) {
+                return (object) [
+                    'ID' => $id,
+                    'post_status' => (string) ($post['post_status'] ?? ''),
+                    'post_date_gmt' => (string) ($post['post_date_gmt'] ?? '2026-01-01 00:00:00'),
+                    'post_modified_gmt' => (string) ($post['post_modified_gmt'] ?? $post['post_date_gmt'] ?? '2026-01-01 00:00:00'),
+                ];
             }
         }
         return null;
@@ -468,16 +477,37 @@ test('the seeder plugin creates, fronts, and removes the site pages', function (
         'post_type' => 'page', 'post_status' => 'publish',
         'post_title' => 'Sample Page', 'post_name' => 'sample-page',
     ];
+    // Some hosts seed an "About" page and a "Hello world!" post instead of,
+    // or alongside, core's Sample Page.
+    $GLOBALS['wp_posts'][3] = [
+        'post_type' => 'page', 'post_status' => 'publish',
+        'post_title' => 'About', 'post_name' => 'about',
+        'post_date_gmt' => '2026-08-20 20:28:14', 'post_modified_gmt' => '2026-08-20 20:28:14',
+    ];
+    $GLOBALS['wp_posts'][4] = [
+        'post_type' => 'post', 'post_status' => 'publish',
+        'post_title' => 'Hello world!', 'post_name' => 'hello-world',
+        'post_date_gmt' => '2026-08-20 20:28:14', 'post_modified_gmt' => '2026-08-20 20:28:14',
+    ];
     require_once $project->pluginPath('site-content.php');
 
     // ── Activation seeds every page in manifest order. ──
     (content_fn($slug, 'activate'))();
 
     $posts = $GLOBALS['wp_posts'];
-    assert_eq(4, count($posts)); // sample page + 3 seeded
-    // The stock sample page is unpublished (not deleted) so it leaves the nav.
-    assert_eq('draft', $posts[2]['post_status']);
-    $seeded = array_filter($posts, fn (array $p) => ($p['post_name'] ?? '') !== 'sample-page');
+    assert_eq(6, count($posts)); // 3 stock + 3 seeded
+
+    // Every flavour of stock sample content is unpublished (not deleted) so it
+    // leaves the nav, the blog and the feed.
+    assert_eq('draft', $posts[2]['post_status'], 'core Sample Page unpublished');
+    assert_eq('draft', $posts[3]['post_status'], 'host About page unpublished');
+    assert_eq('draft', $posts[4]['post_status'], 'Hello world! post unpublished');
+
+    // Its slug is released, so a seeded page named "about" would keep it.
+    assert_eq('about-sample', $posts[3]['post_name'], 'the stock About page releases its slug');
+
+    $stock_names = ['sample-page-sample', 'about-sample', 'hello-world-sample'];
+    $seeded = array_filter($posts, fn (array $p) => !in_array($p['post_name'] ?? '', $stock_names, true));
     $ids = array_keys($seeded);
     assert_eq(['home', 'menu', 'breads'], array_column($seeded, 'post_name'));
     assert_eq([0, 10, 20], array_column($seeded, 'menu_order'));
@@ -547,13 +577,16 @@ test('the seeder plugin creates, fronts, and removes the site pages', function (
 
     // ── A second activation is a no-op (no duplicate pages or attachments). ──
     (content_fn($slug, 'activate'))();
-    assert_eq(4, count($GLOBALS['wp_posts']), 'no duplicates on re-activation');
+    assert_eq(6, count($GLOBALS['wp_posts']), 'no duplicates on re-activation');
     assert_eq(1, count($GLOBALS['wp_attachments']), 'no duplicate imports on re-activation');
 
     // ── Deactivation deletes exactly what was created and restores the rest. ──
     (content_fn($slug, 'deactivate'))();
-    assert_eq([2], array_keys($GLOBALS['wp_posts']), 'only the sample page survives');
+    assert_eq([2, 3, 4], array_keys($GLOBALS['wp_posts']), 'only the stock content survives');
     assert_eq('publish', $GLOBALS['wp_posts'][2]['post_status'], 'sample page republished');
+    assert_eq('publish', $GLOBALS['wp_posts'][3]['post_status'], 'About page republished');
+    assert_eq('about', $GLOBALS['wp_posts'][3]['post_name'], 'and it gets its slug back');
+    assert_eq('publish', $GLOBALS['wp_posts'][4]['post_status'], 'Hello world! republished');
     assert_eq([], $GLOBALS['wp_attachments'], 'imported media removed');
     assert_eq('posts', get_option('show_on_front'));
     assert_eq(0, get_option('page_on_front'));
@@ -561,6 +594,32 @@ test('the seeder plugin creates, fronts, and removes the site pages', function (
 
     // Deactivating again (state gone) is harmless.
     (content_fn($slug, 'deactivate'))();
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('the seeder leaves an About page somebody wrote alone', function () {
+    // "about" is a slug a real page can hold, so the seeder only clears it
+    // while it still looks stock: untouched since it was created. A page whose
+    // post_modified has moved is somebody's writing.
+    [$project, $tmp] = scaffold_plugin_fixture('hearth-crumb');
+    $project->writeJson('plugin/pages.json', ['pages' => [
+        ['slug' => 'home', 'title' => 'Home', 'front' => true, 'menu_order' => 0],
+    ]]);
+    $project->writeText('plugin/pages/home.html', '<!-- wp:paragraph --><p>Hi</p><!-- /wp:paragraph -->');
+
+    wp_stub_reset();
+    $GLOBALS['wp_posts'][2] = [
+        'post_type' => 'page', 'post_status' => 'publish',
+        'post_title' => 'About', 'post_name' => 'about',
+        'post_date_gmt' => '2026-08-20 20:28:14', 'post_modified_gmt' => '2026-08-20 22:00:00',
+    ];
+    require_once $project->pluginPath('site-content.php');
+
+    (content_fn('hearth-crumb', 'activate'))();
+
+    assert_eq('publish', $GLOBALS['wp_posts'][2]['post_status'], 'an edited About page stays published');
+    assert_eq('about', $GLOBALS['wp_posts'][2]['post_name'], 'and keeps its slug');
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
