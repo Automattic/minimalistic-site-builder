@@ -7,6 +7,7 @@ use Automattic\SiteBuild\HeaderBehavior;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\OverlayKit;
+use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\PageScope;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
@@ -47,6 +48,9 @@ use Automattic\SiteBuild\Warnings;
  *           rounds contained media surfaces theme.json cannot reach — the
  *           media half of core/media-text and the core/cover canvas — while
  *           its selectors keep alignfull media square; `sharp` ships no kit.
+ *         - for a committed page surface other than `none`, writes and
+ *           enqueues the build-owned overlay (assets/surface/surface.css) that
+ *           claims `body::before` as a fixed grain sheet; `none` prunes it.
  *         - require_once's the generated fonts.php (written by the fonts-php
  *           step) when present, guarded so a fontless theme stays valid.
  */
@@ -71,6 +75,7 @@ final class FinalizeThemeStep implements Step
                 'designDirection.json',
                 'headerBehavior.json',
                 'theme/theme.json',
+                'theme/style.css',
                 'theme/parts/header.html',
                 'theme/assets/motion/*',
                 'theme/assets/header/*',
@@ -94,6 +99,15 @@ final class FinalizeThemeStep implements Step
 
     public function run(Project $project): void
     {
+        // Every read that can fail happens before the first write. A corrupt
+        // theme.json is fatal (AGENTS.md:53 puts a corrupt required artifact in
+        // the fatal list), and discovering that halfway through would leave the
+        // theme half-written — a pruned kit with no functions.php naming it.
+        $shape = DesignDirectionStep::shapeFor($project);
+        $surface = DesignDirectionStep::surfaceFor($project);
+        $palette = self::paletteColors($project);
+        $surfaceCss = Surface::kitCss($surface, $palette['base'], $palette['contrast']);
+
         $profile = DesignDirectionStep::motionProfileFor($project);
         $motion = $profile !== 'none' && $project->exists('theme/assets/motion/motion.css')
             ? $profile
@@ -112,15 +126,21 @@ final class FinalizeThemeStep implements Step
         }
         self::pruneMotionKit($project, $motion);
         self::pruneHeaderKit($project, $header);
-        $shape = DesignDirectionStep::shapeFor($project);
         $device = DesignDirectionStep::deviceFor($project);
         // Per kit, not `$overlays !== []`: the catalog-wide predicate would
         // report shape on a second kit's behalf as soon as one joins the list.
-        // The device kit below is that second kit.
-        $shapeShipped = self::writeOverlayKit($project, self::shapeKit(), ShapeMarkup::kitCss($shape));
-        $overlays = $shapeShipped ? [self::shapeKit()] : [];
-        $deviceKit = self::writeOverlayKit($project, self::deviceKit(), Device::kitCss($device));
-        if ($deviceKit) {
+        $shapeShipped = self::writeOverlayKit($project, self::shapeKit(), ShapeMarkup::kitCss($shape), $headerWarnings);
+        $surfaceShipped = self::writeOverlayKit($project, self::surfaceKit(), $surfaceCss, $headerWarnings);
+        $deviceShipped = self::writeOverlayKit($project, self::deviceKit(), Device::kitCss($device), $headerWarnings);
+        $overlays = [];
+        if ($shapeShipped) {
+            $overlays[] = self::shapeKit();
+        }
+        if ($surfaceShipped) {
+            $overlays[] = self::surfaceKit();
+            array_push($headerWarnings, ...self::claimedPseudoElementWarnings($project, $surface));
+        }
+        if ($deviceShipped) {
             $overlays[] = self::deviceKit();
         }
         if ($headerWarnings !== []) {
@@ -136,12 +156,59 @@ final class FinalizeThemeStep implements Step
         Narrator::write($header
             ? "  header: '{$headerBehavior}' state kit enqueued\n"
             : "  header: static (kit not shipped)\n");
-        Narrator::write($deviceKit
+        Narrator::write($surfaceShipped
+            ? "  surface: '{$surface}' overlay enqueued\n"
+            : "  surface: {$surface} (kit not shipped)\n");
+        Narrator::write($deviceShipped
             ? "  device: '{$device}' utility enqueued\n"
             : "  device: {$device} (kit not shipped)\n");
         Narrator::write($shapeShipped
             ? "  shape: '{$shape}' corner kit enqueued\n"
             : '  shape: ' . ($shape ?? 'none committed') . " (kit not shipped)\n");
+    }
+
+    /**
+     * The surface overlay claims `body::before`, so if the generated
+     * stylesheet was already using it, something lost its layer. Silence there
+     * would mean a design's own decoration vanishing with nothing said.
+     *
+     * @return list<string>
+     */
+    private static function claimedPseudoElementWarnings(Project $project, string $surface): array
+    {
+        if (!$project->exists('theme/style.css')) {
+            return [];
+        }
+        $css = $project->readText('theme/style.css');
+        if (preg_match('/\bbody\b(?:\s|:where\([^)]*\))*::?before\b/i', $css) !== 1) {
+            return [];
+        }
+        return ["file='theme/style.css'; path=\"body::before\"; authored=generated design rule;"
+            . " delivered=overridden; disposition the '{$surface}' surface overlay claims html body::before"
+            . ' and resets it, so a generated rule on the same pseudo-element no longer renders'];
+    }
+
+    /**
+     * Page-background and body-text hexes from the delivered theme.
+     *
+     * @return array{base:?string, contrast:?string}
+     */
+    private static function paletteColors(Project $project): array
+    {
+        $out = ['base' => null, 'contrast' => null];
+        if (!$project->exists('theme/theme.json')) {
+            return $out;
+        }
+        foreach ($project->readJson('theme/theme.json')['settings']['color']['palette'] ?? [] as $entry) {
+            if (!is_array($entry) || !is_string($entry['color'] ?? null)) {
+                continue;
+            }
+            $slug = $entry['slug'] ?? '';
+            if ($slug === 'base' || $slug === 'contrast') {
+                $out[$slug] = $entry['color'];
+            }
+        }
+        return $out;
     }
 
     /**
@@ -154,7 +221,16 @@ final class FinalizeThemeStep implements Step
      */
     public static function overlayKits(): array
     {
-        return [self::shapeKit(), self::deviceKit()];
+        return [self::shapeKit(), self::surfaceKit(), self::deviceKit()];
+    }
+
+    public static function surfaceKit(): OverlayKit
+    {
+        return new OverlayKit(
+            'surface',
+            "// Committed page surface: a fixed overlay, never on a scrolling\n"
+                . '// container. Loads after generated style.css.',
+        );
     }
 
     public static function deviceKit(): OverlayKit
@@ -184,10 +260,13 @@ final class FinalizeThemeStep implements Step
      * Write a build-owned overlay stylesheet, or prune it when the commitment
      * resolved to nothing.
      *
-     * A failed delete is an error rather than a shrug: the build would
-     * otherwise report the sheet pruned while it sat there still loading.
+     * A leftover file that cannot be deleted is omitted from the loader and
+     * warned rather than aborting the build: the previous functions.php would
+     * otherwise keep enqueueing it after we threw.
+     *
+     * @param list<string> $warnings
      */
-    private static function writeOverlayKit(Project $project, OverlayKit $kit, ?string $css): bool
+    private static function writeOverlayKit(Project $project, OverlayKit $kit, ?string $css, array &$warnings): bool
     {
         if ($css !== null) {
             $project->writeText($kit->projectRelPath(), $css);
@@ -195,7 +274,9 @@ final class FinalizeThemeStep implements Step
         }
         $file = $project->themePath($kit->themeRelPath());
         if (is_file($file) && !@unlink($file) && is_file($file)) {
-            throw new \RuntimeException("Could not remove stale overlay stylesheet: {$file}");
+            $warnings[] = "file='{$kit->projectRelPath()}'; path=\"stylesheet\"; authored=stale overlay;"
+                . ' delivered=removed from loader; disposition leftover bytes could not be deleted, enqueue omitted';
+            return false;
         }
         @rmdir($project->themePath("assets/{$kit->folder}"));
         @rmdir($project->themePath('assets'));

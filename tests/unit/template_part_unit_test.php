@@ -736,7 +736,7 @@ test('FooterUnit derives navigation from typed page count and rejects invalid co
     $unit = new FooterUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
     $multi = $unit->request(array_merge(template_part_unit_input(), ['page_count' => 2]))['prompt'];
 
-    assert_contains('A compact `wp:page-list` is permitted', $multi);
+    assert_contains('`wp:navigation` that contains `<!-- wp:page-list /-->`', $multi);
     assert_true(!str_contains($multi, 'This site is ONE page'));
     assert_throws(
         fn () => $unit->request(array_merge(template_part_unit_input(), ['page_count' => '2'])),

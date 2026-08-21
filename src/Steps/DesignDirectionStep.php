@@ -7,6 +7,7 @@ use Automattic\SiteBuild\AboveFoldContract;
 use Automattic\SiteBuild\CardStyle;
 use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\Env;
+use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
@@ -286,6 +287,7 @@ final class DesignDirectionStep implements Step
             'canvas'           => $canvas,
             'card_style'       => 'flush',
             'shape'            => 'sharp',
+            'surface'          => Surface::DEFAULT,
             'device'           => Device::DEFAULT,
             'motion'           => Motion::DEFAULT_PROFILE,
             'motion_note'      => '',
@@ -577,6 +579,7 @@ final class DesignDirectionStep implements Step
         }
 
         $cardStyle = self::normalizeCardStyle($raw['card_style'] ?? null, $warnings);
+        $surface = self::normalizeSurface($raw['surface'] ?? null, $warnings);
         $device = self::normalizeDevice($raw['device'] ?? null, $warnings);
 
         $motion = self::motionProfile($raw['motion'] ?? null);
@@ -622,6 +625,7 @@ final class DesignDirectionStep implements Step
             // the accidental look every site gets.
             'card_style'       => $cardStyle,
             'shape'            => $shape,
+            'surface'          => $surface,
             'device'           => $device,
             // The motion profile is a fixed list (the kit ships exactly these);
             // anything unrecognized falls back to the default so every build
@@ -650,6 +654,21 @@ final class DesignDirectionStep implements Step
             'card_style',
             $warnings,
             'unsupported generated card treatment replaced by default',
+        );
+    }
+
+    /**
+     * @param list<string> $warnings
+     */
+    public static function normalizeSurface(mixed $authored, array &$warnings = []): string
+    {
+        return BoundedChoice::normalize(
+            $authored,
+            Surface::ALL,
+            Surface::DEFAULT,
+            'surface',
+            $warnings,
+            'unsupported texture replaced by none',
         );
     }
 
@@ -917,6 +936,18 @@ final class DesignDirectionStep implements Step
             };
         }
 
+        $surface = Surface::explicit($direction['surface'] ?? null);
+        if ($surface !== null && $surface !== 'none') {
+            $surfaceMeaning = match ($surface) {
+                'paper'    => 'a paper tooth overlay on the page',
+                'concrete' => 'a concrete grit overlay on the page',
+                'film'     => 'a film grain overlay on the page',
+                'fabric'   => 'a fabric weave overlay on the page',
+                default    => 'the committed surface overlay',
+            };
+            $facts[] = "- **Surface**: {$surface} — {$surfaceMeaning}.";
+        }
+
         $device = Device::explicit($direction['device'] ?? null);
         $deviceClass = Device::className($device);
         if ($device !== null && $device !== 'none' && $deviceClass !== null) {
@@ -1119,6 +1150,18 @@ final class DesignDirectionStep implements Step
             return null;
         }
         return self::explicitShape($project->readJson(self::FILE)['shape'] ?? null);
+    }
+
+    /**
+     * The committed page surface, or `none` when no direction was persisted
+     * or the field is absent.
+     */
+    public static function surfaceFor(Project $project): string
+    {
+        if (!$project->exists(self::FILE)) {
+            return Surface::DEFAULT;
+        }
+        return self::normalizeSurface($project->readJson(self::FILE)['surface'] ?? null);
     }
 
     /** The committed one-band CSS device, or `none`. */

@@ -235,11 +235,17 @@ final class SectionsStep implements Step
                 } elseif ($key === 'footer') {
                     // This is an error handler: an unknown archetype falls
                     // back to the default surface instead of throwing again.
+                    // The resolved surface on the job wins when present — the
+                    // fallback part must land on the same band the closing
+                    // sections were planned against.
                     $assignedArchetype = (string) ($job['input']['composition_archetype'] ?? '');
-                    $footerSurface = $key === 'footer'
-                        && in_array($assignedArchetype, FooterComposition::ARCHETYPES, true)
-                        ? FooterComposition::surface($assignedArchetype)
-                        : null;
+                    $resolvedSurface = (string) ($job['input']['surface'] ?? '');
+                    $footerSurface = match (true) {
+                        $resolvedSurface !== '' => $resolvedSurface,
+                        in_array($assignedArchetype, FooterComposition::ARCHETYPES, true)
+                            => FooterComposition::surface($assignedArchetype),
+                        default => null,
+                    };
                     $footerPageCount = $key === 'footer' && is_int($job['input']['page_count'] ?? null)
                         ? $job['input']['page_count']
                         : null;
@@ -462,7 +468,8 @@ final class SectionsStep implements Step
         $siteSpecData = $project->readJson('siteSpec.json');
         $designDirection = DesignDirectionStep::readFor($project);
         $blueprint = DesignDirectionStep::heroBlueprintFor($project);
-        $footerArchetype = self::footerArchetype($pages, $siteSpec, $designDirection);
+        $footerArchetype = self::footerArchetype($siteSpec, $designDirection);
+        $footerSurface = FooterComposition::resolveSurface($footerArchetype, self::closingBackgrounds($pages));
         $contract = AboveFoldContract::resolve(
             pages: $pages,
             blueprint: $blueprint,
@@ -475,7 +482,7 @@ final class SectionsStep implements Step
             ],
             footerContext: [
                 'archetype' => $footerArchetype,
-                'surface' => FooterComposition::surface($footerArchetype),
+                'surface' => $footerSurface,
             ],
             forcedHeaderArchetype: Env::get(AboveFoldContract::HEADER_ARCHETYPE_ENV),
             designCss: self::designCss($project),
@@ -980,7 +987,8 @@ final class SectionsStep implements Step
         // AboveFoldContract then owns the complete top relation; no unit
         // derives mode or header archetype independently.
         $frontSections = (array) (self::frontPage($pages)['sections'] ?? []);
-        $footerArchetype = self::footerArchetype($pages, $siteSpec, $designDirection);
+        $footerArchetype = self::footerArchetype($siteSpec, $designDirection);
+        $footerSurface = FooterComposition::resolveSurface($footerArchetype, self::closingBackgrounds($pages));
         $contract = AboveFoldContract::resolve(
             pages: $pages,
             blueprint: $blueprint,
@@ -997,7 +1005,7 @@ final class SectionsStep implements Step
             ],
             footerContext: [
                 'archetype' => $footerArchetype,
-                'surface' => FooterComposition::surface($footerArchetype),
+                'surface' => $footerSurface,
             ],
             forcedHeaderArchetype: Env::get(AboveFoldContract::HEADER_ARCHETYPE_ENV),
             designCss: self::designCss($project),
@@ -1032,6 +1040,7 @@ final class SectionsStep implements Step
                     'outline' => self::outline($frontSections),
                     'final_section_brief' => self::finalSectionBrief($frontSections),
                     'composition_archetype' => $footerArchetype,
+                    'surface' => $footerSurface,
                     'page_count' => count($pages),
                 ],
                 'file'  => 'parts/footer.html',
@@ -1054,7 +1063,7 @@ final class SectionsStep implements Step
                         'front' => (bool) ($page['front'] ?? false),
                     ],
                     'section'   => $section,
-                    'neighbors' => self::neighbors($sections, $i, $footerArchetype),
+                    'neighbors' => self::neighbors($sections, $i, $footerArchetype, $footerSurface),
                     'header_contract' => $opening
                         ? ($frontHero
                             ? $frontContract
@@ -1177,8 +1186,12 @@ final class SectionsStep implements Step
      *
      * @param array<int,array<string,mixed>> $sections
      */
-    public static function neighbors(array $sections, int $i, string $footerArchetype = ''): string
-    {
+    public static function neighbors(
+        array $sections,
+        int $i,
+        string $footerArchetype = '',
+        string $footerSurface = '',
+    ): string {
         $describe = function (?array $s): ?string {
             if (!is_array($s)) {
                 return null;
@@ -1191,30 +1204,45 @@ final class SectionsStep implements Step
         $above = $describe($sections[$i - 1] ?? null) ?? 'the site header (this is the first section)';
         $below = $describe($sections[$i + 1] ?? null);
         if ($below === null) {
-            $below = self::footerNeighborContract($footerArchetype);
+            $own = is_array($sections[$i] ?? null) ? (string) ($sections[$i]['background'] ?? '') : '';
+            $below = self::footerNeighborContract($footerArchetype, $footerSurface, $own);
         }
         return "Above: {$above}\nBelow: {$below}";
     }
 
     /**
      * The footer-side contract injected as every page's final section neighbor.
-     * The same archetype is sent to FooterUnit, so the two independently
-     * generated parts agree about content ownership and the visual handoff.
-     * Passing '' preserves the compact legacy description for direct callers
-     * whose adapter has not assigned a footer composition. Pure — unit-testable.
+     * The same archetype and resolved surface are sent to FooterUnit, so the two
+     * independently generated parts agree about content ownership and the visual
+     * handoff. Passing '' for the archetype preserves the compact legacy
+     * description for direct callers whose adapter has not assigned a footer
+     * composition; '' for the surface falls back to the archetype's preference.
+     * Pure — unit-testable.
      */
-    public static function footerNeighborContract(string $archetype): string
-    {
+    public static function footerNeighborContract(
+        string $archetype,
+        string $surface = '',
+        string $sectionBackground = '',
+    ): string {
         if ($archetype === '') {
             return 'the site footer (this is the last section)';
         }
         FooterComposition::assertKnown($archetype);
-        $surface = FooterComposition::surface($archetype);
+        $surface = $surface !== '' ? $surface : FooterComposition::surface($archetype);
+        // resolveSurface() picks the fewest collisions, not zero, and a host
+        // adapter calling this directly never runs the plan-level move. So the
+        // section really can be sitting on the footer's surface, and telling
+        // its author it was planned off one would brief a cut that has nothing
+        // to cut against.
+        $seam = $sectionBackground !== '' && $sectionBackground === $surface
+            ? 'This section shares that exact surface, so hand off continuously through spacing and rhythm rather '
+                . 'than a colour cut, and never restate the footer band.'
+            : 'This section was planned NOT to use that surface, so make one decisive color or image cut at the '
+                . 'boundary and never restate the footer band.';
         return "the site footer (this is the last section) — assigned {$archetype} composition opening on the "
             . "exact **{$surface}** background surface. "
             . 'This section owns its planned narrative, facts, imagery, and primary CTA; the footer owns persistent '
-            . 'identity, compact site-wide utility, and credit. If this section also uses that exact solid surface, '
-            . 'hand off continuously through spacing; otherwise make one decisive color or image cut. Do not repeat '
+            . "identity, compact site-wide utility, and credit. {$seam} Do not repeat "
             . 'copy, contact/hours clusters, CTA, or a second signature ornament.';
     }
 
@@ -1343,22 +1371,37 @@ final class SectionsStep implements Step
     }
 
     /**
-     * @param array<int,array<string,mixed>> $pages
+     * The footer composition for this build. Seeded on the site alone so
+     * page-plan can learn the footer's surface before it plans the closing
+     * sections that have to differ from it.
      */
-    public static function footerArchetype(array $pages, string $siteSpec, string $designDirection): string
+    public static function footerArchetype(string $siteSpec, string $designDirection): string
     {
-        $front = self::frontPage($pages);
-        $seed = $siteSpec . "\n"
-            . $designDirection . "\n"
-            . (string) ($front['slug'] ?? '') . "\n"
-            . (string) ($front['title'] ?? '') . "\n"
-            . self::outline((array) ($front['sections'] ?? []));
-        $bucket = 0;
-        $count = count(self::FOOTER_ARCHETYPES);
-        foreach (str_split(hash('sha256', $seed, true)) as $byte) {
-            $bucket = (($bucket * 256) + ord($byte)) % $count;
+        return FooterComposition::archetypeFor($siteSpec, $designDirection);
+    }
+
+    /**
+     * What each page's last section closes on, in page order. One footer part
+     * renders below all of them, so the surface has to clear the whole list —
+     * not just the front page's.
+     *
+     * @param array<int,array<string,mixed>> $pages
+     * @return list<string>
+     */
+    public static function closingBackgrounds(array $pages): array
+    {
+        $backgrounds = [];
+        foreach ($pages as $page) {
+            $sections = array_values(array_filter(
+                (array) ($page['sections'] ?? []),
+                'is_array'
+            ));
+            $last = end($sections);
+            if (is_array($last) && is_string($last['background'] ?? null)) {
+                $backgrounds[] = $last['background'];
+            }
         }
-        return self::FOOTER_ARCHETYPES[$bucket];
+        return $backgrounds;
     }
 
     /** The exact, single-archetype directive rendered into footer.md. */

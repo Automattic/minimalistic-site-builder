@@ -84,6 +84,7 @@ final class ContrastFix
         private ?string $defaultText = null,
         private ?string $headingText = null,
         private array $fontSizes = [],
+        private float $normalText = ContrastMath::NORMAL_TEXT,
     ) {}
 
     /**
@@ -222,7 +223,7 @@ final class ContrastFix
                 'bg'        => $bgColors,
                 'bgLabel'   => $bgLabel,
                 'provider'  => $bgProvider,
-                'threshold' => ContrastMath::NORMAL_TEXT,
+                'threshold' => $this->normalText,
                 'hasText'   => true,
                 'hasAnchor' => stripos($cap[1], '<a ') !== false,
                 'link'      => $linkCtx,
@@ -239,7 +240,7 @@ final class ContrastFix
                 'bg'        => $bgColors,
                 'bgLabel'   => $bgLabel,
                 'provider'  => $bgProvider,
-                'threshold' => ContrastMath::NORMAL_TEXT,
+                'threshold' => $this->normalText,
                 'hasText'   => true,
                 'hasAnchor' => stripos($cite[1], '<a ') !== false,
                 'link'      => $linkCtx,
@@ -384,7 +385,7 @@ final class ContrastFix
             foreach (array_keys($injected) as $p) {
                 if ($this->isSelfOrDescendant((int) $key, $p) && $key !== $p) {
                     [$bestSlug, $bestRatio] = $this->bestOf(['base', 'contrast', 'primary', 'secondary', 'accent'], $row['bg']);
-                    if ($bestSlug !== null && $bestRatio >= ContrastMath::NORMAL_TEXT) {
+                    if ($bestSlug !== null && $bestRatio >= $this->normalText) {
                         $this->setLinkColor((int) $key, $bestSlug, $row['bg']);
                         $this->findings[] = [
                             'kind' => 'link', 'block' => $this->doc->name((int) $key),
@@ -438,19 +439,19 @@ final class ContrastFix
             return;
         }
         $ratio = $this->minRatio($linkRgb, $row['bg']);
-        if ($ratio >= ContrastMath::NORMAL_TEXT) {
+        if ($ratio >= $this->normalText) {
             return;
         }
 
         [$bestSlug, $bestRatio] = $this->bestOf(['base', 'contrast', 'primary', 'secondary', 'accent'], $row['bg']);
-        $detail = sprintf('links %s on %s: %.2f < %.1f', $linkLabel, $row['bgLabel'], $ratio, ContrastMath::NORMAL_TEXT);
+        $detail = sprintf('links %s on %s: %.2f < %.1f', $linkLabel, $row['bgLabel'], $ratio, $this->normalText);
 
         if ($key === -1) {
             // Root region (page background). A block-authored elements.link
             // is repaired at that block; the global theme.json default is
             // not ours to fix — ContrastFixStep repairs theme.json itself.
             if ($link !== null && $link['fromNode'] !== null && $repair
-                && $bestSlug !== null && $bestRatio >= ContrastMath::NORMAL_TEXT) {
+                && $bestSlug !== null && $bestRatio >= $this->normalText) {
                 $this->setLinkColor($link['fromNode'], $bestSlug, $row['bg']);
                 $injected[$link['fromNode']] = true;
                 $this->findings[] = [
@@ -467,7 +468,7 @@ final class ContrastFix
             }
             return;
         }
-        if ($bestSlug === null || $bestRatio < ContrastMath::NORMAL_TEXT || !$repair) {
+        if ($bestSlug === null || $bestRatio < $this->normalText || !$repair) {
             $this->findings[] = ['kind' => 'link', 'block' => $this->doc->name($key), 'detail' => $detail, 'repaired' => false];
             return;
         }
@@ -529,10 +530,10 @@ final class ContrastFix
         $authored = $attrs['style']['elements']['link'][':hover']['color']['text'] ?? null;
         $authoredPasses = is_string($authored)
             && ($resolved = $this->resolveColorValue($authored)) !== null
-            && $this->minRatio($resolved['rgb'], $bg) >= ContrastMath::NORMAL_TEXT;
+            && $this->minRatio($resolved['rgb'], $bg) >= $this->normalText;
         if (!$authoredPasses) {
             $accent = $this->rgbFor('accent');
-            $hover = ($accent !== null && $this->minRatio($accent, $bg) >= ContrastMath::NORMAL_TEXT)
+            $hover = ($accent !== null && $this->minRatio($accent, $bg) >= $this->normalText)
                 ? 'accent' : $slug;
             $attrs['style']['elements']['link'][':hover']['color']['text'] = 'var:preset|color|' . $hover;
         }
@@ -615,18 +616,18 @@ final class ContrastFix
     public function textThreshold(string $name, array $attrs): float
     {
         if (!in_array($name, self::LARGE_TEXT_BLOCKS, true)) {
-            return ContrastMath::NORMAL_TEXT;
+            return $this->normalText;
         }
         $px = $this->resolvedFontSizePx($attrs);
         if ($px !== null) {
             $weight = $attrs['style']['typography']['fontWeight'] ?? null;
             $bold = $weight === 'bold' || (is_numeric($weight) && (int) $weight >= 700);
             return ($px >= 24.0 || ($bold && $px >= 18.66))
-                ? ContrastMath::LARGE_TEXT : ContrastMath::NORMAL_TEXT;
+                ? ContrastMath::LARGE_TEXT : $this->normalText;
         }
         if ($name === 'heading') {
             return ((int) ($attrs['level'] ?? 2)) <= 3
-                ? ContrastMath::LARGE_TEXT : ContrastMath::NORMAL_TEXT;
+                ? ContrastMath::LARGE_TEXT : $this->normalText;
         }
         return ContrastMath::LARGE_TEXT; // site-title, post-title, pullquote
     }
