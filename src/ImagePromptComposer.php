@@ -217,7 +217,7 @@ final class ImagePromptComposer
      * backwards, treating a subject that agreed with the grade as fighting it.
      */
     private const GRADE_VOCABULARY = [
-        'grain', 'grainy', 'grainless', 'film', 'filmic', '35mm', 'portra', 'kodachrome',
+        'grain', 'grainy', 'grainless', 'film', 'film grain', 'filmic', '35mm', 'portra', 'kodachrome',
         'tri-x', 'black and white', 'b&w', 'monochrome', 'greyscale', 'grayscale',
         'desaturated', 'muted grey tones', 'muted gray tones', 'sepia', 'duotone',
         'golden hour', 'available light', 'studio white', 'seamless white', 'cyclorama',
@@ -230,13 +230,23 @@ final class ImagePromptComposer
     /**
      * Words that carry no scene content, so a clause left holding only these
      * after its grade vocabulary is removed was never describing anything.
+     *
+     * The second group is how much of the grade, not what the scene is: real
+     * subjects write "fine 35mm grain" and "heavy 35mm film grain" far more
+     * often than the bare term, and without these an adjective alone kept the
+     * clause. They only ever apply to a clause that already matched grade
+     * vocabulary, so a scene noun beside one ("a monochrome colour chart")
+     * still holds the clause.
      */
     private const FILLER_WORDS = [
         'a', 'an', 'the', 'no', 'not', 'without', 'with', 'of', 'on', 'in', 'at', 'to',
         'and', 'or', 'but', 'for', 'from', 'by', 'over', 'under', 'into', 'onto',
         'is', 'are', 'was', 'were', 'be', 'all', 'its', 'it', 'very', 'quite', 'rather',
-        'shot', 'shots', 'shot in', 'image', 'images', 'photo', 'photos', 'photograph',
+        'shot', 'shots', 'image', 'images', 'photo', 'photos', 'photograph',
         'photographed', 'rendered', 'look', 'style', 'treatment', 'tone', 'tones',
+        'fine', 'faint', 'subtle', 'gentle', 'soft', 'heavy', 'strong', 'deep', 'hard',
+        'visible', 'slight', 'slightly', 'strictly', 'natural', 'warm', 'cool',
+        'color', 'colour', 'grade', 'graded', 'grading', 'lighting', 'lit',
     ];
 
     /**
@@ -262,16 +272,27 @@ final class ImagePromptComposer
             return ['subject' => $original, 'removed' => [], 'kept' => []];
         }
 
+        $clauses = self::splitClauses($original);
+        if ($clauses === []) {
+            // Nothing could be read — punctuation only, or bytes preg_split
+            // rejected. No clause was examined, so there is no conflict to
+            // report and nothing to deliver but what was authored.
+            return ['subject' => $original, 'removed' => [], 'kept' => []];
+        }
+
+        $matchesPer = array_map(self::gradeVocabularyIn(...), $clauses);
+
         $removed = [];
         $kept = [];
         $survivors = [];
-        foreach (self::splitClauses($original) as $clause) {
-            $matches = self::gradeVocabularyIn($clause);
+        foreach ($clauses as $index => $clause) {
+            $matches = $matchesPer[$index];
             if ($matches === []) {
                 $survivors[] = $clause;
                 continue;
             }
-            if (self::clauseIsOnlyGrade($clause, $matches)) {
+            $isGrade = self::namesGradeOutright($matches) || self::negatesGrade($clause);
+            if ($isGrade && self::clauseIsOnlyGrade($clause, $matches)) {
                 $removed[] = trim($clause['text']);
                 continue;
             }
@@ -285,6 +306,15 @@ final class ImagePromptComposer
             // The subject was grade talk end to end. Delivering an empty
             // subject is worse than delivering the authored one.
             return ['subject' => $original, 'removed' => [], 'kept' => [$original]];
+        }
+
+        if ($removed === []) {
+            // Nothing was dropped, so there is nothing to rejoin around.
+            // Rebuilding anyway re-punctuates every other clause, and with no
+            // removal there is no authored-vs-delivered row to record it —
+            // the kept row would assert "delivered unchanged" over a subject
+            // we had just changed.
+            return ['subject' => $original, 'removed' => [], 'kept' => $kept];
         }
 
         return [
@@ -365,6 +395,45 @@ final class ImagePromptComposer
     }
 
     /**
+     * Terms that also name ordinary subject matter: wood and leather have a
+     * grain, a landscape has a sweep, a cat is black and white. On their own
+     * they are not enough to call a clause grade talk — "fine grain" is a
+     * walnut finish as often as a film stock. A clause carrying only these is
+     * kept and reported instead of dropped.
+     */
+    private const AMBIGUOUS_VOCABULARY = [
+        'grain', 'grainy', 'grainless', 'film', 'sweep', 'black and white',
+    ];
+
+    /**
+     * Whether a clause's matches include a term that can only be photographic.
+     * "fine film grain" says film stock; "fine grain" alone does not.
+     *
+     * @param list<string> $matches
+     */
+    private static function namesGradeOutright(array $matches): bool
+    {
+        foreach ($matches as $term) {
+            if (!in_array($term, self::AMBIGUOUS_VOCABULARY, true)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Whether a clause negates its grade term. "no grain" and "without grain"
+     * only mean anything about a photograph — material is never described by
+     * the grain it lacks — so a negated ambiguous term is grade talk on its own.
+     *
+     * @param array{text:string,separator:string} $clause
+     */
+    private static function negatesGrade(array $clause): bool
+    {
+        return preg_match('/(?<![\w-])(no|not|without|never)(?![\w-])/iu', $clause['text']) === 1;
+    }
+
+    /**
      * Whether removing the grade terms leaves a clause with nothing that names
      * anything — the test for "this clause was only grade talk".
      *
@@ -375,7 +444,15 @@ final class ImagePromptComposer
     {
         $residue = $clause['text'];
         foreach ($matches as $term) {
-            $residue = (string) preg_replace(self::termPattern($term), ' ', $residue);
+            $replaced = preg_replace(self::termPattern($term), ' ', $residue);
+            if ($replaced === null) {
+                // The residue could not be computed, so "nothing is left" is
+                // not something we know. Keep the clause: the sibling match
+                // above already fails this way, and the alternative is
+                // deleting a scene we never managed to read.
+                return false;
+            }
+            $residue = $replaced;
         }
         $residue = strtolower((string) preg_replace('/[^\p{L}\p{N}\s]+/u', ' ', $residue));
         foreach (preg_split('/\s+/u', trim($residue)) ?: [] as $word) {

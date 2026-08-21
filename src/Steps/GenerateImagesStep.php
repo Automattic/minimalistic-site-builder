@@ -397,31 +397,51 @@ final class GenerateImagesStep implements Step
      */
     private static function gradeSubjectWarnings(array $pending, string $imageGrade): array
     {
-        if (trim($imageGrade) === '') {
+        $rows = [];
+        foreach ($pending as $spec) {
+            $rows = array_merge($rows, self::gradeSubjectWarningsFor(
+                (string) ($spec['filename'] ?? ''),
+                (string) ($spec['subject'] ?? ''),
+                $imageGrade,
+            ));
+        }
+        return $rows;
+    }
+
+    /**
+     * The rows one subject owes. Split out from the batch above because the
+     * repair pass rewrites a subject after that batch has been reported, and
+     * a rewritten subject the grade pass edits owes the same receipt.
+     *
+     * The clauses are reported, not the whole subject: Warnings::value caps a
+     * value at 160 characters and a subject runs several hundred, so an
+     * authored/delivered pair rendered as the same truncated head twice and
+     * showed nothing. AGENTS.md takes `removed` in place of the delivered
+     * value for exactly this reason.
+     *
+     * @return list<string>
+     */
+    private static function gradeSubjectWarningsFor(string $filename, string $subject, string $imageGrade): array
+    {
+        $authored = trim($subject);
+        // Transparent assets keep their subject: the isolation clause owns
+        // the backdrop and no grade is appended.
+        if (trim($imageGrade) === '' || $authored === ''
+            || GeminiImage::mimeForFilename($filename) === 'image/png') {
             return [];
         }
         $rows = [];
-        foreach ($pending as $spec) {
-            $filename = (string) ($spec['filename'] ?? '');
-            $authored = trim((string) ($spec['subject'] ?? ''));
-            // Transparent assets keep their subject: the isolation clause owns
-            // the backdrop and no grade is appended.
-            if ($authored === '' || GeminiImage::mimeForFilename($filename) === 'image/png') {
-                continue;
-            }
-            $result = ImagePromptComposer::stripCompetingGradeTokens($authored, $imageGrade);
-            if ($result['removed'] !== []) {
-                $rows[] = "images.json '{$filename}': subject authored " . Warnings::value($authored)
-                    . '; delivered ' . Warnings::value($result['subject'])
-                    . '; disposition removed photographic-grade clause(s) '
-                    . Warnings::value(implode('; ', $result['removed']))
-                    . ' per prompts/image-generation.md:63';
-            }
-            foreach ($result['kept'] as $clause) {
-                $rows[] = "images.json '{$filename}': subject clause " . Warnings::value($clause)
-                    . '; delivered unchanged; disposition names photographic grade but also names the'
-                    . ' scene, and no edit removes the grade wording without changing what is rendered';
-            }
+        $result = ImagePromptComposer::stripCompetingGradeTokens($authored, $imageGrade);
+        if ($result['removed'] !== []) {
+            $rows[] = "images.json '{$filename}': authored subject clause(s) "
+                . Warnings::value(implode('; ', $result['removed']))
+                . '; delivered removed; disposition photographic grade competing with the'
+                . ' site-wide grade, per prompts/image-generation.md:63';
+        }
+        foreach ($result['kept'] as $clause) {
+            $rows[] = "images.json '{$filename}': subject clause " . Warnings::value($clause)
+                . '; delivered unchanged; disposition names photographic grade but also names the'
+                . ' scene, and no edit removes the grade wording without changing what is rendered';
         }
         return $rows;
     }
@@ -624,6 +644,21 @@ final class GenerateImagesStep implements Step
         }
         if ($regenSpecs === []) {
             return;
+        }
+
+        // The rewrite is a fresh subject the grade pass has never seen, and it
+        // is what ships. A rewrite that reintroduces grade wording was being
+        // edited with only a log line behind it.
+        $repairNotes = [];
+        foreach ($subjects as $i => $subject) {
+            $repairNotes = array_merge($repairNotes, self::gradeSubjectWarningsFor(
+                (string) ($specs[$i]['filename'] ?? ''),
+                $subject,
+                $imageGrade,
+            ));
+        }
+        if ($repairNotes !== []) {
+            $project->addWarnings($this->id(), $repairNotes);
         }
 
         // Stream repaired images through the same bounded-memory contract as
