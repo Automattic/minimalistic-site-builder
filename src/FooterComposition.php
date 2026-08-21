@@ -102,6 +102,21 @@ final class FooterComposition
      * planned page — so page-plan can be told the footer's surface before it
      * plans the sections that have to differ from it.
      */
+    /**
+     * The archetype for a project, reading the two files the seed is built from.
+     *
+     * Five call sites used to spell out this pair, two of them re-reading files
+     * their own function had already loaded. The seed is the whole coupling
+     * between page-plan and sections, so it gets one name.
+     */
+    public static function archetypeForProject(Project $project): string
+    {
+        return self::archetypeFor(
+            $project->readText('siteSpec.json'),
+            Steps\DesignDirectionStep::readFor($project),
+        );
+    }
+
     public static function archetypeFor(string $siteSpec, string $designDirection): string
     {
         $bucket = 0;
@@ -118,6 +133,15 @@ final class FooterComposition
      * so a surface that matches a page's closing band leaves that page with no
      * boundary at all — the archetype's preference loses to the surface that
      * merges the fewest seams, and ties keep the preference.
+     *
+     * This is the fallback for pages that reach the footer job without passing
+     * the deterministic floor, not a general safety net. On the blocks path
+     * withClosingBandOffFooterSurface() has already moved every closing band
+     * off the preference before pages.json is written, so there is nothing left
+     * here to resolve. And it minimises rather than clears: with two candidates
+     * a site closing on both still leaves one seam merged, which is why
+     * footerNeighborContract() brands that section for a continuous handoff
+     * instead of a cut.
      *
      * @param list<string> $closingBackgrounds each page's last-section background
      */

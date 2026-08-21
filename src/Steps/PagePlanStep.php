@@ -583,10 +583,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         // that the seam merges — this is the deterministic floor.
         $out = self::withClosingBandOffFooterSurface(
             $out,
-            FooterComposition::surface(FooterComposition::archetypeFor(
-                $project->readText('siteSpec.json'),
-                DesignDirectionStep::readFor($project),
-            )),
+            FooterComposition::surface(FooterComposition::archetypeForProject($project)),
             $warnings,
         );
 

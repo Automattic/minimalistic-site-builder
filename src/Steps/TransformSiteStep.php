@@ -501,10 +501,7 @@ final class TransformSiteStep implements Step
             $rerouteWarnings = [];
             $plannedFailedPages = PagePlanStep::withClosingBandOffFooterSurface(
                 $plannedFailedPages,
-                FooterComposition::surface(SectionsStep::footerArchetype(
-                    $project->readText('siteSpec.json'),
-                    DesignDirectionStep::readFor($project),
-                )),
+                FooterComposition::surface(FooterComposition::archetypeForProject($project)),
                 $rerouteWarnings,
             );
             if ($rerouteWarnings !== []) {
