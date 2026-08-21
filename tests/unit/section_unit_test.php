@@ -365,6 +365,7 @@ test('SectionUnit layered request loses only cache marker separators', function 
         'composition'       => $composition,
         'header_contract'   => $input['header_contract'],
         'image_instructions' => $renderer->render('image-generation.md', []),
+        'form_instructions'  => $renderer->render('no-forms.md', []),
         'block_markup_output_contract' => rtrim(
             $renderer->render('block-markup-output-contract.md', []),
             "\r\n",

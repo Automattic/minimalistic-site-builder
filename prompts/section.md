@@ -8,7 +8,7 @@ Rules:
 - The markup is the section's content ONLY — no header, no footer, no <html>/<body>. Do NOT emit a wp:template-part.
 - NEVER include site chrome in the section: no wordmark, no site-title lockup, no navigation or menu links — even if the DESIGN DIRECTION or Notes mention them. The real site header is a separate part; duplicating it here puts two headers on the page. If the Notes say "wordmark top-left" or "nav reduced to one link", skip that furniture and build only the section's own content.
 - LINKS: when a button or link leads to another page of THIS site, use that page's path from SITE PAGES verbatim (e.g. href="/menu/") — never a path that isn't in the list. Do not link the page to itself. An external/social link uses an exact URL supplied by the SITE SPEC; when none was supplied, omit the link or render its label as plain text. NEVER emit `href="#"`.
-- NO FORM MARKUP: never emit `<form>`, `<input>`, `<textarea>`, or `<select>` — the site has no form backend, so a form is dead UI that silently discards whatever visitors type. Where the brief asks for a contact, booking, or signup form, present the spec's contact facts instead and make the CTA a mailto: button minted at the spec's `email_domain` (or a link to the page that holds those facts).
+- FORMS: the FORM INSTRUCTIONS section below is the ONLY authority on whether and how this section may present a form. Follow it exactly and never invent form markup outside those rules.
 - Use valid CORE block markup only (group, cover, columns/column, heading, paragraph, buttons/button, image, gallery, media-text, quote, pullquote, list, separator, spacer; query/post-template only if useful).
 - Reach beyond group/columns when the content calls for it:
     media-text — a split row with the image filling one half edge-to-edge and copy in the other; supports `"mediaPosition":"right"`, `"verticalAlignment"`, `"isStackedOnMobile":true`. The best tool for alternating feature rows and about/story sections.
@@ -121,6 +121,9 @@ Motion budget (hard rules — a deterministic build step strips violations, so o
 
 IMAGE INSTRUCTIONS:
 {{image_instructions}}
+
+FORM INSTRUCTIONS:
+{{form_instructions}}
 
 {{block_markup_output_contract}}
 

@@ -149,6 +149,7 @@ final class SectionsStep implements Step
             id: $this->id(),
             label: $this->label(),
             reads: [
+                'meta.json',
                 'siteSpec.json',
                 'theme/theme.json',
                 'pages.json',
@@ -952,16 +953,20 @@ final class SectionsStep implements Step
         }
 
         $common = [
-            'site_spec'        => $siteSpec,
-            'language'         => SiteSpecStep::languageOf($project),
-            'theme_json'       => $themeJsonText,
-            'design_direction' => $designDirection,
+            'site_spec'         => $siteSpec,
+            'language'          => SiteSpecStep::languageOf($project),
+            'theme_json'        => $themeJsonText,
+            'design_direction'  => $designDirection,
             // Unlike design_direction's prose, this value is a portable,
             // machine-readable execution contract consumed by SectionUnit's
             // delivery boundary. Old/missing directions retain the documented
             // flush default without making section generation fatal.
-            'card_style'       => $cardStyle,
-            'site_pages'       => PagePlanStep::sitePagesList($pages),
+            'card_style'        => $cardStyle,
+            'site_pages'        => PagePlanStep::sitePagesList($pages),
+            // A host capability, not a site fact: it says whether a real form
+            // backend exists to replace the placeholders, so it stays in the
+            // caller-owned meta rather than in the spec the model authors.
+            'form_placeholders' => self::formPlaceholders($project),
         ];
 
         // Select the footer first: a singleton hero's lower edge must name the
@@ -1070,6 +1075,26 @@ final class SectionsStep implements Step
         }
 
         return ['jobs' => $jobs, 'contract' => $contract];
+    }
+
+    /**
+     * Whether this build's host owns a real form backend.
+     *
+     * Set by the caller at createProject time (CLI: --use-jetpack-placeholders).
+     * True picks prompts/jetpack-form.md for every section, false picks
+     * prompts/no-forms.md; those two files carry the reasoning.
+     */
+    public static function formPlaceholders(Project $project): bool
+    {
+        // The graph always seeds meta.json, but this step is also driven
+        // directly — runForPages() from the transform path, and the test
+        // fixtures — against projects that never went through
+        // createProject. There a missing meta is the default, not an error.
+        if (!$project->exists('meta.json')) {
+            return false;
+        }
+
+        return (bool) ($project->readJson('meta.json')['form_placeholders'] ?? false);
     }
 
     /** The portable routing rule: position and front flag, never mutable role prose. */

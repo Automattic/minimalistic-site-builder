@@ -18,6 +18,9 @@ namespace Automattic\SiteBuild\Units;
  * - neighbors: the preceding/following composition summary
  * - header_contract: the header-mode contract for hero-role sections (how the
  *   site header shares the first viewport with this section); '' otherwise
+ * - form_placeholders: true when the host owns a form backend and wants the
+ *   section to reserve a form's place with a JP_FORM placeholder block instead
+ *   of the default no-form-markup rule; absent/false keeps the default
  *
  * Static authoring rules come from the package's prompt templates; no Project
  * or project artifact is read or written here.
@@ -43,7 +46,8 @@ final class SectionUnit extends AbstractPageSectionUnit
      *     layout_archetype:string,background:string,vertical_density:string,handoff:string
      *   },
      *   neighbors:string,
-     *   header_contract:string
+     *   header_contract:string,
+     *   form_placeholders?:bool
      * } $input
      */
     public function request(array $input): array
@@ -86,6 +90,10 @@ final class SectionUnit extends AbstractPageSectionUnit
             'composition'       => $composition,
             'header_contract'   => $this->inputString($input, 'header_contract'),
             'image_instructions' => $this->renderer->render('image-generation.md', []),
+            'form_instructions'  => $this->renderer->render(
+                ($input['form_placeholders'] ?? false) ? 'jetpack-form.md' : 'no-forms.md',
+                [],
+            ),
         ]);
 
         // The site layer is byte-identical to the one the header, footer and
