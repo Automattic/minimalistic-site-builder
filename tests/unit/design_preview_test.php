@@ -404,6 +404,37 @@ test('design-preview repairs one malformed response once and warns', function ()
     design_preview_cleanup($tmp);
 });
 
+test('a structurally valid preview with no head style is an issue, not a throw', function () {
+    [$project, $llm, $tmp] = design_preview_fixture();
+    $styleless = str_replace(
+        '<style>' . design_preview_css() . '</style>',
+        '',
+        design_preview_document(),
+    );
+    assert_true($styleless !== design_preview_document(), 'fixture head style removed');
+    $llm->queueText($styleless);
+    $llm->queueText($styleless);
+
+    $caught = null;
+    try {
+        design_preview_run($project, $llm);
+    } catch (Throwable $error) {
+        $caught = $error;
+    }
+
+    assert_eq(null, $caught, 'styleless generated content never throws');
+    assert_contains(
+        'Previous preview violated contract: document has no inline head style.',
+        $llm->calls[1]['prompt'] ?? '',
+        'repair prompt carries the shared missing-style issue',
+    );
+    assert_true($project->exists('design/preview.html'), 'safe scaffold written');
+    $warnings = design_preview_warnings($project);
+    assert_contains('malformed_design', $warnings);
+    assert_contains('delivered_value safe scaffold', $warnings);
+    design_preview_cleanup($tmp);
+});
+
 test('design-preview degrades two malformed responses to one deterministic safe scaffold', function () {
     $outputs = [];
     $styles = [];
