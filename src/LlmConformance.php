@@ -37,9 +37,10 @@ namespace Automattic\SiteBuild;
  * delivery, and so both travel the seam that authors sections.
  *
  * Structural checks spend nothing (they must be rejected before transport).
- * Five live checks spend five completions before retries, one of them carrying
- * ~7,400 tokens of cached layers. Pure apart from the calls it makes into the
- * supplied Llm — it never touches a Project or the filesystem.
+ * Five live checks spend six completions before retries (the first is a plain
+ * reachability probe): one carries ~7,500 tokens of cached layers and one
+ * carries ~2,500. Pure apart from the calls it makes into the supplied Llm —
+ * it never touches a Project or the filesystem.
  */
 final class LlmConformance
 {
@@ -98,8 +99,24 @@ final class LlmConformance
     }
 
     /**
-     * Checks that need model calls: one single, plus three batches carrying
-     * four members between them. Five completions before retries.
+     * Every live check, in the order they are reported.
+     *
+     * Duplicated from the check methods so an unreachable host can be reported
+     * without calling them; the ids are asserted equal in the unit tests, which
+     * is what keeps the two copies from drifting.
+     */
+    private const LIVE_CHECKS = [
+        'cached_prefixes_counted_in_usage',
+        'cached_prefixes_reach_the_model',
+        'blank_prefixes_tolerated',
+        'cache_warm_probe_tolerated',
+        'batch_keys_round_trip',
+    ];
+
+    /**
+     * Checks that need model calls: a reachability probe, one single, plus
+     * three batches carrying four members between them. Six completions before
+     * retries.
      *
      * Both cached_prefixes probes read ONE request — the layered batch one.
      * They ask different questions (was it billed? did the model see it?) of
@@ -110,6 +127,11 @@ final class LlmConformance
      */
     public static function live(Llm $llm): array
     {
+        $unreachable = self::reachabilityFailure($llm);
+        if ($unreachable !== null) {
+            return self::liveTierUnreachable($unreachable);
+        }
+
         $probe = self::layeredProbe($llm);
 
         return [
@@ -160,6 +182,29 @@ final class LlmConformance
             }
         }
         return true;
+    }
+
+    /**
+     * True when the live tier ran and every one of its checks skipped.
+     *
+     * Separate from inconclusive(), which asks about the run as a whole and so
+     * goes quiet the moment a single structural check decides anything.
+     *
+     * @param list<LlmConformanceFinding> $findings
+     */
+    private static function liveTierProvedNothing(array $findings): bool
+    {
+        $live = 0;
+        foreach ($findings as $finding) {
+            if ($finding->tier !== LlmConformanceFinding::TIER_LIVE) {
+                continue;
+            }
+            $live++;
+            if (!$finding->skipped) {
+                return false;
+            }
+        }
+        return $live > 0;
     }
 
     /**
@@ -232,11 +277,84 @@ final class LlmConformance
             ];
         }
 
+        // The whole-run check above is not enough once a tier can skip as a
+        // block. A conformant host behind a bad key passes both structural
+        // checks without touching the network, so a wholly skipped live tier
+        // leaves two passes standing and would exit 0 — green on a run that
+        // never reached the usage probe, which is the load-bearing one. A tier
+        // that was asked to run and proved nothing fails the run.
+        if (!$structuralOnly && self::liveTierProvedNothing($findings)) {
+            return [
+                'text' => $text . sprintf(
+                    "\nAll %d live checks were SKIPPED — this run proved nothing about how the host "
+                    . "actually behaves, only that it validates. Check the credentials and the "
+                    . "endpoint, then run it again.\n",
+                    count(self::LIVE_CHECKS),
+                ),
+                'exit' => 1,
+            ];
+        }
+
         $summary = $skipped > 0
             ? sprintf("\n%d checks passed, %d skipped%s.\n", $passed, $skipped, $scope)
             : sprintf("\nAll %d checks passed%s.\n", $total, $scope);
 
         return ['text' => $text . $summary, 'exit' => 0];
+    }
+
+    /**
+     * One plain completion, to establish the host is reachable at all before
+     * anything else is attributed to the contract.
+     *
+     * Without it a bad key is reported as five separate contract violations,
+     * each naming a clause the host never broke: a 401 raised inside
+     * checkBlankPrefixesTolerated is, from in there, indistinguishable from a
+     * host that refuses blank layers — and the check says so. That is the same
+     * false verdict the structural tier spent a whole exception type refusing
+     * to give, and this tier owes its callers the same discipline.
+     *
+     * The request carries no cached_prefixes and no optional clause, so there
+     * is nothing in it a host could legitimately refuse. Anything other than
+     * LlmRequestRejected coming back therefore means the transport failed, not
+     * the contract. LlmRequestRejected here IS a contract failure — a host that
+     * refuses this refuses everything — so it is left to the checks, which
+     * report it against the shape each of them sends.
+     *
+     * @return string|null the transport error, or null when the host answered
+     */
+    private static function reachabilityFailure(Llm $llm): ?string
+    {
+        try {
+            $llm->complete('Reply with the single word: ok.', ['max_tokens' => 16]);
+        } catch (LlmRequestRejected) {
+            return null;
+        } catch (\Throwable $e) {
+            return $e->getMessage();
+        }
+        return null;
+    }
+
+    /**
+     * Every live check reported as skipped, naming the transport error once.
+     *
+     * Skipped rather than failed because an unreachable host has not been
+     * observed doing anything — and report() turns a wholly skipped live tier
+     * into a non-zero exit, so this stays a red build without becoming a false
+     * accusation.
+     *
+     * @return list<LlmConformanceFinding>
+     */
+    private static function liveTierUnreachable(string $error): array
+    {
+        $detail = 'The host could not complete a plain request carrying no cached_prefixes and no '
+            . 'optional clause, so nothing this tier would observe could be attributed to the '
+            . 'contract rather than to the transport: ' . $error;
+
+        return array_map(
+            static fn (string $check): LlmConformanceFinding
+                => LlmConformanceFinding::skip($check, $detail, LlmConformanceFinding::TIER_LIVE),
+            self::LIVE_CHECKS,
+        );
     }
 
     /** The probe prefix: inert filler wrapped around the echo nonce. */
@@ -293,12 +411,12 @@ final class LlmConformance
      * One request carrying three distinguishable layers, sent through
      * completeBatch.
      *
-     * Both halves matter. SectionUnit sends TWO layers, so a host that
-     * forwards only cached_prefixes[0] keeps the theme and drops the page
-     * outline, and a single-layer probe reports that host conformant. And
-     * sections are dispatched through completeBatch, so a host whose batch
-     * path is a separate body builder can honour the field in complete() and
-     * discard it in the call that actually runs.
+     * Both halves matter. SectionUnit sends THREE layers (site, build, page),
+     * so a host that forwards only cached_prefixes[0] keeps the site spec and
+     * drops the theme and the page outline, and a single-layer probe reports
+     * that host conformant. And sections are dispatched through completeBatch,
+     * so a host whose batch path is a separate body builder can honour the
+     * field in complete() and discard it in the call that actually runs.
      *
      * @return array{prompt:string,cached_prefixes:list<string>,max_tokens:int}
      */
@@ -351,11 +469,15 @@ final class LlmConformance
         if ($e instanceof LlmRequestRejected) {
             return true;
         }
-        if (stripos($e->getMessage(), 'cached_prefixes') !== false) {
-            return true;
-        }
+        // A moved counter is conclusive and outranks the message heuristic: the
+        // host demonstrably transported something, so it did not refuse. Adapters
+        // that echo the request payload into an error message would otherwise
+        // read as a local rejection on the strength of the field name alone.
         if ($requestsBefore !== null && $requestsAfter !== null && $requestsAfter !== $requestsBefore) {
             return false;
+        }
+        if (stripos($e->getMessage(), 'cached_prefixes') !== false) {
+            return true;
         }
         return null;
     }
@@ -392,7 +514,7 @@ final class LlmConformance
         foreach ($invalid as $label => $value) {
             $before = self::requestCount($llm);
             try {
-                $llm->complete('Conformance probe.', ['cached_prefixes' => $value]);
+                $llm->complete('Conformance probe.', ['cached_prefixes' => $value, 'max_tokens' => 16]);
                 $accepted[] = $label;
             } catch (\Throwable $e) {
                 $local = self::rejectedBeforeTransport($e, $before, self::requestCount($llm));
@@ -441,8 +563,11 @@ final class LlmConformance
         $check = 'oversized_prefix_list_rejected';
         $before = self::requestCount($llm);
         try {
+            // max_tokens is capped because this tier is only free on a host that
+            // refuses the request: one that validates nothing actually sends it.
             $llm->complete('Conformance probe.', [
                 'cached_prefixes' => ['one', 'two', 'three', 'four'],
+                'max_tokens'      => 16,
             ]);
         } catch (\Throwable $e) {
             $local = self::rejectedBeforeTransport($e, $before, self::requestCount($llm));

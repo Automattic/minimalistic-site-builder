@@ -182,6 +182,103 @@ final class NoValidationBadKeyFakeLlm implements Llm, UsageReporting
 }
 
 /**
+ * Validates nothing, and transports every request before failing — but its
+ * error message echoes the request payload, which many adapters' do.
+ *
+ * The field name appearing in a message is only weak evidence of a local
+ * rejection; a request counter that MOVED is conclusive proof the host
+ * transported something, so it cannot also have refused. This adapter exists to
+ * keep the weak signal from outranking the conclusive one.
+ */
+final class PayloadEchoingBadKeyFakeLlm implements Llm, UsageReporting
+{
+    public int $requests = 0;
+
+    public function complete(string $prompt, array $opts = []): string
+    {
+        $this->requests++; // Transported: the counter moves BEFORE the failure.
+        throw new \RuntimeException(
+            'HTTP 401 from api.example.com while POSTing ' . json_encode(['prompt' => $prompt] + $opts),
+        );
+    }
+
+    public function completeJson(string $prompt, array $opts = []): array
+    {
+        return [];
+    }
+
+    public function completeJsonBatch(array $requests): array
+    {
+        return array_map(static fn () => [], $requests);
+    }
+
+    public function completeBatch(array $requests): TextBatchResult
+    {
+        return new TextBatchResult([]);
+    }
+
+    public function usageTotals(): array
+    {
+        return ['requests' => $this->requests, 'input_tokens' => 0, 'output_tokens' => 0, 'total_tokens' => 0];
+    }
+}
+
+/**
+ * Fully conformant — validates exactly like both reference clients — but every
+ * transport call fails, as it does behind an expired or wrong key.
+ *
+ * The suite must not read this as a contract violation. It has observed no
+ * behaviour at all.
+ */
+final class ConformantUnreachableFakeLlm implements Llm, UsageReporting
+{
+    /** Only moves after a call succeeds, as both reference clients' does. */
+    public int $requests = 0;
+
+    /** Attempts, which `requests` cannot count precisely because of the above. */
+    public int $calls = 0;
+
+    private function guard(array $opts): void
+    {
+        if (array_key_exists('cached_prefixes', $opts)) {
+            CachedPrefixes::normalize($opts['cached_prefixes'], 'requests');
+        }
+    }
+
+    public function complete(string $prompt, array $opts = []): string
+    {
+        $this->calls++;
+        $this->guard($opts);
+        throw new \RuntimeException('HTTP 401 from api.example.com: invalid x-api-key');
+    }
+
+    public function completeJson(string $prompt, array $opts = []): array
+    {
+        $this->guard($opts);
+        throw new \RuntimeException('HTTP 401 from api.example.com: invalid x-api-key');
+    }
+
+    public function completeJsonBatch(array $requests): array
+    {
+        throw new \RuntimeException('HTTP 401 from api.example.com: invalid x-api-key');
+    }
+
+    public function completeBatch(array $requests): TextBatchResult
+    {
+        $this->calls++;
+        foreach ($requests as $request) {
+            $this->guard($request);
+        }
+        throw new \RuntimeException('HTTP 401 from api.example.com: invalid x-api-key');
+    }
+
+    public function usageTotals(): array
+    {
+        return ['requests' => $this->requests, 'input_tokens' => 0, 'output_tokens' => 0, 'total_tokens' => 0];
+    }
+}
+
+/**
  * Fully conformant, but reports usage the way the raw Anthropic Messages API
  * does: cached tokens land in cache_creation_input_tokens and are EXCLUDED
  * from input_tokens.
@@ -273,7 +370,9 @@ test('a conformant host passes every check', function () {
         $byCheck['cached_prefixes_reach_the_model']->passed,
         'echo probe should recover the nonce',
     );
-    assert_eq(5, $llm->requests, 'full run should spend five completions before retries');
+    // Six, not five: the live tier opens with a plain reachability completion so
+    // that a transport failure is never reported as a contract violation.
+    assert_eq(6, $llm->requests, 'full run should spend six completions before retries');
 });
 
 test('a host that drops cached_prefixes fails, and the failure names the field', function () {
@@ -324,6 +423,64 @@ test('a bad key is never mistaken for validation the host does not have', functi
     }
     // Nothing was proven, so the run as a whole must not read as a pass.
     assert_true(LlmConformance::inconclusive(array_values($findings)), 'an all-skipped run is inconclusive');
+});
+
+test('an unreachable host is reported as unproven, never as non-conformant', function () {
+    // Regression: a bad key used to surface as five separate contract
+    // violations, each naming a clause the host never broke — "the contract
+    // says blank layers are ignored" about an HTTP 401. The structural tier
+    // spent a whole exception type refusing to give that verdict; this tier
+    // owes the same discipline.
+    $llm = new ConformantUnreachableFakeLlm();
+    $findings = LlmConformance::run($llm);
+    $byCheck = conformance_by_check($findings);
+
+    foreach ($byCheck as $check => $finding) {
+        if ($finding->tier !== LlmConformanceFinding::TIER_LIVE) {
+            continue;
+        }
+        assert_true($finding->skipped, "{$check} must skip, not accuse a host it never observed");
+        assert_contains('401', $finding->detail);
+    }
+    // Validation happens before transport, so the structural tier still decides —
+    // which is exactly why the whole-run inconclusive() check cannot carry this.
+    assert_true($byCheck['malformed_prefixes_rejected']->passed);
+    assert_true(!$byCheck['malformed_prefixes_rejected']->skipped);
+    assert_true(!LlmConformance::inconclusive($findings), 'the structural tier did prove something');
+
+    // ... and the run must still be red. A tier that was asked to run and
+    // established nothing cannot hand a build a green light.
+    assert_eq(1, LlmConformance::report($findings)['exit'], 'a wholly skipped live tier must exit non-zero');
+
+    // One completion only: the reachability probe fails and the tier stands down
+    // instead of sending five more calls that could not be attributed anyway.
+    $liveOnly = new ConformantUnreachableFakeLlm();
+    LlmConformance::live($liveOnly);
+    assert_eq(1, $liveOnly->calls, 'an unreachable host must not be probed five more times');
+});
+
+test('the live check roster matches the ids a live run emits', function () {
+    // liveTierUnreachable() names the checks without calling them, so the two
+    // lists can drift silently. This is what stops that.
+    $emitted = array_keys(conformance_by_check(LlmConformance::live(new ConformantFakeLlm())));
+    $skipped = array_keys(conformance_by_check(LlmConformance::live(new ConformantUnreachableFakeLlm())));
+
+    assert_eq($emitted, $skipped, 'the unreachable roster must list exactly the live checks');
+});
+
+test('a payload-echoing error message never outranks a moved request counter', function () {
+    // Regression: the 'cached_prefixes' substring heuristic used to be consulted
+    // BEFORE the request counter, so an adapter that validated nothing, sent all
+    // four shapes to transport and quoted the payload back in its 401 reported
+    // "Rejected all 3 malformed cached_prefixes shapes before transport" — a
+    // green gate for a host with no validation at all.
+    $findings = conformance_by_check(LlmConformance::structural(new PayloadEchoingBadKeyFakeLlm()));
+
+    foreach (['malformed_prefixes_rejected', 'oversized_prefix_list_rejected'] as $check) {
+        assert_true(!$findings[$check]->passed, "{$check} must fail: the host transported every shape");
+        assert_true(!$findings[$check]->skipped, "{$check} must be decisive, not skipped");
+    }
+    assert_contains('sent it, then failed downstream', $findings['malformed_prefixes_rejected']->detail);
 });
 
 test('LlmRequestRejected is accepted as proof even from a usage-blind host', function () {

@@ -126,7 +126,7 @@ So a new host is not considered wired up until it passes the conformance suite:
 
 ```
 php bin/llm-conformance.php --structural   # zero spend, safe on every commit
-php bin/llm-conformance.php                # + five live checks, five completions before retries
+php bin/llm-conformance.php                # + five live checks, six completions before retries
 ```
 
 The checks are behavioural rather than structural, because the interface deliberately hides the transport — a portable suite can't inspect an outgoing request body, only observe what an implementation does. The load-bearing check sends three layers of known size through `completeBatch` — the same seam that authors sections — and asserts they appear in the host's *billed* input usage; that one holds even when the model ignores instructions, and it is the same measurement that exposed the original defect. `LlmConformance` is part of the shipped package, so a host can also call it directly from its own test suite.

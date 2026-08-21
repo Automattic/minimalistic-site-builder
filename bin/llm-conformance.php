@@ -12,8 +12,13 @@ use Automattic\SiteBuild\LlmConformance;
  * Every host that supplies its own Llm (wpcom, Studio, the coding-agent
  * harness) should run this against its adapter before wiring it up, and keep
  * it in that host's CI. The structural pass costs nothing and is safe to run
- * on every commit; the live pass spends five small completions before retries,
- * one of them carrying ~7,400 tokens of cached layers.
+ * on every commit; the live pass spends six small completions before retries,
+ * one of them carrying ~7,500 tokens of cached layers and one ~2,500.
+ *
+ * "Zero spend" is a property of a CONFORMANT host: the structural checks are
+ * only free because the host refuses them before transport. A host that
+ * validates nothing sends all four, so the probes cap max_tokens to keep the
+ * cost of finding that out small.
  *
  * Exits non-zero when a check fails AND when nothing could be proven, because
  * a gate that goes green on "could not tell" is the false confidence this
