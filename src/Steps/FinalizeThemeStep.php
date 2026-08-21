@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\HeaderBehavior;
 use Automattic\SiteBuild\Narrator;
+use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\OverlayKit;
 use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\PageScope;
@@ -120,13 +121,22 @@ final class FinalizeThemeStep implements Step
         }
         self::pruneMotionKit($project, $motion);
         self::pruneHeaderKit($project, $header);
+        $device = DesignDirectionStep::deviceFor($project);
+        // Per kit, not `$overlays !== []`: the catalog-wide predicate would
+        // report shape on a second kit's behalf as soon as one joins the list.
+        $shapeShipped = self::writeOverlayKit($project, self::shapeKit(), ShapeMarkup::kitCss($shape));
+        $surfaceShipped = self::writeOverlayKit($project, self::surfaceKit(), $surfaceCss);
+        $deviceShipped = self::writeOverlayKit($project, self::deviceKit(), Device::kitCss($device));
         $overlays = [];
-        if (self::writeOverlayKit($project, self::shapeKit(), ShapeMarkup::kitCss($shape))) {
+        if ($shapeShipped) {
             $overlays[] = self::shapeKit();
         }
-        if (self::writeOverlayKit($project, self::surfaceKit(), $surfaceCss)) {
+        if ($surfaceShipped) {
             $overlays[] = self::surfaceKit();
             array_push($headerWarnings, ...self::claimedPseudoElementWarnings($project, $surface));
+        }
+        if ($deviceShipped) {
+            $overlays[] = self::deviceKit();
         }
         if ($headerWarnings !== []) {
             $project->addWarnings($this->id(), $headerWarnings);
@@ -141,28 +151,17 @@ final class FinalizeThemeStep implements Step
         Narrator::write($header
             ? "  header: '{$headerBehavior}' state kit enqueued\n"
             : "  header: static (kit not shipped)\n");
-        Narrator::write($surfaceCss !== null
+        Narrator::write($surfaceShipped
             ? "  surface: '{$surface}' overlay enqueued\n"
             : "  surface: {$surface} (kit not shipped)\n");
-        Narrator::write($overlays !== []
+        Narrator::write($deviceShipped
+            ? "  device: '{$device}' utility enqueued\n"
+            : "  device: {$device} (kit not shipped)\n");
+        Narrator::write($shapeShipped
             ? "  shape: '{$shape}' corner kit enqueued\n"
             : '  shape: ' . ($shape ?? 'none committed') . " (kit not shipped)\n");
     }
 
-    /**
-     * Write the build-owned corner-language stylesheet for a rounded shape
-     * commitment: contained media surfaces theme.json cannot reach (the media
-     * half of core/media-text, the core/cover canvas). `sharp` and an absent
-     * commitment ship no kit — those surfaces are square by default — and any
-     * kit left by an earlier finalize run is pruned so the shape cannot go
-     * stale.
-     */
-    /**
-     * The corner-language kit. Kits are described here rather than spelled out
-     * at each of their four use sites (declaration, write, enqueue, editor
-     * mirror), so adding the next CSS commitment is one entry instead of
-     * another copy of this wiring.
-     */
     /**
      * The surface overlay claims `body::before`, so if the generated
      * stylesheet was already using it, something lost its layer. Silence there
@@ -199,13 +198,16 @@ final class FinalizeThemeStep implements Step
     }
 
     /**
-     * Every overlay kit this step knows how to ship, in load order.
+     * Every overlay kit this step knows how to ship, in load order. Describing
+     * a kit as data rather than spelling it out at each of its four use sites
+     * (declaration, write, enqueue, editor mirror) is what keeps the next CSS
+     * commitment to one entry instead of another copy of this wiring.
      *
      * @return list<OverlayKit>
      */
     public static function overlayKits(): array
     {
-        return [self::shapeKit(), self::surfaceKit()];
+        return [self::shapeKit(), self::surfaceKit(), self::deviceKit()];
     }
 
     public static function surfaceKit(): OverlayKit
@@ -217,6 +219,19 @@ final class FinalizeThemeStep implements Step
         );
     }
 
+    public static function deviceKit(): OverlayKit
+    {
+        return new OverlayKit(
+            'device',
+            '// Committed one-band CSS device. Loads after generated style.css.',
+        );
+    }
+
+    /**
+     * The corner-language kit: contained media surfaces theme.json cannot reach
+     * (the media half of core/media-text, the core/cover canvas). `sharp` and an
+     * absent commitment resolve to no CSS, so the kit is pruned instead.
+     */
     public static function shapeKit(): OverlayKit
     {
         return new OverlayKit(

@@ -50,6 +50,9 @@ Emit exactly one `<img>` in whole document, inside `<section id="hero">`. Omit `
 - Use system font stacks only. Do not emit `@font-face`, `@import`, or any `url()` in CSS.
 - Do not load external stylesheets, fonts, scripts, images, CDN resources, or other dependencies. Do not emit `<link>` or `<iframe>`.
 - No JavaScript. Do not emit `<script>`, inline event-handler attributes, `javascript:` URLs, or behavior-bearing markup.
+- Never place a `device--hairline-rule`, `device--section-numeral`, or `device--stamp` class in this
+  document. This is the hero and fold, and the DESIGN DIRECTION's device belongs on ONE later
+  non-hero band; the build strips it from the hero.
 - No HTML comments. No CSS comments.
 
 Return only finished HTML document.

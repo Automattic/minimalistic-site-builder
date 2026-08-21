@@ -1248,6 +1248,52 @@ test('normalize commits a catalog surface and falls unknown textures back to non
     assert_eq('none', DesignDirectionStep::normalizeSurface(null));
 });
 
+test('normalize commits a catalog device', function () {
+    $direction = DesignDirectionStep::normalize([
+        'description' => 'A stamp on the menu.',
+        'device' => 'stamp',
+    ], 'cinematic-safe-zone');
+    assert_eq('stamp', $direction['device']);
+    assert_contains('device--stamp', DesignDirectionStep::format($direction));
+
+    $warnings = [];
+    assert_eq('none', DesignDirectionStep::normalizeDevice('twine', $warnings));
+    assert_contains('unbuildable motif', implode(' ', $warnings));
+});
+
+test('the direction description is never edited to remove motif words', function () {
+    // Deleting motif words mid-sentence left broken English in the text every
+    // downstream prompt reads through format(): "Kraft labels with twine and
+    // tape corners on the loaf" came out as "Kraft labels with and on the
+    // loaf". prompts/design-direction.md already says twine and tape are not
+    // devices, so it owns the rule and the description ships as authored.
+    $authored = 'Kraft labels with twine and tape corners on the loaf.';
+    $repairs = [];
+    $warnings = [];
+    $direction = DesignDirectionStep::normalize([
+        'description' => $authored,
+        'device' => 'none',
+    ], 'cinematic-safe-zone', '', $repairs, $warnings);
+
+    assert_eq($authored, $direction['description'], 'the sentence stays readable');
+    assert_true(
+        !str_contains(implode(' ', $warnings), 'unbuildable motif phrases removed'),
+        'no removal is claimed',
+    );
+});
+
+test('a description naming the accent font is left alone', function () {
+    // The removal list carried "rotated caveat", and Caveat is a real font a
+    // direction can commit to (#290). A direction that used it in the
+    // narrative had the phrase deleted and was warned it was unbuildable.
+    $authored = 'Flavor labels in a rotated Caveat, hand-written on kraft.';
+    $direction = DesignDirectionStep::normalize([
+        'description' => $authored,
+        'device' => 'none',
+    ], 'cinematic-safe-zone');
+    assert_eq($authored, $direction['description']);
+});
+
 test('directionFor returns nothing when no direction was committed', function () {
     $project = new Project(sys_get_temp_dir() . '/design-direction-absent-' . uniqid());
     try {
@@ -1255,4 +1301,41 @@ test('directionFor returns nothing when no direction was committed', function ()
     } finally {
         exec('rm -rf ' . escapeshellarg($project->root));
     }
+});
+
+test('normalize commits optional accent type and leaves an empty accent valid', function () {
+    $prompt = file_get_contents(repo_path('prompts/design-direction.md')) ?: '';
+    assert_eq(1, preg_match(
+        '/"accent":\s*\{\s*"family":\s*"",\s*"weights":\s*\[\],\s*'
+            . '"italic":\s*false,\s*"axes":\s*\{\},\s*"character":\s*""\s*\}/',
+        $prompt,
+    ), 'the empty-accent prompt example is warning-free');
+
+    $withAccent = DesignDirectionStep::normalize([
+        'description' => 'Caveat on flavor labels.',
+        'type' => [
+            'heading' => ['family' => 'Oswald', 'weights' => [700], 'italic' => false, 'axes' => [], 'character' => ''],
+            'body' => ['family' => 'Source Sans 3', 'weights' => [400], 'italic' => false, 'axes' => [], 'character' => ''],
+            'accent' => ['family' => 'Caveat', 'weights' => [400, 700], 'italic' => false, 'axes' => [], 'character' => 'hand labels'],
+        ],
+    ], 'cinematic-safe-zone');
+
+    assert_eq('Caveat', $withAccent['type']['accent']['family']);
+    assert_eq([400, 700], $withAccent['type']['accent']['weights']);
+    assert_contains('accent — Caveat', DesignDirectionStep::format($withAccent));
+
+    $repairs = [];
+    $warnings = [];
+    $empty = DesignDirectionStep::normalize([
+        'description' => 'Two faces only.',
+        'type' => [
+            'heading' => ['family' => 'Oswald', 'weights' => [700], 'italic' => false, 'axes' => [], 'character' => ''],
+            'body' => ['family' => 'Source Sans 3', 'weights' => [400], 'italic' => false, 'axes' => [], 'character' => ''],
+            'accent' => ['family' => '', 'weights' => [], 'italic' => false, 'axes' => [], 'character' => ''],
+        ],
+        'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
+    ], 'cinematic-safe-zone', '', $repairs, $warnings);
+    assert_eq('', $empty['type']['accent']['family']);
+    assert_true(!str_contains(DesignDirectionStep::format($empty), 'accent —'));
+    assert_eq([], $warnings, 'valid empty accent emits no durable warning');
 });

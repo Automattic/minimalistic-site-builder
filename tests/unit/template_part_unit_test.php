@@ -45,7 +45,7 @@ test('HeaderUnit generates a constrained header from self-contained input', func
     ]));
     $markup = $result->markup;
 
-    $prompt = $llm->calls[0]['prompt'];
+    $prompt = llm_call_text($llm->calls[0]);
     foreach (['PART-SPEC-SENTINEL', 'part-language-sentinel', 'part-theme-sentinel', 'PART-DIRECTION-SENTINEL', 'PART-OUTLINE-SENTINEL', 'PART-HERO-SENTINEL', 'PART-PAGES-SENTINEL', 'PART-NAV-SENTINEL', 'ABOVE-FOLD CONTRACT', 'branded-lockup', 'PART-BEHAVIOR-SENTINEL'] as $sentinel) {
         assert_contains($sentinel, $prompt);
     }
@@ -497,7 +497,7 @@ test('FooterUnit generates a constrained footer from self-contained input', func
     $result = $unit->generate(template_part_unit_input());
     $markup = $result->markup;
 
-    $prompt = $llm->calls[0]['prompt'];
+    $prompt = llm_call_text($llm->calls[0]);
     foreach (['PART-SPEC-SENTINEL', 'part-language-sentinel', 'part-theme-sentinel', 'PART-DIRECTION-SENTINEL', 'PART-OUTLINE-SENTINEL', 'PART-PAGES-SENTINEL', 'PART-FINAL-SECTION-SENTINEL', 'photographic-split'] as $sentinel) {
         assert_contains($sentinel, $prompt);
     }
