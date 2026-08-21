@@ -38,11 +38,12 @@ test('validateNote resolves the bare reveal class the phrase table missed', func
     assert_eq(['reveal'], $note['classes']);
 });
 
-test('validateNote spends the entrance budget once, keeping stagger off reveal', function () {
-    // prompts/section.md forbids stagger-children beside any reveal-* class.
+test('validateNote keeps stagger and reveal together: they belong on different blocks', function () {
+    // prompts/section.md forbids the pair on one block; the site-wide note
+    // names languages, and motion-sanity enforces the per-block clash.
     $note = Motion::validateNote(['stagger-children', 'reveal-up'], 'energetic');
-    assert_eq(['stagger-children'], $note['classes']);
-    assert_contains('entrance budget', implode(' ', $note['dropped']));
+    assert_eq(['stagger-children', 'reveal-up'], $note['classes']);
+    assert_eq([], $note['dropped']);
 });
 
 test('validateNote keeps one ambient effect for the whole page', function () {
@@ -51,14 +52,14 @@ test('validateNote keeps one ambient effect for the whole page', function () {
     assert_contains('ambient budget', implode(' ', $note['dropped']));
 });
 
-test('validateNote refuses the pairs that fight over one transform', function () {
+test('validateNote keeps hover beside the ambient it must not share a block with', function () {
     $drift = Motion::validateNote(['ambient-drift', 'hover-lift'], 'energetic');
-    assert_eq(['ambient-drift'], $drift['classes']);
-    assert_contains('same transform', implode(' ', $drift['dropped']));
+    assert_eq(['ambient-drift', 'hover-lift'], $drift['classes']);
+    assert_eq([], $drift['dropped']);
 
     $burns = Motion::validateNote(['ken-burns', 'hover-reveal'], 'dramatic');
-    assert_eq(['ken-burns'], $burns['classes']);
-    assert_contains('same transform', implode(' ', $burns['dropped']));
+    assert_eq(['ken-burns', 'hover-reveal'], $burns['classes']);
+    assert_eq([], $burns['dropped']);
 });
 
 test('validateNote refuses hero-entrance in a site-wide note', function () {

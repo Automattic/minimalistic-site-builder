@@ -96,14 +96,15 @@ final class Motion
     }
 
     /**
-     * Class pairs prompts/section.md forbids on one block because each pair
-     * fights over the same transform. A note that names both would hand the
-     * section prompts a combination they are told to refuse.
+     * The prompt sentence for a validated class list. Persisted JSON stores
+     * the list; format() is the only place this sentence is rendered.
+     *
+     * @param list<string> $classes
      */
-    public const NOTE_CONFLICTS = [
-        ['ambient-drift', 'hover-lift'],
-        ['ken-burns', 'hover-reveal'],
-    ];
+    public static function formatNote(array $classes): string
+    {
+        return $classes === [] ? '' : 'Use kit classes: ' . implode(', ', $classes) . '.';
+    }
 
     /**
      * Read a motion note as the bounded list of kit classes it is.
@@ -115,9 +116,10 @@ final class Motion
      * "surprise" as `rise`.
      *
      * Accepts a JSON list, or one string of comma/space separated names, since
-     * models write both. Budgets follow prompts/section.md: one entrance class
-     * (which also keeps `stagger-children` away from any `reveal-*`), one
-     * ambient effect per page, one hover response, and neither forbidden pair.
+     * models write both. Site-wide budgets: one ambient (the page-level cap in
+     * prompts/section.md) and one hover language. Entrance classes are not
+     * capped here — stagger and a reveal belong on different block kinds, and
+     * motion-sanity enforces the per-block pairs that fight over one transform.
      *
      * @return array{note:string,classes:list<string>,dropped:list<string>}
      */
@@ -150,25 +152,18 @@ final class Motion
                 continue;
             }
             $bucket = self::noteBucket($token);
-            $taken = array_filter($kept, static fn (string $c): bool => self::noteBucket($c) === $bucket);
-            if ($taken !== []) {
-                $dropped[] = $token . ' (' . $bucket . ' budget already spent on ' . reset($taken) . ')';
-                continue;
-            }
-            $clash = self::conflictWith($token, $kept);
-            if ($clash !== null) {
-                $dropped[] = $token . ' (fights ' . $clash . ' over the same transform)';
-                continue;
+            if ($bucket !== 'entrance') {
+                $taken = array_filter($kept, static fn (string $c): bool => self::noteBucket($c) === $bucket);
+                if ($taken !== []) {
+                    $dropped[] = $token . ' (' . $bucket . ' budget already spent on ' . reset($taken) . ')';
+                    continue;
+                }
             }
             $kept[] = $token;
         }
 
-        if ($kept === []) {
-            return ['note' => '', 'classes' => [], 'dropped' => $dropped];
-        }
-
         return [
-            'note' => 'Use kit classes: ' . implode(', ', $kept) . '.',
+            'note' => self::formatNote($kept),
             'classes' => $kept,
             'dropped' => $dropped,
         ];
@@ -198,26 +193,12 @@ final class Motion
         return $parts;
     }
 
-    /** Which prompts/section.md budget a class draws from. */
+    /** Which site-wide note budget a class draws from. Entrance is uncapped. */
     private static function noteBucket(string $class): string
     {
         if (in_array($class, self::AMBIENT_CLASSES, true)) {
             return 'ambient';
         }
         return in_array($class, self::HOVER_CLASSES, true) ? 'hover' : 'entrance';
-    }
-
-    /** The already-kept class a candidate is forbidden to sit beside, if any. */
-    private static function conflictWith(string $class, array $kept): ?string
-    {
-        foreach (self::NOTE_CONFLICTS as [$a, $b]) {
-            if ($class === $a && in_array($b, $kept, true)) {
-                return $b;
-            }
-            if ($class === $b && in_array($a, $kept, true)) {
-                return $a;
-            }
-        }
-        return null;
     }
 }

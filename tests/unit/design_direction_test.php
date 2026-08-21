@@ -136,7 +136,7 @@ test('design-direction persists an unmappable motion-note warning and reaches a 
     (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
 
     $written = $project->readJson('designDirection.json');
-    assert_eq('', $written['motion_note']);
+    assert_eq([], $written['motion_note']);
     foreach (['title', 'palette', 'image_grade', 'card_style'] as $sibling) {
         assert_eq($authored[$sibling], $written[$sibling], "{$sibling} survives motion-note removal");
     }
@@ -156,7 +156,7 @@ test('design-direction persists an unmappable motion-note warning and reaches a 
         'designDirection.json',
         'field motion_note',
         'a cinematic wipe nobody ships',
-        'delivered ""',
+        'delivered=[]',
         'named no motion-kit class the calm profile ships',
     ] as $context) {
         assert_contains($context, $motionWarning);
@@ -1038,9 +1038,25 @@ test('normalize commits a motion profile: valid values pass, anything else defau
         'motion' => 'calm',
         'motion_note' => ['hover-lift'],
     ], 'cinematic-safe-zone');
-    assert_contains('hover-lift', $mapped['motion_note'], 'a named kit class survives');
+    assert_eq(['hover-lift'], $mapped['motion_note'], 'a named kit class survives as the persisted list');
+    $roundTripRepairs = [];
+    $roundTripWarnings = [];
+    $roundTrip = DesignDirectionStep::normalize(
+        $mapped,
+        'cinematic-safe-zone',
+        $mapped['concept_seed'],
+        $roundTripRepairs,
+        $roundTripWarnings,
+    );
     assert_eq(
-        '',
+        json_encode($mapped, JSON_THROW_ON_ERROR),
+        json_encode($roundTrip, JSON_THROW_ON_ERROR),
+        'a mapped note is a warning-free fixed point',
+    );
+    assert_eq([], $roundTripRepairs);
+    assert_eq([], $roundTripWarnings);
+    assert_eq(
+        [],
         DesignDirectionStep::normalize(['description' => 'x', 'motion_note' => ' a note '], 'cinematic-safe-zone')['motion_note'],
         'prose names no class',
     );
@@ -1052,7 +1068,7 @@ test('normalize commits a motion profile: valid values pass, anything else defau
         'motion' => 'calm',
         'motion_note' => 42,
     ], 'cinematic-safe-zone', '', $repairs, $warnings);
-    assert_eq('', $unusable['motion_note']);
+    assert_eq([], $unusable['motion_note']);
     assert_eq([], $repairs, 'type loss is a degradation, not a successful repair');
     $motionWarnings = array_values(array_filter(
         $warnings,
@@ -1063,7 +1079,7 @@ test('normalize commits a motion profile: valid values pass, anything else defau
         "file='designDirection.json'",
         'path="motion_note"',
         'authored=42',
-        'delivered=""',
+        'delivered=[]',
         'disposition=motion note was neither a class list nor a string and was removed',
     ] as $context) {
         assert_contains($context, $motionWarnings[0]);
@@ -1078,18 +1094,14 @@ test('normalize commits a motion profile: valid values pass, anything else defau
         'motion' => 'minimal',
         'motion_note' => ['hover-lift', 'ken-burns'],
     ], 'cinematic-safe-zone', '', $partialRepairs, $partialWarnings);
-    assert_contains('hover-lift', $partial['motion_note']);
-    assert_true(
-        !str_contains($partial['motion_note'], 'ken-burns'),
-        'a class the minimal profile cannot ship never reaches the note',
-    );
+    assert_eq(['hover-lift'], $partial['motion_note']);
     assert_contains('ken-burns', implode(' ', $partialWarnings));
 });
 
 test('format renders the motion commitment with its executable meaning', function () {
-    $calm = DesignDirectionStep::format(['description' => 'x', 'motion' => 'calm', 'motion_note' => 'Use kit classes: ken-burns.']);
+    $calm = DesignDirectionStep::format(['description' => 'x', 'motion' => 'calm', 'motion_note' => ['ken-burns']]);
     assert_contains('**Motion**: calm', $calm);
-    assert_contains('ken-burns', $calm);
+    assert_contains('Use kit classes: ken-burns.', $calm);
 
     $minimal = DesignDirectionStep::format(['description' => 'x', 'motion' => 'minimal']);
     assert_contains('hover-lift', $minimal, 'minimal names the only classes allowed');

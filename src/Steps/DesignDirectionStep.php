@@ -290,7 +290,7 @@ final class DesignDirectionStep implements Step
             'surface'          => Surface::DEFAULT,
             'device'           => Device::DEFAULT,
             'motion'           => Motion::DEFAULT_PROFILE,
-            'motion_note'      => '',
+            'motion_note'      => [],
             'concept_seed'     => $seed,
             'hero_blueprint'   => HeroBlueprint::defaultFor($recipe),
         ];
@@ -595,12 +595,15 @@ final class DesignDirectionStep implements Step
         // motion_note names kit classes; it is not art direction to interpret.
         // Every token must be a class exactly, so a phrase the kit cannot ship
         // drops whole instead of turning on whichever class its letters
-        // happen to contain.
+        // happen to contain. Persist the list; format() renders the sentence.
         $rawMotionNote = $raw['motion_note'] ?? null;
         $authoredNote = self::describeNote($rawMotionNote);
         $validated = Motion::validateNote($rawMotionNote, $motion);
-        $motionNote = $validated['note'];
+        $motionNote = $validated['classes'];
         $notePresent = $rawMotionNote !== null && $rawMotionNote !== '' && $rawMotionNote !== [];
+        $alreadyCanonical = is_array($rawMotionNote)
+            && array_is_list($rawMotionNote)
+            && $rawMotionNote === $motionNote;
         if (
             array_key_exists('motion_note', $raw)
             && $rawMotionNote !== null
@@ -609,21 +612,23 @@ final class DesignDirectionStep implements Step
         ) {
             $warnings[] = "file='designDirection.json'; path=\"motion_note\"; authored="
                 . Warnings::value($rawMotionNote)
-                . '; delivered=""; disposition=motion note was neither a class list nor a string and was removed';
+                . '; delivered=' . Warnings::value($motionNote)
+                . '; disposition=motion note was neither a class list nor a string and was removed';
         } elseif ($notePresent && $validated['classes'] === []) {
             $warnings[] = 'designDirection.json: field motion_note authored '
                 . Warnings::value($authoredNote)
-                . '; delivered ""; disposition named no motion-kit class the '
+                . '; delivered=' . Warnings::value($motionNote)
+                . '; disposition named no motion-kit class the '
                 . $motion . ' profile ships (' . implode('; ', $validated['dropped']) . ')';
         } elseif ($validated['dropped'] !== []) {
             $warnings[] = 'designDirection.json: field motion_note authored '
                 . Warnings::value($authoredNote)
-                . '; delivered ' . self::describe($motionNote)
+                . '; delivered=' . Warnings::value($motionNote)
                 . '; disposition dropped ' . implode('; ', $validated['dropped']);
-        } elseif ($notePresent && $motionNote !== $authoredNote) {
+        } elseif ($notePresent && !$alreadyCanonical) {
             $repairs[] = 'designDirection.json: field motion_note authored '
-                . self::describe($authoredNote) . ' delivered ' . self::describe($motionNote)
-                . '; disposition rendered the committed classes as the note line';
+                . self::describe($rawMotionNote) . ' delivered ' . self::describe($motionNote)
+                . '; disposition rendered the committed classes as the note list';
         }
 
         // The corner language is a fixed list; anything unrecognized falls
@@ -1007,7 +1012,7 @@ final class DesignDirectionStep implements Step
                     'dramatic'  => 'long directional masks and a cinematic hero focus pull',
                 ][$motion] . ' — place motion classes sparingly, per their budget rules',
             };
-            $note = trim((string) ($direction['motion_note'] ?? ''));
+            $note = self::formatMotionNote($direction['motion_note'] ?? null);
             $facts[] = "- **Motion**: {$motion} — {$meaning}." . ($note !== '' ? " Motion note: {$note}" : '');
         }
 
@@ -1025,6 +1030,24 @@ final class DesignDirectionStep implements Step
         if (is_array($raw)) {
             $parts = array_filter($raw, 'is_string');
             return implode(', ', array_map('trim', $parts));
+        }
+        return is_string($raw) ? trim($raw) : '';
+    }
+
+    /**
+     * Prompt sentence for a persisted class list. A leftover string (hand-written
+     * fixtures, predating this contract) is passed through unchanged.
+     */
+    private static function formatMotionNote(mixed $raw): string
+    {
+        if (is_array($raw)) {
+            $classes = [];
+            foreach ($raw as $item) {
+                if (is_string($item) && trim($item) !== '') {
+                    $classes[] = trim($item);
+                }
+            }
+            return Motion::formatNote($classes);
         }
         return is_string($raw) ? trim($raw) : '';
     }
