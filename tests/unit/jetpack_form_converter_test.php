@@ -369,3 +369,59 @@ test('converter carries placeholder text onto the converted fields', function ()
 
     assert_contains('"placeholder":"tu@correo.com"', $result['markup']);
 });
+
+test('converter strips protocol-relative hrefs instead of treating them as root-relative', function () {
+    $markup = '<!-- wp:html --><form action="mailto:x@x.example">'
+        . '<label for="e">Email</label><input type="email" id="e" name="e">'
+        . '<p>See <a href="//evil.example/phish">our policy</a>.</p>'
+        . '<button type="submit">Enviar</button></form><!-- /wp:html -->';
+
+    $result = JetpackFormConverter::fix($markup);
+
+    assert_true(!str_contains($result['markup'], '//evil.example'), 'protocol-relative URL dropped');
+    assert_contains('our policy', $result['markup']);
+});
+
+test('converter refuses a search box named q even without role=search', function () {
+    $markup = '<!-- wp:html --><form action="/search" method="get">'
+        . '<input type="text" name="q"><button type="submit">Search</button></form><!-- /wp:html -->';
+
+    assert_eq($markup, JetpackFormConverter::fix($markup)['markup']);
+});
+
+test('converter still converts a contact form whose subject field is named s', function () {
+    $markup = '<!-- wp:html --><form action="mailto:x@x.example">'
+        . '<label for="s">Subject</label><input type="text" id="s" name="s">'
+        . '<label for="e">Email</label><input type="email" id="e" name="e">'
+        . '<button type="submit">Enviar</button></form><!-- /wp:html -->';
+
+    $result = JetpackFormConverter::fix($markup);
+
+    assert_contains('<!-- wp:jetpack/contact-form -->', $result['markup']);
+    assert_contains('"label":"Subject"', $result['markup']);
+    assert_contains('jetpack/field-email', $result['markup']);
+});
+
+test('converter reads label text from nested spans', function () {
+    $markup = '<!-- wp:html --><form action="mailto:x@x.example">'
+        . '<label for="e"><span>Email</span></label><input type="email" id="e" name="e">'
+        . '<button type="submit">Enviar</button></form><!-- /wp:html -->';
+
+    $result = JetpackFormConverter::fix($markup);
+
+    assert_contains('"label":"Email"', $result['markup']);
+});
+
+test('converter warns when a select option value differs from its display text', function () {
+    $markup = '<!-- wp:html --><form action="mailto:x@x.example">'
+        . '<label for="c">Color</label><select id="c" name="c">'
+        . '<option value="sku-9">Blue mug</option>'
+        . '</select><button type="submit">Ok</button></form><!-- /wp:html -->';
+
+    $result = JetpackFormConverter::fix($markup);
+
+    assert_contains('"options":["Blue mug"]', $result['markup']);
+    $all = implode("\n", $result['warnings']);
+    assert_contains('option value "sku-9"', $all);
+    assert_contains('Blue mug', $all);
+});

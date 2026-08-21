@@ -103,3 +103,24 @@ test('FixBlocksStep drops form-conversion warnings when the file is restored', f
         assert_true(!str_contains($warnings, 'form conversion replaced'));
     });
 });
+
+test('FixBlocksStep does not convert raw forms when the host owns placeholders', function () {
+    with_project('jetpack-form-host-', function ($project): void {
+        $original = '<!-- wp:html --><form action="mailto:x@x.example">'
+            . '<label for="e">Email</label><input type="email" id="e" name="e">'
+            . '<button type="submit">Enviar</button></form><!-- /wp:html -->';
+        $project->writeJson('meta.json', ['prompt' => 'x', 'form_placeholders' => true]);
+        $project->writeText('theme/parts/contact.html', $original);
+        $fixer = new class implements BlockFixer {
+            public function fix(string $themeDir): string
+            {
+                return '[fix-templates] noop';
+            }
+        };
+
+        quietly(fn () => (new FixBlocksStep($fixer))->run($project));
+
+        assert_eq($original, $project->readText('theme/parts/contact.html'));
+        assert_true(!str_contains($project->readText('theme/parts/contact.html'), 'wp:jetpack/contact-form'));
+    });
+});

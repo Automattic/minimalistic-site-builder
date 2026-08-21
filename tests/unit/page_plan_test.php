@@ -864,7 +864,8 @@ test('page-plan fans out one request per page with per-page context', function (
     assert_contains('"slug" and "type" are machine-facing identifiers and are ALWAYS plain English words', $reqs['home']['prompt']);
     assert_contains('builder derives each section\'s structural role', $reqs['home']['prompt']);
     assert_contains('Put it in exactly one appropriate section', $reqs['home']['prompt']);
-    assert_contains('state in `content_notes` that it needs a working form', $reqs['home']['prompt']);
+    assert_contains('state in `content_notes` that it needs a form', $reqs['home']['prompt']);
+    assert_contains('never plan raw HTML form controls', $reqs['home']['prompt']);
     assert_contains('examples:', $reqs['home']['prompt']);
     assert_contains('Never plan a footer or site-chrome section', $reqs['home']['prompt']);
     assert_contains('appends it after this page\'s LAST section', $reqs['home']['prompt']);

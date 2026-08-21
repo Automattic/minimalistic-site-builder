@@ -181,20 +181,8 @@ final class JetpackFormConverter
     /** @return array{markup:string, summary:string, warnings:list<string>}|null */
     private static function convertForm(\DOMElement $form): ?array
     {
-        // A search box or a login is not a submission to the site owner;
-        // rewriting it would destroy behavior (and email visitors' search
-        // words to the owner) instead of repairing anything. WordPress's
-        // search field is named `s`. Refusal is deliberate escalation: the
-        // raw form stays and the validator's raw-form problem reports it.
-        if (strtolower($form->getAttribute('role')) === 'search') {
+        if (self::isRefusedForm($form)) {
             return null;
-        }
-        foreach ($form->getElementsByTagName('input') as $input) {
-            if (in_array(strtolower($input->getAttribute('type')), ['password', 'search'], true)
-                || strtolower($input->getAttribute('name')) === 's'
-            ) {
-                return null;
-            }
         }
 
         $formName = self::formName($form);
@@ -222,6 +210,70 @@ final class JetpackFormConverter
 
         $summary = $inner['fields'] . ' field(s)' . ($isMailto ? ', mailto action dropped' : '');
         return ['markup' => $markup, 'summary' => $summary, 'warnings' => $warnings];
+    }
+
+    /**
+     * Search and login forms are not submissions to the site owner. Rewriting
+     * them would email visitors' queries (or credentials) to the admin.
+     *
+     * WordPress's search field is named `s`, but a contact form's subject
+     * field is often named `s` too — refuse `s` only when the form has no
+     * contact-like controls (email, telephone, url, date, textarea).
+     */
+    private static function isRefusedForm(\DOMElement $form): bool
+    {
+        if (strtolower($form->getAttribute('role')) === 'search') {
+            return true;
+        }
+
+        $action = strtolower($form->getAttribute('action'));
+        if (str_contains($action, 'wp-login.php')
+            || preg_match('~(wp-login|/(?:log|sign)[-_]?in)(?:/|\?|$|#)~i', $action) === 1
+        ) {
+            return true;
+        }
+        if (preg_match('~/(?:search)(?:/|\?|$|#)|[?&]s=|/s(?:/|\?|$|#)~i', $action) === 1) {
+            return true;
+        }
+
+        $hasS = false;
+        $hasSearchName = false;
+        $contactLike = 0;
+        foreach ($form->getElementsByTagName('input') as $input) {
+            $type = strtolower($input->getAttribute('type') ?: 'text');
+            $name = strtolower($input->getAttribute('name'));
+            $auto = strtolower($input->getAttribute('autocomplete'));
+            if ($type === 'password' || $type === 'search'
+                || in_array($auto, ['current-password', 'username', 'new-password'], true)
+            ) {
+                return true;
+            }
+            if (in_array($name, ['q', 'query', 'search'], true)) {
+                $hasSearchName = true;
+            }
+            if ($name === 's') {
+                $hasS = true;
+            }
+            if (in_array($type, ['email', 'tel', 'url', 'date'], true)) {
+                $contactLike++;
+            }
+        }
+        if ($form->getElementsByTagName('textarea')->length > 0) {
+            $contactLike++;
+        }
+        if ($hasSearchName) {
+            return true;
+        }
+        return $hasS && $contactLike === 0;
+    }
+
+    /** Root-relative paths must be a single slash, not protocol-relative `//host`. */
+    private static function hrefIsSafe(string $href): bool
+    {
+        if (preg_match('#^(https?:|mailto:|tel:|\#)#i', $href) === 1) {
+            return true;
+        }
+        return str_starts_with($href, '/') && !str_starts_with($href, '//');
     }
 
     /**
@@ -420,6 +472,11 @@ final class JetpackFormConverter
                 $warnings[] = "form \"{$formName}\": preselected choice \"{$text}\" of \"{$label}\""
                     . ' not carried; the converted select starts unselected';
             }
+            $value = $option->getAttribute('value');
+            if ($option->hasAttribute('value') && $value !== '' && $value !== $text) {
+                $warnings[] = "form \"{$formName}\": option value " . Warnings::value($value)
+                    . " of \"{$label}\" not carried; visitors submit the display text \"{$text}\"";
+            }
             $options[] = $text;
         }
         if ($options === []) {
@@ -507,8 +564,22 @@ final class JetpackFormConverter
         foreach ($el->childNodes as $child) {
             if ($child->nodeType === XML_TEXT_NODE) {
                 $text .= $child->textContent;
+                continue;
             }
+            if (!$child instanceof \DOMElement) {
+                continue;
+            }
+            $tag = strtolower($child->tagName);
+            if (in_array($tag, ['input', 'select', 'textarea', 'button'], true)
+                || strtolower($child->getAttribute('aria-hidden')) === 'true'
+            ) {
+                continue;
+            }
+            $text .= self::ownText($child);
         }
+        $text = self::collapse($text);
+        $text = preg_replace('/\s*\((?:optional|opcional)\)\s*$/iu', '', $text) ?? $text;
+        $text = rtrim($text, " \t*");
         return self::collapse($text);
     }
 
@@ -540,7 +611,7 @@ final class JetpackFormConverter
             $inner = self::inlineHtml($child);
             if ($tag === 'a') {
                 $href = trim($child->getAttribute('href'));
-                $safe = preg_match('#^(https?:|mailto:|tel:|/|\#)#i', $href) === 1;
+                $safe = self::hrefIsSafe($href);
                 $html .= $safe
                     ? '<a href="' . htmlspecialchars($href, ENT_QUOTES | ENT_HTML5 | ENT_SUBSTITUTE, 'UTF-8') . '">' . $inner . '</a>'
                     : $inner;

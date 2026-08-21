@@ -467,7 +467,7 @@ test('validator flags raw form markup in generated markup', function () {
     $joined = implode(' ', ThemeValidator::validate($project));
     assert_contains('plugin/pages/contact.html', $joined);
     assert_contains('raw form markup', $joined);
-    assert_contains('use Jetpack Forms blocks', $joined);
+    assert_contains('supported form contract', $joined);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -916,12 +916,30 @@ test('validator reports an unmaterialized form placeholder', function () {
     [$project, $tmp] = validator_project();
 
     $project->writeText('plugin/pages/contacto.html',
-        '<!-- wp:html --><div class="jetpack-form-placeholder"><h3>Booking form</h3>'
+        '<!-- wp:html --><div class="html-form-placeholder"><h3>Booking form</h3>'
         . '<p>Booking form: name, email, message</p></div><!-- /wp:html -->'
     );
     $problems = ThemeValidator::validate($project);
     assert_eq(1, count($problems));
-    assert_true(str_contains($problems[0], 'unmaterialized jetpack-form-placeholder'), 'stub reported');
+    assert_true(str_contains($problems[0], 'unmaterialized html-form-placeholder'), 'stub reported');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('validator reports an HTML-first form stub even when a JP_FORM placeholder is on the same page', function () {
+    [$project, $tmp] = validator_project();
+    $project->writeJson('meta.json', ['prompt' => 'x', 'form_placeholders' => true]);
+    $project->writeText(
+        'plugin/pages/contacto.html',
+        '<!-- wp:paragraph {"className":"jetpack-form-placeholder"} -->'
+        . '<p class="jetpack-form-placeholder">JP_FORM: contact | Email:email:required | Send</p>'
+        . '<!-- /wp:paragraph -->'
+        . '<!-- wp:html --><div class="html-form-placeholder"><p>Booking form: name, email</p></div><!-- /wp:html -->'
+    );
+
+    $joined = implode(' ', ThemeValidator::validate($project));
+    assert_contains('unmaterialized html-form-placeholder', $joined);
+    assert_true(!str_contains($joined, 'unparseable form spec'), 'valid JP_FORM spec is not flagged');
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

@@ -87,27 +87,22 @@ final class ThemeValidator
         foreach ($checked as $rel) {
             if ($project->exists($rel) && preg_match('/<(form|input|textarea|select)\b/i', $project->readText($rel), $m)) {
                 $problems[] = "{$rel}: contains raw form markup (<" . strtolower($m[1])
-                    . '>) — use Jetpack Forms blocks instead';
+                    . '>) — use the supported form contract';
             }
         }
 
-        // HTML-first design stubs reserve a requested form with a
-        // jetpack-form-placeholder container so the request survives for a
-        // later form step. JP_FORM paragraph specs are a different contract
-        // (FormPlaceholder) and are checked below; a leftover HTML stub means
-        // that step has not run and visitors would see the placeholder.
+        // HTML-first design stubs reserve a requested form with a distinct
+        // class so hosts looking for JP_FORM paragraphs do not pick them up.
+        // A leftover stub means the materialization step has not run.
         foreach ($checked as $rel) {
             if (!$project->exists($rel)) {
                 continue;
             }
             $markup = $project->readText($rel);
-            if (!str_contains($markup, 'jetpack-form-placeholder')) {
+            if (!preg_match('/\bhtml-form-placeholder\b/', $markup)) {
                 continue;
             }
-            if (FormPlaceholder::find($markup) !== [] || FormPlaceholder::markerCount($markup) > 0) {
-                continue;
-            }
-            $problems[] = "{$rel}: contains an unmaterialized jetpack-form-placeholder — the requested form was never built";
+            $problems[] = "{$rel}: contains an unmaterialized html-form-placeholder — the requested form was never built";
         }
 
         // A form placeholder is a spec a host has to parse. The library owns

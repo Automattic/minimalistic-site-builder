@@ -399,19 +399,22 @@ final class FixBlocksStep implements Step
     }
 
     /**
-     * Default legacy Jetpack buttons inside generated contact forms to real
-     * button elements before the block fixer sees them.
+     * Convert leaked raw HTML forms to Jetpack markup, then default legacy
+     * Jetpack submit buttons inside contact forms to real button elements.
+     *
+     * When the host owns form placeholders, conversion is skipped: emitting
+     * `wp:jetpack/*` would steal the spec the host is about to substitute.
      *
      * @param list<string> $excluded fixer-relative paths that have already
      *        failed this step and must remain at their step-entry bytes
-     * @return list<string>
+     * @return array{notes: list<string>, warnings: list<string>}
      */
-    /** @return array{notes: list<string>, warnings: list<string>} */
     private static function normalizeJetpackForms(Project $project, array $excluded = []): array
     {
         $notes = [];
         $formWarnings = [];
         $excluded = array_fill_keys($excluded, true);
+        $hostOwnsPlaceholders = SectionsStep::formPlaceholders($project);
         foreach ($project->themeFiles() as $rel) {
             if (isset($excluded[$rel])) {
                 continue;
@@ -419,7 +422,9 @@ final class FixBlocksStep implements Step
             $markup = $project->readText('theme/' . $rel);
             // Conversion first: a raw model-authored <form> becomes canonical
             // jetpack markup, then the button repair covers the legacy shape.
-            $converted = JetpackFormConverter::fix($markup);
+            $converted = $hostOwnsPlaceholders
+                ? ['markup' => $markup, 'notes' => [], 'warnings' => []]
+                : JetpackFormConverter::fix($markup);
             $result = JetpackFormFixer::fix($converted['markup']);
             if ($result['markup'] !== $markup) {
                 $project->writeText('theme/' . $rel, $result['markup']);

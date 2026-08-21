@@ -250,19 +250,15 @@ test('SectionUnit documents the nested flush-card body contract', function () {
     );
 });
 
-test('SectionUnit documents canonical Jetpack Forms markup', function () {
+test('SectionUnit default prompt does not teach Jetpack contact-form blocks', function () {
     $request = (new SectionUnit(
         new FakeLlm(),
         new PromptRenderer(repo_path('prompts')),
     ))->request(section_unit_input());
     $prompt = section_unit_request_text($request);
 
-    assert_contains('wp:jetpack/contact-form', $prompt);
-    assert_contains('"tagName":"button","type":"submit"', $prompt);
-    assert_contains('NEVER use `wp:jetpack/button` for a form submit control', $prompt);
-    assert_contains('never emit raw `<form>`', $prompt);
-    assert_contains("omit the form's `to` attribute", $prompt);
-    assert_contains("Jetpack's standard success response", $prompt);
+    assert_true(!str_contains($prompt, 'wp:jetpack/contact-form'), 'default sections stay on no-forms.md');
+    assert_contains('NO FORM MARKUP', $prompt);
 });
 
 test('SectionUnit documents the complete list-thumb delivery contract', function () {
@@ -455,7 +451,7 @@ test('design prompts preserve a requested form instead of silently dropping it',
         'prompts/inner-section-design.md',
     ] as $prompt) {
         $text = file_get_contents(__DIR__ . '/../../' . $prompt);
-        assert_true(str_contains($text, 'jetpack-form-placeholder'), "$prompt reserves the form request");
+        assert_true(str_contains($text, 'html-form-placeholder'), "$prompt reserves the form request");
         assert_true(str_contains($text, 'must NOT silently disappear'), "$prompt names the rule");
     }
 });
