@@ -457,11 +457,9 @@ final class SectionsStep implements Step
      */
     public static function deliveryContract(Project $project, array $pages): array
     {
-        $siteSpec = $project->readText('siteSpec.json');
         $siteSpecData = $project->readJson('siteSpec.json');
-        $designDirection = DesignDirectionStep::readFor($project);
         $blueprint = DesignDirectionStep::heroBlueprintFor($project);
-        $footerArchetype = self::footerArchetype($siteSpec, $designDirection);
+        $footerArchetype = FooterComposition::archetypeForProject($project);
         $footerSurface = FooterComposition::resolveSurface($footerArchetype, self::closingBackgrounds($pages));
         $contract = AboveFoldContract::resolve(
             pages: $pages,
@@ -958,7 +956,7 @@ final class SectionsStep implements Step
         // AboveFoldContract then owns the complete top relation; no unit
         // derives mode or header archetype independently.
         $frontSections = (array) (self::frontPage($pages)['sections'] ?? []);
-        $footerArchetype = self::footerArchetype($siteSpec, $designDirection);
+        $footerArchetype = FooterComposition::archetypeForProject($project);
         $footerSurface = FooterComposition::resolveSurface($footerArchetype, self::closingBackgrounds($pages));
         $contract = AboveFoldContract::resolve(
             pages: $pages,

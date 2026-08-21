@@ -188,6 +188,7 @@ test('rewriting is single-pass and respects color token boundaries', function ()
     );
     assert_eq(['#AABBCC' => '#DDEEFF'], $plan['substitutions']);
     assert_eq(['secondary'], $plan['ambiguous']);
+    assert_eq(['secondary' => 'still-in-palette'], $plan['skipReasons']);
     assert_eq(
         'primary #DDEEFF, secondary #DDEEFF',
         PaletteReconciliation::rewriteText('primary #AABBCC, secondary #DDEEFF', $plan['substitutions']),
@@ -202,6 +203,10 @@ test('rewriting is single-pass and respects color token boundaries', function ()
     );
     assert_eq([], $collision['substitutions']);
     assert_eq(['primary', 'secondary'], $collision['ambiguous']);
+    assert_eq(
+        ['primary' => 'collided', 'secondary' => 'collided'],
+        $collision['skipReasons'],
+    );
 
     $simple = ['#AABBCC' => '#001122'];
     assert_eq('#001122', PaletteReconciliation::rewriteText('#AABBCC', $simple));
@@ -230,6 +235,123 @@ test('the reconciler ignores malformed palette entries on both sides', function 
         PaletteReconciliation::directionPalette(['palette' => ['primary' => '#A6432A', 'secondary' => 'walnut']]),
     );
     assert_eq([], PaletteReconciliation::plan(['primary' => '#A6432A'], [])['substitutions']);
+
+    $shorthand = palette_theme(['primary' => '#C32']);
+    assert_eq(['primary' => '#C32'], PaletteReconciliation::themePalette($shorthand));
+    assert_eq(
+        ['#A6432A' => '#C32'],
+        PaletteReconciliation::plan(['primary' => '#A6432A'], ['primary' => '#C32'])['substitutions'],
+        'a 3-digit delivered color is a real drift, rewritten with theme.json spelling',
+    );
+    assert_eq(
+        [],
+        PaletteReconciliation::plan(['primary' => '#CC3322'], ['primary' => '#C32'])['substitutions'],
+        'the same color in 6-digit and 3-digit form is not a drift',
+    );
+});
+
+test('two slugs that proposed the same hex and drifted apart keep it and warn with the collision reason', function () {
+    with_project('builder_palette_collided_', function ($project): void {
+        $proposed = [
+            'base' => '#FFFFFF',
+            'contrast' => '#111111',
+            'primary' => '#AABBCC',
+            'secondary' => '#AABBCC',
+            'accent' => '#778899',
+        ];
+        $project->writeJson('designDirection.json', palette_direction($proposed));
+        $project->writeJson('pages.json', palette_pages($proposed));
+        $project->writeJson('theme/theme.json', palette_theme([
+            'base' => '#FFFFFF',
+            'contrast' => '#111111',
+            'primary' => '#111111',
+            'secondary' => '#222222',
+            'accent' => '#778899',
+        ]));
+
+        quietly(fn () => (new ReconcilePaletteStep())->run($project));
+
+        $direction = $project->readJson('designDirection.json');
+        assert_eq('#AABBCC', $direction['palette']['primary'], 'a collided color is not rewritten');
+        assert_eq('#AABBCC', $direction['palette']['secondary']);
+        assert_contains('Terracotta #AABBCC carries the brand', $direction['description']);
+
+        $warnings = $project->readJson('warnings.json')['reconcile-palette'] ?? [];
+        assert_eq(2, count($warnings));
+        assert_contains('two slugs proposed this hex', $warnings[0]);
+        assert_contains('two slugs proposed this hex', $warnings[1]);
+        assert_true(
+            !str_contains(implode("\n", $warnings), 'still uses it for another slug'),
+            'collision warnings do not claim the hex survived under another slug',
+        );
+    });
+});
+
+test('a 3-digit delivered hex is resynced using theme.json spelling', function () {
+    with_project('builder_palette_shorthand_', function ($project): void {
+        $proposed = [
+            'base' => '#FFFFFF',
+            'contrast' => '#111111',
+            'primary' => '#A6432A',
+            'secondary' => '#00AA00',
+            'accent' => '#0000AA',
+        ];
+        $project->writeJson('designDirection.json', palette_direction($proposed));
+        $project->writeJson('pages.json', palette_pages($proposed));
+        $project->writeJson('theme/theme.json', palette_theme([
+            'base' => '#FFFFFF',
+            'contrast' => '#111111',
+            'primary' => '#C32',
+            'secondary' => '#00AA00',
+            'accent' => '#0000AA',
+        ]));
+
+        quietly(fn () => (new ReconcilePaletteStep())->run($project));
+
+        $direction = $project->readJson('designDirection.json');
+        assert_eq('#C32', $direction['palette']['primary'], 'shorthand spelling is preserved');
+        assert_contains('Terracotta #C32 carries the brand', $direction['description']);
+        assert_contains('button in #C32', $project->readJson('pages.json')['pages'][0]['sections'][0]['content_notes']);
+        assert_true(!$project->exists('warnings.json'));
+    });
+});
+
+test('resyncing the palette does not retarget a persisted footer archetype', function () {
+    with_project('builder_palette_footer_', function ($project): void {
+        $project->writeText('siteSpec.json', '{"name":"Palette footer seed"}');
+        $proposed = [
+            'base' => '#1E1714',
+            'contrast' => '#EDE0CC',
+            'primary' => '#A6432A',
+            'secondary' => '#6E6A45',
+            'accent' => '#C79A3E',
+        ];
+        $project->writeJson('designDirection.json', palette_direction($proposed));
+        $before = \Automattic\SiteBuild\FooterComposition::archetypeFor(
+            $project->readText('siteSpec.json'),
+            \Automattic\SiteBuild\Steps\DesignDirectionStep::readFor($project),
+        );
+        $project->writeJson('pages.json', [
+            'pages' => palette_pages($proposed)['pages'],
+            'footer_archetype' => $before,
+        ]);
+        $project->writeJson('theme/theme.json', palette_theme([
+            'base' => '#1E1714',
+            'contrast' => '#EDE0CC',
+            'primary' => '#C9542F',
+            'secondary' => '#A7A277',
+            'accent' => '#C79A3E',
+        ]));
+
+        quietly(fn () => (new ReconcilePaletteStep())->run($project));
+
+        assert_eq($before, $project->readJson('pages.json')['footer_archetype']);
+        assert_eq(
+            $before,
+            \Automattic\SiteBuild\FooterComposition::archetypeForProject($project),
+        );
+        assert_eq('#C9542F', $project->readJson('designDirection.json')['palette']['primary']);
+    });
 });
 
 test('the reconcile step declares the artifacts it rewrites', function () {

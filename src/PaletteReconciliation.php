@@ -34,8 +34,14 @@ final class PaletteReconciliation
      *
      * @param array<string,string> $proposed  slug => hex from designDirection.json
      * @param array<string,string> $delivered slug => hex from theme.json
-     * @return array{substitutions:array<string,string>,ambiguous:list<string>}
-     *         ambiguous lists the slugs skipped for either reason
+     * @return array{
+     *     substitutions:array<string,string>,
+     *     ambiguous:list<string>,
+     *     skipReasons:array<string, 'still-in-palette'|'collided'>
+     * }
+     *         substitutions map proposed hex => delivered hex as theme.json
+     *         spelled it. ambiguous lists every skipped slug; skipReasons
+     *         names why each one was left alone.
      */
     public static function plan(array $proposed, array $delivered): array
     {
@@ -49,18 +55,22 @@ final class PaletteReconciliation
 
         $candidates = [];
         $ambiguous = [];
+        $skipReasons = [];
         foreach ($proposed as $slug => $hex) {
             $from = self::normalizeHex($hex);
-            $to = self::normalizeHex($delivered[$slug] ?? null);
+            $toRaw = is_string($delivered[$slug] ?? null) ? trim($delivered[$slug]) : '';
+            $to = self::normalizeHex($toRaw);
             if ($from === null || $to === null || $from === $to) {
                 continue;
             }
+            $slug = (string) $slug;
             if (isset($deliveredHexes[$from])) {
                 // Still a real theme color, just no longer this slug's.
-                $ambiguous[] = (string) $slug;
+                $ambiguous[] = $slug;
+                $skipReasons[$slug] = 'still-in-palette';
                 continue;
             }
-            $candidates[$from][] = ['slug' => (string) $slug, 'to' => $to];
+            $candidates[$from][] = ['slug' => $slug, 'to' => $to, 'toRaw' => $toRaw];
         }
 
         $substitutions = [];
@@ -69,14 +79,19 @@ final class PaletteReconciliation
             if (count($distinct) > 1) {
                 foreach ($targets as $target) {
                     $ambiguous[] = $target['slug'];
+                    $skipReasons[$target['slug']] = 'collided';
                 }
                 continue;
             }
-            $substitutions[$from] = $targets[0]['to'];
+            $substitutions[$from] = $targets[0]['toRaw'];
         }
 
         sort($ambiguous);
-        return ['substitutions' => $substitutions, 'ambiguous' => $ambiguous];
+        return [
+            'substitutions' => $substitutions,
+            'ambiguous' => $ambiguous,
+            'skipReasons' => $skipReasons,
+        ];
     }
 
     /**
@@ -85,7 +100,8 @@ final class PaletteReconciliation
      *
      * Matching is case-insensitive and stops at the token boundary: an
      * eight-digit `#RRGGBBAA` is a different color and is left alone. The
-     * replacement keeps the delivered hex exactly as theme.json spells it.
+     * replacement is the delivered hex exactly as theme.json spelled it,
+     * including 3-digit shorthand.
      *
      * @param array<string,string> $substitutions proposed hex => delivered hex
      */
@@ -100,7 +116,7 @@ final class PaletteReconciliation
         ));
         $pattern = '/#(' . $alternation . ')(?![0-9A-Fa-f])/i';
 
-        return (string) preg_replace_callback(
+        $rewritten = preg_replace_callback(
             $pattern,
             static function (array $match) use ($substitutions): string {
                 $key = '#' . strtoupper($match[1]);
@@ -108,6 +124,7 @@ final class PaletteReconciliation
             },
             $text,
         );
+        return is_string($rewritten) ? $rewritten : $text;
     }
 
     /**
@@ -195,13 +212,19 @@ final class PaletteReconciliation
         return $map;
     }
 
-    /** Uppercase `#RRGGBB`, or null when the value is not one. */
+    /** Uppercase `#RRGGBB`, expanding `#RGB`, or null when the value is not one. */
     private static function normalizeHex(mixed $hex): ?string
     {
         if (!is_string($hex)) {
             return null;
         }
         $trimmed = strtoupper(trim($hex));
-        return preg_match('/^#[0-9A-F]{6}$/', $trimmed) === 1 ? $trimmed : null;
+        if (preg_match('/^#[0-9A-F]{6}$/', $trimmed) === 1) {
+            return $trimmed;
+        }
+        if (preg_match('/^#[0-9A-F]{3}$/', $trimmed) === 1) {
+            return '#' . $trimmed[1] . $trimmed[1] . $trimmed[2] . $trimmed[2] . $trimmed[3] . $trimmed[3];
+        }
+        return null;
     }
 }

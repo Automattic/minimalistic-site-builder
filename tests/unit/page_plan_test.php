@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\FooterComposition;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\GeneratedJsonException;
@@ -924,6 +925,10 @@ test('page-plan writes pages.json with sections per page', function () {
     (new PagePlanStep($llm, $renderer))->run($project);
 
     $plan = $project->readJson('pages.json');
+    assert_true(
+        in_array($plan['footer_archetype'] ?? null, FooterComposition::ARCHETYPES, true),
+        'page-plan persists the footer pick so later direction rewrites cannot retarget it'
+    );
     assert_eq(3, count($plan['pages']));
     assert_eq('home', $plan['pages'][0]['slug']);
     assert_eq(true, $plan['pages'][0]['front']);

@@ -111,6 +111,12 @@ final class FooterComposition
      */
     public static function archetypeForProject(Project $project): string
     {
+        if ($project->exists('pages.json')) {
+            $persisted = $project->readJson('pages.json')['footer_archetype'] ?? null;
+            if (is_string($persisted) && in_array($persisted, self::ARCHETYPES, true)) {
+                return $persisted;
+            }
+        }
         return self::archetypeFor(
             $project->readText('siteSpec.json'),
             Steps\DesignDirectionStep::readFor($project),

@@ -83,13 +83,13 @@ final class ReconcilePaletteStep implements Step
         }
 
         if ($substitutions !== []) {
-            $project->writeJson('designDirection.json', $reconciledDirection);
+            $project->writeJsonAtomic('designDirection.json', $reconciledDirection);
             if ($pagesExist) {
-                $project->writeJson('pages.json', $reconciledPages);
+                $project->writeJsonAtomic('pages.json', $reconciledPages);
             }
         }
 
-        $project->addWarnings($this->id(), self::ambiguityWarnings($plan['ambiguous'], $direction, $theme));
+        $project->addWarnings($this->id(), self::ambiguityWarnings($plan, $direction, $theme));
 
         $slugs = count($substitutions);
         Narrator::write(
@@ -99,32 +99,37 @@ final class ReconcilePaletteStep implements Step
     }
 
     /**
-     * One actionable row per slug whose proposed color survived in the theme
-     * under a different name, so the prose describing its role is now wrong in
-     * a way this step cannot safely repair.
+     * One actionable row per slug whose proposed color cannot be rewritten
+     * without trading one wrong color for another, so the prose describing
+     * its role is now wrong in a way this step cannot safely repair.
      *
-     * @param list<string>           $ambiguous
+     * @param array{ambiguous?:list<string>,skipReasons?:array<string,string>} $plan
      * @param array<array-key,mixed> $direction
      * @param array<array-key,mixed> $theme
      * @return list<string>
      */
-    private static function ambiguityWarnings(array $ambiguous, array $direction, array $theme): array
+    private static function ambiguityWarnings(array $plan, array $direction, array $theme): array
     {
+        $ambiguous = $plan['ambiguous'] ?? [];
         if ($ambiguous === []) {
             return [];
         }
         $proposed = PaletteReconciliation::directionPalette($direction);
         $delivered = PaletteReconciliation::themePalette($theme);
+        $skipReasons = $plan['skipReasons'] ?? [];
 
         $rows = [];
         foreach ($ambiguous as $slug) {
             $authored = Warnings::value($proposed[$slug] ?? null);
             $shipped = Warnings::value($delivered[$slug] ?? null);
+            $reason = $skipReasons[$slug] ?? 'still-in-palette';
+            $why = $reason === 'collided'
+                ? 'two slugs proposed this hex and drifted to different delivered colors, so there is no single rewrite'
+                : 'the delivered palette still uses it for another slug';
             $rows[] = "file='designDirection.json'; block=\"palette.{$slug}\"; "
                 . "authored={$authored}; delivered={$shipped}; disposition=proposed color kept "
-                . 'verbatim in the direction prose and page plan because the delivered palette '
-                . 'still uses it for another slug; every prompt describing that color now names '
-                . 'the wrong role';
+                . "verbatim in the direction prose and page plan because {$why}; every prompt "
+                . 'describing that color now names the wrong role';
         }
         return $rows;
     }
