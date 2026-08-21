@@ -579,7 +579,10 @@ test('FixBlocksStep filters rolled-back shape changes while healthy siblings con
             . '<!-- wp:image {"style":{"border":{"radius":"20px"}}} -->'
             . '<figure class="wp-block-image"><img src="failed.jpg" alt="" style="border-radius:20px"/></figure>'
             . '<!-- /wp:image -->'
-            . '<!-- wp:query --><div class="wp-block-query"></div><!-- /wp:query -->'
+            // A root text-alignment conflict still fails the whole file; an
+            // unsupported block is now isolated to its own block instead.
+            . '<!-- wp:heading --><h2 class="wp-block-heading has-text-align-center" '
+            . 'style="text-align:right">Conflicting sibling</h2><!-- /wp:heading -->'
             . '</div><!-- /wp:group -->';
         $project->writeText('theme/parts/a-healthy.html', $healthy);
         $project->writeText('theme/parts/b-failed.html', $failed);

@@ -229,7 +229,28 @@ final class GeneratedMarkup
         } catch (\RuntimeException $e) {
             throw new \RuntimeException("part '{$key}': {$e->getMessage()}");
         }
-        return self::stripTextBlockShadow($salvage['markup'], $key, $repairs, $warnings);
+        // Legacy comment attributes are converted onto the current schema
+        // HERE because the serializer's reviewed migrations recover them from
+        // saved has-text-align-* classes, which attribute-light markup no
+        // longer carries. Conversions are lossless (repair report); drops and
+        // missing required sources are degradations (warnings). Running before
+        // the shadow pass leaves that pass one schema to reason about.
+        $legacy = LegacyAttributes::normalize($salvage['markup']);
+        foreach ($legacy['conversions'] as $note) {
+            Narrator::write("    (part '{$key}': {$note})\n");
+            $repairs[] = [
+                'code' => 'legacy-attributes-converted',
+                'part' => $key,
+                'authored' => $note,
+                'delivered' => 'current-schema block attributes',
+                'disposition' => 'repaired',
+            ];
+        }
+        foreach ($legacy['notes'] as $note) {
+            $record($note);
+        }
+
+        return self::stripTextBlockShadow($legacy['markup'], $key, $repairs, $warnings);
     }
 
     /**
