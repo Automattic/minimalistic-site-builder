@@ -29,7 +29,31 @@ test('StorefrontDegrade rewrites a cart page to a catalog storefront', function 
     assert_true(isset($bySlug['shop']));
     assert_eq('Shop', $bySlug['shop']);
     assert_true(!isset($bySlug['cart']));
-    assert_contains('catalog storefront', implode(' ', $warnings));
+    $joined = implode(' ', $warnings);
+    assert_contains('catalog storefront', $joined);
+    assert_contains('delivered="shop"', $joined);
+});
+
+test('StorefrontDegrade does not rewrite a page whose purpose only mentions checkout time', function () {
+    [$pages, $warnings] = StorefrontDegrade::pages([
+        [
+            'title' => 'Visit',
+            'slug' => 'visit',
+            'purpose' => 'Hours, parking, and checkout time for the inn',
+            'children' => [],
+        ],
+    ]);
+    assert_eq('visit', $pages[0]['slug']);
+    assert_eq('Visit', $pages[0]['title']);
+    assert_eq([], $warnings);
+});
+
+test('StorefrontDegrade still rewrites a page titled Checkout even when the slug is not checkout', function () {
+    [$pages] = StorefrontDegrade::pages([
+        ['title' => 'Checkout', 'slug' => 'pay', 'purpose' => 'Complete the order', 'children' => []],
+    ]);
+    assert_eq('shop', $pages[0]['slug']);
+    assert_eq('Shop', $pages[0]['title']);
 });
 
 test('StorefrontDegrade page rewrite reaches a fixed point', function () {
@@ -140,6 +164,14 @@ test('StorefrontDegrade relabels every purchase CTA, not just add-to-cart', func
     }
 });
 
+test('StorefrontDegrade does not relabel a heading whose text is a purchase verb', function () {
+    $markup = '<!-- wp:heading --><h2>Purchase</h2><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>Reserve a table.</p><!-- /wp:paragraph -->';
+    [$out] = StorefrontDegrade::markup($markup, 'theme/parts/shop.html');
+    assert_contains('<h2>Purchase</h2>', $out);
+    assert_true(!str_contains($out, 'Enquire'));
+});
+
 test('StorefrontDegrade points a relabelled CTA at the contact page', function () {
     $markup = '<!-- wp:button --><div class="wp-block-button">'
         . '<a class="wp-block-button__link" href="/cart">Add to cart</a>'
@@ -231,6 +263,55 @@ test('normalize-layout degrades cart markup on a part and records a warning', fu
     assert_true(!str_contains(strtolower($out), '<form'));
     $joined = implode(' ', $project->readJson('warnings.json')['normalize-layout'] ?? []);
     assert_contains('cart', $joined);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('normalize-layout points enquiry at the contact path, not a contact-sheet page', function () {
+    $tmp = sys_get_temp_dir() . '/builder_cart_contact_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('theme/theme.json', ['settings' => ['color' => ['palette' => []]]]);
+    $project->writeJson('pages.json', ['pages' => [
+        ['slug' => 'contact-sheet', 'title' => 'Contact Sheet', 'path' => '/contact-sheet/'],
+        ['slug' => 'contact', 'title' => 'Contact', 'path' => '/contact/'],
+    ]]);
+    $project->writeText(
+        'theme/parts/shop.html',
+        '<!-- wp:button --><div class="wp-block-button">'
+        . '<a class="wp-block-button__link" href="/cart">Add to cart</a>'
+        . '</div><!-- /wp:button -->',
+    );
+
+    (new NormalizeLayoutStep())->run($project);
+
+    $out = $project->readText('theme/parts/shop.html');
+    assert_contains('Enquire', $out);
+    assert_contains('href="/contact/"', $out);
+    assert_true(!str_contains($out, '/contact-sheet'));
+    assert_true(!str_contains($out, 'href="/cart"'));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('normalize-layout uses a nested contact path instead of inventing /{slug}', function () {
+    $tmp = sys_get_temp_dir() . '/builder_cart_nested_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('theme/theme.json', ['settings' => ['color' => ['palette' => []]]]);
+    $project->writeJson('pages.json', ['pages' => [
+        ['slug' => 'contact', 'title' => 'Contact', 'path' => '/about/contact/'],
+    ]]);
+    $project->writeText(
+        'theme/parts/shop.html',
+        '<!-- wp:button --><div class="wp-block-button">'
+        . '<a class="wp-block-button__link" href="/cart">Buy now</a>'
+        . '</div><!-- /wp:button -->',
+    );
+
+    (new NormalizeLayoutStep())->run($project);
+
+    $out = $project->readText('theme/parts/shop.html');
+    assert_contains('href="/about/contact/"', $out);
+    assert_true(!str_contains($out, 'href="/cart"'));
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

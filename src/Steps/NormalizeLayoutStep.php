@@ -41,36 +41,6 @@ final class NormalizeLayoutStep implements Step
         return 'Normalize layout attributes';
     }
 
-    /**
-     * The route of this build's contact page, or null when it has none.
-     *
-     * Matched on slug and title so a localized site still resolves; when
-     * nothing matches, callers report the cart destination they could not
-     * repair rather than pointing a button at a route that does not exist.
-     */
-    private static function contactRoute(Project $project): ?string
-    {
-        if (!$project->exists('pages.json')) {
-            return null;
-        }
-        foreach (($project->readJson('pages.json')['pages'] ?? []) as $page) {
-            if (!is_array($page)) {
-                continue;
-            }
-            $slug = strtolower(trim((string) ($page['slug'] ?? '')));
-            $title = strtolower(trim((string) ($page['title'] ?? '')));
-            foreach ([$slug, $title] as $candidate) {
-                if ($candidate === '') {
-                    continue;
-                }
-                if (preg_match('/\b(?:contact|contacto|contato|kontakt|contatti)\b/u', $candidate) === 1) {
-                    return '/' . ltrim($slug, '/');
-                }
-            }
-        }
-        return null;
-    }
-
     public function declaration(): StepDeclaration
     {
         return new StepDeclaration(
@@ -112,7 +82,11 @@ final class NormalizeLayoutStep implements Step
         );
         // Where a relabelled purchase CTA should send an enquiry, when this
         // build has a contact page at all.
-        $contactRoute = self::contactRoute($project);
+        $contactRoute = StorefrontDegrade::contactRouteFromPages(
+            $project->exists('pages.json')
+                ? (array) ($project->readJson('pages.json')['pages'] ?? [])
+                : [],
+        );
         $cartWarnings = [];
         foreach ($project->themeFiles() as $rel) {
             $path = 'theme/' . $rel;

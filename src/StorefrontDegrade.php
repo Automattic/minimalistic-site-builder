@@ -61,7 +61,8 @@ final class StorefrontDegrade
             ];
             $warnings[] = "file='siteSpec.json'; path=\"pages.{$authoredSlug}\"; authored="
                 . Warnings::value($authoredSlug !== '' ? $authoredSlug : ($page['title'] ?? 'cart'))
-                . "; delivered={$slug}; disposition shop/cart page rewritten to a catalog storefront";
+                . '; delivered=' . Warnings::value($slug)
+                . '; disposition shop/cart page rewritten to a catalog storefront';
         }
 
         return [$out, $warnings];
@@ -87,9 +88,6 @@ final class StorefrontDegrade
         }
     }
 
-    /**
-     * @return array{0:string,1:list<string>}
-     */
     /**
      * Purchase controls a catalog storefront cannot honor, and the label each
      * one becomes. "Add to cart" was the only one matched before, so
@@ -234,9 +232,10 @@ final class StorefrontDegrade
         ));
 
         foreach ([
-            // Visible button/link text between tags.
-            '/(>\s*)(?:' . $labels . ')(\s*<)/i',
-            // The same label inside a block attribute payload.
+            // Visible label of a link or button, not a heading or paragraph
+            // whose entire text happens to be "Purchase" or "Checkout".
+            '/(<(?:a|button)\b[^>]*>\s*)(?:' . $labels . ')(\s*<\/(?:a|button)>)/i',
+            // The same label inside a block attribute payload (core/button).
             '/("text"\s*:\s*")(?:' . $labels . ')(")/i',
         ] as $pattern) {
             $count = 0;
@@ -293,20 +292,72 @@ final class StorefrontDegrade
             . '; delivered=' . Warnings::value($delivered) . '; disposition ';
     }
 
+    /**
+     * Route of this build's contact page, or null when it has none.
+     *
+     * Slug and title must be the contact token itself (plus optional "us"),
+     * so a photography "Contact Sheet" does not steal the enquiry URL.
+     * The delivered href is pages.json `path` when present, trailing slash
+     * included, so a nested contact page keeps its real route.
+     *
+     * @param list<mixed> $pages
+     */
+    public static function contactRouteFromPages(array $pages): ?string
+    {
+        foreach ($pages as $page) {
+            if (!is_array($page)) {
+                continue;
+            }
+            $slug = strtolower(trim((string) ($page['slug'] ?? '')));
+            $title = strtolower(trim((string) ($page['title'] ?? '')));
+            if (!self::looksLikeContactPage($slug, $title)) {
+                continue;
+            }
+            $path = trim((string) ($page['path'] ?? ''));
+            if ($path !== '') {
+                if (!str_starts_with($path, '/')) {
+                    $path = '/' . $path;
+                }
+                if ($path !== '/' && !str_ends_with($path, '/')) {
+                    $path .= '/';
+                }
+                return $path;
+            }
+            if ($slug !== '') {
+                return '/' . ltrim($slug, '/') . '/';
+            }
+        }
+        return null;
+    }
+
+    /** Slug `contact` / `contact-us`, title "Contact" / "Contact Us" — not contact-sheet. */
+    private static function looksLikeContactPage(string $slug, string $title): bool
+    {
+        $token = '(?:contact|contacto|contato|kontakt|contatti)';
+        return ($slug !== '' && preg_match('/^' . $token . '(?:-us)?$/u', $slug) === 1)
+            || ($title !== '' && preg_match('/^' . $token . '(?:\s+us)?$/u', $title) === 1);
+    }
+
     public static function pageLooksLikeCart(array $page): bool
     {
         $slug = is_string($page['slug'] ?? null) ? strtolower(trim($page['slug'])) : '';
         if (in_array($slug, self::CART_SLUGS, true)) {
             return true;
         }
-        $haystack = strtolower(
-            (is_string($page['title'] ?? null) ? $page['title'] : '')
-            . ' '
-            . (is_string($page['purpose'] ?? null) ? $page['purpose'] : ''),
-        );
-        return preg_match(
+        // Bare "checkout" is a cart signal in a title ("Checkout") or slug,
+        // not in purpose copy — a hotel Visit page that mentions checkout
+        // time is not a shop.
+        $title = strtolower(is_string($page['title'] ?? null) ? $page['title'] : '');
+        if (preg_match(
             '/\b(?:shopping cart|checkout|add to cart|woocommerce|mini-?cart|basket checkout)\b/',
-            $haystack,
+            $title,
+        ) === 1) {
+            return true;
+        }
+        $purpose = strtolower(is_string($page['purpose'] ?? null) ? $page['purpose'] : '');
+        return preg_match(
+            '/\b(?:shopping cart|add to cart|woocommerce|mini-?cart|basket checkout)\b/',
+            $purpose,
         ) === 1;
     }
 
