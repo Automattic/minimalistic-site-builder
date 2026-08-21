@@ -301,10 +301,11 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporti
         }
 
         $userPrompt = '';
-        foreach ($req['cached_prefixes'] ?? [] as $prefix) {
-            if (trim($prefix) !== '') {
-                $userPrompt .= rtrim($prefix, "\r\n") . "\n\n";
-            }
+        $cachedPrefixes = array_key_exists('cached_prefixes', $req)
+            ? CachedPrefixes::normalize($req['cached_prefixes'], 'OpenAI-compatible requests')
+            : [];
+        foreach ($cachedPrefixes as $prefix) {
+            $userPrompt .= rtrim($prefix, "\r\n") . "\n\n";
         }
         $userPrompt .= (string) $req['prompt'];
 
