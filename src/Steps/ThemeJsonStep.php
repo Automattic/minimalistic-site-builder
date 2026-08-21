@@ -30,9 +30,11 @@ use Throwable;
  * Output: theme/theme.json — palette, typography, spacing, layout, element styles.
  *
  * Validates the structure the templates depend on (version 3, the five color
- * slugs, the two font slugs) and repairs drift deterministically: missing
- * slugs are filled from the design direction's committed values, then neutral
- * defaults, with every fill recorded in warnings.json — a missing slug never
+ * slugs, the heading/body font slugs, and an optional accent family) and
+ * repairs drift deterministically: missing slugs are filled from the design
+ * direction's committed values, then neutral defaults. When an accent family
+ * ships, captions pick it up even if a section forgot fontFamily:accent.
+ * Every fill is recorded in warnings.json — a missing slug never
  * aborts the build.
  *
  * HTML-first composition mode declares and consumes design/site.css token
@@ -44,6 +46,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
 
     private const REQUIRED_COLORS = ['base', 'contrast', 'primary', 'secondary', 'accent'];
     private const REQUIRED_FONTS = ['heading', 'body'];
+    private const OPTIONAL_FONTS = ['accent'];
 
     /** @var array{contentSize:string,wideSize:string} */
     private const FALLBACK_LAYOUT_WIDTHS = [
@@ -97,6 +100,13 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     private const FALLBACK_FONTS = [
         'heading' => 'system-ui, sans-serif',
         'body'    => 'system-ui, sans-serif',
+        // The accent slot only ever donates its tail: replacePrimaryFamily
+        // swaps the first entry for the direction's family, so whatever sits
+        // here first is discarded. The tail is the neutral stack rather than
+        // `cursive` because an accent face is whatever the direction picked —
+        // Caveat is cursive, Bebas Neue is not — and guessing the wrong
+        // generic is worse than degrading to the same stack as the siblings.
+        'accent'  => 'system-ui, sans-serif',
     ];
     /**
      * The type scale the scaffold wires roles to. Every slug SCAFFOLD does
@@ -459,6 +469,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         if ($this->htmlFirst) {
             $theme = self::removeGeneratedControlTypography($theme);
         }
+        [$theme, $accentCaptionWarnings] = self::repairAccentCaption($theme);
         [$theme, $shapeRepairs, $shapeWarnings] = self::repairShapeWiring(
             $theme,
             DesignDirectionStep::shapeFor($project) ?? '',
@@ -469,6 +480,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $layoutWarnings,
             $colorWarnings,
             $fontWarnings,
+            $accentCaptionWarnings,
             $sizeWarnings,
             $scaffoldWarnings,
             $groupPaddingWarnings,
@@ -1426,7 +1438,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     {
         $warnings = [];
         $preferred = [];
-        foreach (self::REQUIRED_FONTS as $slot) {
+        foreach (array_merge(self::REQUIRED_FONTS, self::OPTIONAL_FONTS) as $slot) {
             $typeSlot = is_array($preferredType[$slot] ?? null) ? $preferredType[$slot] : [];
             $family = is_string($typeSlot['family'] ?? null) ? trim($typeSlot['family']) : '';
             if (
@@ -1465,6 +1477,16 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                     . Warnings::value($family) . '; malformed entry removed';
                 continue;
             }
+            // An uncommitted accent ships a face nothing chose, and
+            // repairAccentCaption would then put it on every caption. Guard
+            // covers OPTIONAL_FONTS only — any other invented slug still ships.
+            if (in_array($slug, self::OPTIONAL_FONTS, true) && !isset($preferred[$slug])) {
+                $warnings[] = "theme.json fontFamilies slug '{$slug}': authored "
+                    . Warnings::value(trim($family))
+                    . '; delivered removed; disposition designDirection.json committed no type.'
+                    . $slug . '.family, and the type pairing is the direction\'s call';
+                continue;
+            }
             $entry['slug'] = $slug;
             $entry['fontFamily'] = trim($family);
             if (isset($preferred[$slug])) {
@@ -1477,9 +1499,15 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                 . ($nonObjects === 1 ? 'y' : 'ies');
         }
         $families = $entries;
-        $slugs = array_column($families, 'slug');
-        foreach (self::REQUIRED_FONTS as $needed) {
-            if (in_array($needed, $slugs, true)) {
+        // One pass over both slot kinds. A required slot is filled whether or
+        // not the direction named a family; an optional one only when it did,
+        // which is the single line of difference between them.
+        foreach (array_merge(self::REQUIRED_FONTS, self::OPTIONAL_FONTS) as $needed) {
+            $optional = in_array($needed, self::OPTIONAL_FONTS, true);
+            if (in_array($needed, array_column($families, 'slug'), true)) {
+                continue;
+            }
+            if ($optional && !isset($preferred[$needed])) {
                 continue;
             }
             $stack = isset($preferred[$needed])
@@ -1490,7 +1518,54 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                 ? "theme.json fontFamilies missing slug '{$needed}'; filled from designDirection.json with {$stack}"
                 : "theme.json fontFamilies missing slug '{$needed}'; filled with the system stack";
         }
+
         $theme['settings']['typography']['fontFamilies'] = $families;
+        return [$theme, $warnings];
+    }
+
+    /**
+     * When an accent family shipped, captions and image credits use it so
+     * the third face is visible even if a section forgot fontFamily:accent.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>}
+     */
+    public static function repairAccentCaption(array $theme): array
+    {
+        $hasAccent = false;
+        foreach ($theme['settings']['typography']['fontFamilies'] ?? [] as $entry) {
+            if (is_array($entry) && ($entry['slug'] ?? '') === 'accent') {
+                $family = is_string($entry['fontFamily'] ?? null) ? trim($entry['fontFamily']) : '';
+                $hasAccent = $family !== '';
+                break;
+            }
+        }
+        if (!$hasAccent) {
+            return [$theme, []];
+        }
+        $accent = 'var:preset|font-family|accent';
+        $warnings = [];
+        foreach ([['elements', 'caption'], ['blocks', 'core/image']] as [$group, $name]) {
+            $node = &$theme;
+            foreach (['styles', $group, $name, 'typography'] as $key) {
+                if (!is_array($node[$key] ?? null)) {
+                    $node[$key] = [];
+                }
+                $node = &$node[$key];
+            }
+            // The committed accent wins over a model choice here, but an
+            // overridden valid value is a repair like any other: record it so
+            // warnings.json still explains every face the build changed.
+            $authored = $node['fontFamily'] ?? null;
+            if ($authored !== null && $authored !== $accent) {
+                $warnings[] = "theme/theme.json styles.{$group}.{$name}.typography.fontFamily: authored "
+                    . Warnings::value($authored)
+                    . "; delivered {$accent}"
+                    . '; disposition the committed type.accent family owns caption typography';
+            }
+            $node['fontFamily'] = $accent;
+            unset($node);
+        }
         return [$theme, $warnings];
     }
 

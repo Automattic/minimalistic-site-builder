@@ -102,8 +102,9 @@ test('markup generation units share one output-only contract', function () {
     }
 
     $section = $requests['section'];
-    assert_contains($contract, $section['cached_prefixes'][0], 'contract stays in the stable build layer');
-    assert_true(!str_contains($section['cached_prefixes'][1], $contract), 'contract is absent from the page layer');
+    assert_true(!str_contains($section['cached_prefixes'][0], $contract), 'contract is absent from the shared site layer');
+    assert_contains($contract, $section['cached_prefixes'][1], 'contract stays in the stable build layer');
+    assert_true(!str_contains($section['cached_prefixes'][2], $contract), 'contract is absent from the page layer');
     assert_true(!str_contains($section['prompt'], $contract), 'contract is absent from the varying brief');
 });
 

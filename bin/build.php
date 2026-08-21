@@ -10,7 +10,7 @@ use Automattic\SiteBuild\Steps\CoverContrastStep;
 /**
  * Build a site from a prompt.
  *
- *   php bin/build.php "A cozy neighborhood bakery" [--provider=openai] [--slug=my-slug] [--from=step-id] [--until=step-id] [--multi-page] [--pages="Home, Menu, About"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=foreground-image] [--max-hero-images=1] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--port=9400] [--no-serve]
+ *   php bin/build.php "A cozy neighborhood bakery" [--provider=openai] [--slug=my-slug] [--from=step-id] [--until=step-id] [--multi-page] [--pages="Home, Menu, About"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=foreground-image] [--max-hero-images=1] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--use-jetpack-placeholders] [--port=9400] [--no-serve]
  *
  * --provider=<anthropic|openai|xai|openrouter> picks the model set (config/models.json):
  * each step runs on that provider's large/small tier. Per-step LLM_MODEL_<STEP>
@@ -59,6 +59,12 @@ use Automattic\SiteBuild\Steps\CoverContrastStep;
  * --with-images additionally generates the AI image placeholders into real
  * assets via the WPCOM AI proxy (slow + networked; off by default).
  *
+ * --use-jetpack-placeholders is for hosts that own a real form backend. With
+ * it, a section that genuinely needs a form reserves its place with a JP_FORM
+ * placeholder block for the host to replace after the build. Without it (the
+ * default) the build emits no form markup at all, because a form with nothing
+ * behind it silently discards whatever visitors type.
+ *
  * After a full build it boots the site in WordPress Playground and prints the
  * URL. --no-serve skips that (build only); --until=... also skips it (the build
  * is incomplete). --port chooses the Playground port.
@@ -67,20 +73,21 @@ use Automattic\SiteBuild\Steps\CoverContrastStep;
 require_once __DIR__ . '/../src/bootstrap.php';
 
 $args = parse_cli_args($argv, [
-    '--slug'               => 'value',
-    '--provider'           => 'value',
-    '--until'              => 'value',
-    '--from'               => 'value',
-    '--pages'              => 'value',
-    '--port'               => 'value',
-    '--writing-direction'  => 'value',
-    '--hero-canvas'        => 'value',
-    '--hero-media-modes'   => 'value',
-    '--max-hero-images'    => 'value',
-    '--hero-copy-capacity' => 'value',
-    '--with-images'        => 'bool',
-    '--multi-page'         => 'bool',
-    '--serve'              => 'toggle',
+    '--slug'                     => 'value',
+    '--provider'                 => 'value',
+    '--until'                    => 'value',
+    '--from'                     => 'value',
+    '--pages'                    => 'value',
+    '--port'                     => 'value',
+    '--writing-direction'        => 'value',
+    '--hero-canvas'              => 'value',
+    '--hero-media-modes'         => 'value',
+    '--max-hero-images'          => 'value',
+    '--hero-copy-capacity'       => 'value',
+    '--with-images'              => 'bool',
+    '--use-jetpack-placeholders' => 'bool',
+    '--multi-page'               => 'bool',
+    '--serve'                    => 'toggle',
 ], maxPositionals: 1);
 if ($args['unknown'] !== null) {
     Narrator::write("Unknown argument: {$args['unknown']}\n");
@@ -92,6 +99,7 @@ $slug = $flags['--slug'] ?? null;
 $until = $flags['--until'] ?? null;
 $from = $flags['--from'] ?? null;
 $withImages = $flags['--with-images'] ?? false;
+$formPlaceholders = $flags['--use-jetpack-placeholders'] ?? false;
 $multiPage = $flags['--multi-page'] ?? false;
 $pagesArg = $flags['--pages'] ?? null;
 $port = isset($flags['--port']) ? (int) $flags['--port'] : null;
@@ -209,6 +217,7 @@ if ($from !== null) {
             pages: $pages,
             designConstraints: $designConstraints,
             writingDirection: $writingDirection,
+            formPlaceholders: $formPlaceholders,
         );
     } catch (InvalidArgumentException $e) {
         Narrator::write($e->getMessage() . "\n");
@@ -339,6 +348,6 @@ if ($serve && $until === null) {
 /** The one invocation summary, shared by every path that rejects the line. */
 function usage(): never
 {
-    Narrator::write("Usage: php bin/build.php \"<prompt>\" [--provider=anthropic|openai|xai|openrouter] [--slug=...] [--from=step-id] [--until=step-id] [--multi-page] [--pages=\"Home, Menu, About\"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=cover-image,foreground-image] [--max-hero-images=1..2] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--port=9400] [--no-serve]\n");
+    Narrator::write("Usage: php bin/build.php \"<prompt>\" [--provider=anthropic|openai|xai|openrouter] [--slug=...] [--from=step-id] [--until=step-id] [--multi-page] [--pages=\"Home, Menu, About\"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=cover-image,foreground-image] [--max-hero-images=1..2] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--use-jetpack-placeholders] [--port=9400] [--no-serve]\n");
     exit(1);
 }

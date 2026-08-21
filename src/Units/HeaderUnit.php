@@ -31,7 +31,7 @@ final class HeaderUnit extends AbstractMarkupUnit
     {
         $contract = $this->contract($input);
         $archetype = (string) $contract['header']['archetype'];
-        return $this->renderedRequest('header.md', $this->commonVars($input) + [
+        return $this->siteLayeredRequest('header.md', $this->commonVars($input) + [
             'hero_brief' => $this->inputString($input, 'hero_brief'),
             'site_pages' => $this->inputString($input, 'site_pages'),
             'nav_rule'   => $this->inputString($input, 'nav_rule'),

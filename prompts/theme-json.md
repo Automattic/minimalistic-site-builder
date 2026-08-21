@@ -63,12 +63,13 @@ Hard requirements — follow exactly so downstream templates can rely on the slu
 - settings.shadow.presets: a small array of named shadow presets (slug + name + shadow) sections can apply for depth.
 - settings.typography.fluid: true.
 - settings.typography.fontSizes: the 6-step scale above (each entry { "slug", "name", "size" }) using EXACTLY the slugs caption / body / lead / heading / section-title / display — sections reference the steps by these exact slugs.
-- settings.typography.fontFamilies: an array with EXACTLY these two slugs:
+- settings.typography.fontFamilies: an array with the heading and body slugs, plus an optional accent slug ONLY when the design-direction Type fact names `type.accent.family`:
     "heading" — a real, characterful Google font that fits the brand, as the FIRST token in the stack, then web-safe fallbacks
     "body"    — a real, refined Google font that fits the brand, as the FIRST token in the stack, then web-safe fallbacks
+    "accent"  — optional third family for flavor names, prices, folio, numerals. Omit the slug entirely when Type has no accent family.
   Each entry: { "fontFamily": "<stack>", "name": "...", "slug": "..." }.
-  Pick REAL Google Fonts families spelled exactly (e.g. "Cormorant Garamond", "Source Serif 4", "Oswald") — the build enqueues them from Google Fonts automatically by name, so no fontFace/src is needed here. Just make the FIRST family in each stack the exact Google font name.
-  Include EXACTLY these two fontFamilies and no others — do NOT add a third entry (e.g. a "mono" or "accent" family). Two families only: heading and body.
+  Pick REAL Google Fonts families spelled exactly (e.g. "Cormorant Garamond", "Source Serif 4", "Oswald", "Caveat") — the build enqueues them from Google Fonts automatically by name, so no fontFace/src is needed here. Just make the FIRST family in each stack the exact Google font name.
+  Do not invent a fourth family. Without an accent Type fact, include EXACTLY heading and body.
 - settings.spacing: set `"blockGap": true` and include EXACTLY this bounded, responsive `spacingSizes` profile (the build normalizes it deterministically, so do not rename or rescale it):
     `xs` — Extra Small — `clamp(0.25rem, 0.5vw, 0.5rem)`
     `sm` — Small — `clamp(0.75rem, 1vw, 1rem)`
