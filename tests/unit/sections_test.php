@@ -1172,6 +1172,26 @@ test('the footer never takes the surface a page closes on', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('page-plan steers pages off the same surface the footer is actually painted', function () {
+    // page-plan and sections derive the footer surface independently from the
+    // same two files. Nothing else pins them together, so a change to either
+    // seed would silently stop the two steps coordinating — with every other
+    // test still green.
+    [$project, $tmp] = sections_fixture();
+    $project->writeJson('meta.json', ['prompt' => 'Demo prompt']);
+
+    $planStep = new \Automattic\SiteBuild\Steps\PagePlanStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    $planText = sections_request_text((array) reset($planStep->requests($project)));
+    assert_eq(1, preg_match('/on the exact \*\*([a-z-]+)\*\* background/', $planText, $avoided), 'plan names a surface');
+
+    $footerPrompt = (new SectionsStep(new FakeLlm(), new PromptRenderer(repo_path('prompts'))))
+        ->requests($project)['footer']['prompt'];
+    assert_eq(1, preg_match('/ASSIGNED FOOTER SURFACE: \*\*([a-z-]+)\*\*/', $footerPrompt, $painted), 'footer names a surface');
+
+    assert_eq($avoided[1], $painted[1], 'the surface pages are steered off is the one the footer takes');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('every page-plan request is told which surface its closing section must avoid', function () {
     [$project, $tmp] = sections_fixture();
     $project->writeJson('meta.json', ['prompt' => 'Demo prompt']);
