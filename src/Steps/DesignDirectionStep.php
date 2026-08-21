@@ -17,6 +17,7 @@ use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\BoundedChoice;
 use Automattic\SiteBuild\Warnings;
 
 /**
@@ -638,18 +639,14 @@ final class DesignDirectionStep implements Step
      */
     public static function normalizeCardStyle(mixed $authored, array &$warnings = []): string
     {
-        $normalized = is_string($authored) ? strtolower(trim($authored)) : '';
-        if (in_array($normalized, self::CARD_STYLES, true)) {
-            return $normalized;
-        }
-        if ($authored === null || (is_string($authored) && $normalized === '')) {
-            return 'flush';
-        }
-
-        $warnings[] = 'designDirection.json: field card_style authored '
-            . Warnings::value($authored)
-            . '; delivered "flush"; disposition unsupported generated card treatment replaced by default';
-        return 'flush';
+        return BoundedChoice::normalize(
+            $authored,
+            self::CARD_STYLES,
+            'flush',
+            'card_style',
+            $warnings,
+            'unsupported generated card treatment replaced by default',
+        );
     }
 
     /**
@@ -1096,11 +1093,7 @@ final class DesignDirectionStep implements Step
     /** Parse only an explicit valid corner-language commitment. */
     private static function explicitShape(mixed $raw): ?string
     {
-        if (!is_string($raw)) {
-            return null;
-        }
-        $shape = strtolower(trim($raw));
-        return in_array($shape, self::SHAPES, true) ? $shape : null;
+        return BoundedChoice::explicit($raw, self::SHAPES);
     }
 
 

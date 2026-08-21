@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\HeaderBehavior;
 use Automattic\SiteBuild\Narrator;
+use Automattic\SiteBuild\OverlayKit;
 use Automattic\SiteBuild\PageScope;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
@@ -78,7 +79,12 @@ final class FinalizeThemeStep implements Step
                 'theme/parts/header.html',
                 'theme/assets/motion/*',
                 'theme/assets/header/*',
-                'theme/assets/shape/*',
+                // Every overlay kit this theme can ship, so the declaration
+                // moves with the catalog instead of being restated per kit.
+                ...array_map(
+                    static fn (OverlayKit $kit): string => $kit->declaredWrites(),
+                    self::overlayKits(),
+                ),
                 'warnings.json',
             ],
             concurrent: false,
@@ -106,13 +112,16 @@ final class FinalizeThemeStep implements Step
         self::pruneMotionKit($project, $motion);
         self::pruneHeaderKit($project, $header);
         $shape = DesignDirectionStep::shapeFor($project);
-        $shapeKit = self::writeShapeKit($project, $shape);
+        $overlays = [];
+        if (self::writeOverlayKit($project, self::shapeKit(), ShapeMarkup::kitCss($shape))) {
+            $overlays[] = self::shapeKit();
+        }
         if ($headerWarnings !== []) {
             $project->addWarnings($this->id(), $headerWarnings);
         }
         $project->writeText(
             'theme/functions.php',
-            self::functionsPhp($project->slug(), $motion, $header, $shapeKit),
+            self::functionsPhp($project->slug(), $motion, $header, $overlays),
         );
         Narrator::write($motion === null
             ? "  motion: none (kit not shipped)\n"
@@ -120,7 +129,7 @@ final class FinalizeThemeStep implements Step
         Narrator::write($header
             ? "  header: '{$headerBehavior}' state kit enqueued\n"
             : "  header: static (kit not shipped)\n");
-        Narrator::write($shapeKit
+        Narrator::write($overlays !== []
             ? "  shape: '{$shape}' corner kit enqueued\n"
             : '  shape: ' . ($shape ?? 'none committed') . " (kit not shipped)\n");
     }
@@ -133,18 +142,50 @@ final class FinalizeThemeStep implements Step
      * kit left by an earlier finalize run is pruned so the shape cannot go
      * stale.
      */
-    private static function writeShapeKit(Project $project, ?string $shape): bool
+    /**
+     * The corner-language kit. Kits are described here rather than spelled out
+     * at each of their four use sites (declaration, write, enqueue, editor
+     * mirror), so adding the next CSS commitment is one entry instead of
+     * another copy of this wiring.
+     */
+    /**
+     * Every overlay kit this step knows how to ship, in load order.
+     *
+     * @return list<OverlayKit>
+     */
+    public static function overlayKits(): array
     {
-        $css = ShapeMarkup::kitCss($shape);
+        return [self::shapeKit()];
+    }
+
+    public static function shapeKit(): OverlayKit
+    {
+        return new OverlayKit(
+            'shape',
+            "// Committed corner language for contained media surfaces theme.json\n"
+                . "// cannot reach (media-text halves, contained covers). Loads after\n"
+                . '// generated style.css so the commitment outranks generated utilities.',
+        );
+    }
+
+    /**
+     * Write a build-owned overlay stylesheet, or prune it when the commitment
+     * resolved to nothing.
+     *
+     * A failed delete is an error rather than a shrug: the build would
+     * otherwise report the sheet pruned while it sat there still loading.
+     */
+    private static function writeOverlayKit(Project $project, OverlayKit $kit, ?string $css): bool
+    {
         if ($css !== null) {
-            $project->writeText('theme/assets/shape/shape.css', $css);
+            $project->writeText($kit->projectRelPath(), $css);
             return true;
         }
-        $file = $project->themePath('assets/shape/shape.css');
-        if (is_file($file)) {
-            unlink($file);
+        $file = $project->themePath($kit->themeRelPath());
+        if (is_file($file) && !@unlink($file) && is_file($file)) {
+            throw new \RuntimeException("Could not remove stale overlay stylesheet: {$file}");
         }
-        @rmdir($project->themePath('assets/shape'));
+        @rmdir($project->themePath("assets/{$kit->folder}"));
         @rmdir($project->themePath('assets'));
         return false;
     }
@@ -290,11 +331,25 @@ final class FinalizeThemeStep implements Step
         @rmdir($project->themePath('assets'));
     }
 
+    /** Put every line of a block at the enqueue body's indentation. */
+    private static function indentBlock(string $block): string
+    {
+        return implode("\n", array_map(
+            static fn (string $line): string => $line === '' ? '' : '    ' . $line,
+            explode("\n", $block),
+        ));
+    }
+
+    /**
+     * @param list<OverlayKit> $overlays the build-owned stylesheets this theme
+     *        ships, in load order. Each one enqueues after style.css and is
+     *        mirrored into the editor; an empty list is a theme with none.
+     */
     private static function functionsPhp(
         string $slug,
         ?string $motion,
         bool $header,
-        bool $shapeKit,
+        array $overlays = [],
     ): string {
         $slug = ProjectStore::slugify($slug);
         $scopePrefix = PageScope::CLASS_PREFIX;
@@ -315,18 +370,24 @@ final class FinalizeThemeStep implements Step
             PHP;
         }
 
-        $shapeEnqueues = '';
-        $editorStyles = "add_editor_style('style.css');";
-        if ($shapeKit) {
-            $editorStyles = "add_editor_style(array('style.css', 'assets/shape/shape.css'));";
-            $shapeEnqueues = <<<PHP
-
-                // Committed corner language for contained media surfaces theme.json
-                // cannot reach (media-text halves, contained covers). Loads after
-                // generated style.css so the commitment outranks generated utilities.
-                wp_enqueue_style('{$slug}-shape', get_theme_file_uri('assets/shape/shape.css'), array('{$slug}-style'), \$ver);
-            PHP;
+        // Built line by line rather than through a heredoc: the comment is
+        // per-kit data, and a heredoc would de-indent its literal lines while
+        // leaving the interpolated ones alone.
+        $overlayEnqueues = '';
+        $editorStyleList = ['style.css'];
+        foreach ($overlays as $overlay) {
+            $editorStyleList[] = $overlay->themeRelPath();
+            $overlayEnqueues .= "\n" . self::indentBlock($overlay->comment)
+                . "\n" . self::indentBlock(sprintf(
+                    "wp_enqueue_style('%s', get_theme_file_uri('%s'), array('%s-style'), \$ver);",
+                    $overlay->handle($slug),
+                    $overlay->themeRelPath(),
+                    $slug,
+                ));
         }
+        $editorStyles = count($editorStyleList) === 1
+            ? "add_editor_style('style.css');"
+            : "add_editor_style(array('" . implode("', '", $editorStyleList) . "'));";
 
         $headerEnqueues = '';
         if ($header) {
@@ -351,7 +412,7 @@ final class FinalizeThemeStep implements Step
                 \$ver = wp_get_theme()->get('Version');{$motionEnqueues}
                 // Block themes do not load style.css automatically — without this
                 // enqueue its utility CSS (card layouts, layout utilities) never applies.
-                wp_enqueue_style('{$slug}-style', get_stylesheet_uri(), {$styleDeps}, \$ver);{$shapeEnqueues}{$headerEnqueues}
+                wp_enqueue_style('{$slug}-style', get_stylesheet_uri(), {$styleDeps}, \$ver);{$overlayEnqueues}{$headerEnqueues}
             });
 
             // Mirror the theme stylesheets into the editor so previews match the front end.
