@@ -28,6 +28,12 @@ function designdir_seeds(): array
     return array_map(fn (int $i) => "Seed {$i}", range(1, 4));
 }
 
+/** @return array{seed:string,ground:string,register:string,accent:string} */
+function designdir_seed_obj(string $text, string $ground, string $register, string $accent): array
+{
+    return ['seed' => $text, 'ground' => $ground, 'register' => $register, 'accent' => $accent];
+}
+
 /** @return array<string,array<string,mixed>> */
 function designdir_type(): array
 {
@@ -99,6 +105,10 @@ test('design-direction expands a picked seed into structured designDirection.jso
     // The seed prompt carries the user's words and the factual spec.
     assert_eq(2, count($llm->calls), 'exactly two calls: seeds + expansion');
     assert_contains('cozy neighborhood bakery', $llm->calls[0]['prompt']);
+    assert_true(
+        !str_contains($llm->calls[0]['prompt'], '`"luxury"`'),
+        'a brief that did not name luxury does not offer it as a label',
+    );
     assert_contains('Hearth & Crumb', $llm->calls[0]['prompt']);
     assert_contains('title', $llm->calls[0]['prompt']);
 
@@ -308,6 +318,106 @@ test('DESIGN_DIRECTION_CHOICE with a failed seed call fails loud (a forced eval 
     } finally {
         putenv('DESIGN_DIRECTION_CHOICE');
     }
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('design-direction offers a locked extra label only when the brief named that look', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $project->writeJson('meta.json', ['prompt' => 'A luxury bakery in Lisbon']);
+    $llm->queueJson(['seeds' => designdir_seeds()]);
+    $llm->queueJson(['direction' => designdir_direction()]);
+
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    (new DesignDirectionStep($llm, $renderer))->run($project);
+
+    assert_contains('`"luxury"`', $llm->calls[0]['prompt']);
+    assert_contains('This brief already named a look', $llm->calls[0]['prompt']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('design-direction drops a repeated world from the pick and records one warning', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $llm->queueJson(['seeds' => [
+        designdir_seed_obj('Hearth Light — a warm heritage bakery.', 'light', 'heritage', 'warm'),
+        designdir_seed_obj('Copper Morning — a warm heritage bakery.', 'light', 'heritage', 'warm'),
+        designdir_seed_obj('Night Kitchen — a dark modernist counter.', 'dark', 'modernist', 'cool'),
+    ]]);
+    $llm->queueJson(['direction' => designdir_direction()]);
+
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    (new DesignDirectionStep($llm, $renderer))->run($project);
+
+    $warnings = $project->readJson('warnings.json')['design-direction'] ?? [];
+    $seedWarnings = array_values(array_filter(
+        $warnings,
+        static fn (string $row): bool => str_contains($row, 'concept seed')
+            || str_contains($row, 'concept seeds'),
+    ));
+    assert_eq(1, count($seedWarnings), 'one drop, not a drop plus a shared-ground echo');
+    assert_contains('Copper Morning', $seedWarnings[0]);
+    assert_contains('disposition dropped', $seedWarnings[0]);
+    assert_true(
+        !str_contains(implode("\n", $warnings), 'open brief'),
+        'the warning does not claim the brief was open',
+    );
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('design-direction records a collapsed round once, without a shared-ground echo', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $llm->queueJson(['seeds' => [
+        designdir_seed_obj('One', 'dark', 'editorial', 'jewel'),
+        designdir_seed_obj('Two', 'dark', 'editorial', 'jewel'),
+        designdir_seed_obj('Three', 'dark', 'editorial', 'jewel'),
+    ]]);
+    $llm->queueJson(['direction' => designdir_direction()]);
+
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    (new DesignDirectionStep($llm, $renderer))->run($project);
+
+    $warnings = $project->readJson('warnings.json')['design-direction'] ?? [];
+    $seedWarnings = array_values(array_filter(
+        $warnings,
+        static fn (string $row): bool => str_contains($row, 'concept seed')
+            || str_contains($row, 'concept seeds')
+            || str_contains($row, '-grounded'),
+    ));
+    assert_eq(1, count($seedWarnings), 'collapse is one durable row');
+    assert_contains('describe one world', $seedWarnings[0]);
+    assert_true(
+        !str_contains(implode("\n", $warnings), 'every concept seed is'),
+        'shared ground is already named inside the collapse row',
+    );
+    assert_true(
+        !str_contains(implode("\n", $warnings), 'open brief'),
+        'a collapsed round is not reported as an open brief',
+    );
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('design-direction does not warn that every seed is grounded when two left ground unstated', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $llm->queueJson(['seeds' => [
+        designdir_seed_obj('One', 'light', 'heritage', 'warm'),
+        ['seed' => 'Two — a sentence.', 'register' => 'modernist', 'accent' => 'cool'],
+        ['seed' => 'Three — a sentence.'],
+    ]]);
+    $llm->queueJson(['direction' => designdir_direction()]);
+
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    (new DesignDirectionStep($llm, $renderer))->run($project);
+
+    $joined = $project->exists('warnings.json')
+        ? implode("\n", $project->readJson('warnings.json')['design-direction'] ?? [])
+        : '';
+    assert_true(
+        !str_contains($joined, 'every concept seed is'),
+        'one named ground is not a round-wide claim',
+    );
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

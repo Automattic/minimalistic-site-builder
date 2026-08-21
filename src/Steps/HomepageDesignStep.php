@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\ConceptSeeds;
 use Automattic\SiteBuild\ContinuationRecovery;
 use Automattic\SiteBuild\DesignMarkupSanitizer;
 use Automattic\SiteBuild\Llm;
@@ -296,10 +297,10 @@ final class HomepageDesignStep implements Step
     ): array {
         $seeds = [];
         try {
-            $prompt = $this->renderer->render('design-direction-seeds.md', [
-                'user_prompt' => $brief,
-                'site_spec'   => $siteSpec,
-            ]);
+            $prompt = $this->renderer->render(
+                'design-direction-seeds.md',
+                ConceptSeeds::seedPromptVars($brief, $siteSpec),
+            );
             $payload = $this->llm->completeJson(
                 $prompt,
                 $this->withOptions(['log_label' => 'design-direction-seeds']),
