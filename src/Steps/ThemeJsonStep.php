@@ -8,8 +8,10 @@ use Automattic\SiteBuild\BlockSerializer\Html\HtmlFragment;
 use Automattic\SiteBuild\BlockSerializer\Html\HtmlNode;
 use Automattic\SiteBuild\BlockSerializer\Html\Selector;
 use Automattic\SiteBuild\CssTokenExtractor;
+use Automattic\SiteBuild\FontCatalog;
 use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\GeneratedJsonFallbackStep;
+use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\CssChecks;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
@@ -32,9 +34,12 @@ use Throwable;
  * Validates the structure the templates depend on (version 3, the five color
  * slugs, the heading/body font slugs, and an optional accent family) and
  * repairs drift deterministically: missing slugs are filled from the design
- * direction's committed values, then neutral defaults. When an accent family
- * ships, captions pick it up even if a section forgot fontFamily:accent.
- * Every fill is recorded in warnings.json — a missing slug never
+ * direction's committed values, then neutral defaults, and heading/body
+ * families and palette hexes that disagree with the direction are written
+ * back. When an accent family ships, captions pick it up even if a section
+ * forgot fontFamily:accent. A fill, and a writeback a contrast floor
+ * rejects, are recorded in warnings.json; an applied writeback is a receipt
+ * in logs/theme-json-direction-bind.txt instead. A missing slug never
  * aborts the build.
  *
  * HTML-first composition mode declares and consumes design/site.css token
@@ -45,6 +50,18 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     use LlmOptions;
 
     private const REQUIRED_COLORS = ['base', 'contrast', 'primary', 'secondary', 'accent'];
+
+    /**
+     * The per-slug contrast floors against `base` that prompts/theme-json.md
+     * states as non-negotiable, mirrored here so the direction writeback can
+     * tell a model hex that was moved to clear one from ordinary drift.
+     */
+    private const CONTRAST_FLOORS = [
+        'contrast' => 7.0,
+        'primary' => ContrastMath::NORMAL_TEXT,
+        'secondary' => ContrastMath::NORMAL_TEXT,
+        'accent' => ContrastMath::NORMAL_TEXT,
+    ];
     private const REQUIRED_FONTS = ['heading', 'body'];
     private const OPTIONAL_FONTS = ['accent'];
 
@@ -300,6 +317,14 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     private const REQ = 'theme-json';
     private const SHAPE_REPORT_FILE = 'theme-json-shape.txt';
 
+    /**
+     * Applied direction writebacks. warnings.json is the list of defects the
+     * build delivered through (Project::addWarnings), which a later repair pass
+     * consumes; a correction that succeeded is not one of those, and logging it
+     * there hands the next pass work that is already done.
+     */
+    private const BIND_REPORT_FILE = 'theme-json-direction-bind.txt';
+
     public function __construct(
         private Llm $llm,
         private PromptRenderer $renderer,
@@ -329,7 +354,12 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             id: $this->id(),
             label: $this->label(),
             reads: $reads,
-            writes: ['theme/theme.json', 'logs/' . self::SHAPE_REPORT_FILE, 'warnings.json'],
+            writes: [
+                'theme/theme.json',
+                'logs/' . self::SHAPE_REPORT_FILE,
+                'logs/' . self::BIND_REPORT_FILE,
+                'warnings.json',
+            ],
             concurrent: false,
         );
     }
@@ -458,9 +488,9 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         // readable defaults otherwise. Every fill is recorded durably.
         $direction = DesignDirectionStep::dataFor($project);
         $preferred = is_array($direction['palette'] ?? null) ? $direction['palette'] : [];
-        [$theme, $colorWarnings] = self::repairColors($theme, $preferred);
+        [$theme, $colorWarnings, $colorRepairs] = self::repairColors($theme, $preferred);
         $preferredType = is_array($direction['type'] ?? null) ? $direction['type'] : [];
-        [$theme, $fontWarnings] = self::repairFonts($theme, $preferredType);
+        [$theme, $fontWarnings, $fontRepairs] = self::repairFonts($theme, $preferredType);
         [$theme, $sizeWarnings] = self::repairFontSizes($theme);
 
         // Last: the scaffold references the preset slugs repaired above. The
@@ -486,6 +516,17 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $groupPaddingWarnings,
             $shapeWarnings,
         );
+
+        $bindRepairs = array_merge($colorRepairs, $fontRepairs);
+        $bindReport = ['Successful design-direction writebacks: ' . count($bindRepairs)];
+        foreach ($bindRepairs as $repair) {
+            $bindReport[] = '- ' . $repair;
+        }
+        $project->writeText('logs/' . self::BIND_REPORT_FILE, implode("\n", $bindReport) . "\n");
+        if ($bindRepairs !== []) {
+            Narrator::write('  [theme-json] wrote ' . count($bindRepairs)
+                . ' drifted value(s) back to the design direction; see logs/' . self::BIND_REPORT_FILE . "\n");
+        }
 
         $shapeReport = ['Successful deterministic shape repairs: ' . count($shapeRepairs)];
         foreach ($shapeRepairs as $repair) {
@@ -1370,18 +1411,29 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      * entries are removed at the smallest unit and recorded before a required
      * slug is replaced. Pure — unit-testable.
      *
+     * A hex the model moved is only written back when the direction's own hex
+     * stays readable on the delivered base: prompts/theme-json.md lets the
+     * model nudge a hex to clear WCAG, and the direction sets no numeric floor,
+     * so an unconditional writeback can silently reinstate an unreadable pair
+     * that nothing downstream re-checks. A rejected writeback is a warning; an
+     * applied one is a repair receipt, not a defect.
+     *
      * @param array<mixed>         $theme
      * @param array<string,mixed>  $preferredHexes role => "#RRGGBB" (direction palette)
-     * @return array{0:array<mixed>,1:list<string>} theme, warnings
+     * @return array{0:array<mixed>,1:list<string>,2:list<string>} theme, warnings, repairs
      */
     public static function repairColors(array $theme, array $preferredHexes = []): array
     {
         $warnings = [];
+        $repairs = [];
         $palette = $theme['settings']['color']['palette'] ?? null;
         if (!is_array($palette)) {
             $warnings[] = 'theme.json missing settings.color.palette; rebuilt with default colors';
             $palette = [];
         }
+        // The background every other slug is judged against, resolved before the
+        // loop because `base` may sit after the entry being decided.
+        $deliveredBase = self::deliveredBase($palette, $preferredHexes);
         $entries = [];
         $nonObjects = 0;
         foreach ($palette as $entry) {
@@ -1402,7 +1454,31 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                 continue;
             }
             $entry['slug'] = $slug;
-            $entry['color'] = trim($color);
+            $entry['color'] = trim((string) $color);
+            $rawPreferred = $preferredHexes[$slug] ?? null;
+            $preferred = is_string($rawPreferred) ? self::normalizeHex($rawPreferred) : null;
+            $current = self::normalizeHex($entry['color']);
+            if ($preferred !== null && $current !== null && $current !== $preferred) {
+                $authored = $entry['color'];
+                if (self::writebackWouldBlind($slug, $current, $preferred, $deliveredBase)) {
+                    // The model's hex clears WCAG on the delivered base and the
+                    // direction's does not. Keep the readable one and say so;
+                    // ContrastFixStep only reports on the base/contrast pair and
+                    // is skipped outright on the HTML-first path, so nothing
+                    // downstream would catch this.
+                    $warnings[] = "theme.json palette slug '{$slug}': authored {$authored}; delivered {$authored}"
+                        . "; disposition kept the model hex because the design-direction hex {$preferred} scored "
+                        . self::ratioLabel($preferred, $deliveredBase) . ':1 on base ' . $deliveredBase
+                        . ', below the ' . self::CONTRAST_FLOORS[$slug] . ':1 floor for this slug, '
+                        . 'which the model hex clears at ' . self::ratioLabel($current, $deliveredBase) . ':1'
+                        . self::hueDriftNote($slug, $current, $preferred);
+                } else {
+                    $entry['color'] = $preferred;
+                    $repairs[] = "palette slug '{$slug}': authored {$authored}; delivered {$preferred}"
+                        . '; disposition wrote the design-direction hex back'
+                        . self::hueDriftNote($slug, $authored, $preferred);
+                }
+            }
             $entries[] = $entry;
         }
         if ($nonObjects > 0) {
@@ -1417,14 +1493,31 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             }
             $rawPreferred = $preferredHexes[$needed] ?? null;
             $preferred = is_string($rawPreferred) ? strtoupper(trim($rawPreferred)) : '';
-            $hex = preg_match('/^#[0-9A-F]{6}$/', $preferred) === 1
-                ? $preferred
-                : self::FALLBACK_COLORS[$needed];
+            $fromDirection = preg_match('/^#[0-9A-F]{6}$/', $preferred) === 1 ? $preferred : null;
+            $neutral = self::FALLBACK_COLORS[$needed];
+            if ($fromDirection === null || self::clearsFloor($needed, $fromDirection, $deliveredBase)) {
+                $hex = $fromDirection ?? $neutral;
+                $warnings[] = "theme.json palette missing slug '{$needed}'; filled with {$hex}";
+            } else {
+                // Same floor the writeback above enforces, applied to the one
+                // other way a direction hex reaches the palette. There is no
+                // model hex to keep here, so the choice is the direction's own
+                // against the neutral default: take whichever actually reads on
+                // the delivered base, and never make the slug less readable.
+                $hex = (self::ratioOn($neutral, $deliveredBase) ?? 0.0)
+                    > (self::ratioOn($fromDirection, $deliveredBase) ?? 0.0)
+                    ? $neutral
+                    : $fromDirection;
+                $warnings[] = "theme.json palette missing slug '{$needed}': authored {$fromDirection}"
+                    . "; delivered {$hex}; disposition the design-direction hex scored "
+                    . self::ratioLabel($fromDirection, $deliveredBase) . ':1 on base ' . $deliveredBase
+                    . ', below the ' . self::CONTRAST_FLOORS[$needed] . ':1 floor for this slug'
+                    . self::hueDriftNote($needed, $fromDirection, $hex);
+            }
             $palette[] = ['slug' => $needed, 'color' => $hex, 'name' => ucfirst($needed)];
-            $warnings[] = "theme.json palette missing slug '{$needed}'; filled with {$hex}";
         }
         $theme['settings']['color']['palette'] = $palette;
-        return [$theme, $warnings];
+        return [$theme, $warnings, $repairs];
     }
 
     /**
@@ -1432,11 +1525,12 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      * for the missing ones. Pure — unit-testable.
      *
      * @param array<mixed> $theme
-     * @return array{0:array<mixed>,1:list<string>} theme, warnings
+     * @return array{0:array<mixed>,1:list<string>,2:list<string>} theme, warnings, repairs
      */
     public static function repairFonts(array $theme, array $preferredType = []): array
     {
         $warnings = [];
+        $repairs = [];
         $preferred = [];
         foreach (array_merge(self::REQUIRED_FONTS, self::OPTIONAL_FONTS) as $slot) {
             $typeSlot = is_array($preferredType[$slot] ?? null) ? $preferredType[$slot] : [];
@@ -1490,7 +1584,13 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $entry['slug'] = $slug;
             $entry['fontFamily'] = trim($family);
             if (isset($preferred[$slug])) {
+                $previous = $entry['fontFamily'];
                 $entry['fontFamily'] = self::replacePrimaryFamily($entry['fontFamily'], $preferred[$slug]);
+                if (!self::samePrimaryFamily($previous, $preferred[$slug])) {
+                    $repairs[] = "fontFamilies slug '{$slug}': authored {$previous}; delivered "
+                        . $entry['fontFamily']
+                        . '; disposition wrote the design-direction family back';
+                }
             }
             $entries[] = $entry;
         }
@@ -1520,7 +1620,92 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         }
 
         $theme['settings']['typography']['fontFamilies'] = $families;
-        return [$theme, $warnings];
+        return [$theme, $warnings, $repairs];
+    }
+
+    /**
+     * The base hex every other slug is judged against once the writeback has
+     * run: the direction's base when it commits one, else the palette's own.
+     */
+    private static function deliveredBase(mixed $palette, array $preferredHexes): string
+    {
+        $fromDirection = is_string($preferredHexes['base'] ?? null)
+            ? self::normalizeHex($preferredHexes['base'])
+            : null;
+        if ($fromDirection !== null) {
+            return $fromDirection;
+        }
+        foreach (is_array($palette) ? $palette : [] as $entry) {
+            if (!is_array($entry) || ($entry['slug'] ?? null) !== 'base') {
+                continue;
+            }
+            $hex = is_string($entry['color'] ?? null) ? self::normalizeHex($entry['color']) : null;
+            if ($hex !== null) {
+                return $hex;
+            }
+        }
+        return '#FFFFFF';
+    }
+
+    /**
+     * True when the direction's hex would drop a slug the model had made
+     * compliant below the floor prompts/theme-json.md:36-39 states for it.
+     *
+     * `base` is exempt: it is the reference background, and replacing it is a
+     * design decision rather than a readability one. The floors below are the
+     * prompt's own, and the ratio is symmetric, so `accent`'s requirement —
+     * "base on accent >= 4.5:1" for button labels — is the same measurement.
+     */
+    private static function writebackWouldBlind(
+        string $slug,
+        string $authored,
+        string $preferred,
+        string $base,
+    ): bool {
+        return self::clearsFloor($slug, $authored, $base)
+            && !self::clearsFloor($slug, $preferred, $base);
+    }
+
+    /**
+     * Whether one hex meets the floor its slug carries on the delivered base.
+     * A slug with no floor, and a hex we cannot measure, both pass: this gate
+     * exists to catch a measured failure, not to reject unfamiliar input.
+     */
+    private static function clearsFloor(string $slug, string $hex, string $base): bool
+    {
+        $floor = self::CONTRAST_FLOORS[$slug] ?? null;
+        if ($floor === null) {
+            return true;
+        }
+        $ratio = self::ratioOn($hex, $base);
+        return $ratio === null || $ratio >= $floor;
+    }
+
+    /**
+     * The direction names its colors ("rosa goiaba"), so past 30 degrees of
+     * hue the delivered hex reads as a different color than the name it
+     * shipped under. Only secondary and accent carry a name worth reporting.
+     */
+    private static function hueDriftNote(string $slug, string $from, string $to): string
+    {
+        return in_array($slug, ['secondary', 'accent'], true)
+            && self::hueDistance($from, $to) > 30.0
+            ? '; hue distance exceeded 30 degrees'
+            : '';
+    }
+
+    /** WCAG ratio of one hex against another, or null when either is unreadable. */
+    private static function ratioOn(string $hex, string $base): ?float
+    {
+        $fg = ContrastMath::hexToRgb($hex);
+        $bg = ContrastMath::hexToRgb($base);
+        return $fg === null || $bg === null ? null : ContrastMath::ratio($fg, $bg);
+    }
+
+    private static function ratioLabel(string $hex, string $base): string
+    {
+        $ratio = self::ratioOn($hex, $base);
+        return $ratio === null ? 'an unmeasurable' : number_format($ratio, 2);
     }
 
     /**
@@ -1576,6 +1761,62 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             ? ', ' . trim($parts[1])
             : ', system-ui, sans-serif';
         return '"' . $family . '"' . $fallback;
+    }
+
+    /**
+     * FontCatalog owns the one parser for a stack's primary family, so a scan
+     * and this writeback can never disagree about what a stack already names.
+     */
+    private static function samePrimaryFamily(string $stack, string $family): bool
+    {
+        return strcasecmp(FontCatalog::primaryFamily($stack) ?? '', $family) === 0;
+    }
+
+    /** @return ?string uppercase #RRGGBB */
+    private static function normalizeHex(string $hex): ?string
+    {
+        $hex = strtoupper(trim($hex));
+        if (preg_match('/^#[0-9A-F]{6}$/', $hex) === 1) {
+            return $hex;
+        }
+        if (preg_match('/^#[0-9A-F]{3}$/', $hex) === 1) {
+            return '#' . $hex[1] . $hex[1] . $hex[2] . $hex[2] . $hex[3] . $hex[3];
+        }
+        return null;
+    }
+
+    /** Circular hue distance in degrees, or 0 when either hex is unreadable. */
+    private static function hueDistance(string $a, string $b): float
+    {
+        $ha = self::hueDegrees($a);
+        $hb = self::hueDegrees($b);
+        if ($ha === null || $hb === null) {
+            return 0.0;
+        }
+        $delta = abs($ha - $hb);
+        return min($delta, 360.0 - $delta);
+    }
+
+    private static function hueDegrees(string $hex): ?float
+    {
+        $rgb = ContrastMath::hexToRgb($hex);
+        if ($rgb === null) {
+            return null;
+        }
+        [$r, $g, $b] = [$rgb[0] / 255, $rgb[1] / 255, $rgb[2] / 255];
+        $max = max($r, $g, $b);
+        $min = min($r, $g, $b);
+        $d = $max - $min;
+        if ($d < 1e-6) {
+            return 0.0;
+        }
+        $h = match ($max) {
+            $r => fmod((($g - $b) / $d), 6),
+            $g => (($b - $r) / $d) + 2,
+            default => (($r - $g) / $d) + 4,
+        };
+        $h *= 60.0;
+        return $h < 0 ? $h + 360.0 : $h;
     }
 
     /**
