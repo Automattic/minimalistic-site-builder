@@ -693,12 +693,15 @@ final class SectionsStep implements Step
      * forfeits first-window cache hits; it must not abort the build or change
      * the subsequent concurrent fan-out.
      *
-     * The probe uses the most deeply layered request in the batch, which is a
-     * section: its leading layer is byte-identical to the one the header,
-     * footer and hero open with, so priming it covers every markup call rather
-     * than only the sections. Warming a chrome request instead would prime that
-     * shared layer alone and leave the section build/page layers cold — the
-     * batch fans out concurrently, so nothing else can prime them in time.
+     * The probe uses the most deeply layered request in the batch — a section
+     * whenever the batch has one. Its leading layer is byte-identical to the
+     * one the header, footer and hero open with, so priming it covers every
+     * markup call rather than only the sections. Warming a chrome request
+     * instead would prime that shared layer alone and leave the section
+     * build/page layers cold — the batch fans out concurrently, so nothing
+     * else can prime them in time. A hero-only front page has no section, so
+     * there the probe is a chrome request and the shared layer is all there is
+     * to prime.
      *
      * The sections themselves are generated through completeBatch(), so the
      * one-member probe deliberately travels that same seam. Hosts may implement
@@ -748,8 +751,11 @@ final class SectionsStep implements Step
     /**
      * The request carrying the most cached prefix bytes, so one probe primes
      * the largest reusable context in the batch. Every markup unit's layers
-     * start with the same site layer, so the deepest request's prefixes are a
-     * superset of every other request's.
+     * open with the same site layer, so priming any request covers that shared
+     * layer for all of them; picking the deepest one also primes the section
+     * build and page layers sitting behind it. It is not a superset of every
+     * request — sections on other pages carry their own page layer, which this
+     * probe leaves cold.
      *
      * @param array<string,array{prompt:string,model?:string,temperature?:float,cached_prefixes?:list<string>}> $requests
      * @return array{prompt:string,cached_prefixes:list<string>}|null null when no request carries layers
