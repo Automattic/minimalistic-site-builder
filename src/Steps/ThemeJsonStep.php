@@ -37,8 +37,10 @@ use Throwable;
  * direction's committed values, then neutral defaults, and heading/body
  * families and palette hexes that disagree with the direction are written
  * back. When an accent family ships, captions pick it up even if a section
- * forgot fontFamily:accent. Every fill or overwrite is recorded in
- * warnings.json — a missing slug never aborts the build.
+ * forgot fontFamily:accent. A fill, and a writeback a contrast floor
+ * rejects, are recorded in warnings.json; an applied writeback is a receipt
+ * in logs/theme-json-direction-bind.txt instead. A missing slug never
+ * aborts the build.
  *
  * HTML-first composition mode declares and consumes design/site.css token
  * evidence. Legacy mode ignores any stale design artifact from an earlier run.
