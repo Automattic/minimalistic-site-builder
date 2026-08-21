@@ -1,0 +1,457 @@
+/*
+ * Header state kit -- trusted, deterministic chrome for generated themes.
+ *
+ * The generated header contributes only reviewed class hooks. This stylesheet
+ * owns positioning and the two visual states, so model-authored CSS can never
+ * turn a header into persistent, layout-shifting chrome. The top and scrolled
+ * states deliberately keep identical geometry and foreground color: only
+ * paint properties change, avoiding both content jumps and a low-contrast
+ * midpoint while colors interpolate.
+ *
+ * Progressive enhancement:
+ * - sticky-soft remains useful with no JavaScript through native sticky.
+ * - overlay-to-solid is absolute (and therefore scrolls away) by default. It
+ *   becomes fixed only beneath the driver-owned html.header-state-js scope.
+ * - the sticky transparent/glass start and glass scrolled treatments exist
+ *   only beneath that same scope; without it (or without color-mix and
+ *   backdrop-filter support) the header keeps its opaque token surfaces.
+ * - if the driver fails, it removes that scope and the overlay fails open to
+ *   the non-persistent absolute treatment while sticky fails closed to its
+ *   opaque pair.
+ */
+
+:root {
+    --site-header-height: 0px;
+    --site-admin-bar-offset: 0px;
+    --header-state-duration: 240ms;
+    --header-state-ease: cubic-bezier(0.22, 1, 0.36, 1);
+    --header-overlay-scrim: rgb(0 0 0 / 0.60);
+}
+
+/* WordPress's classic admin-bar stylesheet does not expose a stable variable. */
+body.admin-bar {
+    --site-admin-bar-offset: 32px;
+}
+
+@media (max-width: 782px) {
+    body.admin-bar {
+        --site-admin-bar-offset: 46px;
+    }
+}
+
+/* The template-part wrapper owns all viewport positioning. */
+.site-header-shell {
+    box-sizing: border-box;
+    inline-size: 100%;
+    margin-block: 0;
+    z-index: 1000;
+}
+
+.site-header-shell--sticky-soft {
+    position: sticky;
+    top: var(--site-admin-bar-offset, 0px);
+}
+
+/* Core makes the mobile admin bar non-fixed at this breakpoint. Native sticky
+ * chrome uses the viewport edge after it scrolls away; an absolute overlay
+ * retains the 46px fallback until the enhanced driver measures its overlap. */
+@media (max-width: 600px) {
+    body.admin-bar .site-header-shell--sticky-soft {
+        top: 0;
+    }
+}
+
+.site-header-shell--overlay-to-solid {
+    position: absolute;
+    top: var(--site-admin-bar-offset, 0px);
+    right: 0;
+    left: 0;
+}
+
+/* Absolute overlay chrome and the first content band must share y=0. Core's
+ * top-level block-gap rule would otherwise reveal a strip of page background. */
+.site-header-shell--overlay-to-solid + .wp-block-post-content {
+    margin-block-start: 0;
+}
+
+/* Fixed overlay behavior is JS-owned. Without this scope it scrolls away. */
+html.header-state-js .site-header-shell--overlay-to-solid {
+    position: fixed;
+}
+
+/*
+ * The inner group owns the surface. Its padding, border width, and dimensions
+ * are identical in both states; no state selector below changes layout.
+ */
+.site-header-shell :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid) {
+    /* Two tiers: the -solid tokens are the always-opaque vocabulary (no-JS
+     * fallback, forced-solid pages, nav modal and submenu panels); the
+     * surface pair is what the two states actually paint, and only the
+     * driver-scoped treatment rules below ever make it non-opaque. */
+    --header-start-solid: var(--wp--preset--color--base, #ffffff);
+    --header-scrolled-solid: var(--header-start-solid);
+    --header-start-surface: var(--header-start-solid);
+    --header-scrolled-surface: var(--header-scrolled-solid);
+    --header-foreground: var(--wp--preset--color--contrast, #111111);
+    --header-start-shadow: none;
+    --header-scrolled-shadow: 0 10px 30px rgb(0 0 0 / 0.12);
+
+    box-sizing: border-box;
+    inline-size: 100%;
+    min-inline-size: 0;
+    color: var(--header-foreground) !important;
+    background-color: var(--header-start-surface) !important;
+    background-image: none !important;
+    box-shadow: var(--header-start-shadow);
+    transition-property: background-color, box-shadow;
+    transition-duration: var(--header-state-duration);
+    transition-timing-function: var(--header-state-ease);
+}
+
+.site-header-shell .header-behavior-overlay-to-solid {
+    /* A 60%-black translucent surface still reveals the hero while bounding
+     * an arbitrary white image pixel to #666. HeaderBehavior selects the one
+     * foreground against that exact worst case before enabling overlay. */
+    --header-start-surface: var(--header-overlay-scrim);
+    --header-scrolled-solid: var(--wp--preset--color--contrast, #111111);
+    --header-foreground: var(--wp--preset--color--base, #ffffff);
+
+    padding-left: var(--wp--style--root--padding-left, var(--wp--preset--spacing--md));
+    padding-right: var(--wp--style--root--padding-right, var(--wp--preset--spacing--md));
+}
+
+/* Canonical five-color theme vocabulary plus transparent overlay tops. */
+.site-header-shell .header-start-transparent { --header-start-surface: var(--header-overlay-scrim); }
+
+/* An earned clear resting state (BIGR-778): the build proved the foreground
+ * against each opening cover's own dim, so the kit scrim would only double
+ * the darkening. Driver-scoped like every treatment rule — without the
+ * state driver the header fails closed to the scrim veil — and the scrolled
+ * surface still arrives via header-is-scrolled exactly as with the veil. */
+html.header-state-js
+    .site-header-shell
+    .header-behavior-overlay-to-solid.header-top-transparent {
+    --header-start-surface: transparent;
+
+    /* The fixed header can move over a different section between frames.
+     * Snap the protective solid paint on/off so a timed transparent-to-solid
+     * interpolation never exposes that changing underlay; the shadow remains
+     * the smooth visual cue for motion-enabled themes. */
+    transition-property: box-shadow;
+}
+.site-header-shell .header-start-base { --header-start-solid: var(--wp--preset--color--base, #ffffff); }
+.site-header-shell .header-start-contrast { --header-start-solid: var(--wp--preset--color--contrast, #111111); }
+.site-header-shell .header-start-primary { --header-start-solid: var(--wp--preset--color--primary, #333333); }
+.site-header-shell .header-start-secondary { --header-start-solid: var(--wp--preset--color--secondary, #eeeeee); }
+.site-header-shell .header-start-accent { --header-start-solid: var(--wp--preset--color--accent, #555555); }
+
+.site-header-shell .header-scrolled-base { --header-scrolled-solid: var(--wp--preset--color--base, #ffffff); }
+.site-header-shell .header-scrolled-contrast { --header-scrolled-solid: var(--wp--preset--color--contrast, #111111); }
+.site-header-shell .header-scrolled-primary { --header-scrolled-solid: var(--wp--preset--color--primary, #333333); }
+.site-header-shell .header-scrolled-secondary { --header-scrolled-solid: var(--wp--preset--color--secondary, #eeeeee); }
+.site-header-shell .header-scrolled-accent { --header-scrolled-solid: var(--wp--preset--color--accent, #555555); }
+
+.site-header-shell .header-foreground-base { --header-foreground: var(--wp--preset--color--base, #ffffff); }
+.site-header-shell .header-foreground-contrast { --header-foreground: var(--wp--preset--color--contrast, #111111); }
+.site-header-shell .header-foreground-primary { --header-foreground: var(--wp--preset--color--primary, #333333); }
+.site-header-shell .header-foreground-secondary { --header-foreground: var(--wp--preset--color--secondary, #eeeeee); }
+.site-header-shell .header-foreground-accent { --header-foreground: var(--wp--preset--color--accent, #555555); }
+
+/* Keep the shared readable foreground on navigation chrome in both states. */
+.site-header-shell
+    :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid)
+    :where(
+        .wp-block-site-title,
+        .wp-block-site-title a,
+        .wp-block-site-tagline,
+        .wp-block-navigation,
+        .wp-block-navigation-item__content,
+        .wp-block-navigation__responsive-container-open,
+        .wp-block-navigation__responsive-container-close
+    ) {
+    /* Not !important: an authored colour has to win here. A design that
+     paints its own header — calm-lantern's is dark purple in BOTH
+     states — carries that colour inline on the navigation block, and
+     forcing --header-foreground over it rendered near-black text on
+     purple at roughly 1.2:1. This still supplies the readable default
+     wherever nothing else states a colour; it just stops overriding a
+     design that did. The submenu and open-overlay rules below keep
+     their !important: those panels paint their own opaque background,
+     so pairing the foreground to it is self-consistent. */
+  color: var(--header-foreground);
+}
+
+/* Core gives unstyled desktop submenus a white panel. Give every nested menu
+ * the same verified opaque pair as the mobile modal instead. */
+.site-header-shell
+    :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid)
+    .wp-block-navigation__submenu-container {
+    color: var(--header-foreground) !important;
+    background-color: var(--header-scrolled-solid) !important;
+}
+
+/* Driver-scrolled pages use the treatment-aware scrolled surface; explicitly
+ * forced pages take the opaque token directly — force-solid means solid. */
+html.header-is-scrolled
+    .site-header-shell
+    :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid) {
+    background-color: var(--header-scrolled-surface) !important;
+    box-shadow: var(--header-scrolled-shadow);
+}
+
+.site-header-shell--force-solid
+    :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid) {
+    background-color: var(--header-scrolled-solid) !important;
+    box-shadow: var(--header-scrolled-shadow);
+}
+
+/*
+ * Sticky start/scrolled paint treatments. Both are driver-owned: without the
+ * header-state-js scope (no JavaScript, or a failed driver that removed it)
+ * the sticky header keeps its opaque token surfaces, so the airier states
+ * can never strand unreadable text. HeaderBehavior grants each class only
+ * after proving the foreground against the exact worst case the state
+ * admits — including the premultiplied interpolation path between states.
+ */
+html.header-state-js
+    .site-header-shell
+    .header-behavior-sticky-soft.header-top-transparent {
+    --header-start-surface: transparent;
+}
+
+/* The 80% color-mix tint is part of the contrast contract: it must match
+ * HeaderBehavior::GLASS_ALPHA, which proved the foreground readable against
+ * this tint over both pure black and pure white content. Without color-mix
+ * and backdrop-filter support the opaque token surface above stays. */
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px)))
+    and (background-color: color-mix(in srgb, red 80%, transparent)) {
+    html.header-state-js
+        .site-header-shell
+        .header-behavior-sticky-soft.header-top-glass {
+        --header-start-surface: color-mix(in srgb, var(--header-start-solid) 80%, transparent);
+    }
+
+    html.header-state-js
+        .site-header-shell
+        .header-behavior-sticky-soft.header-scrolled-glass {
+        --header-scrolled-surface: color-mix(in srgb, var(--header-scrolled-solid) 80%, transparent);
+    }
+
+    /* Blur behind glass states via the same non-ancestor pseudo-element
+     * pattern the overlay uses, so the filter cannot turn the fixed
+     * responsive-nav modal into a header-relative containing block. */
+    html.header-state-js
+        .site-header-shell
+        .header-behavior-sticky-soft:is(.header-top-glass, .header-scrolled-glass) {
+        position: relative;
+    }
+
+    html.header-state-js
+        .site-header-shell
+        .header-behavior-sticky-soft:is(.header-top-glass, .header-scrolled-glass)::before {
+        position: absolute;
+        z-index: 0;
+        inset: 0;
+        content: "";
+        pointer-events: none;
+        -webkit-backdrop-filter: blur(14px) saturate(115%);
+        backdrop-filter: blur(14px) saturate(115%);
+    }
+
+    html.header-state-js
+        .site-header-shell
+        .header-behavior-sticky-soft:is(.header-top-glass, .header-scrolled-glass) > * {
+        position: relative;
+        z-index: 1;
+    }
+
+    /* Blur is pointless work under an opaque scrolled surface. */
+    html.header-state-js.header-is-scrolled
+        .site-header-shell
+        .header-behavior-sticky-soft:not(.header-scrolled-glass)::before {
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+    }
+}
+
+/* Users who ask for less transparency get the verified opaque pair; these
+ * override the treatment rules above by cascade order at equal specificity. */
+@media (prefers-reduced-transparency: reduce) {
+    html.header-state-js
+        .site-header-shell
+        .header-behavior-sticky-soft:is(.header-top-transparent, .header-top-glass) {
+        --header-start-surface: var(--header-start-solid);
+    }
+
+    /* The clear overlay start returns to the verified scrim veil. */
+    html.header-state-js
+        .site-header-shell
+        .header-behavior-overlay-to-solid.header-top-transparent {
+        --header-start-surface: var(--header-overlay-scrim);
+    }
+
+    html.header-state-js
+        .site-header-shell
+        .header-behavior-sticky-soft.header-scrolled-glass {
+        --header-scrolled-surface: var(--header-scrolled-solid);
+    }
+
+    html.header-state-js
+        .site-header-shell
+        .header-behavior-sticky-soft:is(.header-top-glass, .header-scrolled-glass)::before {
+        content: none;
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+    }
+}
+
+/* Progressive glass enhancement for image-led opening compositions. The
+ * pseudo-element is not an ancestor of the navigation, so its filter cannot
+ * turn a fixed responsive menu into a header-relative containing block. */
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+    .site-header-shell .header-behavior-overlay-to-solid {
+        position: relative;
+    }
+
+    .site-header-shell .header-behavior-overlay-to-solid::before {
+        position: absolute;
+        z-index: 0;
+        inset: 0;
+        content: "";
+        pointer-events: none;
+        -webkit-backdrop-filter: blur(14px) saturate(115%);
+        backdrop-filter: blur(14px) saturate(115%);
+    }
+
+    .site-header-shell .header-behavior-overlay-to-solid > * {
+        position: relative;
+        z-index: 1;
+    }
+
+    html.header-is-scrolled
+        .site-header-shell
+        .header-behavior-overlay-to-solid::before,
+    .site-header-shell--force-solid .header-behavior-overlay-to-solid::before {
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+    }
+
+    /* A clear resting state must actually be clear: no frosted blur band
+     * over the hero while the surface is transparent. */
+    html.header-state-js
+        .site-header-shell
+        .header-behavior-overlay-to-solid.header-top-transparent::before {
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+    }
+}
+
+/* A WordPress responsive-nav modal must never expose content behind its text.
+ * It also must not inherit the desktop row justification (nav-at-end headers
+ * otherwise glue labels to the viewport edge and clip them). */
+.site-header-shell
+    :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid)
+    .wp-block-navigation__responsive-container.is-menu-open {
+    --navigation-layout-justification-setting: flex-start;
+    --navigation-layout-justify: flex-start;
+    color: var(--header-foreground) !important;
+    background-color: var(--header-scrolled-solid) !important;
+    background-image: none !important;
+}
+
+.site-header-shell
+    :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid)
+    .wp-block-navigation__responsive-container.is-menu-open
+    .wp-block-navigation__responsive-container-content,
+.site-header-shell
+    :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid)
+    .wp-block-navigation__responsive-container.is-menu-open
+    :is(.wp-block-navigation__container, .wp-block-page-list) {
+    align-items: stretch !important;
+    justify-content: flex-start !important;
+    text-align: start !important;
+}
+
+/* Measured by header.js, including restored-scroll and responsive layouts. */
+html.header-state-js {
+    scroll-padding-top: calc(
+        var(--site-header-height, 0px)
+        + var(--site-admin-bar-offset, 0px)
+    );
+}
+
+.site-header-shell .header-transition-instant {
+    transition-duration: 0s !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .site-header-shell
+        :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid),
+    .site-header-shell
+        :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid) * {
+        transition-duration: 0s !important;
+    }
+}
+
+@media print {
+    html.header-state-js {
+        scroll-padding-top: 0;
+    }
+
+    .site-header-shell,
+    html.header-state-js .site-header-shell--overlay-to-solid {
+        position: static !important;
+        inset: auto !important;
+        inline-size: auto;
+        box-shadow: none !important;
+    }
+
+    .site-header-shell
+        :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid),
+    html.header-is-scrolled
+        .site-header-shell
+        :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid),
+    .site-header-shell--force-solid
+        :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid) {
+        color: #000000 !important;
+        background: #ffffff !important;
+        box-shadow: none !important;
+        transition: none !important;
+    }
+
+    .site-header-shell
+        :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid)
+        :where(
+            .wp-block-site-title,
+            .wp-block-site-title a,
+            .wp-block-site-tagline,
+            .wp-block-navigation,
+            .wp-block-navigation-item__content
+    ) {
+        color: #000000 !important;
+    }
+
+    .site-header-shell
+        :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid)
+        .wp-block-navigation__responsive-container.is-menu-open {
+        position: static !important;
+        inset: auto !important;
+        color: #000000 !important;
+        background: #ffffff !important;
+    }
+
+    .site-header-shell
+        :is(
+            .wp-block-navigation__responsive-container-open,
+            .wp-block-navigation__responsive-container-close
+        ) {
+        display: none !important;
+    }
+
+    .site-header-shell
+        :is(.header-behavior-overlay-to-solid, .header-behavior-sticky-soft)::before {
+        content: none !important;
+        -webkit-backdrop-filter: none !important;
+        backdrop-filter: none !important;
+    }
+}

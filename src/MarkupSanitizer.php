@@ -37,8 +37,13 @@ final class MarkupSanitizer
         // The scanner is quote/comment aware and follows nested
         // object/applet boundaries; a first-closer regex can expose exactly
         // the content this pass is meant to remove.
+        // `style` is not script-capable, but a single model-authored rule
+        // (`.site-header-shell{position:fixed}`) overrides the trusted theme
+        // shell's positioning contract in the delivered site. Generated
+        // markup never legitimately ships a stylesheet element — delivered
+        // CSS belongs to the trusted asset kit — so the whole element goes.
         $containers = [
-            'script', 'iframe', 'object', 'applet',
+            'script', 'style', 'iframe', 'object', 'applet',
             'noembed', 'noframes', 'noscript',
         ];
         // SVG SMIL animation elements set the LIVE value of a sibling's

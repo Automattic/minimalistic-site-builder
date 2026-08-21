@@ -1,11 +1,10 @@
 <?php
 declare(strict_types=1);
 
-use Automattic\SiteBuild\BlockFixers;
 use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\StepComposition;
 use Automattic\SiteBuild\Steps\CollectImagesStep;
-use Automattic\SiteBuild\Steps\CoverContrastStep;
-use Automattic\SiteBuild\Steps\GenerateImagesStep;
+use Automattic\SiteBuild\TransformArtifacts;
 
 /**
  * Generate (or regenerate) the AI images for an already-built project.
@@ -28,10 +27,7 @@ require_once __DIR__ . '/../src/bootstrap.php';
 $slug = $argv[1] ?? null;
 if ($slug === null || trim($slug) === '') {
     fwrite(STDERR, "Usage: php bin/images.php <slug>\n");
-    fwrite(STDERR, "Available projects:\n");
-    foreach (glob(repo_path('projects/*/theme/style.css')) ?: [] as $f) {
-        fwrite(STDERR, '  - ' . basename(dirname(dirname($f))) . "\n");
-    }
+    print_built_projects(STDERR);
     exit(1);
 }
 
@@ -42,7 +38,9 @@ echo "Generating images for '{$project->slug()}'\n";
 
 // Use the durable record from the pipeline; only collect if it's absent.
 if (!$project->exists('images.json')) {
-    (new CollectImagesStep())->run($project);
+    // The transform report is only written by the HTML-first pipeline, and it
+    // is what tells the collector to read prose alts as image subjects.
+    (new CollectImagesStep(htmlFirst: $project->exists(TransformArtifacts::REPORT)))->run($project);
 }
 $specs = $project->readJson('images.json');
 $pending = array_filter($specs, static fn ($img) => ($img['status'] ?? 'pending') !== 'completed');
@@ -57,11 +55,14 @@ try {
     $llm = null;
 }
 
+// The whole post-image phase, not just the generation: everything downstream
+// of the real pixels — the cover-contrast recheck and the theme's preview card
+// — has to run here too, or a project that got its images this way keeps the
+// placeholders the pipeline left behind.
 $start = microtime(true);
-(new GenerateImagesStep(make_image_client(), $llm, step_models()['image-prompt-repair'] ?? null))->run($project);
+foreach (StepComposition::postImages(make_generate_images_step($llm)) as $step) {
+    $step->run($project);
+}
 printf("  done in %.1fs\n", microtime(true) - $start);
-
-// With the real pixels on disk, verify cover text against the dimmed images.
-(new CoverContrastStep(BlockFixers::default()))->run($project);
 
 echo "Output: {$project->themePath('assets')}\n";

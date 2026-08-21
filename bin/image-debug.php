@@ -6,7 +6,7 @@ use Automattic\SiteBuild\ImagePromptComposer;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Steps\CollectImagesStep;
 use Automattic\SiteBuild\Steps\GenerateImagesStep;
-use Automattic\SiteBuild\Imagen;
+use Automattic\SiteBuild\GeminiImage;
 
 /**
  * Image-prompt debugger.
@@ -15,7 +15,7 @@ use Automattic\SiteBuild\Imagen;
  * theme. It drives the real GenerateImagesStep against a throwaway temp project,
  * so what you see here is exactly what the pipeline would produce: the same
  * prompt composition (ImagePromptComposer), the same site-context grounding, the
- * same Imagen call, the same batching/retry.
+ * same Gemini call, the same batching/retry.
  *
  * Run it:
  *   php -S localhost:8080 bin/image-debug.php
@@ -64,7 +64,7 @@ function debug_examples(): array
             'subject'     => 'A lone figure seen from behind facing a vast crowd at a dusk demonstration on a wide '
                 . 'Buenos Aires avenue, banners blurred in the distance, smoke and low golden light, documentary '
                 . 'reportage feel, subject placed to the right with open low-detail sky to the left',
-            'pageContext' => 'full-bleed hero section with the photographer name and tagline overlaid on the left',
+            'pageContext' => 'full-frame editorial photograph with the left third kept as open, low-detail negative space',
             'style'       => 'photorealistic',
             'aspectRatio' => 'landscape',
         ],
@@ -211,7 +211,7 @@ function generate_images_for(array $req, ?ImageClient $client = null): array
         $project->writeJson('siteSpec.json', $siteSpec);
         $project->writeJson('images.json', $specs);
 
-        // The real pipeline step does the work: compose → Imagen → batch/retry.
+        // The real pipeline step does the work: compose → Gemini → batch/retry.
         (new GenerateImagesStep($client ?? make_image_client()))->run($project);
 
         $done = $project->readJson('images.json');
@@ -221,7 +221,7 @@ function generate_images_for(array $req, ?ImageClient $client = null): array
             $dataUri = null;
             if (($spec['status'] ?? '') === 'completed' && $project->exists('theme/assets/' . $filename)) {
                 $bytes = $project->readText('theme/assets/' . $filename);
-                $dataUri = 'data:' . Imagen::mimeForFilename($filename) . ';base64,'
+                $dataUri = 'data:' . GeminiImage::mimeForFilename($filename) . ';base64,'
                     . base64_encode($bytes);
             }
             $results[] = [
@@ -235,9 +235,9 @@ function generate_images_for(array $req, ?ImageClient $client = null): array
                     (string) ($spec['style'] ?? ''),
                     $siteContext,
                     '',
-                    Imagen::mimeForFilename($filename) === 'image/png',
+                    GeminiImage::mimeForFilename($filename) === 'image/png',
                 ),
-                'aspectRatio' => Imagen::aspectRatio((string) ($spec['aspectRatio'] ?? 'landscape')),
+                'aspectRatio' => GeminiImage::aspectRatio((string) ($spec['aspectRatio'] ?? 'landscape')),
                 'dataUri'     => $dataUri,
             ];
         }
@@ -292,7 +292,7 @@ function rrmdir(string $dir): void
 $site = debug_site_context();
 $examples = debug_examples();
 $styles = ['photorealistic', 'digital-art', 'illustration', 'minimalist', 'flat-design', '3d-render', 'abstract', 'watercolor'];
-$ratios = ['square', 'landscape', 'portrait'];
+$ratios = ['square', 'landscape', 'ultrawide', 'portrait', 'card-landscape', 'card-portrait'];
 
 header('Content-Type: text/html; charset=utf-8');
 ?>
@@ -332,7 +332,10 @@ header('Content-Type: text/html; charset=utf-8');
     border-bottom: 1px solid #e1e4ea;
   }
   .card .preview.square { aspect-ratio: 1 / 1; }
-  .card .preview.portrait { aspect-ratio: 3 / 4; }
+  .card .preview.ultrawide { aspect-ratio: 21 / 9; }
+  .card .preview.portrait { aspect-ratio: 9 / 16; }
+  .card .preview.card-landscape { aspect-ratio: 4 / 3; }
+  .card .preview.card-portrait { aspect-ratio: 3 / 4; }
   .card .preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .card .ph { color: #9aa1b1; font-size: 13px; }
   .meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }

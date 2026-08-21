@@ -40,6 +40,9 @@ final class ContrastFix
     /** Text blocks rendered at large-text scale — the 3:1 WCAG threshold applies. */
     private const LARGE_TEXT_BLOCKS = ['heading', 'site-title', 'post-title', 'pullquote'];
 
+    /** Blocks whose own HTML may carry a `<figcaption>` the walk must check. */
+    private const CAPTION_BLOCKS = ['image', 'gallery'];
+
     /**
      * Void/dynamic blocks that render text at runtime (no inner HTML to
      * inspect) and whose rendered links inherit the block's own text color,
@@ -81,6 +84,7 @@ final class ContrastFix
         private ?string $defaultText = null,
         private ?string $headingText = null,
         private array $fontSizes = [],
+        private float $normalText = ContrastMath::NORMAL_TEXT,
     ) {}
 
     /**
@@ -202,6 +206,28 @@ final class ContrastFix
                     || ($name === 'post-title' && ($attrs['isLink'] ?? false) === true),
                 'link'      => $linkCtx,
             ];
+        } elseif (in_array($name, self::CAPTION_BLOCKS, true)
+            && preg_match('/<figcaption\b[^>]*>(.*?)<\/figcaption>/is', $this->captionHtml($i), $cap)
+            && self::visibleText($cap[1]) !== '') {
+            // A figcaption inherits the surrounding text color — no core rule
+            // recolors it, and removeUnverifiedContextColors strips authored
+            // theme-level caption colors on the promise that this pass checks
+            // rendered backgrounds. The block supports no textColor, so a
+            // failing caption is repaired through the theme stylesheet's
+            // caption-text-* class hooks instead.
+            $this->texts[] = [
+                'index'     => $i,
+                'name'      => $name,
+                'caption'   => true,
+                'fg'        => $textCtx,
+                'bg'        => $bgColors,
+                'bgLabel'   => $bgLabel,
+                'provider'  => $bgProvider,
+                'threshold' => $this->normalText,
+                'hasText'   => true,
+                'hasAnchor' => stripos($cap[1], '<a ') !== false,
+                'link'      => $linkCtx,
+            ];
         } elseif (in_array($name, ['quote', 'pullquote'], true)
             && preg_match('/<cite\b[^>]*>(.*?)<\/cite>/is', $this->doc->innerHtml($i), $cite)
             && self::visibleText($cite[1]) !== '') {
@@ -214,7 +240,7 @@ final class ContrastFix
                 'bg'        => $bgColors,
                 'bgLabel'   => $bgLabel,
                 'provider'  => $bgProvider,
-                'threshold' => ContrastMath::NORMAL_TEXT,
+                'threshold' => $this->normalText,
                 'hasText'   => true,
                 'hasAnchor' => stripos($cite[1], '<a ') !== false,
                 'link'      => $linkCtx,
@@ -226,15 +252,43 @@ final class ContrastFix
         }
     }
 
+    /**
+     * The HTML segment that can hold this block's OWN figcaption: everything
+     * for a childless image, but only the tail after the last child block for
+     * a gallery — core serializes the gallery caption there, and matching the
+     * whole innerHtml would claim a child image's caption as the gallery's.
+     */
+    private function captionHtml(int $i): string
+    {
+        $children = $this->doc->children($i);
+        if ($children === []) {
+            return $this->doc->ownHtml($i);
+        }
+        $lastEnd = $this->doc->endOffset($children[count($children) - 1]);
+        if ($lastEnd === null) {
+            return '';
+        }
+        $innerStart = $this->doc->openingOffset($i) + $this->doc->openingLength($i);
+        return substr($this->doc->innerHtml($i), $lastEnd - $innerStart);
+    }
+
     // ── repair planning ──────────────────────────────────────────────────
 
     private function plan(bool $repair): void
     {
-        // Text/background pairs.
+        $this->planTexts($repair);
+        $this->planLinks($repair);
+        $this->planCoverDims($repair);
+    }
+
+    // Text/background pairs.
+    private function planTexts(bool $repair): void
+    {
         foreach ($this->texts as $row) {
             if ($row['bg'] === null || !$row['hasText']) {
                 continue; // image-backed cover (phase 2) or nothing visible
             }
+            $caption = $row['caption'] ?? false;
             $fg = $row['fg'] ?? $this->defaultTextFor($row['name']);
             $ratio = $this->minRatio($fg['rgb'], $row['bg']);
             if ($ratio >= $row['threshold']) {
@@ -243,8 +297,9 @@ final class ContrastFix
 
             [$bestSlug, $bestRatio] = $this->bestOf(['base', 'contrast'], $row['bg']);
             $detail = sprintf(
-                '%s text %s on %s: %.2f < %.1f',
-                $row['name'], $fg['label'], $row['bgLabel'], $ratio, $row['threshold']
+                '%s %s %s on %s: %.2f < %.1f',
+                $row['name'], $caption ? 'caption' : 'text',
+                $fg['label'], $row['bgLabel'], $ratio, $row['threshold']
             );
             // Full repair when a candidate passes; partial repair when the
             // background is a mid-tone nothing passes against but a candidate
@@ -252,14 +307,22 @@ final class ContrastFix
             $passes = $bestRatio >= $row['threshold'];
             $improves = $bestRatio >= ContrastMath::LARGE_TEXT && $bestRatio >= $ratio * 1.25;
             if ($bestSlug !== null && $repair && ($passes || $improves)) {
-                // When the failing color was an explicit preset on this very
-                // block, its has-<slug>-color class must be swapped too.
-                $oldSlug = ($fg['node'] ?? null) === $row['index'] && isset($this->palette[$fg['label']])
-                    ? $fg['label'] : null;
-                $this->setTextColor($row['index'], $bestSlug, $oldSlug);
+                if ($caption) {
+                    // No textColor support on the block; the theme stylesheet
+                    // recolors the figcaption via this class hook.
+                    $this->setCaptionClass($row['index'], $bestSlug);
+                    $applied = "caption-text-{$bestSlug}";
+                } else {
+                    // When the failing color was an explicit preset on this
+                    // very block, its has-<slug>-color class must be swapped too.
+                    $oldSlug = ($fg['node'] ?? null) === $row['index'] && isset($this->palette[$fg['label']])
+                        ? $fg['label'] : null;
+                    $this->setTextColor($row['index'], $bestSlug, $oldSlug);
+                    $applied = "textColor={$bestSlug}";
+                }
                 $this->findings[] = [
                     'kind' => 'text', 'block' => $row['name'],
-                    'detail' => $detail . " → textColor={$bestSlug} (" . sprintf('%.2f', $bestRatio) . ')'
+                    'detail' => $detail . " → {$applied} (" . sprintf('%.2f', $bestRatio) . ')'
                         . ($passes ? '' : ' — best available, still below threshold'),
                     'repaired' => true,
                     'residual' => !$passes,
@@ -273,10 +336,13 @@ final class ContrastFix
                 ];
             }
         }
+    }
 
-        // Link/background pairs, one decision per background region and
-        // distinct link color: a passing first paragraph must not hide a
-        // second whose links inherit a different (failing) color.
+    // Link/background pairs, one decision per background region and
+    // distinct link color: a passing first paragraph must not hide a
+    // second whose links inherit a different (failing) color.
+    private function planLinks(bool $repair): void
+    {
         $groups = []; // provider key => rows with anchors
         foreach ($this->texts as $row) {
             if ($row['bg'] === null || !$row['hasAnchor']) {
@@ -319,7 +385,7 @@ final class ContrastFix
             foreach (array_keys($injected) as $p) {
                 if ($this->isSelfOrDescendant((int) $key, $p) && $key !== $p) {
                     [$bestSlug, $bestRatio] = $this->bestOf(['base', 'contrast', 'primary', 'secondary', 'accent'], $row['bg']);
-                    if ($bestSlug !== null && $bestRatio >= ContrastMath::NORMAL_TEXT) {
+                    if ($bestSlug !== null && $bestRatio >= $this->normalText) {
                         $this->setLinkColor((int) $key, $bestSlug, $row['bg']);
                         $this->findings[] = [
                             'kind' => 'link', 'block' => $this->doc->name((int) $key),
@@ -331,8 +397,11 @@ final class ContrastFix
                 }
             }
         }
+    }
 
-        // Cover dim floor.
+    // Cover dim floor.
+    private function planCoverDims(bool $repair): void
+    {
         foreach ($this->covers as $cover) {
             if ($cover['dim'] >= self::COVER_DIM_FLOOR) {
                 continue;
@@ -370,19 +439,19 @@ final class ContrastFix
             return;
         }
         $ratio = $this->minRatio($linkRgb, $row['bg']);
-        if ($ratio >= ContrastMath::NORMAL_TEXT) {
+        if ($ratio >= $this->normalText) {
             return;
         }
 
         [$bestSlug, $bestRatio] = $this->bestOf(['base', 'contrast', 'primary', 'secondary', 'accent'], $row['bg']);
-        $detail = sprintf('links %s on %s: %.2f < %.1f', $linkLabel, $row['bgLabel'], $ratio, ContrastMath::NORMAL_TEXT);
+        $detail = sprintf('links %s on %s: %.2f < %.1f', $linkLabel, $row['bgLabel'], $ratio, $this->normalText);
 
         if ($key === -1) {
             // Root region (page background). A block-authored elements.link
             // is repaired at that block; the global theme.json default is
             // not ours to fix — ContrastFixStep repairs theme.json itself.
             if ($link !== null && $link['fromNode'] !== null && $repair
-                && $bestSlug !== null && $bestRatio >= ContrastMath::NORMAL_TEXT) {
+                && $bestSlug !== null && $bestRatio >= $this->normalText) {
                 $this->setLinkColor($link['fromNode'], $bestSlug, $row['bg']);
                 $injected[$link['fromNode']] = true;
                 $this->findings[] = [
@@ -399,7 +468,7 @@ final class ContrastFix
             }
             return;
         }
-        if ($bestSlug === null || $bestRatio < ContrastMath::NORMAL_TEXT || !$repair) {
+        if ($bestSlug === null || $bestRatio < $this->normalText || !$repair) {
             $this->findings[] = ['kind' => 'link', 'block' => $this->doc->name($key), 'detail' => $detail, 'repaired' => false];
             return;
         }
@@ -432,6 +501,23 @@ final class ContrastFix
         }
     }
 
+    /**
+     * Opt the figure into the theme stylesheet's caption color hook
+     * (`.caption-text-<slug> > figcaption`), replacing any earlier one.
+     */
+    private function setCaptionClass(int $i, string $slug): void
+    {
+        $attrs = $this->doc->attrs($i) ?? [];
+        $classes = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $classes = array_values(array_filter(
+            $classes,
+            static fn (string $c): bool => !str_starts_with($c, 'caption-text-'),
+        ));
+        $classes[] = 'caption-text-' . $slug;
+        $attrs['className'] = implode(' ', $classes);
+        $this->doc->setAttrs($i, $attrs);
+    }
+
     /** @param list<array{0:int,1:int,2:int}> $bg */
     private function setLinkColor(int $i, string $slug, array $bg): void
     {
@@ -444,10 +530,10 @@ final class ContrastFix
         $authored = $attrs['style']['elements']['link'][':hover']['color']['text'] ?? null;
         $authoredPasses = is_string($authored)
             && ($resolved = $this->resolveColorValue($authored)) !== null
-            && $this->minRatio($resolved['rgb'], $bg) >= ContrastMath::NORMAL_TEXT;
+            && $this->minRatio($resolved['rgb'], $bg) >= $this->normalText;
         if (!$authoredPasses) {
             $accent = $this->rgbFor('accent');
-            $hover = ($accent !== null && $this->minRatio($accent, $bg) >= ContrastMath::NORMAL_TEXT)
+            $hover = ($accent !== null && $this->minRatio($accent, $bg) >= $this->normalText)
                 ? 'accent' : $slug;
             $attrs['style']['elements']['link'][':hover']['color']['text'] = 'var:preset|color|' . $hover;
         }
@@ -461,21 +547,34 @@ final class ContrastFix
      */
     public static function swapDimClass(BlockMarkup $doc, int $i, int $oldDim, int $newDim): void
     {
-        $oldClass = self::dimClass($oldDim);
-        if ($oldClass === null || $oldDim === $newDim) {
+        if ($oldDim === $newDim) {
             return;
         }
-        // A duplicate has-background-dim token is harmless — the fixer
-        // re-serializes to the canonical class list anyway; the point is
-        // removing the stale numbered token.
-        $doc->replaceInOwnHtml($i, $oldClass, self::dimClass($newDim) ?? 'has-background-dim');
+        $oldClass = self::dimClass($oldDim);
+        $newClass = self::dimClass($newDim);
+        if ($oldClass !== null) {
+            // The generic token is already present beside every numbered
+            // Core dim class. Moving to the 50% default therefore removes
+            // only the old numbered token instead of duplicating the generic.
+            $doc->replaceClassTokenInOwnHtml($i, $oldClass, $newClass ?? '');
+            return;
+        }
+        if ($newClass !== null) {
+            // Core's 50% default has only the generic token. Preserve it while
+            // adding the numbered opacity token the new value requires.
+            $doc->replaceClassTokenInOwnHtml(
+                $i,
+                'has-background-dim',
+                $newClass . ' has-background-dim',
+            );
+        }
     }
 
-    /** Core cover save(): numbered dim class, absent at 0 and at the 50 default. */
+    /** Core cover save(): numbered dim class, absent only at the 50 default. */
     private static function dimClass(int $dim): ?string
     {
         $rounded = 10 * (int) round($dim / 10);
-        return $rounded === 0 || $rounded === 50 ? null : 'has-background-dim-' . $rounded;
+        return $rounded === 50 ? null : 'has-background-dim-' . $rounded;
     }
 
     /** Drop style/color scaffolding left empty by an unset. @param array<mixed> $attrs */
@@ -517,18 +616,18 @@ final class ContrastFix
     public function textThreshold(string $name, array $attrs): float
     {
         if (!in_array($name, self::LARGE_TEXT_BLOCKS, true)) {
-            return ContrastMath::NORMAL_TEXT;
+            return $this->normalText;
         }
         $px = $this->resolvedFontSizePx($attrs);
         if ($px !== null) {
             $weight = $attrs['style']['typography']['fontWeight'] ?? null;
             $bold = $weight === 'bold' || (is_numeric($weight) && (int) $weight >= 700);
             return ($px >= 24.0 || ($bold && $px >= 18.66))
-                ? ContrastMath::LARGE_TEXT : ContrastMath::NORMAL_TEXT;
+                ? ContrastMath::LARGE_TEXT : $this->normalText;
         }
         if ($name === 'heading') {
             return ((int) ($attrs['level'] ?? 2)) <= 3
-                ? ContrastMath::LARGE_TEXT : ContrastMath::NORMAL_TEXT;
+                ? ContrastMath::LARGE_TEXT : $this->normalText;
         }
         return ContrastMath::LARGE_TEXT; // site-title, post-title, pullquote
     }

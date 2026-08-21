@@ -82,11 +82,26 @@ final class ThemeValidator
             }
         }
 
-        // Raw form controls are dead UI: nothing generated serves a submission,
-        // so a section that emits them silently discards whatever visitors type.
+        // The model never authors form controls. Without a host behind them
+        // they are dead UI that discards whatever visitors type; with one, the
+        // form is the host's to render from a placeholder. Either way, raw
+        // markup here means a section ignored its instructions.
         foreach ($checked as $rel) {
             if ($project->exists($rel) && preg_match('/<(form|input|textarea|select)\b/i', $project->readText($rel), $m)) {
-                $problems[] = "{$rel}: contains form markup (<" . strtolower($m[1]) . '>) — the site has no form backend';
+                $problems[] = "{$rel}: contains form markup (<" . strtolower($m[1])
+                    . '>) — sections never author form controls';
+            }
+        }
+
+        // A form placeholder is a spec a host has to parse. The library owns
+        // that grammar, so the library checks it: a malformed one is invisible
+        // to every downstream step and ships as literal grey body text on the
+        // page. Off the flag, the marker must not appear at all.
+        foreach ($checked as $rel) {
+            if ($project->exists($rel)) {
+                foreach (self::formPlaceholderProblems($project, $rel) as $problem) {
+                    $problems[] = $problem;
+                }
             }
         }
 
@@ -105,13 +120,302 @@ final class ThemeValidator
     }
 
     /**
+     * Advisory final check of the persisted above-fold contract after section
+     * parts have been serialized into plugin pages. This method never mutates
+     * generated markup. Residual drift is actionable repair input and must not
+     * prevent delivery of an otherwise usable theme.
+     *
+     * `aboveFold.json` is a required upstream artifact for callers of this
+     * method; missing/corrupt/wrong-phase input remains an artifact failure,
+     * not a generated-content defect.
+     *
+     * @return list<string>
+     */
+    public static function aboveFoldWarnings(Project $project): array
+    {
+        $contract = $project->readJson('aboveFold.json');
+        AboveFoldContract::assertPhase($contract, AboveFoldContract::PHASE_FINAL);
+        $pages = array_values(array_filter(
+            (array) ($project->readJson('pages.json')['pages'] ?? []),
+            'is_array',
+        ));
+        $warnings = [];
+        $requiresClearOpeningProof = false;
+        if ($project->exists(HeaderBehavior::FILE)) {
+            try {
+                $headerBehavior = $project->readJson(HeaderBehavior::FILE);
+                if (is_array($headerBehavior)) {
+                    $headerBehavior = HeaderBehavior::validateArtifact($headerBehavior);
+                    $requiresClearOpeningProof = $headerBehavior['behavior'] === HeaderBehavior::OVERLAY_TO_SOLID
+                        && $headerBehavior['topTreatment'] === HeaderBehavior::TREATMENT_TRANSPARENT;
+                }
+            } catch (\RuntimeException|\InvalidArgumentException) {
+                // ValidateThemeStep records the malformed artifact itself. Do
+                // not let that advisory defect abort this independent scan.
+            }
+        }
+
+        $headerFile = 'theme/parts/header.html';
+        if (!$project->exists($headerFile)) {
+            $warnings[] = self::aboveFoldWarning(
+                $headerFile,
+                'header',
+                $contract['header'] ?? null,
+                'removed',
+                'final header part is absent; retain the delivered site and regenerate the contract-owned header',
+            );
+        } else {
+            try {
+                $facts = AboveFoldPartFacts::headerFacts($project->readText($headerFile));
+                foreach (['mode', 'archetype'] as $field) {
+                    $expected = $contract['header'][$field] ?? null;
+                    $delivered = $facts[$field] ?? null;
+                    if ($expected !== $delivered) {
+                        $warnings[] = self::aboveFoldWarning(
+                            $headerFile,
+                            "header.{$field}",
+                            $expected,
+                            $delivered,
+                            'downstream markup drifted from the final above-fold relation; retain it and repair this exact header field',
+                        );
+                    }
+                }
+                $expectedForeground = $contract['header']['foreground_token'] ?? null;
+                if (($facts['foreground'] ?? null) !== $expectedForeground) {
+                    $warnings[] = self::aboveFoldWarning(
+                        $headerFile,
+                        'header.foreground_token',
+                        $expectedForeground,
+                        $facts['foreground'] ?? null,
+                        'downstream markup drifted from the final readable foreground; retain it and restore the contract token',
+                    );
+                }
+                if (($contract['header']['mode'] ?? null) === AboveFoldContract::MODE_STACKED) {
+                    $expectedSurface = $contract['header']['protection_token'] ?? null;
+                    if (($facts['background'] ?? null) !== $expectedSurface) {
+                        $warnings[] = self::aboveFoldWarning(
+                            $headerFile,
+                            'header.protection_token',
+                            $expectedSurface,
+                            $facts['background'] ?? null,
+                            'downstream markup drifted from the stacked protection surface; retain it and restore the contract token',
+                        );
+                    }
+                    if (($facts['gradient'] ?? null) !== null || ($facts['custom_background'] ?? false) === true) {
+                        $warnings[] = self::aboveFoldWarning(
+                            $headerFile,
+                            'header.stacked_surface',
+                            ['background' => $expectedSurface, 'gradient' => null, 'custom_background' => false],
+                            [
+                                'background' => $facts['background'] ?? null,
+                                'gradient' => $facts['gradient'] ?? null,
+                                'custom_background' => $facts['custom_background'] ?? false,
+                            ],
+                            'downstream markup added a competing stacked surface; retain it and restore only the contract-owned background',
+                        );
+                    }
+                } elseif (($facts['background'] ?? null) !== null
+                    || ($facts['gradient'] ?? null) !== null
+                    || ($facts['custom_background'] ?? false) === true
+                ) {
+                    $warnings[] = self::aboveFoldWarning(
+                        $headerFile,
+                        'header.overlay_surface',
+                        ['background' => null, 'gradient' => null, 'custom_background' => false],
+                        [
+                            'background' => $facts['background'] ?? null,
+                            'gradient' => $facts['gradient'] ?? null,
+                            'custom_background' => $facts['custom_background'] ?? false,
+                        ],
+                        'downstream markup made the overlay header opaque; retain it and restore transparent contract-owned chrome',
+                    );
+                }
+            } catch (\RuntimeException $error) {
+                $warnings[] = self::aboveFoldWarning(
+                    $headerFile,
+                    'header.root',
+                    'parseable wp:group with final relation markers',
+                    'uninspectable: ' . $error->getMessage(),
+                    'final advisory inspection could not isolate the generated header drift; retain the bytes for a later repair pass',
+                );
+            }
+        }
+
+        foreach ($pages as $page) {
+            $pageSlug = (string) ($page['slug'] ?? '');
+            $pageFile = 'plugin/pages/' . $pageSlug . '.html';
+            if ($pageSlug === '' || !$project->exists($pageFile)) {
+                $warnings[] = self::aboveFoldWarning(
+                    $pageFile,
+                    "openings[page='{$pageSlug}']",
+                    'first planned section markup',
+                    'removed',
+                    'assembled page opening is absent; retain the rest of the site and regenerate only this page opening',
+                );
+                continue;
+            }
+            try {
+                $sections = Steps\SectionRhythmStep::splitTopLevel($project->readText($pageFile));
+            } catch (\RuntimeException $error) {
+                $warnings[] = self::aboveFoldWarning(
+                    $pageFile,
+                    "openings[page='{$pageSlug}']",
+                    'inspectable first section',
+                    'uninspectable: ' . $error->getMessage(),
+                    'final advisory inspection could not isolate the generated opening drift; retain the page bytes for a later repair pass',
+                );
+                continue;
+            }
+            $opening = $sections[0] ?? '';
+            if ($opening === '') {
+                $warnings[] = self::aboveFoldWarning(
+                    $pageFile,
+                    "openings[page='{$pageSlug}']",
+                    'first planned section markup',
+                    'removed',
+                    'assembled page has no opening; retain the page and regenerate only the missing opening',
+                );
+                continue;
+            }
+
+            if (($contract['header']['mode'] ?? null) === AboveFoldContract::MODE_OVERLAY) {
+                $openingContract = null;
+                foreach ((array) ($contract['openings'] ?? []) as $candidate) {
+                    if (is_array($candidate) && (string) ($candidate['page'] ?? '') === $pageSlug) {
+                        $openingContract = $candidate;
+                        break;
+                    }
+                }
+                $surface = (string) ($openingContract['surface'] ?? '');
+                $protection = (string) ($contract['header']['protection_token'] ?? 'contrast');
+                $protectionHex = is_string($contract['theme_tokens'][$protection]['hex'] ?? null)
+                    ? (string) $contract['theme_tokens'][$protection]['hex']
+                    : null;
+                if ($requiresClearOpeningProof) {
+                    $foregroundToken = (string) ($contract['header']['foreground_token'] ?? '');
+                    $foregroundHex = is_string($contract['theme_tokens'][$foregroundToken]['hex'] ?? null)
+                        ? (string) $contract['theme_tokens'][$foregroundToken]['hex']
+                        : null;
+                    $foreground = $foregroundHex === null ? null : ContrastMath::hexToRgb($foregroundHex);
+                    $protectionRgb = $protectionHex === null ? null : ContrastMath::hexToRgb($protectionHex);
+                    $dim = AboveFoldPartFacts::clearOverlayTopDimRatio(
+                        $opening,
+                        $surface,
+                        $protection,
+                        $protectionHex,
+                    );
+                    // Earned-clear CSS snaps the background surface while its
+                    // shadow keeps the motion cue, so only the delivered rest
+                    // state needs a dim composite proof here.
+                    $supported = $foreground !== null
+                        && $protectionRgb !== null
+                        && $dim !== null
+                        && HeaderBehavior::clearOverlayTopIsSafe(
+                            $foreground,
+                            $protectionRgb,
+                            $dim,
+                            null,
+                            false,
+                        );
+                } else {
+                    $supported = AboveFoldPartFacts::supportsOverlay(
+                        $opening,
+                        $surface,
+                        $protection,
+                        $protectionHex,
+                    );
+                }
+                if (!$supported) {
+                    $warnings[] = self::aboveFoldWarning(
+                        $pageFile,
+                        "openings[page='{$pageSlug}'].top_protection_token",
+                        $protection,
+                        'unsupported',
+                        'serialized page opening no longer protects the final overlay header; retain it and restore the exact top-edge relation',
+                    );
+                }
+            }
+
+            if (($contract['header']['mode'] ?? null) === AboveFoldContract::MODE_STACKED) {
+                $maxVh = $contract['viewport']['stacked_cover_max_vh'] ?? null;
+                if (is_numeric($maxVh)) {
+                    foreach (AboveFoldPartFacts::coverViewportHeights($opening) as $height) {
+                        if ($height <= (float) $maxVh) {
+                            continue;
+                        }
+                        $warnings[] = self::aboveFoldWarning(
+                            $pageFile,
+                            "openings[page='{$pageSlug}'].stacked_cover_max_vh",
+                            (float) $maxVh,
+                            $height,
+                            'serialized page opening exceeds the final stacked first-viewport budget; retain it and cap only this cover height',
+                        );
+                    }
+                }
+            }
+
+            if (($page['front'] ?? false) !== true) {
+                continue;
+            }
+            $heroFacts = AboveFoldPartFacts::heroFacts($opening, (string) ($contract['recipe'] ?? ''));
+            foreach (['root_group', 'recipe_marker'] as $field) {
+                if (($heroFacts[$field] ?? false) !== true) {
+                    $warnings[] = self::aboveFoldWarning(
+                        $pageFile,
+                        'hero.' . $field,
+                        true,
+                        $heroFacts[$field] ?? false,
+                        'serialized front hero drifted from its objective envelope; retain it and restore only the root/assigned marker invariant',
+                    );
+                }
+            }
+            $action = $contract['primary_action'] ?? null;
+            if (is_array($action) && !AboveFoldPartFacts::containsAction($opening, $action)) {
+                $warnings[] = self::aboveFoldWarning(
+                    $pageFile,
+                    'hero.primary_action',
+                    $action,
+                    'removed or changed',
+                    'serialized front hero no longer contains the exact final action; retain it and reconcile only that control',
+                );
+            }
+        }
+
+        return array_values(array_unique($warnings));
+    }
+
+    private static function aboveFoldWarning(
+        string $file,
+        string $path,
+        mixed $authored,
+        mixed $delivered,
+        string $disposition,
+    ): string {
+        $value = static fn (mixed $item): string => is_string($item)
+            ? json_encode($item, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+            : (string) json_encode($item, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        return "above-fold final validation: file='{$file}'; path=\"{$path}\"; authored="
+            . $value($authored) . '; delivered=' . $value($delivered)
+            . '; disposition=' . $disposition;
+    }
+
+    /**
      * Raw AI_IMAGE specs still occupying URL/source fields in generated markup.
      *
-     * The documented AI_IMAGE value belongs in an img alt until collect-images
-     * records it, so a blanket marker scan would reject valid canonical markup
-     * even after its src was resolved. This check is deliberately contextual:
-     * only block-JSON url/src values and rendered HTML src attributes can ship
-     * the prompt as an image URL.
+     * Two shapes. The first is a raw AI_IMAGE spec still occupying a URL/source
+     * field. The documented AI_IMAGE value belongs in an img alt until
+     * collect-images records it, so a blanket marker scan would reject valid
+     * canonical markup even after its src was resolved. That check is
+     * deliberately contextual: only block-JSON url/src values and rendered HTML
+     * src attributes can ship the prompt as an image URL.
+     *
+     * The second is an image reference collect-images never recorded — a bare
+     * "hero.jpg" the design invented, or an empty src. Those 404 (or render
+     * nothing) no matter how image generation goes, and before this check they
+     * were invisible: a page full of them let generate-images report success
+     * with zero images. A reference IS judged resolvable when images.json
+     * carries it, whatever its status — generation deliberately leaves a
+     * failed image's placeholder in place rather than abort the build.
      *
      * The ordinary final validator reports these as warnings for builds that
      * skip optional image generation. GenerateImagesStep also calls this helper
@@ -123,6 +427,7 @@ final class ThemeValidator
     {
         $problems = [];
         $root = rtrim($project->root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
+        $known = self::recordedImageSources($project);
 
         foreach ($project->markupFiles() as $file) {
             $markup = (string) file_get_contents($file);
@@ -133,16 +438,99 @@ final class ThemeValidator
             if (preg_match('/\bsrc\s*=\s*(?:(?:["\'])\s*AI_IMAGE:|AI_IMAGE:)/i', $markup)) {
                 $contexts[] = 'HTML src';
             }
-            if ($contexts === []) {
-                continue;
-            }
 
-            $rel = str_starts_with($file, $root) ? substr($file, strlen($root)) : $file;
-            $problems[] = str_replace(DIRECTORY_SEPARATOR, '/', $rel)
-                . ': contains unresolved AI_IMAGE: in ' . implode(' and ', $contexts);
+            $rel = str_replace(
+                DIRECTORY_SEPARATOR,
+                '/',
+                str_starts_with($file, $root) ? substr($file, strlen($root)) : $file,
+            );
+            if ($contexts !== []) {
+                $problems[] = "{$rel}: contains unresolved AI_IMAGE: in " . implode(' and ', $contexts);
+            }
+            foreach (self::danglingImageSources($markup, $known) as $source) {
+                $problems[] = "{$rel}: image source {$source} resolves to nothing and was never collected for generation";
+            }
         }
 
         return $problems;
+    }
+
+    /**
+     * Every image source collect-images recorded, by its markup spelling.
+     * Null means images.json is absent — collection never ran for this project
+     * (theme-only fixtures, hosts with their own image pipeline), so nothing
+     * can be called dangling.
+     *
+     * @return array<string,true>|null
+     */
+    private static function recordedImageSources(Project $project): ?array
+    {
+        if (!$project->exists('images.json')) {
+            return null;
+        }
+        $known = [];
+        foreach ((array) $project->readJson('images.json') as $spec) {
+            if (is_array($spec) && is_string($spec['src'] ?? null) && $spec['src'] !== '') {
+                $known[$spec['src']] = true;
+            }
+        }
+        return $known;
+    }
+
+    /**
+     * Image references in one file that neither the browser nor the image
+     * pipeline can resolve. Only relative/custom-scheme values that name an
+     * image are judged, so a "#" social link or an absolute URL never trips it.
+     *
+     * @param array<string,true>|null $known
+     * @return list<string>
+     */
+    private static function danglingImageSources(string $markup, ?array $known): array
+    {
+        if ($known === null) {
+            return [];
+        }
+
+        $found = [];
+        preg_match_all('/<img\b[^>]*>/i', $markup, $tags);
+        foreach ($tags[0] as $tag) {
+            if (preg_match('/(?<![-\w])src\s*=\s*(["\'])(.*?)\1/is', $tag, $m) === 1) {
+                $found[] = trim(html_entity_decode($m[2], ENT_QUOTES | ENT_HTML5));
+            }
+        }
+        // wp:cover paints its background from the block attribute alone when
+        // the overlay renders as a div, so the JSON is the only reference.
+        preg_match_all('/<!--\s*wp:(?:image|cover)\s(?:(?!-->).)*?"url"\s*:\s*"((?:[^"\\\\]|\\\\.)*)"/is', $markup, $urls);
+        foreach ($urls[1] as $url) {
+            $decoded = json_decode('"' . $url . '"');
+            $found[] = trim(is_string($decoded) ? $decoded : $url);
+        }
+
+        $problems = [];
+        foreach (array_unique($found) as $source) {
+            if (isset($known[$source]) || !self::isDanglingImageSource($source)) {
+                continue;
+            }
+            $problems[] = $source === '' ? '(empty)' : $source;
+        }
+        return $problems;
+    }
+
+    /**
+     * A source the browser cannot fetch: empty, or a relative/custom-scheme
+     * path naming an image file. Root-relative, absolute, protocol-relative,
+     * and data: values all resolve on their own and are left alone.
+     */
+    private static function isDanglingImageSource(string $source): bool
+    {
+        if ($source === '') {
+            return true;
+        }
+        if (preg_match('#^(?:/|//|https?:|data:|mailto:|tel:|\#)#i', $source) === 1) {
+            return false;
+        }
+        return str_starts_with($source, 'theme:')
+            || preg_match('/\.(?:jpe?g|png|gif|webp|avif|svg)(?:[?\#]|$)/i', $source) === 1;
     }
 
     /**
@@ -282,6 +670,51 @@ final class ThemeValidator
         // href and block-JSON "url" mirror each other, so the same broken
         // destination would otherwise be reported twice.
         return array_values(array_unique($problems));
+    }
+
+    /**
+     * Whether every form placeholder in one file is one a host can parse.
+     *
+     * The grammar lives in FormPlaceholder, which is also what the host reads
+     * it with, so this check and the substitution downstream cannot disagree.
+     * They would disagree silently: a placeholder is ordinary paragraph text,
+     * so a spec no host can read reaches the visitor as literal grey body copy
+     * with nothing else in the pipeline noticing.
+     *
+     * @return list<string>
+     */
+    private static function formPlaceholderProblems(Project $project, string $rel): array
+    {
+        $markup = $project->readText($rel);
+        $markers = FormPlaceholder::markerCount($markup);
+        if ($markers === 0) {
+            return [];
+        }
+
+        if (!Steps\SectionsStep::formPlaceholders($project)) {
+            return ["{$rel}: contains a " . FormPlaceholder::MARKER . ' marker but this build has no'
+                . ' form host — disposition: rebuild the section, or enable form placeholders'];
+        }
+
+        $problems = [];
+        $placeholders = FormPlaceholder::find($markup);
+        foreach ($placeholders as $placeholder) {
+            $parsed = FormPlaceholder::parse($placeholder['spec']);
+            if (is_string($parsed)) {
+                $problems[] = "{$rel}: unparseable form spec \"{$placeholder['spec']}\" ({$parsed})"
+                    . ' — disposition: no host can substitute this; regenerate the section';
+            }
+        }
+
+        // A marker outside a placeholder block is text the host never reads.
+        $loose = $markers - count($placeholders);
+        if ($loose > 0) {
+            $problems[] = "{$rel}: {$loose} form marker(s) outside a "
+                . FormPlaceholder::CLASS_NAME . ' block — disposition: the host only substitutes'
+                . ' markers inside that block, so these would ship as visible text';
+        }
+
+        return $problems;
     }
 
     /**
@@ -500,19 +933,30 @@ final class ThemeValidator
      * anything reported here means generated markup drifted past the
      * deterministic normalization (or an old project predates it).
      *
+     * @param bool $htmlFirst must match the flag the build's fix-blocks pass
+     *        used, or the linter reports rules that path deliberately skips
      * @return string[] list of warnings (empty means widths follow the contract)
      */
-    public static function layoutWarnings(Project $project): array
+    public static function layoutWarnings(Project $project, bool $htmlFirst = false): array
     {
         $warnings = [];
         $contentSize = Steps\FixBlocksStep::themeContentSize($project);
         $spacingSlugs = Steps\FixBlocksStep::themeSpacingSlugs($project);
-        foreach (Steps\FixBlocksStep::themeFiles($project) as $rel) {
+        // The build's normalization consults the design's own stylesheet to
+        // decide which roots already own their width. Reading it here too is
+        // what keeps this a dry run of that pass: without it the linter reports
+        // the very stamp normalize-layout deliberately withheld.
+        $wideMeasureRootClasses = $htmlFirst && $project->exists('design/site.css')
+            ? Units\GeneratedMarkup::wideMeasureSubjectClasses($project->readText('design/site.css'))
+            : [];
+        foreach ($project->themeFiles() as $rel) {
             $result = LayoutFixer::fix(
                 $project->readText('theme/' . $rel),
                 LayoutFixer::roleFor($rel),
                 $contentSize,
-                $spacingSlugs
+                $spacingSlugs,
+                $htmlFirst,
+                $wideMeasureRootClasses,
             );
             foreach ($result['notes'] as $note) {
                 $warnings[] = "{$rel}: {$note}";
@@ -541,6 +985,15 @@ final class ThemeValidator
                 $normalized = Steps\ThemeJsonStep::normalizeSpacingSettings($theme);
                 if (($theme['settings']['spacing'] ?? null) !== ($normalized['settings']['spacing'] ?? null)) {
                     $warnings[] = 'theme.json settings.spacing drifted from the bounded canonical profile';
+                }
+                $normalized = Steps\ThemeJsonStep::normalizeGroupBlockPadding($theme);
+                if ($theme !== $normalized) {
+                    $authored = $theme['styles']['blocks']['core/group']['spacing']['padding'] ?? null;
+                    $warnings[] = "file='theme/theme.json'; "
+                        . "block='styles.blocks.core/group.spacing.padding'; authored="
+                        . Warnings::value($authored)
+                        . '; delivered=unchanged; disposition=remove global top/bottom Group padding '
+                        . 'and place vertical spacing on explicit section or component roots';
                 }
             }
         }

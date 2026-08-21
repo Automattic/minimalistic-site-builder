@@ -6,6 +6,8 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\StorefrontDegrade;
+use Automattic\SiteBuild\Units\GeneratedMarkup;
 
 /**
  * Deterministic: run the LayoutFixer attribute repair + width/rhythm
@@ -27,6 +29,8 @@ final class NormalizeLayoutStep implements Step
 {
     private const LOG_FILE = 'normalize-layout.log';
 
+    public function __construct(private bool $htmlFirst = false) {}
+
     public function id(): string
     {
         return 'normalize-layout';
@@ -44,15 +48,68 @@ final class NormalizeLayoutStep implements Step
             label: $this->label(),
             // Templates are only scanned when they exist; in the default graph
             // they are written by assemble-pages, which runs after this step.
-            reads: ['theme/theme.json', 'theme/parts/*'],
-            writes: ['theme/parts/*'],
+            reads: [
+                ...($this->htmlFirst ? ['design/site.css'] : []),
+                'meta.json',
+                'siteSpec.json',
+                'theme/theme.json',
+                'theme/parts/*',
+                // Read only when it exists: a relabelled purchase CTA needs
+                // somewhere to send an enquiry, and pages.json is where the
+                // build's routes live. Absent, the CTA's destination is
+                // reported instead of invented.
+                'pages.json',
+            ],
+            writes: ['theme/parts/*', 'warnings.json'],
             concurrent: false,
         );
     }
 
     public function run(Project $project): void
     {
-        $notes = FixBlocksStep::normalizeLayouts($project);
+        // fix-blocks computes these same tokens, but by the time it runs every
+        // root already carries a layout and the injection is a no-op — the
+        // stamp this signal would have prevented was committed one step
+        // earlier, here. Load it before the damage, not after.
+        $wideMeasureRootClasses = $this->htmlFirst && $project->exists('design/site.css')
+            ? GeneratedMarkup::wideMeasureSubjectClasses($project->readText('design/site.css'))
+            : [];
+        $notes = FixBlocksStep::normalizeLayouts(
+            $project,
+            [],
+            $this->htmlFirst,
+            $wideMeasureRootClasses,
+            // No carrier classes: align:wide promotion stays fix-blocks' alone.
+            widePartCarrierClasses: [],
+        );
+        // Where a relabelled purchase CTA should send an enquiry, when this
+        // build has a contact page at all.
+        $contactRoute = StorefrontDegrade::contactRouteFromPages(
+            $project->exists('pages.json')
+                ? (array) ($project->readJson('pages.json')['pages'] ?? [])
+                : [],
+        );
+        $cartWarnings = [];
+        foreach ($project->themeFiles() as $rel) {
+            $path = 'theme/' . $rel;
+            if (!$project->exists($path)) {
+                continue;
+            }
+            [$markup, $degraded] = StorefrontDegrade::markup(
+                $project->readText($path),
+                $path,
+                $contactRoute,
+            );
+            if ($degraded === []) {
+                continue;
+            }
+            $project->writeText($path, $markup);
+            array_push($notes, ...$degraded);
+            array_push($cartWarnings, ...$degraded);
+        }
+        if ($cartWarnings !== []) {
+            $project->addWarnings($this->id(), $cartWarnings);
+        }
         $report = $notes === []
             ? "No layout/rhythm normalization needed.\n"
             : '- ' . implode("\n- ", $notes) . "\n";

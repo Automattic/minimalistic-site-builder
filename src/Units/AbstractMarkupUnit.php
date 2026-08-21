@@ -10,6 +10,20 @@ use Automattic\SiteBuild\PromptRenderer;
 abstract class AbstractMarkupUnit implements MarkupUnit
 {
     private const OUTPUT_CONTRACT_TEMPLATE = 'block-markup-output-contract.md';
+    private const SITE_CONTEXT_TEMPLATE = 'site-context.md';
+
+    /**
+     * Frozen cache-layer markers. The four markup templates each open with the
+     * site layer, byte-identical across them, so one warm-up primes it for all
+     * four; each unit splits the rest into whatever further layers it can
+     * reuse. A unit that calls renderedRequest() directly gets no layers, so
+     * a new template has to declare these to be cached.
+     */
+    protected const SITE_LAYER_MARKER = '<!-- cache-layer:site -->';
+    protected const UNIT_LAYER_MARKER = '<!-- cache-layer:unit -->';
+
+    /** What every marker starts with, defused in substituted values. */
+    private const LAYER_MARKER_PREFIX = '<!-- cache-layer:';
 
     public function __construct(
         protected Llm $llm,
@@ -22,7 +36,7 @@ abstract class AbstractMarkupUnit implements MarkupUnit
      * Execute one rendered request, forwarding all request metadata (including
      * cached_prefixes) to the single-completion path.
      */
-    final public function generate(array $input): string
+    final public function generate(array $input): MarkupResult
     {
         $request = $this->request($input);
         $prompt = $request['prompt'];
@@ -41,6 +55,19 @@ abstract class AbstractMarkupUnit implements MarkupUnit
      */
     final protected function renderedRequest(string $template, array $vars): array
     {
+        // A cache-layer marker inside an authored value (the site spec, the
+        // design direction, the outline) would make cacheLayers() count two and
+        // throw, from a call site with no catch: the build would die on a string
+        // somebody wrote. Defused here, only the template can open a layer.
+        $vars = array_map(
+            static fn (string $value): string => str_replace(
+                self::LAYER_MARKER_PREFIX,
+                '<!-- cache layer:',
+                $value,
+            ),
+            $vars,
+        );
+
         // Keep the response contract in one shared fragment while each prompt
         // controls where it belongs (the section places it in its build layer).
         $vars['block_markup_output_contract'] = rtrim(
@@ -66,14 +93,22 @@ abstract class AbstractMarkupUnit implements MarkupUnit
         return $input[$key];
     }
 
-    /** Accept JSON text from the CLI adapter or a decoded object from HTTP. */
+    /**
+     * Accept JSON text from the CLI adapter or a decoded object from HTTP.
+     *
+     * Both shapes must render to the same bytes: the site layer is a shared
+     * cache prefix, and a step reading siteSpec.json as text would otherwise
+     * never match one that read it as an array. writeJson() encodes with these
+     * exact flags and appends a newline, so trimming the terminator is all it
+     * takes to make the two agree.
+     */
     final protected function inputJson(array $input, string $key): string
     {
         if (!array_key_exists($key, $input)) {
             throw new \InvalidArgumentException("unit input '{$key}' must be JSON text or an array");
         }
         if (is_string($input[$key])) {
-            return $input[$key];
+            return rtrim($input[$key], "\r\n");
         }
         if (!is_array($input[$key])) {
             throw new \InvalidArgumentException("unit input '{$key}' must be JSON text or an array");
@@ -88,19 +123,124 @@ abstract class AbstractMarkupUnit implements MarkupUnit
         return $json;
     }
 
+    /** Accept a decoded object or decode one JSON object from a portable input. */
+    final protected function inputArrayOrJson(array $input, string $key): array
+    {
+        if (!array_key_exists($key, $input)) {
+            throw new \InvalidArgumentException("unit input '{$key}' must be JSON text or an array");
+        }
+        if (is_array($input[$key])) {
+            return $input[$key];
+        }
+        if (!is_string($input[$key])) {
+            throw new \InvalidArgumentException("unit input '{$key}' must be JSON text or an array");
+        }
+        try {
+            $decoded = json_decode($input[$key], true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException $e) {
+            throw new \InvalidArgumentException("unit input '{$key}' must contain valid JSON", 0, $e);
+        }
+        if (!is_array($decoded)) {
+            throw new \InvalidArgumentException("unit input '{$key}' must decode to an object");
+        }
+        return $decoded;
+    }
+
     /**
-     * The context shared by header, footer, and section prompts.
+     * The context shared by header, footer, hero, and section prompts.
      *
-     * @return array{site_spec:string,language:string,theme_json:string,design_direction:string,outline:string}
+     * site_context is the rendered shared cache layer: the same site spec,
+     * theme tokens and design direction those four prompts all open with, in
+     * one arrangement so the bytes match and the layer is cacheable once.
+     *
+     * @return array{site_context:string,language:string,outline:string}
      */
     final protected function commonVars(array $input): array
     {
         return [
-            'site_spec'        => $this->inputJson($input, 'site_spec'),
-            'language'         => $this->inputString($input, 'language'),
-            'theme_json'       => $this->inputJson($input, 'theme_json'),
-            'design_direction' => $this->inputString($input, 'design_direction'),
-            'outline'          => $this->inputString($input, 'outline'),
+            'site_context' => rtrim($this->renderer->render(self::SITE_CONTEXT_TEMPLATE, [
+                'site_spec'        => $this->inputJson($input, 'site_spec'),
+                'theme_json'       => $this->inputJson($input, 'theme_json'),
+                'design_direction' => $this->inputString($input, 'design_direction'),
+            ]), "\r\n"),
+            'language' => $this->inputString($input, 'language'),
+            'outline'  => $this->inputString($input, 'outline'),
         ];
+    }
+
+    /**
+     * Split a rendered prompt at its frozen cache-layer markers.
+     *
+     * Every layer but the last is a reusable prefix: newline-trimmed with
+     * exactly "\n\n" appended, so adjacent Anthropic content blocks and an
+     * OpenAI-compatible concatenation assemble to the same text. The final
+     * layer is the varying prompt and is newline-trimmed only.
+     *
+     * Marker order and uniqueness are invariants of the template: renderedRequest()
+     * defuses the marker prefix in every substituted value, so generated content
+     * cannot introduce one. A violation is therefore a broken template, and throws.
+     *
+     * @param  list<string> $markers ordered, one per layer
+     * @return list<string> one layer per marker, in the same order
+     */
+    final protected static function cacheLayers(string $rendered, array $markers): array
+    {
+        foreach ($markers as $marker) {
+            if (substr_count($rendered, $marker) !== 1) {
+                throw new \RuntimeException("markup prompt must contain exactly one {$marker} marker");
+            }
+        }
+
+        $positions = array_map(
+            static fn (string $marker): int => (int) strpos($rendered, $marker),
+            $markers,
+        );
+        $sorted = $positions;
+        sort($sorted);
+        if ($positions !== $sorted) {
+            throw new \RuntimeException('markup prompt cache layer markers are out of order');
+        }
+
+        $rest = $rendered;
+        $layers = [];
+        foreach ($markers as $index => $marker) {
+            [$before, $rest] = explode($marker, $rest, 2);
+            if ($index === 0) {
+                if (trim($before, "\r\n") !== '') {
+                    throw new \RuntimeException('markup prompt has content before its first cache layer');
+                }
+                continue;
+            }
+            // Remove only newlines belonging to the marker separators;
+            // preserve every other byte, including indentation.
+            $layers[] = rtrim(ltrim($before, "\r\n"), "\r\n") . "\n\n";
+        }
+        $layers[] = trim($rest, "\r\n");
+
+        foreach ($layers as $layer) {
+            if (trim($layer) === '') {
+                throw new \RuntimeException('markup prompt cache layers must not be empty');
+            }
+        }
+        return $layers;
+    }
+
+    /**
+     * Render a chrome prompt (header, footer, hero) as two layers: the shared
+     * site context every markup call reuses, and this unit's own brief.
+     *
+     * @param array<string,string> $vars
+     * @return array{prompt:string,model?:string,temperature?:float,cached_prefixes:list<string>}
+     */
+    final protected function siteLayeredRequest(string $template, array $vars): array
+    {
+        $request = $this->renderedRequest($template, $vars);
+        [$site, $unit] = self::cacheLayers(
+            $request['prompt'],
+            [self::SITE_LAYER_MARKER, self::UNIT_LAYER_MARKER],
+        );
+        $request['cached_prefixes'] = [$site];
+        $request['prompt'] = $unit;
+        return $request;
     }
 }

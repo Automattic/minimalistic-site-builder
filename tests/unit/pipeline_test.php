@@ -3,11 +3,18 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\ConcurrentGroup;
 use Automattic\SiteBuild\Pipeline;
+use Automattic\SiteBuild\BuildPipeline;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\Tests\FakeLlm;
+
+test('Pipeline implements the frozen build runner contract', function () {
+    $pipeline = new Pipeline([new RecorderStep('contract')]);
+
+    assert_true($pipeline instanceof BuildPipeline);
+});
 
 /**
  * Unit tests for Pipeline stop semantics: `--until` accepts a concurrent
@@ -77,5 +84,67 @@ test('--until stops after a concurrent group when given a member id', function (
     $pipeline->runThrough($project, 'theme-json');
 
     assert_eq(['site-spec'], RecorderStep::$ran, 'stopped after the group; later step did not run');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('--from skips every step that order-precedes the resume id', function () {
+    RecorderStep::$ran = [];
+    $tmp = sys_get_temp_dir() . '/builder_pl_from_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+
+    $pipeline = new Pipeline([
+        new RecorderStep('scaffold'),
+        new RecorderStep('transform-site'),
+        new RecorderStep('section-layout'),
+        new RecorderStep('page-styles'),
+    ]);
+
+    // Resume at transform-site through page-styles: the two upstream steps are
+    // assumed already materialized on disk and must not run.
+    $pipeline->runThrough($project, 'page-styles', fromId: 'transform-site');
+
+    assert_eq(
+        ['transform-site', 'section-layout', 'page-styles'],
+        RecorderStep::$ran,
+        'ran the requested window only; upstream steps skipped',
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('--from resumes at the whole group when given a member id', function () {
+    RecorderStep::$ran = [];
+    $tmp = sys_get_temp_dir() . '/builder_pl_from_group_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+
+    $llm = new FakeLlm();
+    $llm->queueJson(['v' => 1]); // theme-json member
+    $llm->queueJson(['v' => 2]); // page-plan member
+    $group = new ConcurrentGroup($llm, [
+        new RecordingConcurrentStep('theme-json', ['out' => ['prompt' => 'P']]),
+        new RecordingConcurrentStep('page-plan', ['out' => ['prompt' => 'P']]),
+    ]);
+    $pipeline = new Pipeline([new RecorderStep('site-spec'), $group, new RecorderStep('sections')]);
+
+    // Member id of the group — starts at the whole group (site-spec is skipped),
+    // mirroring how --until stops at the whole group for a member id.
+    $pipeline->runThrough($project, fromId: 'page-plan');
+
+    assert_eq(['sections'], RecorderStep::$ran, 'skipped site-spec, ran the group then sections');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('--from null preserves running from the first step', function () {
+    RecorderStep::$ran = [];
+    $tmp = sys_get_temp_dir() . '/builder_pl_from_null_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+
+    $pipeline = new Pipeline([
+        new RecorderStep('a'),
+        new RecorderStep('b'),
+        new RecorderStep('c'),
+    ]);
+    $pipeline->runThrough($project);
+
+    assert_eq(['a', 'b', 'c'], RecorderStep::$ran, 'default runs the full graph');
     exec('rm -rf ' . escapeshellarg($tmp));
 });

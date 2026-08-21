@@ -37,6 +37,144 @@ test('custom-motion validate accepts scoped rules with custom-motion keyframes',
     assert_eq([], CustomMotionStep::validate(CM_VALID_CSS));
 });
 
+test('custom-motion validate rejects shape-owned radius declarations in rules and keyframes', function () {
+    $cases = [
+        'direct shorthand' => '.custom-motion img { border-radius: 50% !important; }',
+        'physical longhand' => '.custom-motion { border-top-left-radius: 1rem; }',
+        'logical longhand' => '.custom-motion { border-start-end-radius: 1rem; }',
+        'vendor shorthand' => '.custom-motion { -webkit-border-radius: 1rem; }',
+        'keyframe shorthand' => ".custom-motion { animation: custom-motion-round 1s both; }\n"
+            . '@keyframes custom-motion-round { from { border-radius: 0; } to { border-radius: 50%; } }',
+    ];
+    foreach ($cases as $label => $css) {
+        $problems = CustomMotionStep::validate($css, true);
+        assert_contains('shape-owned image/button corner', implode('; ', $problems), $label);
+    }
+
+    assert_eq(
+        [],
+        CustomMotionStep::validate(
+            '.custom-motion { border-radius: 1rem; all: revert-layer; transform: none; }',
+            false,
+        ),
+        'a tagged generic wrapper may keep unrelated corner geometry',
+    );
+
+    foreach ([
+        '.custom-motion > *',
+        '.custom-motion > a',
+        '.custom-motion [class]',
+        '.custom-motion :not(.card)',
+    ] as $selector) {
+        $css = "{$selector} { border-radius: 9999px !important; transform: none; }";
+        $problems = CustomMotionStep::validate($css, false);
+        assert_contains('shape-owned image/button corner', implode('; ', $problems), $selector);
+        [$repaired, $dropped] = CustomMotionStep::dropShapeOwnedDeclarations($css, false);
+        assert_eq(['border-radius: 9999px !important'], $dropped, $selector);
+        assert_contains('transform: none', $repaired);
+        assert_true(!str_contains($repaired, 'border-radius'));
+    }
+
+    assert_eq(
+        [],
+        CustomMotionStep::validate(
+            '.custom-motion .card { border-radius: 1rem; transform: none; }',
+            true,
+        ),
+        'an explicit generic-card subject remains outside image/button ownership',
+    );
+});
+
+test('custom-motion drops only radius declarations and preserves direct and keyframed motion', function () {
+    $css = ".custom-motion img {\n"
+        . "    display: block;\n"
+        . "    --card-border-radius: 2rem;\n"
+        . "    border-radius: 9999px !important;\n"
+        . "    -webkit-border-radius: 50%;\n"
+        . "    all: var(--shape-reset, initial) !important;\n"
+        . "    animation: custom-motion-spin 1s both;\n"
+        . "}\n"
+        . "@keyframes custom-motion-spin {\n"
+        . "    from { transform: rotate(0deg); border-top-left-radius: 0; }\n"
+        . "    50% { transform: rotate(180deg); border-start-end-radius: 2rem; }\n"
+        . "    to { transform: rotate(360deg); border-radius: 50%; }\n"
+        . "}";
+
+    [$repaired, $dropped] = CustomMotionStep::dropShapeOwnedDeclarations($css);
+
+    assert_eq(6, count($dropped), 'radius forms and a CSS-wide reset are dropped');
+    assert_true(
+        preg_match('/(?<![-\w])border-radius\s*:/', $repaired) !== 1,
+        'radius shorthand removed',
+    );
+    assert_true(!str_contains($repaired, 'border-top-left-radius'), 'physical longhand removed');
+    assert_true(!str_contains($repaired, 'border-start-end-radius'), 'logical longhand removed');
+    assert_true(!str_contains($repaired, '-webkit-border-radius'), 'vendor form removed');
+    assert_true(!str_contains($repaired, 'all: var('), 'CSS-wide reset removed');
+    assert_contains('--card-border-radius: 2rem', $repaired, 'similarly named custom property is not a radius declaration');
+    assert_contains('animation: custom-motion-spin 1s both', $repaired, 'animation wiring survives');
+    assert_contains('transform: rotate(0deg)', $repaired, 'keyframe start survives');
+    assert_contains('transform: rotate(360deg)', $repaired, 'keyframe end survives');
+    assert_true(
+        substr_count($repaired, "\n") <= substr_count($css, "\n"),
+        'the repair cannot create a line-ceiling rejection',
+    );
+    assert_eq([], CustomMotionStep::validate($repaired), 'remaining motion revalidates cleanly');
+});
+
+test('custom-motion drops only profile-owned motion tokens and preserves the animation', function () {
+    $css = ".custom-motion {\n"
+        . "    --motion-hover-duration: 180ms;\n"
+        . "    --Motion-distance: 4px;\n"
+        . "    --card-radius: 2rem;\n"
+        . "    transition: transform var(--motion-hover-duration, 360ms);\n"
+        . "}\n"
+        . "@keyframes custom-motion-in {\n"
+        . "    from { --motion-enter-duration: 150ms; transform: translateY(8px); }\n"
+        . "    to { transform: none; }\n"
+        . "}";
+
+    [$repaired, $dropped] = CustomMotionStep::dropProfileOwnedMotionDeclarations($css);
+
+    assert_eq(3, count($dropped), 'root and keyframe motion tokens are dropped');
+    assert_true(!str_contains($repaired, '--motion-hover-duration:'), 'hover duration override removed');
+    assert_true(!str_contains($repaired, '--Motion-distance:'), 'case-insensitive prefix removed');
+    assert_true(!str_contains($repaired, '--motion-enter-duration:'), 'keyframe override removed');
+    assert_contains('--card-radius: 2rem', $repaired, 'unrelated custom property survives');
+    assert_contains('transition: transform var(--motion-hover-duration, 360ms)', $repaired, 'reading a token is not declaring it');
+    assert_contains('transform: translateY(8px)', $repaired, 'keyframe motion survives');
+    assert_eq([], CustomMotionStep::validate($repaired), 'remaining motion revalidates cleanly');
+});
+
+test('custom-motion motion scanning leaves declaration-like quoted content byte-identical', function () {
+    $css = '.custom-motion::before { content: "foo; --motion-hover-duration: 180ms"; transform: none; }';
+    [$repaired, $dropped] = CustomMotionStep::dropProfileOwnedMotionDeclarations($css);
+    assert_eq($css, $repaired);
+    assert_eq([], $dropped);
+    assert_eq([], CustomMotionStep::validate($repaired));
+});
+
+test('custom-motion shape scanning leaves declaration-like quoted content byte-identical', function () {
+    $css = '.custom-motion::before { content: "foo; border-radius: 2rem"; transform: none; }';
+    [$repaired, $dropped] = CustomMotionStep::dropShapeOwnedDeclarations($css, true);
+    assert_eq($css, $repaired);
+    assert_eq([], $dropped);
+    assert_eq([], CustomMotionStep::validate($repaired, true));
+});
+
+test('custom-motion shape scanning recognizes balanced root pseudos without owning descendants', function () {
+    $css = '.custom-motion:not(:has(.excluded)) { border-radius: 1rem; transform: none; } '
+        . '.custom-motion:is(:hover,:focus) { all: initial; opacity: 1; } '
+        . '.custom-motion .card { border-radius: 2rem; color: inherit; }';
+
+    [$repaired, $dropped] = CustomMotionStep::dropShapeOwnedDeclarations($css, true);
+
+    assert_eq(['border-radius: 1rem', 'all: initial'], $dropped);
+    assert_contains('transform: none', $repaired);
+    assert_contains('opacity: 1', $repaired);
+    assert_contains('.custom-motion .card { border-radius: 2rem', $repaired);
+});
+
 test('custom-motion validate keeps the hidden-content and scoping rules', function () {
     $cases = [
         'unscoped selector'         => ".logo { animation: custom-motion-x 1s; }",
@@ -51,6 +189,7 @@ test('custom-motion validate keeps the hidden-content and scoping rules', functi
             . "@keyframes custom-motion-out { from { opacity: 1; } to { opacity: 0; } }",
         'mid-keyframe zero opacity' => ".custom-motion { animation: custom-motion-blink 1s both; }\n"
             . "@keyframes custom-motion-blink { 0% { opacity: 1; } 50%, 100% { opacity: 0%; } }",
+        'motion token override'     => ".custom-motion { --motion-hover-duration: 180ms; transform: none; }",
         'url()'                     => ".custom-motion { background: url(x.png); }",
         'image-set()'               => '.custom-motion { background-image: image-set("https://example.invalid/t.png" 1x); }',
         'prefixed image-set()'      => '.custom-motion { background-image: -webkit-image-set("https://example.invalid/t.png" 1x); }',
@@ -89,9 +228,7 @@ test('custom-motion no-ops without an LLM call when no animation was requested',
     [$project, $tmp] = cm_project('builder_cm_skip_', '');
     $llm = new FakeLlm(); // any call would throw
 
-    ob_start();
-    (new CustomMotionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
-    ob_end_clean();
+    quietly(fn () => (new CustomMotionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project));
 
     assert_eq([], $llm->calls);
     assert_true(!str_contains($project->readText('theme/style.css'), 'Custom motion'));
@@ -103,9 +240,7 @@ test('custom-motion skips without an LLM call when the markup carries no tag', f
     $project->writeText('theme/parts/section-hero.html', '<!-- wp:heading --><h1>Hi</h1><!-- /wp:heading -->');
     $llm = new FakeLlm();
 
-    ob_start();
-    (new CustomMotionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
-    ob_end_clean();
+    quietly(fn () => (new CustomMotionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project));
 
     assert_eq([], $llm->calls);
     assert_contains('no', $project->readText('logs/custom-motion.log'));
@@ -148,9 +283,7 @@ test('custom-motion appends validated CSS wrapped in the reduced-motion media qu
     $llm = new FakeLlm();
     $llm->queueText(CM_VALID_CSS);
 
-    ob_start();
-    (new CustomMotionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
-    ob_end_clean();
+    quietly(fn () => (new CustomMotionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project));
 
     $style = $project->readText('theme/style.css');
     assert_contains('@media screen and (prefers-reduced-motion: no-preference) {', $style, 'deterministic wrapper added (screen: print must not render a paused entrance)');
@@ -158,6 +291,99 @@ test('custom-motion appends validated CSS wrapped in the reduced-motion media qu
     // The prompt carried the verbatim request and the tagged element context.
     assert_contains('the logo should spin on hover', $llm->calls[0]['prompt']);
     assert_contains('wp-block-image custom-motion', $llm->calls[0]['prompt']);
+    assert_contains('Contained-media and button corner shape is build-owned', $llm->calls[0]['prompt']);
+    assert_contains('Never declare a `--motion-*` custom property', $llm->calls[0]['prompt']);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('custom-motion removes shape overrides and ships the remaining animation with actionable warnings', function () {
+    [$project, $tmp] = cm_project('builder_cm_shape_salvage_');
+    $project->writeText(
+        'theme/parts/section-hero.html',
+        '<!-- wp:image {"className":"custom-motion"} --><figure class="wp-block-image custom-motion">'
+        . '<img src="logo.png" alt="Logo"/></figure><!-- /wp:image -->'
+    );
+    $llm = new FakeLlm();
+    $llm->queueText(
+        ".custom-motion img {\n"
+        . "    border-radius: 50% !important;\n"
+        . "    animation: custom-motion-spin 0.8s ease-in-out;\n"
+        . "}\n"
+        . "@keyframes custom-motion-spin {\n"
+        . "    from { transform: rotate(0deg); border-start-start-radius: 0; }\n"
+        . "    to { transform: rotate(360deg); border-start-start-radius: 50%; }\n"
+        . "}"
+    );
+
+    quietly(fn () => (new CustomMotionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project));
+
+    $style = $project->readText('theme/style.css');
+    assert_contains('animation: custom-motion-spin 0.8s ease-in-out', $style, 'remaining animation ships');
+    assert_contains('transform: rotate(360deg)', $style, 'remaining keyframe motion ships');
+    assert_true(!str_contains($style, 'border-radius:'), 'direct radius does not ship');
+    assert_true(!str_contains($style, 'border-start-start-radius'), 'keyframe radius does not ship');
+    $log = $project->readText('logs/custom-motion.log');
+    assert_contains('SALVAGED CSS', $log);
+    assert_contains('border-radius: 50% !important', $log);
+    $warnings = implode(' ', $project->readJson('warnings.json')['custom-motion'] ?? []);
+    assert_contains("file='theme/style.css'", $warnings);
+    assert_contains("block='generated custom-motion CSS'", $warnings);
+    assert_contains('authored=', $warnings);
+    assert_contains('delivered=removed', $warnings);
+    assert_contains('disposition=dropped a shape-owned corner declaration', $warnings);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('custom-motion removes motion-token overrides and ships the remaining animation with actionable warnings', function () {
+    [$project, $tmp] = cm_project('builder_cm_motion_salvage_');
+    $project->writeText(
+        'theme/parts/section-hero.html',
+        '<!-- wp:group {"className":"custom-motion"} --><div class="wp-block-group custom-motion">'
+        . '<p>Card</p></div><!-- /wp:group -->'
+    );
+    $llm = new FakeLlm();
+    $llm->queueText(
+        ".custom-motion {\n"
+        . "    --motion-hover-duration: 180ms;\n"
+        . "    transition: transform var(--motion-hover-duration, 360ms);\n"
+        . "}\n"
+        . ".custom-motion:hover {\n"
+        . "    transform: translateY(-4px);\n"
+        . "}"
+    );
+
+    quietly(fn () => (new CustomMotionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project));
+
+    $style = $project->readText('theme/style.css');
+    assert_contains('transition: transform var(--motion-hover-duration, 360ms)', $style, 'remaining animation ships');
+    assert_contains('transform: translateY(-4px)', $style, 'hover motion ships');
+    assert_true(!str_contains($style, '--motion-hover-duration: 180ms'), 'token override does not ship');
+    $log = $project->readText('logs/custom-motion.log');
+    assert_contains('SALVAGED CSS', $log);
+    assert_contains('--motion-hover-duration: 180ms', $log);
+    $warnings = implode(' ', $project->readJson('warnings.json')['custom-motion'] ?? []);
+    assert_contains("file='theme/style.css'", $warnings);
+    assert_contains("block='generated custom-motion CSS'", $warnings);
+    assert_contains('authored=', $warnings);
+    assert_contains('delivered=removed', $warnings);
+    assert_contains('disposition=dropped a profile-owned motion custom property declaration', $warnings);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('custom-motion preserves unrelated radius on a tagged generic group', function () {
+    [$project, $tmp] = cm_project('builder_cm_generic_radius_');
+    $project->writeText(
+        'theme/parts/section-hero.html',
+        '<!-- wp:group {"className":"custom-motion"} --><div class="wp-block-group custom-motion">'
+        . '<p>Card</p></div><!-- /wp:group -->',
+    );
+    $llm = new FakeLlm();
+    $llm->queueText('.custom-motion { border-radius: 1rem; transform: translateY(1px); }');
+
+    quietly(fn () => (new CustomMotionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project));
+
+    assert_contains('border-radius: 1rem', $project->readText('theme/style.css'));
+    assert_true(!$project->exists('warnings.json'));
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -171,9 +397,7 @@ test('custom-motion rejects bad CSS, logs, and leaves style.css untouched', func
     $llm = new FakeLlm();
     $llm->queueText('.logo { display: none; }');
 
-    ob_start();
-    (new CustomMotionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
-    ob_end_clean();
+    quietly(fn () => (new CustomMotionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project));
 
     assert_eq($before, $project->readText('theme/style.css'));
     assert_contains('PROBLEMS', $project->readText('logs/custom-motion.log'));

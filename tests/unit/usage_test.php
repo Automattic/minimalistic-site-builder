@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\AnthropicClient;
+use Automattic\SiteBuild\OpenAiCompatibleClient;
 
 test('extractUsage sums input, cache, and output tokens', function () {
     $resp = ['usage' => [
@@ -32,6 +33,67 @@ test('usageTotals starts at zero', function () {
     assert_eq(0, $t['total_tokens']);
     assert_eq(0, $t['cache_read_input_tokens']);
     assert_eq(0, $t['cache_creation_input_tokens']);
+});
+
+test('Anthropic usageTotals retains successful calls from a batch that later aborts', function () {
+    $client = new AnthropicClient('k', 'claude-opus-4-8');
+    $responseBatch = new ReflectionMethod(AnthropicClient::class, 'responseBatch');
+    $responseBatch->setAccessible(true);
+    $requests = [
+        'bad' => ['prompt' => 'bad'],
+        'good' => ['prompt' => 'good'],
+    ];
+    $transport = static fn (array $subset): array => [
+        'bad' => ['ok' => false, 'transient' => false, 'error' => 'HTTP 400', 'time' => 1.5],
+        'good' => [
+            'ok' => true,
+            'text' => 'kept',
+            'input' => 11,
+            'output' => 7,
+            'cache_read_input_tokens' => 3,
+            'cache_creation_input_tokens' => 2,
+            'time' => 0.5,
+        ],
+    ];
+
+    assert_throws(static function () use ($responseBatch, $client, $requests, $transport): void {
+        $responseBatch->invoke($client, $requests, false, $transport);
+    });
+
+    assert_eq([
+        'requests' => 1,
+        'input_tokens' => 11,
+        'output_tokens' => 7,
+        'total_tokens' => 18,
+        'cache_read_input_tokens' => 3,
+        'cache_creation_input_tokens' => 2,
+    ], $client->usageTotals());
+});
+
+test('OpenAI-compatible usageTotals retains successful calls from an aborted batch', function () {
+    $responseBatch = new ReflectionMethod(OpenAiCompatibleClient::class, 'responseBatch');
+    $responseBatch->setAccessible(true);
+    $requests = [
+        'bad' => ['prompt' => 'bad'],
+        'good' => ['prompt' => 'good'],
+    ];
+    $transport = static fn (array $subset): array => [
+        'bad' => ['ok' => false, 'transient' => false, 'error' => 'HTTP 400', 'time' => 1.5],
+        'good' => ['ok' => true, 'text' => 'kept', 'input' => 13, 'output' => 5, 'time' => 0.5],
+    ];
+
+    foreach (['openai', 'openrouter'] as $provider) {
+        $client = new OpenAiCompatibleClient('k', 'model', provider: $provider);
+        assert_throws(static function () use ($responseBatch, $client, $requests, $transport): void {
+            $responseBatch->invoke($client, $requests, false, $transport);
+        });
+        assert_eq([
+            'requests' => 1,
+            'input_tokens' => 13,
+            'output_tokens' => 5,
+            'total_tokens' => 18,
+        ], $client->usageTotals(), "{$provider} keeps the successful sibling's billed usage");
+    }
 });
 
 test('parseSse assembles text and usage from an SSE body', function () {

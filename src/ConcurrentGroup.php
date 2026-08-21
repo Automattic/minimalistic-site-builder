@@ -37,9 +37,25 @@ final class ConcurrentGroup implements Step
         $this->validateMembers();
     }
 
+    /** Joins the member ids into the group's own id, and splits them back out. */
+    public const ID_SEPARATOR = '+';
+
     public function id(): string
     {
-        return implode('+', array_map(static fn (Step $s) => $s->id(), $this->steps));
+        return implode(self::ID_SEPARATOR, array_map(static fn (Step $s) => $s->id(), $this->steps));
+    }
+
+    /**
+     * The member ids inside a step id — just [$id] for an ordinary step, which
+     * has no separator. Lets callers that only hold the id string (the pipeline
+     * resolving --until, the build report resolving a group's models) decompose
+     * it without each re-encoding the separator convention id() owns.
+     *
+     * @return list<string>
+     */
+    public static function memberIds(string $stepId): array
+    {
+        return explode(self::ID_SEPARATOR, $stepId);
     }
 
     public function label(): string
@@ -82,7 +98,7 @@ final class ConcurrentGroup implements Step
     /** Keep numeric-string paths as strings while de-duplicating the union. */
     private static function pathSetKey(string $path): string
     {
-        return "\0path:" . $path;
+        return StepGraph::PATH_SET_PREFIX . $path;
     }
 
     /**

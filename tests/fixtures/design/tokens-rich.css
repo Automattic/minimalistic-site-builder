@@ -1,0 +1,36 @@
+:root {
+    --brand: #123456;
+    --nested-brand: var(--brand);
+    --space-md: 2rem;
+    --font-body: "Source Sans 3", Arial, sans-serif;
+    --font-heading: "Fraunces", Georgia, serif;
+}
+
+body {
+    color: #abc;
+    background: rgb(255, 255, 255);
+    font-family: var(--font-body);
+    padding: var(--space-md);
+}
+
+h1 {
+    color: var(--brand);
+    font-family: var(--font-heading);
+    margin-bottom: 1.5rem;
+}
+
+a {
+    color: var(--brand);
+}
+
+button {
+    border-color: var(--brand);
+}
+
+.notice {
+    background-color: rgba(18, 52, 86, 1);
+}
+
+.one-level-only {
+    color: var(--nested-brand);
+}

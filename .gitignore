@@ -1,8 +1,12 @@
+.DS_Store
 .env
+.playwright-mcp
+graphify-out/
 /projects/
 eval_run.log
 .playground-blueprint.json
 **/node_modules/
 docs/evidence/issue-31/fixture/img/
+docs/superpowers/
 /vendor/
 /composer.lock

@@ -106,14 +106,45 @@ final class ScaffoldPluginStep implements Step
                 'changed_front'  => false,
             );
 
-            // A fresh WordPress ships a published "Sample Page"; the header's
-            // wp:page-list would render it in the nav next to the seeded
-            // pages. Unpublish it (draft, not delete — it isn't ours) and
-            // remember it so deactivation can restore it.
-            $sample = get_page_by_path('sample-page');
-            if ($sample && $sample->post_status === 'publish') {
-                wp_update_post(array('ID' => (int) $sample->ID, 'post_status' => 'draft'));
-                $state['unpublished'][] = (int) $sample->ID;
+            // A fresh WordPress ships stock sample content: a published page
+            // — core names it "Sample Page", some hosts seed an "About" page
+            // instead — and a "Hello world!" post. The header's wp:page-list
+            // renders that page in the nav beside the seeded ones, and the
+            // post reaches the blog, the feed and /hello-world/.
+            //
+            // Unpublish them (draft, not delete — they aren't ours) and
+            // release the slug, so a seeded page called "about" keeps that
+            // slug instead of landing on "about-2" behind a sample nobody
+            // wrote. Both halves are recorded so deactivation restores them.
+            //
+            // Only while untouched: "about" is a slug a real page can hold,
+            // so anything whose post_modified has moved past its post_date is
+            // somebody's writing and is left alone.
+            $stock = array(
+                'page' => array('sample-page', 'about'),
+                'post' => array('hello-world'),
+            );
+            foreach ($stock as $stock_type => $stock_slugs) {
+                foreach ($stock_slugs as $stock_slug) {
+                    $sample = get_page_by_path($stock_slug, OBJECT, $stock_type);
+                    if (!$sample || $sample->post_status !== 'publish') {
+                        continue;
+                    }
+                    if (isset($sample->post_modified_gmt, $sample->post_date_gmt)
+                        && $sample->post_modified_gmt !== $sample->post_date_gmt) {
+                        continue;
+                    }
+
+                    wp_update_post(array(
+                        'ID'          => (int) $sample->ID,
+                        'post_status' => 'draft',
+                        'post_name'   => $stock_slug . '-sample',
+                    ));
+                    $state['unpublished'][] = array(
+                        'id'        => (int) $sample->ID,
+                        'post_name' => $stock_slug,
+                    );
+                }
             }
 
             // Content images are content: import the bundled files into the
@@ -376,7 +407,7 @@ final class ScaffoldPluginStep implements Step
 
         /** Report a seeding problem where a site owner can still find it. */
         function {{FN_PREFIX}}_content_log($message) {
-            error_log('{{THEME_NAME}} Content: ' . $message);
+            error_log('Generated Site Content: ' . $message);
         }
 
         /** Sanitize with the tree processor, falling back to the tag processor. */
@@ -422,11 +453,14 @@ final class ScaffoldPluginStep implements Step
                 return null;
             }
 
-            // Elements that load or run code.
+            // Elements that load or run code, plus <style>: a stylesheet in
+            // content can restyle the trusted header shell (position:fixed
+            // chrome the build's ownership contract forbids), so its body is
+            // emptied like the intake sanitizer strips it.
             $inert = array(
                 'SCRIPT' => true, 'IFRAME' => true, 'OBJECT' => true,
                 'APPLET' => true, 'EMBED' => true, 'NOEMBED' => true,
-                'NOFRAMES' => true, 'NOSCRIPT' => true,
+                'NOFRAMES' => true, 'NOSCRIPT' => true, 'STYLE' => true,
             );
             $loaders = array(
                 'src', 'data', 'srcdoc', 'code', 'codebase', 'archive',
@@ -481,8 +515,9 @@ final class ScaffoldPluginStep implements Step
                         if ($tag === 'SCRIPT') {
                             $processor->set_attribute('type', 'text/plain');
                         }
-                        // Raw-text bodies (script, iframe, noembed, noframes)
-                        // are this tag's own modifiable text and go with it.
+                        // Raw-text bodies (script, style, iframe, noembed,
+                        // noframes) are this tag's own modifiable text and go
+                        // with it.
                         $processor->set_modifiable_text('');
                     }
                     if ($tag === 'BASE') {
@@ -564,10 +599,24 @@ final class ScaffoldPluginStep implements Step
                 wp_delete_attachment((int) $id, true);
             }
 
-            // Republish whatever activation unpublished (the stock sample page).
+            // Republish whatever activation unpublished (the stock sample
+            // content), slug included. The seeded pages are deleted just
+            // above, so the slug is free again by the time it is handed back.
+            // A state written before the slug was released holds bare ids.
             $unpublished = isset($state['unpublished']) && is_array($state['unpublished']) ? $state['unpublished'] : array();
-            foreach ($unpublished as $id) {
-                wp_update_post(array('ID' => (int) $id, 'post_status' => 'publish'));
+            foreach ($unpublished as $entry) {
+                $restore = array('post_status' => 'publish');
+                if (is_array($entry)) {
+                    $restore['ID'] = isset($entry['id']) ? (int) $entry['id'] : 0;
+                    if (isset($entry['post_name'])) {
+                        $restore['post_name'] = (string) $entry['post_name'];
+                    }
+                } else {
+                    $restore['ID'] = (int) $entry;
+                }
+                if ($restore['ID'] > 0) {
+                    wp_update_post($restore);
+                }
             }
 
             if (!empty($state['changed_front'])) {

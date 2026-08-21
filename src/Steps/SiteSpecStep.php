@@ -6,14 +6,17 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
+use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\WritingDirection;
 
 /**
- * Step 2 (LLM): produce the site spec from the user's creation prompt.
+ * Step 2: produce the canonical site spec from either a host-supplied
+ * `meta.json.site_spec` value or an LLM reading the user's creation prompt.
  *
  * Input:  meta.json (the user prompt, seeded by the runner)
  * Output: siteSpec.json — FACTUAL site information only (name, slug, title,
@@ -31,12 +34,16 @@ use Automattic\SiteBuild\StepDeclaration;
  * The user prompt and this spec are the inputs the theme-json and landing-page
  * steps build the design from.
  *
- * The page tree is normally the model's decision (scoped by the multi_page
- * flag), but a caller can fix it: meta.json `pages` (--pages on the runners,
- * or pre-seeded by a host whose site spec already names its pages) makes the
- * prompt echo that exact list — the model contributes only per-page purposes —
- * and normalize() enforces it. Only the ABSENCE of the list lets the model
- * invent pages.
+ * A supplied spec replaces only candidate generation: it goes through the same
+ * deterministic normalization, page-scope rules, and warning path as model
+ * output. This keeps siteSpec.json as the declared step artifact and lets hosts
+ * carry the input through the portable meta.json boundary without an LLM call.
+ *
+ * The page tree is normally the candidate spec's decision (scoped by the
+ * multi_page flag), but a caller can fix it: meta.json `pages` (--pages on the
+ * runners, or pre-seeded by a host that already names its pages) makes the
+ * final spec reproduce exactly that tree and take only matching per-page
+ * purposes from the candidate.
  */
 final class SiteSpecStep implements Step
 {
@@ -47,6 +54,9 @@ final class SiteSpecStep implements Step
 
     /** Identity keys the model may invent (and must then flag in `invented`). */
     private const IDENTITY_KEYS = ['name', 'persona_name', 'email_domain'];
+
+    /** Internal artifact basenames that generated page slugs must not claim. */
+    private const RESERVED_PAGE_SLUGS = ['preview'];
 
     /** {{page_tree_scope}} / {{page_tree_rule}} when inner pages are enabled (--multi-page). */
     private const MULTI_PAGE_SCOPE = '1-6 top-level pages; nest "children" ONLY where the site genuinely'
@@ -105,41 +115,56 @@ final class SiteSpecStep implements Step
         if (trim($prompt) === '') {
             throw new \RuntimeException('meta.json has no "prompt"');
         }
+        // Validate an explicit caller value before spending the site-spec LLM
+        // call. The generated spec never owns this field.
+        $callerWritingDirection = array_key_exists('writing_direction', $meta)
+            ? WritingDirection::validate($meta['writing_direction'])
+            : null;
 
-        // Inner pages are opt-in: the runner records the --multi-page flag in
-        // meta.json; without it the spec plans (and normalize() enforces) a
-        // landing page only.
+        // Inner pages are opt-in: runners record --multi-page, while the facade
+        // resolves an omitted scope to true for a supplied spec. Without either,
+        // normalize() enforces a landing page only.
         $multiPage = (bool) ($meta['multi_page'] ?? false);
 
         // A caller-fixed page list takes the page-tree decision away from the
-        // model: the prompt asks it to echo the list and write purposes, and
-        // normalize() enforces it. Only honored on multi-page builds — the
-        // flag owns WHETHER inner pages exist; the list only says WHICH.
+        // candidate: the LLM prompt echoes it on the generated path, and
+        // normalize() enforces it on both paths. Only honored on multi-page
+        // builds — the flag owns WHETHER inner pages exist; the list says WHICH.
         $requested = $multiPage ? self::requestedPages($meta['pages'] ?? null) : [];
 
-        $rendered = $this->renderer->render('site-spec.md', [
-            'user_prompt'     => $prompt,
-            'page_tree_scope' => $requested !== [] ? self::REQUESTED_SCOPE
-                : ($multiPage ? self::MULTI_PAGE_SCOPE : self::SINGLE_PAGE_SCOPE),
-            'page_tree_rule'  => $requested !== [] ? self::requestedRule($requested)
-                : ($multiPage ? self::MULTI_PAGE_RULE : self::SINGLE_PAGE_RULE),
-        ]);
         $warnings = [];
-        try {
-            $spec = $this->llm->completeJson($rendered, $this->withOptions(['log_label' => $this->id()]));
-        } catch (GeneratedJsonException $e) {
-            // Only terminal generated-content failures degrade. Transport,
-            // sender-contract, and programming exceptions remain fatal.
-            $spec = [];
-            $warnings[] = 'siteSpec.json: generated JSON remained unusable after its repair attempt ('
-                . $e->getMessage() . '); deterministic prompt-derived site spec delivered';
+        if (array_key_exists('site_spec', $meta)) {
+            if (!is_array($meta['site_spec'])) {
+                throw new \RuntimeException('meta.json "site_spec" must be a JSON object');
+            }
+            $spec = $meta['site_spec'];
+            Narrator::write("  using host-supplied site spec (no site-spec LLM call)\n");
+        } else {
+            $rendered = $this->renderer->render('site-spec.md', [
+                'user_prompt'     => $prompt,
+                'page_tree_scope' => $requested !== [] ? self::REQUESTED_SCOPE
+                    : ($multiPage ? self::MULTI_PAGE_SCOPE : self::SINGLE_PAGE_SCOPE),
+                'page_tree_rule'  => $requested !== [] ? self::requestedRule($requested)
+                    : ($multiPage ? self::MULTI_PAGE_RULE : self::SINGLE_PAGE_RULE),
+            ]);
+            try {
+                $spec = $this->llm->completeJson($rendered, $this->withOptions(['log_label' => $this->id()]));
+            } catch (GeneratedJsonException $e) {
+                // Only terminal generated-content failures degrade. Transport,
+                // sender-contract, and programming exceptions remain fatal.
+                $spec = [];
+                $warnings[] = 'siteSpec.json: generated JSON remained unusable after its repair attempt ('
+                    . $e->getMessage() . '); deterministic prompt-derived site spec delivered';
+            }
         }
 
         $spec = self::normalize($spec, $multiPage, $requested, $warnings, self::nameFromPrompt($prompt));
+        $spec['writing_direction'] = $callerWritingDirection
+            ?? WritingDirection::fromLanguage((string) ($spec['language'] ?? ''));
         if ($warnings !== []) {
             $project->addWarnings($this->id(), $warnings);
-            echo '  [site-spec] warning: ' . count($warnings)
-                . " spec field(s) repaired with deterministic fallbacks (recorded in warnings.json)\n";
+            Narrator::write('  [site-spec] warning: ' . count($warnings)
+                . " spec field(s) repaired with deterministic fallbacks (recorded in warnings.json)\n");
         }
         $project->writeJson('siteSpec.json', $spec);
     }
@@ -167,13 +192,35 @@ final class SiteSpecStep implements Step
     /**
      * The committed copy language from siteSpec.json, for wiring into the
      * {{language}} placeholder of downstream prompts. Falls back to a
-     * descriptive phrase for specs that predate the language field, so the
-     * rendered rule still reads as an instruction.
+     * descriptive phrase for specs that arrive without the field — a
+     * host-supplied spec never carries one — so the rendered rule still reads
+     * as an instruction.
+     *
+     * The fallback names the SITE SPEC, not the user prompt: the prompts that
+     * author visitor-facing copy (section, hero, header, footer, and the
+     * HTML-first page prompts) all carry {{site_spec}} but NONE of them carry
+     * {{user_prompt}}, so a rule pointing at the prompt names a document the
+     * model cannot see. Left unresolvable, the richest language signal in
+     * context is the site's address, and a francophone address produced a
+     * French About page on an otherwise English site (BIGR-849). The spec is
+     * a faithful stand-in: its own title, description, and page purposes are
+     * written in the user's language on both the generated and host paths.
      */
     public static function languageOf(Project $project): string
     {
         $language = trim((string) ($project->readJson('siteSpec.json')['language'] ?? ''));
-        return $language !== '' ? $language : 'the language the user prompt is written in';
+        return $language !== ''
+            ? $language
+            : "the SITE SPEC's own language (never a language implied by the site's location or audience)";
+    }
+
+    /** The normalized logical writing direction persisted in siteSpec.json. */
+    public static function writingDirectionOf(Project $project): string
+    {
+        $direction = strtolower(trim((string) (
+            $project->readJson('siteSpec.json')['writing_direction'] ?? ''
+        )));
+        return in_array($direction, WritingDirection::VALUES, true) ? $direction : 'ltr';
     }
 
     /**
@@ -240,9 +287,18 @@ final class SiteSpecStep implements Step
         // may rely on at least a homepage entry existing. A caller-fixed list
         // wins over whatever tree the model returned — the model's tree can
         // contribute only per-page purposes.
-        $spec['pages'] = self::normalizePages($spec['pages'] ?? null, $spec, $multiPage);
+        $pageWarnings = [];
+        $spec['pages'] = self::normalizePages($spec['pages'] ?? null, $spec, $multiPage, $pageWarnings);
         if ($requested !== []) {
+            // A caller-fixed list is promised to survive unchanged — same
+            // order, same slugs, same titles (REQUESTED_SCOPE above, and the
+            // tests that pin it). A host that explicitly asks for a Cart page
+            // keeps its name and its route; the cart CONTENTS still degrade
+            // downstream, where StorefrontDegrade::markup strips the purchase
+            // controls the catalog cannot honor.
             $spec['pages'] = self::forcePages($requested, $spec['pages']);
+        } else {
+            array_push($warnings, ...$pageWarnings);
         }
 
         // `invented` lists which identity values the model made up; keep only
@@ -254,14 +310,14 @@ final class SiteSpecStep implements Step
 
         // Every piece of site copy is written in this language. A missing or
         // implausible value degrades to '' — languageOf() then renders the
-        // "follow the user prompt's language" instruction downstream — with
+        // "follow the spec's own language" instruction downstream — with
         // a durable warning, instead of aborting the build over one field.
         $language = trim((string) ($spec['language'] ?? ''));
         if ($language === '') {
-            $warnings[] = 'site spec has no "language"; downstream copy follows the user prompt\'s language';
+            $warnings[] = 'site spec has no "language"; downstream copy follows the spec\'s own language';
         } elseif (!self::plausibleLanguage($language)) {
             $warnings[] = "site spec \"language\" is not a plausible language code or name: {$language}; "
-                . "dropped — downstream copy follows the user prompt's language";
+                . "dropped — downstream copy follows the spec's own language";
             $language = '';
         }
         $spec['language'] = $language;
@@ -270,6 +326,11 @@ final class SiteSpecStep implements Step
         // what arms the optional custom-motion step; everything else in the
         // motion feature is preset-driven and must not be triggered here.
         $spec['animation_request'] = trim((string) ($spec['animation_request'] ?? ''));
+
+        // Whether the site's core offering IS visual imagery. Anything but an
+        // explicit boolean true degrades to false: the field only ever narrows
+        // the hero recipe pool, so absence must never change behavior.
+        $spec['subject_is_visual_work'] = ($spec['subject_is_visual_work'] ?? null) === true;
 
         // Contact emails are minted from this domain; when the model returned
         // none (or something that is not a domain), derive it from the slug so
@@ -298,11 +359,12 @@ final class SiteSpecStep implements Step
      *
      * @param mixed        $raw
      * @param array<mixed> $spec
+     * @param list<string> $warnings
      * @return array<int,array<string,mixed>>
      */
-    public static function normalizePages($raw, array $spec, bool $multiPage = true): array
+    public static function normalizePages($raw, array $spec, bool $multiPage = true, array &$warnings = []): array
     {
-        $seen = [];
+        $seen = self::initialPageSlugSet();
         $pages = is_array($raw) ? self::normalizePageList($raw, $seen) : [];
         if (!$multiPage && $pages !== []) {
             $pages = [array_merge($pages[0], ['children' => []])];
@@ -315,7 +377,15 @@ final class SiteSpecStep implements Step
                 'children' => [],
             ]];
         }
+        [$pages, $cartWarnings] = \Automattic\SiteBuild\StorefrontDegrade::pages($pages);
+        array_push($warnings, ...$cartWarnings);
         return $pages;
+    }
+
+    /** Seed reserved slugs into the shared recursive uniqueness state. */
+    private static function initialPageSlugSet(): array
+    {
+        return array_fill_keys(self::RESERVED_PAGE_SLUGS, true);
     }
 
     /**
@@ -381,7 +451,7 @@ final class SiteSpecStep implements Step
                 $entries[] = $page;
             }
         }
-        $seen = [];
+        $seen = self::initialPageSlugSet();
         return self::normalizePageList($entries, $seen);
     }
 

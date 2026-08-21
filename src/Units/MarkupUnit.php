@@ -22,22 +22,12 @@ interface MarkupUnit
      */
     public function request(array $input): array;
 
-    /**
-     * Normalize and validate one raw LLM response.
-     *
-     * @param list<string> $notes out-param: one line per content-changing
-     *        degradation (sanitizer strip, wrapper recovery, truncation
-     *        salvage) for the caller to record durably (warnings.json).
-     * @param list<string> $repairs out-param: lossless deterministic repairs
-     *        for the caller's step report; these are not delivery warnings.
-     */
-    public function finish(
-        string $raw,
-        array $input,
-        array &$notes = [],
-        array &$repairs = [],
-    ): string;
+    /** Normalize and validate one raw LLM response into a portable outcome. */
+    public function finish(string $raw, array $input): MarkupResult;
 
-    /** Render, execute, normalize, and return one unit without Project state. */
-    public function generate(array $input): string;
+    /**
+     * Render, execute, normalize, and return one JSON-serializable outcome
+     * without Project state.
+     */
+    public function generate(array $input): MarkupResult;
 }

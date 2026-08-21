@@ -3,6 +3,24 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\TextBatchRecovery;
 
+test('TextBatchRecovery accepts a tolerated one-token probe without regeneration', function () {
+    $calls = 0;
+    $requests = ['probe' => [
+        'prompt' => 'Warm the cache.',
+        'max_tokens' => 1,
+        'tolerate_empty' => true,
+    ]];
+    $send = static function (array $pending) use (&$calls): array {
+        $calls++;
+        return ['probe' => ['text' => '', 'stop_reason' => 'max_tokens']];
+    };
+
+    $result = TextBatchRecovery::run($requests, $send);
+
+    assert_eq(['probe' => ''], $result->texts);
+    assert_eq(1, $calls, 'the throwaway probe must not spend a regeneration call');
+});
+
 test('TextBatchRecovery returns an all-complete batch without a retry', function () {
     $requests = [
         'header'         => ['prompt' => 'Generate the header'],

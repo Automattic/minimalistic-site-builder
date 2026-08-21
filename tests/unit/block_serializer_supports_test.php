@@ -218,9 +218,20 @@ test('SupportDomainGuard rejects style families outside the reviewed PHP pipelin
         ['style' => ['spacing' => ['unsupported' => '1rem']]],
         '0',
     ));
+    // Grid is a first-class WordPress core/group layout; the pinned runtime
+    // renders it, so the guard admits type:grid plus its two track keys —
+    // columnCount (positive int) and minimumColumnWidth (length string).
+    $guard->assertSupported('core/group', ['layout' => ['type' => 'grid']], '0');
+    $guard->assertSupported('core/group', ['layout' => ['type' => 'grid', 'columnCount' => 3]], '0');
+    $guard->assertSupported('core/group', ['layout' => ['type' => 'grid', 'minimumColumnWidth' => '240px']], '0');
     assert_throws(static fn () => $guard->assertSupported(
         'core/group',
-        ['layout' => ['type' => 'grid']],
+        ['layout' => ['type' => 'grid', 'columnCount' => 0]],
+        '0',
+    ));
+    assert_throws(static fn () => $guard->assertSupported(
+        'core/group',
+        ['layout' => ['type' => 'grid', 'minimumColumnWidth' => '']],
         '0',
     ));
     assert_throws(static fn () => $guard->assertSupported(

@@ -8,9 +8,11 @@ use Automattic\SiteBuild\BlockSerializer\FileReport;
 use Automattic\SiteBuild\BlockSerializer\FixerReport;
 use Automattic\SiteBuild\BlockSerializer\NativeStagedFileWriter;
 use Automattic\SiteBuild\BlockSerializer\Repair;
+use Automattic\SiteBuild\BlockSerializer\RootTextAlignmentConflictDetector;
 use Automattic\SiteBuild\BlockSerializer\Serializer;
 use Automattic\SiteBuild\BlockSerializer\StagedFileWriter;
 use Automattic\SiteBuild\BlockSerializer\TemplateTransformer;
+use Automattic\SiteBuild\BlockSerializer\TextAlignmentRepairer;
 
 /** Pure-PHP, fixed-point Gutenberg compatibility fixer. */
 final class PhpBlockFixer implements ReportingBlockFixer
@@ -32,6 +34,23 @@ final class PhpBlockFixer implements ReportingBlockFixer
         return $this->fixReport($themeDir)->format();
     }
 
+    /**
+     * Run the scoped post-transaction repair with this fixer's injected
+     * transformer, drop detector, and staged writer. FixBlocksStep therefore
+     * never bypasses a customized PhpBlockFixer implementation detail.
+     *
+     * @param list<array{0:string,1:\Automattic\SiteBuild\BlockSerializer\AlignmentClassLoss}> $losses
+     * @return list<string>
+     */
+    public function repairTextAlignmentLosses(string $themeDir, array $losses): array
+    {
+        return (new TextAlignmentRepairer(
+            $this->transformer,
+            $this->drops,
+            $this->writer,
+        ))->repair($themeDir, $losses);
+    }
+
     /** Run the public fixed-point transaction and retain its typed report. */
     public function fixReport(string $themeDir): FixerReport
     {
@@ -49,6 +68,14 @@ final class PhpBlockFixer implements ReportingBlockFixer
         // Discovery and every transformation finish before the first write.
         $prepared = [];
         $reports = [];
+        // This preflight models the pinned Serializer/ParagraphFixer save
+        // behavior. TemplateTransformer is an intentional public injection
+        // seam; a custom transformer may preserve or resolve these shapes by
+        // a different contract, so do not reject its input on serializer-
+        // specific assumptions before it gets a chance to run.
+        $alignmentConflicts = $this->transformer instanceof Serializer
+            ? new RootTextAlignmentConflictDetector()
+            : null;
         foreach ($this->discover($themeDir) as [$relative, $absolute]) {
             $original = @file_get_contents($absolute);
             if ($original === false) {
@@ -69,15 +96,19 @@ final class PhpBlockFixer implements ReportingBlockFixer
             $converged = false;
             $failure = null;
             for ($pass = 1; $pass <= self::MAX_PASSES; $pass++) {
+                $conflicts = $alignmentConflicts?->detect($current) ?? [];
+                if ($conflicts !== []) {
+                    $failure = "root text-alignment conflict on pass {$pass}: "
+                        . implode('; ', $conflicts);
+                    break;
+                }
                 try {
                     $result = $this->transformer->transform($current);
                 } catch (\Throwable $error) {
                     $failure = "block transformation failed on pass {$pass}: {$error->getMessage()}";
                     break;
                 }
-                foreach ($result->repairs as $repair) {
-                    $repairs[$repair->blockPath . "\0" . $repair->code] = $repair;
-                }
+                $repairs = array_merge($repairs, $result->repairs);
                 if ($result->html === $current) {
                     $converged = true;
                     break;
@@ -93,7 +124,7 @@ final class PhpBlockFixer implements ReportingBlockFixer
             }
 
             $changed = $current !== $original;
-            $fileRepairs = $changed ? array_values($repairs) : [];
+            $fileRepairs = $changed ? Repair::dedupe($repairs) : [];
             $dropped = $changed ? $this->drops->detect($original, $current) : [];
             $reports[] = new FileReport(
                 $relative,

@@ -2,6 +2,9 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\AboveFoldContract;
+use Automattic\SiteBuild\HeaderBehavior;
+use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\PhpBlockFixer;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\SectionRhythm;
@@ -26,6 +29,247 @@ function validator_project(): array
 test('validator passes a well-formed theme', function () {
     [$project, $tmp] = validator_project();
     assert_eq([], ThemeValidator::validate($project));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+/** @return array{0:\Automattic\SiteBuild\Project,1:string} */
+function validator_above_fold_project(): array
+{
+    [$project, $tmp] = validator_project();
+    $pages = [[
+        'slug' => 'home',
+        'title' => 'Home',
+        'path' => '/',
+        'front' => true,
+        'sections' => [[
+            'slug' => 'hero',
+            'title' => 'Home',
+            'layout_archetype' => 'mixed-width-editorial',
+            'background' => 'contrast',
+            'primary_action' => null,
+        ]],
+    ]];
+    $blueprint = HeroBlueprint::defaultFor('focal-subject-stage');
+    $delivery = AboveFoldContract::resolve(
+        $pages,
+        $blueprint,
+        'full-bleed',
+        ['base' => '#FFFFFF', 'contrast' => '#111111'],
+        ['stable_id' => 'validator-test', 'writing_direction' => 'ltr', 'page_count' => 1],
+        ['archetype' => 'minimal-columns', 'surface' => 'base'],
+        'standard-row',
+    );
+    $header = '<!-- wp:group {"className":"header-archetype--standard-row","backgroundColor":"base","textColor":"contrast"} -->'
+        . '<div class="wp-block-group header-archetype--standard-row has-base-background-color has-contrast-color"></div>'
+        . '<!-- /wp:group -->';
+    $hero = '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage","layout":{"type":"constrained"}} -->'
+        . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage"></div><!-- /wp:group -->';
+    $final = AboveFoldContract::finalizeMarkup($delivery, $pages, [
+        'part_keys' => ['header', 'page-home--hero'],
+        'opening_overlay_support' => ['page-home--hero' => false],
+        'primary_action_delivered' => true,
+    ]);
+    $project->writeJson('pages.json', ['pages' => $pages]);
+    $project->writeJson('aboveFold.json', $final);
+    $project->writeText('theme/parts/header.html', $header);
+    $project->writeText('plugin/pages/home.html', $hero . "\n");
+    return [$project, $tmp];
+}
+
+test('final above-fold validator accepts the persisted header and hero relation', function () {
+    [$project, $tmp] = validator_above_fold_project();
+    assert_eq([], ThemeValidator::aboveFoldWarnings($project));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('final above-fold advisory ignores a rejected header artifact for its independent scan', function () {
+    [$project, $tmp] = validator_above_fold_project();
+    $project->writeJson(HeaderBehavior::FILE, [
+        'behavior' => HeaderBehavior::STATIC,
+        'mode' => HeaderBehavior::MODE_STACKED,
+        'transition' => HeaderBehavior::TRANSITION_INSTANT,
+        'topSurface' => 'base',
+        'scrolledSurface' => 'base',
+        'foreground' => 'contrast',
+        'topTreatment' => HeaderBehavior::TREATMENT_SOLID,
+        'scrolledTreatment' => HeaderBehavior::TREATMENT_SOLID,
+        'generatedExtension' => true,
+    ]);
+
+    assert_eq([], ThemeValidator::aboveFoldWarnings($project));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('final above-fold validator accepts an exact custom protection color', function () {
+    [$project, $tmp] = validator_project();
+    $pages = [[
+        'slug' => 'home',
+        'title' => 'Home',
+        'path' => '/',
+        'front' => true,
+        'sections' => [[
+            'slug' => 'hero',
+            'title' => 'Home',
+            'layout_archetype' => 'full-bleed-cover',
+            'background' => 'image',
+            'primary_action' => null,
+        ]],
+    ]];
+    $delivery = AboveFoldContract::resolve(
+        $pages,
+        HeroBlueprint::defaultFor('cinematic-safe-zone'),
+        'full-bleed',
+        ['base' => '#FFFFFF', 'contrast' => '#161513'],
+        ['stable_id' => 'validator-custom-overlay', 'writing_direction' => 'ltr', 'page_count' => 1],
+        ['archetype' => 'minimal-columns', 'surface' => 'base'],
+        'minimal-overlay',
+    );
+    $final = AboveFoldContract::finalizeMarkup($delivery, $pages, [
+        'part_keys' => ['header', 'page-home--hero'],
+        'opening_overlay_support' => ['page-home--hero' => true],
+        'opening_surfaces' => ['page-home--hero' => 'image'],
+        'primary_action_delivered' => true,
+    ]);
+    $header = '<!-- wp:group {"className":"header-overlay header-archetype--minimal-overlay","textColor":"base"} -->'
+        . '<div class="wp-block-group header-overlay header-archetype--minimal-overlay has-base-color"></div>'
+        . '<!-- /wp:group -->';
+    $hero = '<!-- wp:group {"anchor":"hero","className":"hero-composition--cinematic-safe-zone","layout":{"type":"constrained"}} -->'
+        . '<div id="hero" class="wp-block-group hero-composition--cinematic-safe-zone">'
+        . '<!-- wp:cover {"dimRatio":60,"customOverlayColor":"#161513","isUserOverlayColor":true} -->'
+        . '<div class="wp-block-cover"><span aria-hidden="true" '
+        . 'class="wp-block-cover__background has-background-dim-60 has-background-dim" '
+        . 'style="background-color:#161513"></span>'
+        . '<div class="wp-block-cover__inner-container"></div></div><!-- /wp:cover -->'
+        . '</div><!-- /wp:group -->';
+    $project->writeJson('pages.json', ['pages' => $pages]);
+    $project->writeJson('aboveFold.json', $final);
+    $project->writeText('theme/parts/header.html', $header);
+    $project->writeText('plugin/pages/home.html', $hero . "\n");
+
+    assert_eq([], ThemeValidator::aboveFoldWarnings($project));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('final above-fold validator checks saved Cover paint for an earned clear header', function () {
+    [$project, $tmp] = validator_project();
+    $pages = [[
+        'slug' => 'home', 'title' => 'Home', 'path' => '/', 'front' => true,
+        'sections' => [[
+            'slug' => 'hero', 'title' => 'Home', 'layout_archetype' => 'full-bleed-cover',
+            'background' => 'image', 'primary_action' => null,
+        ]],
+    ]];
+    $delivery = AboveFoldContract::resolve(
+        $pages,
+        HeroBlueprint::defaultFor('cinematic-safe-zone'),
+        'full-bleed',
+        ['base' => '#FFFFFF', 'contrast' => '#161513'],
+        ['stable_id' => 'validator-clear-overlay', 'writing_direction' => 'ltr', 'page_count' => 1],
+        ['archetype' => 'minimal-columns', 'surface' => 'base'],
+        'minimal-overlay',
+    );
+    $final = AboveFoldContract::finalizeMarkup($delivery, $pages, [
+        'part_keys' => ['header', 'page-home--hero'],
+        'opening_overlay_support' => ['page-home--hero' => true],
+        'opening_surfaces' => ['page-home--hero' => 'image'],
+        'primary_action_delivered' => true,
+    ]);
+    $project->writeJson('pages.json', ['pages' => $pages]);
+    $project->writeJson('aboveFold.json', $final);
+    $project->writeJson(HeaderBehavior::FILE, [
+        'behavior' => HeaderBehavior::OVERLAY_TO_SOLID,
+        'mode' => HeaderBehavior::MODE_OVERLAY,
+        'transition' => HeaderBehavior::TRANSITION_SMOOTH,
+        'topSurface' => HeaderBehavior::TRANSPARENT,
+        'scrolledSurface' => 'contrast',
+        'foreground' => 'base',
+        'topTreatment' => HeaderBehavior::TREATMENT_TRANSPARENT,
+        'scrolledTreatment' => HeaderBehavior::TREATMENT_SOLID,
+    ]);
+    $project->writeText(
+        'theme/parts/header.html',
+        '<!-- wp:group {"className":"header-overlay header-archetype--minimal-overlay","textColor":"base"} -->'
+            . '<div class="wp-block-group header-overlay header-archetype--minimal-overlay has-base-color"></div>'
+            . '<!-- /wp:group -->',
+    );
+    $hero = '<!-- wp:group {"anchor":"hero","className":"hero-composition--cinematic-safe-zone","layout":{"type":"constrained"}} -->'
+        . '<div id="hero" class="wp-block-group hero-composition--cinematic-safe-zone">'
+        . '<!-- wp:cover {"dimRatio":60,"overlayColor":"contrast"} -->'
+        . '<div class="wp-block-cover"><span aria-hidden="true" '
+        . 'class="wp-block-cover__background has-contrast-background-color has-background-dim-60 has-background-dim"></span>'
+        . '<div class="wp-block-cover__inner-container"></div></div><!-- /wp:cover -->'
+        . '</div><!-- /wp:group -->';
+    $project->writeText('plugin/pages/home.html', $hero . "\n");
+    assert_eq([], ThemeValidator::aboveFoldWarnings($project));
+
+    $project->writeText(
+        'plugin/pages/home.html',
+        str_replace('has-background-dim-60', 'has-background-dim-40', $hero) . "\n",
+    );
+    $warnings = implode("\n", ThemeValidator::aboveFoldWarnings($project));
+    assert_contains("openings[page='home'].top_protection_token", $warnings);
+    assert_contains('delivered="unsupported"', $warnings);
+
+    $project->writeText(
+        'plugin/pages/home.html',
+        str_replace(
+            ['"dimRatio":60', 'has-background-dim-60'],
+            ['"dimRatio":40', 'has-background-dim-40'],
+            $hero,
+        ) . "\n",
+    );
+    $warnings = implode("\n", ThemeValidator::aboveFoldWarnings($project));
+    assert_contains(
+        "openings[page='home'].top_protection_token",
+        $warnings,
+        'coherent saved paint still needs enough effective dim to prove the clear header',
+    );
+    assert_contains('delivered="unsupported"', $warnings);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('final above-fold validator reports downstream drift without mutating markup', function () {
+    [$project, $tmp] = validator_above_fold_project();
+    $header = str_replace('header-archetype--standard-row', 'header-archetype--split-nav', $project->readText('theme/parts/header.html'));
+    $hero = str_replace('hero-composition--focal-subject-stage', 'hero-composition--editorial-split', $project->readText('plugin/pages/home.html'));
+    $project->writeText('theme/parts/header.html', $header);
+    $project->writeText('plugin/pages/home.html', $hero);
+
+    $warnings = ThemeValidator::aboveFoldWarnings($project);
+    $joined = implode("\n", $warnings);
+    assert_contains('header.archetype', $joined);
+    assert_contains('hero.recipe_marker', $joined);
+    assert_contains("file='theme/parts/header.html'", $joined);
+    assert_contains('authored=', $joined);
+    assert_contains('delivered=', $joined);
+    assert_contains('disposition=', $joined);
+    assert_eq($header, $project->readText('theme/parts/header.html'), 'advisory validation must not mutate header');
+    assert_eq($hero, $project->readText('plugin/pages/home.html'), 'advisory validation must not mutate page');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('final above-fold validator reports competing stacked chrome and an over-budget opening cover', function () {
+    [$project, $tmp] = validator_above_fold_project();
+    $header = str_replace(
+        '"backgroundColor":"base"',
+        '"backgroundColor":"base","gradient":"invented-gradient"',
+        $project->readText('theme/parts/header.html'),
+    );
+    $opening = '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage","layout":{"type":"constrained"}} -->'
+        . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage">'
+        . '<!-- wp:cover {"minHeight":92,"minHeightUnit":"vh"} --><div class="wp-block-cover" style="min-height:92vh"></div><!-- /wp:cover -->'
+        . '</div><!-- /wp:group -->';
+    $project->writeText('theme/parts/header.html', $header);
+    $project->writeText('plugin/pages/home.html', $opening);
+
+    $warnings = ThemeValidator::aboveFoldWarnings($project);
+    $joined = implode("\n", $warnings);
+    assert_contains('header.stacked_surface', $joined);
+    assert_contains('stacked_cover_max_vh', $joined);
+    assert_contains('authored=80', $joined);
+    assert_contains('delivered=92', $joined);
+    assert_eq($header, $project->readText('theme/parts/header.html'));
+    assert_eq($opening, $project->readText('plugin/pages/home.html'));
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -155,6 +399,53 @@ test('image source validator ignores the documented AI_IMAGE alt after generatio
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('image source validator flags references collect-images never recorded', function () {
+    // The silent failure this exists to stop: a page full of invented srcs let
+    // generate-images report "completed" with zero images.
+    [$project, $tmp] = validator_project();
+    $project->writeJson('images.json', []);
+    $project->writeText('plugin/pages/home.html',
+        '<!-- wp:image --><figure class="wp-block-image"><img src="hero.jpg" alt="A hero"/></figure><!-- /wp:image -->'
+        . '<!-- wp:cover {"url":"bg.png"} --><div class="wp-block-cover"></div><!-- /wp:cover -->'
+    );
+
+    $joined = implode(' ', ThemeValidator::unresolvedImageSourceProblems($project));
+    assert_contains('hero.jpg', $joined);
+    assert_contains('bg.png', $joined);
+    assert_contains('never collected for generation', $joined);
+    assert_contains('plugin/pages/home.html', implode(' ', ThemeValidator::validate($project)));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('image source validator judges only unresolvable image references', function () {
+    [$project, $tmp] = validator_project();
+    // A collected image keeps its placeholder whatever its status — generation
+    // leaves a failed image in place rather than abort the build.
+    $project->writeJson('images.json', [
+        ['filename' => 'known.jpg', 'src' => 'theme:./assets/known.jpg', 'status' => 'failed'],
+    ]);
+    $project->writeText('plugin/pages/home.html',
+        '<img src="theme:./assets/known.jpg" alt="Collected but not generated"/>'
+        . '<img src="/wp-content/themes/demo/assets/done.jpg" alt="Generated"/>'
+        . '<img src="https://cdn.example.com/remote.jpg" alt="Remote"/>'
+        . '<img src="data:image/svg+xml,%3Csvg%3E" alt="Inline"/>'
+        . '<!-- wp:social-link {"url":"#","service":"x"} /-->'
+    );
+
+    assert_eq([], ThemeValidator::unresolvedImageSourceProblems($project));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('image source validator stays quiet when collection never ran', function () {
+    // Theme-only fixtures and hosts with their own image pipeline write no
+    // images.json, so nothing can be called dangling.
+    [$project, $tmp] = validator_project();
+    $project->writeText('plugin/pages/home.html', '<img src="hero.jpg" alt="A hero"/>');
+
+    assert_eq([], ThemeValidator::unresolvedImageSourceProblems($project));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('validator checks the content plugin pages for balance and placeholders', function () {
     [$project, $tmp] = validator_project();
     $project->writeText('plugin/pages/home.html', '<!-- wp:group --><div>oops, never closed</div>');
@@ -176,7 +467,7 @@ test('validator flags raw form markup in generated markup', function () {
     $joined = implode(' ', ThemeValidator::validate($project));
     assert_contains('plugin/pages/contact.html', $joined);
     assert_contains('form markup', $joined);
-    assert_contains('no form backend', $joined);
+    assert_contains('sections never author form controls', $joined);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -444,10 +735,35 @@ test('spacing warnings detect theme-profile and section-root rhythm drift', func
     assert_contains('section root spacing drift', $joined);
 
     $theme = $project->readJson('theme/theme.json');
-    $theme['settings']['spacing']['spacingSizes'][4]['size'] = '12rem';
+    $spacingSlugs = array_column($theme['settings']['spacing']['spacingSizes'], 'slug');
+    $xxlIndex = array_search('xxl', $spacingSlugs, true);
+    assert_true(is_int($xxlIndex), 'canonical spacing profile includes xxl');
+    $theme['settings']['spacing']['spacingSizes'][$xxlIndex]['size'] = '12rem';
     $project->writeJson('theme/theme.json', $theme);
     $joined = implode(' ', ThemeValidator::spacingWarnings($project));
     assert_contains('bounded canonical profile', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('spacing warnings report residual global Group vertical padding actionably', function () {
+    [$project, $tmp] = validator_project();
+    $theme = ThemeJsonStep::normalizeSpacingSettings(['version' => 3]);
+    $theme['styles']['blocks']['core/group']['spacing']['padding'] = [
+        'top' => 'var:preset|spacing|xl',
+        'bottom' => 'var:preset|spacing|xl',
+        'left' => 'var:preset|spacing|md',
+    ];
+    $project->writeJson('theme/theme.json', $theme);
+
+    $joined = implode("\n", ThemeValidator::spacingWarnings($project));
+    assert_contains("file='theme/theme.json'", $joined);
+    assert_contains("block='styles.blocks.core/group.spacing.padding'", $joined);
+    assert_contains('authored=', $joined);
+    assert_contains('delivered=unchanged', $joined);
+    assert_contains('disposition=remove global top/bottom Group padding', $joined);
+
+    $project->writeJson('theme/theme.json', ThemeJsonStep::normalizeGroupBlockPadding($theme));
+    assert_eq([], ThemeValidator::spacingWarnings($project), 'normalized theme passes');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

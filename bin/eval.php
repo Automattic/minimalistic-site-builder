@@ -2,12 +2,10 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\BlockFixers;
-use Automattic\SiteBuild\Env;
-use Automattic\SiteBuild\ModelConfig;
+use Automattic\SiteBuild\Eval\EvalMetrics;
 use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
-use Automattic\SiteBuild\SiteBuilder;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\ThemeValidator;
 
@@ -34,7 +32,6 @@ const SITES = [
 ];
 
 $only = $argv[1] ?? null;
-$store = new ProjectStore(repo_path('projects'));
 
 // Report-only mode: rebuild eval/report.md from projects already on disk,
 // reusing captured step timings from eval/results.json. Used after a
@@ -46,13 +43,7 @@ if ($only === '--report') {
 }
 
 $llm = make_llm();
-$builder = new SiteBuilder(
-    llm: $llm,
-    promptsDir: Package::promptsDir(),
-    outputRoot: repo_path('projects'),
-    blockFixer: BlockFixers::default(),
-    models: step_models(),
-);
+$builder = make_site_builder($llm);
 
 $results = [];
 foreach (SITES as $slug => $prompt) {
@@ -181,49 +172,16 @@ function rebuild_report(): void
 /** @return array<string,mixed> */
 function collect_metrics(Project $project): array
 {
-    $m = ['name' => null, 'fonts' => null, 'fonts_loaded' => false, 'pages' => 0, 'content_blocks' => 0, 'sections' => 0, 'theme_bytes' => 0];
-    if ($project->exists('theme/functions.php')) {
-        $m['fonts_loaded'] = str_contains($project->readText('theme/functions.php'), 'fonts.googleapis.com');
-    }
-    if ($project->exists('siteSpec.json')) {
-        $spec = $project->readJson('siteSpec.json');
-        $m['name'] = $spec['name'] ?? null;
-        $m['sections'] = is_array($spec['sections'] ?? null) ? count($spec['sections']) : 0;
-    }
-    if ($project->exists('theme/theme.json')) {
-        $t = json_decode($project->readText('theme/theme.json'), true);
-        $fams = $t['settings']['typography']['fontFamilies'] ?? [];
-        // Show the primary family from each stack (more accurate than the label).
-        $m['fonts'] = implode(' + ', array_map(static function ($f) {
-            $primary = trim(explode(',', (string) ($f['fontFamily'] ?? ''))[0], " \"'");
-            return $primary !== '' ? $primary : ($f['name'] ?? '?');
-        }, $fams));
-    }
-    if ($project->exists('plugin/pages.json')) {
-        $manifest = $project->readJson('plugin/pages.json');
-        foreach ($manifest['pages'] ?? [] as $page) {
-            $m['pages']++;
-            $rel = 'plugin/pages/' . (string) ($page['slug'] ?? '') . '.html';
-            if ($project->exists($rel)) {
-                $m['content_blocks'] += preg_match_all('/<!--\s*wp:/', $project->readText($rel));
-            }
-        }
-    }
-    foreach (glob($project->themePath('') . '/{,*/}*.{html,json,css,txt}', GLOB_BRACE) ?: [] as $f) {
-        $m['theme_bytes'] += filesize($f);
-    }
-    foreach (glob($project->pluginPath('') . '/{,*/}*.{html,json,php}', GLOB_BRACE) ?: [] as $f) {
-        $m['theme_bytes'] += filesize($f);
-    }
-    return $m;
+    return EvalMetrics::collect($project);
 }
 
 /** @param array<string,mixed> $results */
 function write_report(array $results): void
 {
-    // Derive the columns from what actually ran: a hardcoded list silently
-    // drops steps (and their real token spend) from the totals the day the
-    // pipeline gains one.
+    // Derive the columns from what actually ran (in run order): a hardcoded
+    // list silently drops steps — and their real token spend — from the
+    // totals the day the pipeline gains one, and a renamed step would render
+    // as "–".
     $stepIds = [];
     foreach ($results as $r) {
         foreach ([array_keys($r['timings'] ?? []), array_keys($r['usage'] ?? [])] as $ids) {
@@ -236,18 +194,17 @@ function write_report(array $results): void
     }
 
     $md = "# Builder — Phase 2 Evaluation\n\n";
-    // Resolve the large tier the run actually used rather than naming a model
-    // literally: a hardcoded fallback silently mislabels every report the day
-    // the packaged default changes, and the report is the artifact a model
-    // rollout is judged on.
-    $provider = Env::get('LLM_PROVIDER') ?: ModelConfig::defaultProvider();
-    $model = Env::get('LLM_MODEL') ?: ModelConfig::tierModel($provider, 'large');
-    $md .= 'Generated: ' . gmdate('Y-m-d H:i') . " UTC · model: " . $model . "\n\n";
+    $md .= 'Generated: ' . gmdate('Y-m-d H:i') . " UTC · model: " . default_llm_model() . "\n\n";
 
     // Speed table.
     $md .= "## Speed (seconds per step)\n\n";
-    $md .= '| Site | ' . implode(' | ', array_map(fn ($s) => short($s), $stepIds)) . " | **Total** |\n";
-    $md .= '|' . str_repeat('---|', count($stepIds) + 2) . "\n";
+    $speedHeaders = array_merge(
+        ['Site'],
+        array_map(fn ($s) => short($s), $stepIds),
+        ['**Total**']
+    );
+    $md .= '| ' . implode(' | ', $speedHeaders) . " |\n";
+    $md .= '|' . str_repeat('---|', count($speedHeaders)) . "\n";
     foreach ($results as $slug => $r) {
         $row = ["`{$slug}`"];
         foreach ($stepIds as $sid) {
@@ -318,9 +275,23 @@ function write_report(array $results): void
         $md .= "None — all sites structurally valid.\n";
     }
 
-    @mkdir(repo_path('eval'), 0775, true);
-    file_put_contents(repo_path('eval/report.md'), $md);
-    file_put_contents(repo_path('eval/results.json'), json_encode($results, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+    $evalDir = repo_path('eval');
+    if (!is_dir($evalDir) && !mkdir($evalDir, 0775, true)) {
+        fwrite(STDERR, "Failed to create {$evalDir}\n");
+        exit(1);
+    }
+    if (file_put_contents($evalDir . '/report.md', $md) === false) {
+        fwrite(STDERR, "Failed to write {$evalDir}/report.md\n");
+        exit(1);
+    }
+    $resultsJson = json_encode(
+        $results,
+        JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR
+    );
+    if (file_put_contents($evalDir . '/results.json', $resultsJson) === false) {
+        fwrite(STDERR, "Failed to write {$evalDir}/results.json\n");
+        exit(1);
+    }
 }
 
 function short(string $stepId): string

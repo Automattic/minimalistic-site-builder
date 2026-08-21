@@ -3,23 +3,84 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\JsonBatchRecovery;
 use Automattic\SiteBuild\Llm;
-use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Steps\SiteSpecStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
+use Automattic\SiteBuild\WritingDirection;
 
-/** @return array{0:Project,1:FakeLlm,2:string} */
-function make_sitespec_fixture(bool $multiPage = false, ?array $pages = null): array
-{
-    $tmp = sys_get_temp_dir() . '/builder_sitespec_' . uniqid();
-    $project = (new ProjectStore($tmp))->create('demo');
-    $meta = ['prompt' => 'A cozy neighborhood bakery', 'multi_page' => $multiPage];
-    if ($pages !== null) {
-        $meta['pages'] = $pages;
-    }
+test('site-spec normalizes a host-supplied spec without an LLM call', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture(multiPage: true, siteSpec: [
+        'name' => 'Supplied Bakery',
+        'slug' => 'Supplied Bakery',
+        'language' => 'en',
+        'email_domain' => 'SUPPLIED.EXAMPLE',
+        'pages' => [
+            ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome visitors'],
+            ['title' => 'Menu', 'slug' => 'menu', 'purpose' => 'List the baked goods'],
+        ],
+        'hours' => 'Tue-Sun 7am-3pm',
+    ]);
+
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $spec = $project->readJson('siteSpec.json');
+    assert_eq(0, $llm->completeJsonCalls, 'a supplied spec must bypass candidate generation');
+    assert_eq('supplied-bakery', $spec['slug']);
+    assert_eq('supplied.example', $spec['email_domain']);
+    assert_eq(['home', 'menu'], array_column($spec['pages'], 'slug'));
+    assert_eq('Tue-Sun 7am-3pm', $spec['hours'], 'arbitrary factual fields survive normalization');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec treats an explicitly supplied empty array as input and degrades without an LLM call', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture(siteSpec: []);
+
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $spec = $project->readJson('siteSpec.json');
+    assert_eq(0, $llm->completeJsonCalls, 'an empty supplied spec must not fall through to generation');
+    assert_eq('A Cozy Neighborhood Bakery', $spec['name']);
+    assert_eq('home', $spec['pages'][0]['slug']);
+    $joined = implode(' ', $project->readJson('warnings.json')['site-spec'] ?? []);
+    assert_contains('site spec has no "name"', $joined);
+    assert_contains('site spec has no "language"', $joined);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec rejects a malformed explicit supplied input instead of invoking the LLM', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    $meta = $project->readJson('meta.json');
+    $meta['site_spec'] = 'not an object';
     $project->writeJson('meta.json', $meta);
-    return [$project, new FakeLlm(), $tmp];
+
+    assert_throws(fn () => (new SiteSpecStep(
+        $llm,
+        new PromptRenderer(repo_path('prompts')),
+    ))->run($project));
+    assert_eq(0, $llm->completeJsonCalls);
+    assert_true(!$project->exists('siteSpec.json'));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+/** @return list<string> */
+function site_spec_tree_slugs(array $pages): array
+{
+    $slugs = [];
+    foreach ($pages as $page) {
+        if (!is_array($page)) {
+            continue;
+        }
+        $slugs[] = (string) ($page['slug'] ?? '');
+        $slugs = array_merge(
+            $slugs,
+            site_spec_tree_slugs(is_array($page['children'] ?? null) ? $page['children'] : []),
+        );
+    }
+    return $slugs;
 }
 
 test('site-spec writes a factual, normalized siteSpec.json', function () {
@@ -50,6 +111,7 @@ test('site-spec writes a factual, normalized siteSpec.json', function () {
     assert_eq('Hearth & Crumb', $spec['title']);         // title falls back to name
     assert_eq('warm and rustic', $spec['visual_vibe']);
     assert_eq('en', $spec['language']);
+    assert_eq('ltr', $spec['writing_direction']);
     assert_eq('hearthandcrumb.com', $spec['email_domain']);       // lowercased
     assert_eq(['name', 'email_domain'], $spec['invented']);       // non-identity key dropped
     assert_true(is_array($spec['sections']));
@@ -203,9 +265,9 @@ test('site-spec degrades a missing or implausible language with a durable warnin
     (new SiteSpecStep($llm, $renderer))->run($project);
     assert_eq('', $project->readJson('siteSpec.json')['language']);
     assert_eq(
-        'the language the user prompt is written in',
+        "the SITE SPEC's own language (never a language implied by the site's location or audience)",
         SiteSpecStep::languageOf($project),
-        'the empty field renders the follow-the-prompt instruction downstream',
+        'the empty field renders an instruction the copy prompts can actually resolve',
     );
 
     $llm->queueJson(['name' => 'Solo', 'language' => '12345']); // not a code or name
@@ -262,6 +324,38 @@ test('site-spec normalizes the pages tree: slugs slugified and globally unique',
     assert_eq('Hours and address', $pages[2]['purpose']);
 
     exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec reserves preview artifact slug in model and caller-fixed page trees', function () {
+    $modelPages = SiteSpecStep::normalizePages([
+        ['title' => 'Home', 'slug' => 'home'],
+        ['title' => 'Work', 'slug' => 'work', 'children' => [
+            ['title' => 'Preview', 'slug' => 'preview'],
+            ['title' => 'Archive', 'slug' => 'archive', 'children' => [
+                ['title' => 'Another Preview', 'slug' => 'preview'],
+            ]],
+        ]],
+    ], [], true);
+    assert_eq(
+        ['home', 'work', 'preview-2', 'archive', 'preview-3'],
+        site_spec_tree_slugs($modelPages),
+        'model tree cannot claim design/preview.html',
+    );
+
+    $requestedPages = SiteSpecStep::requestedPages([
+        ['title' => 'Home', 'slug' => 'home'],
+        ['title' => 'Work', 'slug' => 'work', 'children' => [
+            ['title' => 'Preview', 'slug' => 'preview'],
+            ['title' => 'Archive', 'slug' => 'archive', 'children' => [
+                ['title' => 'Another Preview', 'slug' => 'preview'],
+            ]],
+        ]],
+    ]);
+    assert_eq(
+        ['home', 'work', 'preview-2', 'archive', 'preview-3'],
+        site_spec_tree_slugs($requestedPages),
+        'caller-fixed tree cannot claim design/preview.html',
+    );
 });
 
 test('site-spec without multi_page cuts the tree to the homepage and asks for one page', function () {
@@ -340,6 +434,36 @@ test('site-spec with requested pages fixes the tree — the model contributes on
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('site-spec leaves a caller-requested Cart page named and routed as asked', function () {
+    // REQUESTED_SCOPE promises a caller-fixed list survives unchanged — same
+    // order, same slugs, same titles. That promise outranks the cart rename:
+    // the page keeps its name and its route, and its CONTENTS degrade later,
+    // where StorefrontDegrade::markup strips the purchase controls.
+    [$project, $llm, $tmp] = make_sitespec_fixture(multiPage: true, pages: ['Home', 'Cart', 'Contact']);
+    $llm->queueJson([
+        'name' => 'Hearth & Crumb', 'language' => 'en',
+        'pages' => [
+            ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome visitors', 'children' => []],
+            ['title' => 'Cart', 'slug' => 'cart', 'purpose' => 'Basket and checkout', 'children' => []],
+            ['title' => 'Contact', 'slug' => 'contact', 'purpose' => 'Find us', 'children' => []],
+        ],
+    ]);
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $pages = $project->readJson('siteSpec.json')['pages'];
+    assert_eq(['home', 'cart', 'contact'], array_column($pages, 'slug'), 'the requested route survives');
+    assert_eq(['Home', 'Cart', 'Contact'], array_column($pages, 'title'), 'the requested title survives');
+
+    $warnings = $project->exists('warnings.json')
+        ? implode(' ', $project->readJson('warnings.json')['site-spec'] ?? [])
+        : '';
+    assert_true(
+        !str_contains($warnings, 'catalog storefront'),
+        'no rewrite is claimed for a page the caller pinned',
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('site-spec requested pages: caller-stated purposes win over the model\'s', function () {
     [$project, $llm, $tmp] = make_sitespec_fixture(multiPage: true, pages: [
         ['title' => 'Home', 'slug' => 'home'],
@@ -390,8 +514,6 @@ test('site-spec requestedPages accepts titles and page maps, drops junk', functi
     assert_eq('directions', $requested[2]['children'][0]['slug']);
     assert_eq([], SiteSpecStep::requestedPages(null));
     assert_eq([], SiteSpecStep::requestedPages('Home, Menu'));      // a bare string is not a list
-
-    exec('true');
 });
 
 test('site-spec defaults pages to a single homepage when the model omits them', function () {
@@ -424,8 +546,6 @@ test('site-spec pages entries get title fallback from slug and drop junk entries
     assert_eq('about-us', $pages[0]['slug']);
     assert_eq(2, count($pages));
     assert_true($pages[1]['slug'] !== '', 'fallback slug non-empty');
-
-    exec('true');
 });
 
 test('site-spec throws when meta prompt missing', function () {
@@ -437,4 +557,70 @@ test('site-spec throws when meta prompt missing', function () {
         (new SiteSpecStep(new FakeLlm(), $renderer))->run($project);
     });
     exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('writing direction uses caller override, then reviewed language mapping, then ltr', function () {
+    assert_eq('rtl', WritingDirection::fromLanguage('ar'));
+    assert_eq('rtl', WritingDirection::fromLanguage('Hebrew'));
+    assert_eq('rtl', WritingDirection::fromLanguage('fa-IR'));
+    assert_eq('ltr', WritingDirection::fromLanguage('es-AR'));
+    assert_eq('ltr', WritingDirection::fromLanguage('unknown language'));
+
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    $project->writeJson('meta.json', [
+        'prompt' => 'A publication in Arabic',
+        'writing_direction' => 'ltr',
+    ]);
+    $llm->queueJson(['name' => 'مجلة', 'language' => 'ar']);
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    assert_eq('ltr', $project->readJson('siteSpec.json')['writing_direction'], 'caller wins over language');
+    assert_eq('ltr', SiteSpecStep::writingDirectionOf($project));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec derives rtl from generated language and ignores a model-authored direction', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    $llm->queueJson([
+        'name' => 'مجلة',
+        'language' => 'ar',
+        'writing_direction' => 'ltr',
+    ]);
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    assert_eq('rtl', $project->readJson('siteSpec.json')['writing_direction']);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('invalid caller writing direction fails before the site-spec LLM call', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    $project->writeJson('meta.json', [
+        'prompt' => 'A cozy neighborhood bakery',
+        'writing_direction' => 'auto',
+    ]);
+    assert_throws(fn () => (new SiteSpecStep(
+        $llm,
+        new PromptRenderer(repo_path('prompts')),
+    ))->run($project));
+    assert_eq(0, count($llm->calls));
+    assert_true(!$project->exists('siteSpec.json'));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec normalizes subject_is_visual_work to a strict boolean', function () {
+    foreach ([
+        [true, true],
+        [false, false],
+        ['true', false],
+        [1, false],
+        [null, false],
+    ] as [$authored, $expected]) {
+        [$project, $llm, $tmp] = make_sitespec_fixture();
+        $payload = ['name' => 'Solo', 'language' => 'en'];
+        if ($authored !== null) {
+            $payload['subject_is_visual_work'] = $authored;
+        }
+        $llm->queueJson($payload);
+        (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+        assert_eq($expected, $project->readJson('siteSpec.json')['subject_is_visual_work']);
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
 });

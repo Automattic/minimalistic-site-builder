@@ -3,15 +3,16 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Tests;
 
-use Automattic\SiteBuild\Llm;
+use Automattic\SiteBuild\FinishReasonAwareLlm;
+use Automattic\SiteBuild\UsageReporting;
 
 /**
  * Test double for Llm. Returns queued canned responses (FIFO) and records the
  * prompts/options it received so tests can assert on what a step sent.
  */
-final class FakeLlm implements Llm
+final class FakeLlm implements FinishReasonAwareLlm, UsageReporting
 {
-    /** @var string[] */
+    /** @var list<array{text:string,finish_reason:?string}> */
     private array $textQueue = [];
     /** @var array<int,array<mixed>> */
     private array $jsonQueue = [];
@@ -21,22 +22,28 @@ final class FakeLlm implements Llm
     public int $completeJsonCalls = 0;
     public int $completeBatchCalls = 0;
     public int $completeJsonBatchCalls = 0;
+    /** Set false to model a host that accepts but drops cached_prefixes. */
+    public bool $billCachedPrefixes = true;
+    private int $usageRequests = 0;
+    private int $usageInputTokens = 0;
+    private int $usageOutputTokens = 0;
+    private ?string $lastFinishReason = null;
     /** @var array<array-key,list<string>> keyed notes returned with the next raw-text batch */
     public array $batchNotes = [];
 
     /**
-     * Prompt substrings that fail permanently. complete() throws for a matching
-     * prompt; completeBatch() throws for the WHOLE batch when any request
-     * matches — mirroring the real clients, whose retryTextBatch aborts the
-     * batch on the first permanently-failed request.
+     * Prompt substrings that fail permanently. complete()/completeJson() throw
+     * for a matching prompt; completeBatch()/completeJsonBatch() throw for the
+     * WHOLE batch when any request matches — mirroring the real clients, whose
+     * batch retry aborts on the first permanently-failed request.
      *
      * @var string[]
      */
     public array $failPromptSubstrings = [];
 
-    public function queueText(string $text): void
+    public function queueText(string $text, ?string $finishReason = null): void
     {
-        $this->textQueue[] = $text;
+        $this->textQueue[] = ['text' => $text, 'finish_reason' => $finishReason];
     }
 
     /** @param array<mixed> $data */
@@ -45,8 +52,20 @@ final class FakeLlm implements Llm
         $this->jsonQueue[] = $data;
     }
 
+    /** @return array{requests:int,input_tokens:int,output_tokens:int,total_tokens:int} */
+    public function usageTotals(): array
+    {
+        return [
+            'requests' => $this->usageRequests,
+            'input_tokens' => $this->usageInputTokens,
+            'output_tokens' => $this->usageOutputTokens,
+            'total_tokens' => $this->usageInputTokens + $this->usageOutputTokens,
+        ];
+    }
+
     public function complete(string $prompt, array $opts = []): string
     {
+        $this->lastFinishReason = null;
         $this->completeCalls++;
         $this->calls[] = ['prompt' => $prompt, 'opts' => $opts];
         if ($this->shouldFail($prompt)) {
@@ -55,17 +74,30 @@ final class FakeLlm implements Llm
         if ($this->textQueue === []) {
             throw new \RuntimeException('FakeLlm: no queued text response');
         }
-        return array_shift($this->textQueue);
+        $response = array_shift($this->textQueue);
+        $this->lastFinishReason = $response['finish_reason'];
+        $this->recordUsage($prompt, $response['text'], $opts);
+        return $response['text'];
+    }
+
+    public function lastFinishReason(): ?string
+    {
+        return $this->lastFinishReason;
     }
 
     public function completeJson(string $prompt, array $opts = []): array
     {
         $this->completeJsonCalls++;
         $this->calls[] = ['prompt' => $prompt, 'opts' => $opts];
+        if ($this->shouldFail($prompt)) {
+            throw new \RuntimeException('FakeLlm: permanent failure');
+        }
         if ($this->jsonQueue === []) {
             throw new \RuntimeException('FakeLlm: no queued json response');
         }
-        return array_shift($this->jsonQueue);
+        $response = array_shift($this->jsonQueue);
+        $this->recordUsage($prompt, self::jsonUsageText($response), $opts);
+        return $response;
     }
 
     /**
@@ -79,6 +111,11 @@ final class FakeLlm implements Llm
     public function completeJsonBatch(array $requests): array
     {
         $this->completeJsonBatchCalls++;
+        foreach ($requests as $key => $req) {
+            if ($this->shouldFail((string) $req['prompt'])) {
+                throw new \RuntimeException("FakeLlm: batch request '{$key}' failed");
+            }
+        }
         $out = [];
         foreach ($requests as $key => $req) {
             $opts = $req;
@@ -87,7 +124,9 @@ final class FakeLlm implements Llm
             if ($this->jsonQueue === []) {
                 throw new \RuntimeException('FakeLlm: no queued json response');
             }
-            $out[$key] = array_shift($this->jsonQueue);
+            $response = array_shift($this->jsonQueue);
+            $this->recordUsage((string) $req['prompt'], self::jsonUsageText($response), $opts);
+            $out[$key] = $response;
         }
         return $out;
     }
@@ -117,11 +156,59 @@ final class FakeLlm implements Llm
             if ($this->textQueue === []) {
                 throw new \RuntimeException('FakeLlm: no queued text response');
             }
-            $out[$key] = array_shift($this->textQueue);
+            $response = array_shift($this->textQueue)['text'];
+            $this->recordUsage((string) $req['prompt'], $response, $opts);
+            $out[$key] = $response;
         }
-        $notes = $this->batchNotes;
-        $this->batchNotes = [];
+        $notes = [];
+        foreach (array_keys($requests) as $key) {
+            if (!isset($this->batchNotes[$key])) {
+                continue;
+            }
+            $notes[$key] = $this->batchNotes[$key];
+            unset($this->batchNotes[$key]);
+        }
         return new \Automattic\SiteBuild\TextBatchResult($out, $notes);
+    }
+
+    /**
+     * Bill a call the way a conformant host would: `cached_prefixes` are part
+     * of the input the model was handed, so they are part of the input usage.
+     * Counting only `prompt` would model a host that discards the layers, and
+     * SectionsStep's context-loss guard reads exactly this figure — so every
+     * fixture build would carry a spurious warning, and the guard's silent path
+     * would never be exercised.
+     *
+     * @param array<string,mixed> $opts the request's options, minus the prompt
+     */
+    private function recordUsage(string $prompt, string $response, array $opts = []): void
+    {
+        $this->usageRequests++;
+        $this->usageInputTokens += self::syntheticTokenCount($prompt);
+        if ($this->billCachedPrefixes) {
+            foreach ($opts['cached_prefixes'] ?? [] as $prefix) {
+                $this->usageInputTokens += self::syntheticTokenCount((string) $prefix);
+            }
+        }
+        $this->usageOutputTokens += self::syntheticTokenCount($response);
+    }
+
+    private static function syntheticTokenCount(string $text): int
+    {
+        return max(1, (int) ceil(strlen($text) / 4));
+    }
+
+    /** @param array<mixed> $response */
+    private static function jsonUsageText(array $response): string
+    {
+        $encoded = json_encode($response, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        return is_string($encoded) ? $encoded : '';
+    }
+
+    /** Unconsumed queued responses (text + json), so tests can assert a drained queue. */
+    public function remaining(): int
+    {
+        return count($this->textQueue) + count($this->jsonQueue);
     }
 
     private function shouldFail(string $prompt): bool

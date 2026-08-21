@@ -3,12 +3,18 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\BareListItemLift;
 use Automattic\SiteBuild\BlockFixer;
 use Automattic\SiteBuild\BlockFixerOutcome;
+use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\BlockSerializer\AlignmentClassLoss;
 use Automattic\SiteBuild\BlockSerializer\AlignmentClassLossDetector;
 use Automattic\SiteBuild\LayoutFixer;
+use Automattic\SiteBuild\PhotographySite;
+use Automattic\SiteBuild\PhpBlockFixer;
 use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\StaggeredChildren;
+use Automattic\SiteBuild\ShapeMarkup;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\Units\GeneratedMarkup;
@@ -19,9 +25,9 @@ use Automattic\SiteBuild\Units\GeneratedMarkup;
  * Input:  theme/templates/*.html + theme/parts/*.html
  * Output: the same files, re-serialized to match WordPress save() exactly.
  *
- * Runs the LayoutFixer width/rhythm normalization FIRST — it edits only the
- * block-comment JSON attributes, and the block re-serialization right after is
- * what syncs the authored HTML (align classes) with those attributes.
+ * Runs the LayoutFixer width/rhythm and design-direction shape normalization
+ * FIRST. Both edit block-comment JSON attributes, and the block
+ * re-serialization right after syncs saved HTML with those attributes.
  *
  * Delegates the effectful repair to an injected BlockFixer.
  */
@@ -29,7 +35,7 @@ final class FixBlocksStep implements Step
 {
     private const LOG_FILE = 'fix-blocks.log';
 
-    public function __construct(private BlockFixer $fixer) {}
+    public function __construct(private BlockFixer $fixer, private bool $htmlFirst = false) {}
 
     public function id(): string
     {
@@ -46,10 +52,18 @@ final class FixBlocksStep implements Step
         return new StepDeclaration(
             id: $this->id(),
             label: $this->label(),
-            // Templates are only scanned when they exist; in the default graph
-            // they are written by assemble-pages, which runs after this step.
-            reads: ['theme/theme.json', 'theme/parts/*'],
-            writes: ['theme/parts/*', 'warnings.json'],
+            // Templates/pages are only scanned when they already exist; in the
+            // default graph assemble-pages writes them after this step, so an
+            // optional page cannot be declared as a required upstream read.
+            reads: [
+                'designDirection.json',
+                ...($this->htmlFirst ? ['design/site.css'] : []),
+                'meta.json',
+                'siteSpec.json',
+                'theme/theme.json',
+                'theme/parts/*',
+            ],
+            writes: ['theme/parts/*', 'theme/pages/*', 'warnings.json'],
             concurrent: false,
         );
     }
@@ -60,15 +74,59 @@ final class FixBlocksStep implements Step
         $alignmentBaselines = [];
         $outcomes = [];
         $failedFiles = [];
+        $shape = DesignDirectionStep::shapeFor($project);
+        // A failed file is restored to these exact step-entry bytes. Keep the
+        // shape defects observable in that snapshot separate from changes
+        // exposed by LayoutFixer or a successful first fixer pass: only the
+        // former can truthfully describe the file ultimately delivered after
+        // rollback.
+        $entryShapeChanges = self::shapeChangesInSnapshot($beforeInitialPass, $shape);
+        $shapeChanges = [];
+        $designCss = $this->htmlFirst && $project->exists('design/site.css')
+            ? $project->readText('design/site.css')
+            : null;
+        $wideMeasureRootClasses = $designCss === null
+            ? []
+            : GeneratedMarkup::wideMeasureSubjectClasses($designCss);
+        $wideClassTokens = $designCss === null
+            ? []
+            : SectionLayoutStep::wideClassTokens($designCss);
         try {
-            $layoutNotes = self::normalizeLayouts($project);
+            $listReport = self::liftBareListItems($project);
+            $listNotes = $listReport['notes'];
+            $listWarnings = $listReport['warnings'];
+            $listBlocked = $listReport['blocked'];
+            $layoutNotes = self::normalizeLayouts(
+                $project,
+                [],
+                $this->htmlFirst,
+                $wideMeasureRootClasses,
+                $wideClassTokens,
+            );
+            $shapeChanges = self::normalizeShapes($project, $shape);
             $alignmentBaselines[] = self::snapshotThemeFiles($project);
-            $initialOutcome = BlockFixerOutcome::run($this->fixer, $project->themePath());
+            $blockedFailures = [];
+            foreach ($listBlocked as $blocked) {
+                $blockedFailures[$blocked['file']] = isset($blockedFailures[$blocked['file']])
+                    ? $blockedFailures[$blocked['file']] . '; ' . $blocked['reason']
+                    : $blocked['reason'];
+            }
+            $initialOutcome = BlockFixerOutcome::run($this->fixer, $project->themePath())
+                ->withFailures($blockedFailures);
             $outcomes[] = $initialOutcome;
             $summary = $initialOutcome->formatted;
             self::appendFailures($failedFiles, $initialOutcome);
+            // A legacy fixer exposes only a formatted string, so retain the
+            // pre-pass abandonments in the step's own transaction ledger.
+            if ($initialOutcome->typed === null) {
+                foreach ($blockedFailures as $file => $reason) {
+                    $failedFiles[$file] = [$file, $reason];
+                }
+            }
             self::restoreFailedThemeFiles($project, $beforeInitialPass, self::failurePaths($failedFiles));
             $layoutNotes = self::withoutFailedLayoutNotes($layoutNotes, self::failurePaths($failedFiles));
+            $listNotes = self::withoutFailedLayoutNotes($listNotes, self::failurePaths($failedFiles));
+            $listWarnings = self::withoutFailedLayoutNotes($listWarnings, self::failurePaths($failedFiles));
         } catch (\RuntimeException $e) {
             self::restoreThemeFiles($project, $beforeInitialPass);
             $project->writeText('logs/' . self::LOG_FILE, $e->getMessage() . "\n");
@@ -76,30 +134,44 @@ final class FixBlocksStep implements Step
         }
 
         // Structural repair can make previously unparseable markup safe for
-        // LayoutFixer (for example, by balancing a wp:group). Give the layout
-        // contract one more chance, then re-serialize only when that pass
-        // actually changed comment attributes so the authored HTML stays in
-        // sync with them.
+        // LayoutFixer or expose image/button attributes to ShapeMarkup (for
+        // example, by balancing a wp:group). Give both contracts one more
+        // chance, then re-serialize only when that pass actually changed
+        // comment attributes so the saved HTML stays in sync with them.
         try {
-            $postRepairLayoutNotes = self::normalizeLayouts($project, self::failurePaths($failedFiles));
+            $postRepairLayoutNotes = self::normalizeLayouts(
+                $project,
+                self::failurePaths($failedFiles),
+                $this->htmlFirst,
+                $wideMeasureRootClasses,
+                $wideClassTokens,
+            );
+            $postRepairShapeChanges = self::normalizeShapes(
+                $project,
+                $shape,
+                self::failurePaths($failedFiles),
+            );
             $layoutNotes = array_merge($layoutNotes, $postRepairLayoutNotes);
-            if ($postRepairLayoutNotes !== []) {
+            $shapeChanges = array_merge($shapeChanges, $postRepairShapeChanges);
+            if ($postRepairLayoutNotes !== [] || $postRepairShapeChanges !== []) {
                 $alignmentBaselines[] = self::snapshotThemeFiles($project);
                 $followUpOutcome = BlockFixerOutcome::run($this->fixer, $project->themePath());
                 $outcomes[] = $followUpOutcome;
                 $followUpSummary = $followUpOutcome->formatted;
-                $summary .= "\n[layout] post-repair normalization required a second block-fixer pass:\n  "
+                $summary .= "\n[layout/shape] post-repair normalization required a second block-fixer pass:\n  "
                     . str_replace("\n", "\n  ", $followUpSummary);
                 self::appendFailures($failedFiles, $followUpOutcome);
                 self::restoreFailedThemeFiles($project, $beforeInitialPass, self::failurePaths($failedFiles));
                 $layoutNotes = self::withoutFailedLayoutNotes($layoutNotes, self::failurePaths($failedFiles));
+                $listNotes = self::withoutFailedLayoutNotes($listNotes, self::failurePaths($failedFiles));
+                $listWarnings = self::withoutFailedLayoutNotes($listWarnings, self::failurePaths($failedFiles));
             }
         } catch (\RuntimeException $e) {
             // The public step is one transaction even though structural
             // repair can require two fixer passes. A failed follow-up must not
             // leave the first pass committed as a partial step result.
             self::restoreThemeFiles($project, $beforeInitialPass);
-            $summary .= "\n[layout] post-repair normalization required a second block-fixer pass, which failed:\n  "
+            $summary .= "\n[layout/shape] post-repair normalization required a second block-fixer pass, which failed:\n  "
                 . str_replace("\n", "\n  ", $e->getMessage());
             if ($layoutNotes !== []) {
                 $summary .= "\n[layout] " . count($layoutNotes) . " width/rhythm fix(es):\n  "
@@ -108,11 +180,56 @@ final class FixBlocksStep implements Step
             $project->writeText('logs/' . self::LOG_FILE, $summary . "\n");
             throw $e;
         }
+        if ($listNotes !== []) {
+            $summary .= "\n[list] " . count($listNotes) . " bare list-item lift(s):\n  " . implode("\n  ", $listNotes);
+        }
+        if ($listWarnings !== []) {
+            $summary .= "\n[list] WARNING: " . count($listWarnings)
+                . " empty bare list item(s) removed (recorded in warnings.json):\n  "
+                . implode("\n  ", $listWarnings);
+        }
         if ($layoutNotes !== []) {
             $summary .= "\n[layout] " . count($layoutNotes) . " width/rhythm fix(es):\n  " . implode("\n  ", $layoutNotes);
         }
 
         $failedPaths = self::failurePaths($failedFiles);
+        $shapeChanges = self::uniqueShapeChanges($shapeChanges);
+        $failedShapeChanges = self::onlyFailedShapeChanges($entryShapeChanges, $failedPaths);
+        $shapeChanges = self::uniqueShapeChanges(
+            self::withoutFailedShapeChanges($shapeChanges, $failedPaths),
+        );
+        // Every retained shape change is fully resolved in delivered markup,
+        // so it belongs in the fixer report rather than warnings.json (the
+        // future repair queue). A rolled-back file is filtered from that
+        // success report and gets exact unresolved-value evidence below.
+        if ($shapeChanges !== []) {
+            $summary .= "\n[shape] " . count($shapeChanges) . " corner-language normalization(s):\n  "
+                . implode("\n  ", array_map(self::shapeChangeSummary(...), $shapeChanges));
+        }
+        $shapeDeliveryWarnings = array_map(
+            self::shapeDeliveryWarning(...),
+            array_values(array_filter(
+                $shapeChanges,
+                static fn (array $change): bool => ($change['warning'] ?? false) === true,
+            )),
+        );
+        if ($shapeDeliveryWarnings !== []) {
+            $summary .= "\n[shape] WARNING: " . count($shapeDeliveryWarnings)
+                . " lossy corner repair(s) recorded in warnings.json:\n  "
+                . implode("\n  ", $shapeDeliveryWarnings);
+        }
+        $shapeRollbackWarnings = array_map(
+            static fn (array $change): string => self::shapeRollbackWarning(
+                $change,
+                $failedFiles[$change['file']][1] ?? 'unknown transformation failure',
+            ),
+            $failedShapeChanges,
+        );
+        if ($shapeRollbackWarnings !== []) {
+            $summary .= "\n[shape] WARNING: " . count($shapeRollbackWarnings)
+                . " corner-language normalization(s) rolled back with failed file transactions:\n  "
+                . implode("\n  ", $shapeRollbackWarnings);
+        }
 
         // The fixer can silently migrate a mismatched group through a
         // deprecated block version whose schema predates "layout". Re-assert
@@ -125,7 +242,7 @@ final class FixBlocksStep implements Step
                 continue;
             }
             $markup = $project->readText('theme/' . $rel);
-            $repaired = GeneratedMarkup::constrainedPart($markup);
+            $repaired = GeneratedMarkup::constrainedPart($markup, $wideMeasureRootClasses);
             if ($repaired !== $markup) {
                 $project->writeText('theme/' . $rel, $repaired);
             }
@@ -155,7 +272,12 @@ final class FixBlocksStep implements Step
         // deterministic fallback; keep that usable output, but make every loss
         // durable for the later repair pass rather than hiding it in this log.
         $paragraphStyleWarnings = self::degradedParagraphStyles($deliveredSummary);
-        $warnings = $paragraphStyleWarnings;
+        $warnings = array_merge(
+            $listWarnings,
+            $paragraphStyleWarnings,
+            $shapeDeliveryWarnings,
+            $shapeRollbackWarnings,
+        );
         foreach ($rhythmDrops as $drop) {
             $warnings[] = "block re-serialization dropped vertical rhythm CSS `{$drop}`; "
                 . 'see logs/' . self::LOG_FILE;
@@ -169,6 +291,45 @@ final class FixBlocksStep implements Step
                 $paragraphAlignmentRepairs,
             ),
         ));
+        // The built-in fixer's frozen serializer intentionally mirrors the
+        // pinned runtime, including a few HTML-only paragraph/heading classes
+        // that its final save strands. Repair only those proven final losses,
+        // and only when the built-in fixer owns the preceding transaction.
+        // TextAlignmentRepairer serializes each target block in isolation,
+        // verifies that alignment is the sole change, then atomically replaces
+        // the containing file. Custom fixers keep their own output untouched
+        // and any loss stays in warnings.json.
+        if ($alignmentLosses !== [] && $this->fixer instanceof PhpBlockFixer) {
+            try {
+                $alignmentRepairRows = $this->fixer->repairTextAlignmentLosses(
+                    $project->themePath(),
+                    $alignmentLosses,
+                );
+            } catch (\RuntimeException $error) {
+                // The optional repair is still part of this public step's
+                // transaction. Its writer keeps each replacement atomic, but
+                // a later I/O failure must not strand earlier layout/fixer or
+                // alignment writes as a partially committed step.
+                self::restoreThemeFiles($project, $beforeInitialPass);
+                $summary .= "\n[alignment] text-alignment repair transaction failed; "
+                    . "restored step-entry bytes:\n  "
+                    . str_replace("\n", "\n  ", $error->getMessage());
+                $project->writeText('logs/' . self::LOG_FILE, $summary . "\n");
+                throw $error;
+            }
+            if ($alignmentRepairRows !== []) {
+                $summary .= "\n[alignment] REPAIR: dropped text alignment re-expressed as "
+                    . "style.typography.textAlign:\n  " . implode("\n  ", $alignmentRepairRows);
+                $alignmentLosses = array_values(array_filter(
+                    self::alignmentLosses($project, $alignmentBaselines, $failedPaths),
+                    static fn (array $entry): bool => !self::alignmentLossAlreadyWarned(
+                        $entry[0],
+                        $entry[1],
+                        $paragraphAlignmentRepairs,
+                    ),
+                ));
+            }
+        }
         foreach ($alignmentLosses as [$file, $loss]) {
             $warnings[] = self::alignmentWarning($file, $loss);
         }
@@ -210,6 +371,47 @@ final class FixBlocksStep implements Step
     }
 
     /**
+     * Mirror bare `<li>` children of authored wp:list blocks into
+     * wp:list-item inner blocks before the fixer regenerates save output
+     * from block structure alone (which would drop every bare item).
+     *
+     * @param list<string> $excluded fixer-relative paths whose step
+     *        transaction has already been abandoned
+     * @return array{
+     *     notes:list<string>,
+     *     warnings:list<string>,
+     *     blocked:list<array{file:string,reason:string}>
+     * }
+     */
+    public static function liftBareListItems(Project $project, array $excluded = []): array
+    {
+        $notes = [];
+        $warnings = [];
+        $blocked = [];
+        $excluded = array_fill_keys($excluded, true);
+        foreach ($project->themeFiles() as $rel) {
+            if (isset($excluded[$rel])) {
+                continue;
+            }
+            $markup = $project->readText('theme/' . $rel);
+            $result = BareListItemLift::fix($markup);
+            if ($result['markup'] !== $markup) {
+                $project->writeText('theme/' . $rel, $result['markup']);
+            }
+            foreach ($result['notes'] as $note) {
+                $notes[] = "{$rel}: {$note}";
+            }
+            foreach ($result['warnings'] as $warning) {
+                $warnings[] = "{$rel}: {$warning}";
+            }
+            foreach ($result['blocked'] as $reason) {
+                $blocked[] = ['file' => $rel, 'reason' => $reason];
+            }
+        }
+        return ['notes' => $notes, 'warnings' => $warnings, 'blocked' => $blocked];
+    }
+
+    /**
      * Apply LayoutFixer to every part/template, writing changed files back.
      * Returns one "file: note" line per fix for the step log. The primary pass
      * runs before the block fixer because LayoutFixer rewrites only comment
@@ -218,28 +420,354 @@ final class FixBlocksStep implements Step
      *
      * @param list<string> $excluded fixer-relative paths that have already
      *        failed this step and must remain at their step-entry bytes
+     * @param bool $htmlFirst carried design CSS owns section width — see
+     *        LayoutFixer::fix()
+     * Both class lists come from design/site.css, so every caller must declare
+     * that read, but they answer different questions and are not
+     * interchangeable. A root must keep its own width only when its OWN rule
+     * gives it the measure; the carrier search wants every class named in such
+     * a rule, because it is looking for a wrapper anywhere inside the part.
+     *
+     * @param list<string> $wideMeasureRootClasses classes whose own rule gives
+     *        them the wide measure — see Units\GeneratedMarkup::wideMeasureSubjectClasses
+     * @param list<string> $widePartCarrierClasses classes named anywhere in such
+     *        a rule — see SectionLayoutStep::wideClassTokens. Empty means "do
+     *        not promote", which is how normalize-layout leaves align:wide
+     *        promotion to fix-blocks alone.
      * @return string[]
      */
-    public static function normalizeLayouts(Project $project, array $excluded = []): array
+    public static function normalizeLayouts(
+        Project $project,
+        array $excluded = [],
+        bool $htmlFirst = false,
+        array $wideMeasureRootClasses = [],
+        array $widePartCarrierClasses = [],
+    ): array
     {
         $notes = [];
         $excluded = array_fill_keys($excluded, true);
         $contentSize = self::themeContentSize($project);
         $spacingSlugs = self::themeSpacingSlugs($project);
-        foreach (self::themeFiles($project) as $rel) {
+        $siteSpec = $project->exists('siteSpec.json') ? $project->readJson('siteSpec.json') : [];
+        $meta = $project->exists('meta.json') ? $project->readJson('meta.json') : [];
+        $flattenStaggeredChildren = !PhotographySite::matches(
+            is_array($siteSpec) ? $siteSpec : [],
+            (string) ($meta['prompt'] ?? ''),
+        );
+        foreach ($project->themeFiles() as $rel) {
             if (isset($excluded[$rel])) {
                 continue;
             }
             $markup = $project->readText('theme/' . $rel);
-            $result = LayoutFixer::fix($markup, LayoutFixer::roleFor($rel), $contentSize, $spacingSlugs);
-            if ($result['markup'] !== $markup) {
-                $project->writeText('theme/' . $rel, $result['markup']);
+            $role = LayoutFixer::roleFor($rel);
+            $result = LayoutFixer::fix(
+                $markup,
+                $role,
+                $contentSize,
+                $spacingSlugs,
+                $htmlFirst,
+                $wideMeasureRootClasses,
+            );
+            $normalized = $result['markup'];
+            if ($flattenStaggeredChildren && $role === LayoutFixer::ROLE_SECTION) {
+                $flat = StaggeredChildren::flatten($normalized);
+                $normalized = $flat['markup'];
+                foreach ($flat['notes'] as $note) {
+                    $notes[] = "{$rel}: {$note}";
+                }
+            }
+            if ($rel === 'parts/footer.html' && $widePartCarrierClasses !== []) {
+                $wide = self::promoteOutermostWidePartCarrier($normalized, $widePartCarrierClasses);
+                if ($wide !== $normalized) {
+                    $notes[] = "{$rel}: promoted outermost wide-size carrier to align:wide";
+                    $normalized = $wide;
+                }
+            }
+            if ($normalized !== $markup) {
+                $project->writeText('theme/' . $rel, $normalized);
             }
             foreach ($result['notes'] as $note) {
                 $notes[] = "{$rel}: {$note}";
             }
         }
         return $notes;
+    }
+
+    /**
+     * Add align:wide to the first block whose own element carries a class that
+     * design CSS measures against var(--wide-size). Explicit alignment wins.
+     *
+     * @param list<string> $wideClassTokens
+     */
+    private static function promoteOutermostWidePartCarrier(string $markup, array $wideClassTokens): string
+    {
+        $wideClasses = array_fill_keys($wideClassTokens, true);
+        $doc = BlockMarkup::parse($markup);
+        if ($doc->hasMalformedDelimiters()
+            || $doc->hasMismatchedDelimiters()
+            || $doc->unclosedIndices() !== []
+        ) {
+            return $markup;
+        }
+        foreach ($doc->indices() as $index) {
+            foreach (self::partElementClassTokens($doc, $index) as $token) {
+                if (!isset($wideClasses[$token])) {
+                    continue;
+                }
+                $attrs = $doc->attrs($index) ?? [];
+                if (!isset($attrs['align'])) {
+                    $attrs['align'] = 'wide';
+                    $doc->setAttrs($index, $attrs);
+                }
+                return $doc->render();
+            }
+        }
+        return $markup;
+    }
+
+    /** @return list<string> class tokens on a block's own wrapper, never descendants */
+    private static function partElementClassTokens(BlockMarkup $doc, int $index): array
+    {
+        $tokens = [];
+        $className = ($doc->attrs($index) ?? [])['className'] ?? null;
+        if (is_string($className)) {
+            $tokens = preg_split('/[\x20\t\r\n\f]+/', trim($className), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        }
+        if (preg_match('/<[a-zA-Z][a-zA-Z0-9-]*\b[^>]*>/s', $doc->ownHtml($index), $tag) === 1) {
+            $class = self::partTagAttribute($tag[0], 'class');
+            if ($class !== null && trim($class) !== '') {
+                $tokens = array_merge(
+                    $tokens,
+                    preg_split('/[\x20\t\r\n\f]+/', trim($class), -1, PREG_SPLIT_NO_EMPTY) ?: [],
+                );
+            }
+        }
+        return array_values(array_unique($tokens));
+    }
+
+    private static function partTagAttribute(string $tagHtml, string $name): ?string
+    {
+        $pattern = '/[\x20\t\r\n\f]' . preg_quote($name, '/')
+            . '\s*=\s*(?:"([^"]*)"|\'([^\']*)\')/i';
+        if (preg_match($pattern, $tagHtml, $match) !== 1) {
+            return null;
+        }
+        return array_key_exists(1, $match) && $match[1] !== '' ? $match[1] : ($match[2] ?? '');
+    }
+
+    /**
+     * Normalize generated core/image and core/button corner overrides in every
+     * successful file transaction. A null shape is the backwards-compatible
+     * no-op for design directions persisted before the commitment existed.
+     *
+     * @param list<string> $excluded fixer-relative paths whose step
+     *        transaction has already been abandoned
+     * @return list<array{
+     *     file:string,
+     *     blockPath:string,
+     *     blockName:string,
+     *     property:string,
+     *     authored:mixed,
+     *     delivered:mixed,
+     *     disposition:string
+     * }>
+     */
+    public static function normalizeShapes(
+        Project $project,
+        ?string $shape,
+        array $excluded = [],
+    ): array {
+        if ($shape === null) {
+            return [];
+        }
+
+        $changes = [];
+        $excluded = array_fill_keys($excluded, true);
+        foreach ($project->themeFiles() as $rel) {
+            if (isset($excluded[$rel])) {
+                continue;
+            }
+            $markup = $project->readText('theme/' . $rel);
+            $result = ShapeMarkup::normalize($markup, $shape);
+            if ($result['markup'] !== $markup) {
+                $project->writeText('theme/' . $rel, $result['markup']);
+            }
+            foreach ($result['changes'] as $change) {
+                $changes[] = ['file' => $rel] + $change;
+            }
+        }
+        return $changes;
+    }
+
+    /**
+     * Inspect exact step-entry bytes without mutating them. A later fixer pass
+     * can expose or synthesize additional shape state, but a failed file is
+     * restored from this snapshot, so intermediate state must never be
+     * reported as delivered rollback evidence.
+     *
+     * @param array<string,string> $snapshot theme-relative path => exact bytes
+     * @return list<array{
+     *     file:string,
+     *     blockPath:string,
+     *     blockName:string,
+     *     property:string,
+     *     authored:mixed,
+     *     delivered:mixed,
+     *     disposition:string
+     * }>
+     */
+    private static function shapeChangesInSnapshot(array $snapshot, ?string $shape): array
+    {
+        if ($shape === null) {
+            return [];
+        }
+
+        $changes = [];
+        foreach ($snapshot as $rel => $markup) {
+            if (!str_starts_with($rel, 'parts/') && !str_starts_with($rel, 'templates/')) {
+                // Optional pages participate in the block-fixer transaction,
+                // but normalizeShapes intentionally follows themeFiles() and
+                // never touches them. Do not claim a page shape repair was
+                // rolled back when that repair was never attempted.
+                continue;
+            }
+            foreach (ShapeMarkup::normalize($markup, $shape)['changes'] as $change) {
+                $changes[] = ['file' => $rel] + $change;
+            }
+        }
+        return self::uniqueShapeChanges($changes);
+    }
+
+    /**
+     * @param list<array{file:string,blockPath:string,blockName:string,property:string,
+     *        authored:mixed,delivered:mixed,disposition:string}> $changes
+     * @param list<string> $failedPaths
+     * @return list<array{file:string,blockPath:string,blockName:string,property:string,
+     *         authored:mixed,delivered:mixed,disposition:string}>
+     */
+    private static function withoutFailedShapeChanges(array $changes, array $failedPaths): array
+    {
+        $failed = array_fill_keys($failedPaths, true);
+        return array_values(array_filter(
+            $changes,
+            static fn (array $change): bool => !isset($failed[$change['file']]),
+        ));
+    }
+
+    /**
+     * @param list<array{file:string,blockPath:string,blockName:string,property:string,
+     *        authored:mixed,delivered:mixed,disposition:string}> $changes
+     * @param list<string> $failedPaths
+     * @return list<array{file:string,blockPath:string,blockName:string,property:string,
+     *         authored:mixed,delivered:mixed,disposition:string}>
+     */
+    private static function onlyFailedShapeChanges(array $changes, array $failedPaths): array
+    {
+        $failed = array_fill_keys($failedPaths, true);
+        return array_values(array_filter(
+            $changes,
+            static fn (array $change): bool => isset($failed[$change['file']]),
+        ));
+    }
+
+    /**
+     * @param list<array{file:string,blockPath:string,blockName:string,property:string,
+     *        authored:mixed,delivered:mixed,disposition:string}> $changes
+     * @return list<array{file:string,blockPath:string,blockName:string,property:string,
+     *         authored:mixed,delivered:mixed,disposition:string}>
+     */
+    private static function uniqueShapeChanges(array $changes): array
+    {
+        $unique = [];
+        foreach ($changes as $change) {
+            $key = json_encode($change, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            if ($key === false) {
+                $key = serialize($change);
+            }
+            $unique[$key] = $change;
+        }
+        return array_values($unique);
+    }
+
+    /**
+     * @param array{file:string,blockPath:string,blockName:string,property:string,
+     *        authored:mixed,delivered:mixed,disposition:string} $change
+     */
+    private static function shapeChangeSummary(array $change): string
+    {
+        $authored = $change['authored'] === null
+            && str_starts_with($change['disposition'], 'added deterministic')
+            ? 'missing'
+            : self::shapeValue($change['authored']);
+        return sprintf(
+            '%s block %s (%s): %s %s -> %s (%s)',
+            $change['file'],
+            $change['blockPath'],
+            $change['blockName'],
+            $change['property'],
+            $authored,
+            $change['delivered'] === null ? 'removed' : self::shapeValue($change['delivered']),
+            $change['disposition'],
+        );
+    }
+
+    /**
+     * A successful transform can still lose unrelated authored CSS when the
+     * generated declaration container is structurally unsafe. Keep that loss
+     * actionable for the future repair pass instead of hiding it in the log.
+     *
+     * @param array{file:string,blockPath:string,blockName:string,property:string,
+     *        authored:mixed,delivered:mixed,disposition:string,warning?:bool} $change
+     */
+    private static function shapeDeliveryWarning(array $change): string
+    {
+        return sprintf(
+            '%s block %s (%s): corner property %s; authored %s; delivered %s; '
+                . 'disposition %s; see logs/%s',
+            $change['file'],
+            $change['blockPath'],
+            $change['blockName'],
+            $change['property'],
+            self::shapeValue($change['authored']),
+            $change['delivered'] === null ? 'removed' : self::shapeValue($change['delivered']),
+            $change['disposition'],
+            self::LOG_FILE,
+        );
+    }
+
+    /**
+     * Describe the delivered pre-step value after a file-level transaction
+     * rolls back. Unlike a successful normalization, this is unresolved work
+     * for the future repair pass and therefore belongs in warnings.json.
+     *
+     * @param array{file:string,blockPath:string,blockName:string,property:string,
+     *        authored:mixed,delivered:mixed,disposition:string} $change
+     */
+    private static function shapeRollbackWarning(array $change, string $failure): string
+    {
+        $authored = $change['authored'] === null
+            && str_starts_with($change['disposition'], 'added deterministic')
+            ? 'missing'
+            : self::shapeValue($change['authored']);
+        return sprintf(
+            '%s block %s (%s): corner property %s; authored %s; delivered %s '
+                . '(pre-step value restored); disposition shape normalization rolled back '
+                . 'because block re-serialization abandoned this file (%s); see logs/%s',
+            $change['file'],
+            $change['blockPath'],
+            $change['blockName'],
+            $change['property'],
+            $authored,
+            $authored,
+            $failure,
+            self::LOG_FILE,
+        );
+    }
+
+    private static function shapeValue(mixed $value): string
+    {
+        $encoded = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        return $encoded === false ? 'unencodable value' : $encoded;
     }
 
     /**
@@ -320,20 +848,101 @@ final class FixBlocksStep implements Step
         $failed = array_fill_keys($failedPaths, true);
         $delivered = [];
         $lossesByKey = [];
-        foreach ($baselines as $baseline) {
+        $keysByProvenance = [];
+        foreach ($baselines as $baselineIndex => $baseline) {
             foreach ($baseline as $file => $before) {
                 if (isset($failed[$file])) {
                     continue;
                 }
                 $delivered[$file] ??= $project->readText('theme/' . $file);
                 foreach ($detector->detect($before, $delivered[$file]) as $loss) {
-                    $key = implode("\0", [
+                    $provenanceKey = implode("\0", [
                         $file,
                         $loss->blockPath,
                         $loss->blockName,
                         $loss->authoredClass,
                     ]);
+                    $key = implode("\0", [
+                        $provenanceKey,
+                        $loss->authoredClassOnSavedRoot ? 'root' : 'owned-descendant',
+                        $loss->authoredElementPath ?? 'saved-root',
+                    ]);
+                    $previous = $lossesByKey[$key][1] ?? null;
+                    $sameScope = $previous instanceof AlignmentClassLoss;
+                    if (!$sameScope && $baselineIndex !== 0) {
+                        // A scope that appears only after the first baseline
+                        // is an intermediate transformation artifact, not a
+                        // second authored defect. Fold it into the earliest
+                        // row so warnings.json does not invite a later repair
+                        // to promote that temporary root/descendant state.
+                        // The element path remains part of the primary key so
+                        // two authored descendant occurrences are never
+                        // collapsed merely because they carry the same class.
+                        foreach ($keysByProvenance[$provenanceKey] ?? [] as $candidateKey) {
+                            $candidate = $lossesByKey[$candidateKey][1] ?? null;
+                            if ($candidate instanceof AlignmentClassLoss
+                                && $candidate->authoredClassOnSavedRoot
+                                    !== $loss->authoredClassOnSavedRoot
+                            ) {
+                                $key = $candidateKey;
+                                $previous = $candidate;
+                                break;
+                            }
+                        }
+                    }
+                    if ($previous instanceof AlignmentClassLoss) {
+                        // A later fixer baseline must not upgrade evidence
+                        // that was unsafe in an earlier authored snapshot.
+                        // In particular, a descendant class temporarily moved
+                        // onto a root is still not ours to promote to block
+                        // typography. Replacement evidence is also combined
+                        // conservatively so any observed alternative keeps the
+                        // target out of the deterministic-repair path.
+                        $loss = new AlignmentClassLoss(
+                            blockPath: $loss->blockPath,
+                            blockName: $loss->blockName,
+                            authoredClass: $loss->authoredClass,
+                            deliveredClasses: $sameScope
+                                ? array_values(array_unique(array_merge(
+                                    $previous->deliveredClasses,
+                                    $loss->deliveredClasses,
+                                )))
+                                : $previous->deliveredClasses,
+                            authoredClassOnSavedRoot: $previous->authoredClassOnSavedRoot,
+                            authoredClassIsSafeRootTextAlignment:
+                                $previous->authoredClassIsSafeRootTextAlignment
+                                && $loss->authoredClassIsSafeRootTextAlignment
+                                && $sameScope,
+                            deliveredBlockPath: $sameScope
+                                ? $loss->deliveredBlockPath
+                                : $previous->deliveredBlockPath,
+                            authoredElementPath: $previous->authoredElementPath,
+                        );
+                    } elseif ($baselineIndex !== 0 && $loss->authoredClassOnSavedRoot) {
+                        // Repair eligibility requires positive root proof from
+                        // the earliest authored baseline. A structural rewrite
+                        // can make that snapshot non-comparable, or move a
+                        // descendant token onto a later root; absence of
+                        // contrary evidence is not proof that promotion is
+                        // semantics-safe.
+                        $loss = new AlignmentClassLoss(
+                            blockPath: $loss->blockPath,
+                            blockName: $loss->blockName,
+                            authoredClass: $loss->authoredClass,
+                            deliveredClasses: $loss->deliveredClasses,
+                            authoredClassOnSavedRoot: true,
+                            authoredClassIsSafeRootTextAlignment: false,
+                            deliveredBlockPath: $loss->deliveredBlockPath,
+                            authoredElementPath: $loss->authoredElementPath,
+                        );
+                    }
                     $lossesByKey[$key] = [$file, $loss];
+                    if (!isset($keysByProvenance[$provenanceKey])) {
+                        $keysByProvenance[$provenanceKey] = [];
+                    }
+                    if (!in_array($key, $keysByProvenance[$provenanceKey], true)) {
+                        $keysByProvenance[$provenanceKey][] = $key;
+                    }
                 }
             }
         }
@@ -380,6 +989,7 @@ final class FixBlocksStep implements Step
         array $paragraphAlignmentRepairs,
     ): bool {
         return $loss->blockName === 'core/paragraph'
+            && $loss->authoredClassOnSavedRoot
             && str_starts_with($loss->authoredClass, 'has-text-align-')
             && isset($paragraphAlignmentRepairs[$file . "\0" . $loss->blockPath]);
     }
@@ -388,19 +998,34 @@ final class FixBlocksStep implements Step
     {
         $authored = self::quoted($loss->authoredClass);
         $delivered = self::deliveredAlignmentValue($loss);
+        $scope = $loss->authoredClassOnSavedRoot
+            ? 'the saved root'
+            : 'owned descendant element ' . ($loss->authoredElementPath ?? 'unknown');
+        $deliveredPath = $loss->deliveredBlockPath !== null
+            && $loss->deliveredBlockPath !== $loss->blockPath
+            ? "; semantic match moved to delivered block {$loss->deliveredBlockPath}"
+            : '';
         $disposition = $loss->deliveredClasses === []
-            ? 'authored class removed; block uses its default alignment'
-            : 'authored class removed; final block keeps other alignment in the same family';
+            ? 'authored class removed; no same-scope alignment class remains'
+            : 'authored class removed; same scope keeps other alignment in the same family';
         return "{$file} block {$loss->blockPath} ({$loss->blockName}): alignment class {$authored} "
-            . "could not be preserved (authored {$authored}; delivered {$delivered}; "
+            . "could not be preserved on {$scope}{$deliveredPath} (authored {$authored}; delivered {$delivered}; "
             . "disposition: {$disposition}); "
             . 'deterministic final output delivered — see logs/' . self::LOG_FILE;
     }
 
     private static function alignmentSummary(string $file, AlignmentClassLoss $loss): string
     {
+        $scope = $loss->authoredClassOnSavedRoot
+            ? 'root'
+            : 'owned descendant ' . ($loss->authoredElementPath ?? 'unknown');
+        $deliveredPath = $loss->deliveredBlockPath !== null
+            && $loss->deliveredBlockPath !== $loss->blockPath
+            ? " (moved to {$loss->deliveredBlockPath})"
+            : '';
         return "{$file} block {$loss->blockPath} ({$loss->blockName}): "
-            . self::quoted($loss->authoredClass) . ' -> ' . self::deliveredAlignmentValue($loss);
+            . self::quoted($loss->authoredClass) . " [{$scope}]{$deliveredPath} -> "
+            . self::deliveredAlignmentValue($loss);
     }
 
     private static function deliveredAlignmentValue(AlignmentClassLoss $loss): string
@@ -528,7 +1153,11 @@ final class FixBlocksStep implements Step
     private static function snapshotThemeFiles(Project $project): array
     {
         $snapshot = [];
-        foreach (self::themeFiles($project) as $relative) {
+        $files = $project->themeFiles();
+        foreach (glob($project->themePath('pages/*.html')) ?: [] as $absolute) {
+            $files[] = 'pages/' . basename($absolute);
+        }
+        foreach (array_values(array_unique($files)) as $relative) {
             $snapshot[$relative] = $project->readText('theme/' . $relative);
         }
         return $snapshot;
@@ -542,18 +1171,6 @@ final class FixBlocksStep implements Step
         }
     }
 
-    /** @return string[] parts/*.html and templates/*.html, theme-relative */
-    public static function themeFiles(Project $project): array
-    {
-        $rels = [];
-        foreach (['parts', 'templates'] as $sub) {
-            foreach (glob($project->themePath($sub) . '/*.html') ?: [] as $file) {
-                $rels[] = $sub . '/' . basename($file);
-            }
-        }
-        return $rels;
-    }
-
     /**
      * The theme's spacing-scale slugs (settings.spacing.spacingSizes), for
      * LayoutFixer's bare-slug spacing repair. Empty when unknown.
@@ -562,10 +1179,10 @@ final class FixBlocksStep implements Step
      */
     public static function themeSpacingSlugs(Project $project): array
     {
-        if (!$project->exists('theme/theme.json')) {
+        $theme = self::readThemeJson($project);
+        if ($theme === null) {
             return [];
         }
-        $theme = json_decode($project->readText('theme/theme.json'), true);
         $sizes = $theme['settings']['spacing']['spacingSizes'] ?? [];
         if (!is_array($sizes)) {
             return [];
@@ -582,13 +1199,28 @@ final class FixBlocksStep implements Step
     /** theme.json settings.layout.contentSize in px, when parseable. */
     public static function themeContentSize(Project $project): ?float
     {
-        if (!$project->exists('theme/theme.json')) {
+        $theme = self::readThemeJson($project);
+        if ($theme === null) {
             return null;
         }
-        $theme = json_decode($project->readText('theme/theme.json'), true);
         $size = $theme['settings']['layout']['contentSize'] ?? null;
         return is_string($size) && preg_match('/^([0-9.]+)px$/', $size, $m) === 1
             ? (float) $m[1]
             : null;
+    }
+
+    /**
+     * theme.json decoded fail-open: null when missing or malformed, so the
+     * theme helpers degrade to their defaults instead of throwing.
+     *
+     * @return array<mixed>|null
+     */
+    private static function readThemeJson(Project $project): ?array
+    {
+        if (!$project->exists('theme/theme.json')) {
+            return null;
+        }
+        $theme = json_decode($project->readText('theme/theme.json'), true);
+        return is_array($theme) ? $theme : null;
     }
 }

@@ -54,6 +54,21 @@ final class DeprecationAdapters
             // not this comment key, so the key is dropped either way.
             'textAlign' => true,
         ],
+        'core/navigation-link' => [
+            // Transformer-authored alias for a class the anchor itself should
+            // carry. WordPress registers no such attribute, and
+            // render_block_core_navigation_link() hard-codes the anchor's class
+            // and never reads it, so the pinned createBlock path discards this
+            // delimiter key and no render consumer can observe the drop.
+            // NavigationPattern also copies the anchor class into the
+            // registered className, but only when the source <li> carries no
+            // class of its own; a source `<li class="X"><a class="Y">` keeps
+            // className "X" and drops "Y". That divergence is render-equivalent
+            // for the same reason, and admitting it is deliberate: failing
+            // closed on it would bail the whole file again, which is the
+            // outcome this entry exists to prevent.
+            'anchorClassName' => true,
+        ],
         'core/image' => [
             // AI-authored legacy support form observed in tbilisi35. The
             // pinned registry drops the top-level key and its stale wrapper
@@ -348,7 +363,7 @@ final class DeprecationAdapters
         } elseif ($name === 'core/heading') {
             $attributes = $this->heading($attributes, $rawCommentAttributes, $matched);
         } elseif ($name === 'core/navigation') {
-            $attributes = $this->navigation($attributes, $matched);
+            $attributes = $this->navigation($attributes, $rawCommentAttributes, $matched);
         } elseif (in_array($name, ['core/site-title', 'core/site-tagline'], true)) {
             $attributes = $this->siteIdentityText(
                 $name,
@@ -712,11 +727,38 @@ final class DeprecationAdapters
      * and flex layout; the authored current-schema overlay later restores
      * either key when it was explicitly present.
      *
+     * A deprecation describes UN-MIGRATED content, so re-running it over its own
+     * output must be a no-op. This adapter's migration writes the current-schema
+     * top-level fontFamily, so that key's presence in the raw comment marks
+     * content this adapter has already handled. Without that guard the pass is
+     * not a fixed point: the overlayMenu default below is re-forced on every
+     * later pass, and because the raw-comment overlay can only restore a value
+     * the serializer actually wrote — and it elides any value equal to the
+     * registered default, "mobile" included — an authored overlayMenu:"mobile"
+     * survives pass 1 and is then overwritten by "never" on pass 2.
+     *
      * @param array<string,mixed> $attributes
+     * @param array<string,mixed> $rawCommentAttributes
      * @return array<string,mixed>
      */
-    private function navigation(array $attributes, bool &$matched): array
-    {
+    private function navigation(
+        array $attributes,
+        array $rawCommentAttributes,
+        bool &$matched,
+    ): array {
+        // LOAD-BEARING for legacy content, not a redundant second guard. The
+        // gate below does NOT exclude this adapter's own output: the migration
+        // writes the bare slug into the registered top-level fontFamily and
+        // leaves style.typography.fontFamily in the pipe form, so the gate
+        // matches again on every later pass. Measured over three passes on a
+        // legacy fixture, style.typography.fontFamily keeps the pipe form each
+        // time. Without this check the overlayMenu forcing below re-fires after
+        // the serializer has elided the authored value as a default, and legacy
+        // content loses its authored overlayMenu. Pinned by the legacy
+        // convergence test in tests/unit/php_block_fixer_test.php.
+        if (array_key_exists('fontFamily', $rawCommentAttributes)) {
+            return $attributes;
+        }
         $typography = $attributes['style']['typography'] ?? null;
         if (!is_array($typography) || !array_key_exists('fontFamily', $typography)
             || $typography['fontFamily'] === null || $typography['fontFamily'] === '') {
@@ -727,6 +769,17 @@ final class DeprecationAdapters
                 'Unsupported deprecated core/navigation font-family value; '
                 . 'a reviewed deprecation adapter is required'
             );
+        }
+        // Only legacy content carries the pinned pipe-delimited preset form, and
+        // only for it does taking the last segment yield a real slug. A
+        // transformer-authored custom value like `var(--heading)` has no pipe,
+        // so migrating it would write the whole CSS value into the registered
+        // fontFamily attribute — which WordPress prefers over
+        // style.typography.fontFamily and kebab-cases into
+        // `--wp--preset--font-family--var-heading`, a property no theme.json
+        // defines. The authored font would vanish.
+        if (!str_starts_with($typography['fontFamily'], 'var:preset|font-family|')) {
+            return $attributes;
         }
         $matched = true;
         $attributes['overlayMenu'] = 'never';

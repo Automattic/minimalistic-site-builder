@@ -1,0 +1,574 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Field &amp; Found — Small-space landscape design</title>
+    <style>
+        @import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Newsreader:opsz,wght@6..72,600&display=swap");
+
+        :root {
+            --color-ink: #17322b;
+            --color-paper: #f6f2e8;
+            --color-surface: #fffdf7;
+            --color-accent: #d95f3b;
+            --color-accent-dark: #a93d20;
+            --color-moss: #72936a;
+            --color-line: #ccd3c4;
+            --font-display: "Newsreader", Georgia, serif;
+            --font-body: "DM Sans", Arial, sans-serif;
+            --step--1: clamp(0.86rem, 0.82rem + 0.18vw, 0.96rem);
+            --step-0: clamp(1rem, 0.94rem + 0.28vw, 1.15rem);
+            --step-1: clamp(1.25rem, 1.1rem + 0.72vw, 1.65rem);
+            --step-2: clamp(1.65rem, 1.35rem + 1.5vw, 2.45rem);
+            --step-3: clamp(2.4rem, 1.7rem + 3.5vw, 4.8rem);
+            --space-1: clamp(0.75rem, 0.68rem + 0.35vw, 1rem);
+            --space-2: clamp(1.25rem, 1.06rem + 0.9vw, 1.9rem);
+            --space-3: clamp(2rem, 1.55rem + 2.2vw, 3.5rem);
+            --space-4: clamp(3.5rem, 2.5rem + 5vw, 7rem);
+            --radius-small: 0.65rem;
+            --radius-large: 1.5rem;
+            --shadow-soft: 0 1.25rem 3rem rgba(23, 50, 43, 0.12);
+            --content-wide: 74rem;
+            --content-narrow: 48rem;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            background: var(--color-paper);
+            color: var(--color-ink);
+            font-family: var(--font-body);
+            font-size: var(--step-0);
+            line-height: 1.6;
+        }
+
+        img {
+            display: block;
+            max-width: 100%;
+            height: auto;
+        }
+
+        a {
+            color: inherit;
+        }
+
+        h1,
+        h2,
+        h3,
+        p,
+        blockquote {
+            margin-top: 0;
+        }
+
+        h1,
+        h2,
+        h3 {
+            font-family: var(--font-display);
+            line-height: 1.05;
+            text-wrap: balance;
+        }
+
+        h1 {
+            max-width: 12ch;
+            margin-bottom: var(--space-2);
+            font-size: var(--step-3);
+        }
+
+        h2 {
+            margin-bottom: var(--space-1);
+            font-size: var(--step-2);
+        }
+
+        h3 {
+            margin-bottom: 0.55rem;
+            font-size: var(--step-1);
+        }
+
+        .geometry-shell {
+            width: min(calc(100% - 2rem), var(--content-wide));
+            margin-inline: auto;
+        }
+
+        .geometry-narrow {
+            width: min(calc(100% - 2rem), var(--content-narrow));
+            margin-inline: auto;
+        }
+
+        .site-header {
+            border-bottom: 1px solid var(--color-line);
+            background: rgba(246, 242, 232, 0.96);
+        }
+
+        .header-row {
+            display: flex;
+            gap: var(--header-gap, var(--space-2));
+            align-items: center;
+            justify-content: space-between;
+            min-height: 5rem;
+        }
+
+        .brand-lockup {
+            display: inline-flex;
+            gap: 0.7rem;
+            align-items: center;
+            font-family: var(--font-display);
+            font-size: var(--step-1);
+            font-weight: 600;
+            text-decoration: none;
+        }
+
+        .brand-mark {
+            width: 2rem;
+            height: 2rem;
+            color: var(--color-accent);
+        }
+
+        .primary-nav ul,
+        .footer-nav ul {
+            display: flex;
+            gap: var(--space-1);
+            padding: 0;
+            margin: 0;
+            list-style: none;
+        }
+
+        .primary-nav a,
+        .footer-nav a {
+            text-underline-offset: 0.22em;
+        }
+
+        .hero {
+            display: grid;
+            gap: var(--space-3);
+            align-items: center;
+            padding-block: var(--space-4);
+        }
+
+        .eyebrow {
+            margin-bottom: 0.7rem;
+            color: var(--color-accent-dark);
+            font-size: var(--step--1);
+            font-weight: 700;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+        }
+
+        .hero-copy > p:not(.eyebrow) {
+            max-width: 56ch;
+            margin-bottom: var(--space-2);
+        }
+
+        .button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 3rem;
+            padding: 0.72rem 1.2rem;
+            border: 2px solid var(--color-accent);
+            border-radius: 999px;
+            background: var(--color-accent);
+            color: #ffffff;
+            font-weight: 700;
+            text-decoration: none;
+        }
+
+        .button:hover,
+        .button:focus-visible {
+            border-color: var(--color-accent-dark);
+            background: var(--color-accent-dark);
+        }
+
+        .hero-media {
+            overflow: hidden;
+            border-radius: var(--radius-large);
+            box-shadow: var(--shadow-soft);
+        }
+
+        .hero-media img {
+            width: 100%;
+            aspect-ratio: 4 / 3;
+            object-fit: cover;
+        }
+
+        .section-pad {
+            padding-block: var(--space-4);
+        }
+
+        .section-intro {
+            max-width: 58ch;
+            margin-bottom: var(--space-3);
+        }
+
+        .feature-section {
+            background: var(--color-surface);
+        }
+
+        .feature-grid {
+            display: grid;
+            gap: var(--space-2);
+        }
+
+        .feature-card {
+            padding: var(--space-2);
+            border-top: 0.35rem solid var(--card-accent, var(--color-moss));
+            border-radius: var(--radius-small);
+            background: var(--color-paper);
+        }
+
+        .feature-number {
+            margin-bottom: var(--space-2);
+            color: var(--card-accent, var(--color-moss));
+            font-family: var(--font-display);
+            font-size: var(--step-2);
+            font-weight: 600;
+        }
+
+        .testimonial-wrap {
+            display: grid;
+            gap: var(--space-2);
+            align-items: center;
+        }
+
+        .testimonial {
+            margin: 0;
+            padding-left: var(--space-2);
+            border-left: 0.35rem solid var(--color-accent);
+            font-family: var(--font-display);
+            font-size: var(--step-2);
+            line-height: 1.25;
+        }
+
+        .testimonial cite {
+            display: block;
+            margin-top: var(--space-1);
+            font-family: var(--font-body);
+            font-size: var(--step--1);
+            font-style: normal;
+            font-weight: 700;
+        }
+
+        .pricing-section {
+            background: var(--color-ink);
+            color: var(--color-surface);
+        }
+
+        .pricing-table-wrap {
+            overflow-x: auto;
+            border-radius: var(--radius-small);
+            background: #24483f;
+        }
+
+        .pricing-table {
+            width: 100%;
+            min-width: 38rem;
+            border-collapse: collapse;
+        }
+
+        .pricing-table th,
+        .pricing-table td {
+            padding: 1rem 1.15rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+            text-align: left;
+        }
+
+        .pricing-table th {
+            color: #d9e5d4;
+            font-size: var(--step--1);
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .pricing-table tbody tr:last-child td {
+            border-bottom: 0;
+        }
+
+        .newsletter {
+            display: grid;
+            gap: var(--space-2);
+            align-items: end;
+            padding: var(--space-3);
+            border: 1px solid var(--color-line);
+            border-radius: var(--radius-large);
+            background: var(--color-surface);
+        }
+
+        .newsletter-form {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.7rem;
+        }
+
+        .newsletter-form label {
+            flex-basis: 100%;
+            font-size: var(--step--1);
+            font-weight: 700;
+        }
+
+        .newsletter-form input {
+            flex: 1 1 15rem;
+            min-height: 3rem;
+            padding-inline: 0.9rem;
+            border: 1px solid var(--color-line);
+            border-radius: 999px;
+            background: #ffffff;
+            color: var(--color-ink);
+            font: inherit;
+        }
+
+        .newsletter-form button {
+            min-height: 3rem;
+            padding-inline: 1.2rem;
+            border: 0;
+            border-radius: 999px;
+            background: var(--color-accent);
+            color: #ffffff;
+            font: inherit;
+            font-weight: 700;
+        }
+
+        .site-footer {
+            padding-block: var(--space-4) var(--space-2);
+            background: #10241f;
+            color: #edf3ea;
+        }
+
+        .footer-grid {
+            display: grid;
+            gap: var(--space-3);
+        }
+
+        .footer-column h2 {
+            margin-bottom: 0.75rem;
+            color: #bfcfb9;
+            font-family: var(--font-body);
+            font-size: var(--step--1);
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .footer-nav ul {
+            flex-direction: column;
+        }
+
+        .footer-meta {
+            padding-top: var(--space-2);
+            margin-top: var(--space-3);
+            border-top: 1px solid rgba(255, 255, 255, 0.18);
+            color: #bfcfb9;
+            font-size: var(--step--1);
+        }
+
+        @media (min-width: 48rem) {
+            .hero {
+                grid-template-columns: minmax(0, 1.05fr) minmax(18rem, 0.95fr);
+                min-height: var(--hero-min-height, 38rem);
+            }
+
+            .feature-grid {
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+            }
+
+            .testimonial-wrap {
+                grid-template-columns: minmax(12rem, 0.7fr) minmax(0, 1.3fr);
+            }
+
+            .newsletter {
+                grid-template-columns: minmax(0, 0.8fr) minmax(20rem, 1.2fr);
+            }
+
+            .footer-grid {
+                grid-template-columns: minmax(14rem, 1.5fr) repeat(3, minmax(8rem, 1fr));
+            }
+        }
+
+        @media (max-width: 40rem) {
+            .header-row {
+                align-items: flex-start;
+                flex-direction: column;
+                padding-block: var(--space-1);
+            }
+
+            .primary-nav ul {
+                flex-wrap: wrap;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header class="site-header carrier-header">
+        <div class="geometry-shell header-row" style="--header-gap: 2.25rem;">
+            <a class="brand-lockup carrier-brand" href="/" aria-label="Field and Found home">
+                <svg class="brand-mark fallback-probe-svg" viewBox="0 0 32 32" role="img" aria-label="Field and Found leaf mark">
+                    <path fill="currentColor" d="M26.8 4.9C16.9 5.2 9.5 9 7.4 15.5c-1.2 3.6-.3 6.7 2.1 8.7 2.4 2 5.9 2.3 9.2.7 6-2.9 7.7-10.2 8.1-20ZM10.6 25.7c3.2-6.6 7.1-10.8 12.2-14.2-4.2 4-7.2 8.8-9.3 14.8l-2.9-.6Z"/>
+                </svg>
+                <span>Field &amp; Found</span>
+            </a>
+            <nav class="primary-nav carrier-nav" aria-label="Primary navigation">
+                <ul>
+                    <li><a href="#approach">Approach</a></li>
+                    <li><a href="#stories">Stories</a></li>
+                    <li><a href="#pricing">Pricing</a></li>
+                    <li><a href="#contact">Contact</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <main class="site-main carrier-main">
+        <section class="hero geometry-shell carrier-hero" style="--hero-min-height: 42rem;" aria-labelledby="hero-title">
+            <div class="hero-copy">
+                <p class="eyebrow">Landscape design for city-sized spaces</p>
+                <h1 id="hero-title">Make every square foot feel alive.</h1>
+                <p>Practical garden plans shaped around your light, routines, and local climate. You get a clear planting map, a buildable weekend plan, and a space that grows better each season.</p>
+                <a class="button carrier-cta" href="#pricing">Plan my garden</a>
+            </div>
+            <div class="hero-media carrier-media" style="--media-focus: 54% 46%;">
+                <img src="https://images.unsplash.com/photo-1585320806297-9794b3e4eeae?auto=format&amp;fit=crop&amp;w=1200&amp;q=80" width="1200" height="900" alt="Lush compact courtyard garden with layered green foliage, terracotta planters, and a small wooden bench in warm morning light">
+            </div>
+        </section>
+
+        <section id="approach" class="feature-section section-pad carrier-feature-section" aria-labelledby="approach-title">
+            <div class="geometry-shell">
+                <div class="section-intro">
+                    <p class="eyebrow">A garden plan you can use</p>
+                    <h2 id="approach-title">From awkward corner to outdoor room.</h2>
+                    <p>Our designers turn site constraints into a focused plan, with choices explained and every measurement ready for installation.</p>
+                </div>
+                <div class="feature-grid geometry-grid carrier-feature-grid">
+                    <div class="feature-card carrier-card" style="--card-accent: #d95f3b;">
+                        <p class="feature-number">01</p>
+                        <h3>Read the site</h3>
+                        <p>Share photos, measurements, sunlight notes, and what you want the space to do. We map the opportunities before drawing.</p>
+                    </div>
+                    <div class="feature-card carrier-card" style="--card-accent: #72936a;">
+                        <p class="feature-number">02</p>
+                        <h3>Shape the plan</h3>
+                        <p>Review a scaled layout, planting palette, and material direction built around your budget and maintenance comfort.</p>
+                    </div>
+                    <div class="feature-card carrier-card" style="--card-accent: #315f72;">
+                        <p class="feature-number">03</p>
+                        <h3>Build with confidence</h3>
+                        <p>Follow a sequenced install guide, source list, and seasonal care notes. Ask follow-up questions for thirty days.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="stories" class="section-pad carrier-testimonial-section" aria-labelledby="story-title">
+            <div class="geometry-shell testimonial-wrap" style="--story-ratio: 0.7fr 1.3fr;">
+                <div>
+                    <p class="eyebrow">A small-space success</p>
+                    <h2 id="story-title">Room to exhale, ten steps from the kitchen.</h2>
+                </div>
+                <blockquote class="testimonial carrier-quote">
+                    “The plan made our narrow yard feel twice as wide. We installed it over three weekends, and for the first time every plant has a reason to be there.”
+                    <cite>— Maya Chen, Philadelphia rowhouse gardener</cite>
+                </blockquote>
+            </div>
+        </section>
+
+        <section id="pricing" class="pricing-section section-pad carrier-pricing-section" aria-labelledby="pricing-title">
+            <div class="geometry-shell">
+                <div class="section-intro">
+                    <p class="eyebrow">Straightforward scope</p>
+                    <h2 id="pricing-title">Choose the level of detail you need.</h2>
+                    <p>Every package starts with a designer review and ends with files you own.</p>
+                </div>
+                <div class="pricing-table-wrap carrier-table" style="--table-min-width: 38rem;">
+                    <table class="pricing-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Package</th>
+                                <th scope="col">Best for</th>
+                                <th scope="col">Includes</th>
+                                <th scope="col">Price</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Planting Edit</td>
+                                <td>Beds under 200 sq. ft.</td>
+                                <td>Plant map, quantities, care guide</td>
+                                <td>$425</td>
+                            </tr>
+                            <tr>
+                                <td>Full Garden</td>
+                                <td>Complete small yards</td>
+                                <td>Scaled layout, planting, materials, install plan</td>
+                                <td>$980</td>
+                            </tr>
+                            <tr>
+                                <td>Garden + Guidance</td>
+                                <td>Complex phased projects</td>
+                                <td>Full Garden plus two live design reviews</td>
+                                <td>$1,450</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <section id="contact" class="section-pad carrier-newsletter-section" aria-labelledby="contact-title">
+            <div class="geometry-shell newsletter" style="--newsletter-columns: 0.8fr 1.2fr;">
+                <div>
+                    <p class="eyebrow">Start with one useful note</p>
+                    <h2 id="contact-title">Get the small-garden field guide.</h2>
+                    <p>Five measurements to take before you buy a single plant.</p>
+                </div>
+                <form class="newsletter-form fallback-probe-form" action="/subscribe" method="post">
+                    <label for="email">Email address</label>
+                    <input id="email" name="email" type="email" autocomplete="email" placeholder="you@example.com" required>
+                    <button type="submit">Send the guide</button>
+                </form>
+            </div>
+        </section>
+    </main>
+
+    <footer class="site-footer carrier-footer">
+        <div class="geometry-shell">
+            <div class="footer-grid geometry-grid" style="--footer-columns: 1.5fr 1fr 1fr 1fr;">
+                <div class="footer-column">
+                    <h2>Field &amp; Found</h2>
+                    <p>Thoughtful landscape plans for compact urban gardens across the United States.</p>
+                </div>
+                <div class="footer-column">
+                    <h2>Services</h2>
+                    <nav class="footer-nav" aria-label="Services">
+                        <ul>
+                            <li><a href="#pricing">Planting Edit</a></li>
+                            <li><a href="#pricing">Full Garden</a></li>
+                            <li><a href="#pricing">Garden + Guidance</a></li>
+                        </ul>
+                    </nav>
+                </div>
+                <div class="footer-column">
+                    <h2>Learn</h2>
+                    <nav class="footer-nav" aria-label="Learning resources">
+                        <ul>
+                            <li><a href="/journal">Field Notes</a></li>
+                            <li><a href="/guides">Garden Guides</a></li>
+                            <li><a href="/faq">Frequently Asked Questions</a></li>
+                        </ul>
+                    </nav>
+                </div>
+                <div class="footer-column">
+                    <h2>Company</h2>
+                    <nav class="footer-nav" aria-label="Company">
+                        <ul>
+                            <li><a href="/about">About</a></li>
+                            <li><a href="/process">Our Process</a></li>
+                            <li><a href="/contact">Contact</a></li>
+                        </ul>
+                    </nav>
+                </div>
+            </div>
+            <p class="footer-meta">© 2026 Field &amp; Found. Plant for the place you have.</p>
+        </div>
+    </footer>
+</body>
+</html>

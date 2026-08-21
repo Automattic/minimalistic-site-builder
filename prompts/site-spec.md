@@ -20,6 +20,7 @@ Always include exactly these fixed properties:
   "email_domain": string,    // domain for contact email addresses, derived from the name — lowercase, no "@" or scheme, e.g. "hearthandcrumb.com"
   "invented": [string],      // which of "name" / "persona_name" / "email_domain" you invented rather than took from the prompt; [] if all were stated by the user
   "visual_vibe": string,     // a SHORT descriptive phrase of the overall feeling, e.g. "warm and rustic", "clean and clinical" — a vibe, NOT concrete colors or fonts
+  "subject_is_visual_work": boolean, // true ONLY when the site's core offering IS visual imagery — a photography, art, design, food, or architecture portfolio where the pictures are the product; false for everything else (a factual judgment about the subject, not a design choice)
   "animation_request": string, // VERBATIM any SPECIFIC animation/motion behavior the user explicitly asked for (e.g. "the logo should spin on hover", "typewriter effect on the headline"); "" when none — never invent one, and general mood words ("dynamic", "lively") do NOT count
   "sections": [string],      // ordered sections the HOMEPAGE needs (4-7), e.g. ["Hero", "Menu", "About", "Visit"]
   "pages": [                 // the site's page tree — the FIRST page is the homepage. {{page_tree_scope}}
@@ -37,6 +38,8 @@ Always include exactly these fixed properties:
 {{page_tree_rule}}
 
 Beyond these fixed properties, **add any additional factual fields the user actually stated or strongly implied** — for example business hours, location/address, phone, email, a product or service list, price ranges, social links, founding year, tagline. Preserve them as structured data (strings, arrays, or nested objects) under clearly named keys. Only include facts that are grounded in the prompt; apart from the identity fields above, do NOT invent specifics, and do NOT add design fields (colors, typography, layout, imagery).
+
+A shop is a catalog storefront: product cards, prices only when the user supplied them, and a contact enquiry. Do NOT invent Cart, Checkout, Basket, or WooCommerce pages. The build has no cart backend.
 
 Keep `visual_vibe` to a brief mood phrase. If the prompt is sparse, include only the fixed properties plus whatever facts are genuinely present.
 

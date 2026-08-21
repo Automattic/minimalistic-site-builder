@@ -28,17 +28,18 @@ final class FooterUnit extends AbstractMarkupUnit
     {
         $archetype = $this->inputString($input, 'composition_archetype');
         FooterComposition::assertKnown($archetype);
+        $surface = $this->surface($input, $archetype);
         $pageCount = $this->pageCount($input);
         $imageInstructions = FooterComposition::usesGeneratedImage($archetype)
             ? $this->renderer->render('image-generation.md', [])
             : '';
 
-        return $this->renderedRequest('footer.md', $this->commonVars($input) + [
+        return $this->siteLayeredRequest('footer.md', $this->commonVars($input) + [
             'site_pages' => $this->inputString($input, 'site_pages'),
             'nav_rule' => FooterComposition::navigationRule($pageCount),
             'composition' => $this->renderer->render('footer-composition.md', [
                 'composition_assignment' => FooterComposition::assignment($archetype),
-                'footer_surface' => FooterComposition::surface($archetype),
+                'footer_surface' => $surface,
                 'final_section_brief'    => $this->inputString($input, 'final_section_brief'),
                 'composition_recipe' => $this->renderer->render(
                     FooterComposition::recipeTemplate($archetype),
@@ -49,32 +50,61 @@ final class FooterUnit extends AbstractMarkupUnit
         ]);
     }
 
-    public function finish(
-        string $raw,
-        array $input,
-        array &$notes = [],
-        array &$repairs = [],
-    ): string {
-        $markup = GeneratedMarkup::normalize(
-            $raw,
-            $this->key($input),
-            $notes,
-            $repairs,
-        );
+    public function finish(string $raw, array $input): MarkupResult
+    {
+        $warnings = [];
+        $repairs = [];
+        $key = $this->key($input);
+        $markup = GeneratedMarkup::normalize($raw, $key, $warnings, $repairs);
+        $before = $markup;
         $markup = GeneratedMarkup::withoutRedundantLandmark($markup, 'footer');
+        if ($markup !== $before) {
+            $repairs[] = self::repair('redundant-footer-landmark-removed', $key);
+        }
         GeneratedMarkup::assertNoRedundantLandmark($markup, 'footer');
         $archetype = $this->inputString($input, 'composition_archetype');
         FooterComposition::assertKnown($archetype);
         if ($this->pageCount($input) === 1) {
-            $markup = GeneratedMarkup::withoutSiteTitleLinks($markup);
+            $before = $markup;
+            $markup = FooterMarkup::withoutSiteTitleLinks($markup);
+            if ($markup !== $before) {
+                $repairs[] = self::repair('one-page-site-title-link-disabled', $key);
+            }
         }
-        $markup = GeneratedMarkup::withoutPortraitImagePlaceholders($markup, $notes);
-        $markup = GeneratedMarkup::withRootBackgroundColor(
+        $markup = FooterMarkup::withoutPortraitImagePlaceholders($markup, $warnings);
+        $before = $markup;
+        $markup = FooterMarkup::withRootBackgroundColor(
             $markup,
-            FooterComposition::surface($archetype),
-            $notes
+            $this->surface($input, $archetype),
+            $warnings
         );
-        return GeneratedMarkup::constrainedPart($markup);
+        if ($markup !== $before) {
+            $repairs[] = self::repair('footer-surface-enforced', $key);
+        }
+        $before = $markup;
+        $markup = GeneratedMarkup::constrainedPart($markup);
+        if ($markup !== $before) {
+            $repairs[] = self::repair('root-layout-constrained', $key);
+        }
+        return new MarkupResult($markup, $repairs, $warnings);
+    }
+
+    /**
+     * The surface the caller resolved against every page's closing section, or
+     * the archetype's own preference when the adapter did not resolve one.
+     *
+     * @param array<string,mixed> $input
+     */
+    private function surface(array $input, string $archetype): string
+    {
+        $surface = $input['surface'] ?? null;
+        if ($surface === null || $surface === '') {
+            return FooterComposition::surface($archetype);
+        }
+        if (!is_string($surface)) {
+            throw new \InvalidArgumentException("unit input 'surface' must be a string");
+        }
+        return $surface;
     }
 
     private function pageCount(array $input): int
@@ -87,5 +117,11 @@ final class FooterUnit extends AbstractMarkupUnit
             throw new \InvalidArgumentException('footer page_count must be at least 1');
         }
         return $pageCount;
+    }
+
+    /** @return array{code:string,part:string,disposition:string} */
+    private static function repair(string $code, string $part): array
+    {
+        return ['code' => $code, 'part' => $part, 'disposition' => 'repaired'];
     }
 }

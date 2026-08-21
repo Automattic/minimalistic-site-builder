@@ -14,6 +14,28 @@ Issues for this repo are tracked in the Linear project **[Generated themes: repl
 
 We don't need to plan for backwards compatibility. This is a green field project in an early dev stage — there are no external consumers or stored data to preserve, so prefer the cleanest design and feel free to make breaking changes without migration paths or compatibility shims.
 
+## Generation step maps
+
+Default blocks graph (`StepComposition::default()` → `StepComposition::blocks()`), where the model authors block markup directly:
+
+`scaffold-theme -> scaffold-plugin -> refine-prompt -> site-spec -> apply-identity -> design-direction -> (theme-json + page-plan, concurrent) -> reconcile-palette -> sections -> section-rhythm -> copy-dedupe -> collect-images -> normalize-layout -> header-hero -> contrast-fix -> motion-sanity -> fix-blocks -> assemble-pages -> page-styles -> custom-motion -> bundle-fonts -> fonts-php -> finalize-theme -> theme-screenshot -> validate-theme`
+
+Image generation is slow and networked, so it is in neither graph. The steps that depend on the real pixels are named once, in `StepComposition::postImages()`, and every entry point runs that list after the graph:
+
+`generate-images -> theme-screenshot -> cover-contrast`
+
+A host that generates images must run that phase too. Mirroring only the graph ships a theme whose cover text was checked against images that did not exist yet, and whose preview card is the palette poster `theme-screenshot` drew in-pipeline rather than the site's own hero.
+
+Set `SITE_BUILD_HTML_FIRST=1` for the HTML-first graph (`StepComposition::htmlFirst()`), where the model authors an HTML+CSS design that `transform-site` converts to blocks:
+
+`scaffold-theme -> scaffold-plugin -> refine-prompt -> site-spec -> apply-identity -> design-direction -> design-preview -> theme-json -> inner-pages-design -> splice-home-design -> assign-image-sources -> transform-site -> resolve-nav-links -> section-rhythm -> section-layout -> collect-images -> normalize-layout -> header-hero -> contrast-fix -> motion-sanity -> fix-blocks -> assemble-pages -> fix-pages -> page-styles -> custom-motion -> fonts-php -> finalize-theme -> theme-screenshot -> validate-theme`
+
+On that path `theme-json` reads CSS-derived design tokens. `assign-image-sources` gives every design `<img>` the theme asset path the rest of the image pipeline generates into. `contrast-fix` and `motion-sanity` stay addressable but skip only in explicit HTML-first composition mode. `normalize-layout`, `fix-blocks`, and `validate-theme` skip the width rules that assume the theme owns page width — here the carried design CSS does. `page-styles` scrubs and merges generated CSS, then runs `CssContrastCheck` and applies safe tail-only adjustments against delivered markup. Stale `design/site.css` bytes never select pipeline behavior.
+
+Only the HTML-first graph is wrapped in `FallbackBuildPipeline`; the default blocks graph generates no design document, so it is an unwrapped `Pipeline`. The wrapper's whole-build reroute is currently dormant: it only recognizes a `MalformedDesignException` from the retired `homepage-design` step, which no composition contains. Do not rely on it until that trigger is retargeted or removed.
+
+For mixed multi-page HTML-first builds, each `design/<slug>.failed` marker routes only that slug through scoped blocks-path page planning and section generation. Other pages and shared transformed chrome stay on the HTML-first path; `page-styles` ignores failed-page source HTML.
+
 ## Generated-content validation: fix, degrade, warn — never crash the build
 
 Every validator and fixer in this pipeline exists because an LLM produced imperfect content. **A defect in generated content must never abort the build.** The user asked for a site; shipping a site with a slightly wrong margin, a missing decorative section, or a dropped inline style is always better than shipping nothing after paying for every LLM call in the graph.

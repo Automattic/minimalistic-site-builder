@@ -12,12 +12,26 @@ test('fill substitutes plain placeholders', function () {
     assert_eq('Hello Ada', PromptRenderer::fill('Hello {{name}}', ['name' => 'Ada']));
 });
 
+test('fill tolerates whitespace and substitutes multiple placeholders', function () {
+    assert_eq(
+        'Hello Ada, slug=ada',
+        PromptRenderer::fill('Hello {{ name }}, slug={{slug}}', ['name' => 'Ada', 'slug' => 'ada'])
+    );
+});
+
 test('fill substitutes a placeholder with an empty value', function () {
     assert_eq('A', PromptRenderer::fill('A{{suffix}}', ['suffix' => '']));
 });
 
 test('fill throws on an unknown placeholder', function () {
     assert_throws(fn () => PromptRenderer::fill('Hi {{missing}}', []));
+});
+
+test('fill does not reinterpret placeholder-shaped text inside a value', function () {
+    assert_eq(
+        'Hello Acme {{PLACEHOLDER}}',
+        PromptRenderer::fill('Hello {{name}}', ['name' => 'Acme {{PLACEHOLDER}}'])
+    );
 });
 
 test('fill leaves single-brace JSON untouched', function () {

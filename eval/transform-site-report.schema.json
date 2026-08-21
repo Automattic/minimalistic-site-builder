@@ -1,0 +1,105 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "Transform site report",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+        "fallback_codes",
+        "repair_outcomes",
+        "dropped_fragments"
+    ],
+    "properties": {
+        "fallback_codes": {
+            "type": "array",
+            "items": {
+                "type": "string",
+                "minLength": 1
+            },
+            "uniqueItems": true
+        },
+        "repair_outcomes": {
+            "type": "array",
+            "items": {
+                "$ref": "#/$defs/outcome"
+            }
+        },
+        "dropped_fragments": {
+            "type": "array",
+            "items": {
+                "$ref": "#/$defs/drop"
+            }
+        }
+    },
+    "$defs": {
+        "context": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "source",
+                "selector",
+                "diagnostic_code",
+                "authored_value",
+                "delivered_value",
+                "disposition"
+            ],
+            "properties": {
+                "source": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "selector": {
+                    "type": "string"
+                },
+                "diagnostic_code": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "authored_value": {
+                    "type": "string"
+                },
+                "delivered_value": {
+                    "type": "string"
+                },
+                "disposition": {
+                    "type": "string",
+                    "minLength": 1
+                }
+            }
+        },
+        "outcome": {
+            "allOf": [
+                {
+                    "$ref": "#/$defs/context"
+                },
+                {
+                    "properties": {
+                        "disposition": {
+                            "enum": [
+                                "repaired",
+                                "retained",
+                                "dropped"
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        "drop": {
+            "allOf": [
+                {
+                    "$ref": "#/$defs/context"
+                },
+                {
+                    "properties": {
+                        "delivered_value": {
+                            "const": "removed"
+                        },
+                        "disposition": {
+                            "const": "dropped"
+                        }
+                    }
+                }
+            ]
+        }
+    }
+}

@@ -3,15 +3,25 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\AboveFoldContract;
+use Automattic\SiteBuild\CardStyle;
+use Automattic\SiteBuild\ConceptSeeds;
+use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\Env;
+use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\GeneratedJsonException;
+use Automattic\SiteBuild\HeroBlueprint;
+use Automattic\SiteBuild\HeroComposition;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\Motion;
 use Automattic\SiteBuild\LlmOptions;
+use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\BoundedChoice;
+use Automattic\SiteBuild\Warnings;
 
 /**
  * Step (LLM): commit to ONE distinctive creative concept for the site BEFORE any
@@ -21,13 +31,15 @@ use Automattic\SiteBuild\StepDeclaration;
  * Output: designDirection.json — the chosen direction as structured data:
  *         title + vivid description plus the explicit fields downstream steps
  *         execute instead of re-interpreting (palette hexes, type pairing,
- *         image grade, signature device, hero composition).
+ *         image grade, and a separately consumed structured front-page hero
+ *         blueprint).
  *
  * Two calls. First, a cheap seed call (small model, hot sampling) brainstorms
- * FOUR concept seeds — each one string: an evocative title plus one vivid
+ * THREE concept seeds — each an object: an evocative title plus one vivid
  * sentence committing the seed's visual world (palette family, typography
- * character, imagery treatment, mood) — with divergence across the set
- * enforced in the prompt. One seed is picked uniformly at random, then the
+ * character, imagery treatment, mood), plus ground/register/accent
+ * coordinates — with divergence across the set enforced in the prompt and
+ * checked after. One seed is picked uniformly at random, then the
  * main call expands ONLY that seed into the full direction. The random pick
  * over a divergent seed spread is the pipeline's variety injection — repeated
  * builds of one brief land on different concepts — while the expensive
@@ -65,12 +77,31 @@ final class DesignDirectionStep implements Step
     /** Where the chosen direction is persisted, and read back from by readFor(). */
     private const FILE = 'designDirection.json';
 
+    /** Successful deterministic repair evidence (kept out of warnings.json). */
+    private const REPORT_FILE = 'design-direction.txt';
+
     /** Palette roles a direction commits to — the same slugs theme.json requires. */
     public const PALETTE_ROLES = ['base', 'contrast', 'primary', 'secondary', 'accent'];
+
+    /**
+     * The corner languages a direction may commit to. `sharp` is the default
+     * and wires square corners; `soft`/`round` make downstream repair wire a
+     * corner radius onto contained core/image media and buttons.
+     */
+    public const SHAPES = ['sharp', 'soft', 'round'];
 
     /** Env var forcing seed N (1-based) — the reproducible-evals escape hatch. */
     public const CHOICE_ENV = 'DESIGN_DIRECTION_CHOICE';
 
+    /** Exact operator/evaluation override for the code-owned hero catalog. */
+    public const HERO_RECIPE_ENV = 'HERO_RECIPE';
+
+    /**
+     * Card constructions a direction may commit to. The section prompt's card
+     * anatomy documents one markup recipe per value; `flush` is the default so
+     * the dated inset-media card only appears when a direction opts into it.
+     */
+    public const CARD_STYLES = CardStyle::ALL;
     public function __construct(
         private Llm $llm,
         private PromptRenderer $renderer,
@@ -107,16 +138,49 @@ final class DesignDirectionStep implements Step
         if (trim($prompt) === '') {
             throw new \RuntimeException('meta.json has no "prompt"');
         }
-        $spec = $project->readText('siteSpec.json');
+        $constraints = HeroComposition::validateConstraints($meta['design_constraints'] ?? []);
+        if (HeroComposition::compatible($constraints) === []) {
+            throw new \InvalidArgumentException(
+                'meta.json design_constraints leave no compatible hero recipe'
+            );
+        }
+        self::validateOperatorRecipe($constraints);
+        AboveFoldContract::validateHeaderArchetypePreflight(
+            Env::get(AboveFoldContract::HEADER_ARCHETYPE_ENV),
+            $constraints,
+            self::definitiveRequestedPageCount($meta),
+        );
 
-        $seed = $this->chooseSeed($prompt, $spec);
+        $spec = $project->readText('siteSpec.json');
+        $specData = $project->readJson('siteSpec.json');
+
+        $warnings = [];
+        $seed = $this->chooseSeed($prompt, $spec, $warnings);
+        $recipe = self::selectHeroRecipe(
+            $meta,
+            (string) ($specData['slug'] ?? $project->slug()),
+            $seed,
+            $warnings,
+        );
+        $blueprintDefaults = HeroBlueprint::defaultFor($recipe, $constraints);
+        $heroComposition = $this->renderer->render('hero-composition.md', [
+            'recipe' => $recipe,
+            'blueprint_defaults' => json_encode(
+                $blueprintDefaults,
+                JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR,
+            ),
+            'composition_recipe' => $this->renderer->render(
+                HeroComposition::recipeTemplate($recipe),
+                [],
+            ),
+        ]);
 
         $rendered = $this->renderer->render('design-direction.md', [
             'user_prompt' => $prompt,
             'site_spec'   => $spec,
             'seed'        => $seed,
+            'hero_composition' => $heroComposition,
         ]);
-        $warnings = [];
         try {
             $payload = $this->llm->completeJson($rendered, $this->withOptions(['log_label' => $this->id()]));
         } catch (GeneratedJsonException $e) {
@@ -125,20 +189,63 @@ final class DesignDirectionStep implements Step
             // propagate so transport and programming failures stay visible.
             $payload = [];
             $warnings[] = 'designDirection.json: generated JSON remained unusable after its repair attempt ('
-                . $e->getMessage() . '); deterministic seed-derived direction delivered';
+                . $e->getMessage() . '); deterministic seed-derived direction delivered for field direction; '
+                . 'disposition fallback';
         }
 
-        $direction = self::normalize($payload['direction'] ?? null);
+        $repairs = [];
+        $direction = self::normalize(
+            $payload['direction'] ?? null,
+            $recipe,
+            $seed,
+            $repairs,
+            $warnings,
+        );
         if ($direction === null) {
             // A build without a committed direction still works — every
             // downstream step tolerates empty fields — so deliver the
             // deterministic fallback (built on the chosen seed when one
             // exists) rather than abort. Recorded durably: the site loses
             // the concept-variety this step exists to inject.
-            $direction = self::fallbackDirection($seed);
-            $warnings[] = 'model returned no usable design direction; deterministic fallback direction delivered';
-            echo "  [design-direction] warning: no usable direction from the model; fallback delivered (recorded in warnings.json)\n";
+            $direction = self::fallbackDirection(
+                $seed,
+                $recipe,
+                (string) ($constraints['hero_canvas'] ?? 'full-bleed'),
+            );
+            $warnings[] = 'designDirection.json: model returned no usable design direction; field direction '
+                . 'authored unusable generated value delivered deterministic assigned-recipe direction; '
+                . 'disposition fallback';
         }
+
+        if (isset($constraints['hero_canvas']) && $direction['canvas'] !== $constraints['hero_canvas']) {
+            $repairs[] = 'designDirection.json: field canvas authored '
+                . self::describe($direction['canvas']) . ' delivered '
+                . self::describe($constraints['hero_canvas'])
+                . '; disposition repaired to caller-owned design_constraints.hero_canvas';
+            $direction['canvas'] = $constraints['hero_canvas'];
+        }
+
+        if ($repairs !== []) {
+            Narrator::write('  [design-direction] repaired ' . count($repairs)
+                . " generated direction field(s) (reported separately from durable warnings).\n");
+        }
+        if ($warnings !== []) {
+            Narrator::write('  [design-direction] warning: delivered through ' . count($warnings)
+                . " generated-content degradation(s) (recorded in warnings.json)\n");
+        }
+
+        $report = [
+            "Assigned hero recipe: {$recipe}",
+            'Successful deterministic repairs: ' . count($repairs),
+        ];
+        foreach ($repairs as $repair) {
+            $report[] = '- ' . $repair;
+        }
+        $report[] = 'Durable degradations: ' . count($warnings);
+        foreach ($warnings as $warning) {
+            $report[] = '- ' . $warning;
+        }
+        $project->writeText('logs/' . self::REPORT_FILE, implode("\n", $report) . "\n");
 
         $project->addWarnings($this->id(), $warnings);
         $project->writeJson(self::FILE, $direction);
@@ -151,10 +258,18 @@ final class DesignDirectionStep implements Step
      * or type commitments (downstream steps then decide inline), full-bleed
      * canvas, default motion profile. Pure — unit-testable.
      *
-     * @return array{title:string,description:string,palette:array<string,string>,type:array{heading:string,body:string},image_grade:string,canvas:string,motion:string,motion_note:string,signature_device:string,hero_composition:string}
+     * @return array<string,mixed>
      */
-    public static function fallbackDirection(string $seed = ''): array
+    public static function fallbackDirection(
+        string $seed,
+        string $recipe,
+        string $canvas = 'full-bleed',
+    ): array
     {
+        HeroComposition::assertKnown($recipe);
+        if (!in_array($canvas, HeroComposition::CANVASES, true)) {
+            throw new \InvalidArgumentException('fallback direction canvas must be full-bleed or framed');
+        }
         $seed = trim($seed);
         $description = $seed !== '' && $seed !== self::SEED_FALLBACK
             ? $seed
@@ -165,40 +280,51 @@ final class DesignDirectionStep implements Step
             'title'            => '',
             'description'      => $description,
             'palette'          => [],
-            'type'             => ['heading' => '', 'body' => ''],
+            'type'             => [
+                'heading' => self::emptyTypeSlot(),
+                'body'    => self::emptyTypeSlot(),
+                'accent'  => self::emptyTypeSlot(),
+            ],
             'image_grade'      => '',
-            'canvas'           => 'full-bleed',
+            'canvas'           => $canvas,
+            'card_style'       => 'flush',
+            'shape'            => 'sharp',
+            'surface'          => Surface::DEFAULT,
+            'device'           => Device::DEFAULT,
             'motion'           => Motion::DEFAULT_PROFILE,
-            'motion_note'      => '',
-            'signature_device' => '',
-            'hero_composition' => '',
+            'motion_note'      => [],
+            'concept_seed'     => $seed,
+            'hero_blueprint'   => HeroBlueprint::defaultFor($recipe),
         ];
     }
 
     /**
-     * Brainstorm four concept titles on the cheap model and pick ONE, rendered
+     * Brainstorm three concept titles on the cheap model and pick ONE, rendered
      * as the text block the expansion prompt consumes.
      *
      * Precedence: the DESIGN_DIRECTION_CHOICE env var forces seed N (1-based;
      * out of range — including a failed seed call — fails loud, because a
-     * forced eval must not silently drift); otherwise a uniform random pick.
+     * forced eval must not silently drift, so it indexes the round as the
+     * model wrote it); otherwise a uniform random pick over the DISTINCT
+     * seeds, since a world the model described twice would otherwise be twice
+     * as likely to win (see ConceptSeeds).
      * Without a forced choice, any seed failure (transport error, no usable
      * seeds) degrades to SEED_FALLBACK — seeding must never abort a build.
      * The step's hot temperature is applied here too: the seed spread is now
      * the pipeline's variety source, and the small models still support
      * sampling.
      */
-    private function chooseSeed(string $brief, string $spec): string
+    private function chooseSeed(string $brief, string $spec, array &$warnings = []): string
     {
         $forced = Env::get(self::CHOICE_ENV);
         $isForced = $forced !== null && $forced !== '';
 
         $seeds = [];
         try {
-            $rendered = $this->renderer->render('design-direction-seeds.md', [
-                'user_prompt' => $brief,
-                'site_spec'   => $spec,
-            ]);
+            $rendered = $this->renderer->render(
+                'design-direction-seeds.md',
+                ConceptSeeds::seedPromptVars($brief, $spec),
+            );
             $opts = ['log_label' => 'design-direction-seeds'];
             if ($this->seedModel !== null) {
                 $opts['model'] = $this->seedModel;
@@ -207,8 +333,9 @@ final class DesignDirectionStep implements Step
                 $opts['temperature'] = $this->temperature;
             }
             $payload = $this->llm->completeJson($rendered, $opts);
+            $locked = ConceptSeeds::lockedFromBrief($brief);
             foreach (is_array($payload['seeds'] ?? null) ? $payload['seeds'] : [] as $raw) {
-                $seed = self::normalizeSeed($raw);
+                $seed = ConceptSeeds::normalize($raw, $locked);
                 if ($seed !== null) {
                     $seeds[] = $seed;
                 }
@@ -230,33 +357,186 @@ final class DesignDirectionStep implements Step
                     count($seeds),
                 ));
             }
-            return $seeds[$n - 1];
+            return $seeds[$n - 1]['text'];
         }
 
         if ($seeds === []) {
             return self::SEED_FALLBACK;
         }
-        return $seeds[random_int(0, count($seeds) - 1)];
+        $pool = ConceptSeeds::distinct($seeds, $warnings);
+        $sharedGround = ConceptSeeds::sharedGround($pool);
+        if ($sharedGround !== null) {
+            $triples = [];
+            foreach ($pool as $seed) {
+                $key = ConceptSeeds::axisKey($seed);
+                if ($key !== null) {
+                    $triples[$key] = true;
+                }
+            }
+            // distinct() already records a collapsed round (one world, kept
+            // whole). A second row that restates the shared ground is the
+            // same event, and "open brief" is a claim this step never checked.
+            if (count($triples) > 1) {
+                $warnings[] = 'design-direction: every concept seed is ' . $sharedGround
+                    . '-grounded; picked from it anyway; disposition tolerated';
+            }
+        }
+        return $pool[random_int(0, count($pool) - 1)]['text'];
     }
 
     /**
-     * Validate and coerce one raw seed ("Title — one vivid sentence"). The
-     * prompt asks for bare strings; an object carrying a `title` key is
-     * tolerated. Returns null when nothing non-empty is present. Pure —
-     * unit-testable.
+     * One raw seed as the text the prompts consume ("Title — one vivid
+     * sentence"), dropping the coordinates only this step's pick uses. The
+     * seeds prompt is shared with the homepage-design tournament, which wants
+     * the sentence and nothing else. Returns null when nothing usable is
+     * present. Pure — unit-testable.
      *
      * @param mixed $raw
      */
     public static function normalizeSeed($raw): ?string
     {
-        if (is_array($raw)) {
-            $raw = $raw['title'] ?? null;
+        $seed = ConceptSeeds::normalize($raw);
+        return $seed === null ? null : $seed['text'];
+    }
+
+    /**
+     * Resolve one authoritative recipe from caller controls and the pure
+     * compatibility-filtered selector. HERO_RECIPE is exact/fatal; the batch
+     * assignment in meta.json is fallible and remaps with a durable warning.
+     *
+     * @param array<mixed> $meta
+     * @param list<string> $warnings
+     */
+    public static function selectHeroRecipe(
+        array $meta,
+        string $stableIdentifier,
+        string $conceptSeed,
+        array &$warnings = [],
+    ): string {
+        $callerConstraints = HeroComposition::validateConstraints($meta['design_constraints'] ?? []);
+        if (HeroComposition::compatible($callerConstraints) === []) {
+            throw new \InvalidArgumentException('design_constraints leave no compatible hero recipe');
         }
-        if (!is_string($raw)) {
+        $constraints = $callerConstraints;
+        $pool = HeroComposition::compatible($constraints);
+
+        $forced = trim((string) (Env::get(self::HERO_RECIPE_ENV) ?? ''));
+        if ($forced !== '') {
+            HeroComposition::assertKnown($forced);
+            if (!HeroComposition::isCompatible($forced, $callerConstraints)) {
+                throw new \InvalidArgumentException(
+                    self::HERO_RECIPE_ENV . "='{$forced}' is incompatible with caller-owned design_constraints"
+                );
+            }
+            return $forced;
+        }
+
+        if (!array_key_exists('hero_assignment', $meta)) {
+            return HeroComposition::select($stableIdentifier, $conceptSeed, $constraints);
+        }
+        $assignment = $meta['hero_assignment'];
+        if (is_array($assignment)) {
+            $source = is_string($assignment['source'] ?? null)
+                ? strtolower(trim($assignment['source']))
+                : '';
+            $requested = is_string($assignment['requested_recipe'] ?? null)
+                ? trim($assignment['requested_recipe'])
+                : '';
+            if ($source === 'batch'
+                && $requested !== ''
+                && in_array($requested, HeroComposition::RECIPES, true)
+                && in_array($requested, $pool, true)) {
+                return $requested;
+            }
+
+            $delivered = HeroComposition::select($stableIdentifier, $conceptSeed, $constraints);
+            $reason = $source !== 'batch'
+                ? 'assignment source was not the supported fallible batch channel'
+                : ($requested === ''
+                ? 'batch assignment had no usable requested_recipe'
+                : (!in_array($requested, HeroComposition::RECIPES, true)
+                    ? 'batch requested an unknown recipe'
+                    : 'batch request was outside the caller design_constraints pool'));
+            $warnings[] = "file='meta.json'; path=\"hero_assignment.requested_recipe\"; authored="
+                . self::describe($assignment['requested_recipe'] ?? null)
+                . '; delivered=' . self::describe($delivered)
+                . "; disposition=remapped by stable compatible-pool selector because {$reason}";
+            return $delivered;
+        }
+
+        $delivered = HeroComposition::select($stableIdentifier, $conceptSeed, $constraints);
+        $warnings[] = "file='meta.json'; path=\"hero_assignment\"; authored="
+            . self::describe($assignment)
+            . '; delivered=' . self::describe($delivered)
+            . '; disposition=malformed fallible batch assignment was remapped by the stable compatible-pool selector';
+        return $delivered;
+    }
+
+    /** Validate the exact operator override before the seed LLM call. */
+    private static function validateOperatorRecipe(array $constraints): void
+    {
+        $forced = trim((string) (Env::get(self::HERO_RECIPE_ENV) ?? ''));
+        if ($forced === '') {
+            return;
+        }
+        HeroComposition::assertKnown($forced);
+        if (!HeroComposition::isCompatible($forced, $constraints)) {
+            throw new \InvalidArgumentException(
+                self::HERO_RECIPE_ENV . "='{$forced}' is incompatible with caller-owned design_constraints"
+            );
+        }
+    }
+
+    /**
+     * Count a caller-fixed page tree for header preflight. A model-owned or
+     * malformed tree stays unknown; SiteSpecStep will normalize it later.
+     *
+     * @param array<mixed> $meta
+     */
+    private static function definitiveRequestedPageCount(array $meta): ?int
+    {
+        if (($meta['multi_page'] ?? false) !== true) {
+            return 1;
+        }
+        $requested = $meta['pages'] ?? null;
+        if (!is_array($requested) || !array_is_list($requested) || $requested === []) {
             return null;
         }
-        $seed = trim($raw);
-        return $seed === '' ? null : $seed;
+        $countEntry = static function (mixed $entry) use (&$countEntry): ?int {
+            if (is_string($entry)) {
+                return trim($entry) === '' ? null : 1;
+            }
+            if (!is_array($entry)) {
+                return null;
+            }
+            $title = trim((string) ($entry['title'] ?? ''));
+            if ($title === '') {
+                return null;
+            }
+            $children = $entry['children'] ?? [];
+            if (!is_array($children) || !array_is_list($children)) {
+                return null;
+            }
+            $count = 1;
+            foreach ($children as $child) {
+                $childCount = $countEntry($child);
+                if ($childCount === null) {
+                    return null;
+                }
+                $count += $childCount;
+            }
+            return $count;
+        };
+
+        $count = 0;
+        foreach ($requested as $entry) {
+            $entryCount = $countEntry($entry);
+            if ($entryCount === null) {
+                return null;
+            }
+            $count += $entryCount;
+        }
+        return $count;
     }
 
     /**
@@ -266,11 +546,18 @@ final class DesignDirectionStep implements Step
      * dropped, missing fields become empty strings — downstream renders only
      * what is present. Pure — unit-testable.
      *
-     * @param mixed $raw
-     * @return ?array{title:string,description:string,palette:array<string,string>,type:array{heading:string,body:string},image_grade:string,canvas:string,motion:string,motion_note:string,signature_device:string,hero_composition:string}
+     * @param mixed        $raw
+     * @param list<string> $repairs
+     * @param list<string> $warnings
+     * @return ?array<string,mixed>
      */
-    public static function normalize($raw): ?array
-    {
+    public static function normalize(
+        mixed $raw,
+        string $assignedRecipe = 'cinematic-safe-zone',
+        string $conceptSeed = '',
+        array &$repairs = [],
+        array &$warnings = [],
+    ): ?array {
         if (!is_array($raw)) {
             return null;
         }
@@ -285,31 +572,329 @@ final class DesignDirectionStep implements Step
             $hex = strtoupper(trim((string) ($rawPalette[$role] ?? '')));
             if (preg_match('/^#[0-9A-F]{6}$/', $hex) === 1) {
                 $palette[$role] = $hex;
+            } elseif (array_key_exists($role, $rawPalette)) {
+                $repairs[] = 'designDirection.json: field palette.' . $role
+                    . ' authored ' . self::describe($rawPalette[$role])
+                    . ' delivered removed; disposition dropped invalid generated color';
             }
         }
 
         $type = is_array($raw['type'] ?? null) ? $raw['type'] : [];
+
+        HeroComposition::assertKnown($assignedRecipe);
+
+        $blueprint = HeroBlueprint::normalize(
+            $raw['hero_blueprint'] ?? null,
+            $assignedRecipe,
+            $repairs,
+            $warnings,
+        );
+
+        $canvasRaw = strtolower(trim((string) ($raw['canvas'] ?? '')));
+        $canvas = $canvasRaw === 'framed' ? 'framed' : 'full-bleed';
+        if ($canvasRaw !== '' && $canvasRaw !== $canvas) {
+            $repairs[] = 'designDirection.json: field canvas authored '
+                . self::describe($raw['canvas']) . ' delivered "full-bleed"; disposition repaired invalid value';
+        }
+
+        $cardStyle = self::normalizeCardStyle($raw['card_style'] ?? null, $warnings);
+        $surface = self::normalizeSurface($raw['surface'] ?? null, $warnings);
+        $device = self::normalizeDevice($raw['device'] ?? null, $warnings);
+
+        $motion = self::motionProfile($raw['motion'] ?? null);
+        $rawMotion = is_string($raw['motion'] ?? null)
+            ? strtolower(trim($raw['motion']))
+            : '';
+        if ($rawMotion !== '' && $rawMotion !== $motion) {
+            $repairs[] = 'designDirection.json: field motion authored '
+                . self::describe($raw['motion']) . ' delivered ' . self::describe($motion)
+                . '; disposition repaired invalid profile';
+        }
+
+        // motion_note names kit classes; it is not art direction to interpret.
+        // Every token must be a class exactly, so a phrase the kit cannot ship
+        // drops whole instead of turning on whichever class its letters
+        // happen to contain. Persist the list; format() renders the sentence.
+        $rawMotionNote = $raw['motion_note'] ?? null;
+        $authoredNote = self::describeNote($rawMotionNote);
+        $validated = Motion::validateNote($rawMotionNote, $motion);
+        $motionNote = $validated['classes'];
+        $notePresent = $rawMotionNote !== null && $rawMotionNote !== '' && $rawMotionNote !== [];
+        $alreadyCanonical = is_array($rawMotionNote)
+            && array_is_list($rawMotionNote)
+            && $rawMotionNote === $motionNote;
+        if (
+            array_key_exists('motion_note', $raw)
+            && $rawMotionNote !== null
+            && !is_string($rawMotionNote)
+            && !is_array($rawMotionNote)
+        ) {
+            $warnings[] = "file='designDirection.json'; path=\"motion_note\"; authored="
+                . Warnings::value($rawMotionNote)
+                . '; delivered=' . Warnings::value($motionNote)
+                . '; disposition=motion note was neither a class list nor a string and was removed';
+        } elseif ($notePresent && $validated['classes'] === []) {
+            $warnings[] = 'designDirection.json: field motion_note authored '
+                . Warnings::value($authoredNote)
+                . '; delivered=' . Warnings::value($motionNote)
+                . '; disposition named no motion-kit class the '
+                . $motion . ' profile ships (' . implode('; ', $validated['dropped']) . ')';
+        } elseif ($validated['dropped'] !== []) {
+            $warnings[] = 'designDirection.json: field motion_note authored '
+                . Warnings::value($authoredNote)
+                . '; delivered=' . Warnings::value($motionNote)
+                . '; disposition dropped ' . implode('; ', $validated['dropped']);
+        } elseif ($notePresent && !$alreadyCanonical) {
+            $repairs[] = 'designDirection.json: field motion_note authored '
+                . self::describe($rawMotionNote) . ' delivered ' . self::describe($motionNote)
+                . '; disposition rendered the committed classes as the note list';
+        }
+
+        // The corner language is a fixed list; anything unrecognized falls
+        // back to sharp — an accidental radius reads as template styling, so
+        // rounding only ships on an explicit commitment.
+        $rawShape = $raw['shape'] ?? null;
+        $explicitShape = self::explicitShape($rawShape);
+        $shape = $explicitShape ?? 'sharp';
+        if (
+            array_key_exists('shape', $raw)
+            && $explicitShape === null
+        ) {
+            $warnings[] = "file='designDirection.json'; path=\"shape\"; authored="
+                . Warnings::value($rawShape)
+                . '; delivered="sharp"; disposition=invalid corner language replaced by deterministic sharp fallback';
+        }
 
         return [
             'title'            => trim((string) ($raw['title'] ?? '')),
             'description'      => $description,
             'palette'          => $palette,
             'type'             => [
-                'heading' => trim((string) ($type['heading'] ?? '')),
-                'body'    => trim((string) ($type['body'] ?? '')),
+                'heading' => self::normalizeTypeSlot($type['heading'] ?? null, 'heading', $warnings),
+                'body'    => self::normalizeTypeSlot($type['body'] ?? null, 'body', $warnings),
+                'accent'  => self::normalizeTypeSlot($type['accent'] ?? null, 'accent', $warnings),
             ],
             'image_grade'      => trim((string) ($raw['image_grade'] ?? '')),
             // Anything that isn't an explicit "framed" commitment is full-bleed:
             // an accidental frame reads as a rendering bug, not a design choice.
-            'canvas'           => strtolower(trim((string) ($raw['canvas'] ?? ''))) === 'framed' ? 'framed' : 'full-bleed',
+            'canvas'           => $canvas,
+            // Anything outside the bounded card constructions delivers the
+            // flush default — inset media must be an explicit opt-in, never
+            // the accidental look every site gets.
+            'card_style'       => $cardStyle,
+            'shape'            => $shape,
+            'surface'          => $surface,
+            'device'           => $device,
             // The motion profile is a fixed list (the kit ships exactly these);
             // anything unrecognized falls back to the default so every build
             // commits to ONE profile the downstream steps can gate on.
-            'motion'           => self::motionProfile($raw['motion'] ?? null),
-            'motion_note'      => trim((string) ($raw['motion_note'] ?? '')),
-            'signature_device' => trim((string) ($raw['signature_device'] ?? '')),
-            'hero_composition' => trim((string) ($raw['hero_composition'] ?? '')),
+            'motion'           => $motion,
+            'motion_note'      => $motionNote,
+            'concept_seed'     => $conceptSeed,
+            'hero_blueprint'   => $blueprint,
         ];
+    }
+
+    /**
+     * Normalize the one machine-readable card construction contract shared by
+     * direction generation and every downstream adapter. Missing/null/blank is
+     * the documented flush default. Any non-empty unsupported commitment loses
+     * authored intent, so its fallback is durable-warning material.
+     *
+     * @param list<string> $warnings
+     */
+    public static function normalizeCardStyle(mixed $authored, array &$warnings = []): string
+    {
+        return BoundedChoice::normalize(
+            $authored,
+            self::CARD_STYLES,
+            'flush',
+            'card_style',
+            $warnings,
+            'unsupported generated card treatment replaced by default',
+        );
+    }
+
+    /**
+     * @param list<string> $warnings
+     */
+    public static function normalizeSurface(mixed $authored, array &$warnings = []): string
+    {
+        return BoundedChoice::normalize(
+            $authored,
+            Surface::ALL,
+            Surface::DEFAULT,
+            'surface',
+            $warnings,
+            'unsupported texture replaced by none',
+        );
+    }
+
+    /**
+     * @param list<string> $warnings
+     */
+    public static function normalizeDevice(mixed $authored, array &$warnings = []): string
+    {
+        return BoundedChoice::normalize(
+            $authored,
+            Device::ALL,
+            Device::DEFAULT,
+            'device',
+            $warnings,
+            'unbuildable motif replaced by none',
+        );
+    }
+
+    /**
+     * @param mixed $raw
+     * @param list<string> $warnings
+     * @return array{family:string,weights:list<int>,italic:bool,axes:array<string,array{min:float,max:float}>,character:string}
+     */
+    private static function normalizeTypeSlot($raw, string $slot, array &$warnings): array
+    {
+        $empty = self::emptyTypeSlot();
+        if ($raw === null) {
+            return $empty;
+        }
+        if (!is_array($raw)) {
+            $warnings[] = 'designDirection.json: type.' . $slot . ' authored value '
+                . Warnings::value($raw) . '; delivered ' . Warnings::value($empty)
+                . '; disposition malformed prose typography replaced by the structured empty contract';
+            return $empty;
+        }
+
+        $rawFamily = $raw['family'] ?? null;
+        $family = is_string($rawFamily) ? trim($rawFamily) : '';
+        if (array_key_exists('family', $raw) && !is_string($rawFamily)) {
+            $warnings[] = 'designDirection.json: type.' . $slot . '.family authored value '
+                . Warnings::value($rawFamily) . '; delivered ""; disposition non-string family name removed';
+        } elseif (
+            $family !== ''
+            && preg_match("/^\\p{L}[\\p{L}\\p{N} .&'_-]{0,99}$/u", $family) !== 1
+        ) {
+            $warnings[] = 'designDirection.json: type.' . $slot . '.family authored value '
+                . Warnings::value($rawFamily) . '; delivered ""; disposition invalid family name removed';
+            $family = '';
+        }
+
+        $rawWeights = $raw['weights'] ?? [];
+        $rawAxes = $raw['axes'] ?? [];
+        if ($family === '') {
+            if ($rawWeights !== []) {
+                $warnings[] = 'designDirection.json: type.' . $slot . '.weights authored value '
+                    . Warnings::value($rawWeights)
+                    . '; delivered []; disposition requirements removed because no deliverable family remained';
+            }
+            if (array_key_exists('italic', $raw) && $raw['italic'] !== false) {
+                $warnings[] = 'designDirection.json: type.' . $slot . '.italic authored value '
+                    . Warnings::value($raw['italic'])
+                    . '; delivered false; disposition requirement removed because no deliverable family remained';
+            }
+            if (is_array($rawAxes)) {
+                foreach ($rawAxes as $tag => $range) {
+                    $warnings[] = 'designDirection.json: type.' . $slot . '.axes.' . (string) $tag
+                        . ' authored value ' . Warnings::value($range)
+                        . '; delivered removed; disposition axis removed because no deliverable family remained';
+                }
+            } elseif ($rawAxes !== []) {
+                $warnings[] = 'designDirection.json: type.' . $slot . '.axes authored value '
+                    . Warnings::value($rawAxes)
+                    . '; delivered {}; disposition axes removed because no deliverable family remained';
+            }
+            if (array_key_exists('character', $raw) && $raw['character'] !== '') {
+                $warnings[] = 'designDirection.json: type.' . $slot . '.character authored value '
+                    . Warnings::value($raw['character'])
+                    . '; delivered ""; disposition rationale removed because no deliverable family remained';
+            }
+            return $empty;
+        }
+
+        $weights = [];
+        $invalidWeights = false;
+        if (is_array($rawWeights) && array_is_list($rawWeights)) {
+            foreach ($rawWeights as $weight) {
+                if (
+                    (is_int($weight) || (is_string($weight) && ctype_digit($weight)))
+                    && (int) $weight >= 100
+                    && (int) $weight <= 900
+                    && (int) $weight % 100 === 0
+                ) {
+                    $weights[] = (int) $weight;
+                } else {
+                    $invalidWeights = true;
+                }
+            }
+        } elseif ($rawWeights !== []) {
+            $invalidWeights = true;
+        }
+        $weights = array_values(array_unique($weights));
+        sort($weights);
+        if ($family !== '' && $weights === []) {
+            $weights = [400];
+        }
+        if ($invalidWeights) {
+            $warnings[] = 'designDirection.json: type.' . $slot . '.weights authored value '
+                . Warnings::value($rawWeights) . '; delivered ' . Warnings::value($weights)
+                . '; disposition invalid weights removed';
+        }
+
+        $italic = is_bool($raw['italic'] ?? null) ? $raw['italic'] : false;
+        if (array_key_exists('italic', $raw) && !is_bool($raw['italic'])) {
+            $warnings[] = 'designDirection.json: type.' . $slot . '.italic authored value '
+                . Warnings::value($raw['italic']) . '; delivered false; disposition non-boolean value removed';
+        }
+
+        $axes = [];
+        if (is_array($rawAxes)) {
+            foreach ($rawAxes as $tag => $range) {
+                $path = 'designDirection.json: type.' . $slot . '.axes.' . (string) $tag;
+                if ($tag !== 'opsz') {
+                    $warnings[] = $path . ' authored value ' . Warnings::value($range)
+                        . '; delivered removed; disposition axis is not supported by the deterministic CSS2 contract';
+                    continue;
+                }
+                $min = is_array($range) ? ($range['min'] ?? null) : null;
+                $max = is_array($range) ? ($range['max'] ?? null) : null;
+                if (
+                    !is_int($min) && !is_float($min)
+                    || !is_int($max) && !is_float($max)
+                    || !is_finite((float) $min)
+                    || !is_finite((float) $max)
+                    || (float) $min <= 0
+                    || (float) $max < (float) $min
+                    || (float) $max > 1000
+                ) {
+                    $warnings[] = $path . ' authored value ' . Warnings::value($range)
+                        . '; delivered removed; disposition invalid optical-size range';
+                    continue;
+                }
+                $axes['opsz'] = ['min' => (float) $min, 'max' => (float) $max];
+            }
+        } elseif ($rawAxes !== []) {
+            $warnings[] = 'designDirection.json: type.' . $slot . '.axes authored value '
+                . Warnings::value($rawAxes) . '; delivered {}; disposition non-object axes removed';
+        }
+
+        $character = is_string($raw['character'] ?? null) ? trim($raw['character']) : '';
+        if (array_key_exists('character', $raw) && !is_string($raw['character'])) {
+            $warnings[] = 'designDirection.json: type.' . $slot . '.character authored value '
+                . Warnings::value($raw['character'])
+                . '; delivered ""; disposition non-string typography rationale removed';
+        }
+
+        return [
+            'family'    => $family,
+            'weights'   => $weights,
+            'italic'    => $italic,
+            'axes'      => $axes,
+            'character' => $character,
+        ];
+    }
+
+    /** @return array{family:string,weights:list<int>,italic:bool,axes:array<string,array{min:float,max:float}>,character:string} */
+    private static function emptyTypeSlot(): array
+    {
+        return ['family' => '', 'weights' => [], 'italic' => false, 'axes' => [], 'character' => ''];
     }
 
     /**
@@ -339,11 +924,32 @@ final class DesignDirectionStep implements Step
 
         $type = is_array($direction['type'] ?? null) ? $direction['type'] : [];
         $pair = [];
-        foreach (['heading', 'body'] as $slot) {
-            $family = trim((string) ($type[$slot] ?? ''));
-            if ($family !== '') {
-                $pair[] = "{$slot} — {$family}";
+        foreach (['heading', 'body', 'accent'] as $slot) {
+            $typeSlot = is_array($type[$slot] ?? null) ? $type[$slot] : [];
+            $family = is_string($typeSlot['family'] ?? null) ? trim($typeSlot['family']) : '';
+            if ($family === '') {
+                continue;
             }
+            $details = ["{$slot} — {$family}"];
+            $weights = is_array($typeSlot['weights'] ?? null) ? $typeSlot['weights'] : [];
+            if ($weights !== []) {
+                $details[] = 'weights ' . implode('/', array_map('intval', $weights));
+            }
+            if (($typeSlot['italic'] ?? false) === true) {
+                $details[] = 'true italics';
+            }
+            $axes = is_array($typeSlot['axes'] ?? null) ? $typeSlot['axes'] : [];
+            foreach ($axes as $tag => $range) {
+                if (is_array($range) && isset($range['min'], $range['max'])) {
+                    $details[] = $tag . ' ' . self::formatNumber((float) $range['min'])
+                        . '..' . self::formatNumber((float) $range['max']);
+                }
+            }
+            $character = is_string($typeSlot['character'] ?? null) ? trim($typeSlot['character']) : '';
+            if ($character !== '') {
+                $details[] = $character;
+            }
+            $pair[] = implode('; ', $details);
         }
         if ($pair !== []) {
             $facts[] = '- **Type**: ' . implode('; ', $pair);
@@ -354,9 +960,62 @@ final class DesignDirectionStep implements Step
         // keyword. Directions persisted before the field existed carry none.
         $canvas = trim((string) ($direction['canvas'] ?? ''));
         if ($canvas === 'framed') {
-            $facts[] = '- **Canvas**: framed — the page keeps a visible mat of page background around every band; cap bands at `"align":"wide"`, never `"align":"full"`.';
+            $facts[] = '- **Canvas**: framed — the page keeps a visible mat of page background around every band BELOW the hero; cap those bands at `"align":"wide"`, never `"align":"full"`. The page-opening hero is exempt: it always runs edge-to-edge with `"align":"full"`, and the mat begins with the following section.';
         } elseif ($canvas !== '') {
             $facts[] = '- **Canvas**: full-bleed — heroes, image bands and color bands may run edge-to-edge with `"align":"full"`.';
+        }
+
+        // Render the card commitment with its executable meaning: the section
+        // prompt's card anatomy executes exactly the named construction, and
+        // defaults to flush when a direction predates the field.
+        $rawCardStyle = $direction['card_style'] ?? null;
+        $cardStyle = is_string($rawCardStyle) ? strtolower(trim($rawCardStyle)) : '';
+        if (in_array($cardStyle, self::CARD_STYLES, true)) {
+            $meaning = match ($cardStyle) {
+                'flush'      => 'card media bleeds to the card edges and padding wraps only the text — use the `flush` construction from the card anatomy',
+                'framed'     => 'card media sits inset behind padding on all sides — use the `framed` construction from the card anatomy, with concentric corner radii',
+                'overlap'    => 'the text panel rides up over the media\'s bottom edge — use the `overlap` construction from the card anatomy',
+                'borderless' => 'cards have no box at all; media above a plain text stack — use the `borderless` construction from the card anatomy',
+            };
+            $facts[] = "- **Card treatment**: {$cardStyle} — {$meaning}.";
+        }
+
+        // Render the shape commitment with its executable meaning. The build
+        // wires contained media (core/image, core/cover, the media half of
+        // core/media-text) and button radii itself; this line keeps prompts
+        // from re-interpreting a bare keyword. Directions persisted before
+        // the field existed carry none.
+        $shape = self::explicitShape($direction['shape'] ?? null);
+        if ($shape !== null) {
+            $facts[] = match ($shape) {
+                'sharp' => '- **Shape**: sharp — the build keeps contained media (`core/image`, `core/cover`, the media half of `core/media-text`) and buttons square. Full-bleed media stays square.',
+                'soft'  => '- **Shape**: soft — the build wires a subtle corner radius onto contained media (`core/image`, `core/cover`, the media half of `core/media-text`) and a modest radius onto buttons. Full-bleed media stays square.',
+                'round' => '- **Shape**: round — the build wires a decisive corner radius onto contained media (`core/image`, `core/cover`, the media half of `core/media-text`) and pill-shaped buttons. Full-bleed media stays square.',
+            };
+        }
+
+        $surface = Surface::explicit($direction['surface'] ?? null);
+        if ($surface !== null && $surface !== 'none') {
+            $surfaceMeaning = match ($surface) {
+                'paper'    => 'a paper tooth overlay on the page',
+                'concrete' => 'a concrete grit overlay on the page',
+                'film'     => 'a film grain overlay on the page',
+                'fabric'   => 'a fabric weave overlay on the page',
+                default    => 'the committed surface overlay',
+            };
+            $facts[] = "- **Surface**: {$surface} — {$surfaceMeaning}.";
+        }
+
+        $device = Device::explicit($direction['device'] ?? null);
+        $deviceClass = Device::className($device);
+        if ($device !== null && $device !== 'none' && $deviceClass !== null) {
+            $deviceMeaning = match ($device) {
+                'hairline-rule'  => 'a 1px rule in the current text color on ONE non-hero band',
+                'section-numeral'=> 'a folio numeral on ONE non-hero band',
+                'stamp'          => 'a rotated stamp mark on ONE non-hero band',
+                default          => 'the committed one-band CSS device',
+            };
+            $facts[] = "- **Device**: {$deviceClass} — {$deviceMeaning}. Never the hero. Never two bands.";
         }
 
         // Render the motion commitment with its executable meaning: the
@@ -372,22 +1031,49 @@ final class DesignDirectionStep implements Step
                     'dramatic'  => 'long directional masks and a cinematic hero focus pull',
                 ][$motion] . ' — place motion classes sparingly, per their budget rules',
             };
-            $note = trim((string) ($direction['motion_note'] ?? ''));
+            $note = self::formatMotionNote($direction['motion_note'] ?? null);
             $facts[] = "- **Motion**: {$motion} — {$meaning}." . ($note !== '' ? " Motion note: {$note}" : '');
         }
 
-        foreach ([
-            'signature_device' => 'Signature device',
-            'hero_composition' => 'Hero composition',
-            'image_grade'      => 'Image grade (all imagery)',
-        ] as $key => $label) {
-            $value = trim((string) ($direction[$key] ?? ''));
-            if ($value !== '') {
-                $facts[] = "- **{$label}**: {$value}";
-            }
+        $imageGrade = trim((string) ($direction['image_grade'] ?? ''));
+        if ($imageGrade !== '') {
+            $facts[] = "- **Image grade (all imagery)**: {$imageGrade}";
         }
 
         return $head . ($facts === [] ? '' : "\n\n" . implode("\n", $facts));
+    }
+
+    /** A motion note as one readable string, whether authored as a list or a line. */
+    private static function describeNote(mixed $raw): string
+    {
+        if (is_array($raw)) {
+            $parts = array_filter($raw, 'is_string');
+            return implode(', ', array_map('trim', $parts));
+        }
+        return is_string($raw) ? trim($raw) : '';
+    }
+
+    /**
+     * Prompt sentence for a persisted class list. A leftover string (hand-written
+     * fixtures, predating this contract) is passed through unchanged.
+     */
+    private static function formatMotionNote(mixed $raw): string
+    {
+        if (is_array($raw)) {
+            $classes = [];
+            foreach ($raw as $item) {
+                if (is_string($item) && trim($item) !== '') {
+                    $classes[] = trim($item);
+                }
+            }
+            return Motion::formatNote($classes);
+        }
+        return is_string($raw) ? trim($raw) : '';
+    }
+
+    private static function formatNumber(float $value): string
+    {
+        return rtrim(rtrim(number_format($value, 4, '.', ''), '0'), '.');
     }
 
     /**
@@ -401,6 +1087,96 @@ final class DesignDirectionStep implements Step
         return $project->exists(self::FILE)
             ? self::format($project->readJson(self::FILE))
             : self::FALLBACK;
+    }
+
+    /**
+     * Read the separately scoped, normalized front-page blueprint. This is a
+     * required build artifact contract: silently inventing a default here
+     * would let downstream units author a recipe that was never assigned.
+     *
+     * @return array<string,mixed>
+     */
+    public static function heroBlueprintFor(Project $project): array
+    {
+        if (!$project->exists(self::FILE)) {
+            throw new \RuntimeException('designDirection.json is missing the required persisted hero blueprint');
+        }
+        $direction = $project->readJson(self::FILE);
+        $blueprint = $direction['hero_blueprint'] ?? null;
+        if (!is_array($blueprint)) {
+            throw new \RuntimeException('designDirection.json has no structured hero_blueprint');
+        }
+        $recipe = trim((string) ($blueprint['recipe'] ?? ''));
+        if (!in_array($recipe, HeroComposition::RECIPES, true)) {
+            throw new \RuntimeException("designDirection.json has unknown hero_blueprint recipe '{$recipe}'");
+        }
+        $repairs = [];
+        $warnings = [];
+        $normalized = HeroBlueprint::normalize($blueprint, $recipe, $repairs, $warnings);
+        if ($normalized !== $blueprint) {
+            throw new \RuntimeException(
+                'designDirection.json hero_blueprint is not normalized (the producing step must persist its fixed point)'
+            );
+        }
+        return $blueprint;
+    }
+
+    /**
+     * Render the focused blueprint for the few front-page-only consumers.
+     * This intentionally does not call format()/readFor(), preventing the
+     * recipe from leaking into ordinary section or footer prompts.
+     *
+     * @param array<string,mixed> $blueprint
+     */
+    public static function formatHeroBlueprint(array $blueprint): string
+    {
+        HeroBlueprint::recipe($blueprint);
+        return "## Front-page hero blueprint (front page only)\n\n```json\n"
+            . json_encode(
+                $blueprint,
+                JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR,
+            )
+            . "\n```";
+    }
+
+    public static function formatHeroBlueprintFor(Project $project): string
+    {
+        return self::formatHeroBlueprint(self::heroBlueprintFor($project));
+    }
+
+    public static function heroRecipeFor(Project $project): string
+    {
+        return HeroBlueprint::recipe(self::heroBlueprintFor($project));
+    }
+
+    /**
+     * The whole committed direction, or none. The accessors below answer one
+     * field each; callers needing a whole block read through this.
+     *
+     * The full graph cannot reach these callers without a direction —
+     * StepGraph::validate() rejects a composition that drops the writer. The
+     * tolerance is for steps run on their own, where the file is simply not
+     * there: unit tests, and any host that runs a span of the graph rather
+     * than the whole of it.
+     *
+     * @return array<mixed>
+     */
+    public static function dataFor(Project $project): array
+    {
+        return $project->exists(self::FILE) ? $project->readJson(self::FILE) : [];
+    }
+
+    /**
+     * The authoritative site-wide card construction, including the documented
+     * flush default. Adapter callers pass warnings through to their own durable
+     * step boundary so an invalid non-empty persisted value is never hidden.
+     *
+     * @param list<string> $warnings
+     */
+    public static function cardStyleFor(Project $project, array &$warnings = []): string
+    {
+        $direction = self::dataFor($project);
+        return self::normalizeCardStyle($direction['card_style'] ?? null, $warnings);
     }
 
     /**
@@ -422,7 +1198,7 @@ final class DesignDirectionStep implements Step
      * The committed direction's canvas ("full-bleed" or "framed"), or '' when
      * no direction was persisted. A framed canvas keeps a mat of page
      * background around every band, so an overlay header can never float over
-     * the hero image — SectionsStep gates the header archetype pool on this.
+     * the hero image; AboveFoldContract resolves that relation once.
      */
     public static function canvasFor(Project $project): string
     {
@@ -447,10 +1223,59 @@ final class DesignDirectionStep implements Step
         return in_array($motion, Motion::PROFILES, true) ? $motion : 'none';
     }
 
+    /**
+     * The explicit committed corner language ("sharp", "soft" or "round"),
+     * or null when no direction was persisted or its shape field is absent or
+     * garbled. The producing step normalizes every generated direction onto a
+     * valid value; null lets isolated downstream steps preserve pre-field
+     * artifacts instead of silently rewriting them as sharp.
+     */
+    public static function shapeFor(Project $project): ?string
+    {
+        if (!$project->exists(self::FILE)) {
+            return null;
+        }
+        return self::explicitShape($project->readJson(self::FILE)['shape'] ?? null);
+    }
+
+    /**
+     * The committed page surface, or `none` when no direction was persisted
+     * or the field is absent.
+     */
+    public static function surfaceFor(Project $project): string
+    {
+        if (!$project->exists(self::FILE)) {
+            return Surface::DEFAULT;
+        }
+        return self::normalizeSurface($project->readJson(self::FILE)['surface'] ?? null);
+    }
+
+    /** The committed one-band CSS device, or `none`. */
+    public static function deviceFor(Project $project): string
+    {
+        if (!$project->exists(self::FILE)) {
+            return Device::DEFAULT;
+        }
+        return self::normalizeDevice($project->readJson(self::FILE)['device'] ?? null);
+    }
+
+    /** Parse only an explicit valid corner-language commitment. */
+    private static function explicitShape(mixed $raw): ?string
+    {
+        return BoundedChoice::explicit($raw, self::SHAPES);
+    }
+
+
     /** Coerce a raw motion value onto the fixed profile list. */
     private static function motionProfile(mixed $raw): string
     {
         $motion = strtolower(trim((string) (is_string($raw) ? $raw : '')));
         return in_array($motion, Motion::PROFILES, true) ? $motion : Motion::DEFAULT_PROFILE;
+    }
+
+    private static function describe(mixed $value): string
+    {
+        $encoded = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        return $encoded === false ? get_debug_type($value) : $encoded;
     }
 }

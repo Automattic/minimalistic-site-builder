@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\ContrastFix;
 
 /** A black-on-white palette with a failing mid-tone secondary and a link-safe primary. */
@@ -332,6 +333,29 @@ test('the dimRatio floor swaps the stale has-background-dim-N class', function (
     assert_true(!str_contains($res['markup'], 'has-background-dim-10'), 'stale dim class must be gone');
 });
 
+test('a dimRatio repair raised from the 50 default adds the numbered saved-HTML class', function () {
+    $src = '<!-- wp:cover {"dimRatio":50} -->'
+        . '<div class="wp-block-cover"><span aria-hidden="true" '
+        . 'class="wp-block-cover__background has-background-dim"></span>'
+        . '<div class="wp-block-cover__inner-container"></div></div><!-- /wp:cover -->';
+    $doc = BlockMarkup::parse($src);
+    ContrastFix::swapDimClass($doc, 0, 50, 60);
+    $out = $doc->render();
+    assert_contains('has-background-dim-60 has-background-dim', $out);
+});
+
+test('a dimRatio repair moved to the 50 default removes only the numbered class', function () {
+    $src = '<!-- wp:cover {"dimRatio":40} -->'
+        . '<div class="wp-block-cover"><span aria-hidden="true" '
+        . 'class="wp-block-cover__background has-background-dim-40 has-background-dim"></span>'
+        . '<div class="wp-block-cover__inner-container"></div></div><!-- /wp:cover -->';
+    $doc = BlockMarkup::parse($src);
+    ContrastFix::swapDimClass($doc, 0, 40, 50);
+    $out = $doc->render();
+    assert_true(!str_contains($out, 'has-background-dim-40'));
+    assert_eq(1, substr_count($out, 'has-background-dim'));
+});
+
 test('a gradient co-authored with a solid backgroundColor is not ignored', function () {
     // Solid white background + a gradient ending near-black: text passing on
     // white alone still fails against the gradient's dark end.
@@ -373,7 +397,7 @@ test('gradient backgrounds are checked against every stop', function () {
 // ── overlay-header lint (ContrastFixStep) ────────────────────────────────
 
 /** Temp project with a palette, an overlay (or standard) header, and two pages. */
-function overlay_lint_project(bool $overlay): array
+function overlay_lint_project(bool $overlay, string $textColor = 'base'): array
 {
     $tmp = sys_get_temp_dir() . '/builder_overlay_' . uniqid();
     $project = (new Automattic\SiteBuild\ProjectStore($tmp))->create('demo');
@@ -383,20 +407,23 @@ function overlay_lint_project(bool $overlay): array
             ['slug' => 'base', 'color' => '#FFFFFF', 'name' => 'Base'],
             ['slug' => 'contrast', 'color' => '#111111', 'name' => 'Contrast'],
             ['slug' => 'primary', 'color' => '#1D4ED8', 'name' => 'Primary'],
+            // A mid grey that fails even against the scrim's worst case (#666).
+            ['slug' => 'secondary', 'color' => '#9E9E9E', 'name' => 'Secondary'],
         ]]],
     ]);
-    $className = $overlay ? 'header-overlay' : 'site-header';
+    $className = $overlay ? 'header-behavior-overlay-to-solid' : 'site-header';
     $project->writeText(
         'theme/parts/header.html',
-        '<!-- wp:group {"className":"' . $className . '","textColor":"base","layout":{"type":"constrained"}} -->'
-        . '<div class="wp-block-group ' . $className . ' has-base-color has-text-color"><!-- wp:site-title /--></div>'
+        '<!-- wp:group {"className":"' . $className . '","textColor":"' . $textColor . '","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group ' . $className . ' has-' . $textColor . '-color has-text-color"><!-- wp:site-title /--></div>'
         . '<!-- /wp:group -->'
     );
     $project->writeJson('pages.json', ['pages' => [
         ['slug' => 'home', 'front' => true, 'sections' => [['slug' => 'hero']]],
         ['slug' => 'menu', 'front' => false, 'sections' => [['slug' => 'menu-hero']]],
     ]]);
-    // Homepage opens dark (light header text reads); menu opens on base (it doesn't).
+    // Homepage opens dark; menu opens on the light base surface — the trusted
+    // scrim decides whether the committed foreground still reads there.
     $project->writeText(
         'theme/parts/page-home--hero.html',
         '<!-- wp:group {"backgroundColor":"contrast","textColor":"base","layout":{"type":"constrained"}} -->'
@@ -411,13 +438,37 @@ function overlay_lint_project(bool $overlay): array
     return [$project, $tmp];
 }
 
-test('overlay header text is linted against every page opening section', function () {
+test('overlay header lint composites the trusted scrim before judging opening backgrounds', function () {
     [$project, $tmp] = overlay_lint_project(overlay: true);
-    ob_start();
-    (new Automattic\SiteBuild\Steps\ContrastFixStep())->run($project);
-    ob_end_clean();
+    // A light no-media cover: raw composite (#111 at 40% over base) fails a
+    // white foreground, but the kit's 60% black scrim bounds every top-state
+    // pixel to <= #666, against which the foreground was already verified.
+    $project->writeText(
+        'theme/parts/page-menu--menu-hero.html',
+        '<!-- wp:cover {"overlayColor":"contrast","dimRatio":40} -->'
+        . '<div class="wp-block-cover"><span aria-hidden="true" '
+        . 'class="wp-block-cover__background has-contrast-background-color has-background-dim-40 has-background-dim"></span>'
+        . '<div class="wp-block-cover__inner-container">'
+        . '<!-- wp:heading {"textColor":"contrast"} --><h2 class="wp-block-heading has-contrast-color has-text-color">Light cover</h2><!-- /wp:heading -->'
+        . '</div></div><!-- /wp:cover -->'
+    );
+    quietly(fn () => (new Automattic\SiteBuild\Steps\ContrastFixStep())->run($project));
     $log = $project->readText('logs/contrast-report.txt');
-    assert_contains("overlay header text base floats over page 'menu'", $log);
+    assert_true(
+        !str_contains($log, 'overlay header text'),
+        'the scrimmed light cover and the dark homepage opening must both pass'
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('overlay header lint still warns when the foreground fails against the scrimmed background', function () {
+    // #9E9E9E on scrimmed base (#666) is ~2.1:1 — genuinely unreadable in the
+    // kit's own top state, so the scrim-aware lint must keep warning.
+    [$project, $tmp] = overlay_lint_project(overlay: true, textColor: 'secondary');
+    quietly(fn () => (new Automattic\SiteBuild\Steps\ContrastFixStep())->run($project));
+    $log = $project->readText('logs/contrast-report.txt');
+    assert_contains("overlay header text secondary floats over page 'menu'", $log);
+    assert_contains('scrim', $log);
     assert_true(
         !str_contains($log, "floats over page 'home'"),
         'the dark homepage opening must pass'
@@ -427,12 +478,100 @@ test('overlay header text is linted against every page opening section', functio
 
 test('non-overlay headers skip the overlay lint', function () {
     [$project, $tmp] = overlay_lint_project(overlay: false);
-    ob_start();
-    (new Automattic\SiteBuild\Steps\ContrastFixStep())->run($project);
-    ob_end_clean();
+    quietly(fn () => (new Automattic\SiteBuild\Steps\ContrastFixStep())->run($project));
     assert_true(
         !str_contains($project->readText('logs/contrast-report.txt'), 'overlay header'),
         'a solid header must not trigger overlay warnings'
     );
     exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('an inherited caption inside a dark band gets the caption-text class hook', function () {
+    // The figcaption inherits the theme default (contrast, #111) inside a
+    // contrast-background band — invisible. The image block supports no
+    // textColor, so the repair is the stylesheet hook via className.
+    $src = '<!-- wp:group {"backgroundColor":"contrast"} -->' . "\n"
+        . '<div class="wp-block-group has-contrast-background-color has-background">'
+        . '<!-- wp:image {"sizeSlug":"large"} -->'
+        . '<figure class="wp-block-image size-large"><img src="x.jpg" alt=""/>'
+        . '<figcaption class="wp-element-caption">Sorted cullet before the melt.</figcaption></figure>'
+        . '<!-- /wp:image --></div>' . "\n"
+        . '<!-- /wp:group -->';
+    $res = contrast_fix()->process($src);
+    assert_eq(true, $res['changed']);
+    assert_contains('"className":"caption-text-base"', $res['markup']);
+    assert_eq(1, count($res['findings']));
+    assert_contains('image caption', $res['findings'][0]['detail']);
+    assert_contains('caption-text-base', $res['findings'][0]['detail']);
+    assert_eq(true, $res['findings'][0]['repaired']);
+});
+
+test('a readable caption is untouched', function () {
+    // Inherited contrast (#111) on the base page background reads fine.
+    $src = '<!-- wp:image -->'
+        . '<figure class="wp-block-image"><img src="x.jpg" alt=""/>'
+        . '<figcaption class="wp-element-caption">Readable on base.</figcaption></figure>'
+        . '<!-- /wp:image -->';
+    $res = contrast_fix()->process($src);
+    assert_eq(false, $res['changed']);
+    assert_eq([], $res['findings']);
+});
+
+test('a caption follows an ancestor textColor when judging its pair', function () {
+    // The band sets textColor=base; the caption inherits base on contrast — passes.
+    $src = '<!-- wp:group {"backgroundColor":"contrast","textColor":"base"} -->' . "\n"
+        . '<div class="wp-block-group has-base-color has-contrast-background-color has-text-color has-background">'
+        . '<!-- wp:image -->'
+        . '<figure class="wp-block-image"><img src="x.jpg" alt=""/>'
+        . '<figcaption class="wp-element-caption">Inherits the band color.</figcaption></figure>'
+        . '<!-- /wp:image --></div>' . "\n"
+        . '<!-- /wp:group -->';
+    $res = contrast_fix()->process($src);
+    assert_eq(false, $res['changed']);
+    assert_eq([], $res['findings']);
+});
+
+test('a caption repair replaces a stale hook and keeps other classes', function () {
+    $src = '<!-- wp:group {"backgroundColor":"contrast"} -->' . "\n"
+        . '<div class="wp-block-group has-contrast-background-color has-background">'
+        . '<!-- wp:image {"className":"alignwide caption-text-contrast"} -->'
+        . '<figure class="wp-block-image alignwide caption-text-contrast"><img src="x.jpg" alt=""/>'
+        . '<figcaption class="wp-element-caption">Stale hook.</figcaption></figure>'
+        . '<!-- /wp:image --></div>' . "\n"
+        . '<!-- /wp:group -->';
+    $res = contrast_fix()->process($src);
+    assert_contains('"className":"alignwide caption-text-base"', $res['markup']);
+});
+
+test('captions inside an image-backed cover are deferred like other cover text', function () {
+    // The image pixels are unknowable in phase one; no caption finding, and no
+    // dim-floor entry either (an image caption is not TEXT_BLOCKS content).
+    $src = '<!-- wp:cover {"url":"x.jpg","dimRatio":60} -->'
+        . '<div class="wp-block-cover"><div class="wp-block-cover__inner-container">'
+        . '<!-- wp:image -->'
+        . '<figure class="wp-block-image"><img src="y.jpg" alt=""/>'
+        . '<figcaption class="wp-element-caption">Over the photo.</figcaption></figure>'
+        . '<!-- /wp:image --></div></div>'
+        . '<!-- /wp:cover -->';
+    $res = contrast_fix()->process($src);
+    assert_eq([], $res['findings']);
+});
+
+test('a gallery caption is the gallery tail, not a child image caption', function () {
+    // The child image has no caption; the failing caption belongs to the
+    // gallery itself — the hook must land on the gallery, not the child.
+    $src = '<!-- wp:group {"backgroundColor":"contrast"} -->' . "\n"
+        . '<div class="wp-block-group has-contrast-background-color has-background">'
+        . '<!-- wp:gallery {"linkTo":"none"} -->'
+        . '<figure class="wp-block-gallery has-nested-images columns-default is-cropped">'
+        . '<!-- wp:image -->'
+        . '<figure class="wp-block-image"><img src="a.jpg" alt=""/></figure>'
+        . '<!-- /wp:image -->'
+        . '<figcaption class="blocks-gallery-caption wp-element-caption">Two nights of installs.</figcaption></figure>'
+        . '<!-- /wp:gallery --></div>' . "\n"
+        . '<!-- /wp:group -->';
+    $res = contrast_fix()->process($src);
+    assert_eq(1, count($res['findings']));
+    assert_contains('gallery caption', $res['findings'][0]['detail']);
+    assert_contains('wp:gallery {"linkTo":"none","className":"caption-text-base"}', $res['markup']);
 });

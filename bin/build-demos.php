@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\ProjectStore;
 
 /**
@@ -12,6 +13,13 @@ use Automattic\SiteBuild\ProjectStore;
  * with that entry's slug already exists, a fresh sibling is created by appending
  * an incrementing number: photo-journalism-portfolio → photo-journalism-portfolio2
  * → -3 … so re-running the command never overwrites prior testing evidence.
+ *
+ * An entry may carry a `site_spec` object in the package-canonical shape
+ * (examples/site-spec.json). It is pre-seeded into the project's meta.json, so
+ * the site-spec step normalizes it deterministically instead of making an LLM
+ * call — a reproducible probe of the host-supplied-spec path (BIGR-754). Page
+ * scope still follows the runner flags: without --multi-page the spec's page
+ * tree is cut down to the homepage like every other demo build.
  *
  * Builds run CONCURRENTLY, one `bin/build.php` child process per entry. Child
  * processes keep the per-step timing/token accounting clean: every child owns
@@ -55,54 +63,45 @@ use Automattic\SiteBuild\ProjectStore;
 
 require_once __DIR__ . '/../src/bootstrap.php';
 
-$withImages = false;
-$multiPage = false;
-$pagesArg = null;
-$only = null;
-$serve = false;
-$screenshot = true;
-$parallel = 0; // 0 = provider-aware default (all entries; OpenRouter <= 3)
-$port = 9400;
-$provider = null;
-$file = repo_path('eval/theme-prompts.json');
-foreach (array_slice($argv, 1) as $a) {
-    if ($a === '--with-images') { $withImages = true; }
-    elseif ($a === '--multi-page') { $multiPage = true; }
-    elseif (str_starts_with($a, '--pages=')) { $pagesArg = substr($a, 8); }
-    elseif (str_starts_with($a, '--only=')) { $only = substr($a, 7); }
-    elseif (str_starts_with($a, '--provider=')) { $provider = substr($a, 11); }
-    elseif (str_starts_with($a, '--parallel=')) { $parallel = max(1, (int) substr($a, 11)); }
-    elseif (str_starts_with($a, '--port=')) { $port = (int) substr($a, 7); }
-    elseif (str_starts_with($a, '--file=')) { $file = substr($a, 7); }
-    elseif ($a === '--no-serve') { $serve = false; }
-    elseif ($a === '--serve') { $serve = true; }
-    elseif ($a === '--no-screenshot') { $screenshot = false; }
-    elseif ($a === '--screenshot') { $screenshot = true; }
-    else {
-        fwrite(STDERR, "Unknown argument: {$a}\n");
-        fwrite(STDERR, "Usage: php bin/build-demos.php [--multi-page] [--pages=\"Home, Menu, About\"] [--with-images] [--only=<slug>] [--provider=anthropic|openai|xai|openrouter] [--parallel=<n>] [--no-screenshot] [--serve] [--port=9400] [--no-serve] [--file=<path>]\n");
-        exit(1);
-    }
-}
-
-// --pages fixes WHICH pages each site gets; --multi-page owns WHETHER inner
-// pages exist at all, so a list without the flag is a contradiction — fail
-// loud here rather than let every child build fail with the same message.
-if ($pagesArg !== null && !$multiPage) {
-    fwrite(STDERR, "--pages requires --multi-page.\n");
+$args = parse_cli_args($argv, [
+    '--with-images' => 'bool',
+    '--multi-page'  => 'bool',
+    '--pages'       => 'value',
+    '--only'        => 'value',
+    '--provider'    => 'value',
+    '--parallel'    => 'value',
+    '--port'        => 'value',
+    '--file'        => 'value',
+    '--serve'       => 'toggle',
+    '--screenshot'  => 'toggle',
+]);
+if ($args['unknown'] !== null) {
+    fwrite(STDERR, "Unknown argument: {$args['unknown']}\n");
+    fwrite(STDERR, "Usage: php bin/build-demos.php [--multi-page] [--pages=\"Home, Menu, About\"] [--with-images] [--only=<slug>] [--provider=anthropic|openai|xai|openrouter] [--parallel=<n>] [--no-screenshot] [--serve] [--port=9400] [--no-serve] [--file=<path>]\n");
     exit(1);
 }
+$flags = $args['flags'];
+$withImages = $flags['--with-images'] ?? false;
+$multiPage = $flags['--multi-page'] ?? false;
+$pagesArg = $flags['--pages'] ?? null;
+$only = $flags['--only'] ?? null;
+$serve = $flags['--serve'] ?? false;
+$screenshot = $flags['--screenshot'] ?? true;
+// 0 = provider-aware default (all entries; OpenRouter <= 3)
+$parallel = isset($flags['--parallel']) ? max(1, (int) $flags['--parallel']) : 0;
+$port = (int) ($flags['--port'] ?? 9400);
+$provider = $flags['--provider'] ?? null;
+$file = $flags['--file'] ?? repo_path('eval/theme-prompts.json');
 
-// Validate --provider once up front and forward it to each child build.php, so
-// the whole demo set builds on one provider's model set. Per-step LLM_MODEL_*
-// env overrides still apply inside each child.
-if ($provider !== null) {
-    $provider = strtolower(trim($provider));
-    if (!\Automattic\SiteBuild\ModelConfig::hasProvider($provider)) {
-        fwrite(STDERR, "Unknown --provider '{$provider}'. Known: "
-            . implode(', ', \Automattic\SiteBuild\ModelConfig::providerNames()) . "\n");
-        exit(1);
-    }
+// Both flags are forwarded to the children, so check them once here rather than
+// let every child build fail with the same message. The page list goes over
+// verbatim; only --provider's normalized form is kept, for the child commands.
+try {
+    require_multi_page_for_pages($pagesArg, $multiPage);
+    $provider = normalize_provider($provider);
+} catch (InvalidArgumentException $e) {
+    Narrator::write($e->getMessage() . "\n");
+    exit(1);
 }
 
 $data = json_decode((string) file_get_contents($file), true);
@@ -139,26 +138,40 @@ foreach ($entries as $i => $entry) {
         $failures++;
         continue;
     }
+    // An entry may carry a canonical site spec (see examples/site-spec.json):
+    // seeded below as meta.json `site_spec`, it makes the site-spec step
+    // normalize it deterministically instead of generating one via LLM —
+    // testing the host-supplied-spec path with a fixed, reproducible input.
+    $siteSpec = $entry['site_spec'] ?? null;
+    if ($siteSpec !== null && !is_array($siteSpec)) {
+        $label = (string) ($entry['id'] ?? $entry['slug'] ?? '#' . ($i + 1));
+        fwrite(STDERR, "  ✗ SKIPPED: prompt entry '{$label}' has a non-object site_spec\n");
+        $failures++;
+        continue;
+    }
     $baseSlug = ProjectStore::slugify((string) ($entry['slug'] ?? $prompt));
     $slug = $store->freeSlug($baseSlug);
 
     $project = $store->create($slug);
-    $project->writeJson('meta.json', [
+    $project->writeJson('meta.json', array_merge([
         'prompt'           => $prompt,
         'provisional_slug' => $project->slug(),
         'created_at'       => gmdate('c'),
         // Absolute path so a built project stays traceable to its source prompt
         // file regardless of where the command was invoked from. bin/build.php
-        // merges its own meta over this seed, preserving these two fields.
+        // merges its own meta over this seed, preserving the extra fields.
         'demo_source'      => realpath($file) ?: $file,
         'demo_id'          => $entry['id'] ?? $baseSlug,
-    ]);
+    ], $siteSpec !== null ? ['site_spec' => $siteSpec] : []));
 
     echo '[' . ($i + 1) . '/' . count($entries) . "] queued '{$project->slug()}'\n";
     if ($slug !== $baseSlug) {
         echo "  (folder '{$baseSlug}' existed → used '{$slug}')\n";
     }
     echo "  prompt: {$prompt}\n";
+    if ($siteSpec !== null) {
+        echo "  site spec: supplied by the entry — the site-spec step will make no LLM call\n";
+    }
 
     $jobs[] = [
         'slug' => $project->slug(),
@@ -448,15 +461,7 @@ function serve_all(array $slugs, int $basePort, int $exitCode): void
     while ($servers !== []) {
         pump_children($servers, static function (int $idx, int $fd, string $line) use (&$servers): void {
             echo "[{$servers[$idx]['slug']}] " . $line;
-            // Playground prints this exact line once it is actually serving; it
-            // carries the real port (playground.php auto-bumps busy ones). The
-            // CLI may wrap it in ANSI colour codes — strip them before matching.
-            if ($servers[$idx]['url'] === null) {
-                $plain = preg_replace('~\x1b\[[0-9;]*m~', '', $line) ?? $line;
-                if (preg_match('~Ready!\s+WordPress is running on (http://127\.0\.0\.1:\d+)~', $plain, $m)) {
-                    $servers[$idx]['url'] = $m[1] . '/';
-                }
-            }
+            $servers[$idx]['url'] ??= playground_ready_url($line);
         });
 
         $allReady = $servers !== [];

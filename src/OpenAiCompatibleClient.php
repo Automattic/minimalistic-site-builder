@@ -14,7 +14,7 @@ namespace Automattic\SiteBuild;
  * Works with any OpenAI-compatible host. Defaults target OpenAI; for xAI set
  * baseUrl to https://api.x.ai/v1 (see make_llm() LLM_PROVIDER=xai).
  */
-final class OpenAiCompatibleClient implements Llm
+final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporting
 {
     /** K3's default max-effort reasoning shares this budget with its answer. */
     private const KIMI_K3_MIN_MAX_TOKENS = 65536;
@@ -44,6 +44,8 @@ final class OpenAiCompatibleClient implements Llm
     private int $inputTokens = 0;
     private int $outputTokens = 0;
     private string $endpoint;
+    private ?string $lastFinishReason = null;
+    private ?\Closure $singleTransport;
 
     /**
      * @param string $apiKey            Bearer token (OPENAI_API_KEY / XAI_API_KEY)
@@ -56,6 +58,7 @@ final class OpenAiCompatibleClient implements Llm
      *                                   See maxTokensParam().
      * @param int    $timeoutSeconds    Hard timeout for one streamed request
      * @param int    $maxConcurrency    Most simultaneous requests in one batch
+     * @param ?callable $singleTransport Optional single-request transport seam for tests
      */
     public function __construct(
         private string $apiKey,
@@ -65,14 +68,23 @@ final class OpenAiCompatibleClient implements Llm
         private string $provider = 'openai',
         private int $timeoutSeconds = 600,
         private int $maxConcurrency = 10,
+        ?callable $singleTransport = null,
     ) {
         $this->endpoint = rtrim($baseUrl, '/') . '/chat/completions';
+        $this->singleTransport = $singleTransport === null
+            ? null
+            : \Closure::fromCallable($singleTransport);
     }
 
     /** Resolved chat-completions URL (for tests / diagnostics). */
     public function endpoint(): string
     {
         return $this->endpoint;
+    }
+
+    public function lastFinishReason(): ?string
+    {
+        return $this->lastFinishReason;
     }
 
     /**
@@ -116,6 +128,7 @@ final class OpenAiCompatibleClient implements Llm
      */
     public function complete(string $prompt, array $opts = []): string
     {
+        $this->lastFinishReason = null;
         $body = self::bodyFor(['prompt' => $prompt] + $opts, $this->model, $this->defaultMaxTokens, $this->provider);
 
         $label = (string) ($opts['log_label'] ?? 'request');
@@ -139,6 +152,10 @@ final class OpenAiCompatibleClient implements Llm
         if (!$tolerateEmpty && trim($res['text']) === '') {
             throw new \RuntimeException('No text content in streamed response');
         }
+        $stopReason = $res['stop_reason'] ?? null;
+        $this->lastFinishReason = is_string($stopReason) && trim($stopReason) !== ''
+            ? trim($stopReason)
+            : null;
         return $res['text'];
     }
 
@@ -154,6 +171,7 @@ final class OpenAiCompatibleClient implements Llm
         return JsonBatchRecovery::run(
             $requests,
             fn (array $subset): array => $this->responseBatch($subset, true),
+            defaultMaxTokens: $this->defaultMaxTokens,
         );
     }
 
@@ -196,9 +214,11 @@ final class OpenAiCompatibleClient implements Llm
      * Shared concurrent-batch transport for completeJsonBatch and completeBatch.
      *
      * @param array<array-key,array<string,mixed>> $requests
+     * @param null|callable(array<array-key,array<string,mixed>>):array<array-key,array<string,mixed>> $transport
+     *        Test seam; defaults to the live concurrent transport.
      * @return array<array-key,array<string,mixed>>
      */
-    private function responseBatch(array $requests, bool $json): array
+    private function responseBatch(array $requests, bool $json, ?callable $transport = null): array
     {
         if ($requests === []) {
             return [];
@@ -222,22 +242,25 @@ final class OpenAiCompatibleClient implements Llm
         // Keys may be ints too (PHP coerces numeric keys), so admit both.
         $labelFor = fn (string|int $key): string => (string) ($requests[$key]['log_label'] ?? $key);
 
-        $transport = fn (array $subset): array => $this->streamMulti($subset);
+        $transport ??= fn (array $subset): array => $this->streamMulti($subset);
         $onFailure = function (string|int $key, string $error, float $time) use ($labelFor, &$bodies): void {
             LlmLogger::log($labelFor($key), $bodies[$key], ['text' => '', 'input' => 0, 'output' => 0], $time, $error);
         };
-        $delays = [2, 5, 12];
-        $results = $this->provider === 'openrouter'
-            ? self::retryOpenRouterBatch($bodies, $transport, $delays, $onFailure)
-            : AnthropicClient::retryTextBatch($bodies, $transport, $delays, $onFailure);
-
-        $out = [];
-        foreach ($results as $key => $res) {
+        $logPaths = [];
+        $onSuccess = function (string|int $key, array $res) use ($labelFor, &$bodies, &$logPaths): void {
             $this->requests++;
             $this->inputTokens += $res['input'];
             $this->outputTokens += $res['output'];
+            $logPaths[$key] = LlmLogger::log($labelFor($key), $bodies[$key], $res, $res['time']);
+        };
+        $delays = [2, 5, 12];
+        $results = $this->provider === 'openrouter'
+            ? self::retryOpenRouterBatch($bodies, $transport, $delays, $onFailure, onSuccess: $onSuccess)
+            : AnthropicClient::retryTextBatch($bodies, $transport, $delays, $onFailure, onSuccess: $onSuccess);
 
-            $res['log_path'] = LlmLogger::log($labelFor($key), $bodies[$key], $res, $res['time']);
+        $out = [];
+        foreach ($results as $key => $res) {
+            $res['log_path'] = $logPaths[$key] ?? null;
             $res['model'] = (string) $bodies[$key]['model'];
             $out[$key] = $res;
         }
@@ -278,10 +301,11 @@ final class OpenAiCompatibleClient implements Llm
         }
 
         $userPrompt = '';
-        foreach ($req['cached_prefixes'] ?? [] as $prefix) {
-            if (trim($prefix) !== '') {
-                $userPrompt .= rtrim($prefix, "\r\n") . "\n\n";
-            }
+        $cachedPrefixes = array_key_exists('cached_prefixes', $req)
+            ? CachedPrefixes::normalize($req['cached_prefixes'], 'OpenAI-compatible requests')
+            : [];
+        foreach ($cachedPrefixes as $prefix) {
+            $userPrompt .= rtrim($prefix, "\r\n") . "\n\n";
         }
         $userPrompt .= (string) $req['prompt'];
 
@@ -411,8 +435,10 @@ final class OpenAiCompatibleClient implements Llm
      * @param callable(array<array-key,array<string,mixed>>):array<array-key,array<string,mixed>> $transport
      * @param list<int> $delays
      * @param null|callable(string|int,string,float):void $onFailure
-     * @param null|callable(int):void $sleeper Test seam for the remaining wait
+     * @param null|callable(int):void $sleeper Test seam for the remaining
+     *        Retry-After wait and the shared helper's backoff waits
      * @param null|callable():int $clock Test seam returning the current epoch
+     * @param null|callable(string|int,array<string,mixed>):void $onSuccess
      * @return array<array-key,array<string,mixed>>
      */
     public static function retryOpenRouterBatch(
@@ -422,10 +448,14 @@ final class OpenAiCompatibleClient implements Llm
         ?callable $onFailure = null,
         ?callable $sleeper = null,
         ?callable $clock = null,
+        ?callable $onSuccess = null,
     ): array {
         /** @var array<array-key,int> $retryAfterDeadlineByKey */
         $retryAfterDeadlineByKey = [];
         $clock ??= static fn (): int => time();
+        $sleeper ??= static function (int $seconds): void {
+            sleep($seconds);
+        };
 
         $wrappedTransport = function (array $subset) use (
             $transport,
@@ -442,11 +472,7 @@ final class OpenAiCompatibleClient implements Llm
                 );
                 if ($remainingWait > 0) {
                     Narrator::write("    (OpenRouter Retry-After still requires {$remainingWait}s after normal backoff)\n");
-                    if ($sleeper !== null) {
-                        $sleeper($remainingWait);
-                    } else {
-                        sleep($remainingWait);
-                    }
+                    $sleeper($remainingWait);
                 }
                 foreach (array_keys($retryingDeadlines) as $key) {
                     unset($retryAfterDeadlineByKey[$key]);
@@ -471,6 +497,8 @@ final class OpenAiCompatibleClient implements Llm
             $wrappedTransport,
             $delays,
             $onFailure,
+            $sleeper,
+            $onSuccess,
         );
     }
 
@@ -508,41 +536,24 @@ final class OpenAiCompatibleClient implements Llm
     }
 
     /**
+     * Run a set of streaming Chat Completions requests through the shared
+     * curl_multi rolling pool — at most maxConcurrency in flight, the freed
+     * slot refilled the moment any transfer completes — and classify each
+     * transfer via interpretStream. Previously windowed (a slow member
+     * stalled every request behind its window barrier); the rolling pool also
+     * brings the 429 launch-hold and refused-add handling (see CurlMultiPool)
+     * that the pooled clients already had, whose transient/held outcomes the
+     * batch retry layer re-sends after its backoff.
+     *
      * @param array<array-key,array<string,mixed>> $bodies
-     * @return array<array-key,array{ok:bool,text?:string,input?:int,output?:int,error?:string,transient?:bool,retry_without?:string,time?:float,stop_reason?:?string}>
+     * @return array<array-key,array{ok:bool,text?:string,input?:int,output?:int,error?:string,transient?:bool,held?:bool,retry_without?:string,retry_after_at?:int,time?:float,stop_reason?:?string}>
      */
     private function streamMulti(array $bodies): array
     {
-        $out = [];
-        foreach (self::concurrencyWindows($bodies, $this->maxConcurrency) as $chunk) {
-            $out += $this->streamChunk($chunk);
-        }
-        return $out;
-    }
-
-    /**
-     * Windows of concurrent requests, delegating to the shared implementation
-     * so the two transports cannot drift apart on the default cap.
-     *
-     * @param array<array-key,array<string,mixed>> $bodies
-     * @return list<array<array-key,array<string,mixed>>>
-     */
-    public static function concurrencyWindows(array $bodies, ?int $maxConcurrency = null): array
-    {
-        return array_values(AnthropicClient::concurrencyWindows($bodies, $maxConcurrency));
-    }
-
-    /**
-     * @param array<array-key,array<string,mixed>> $bodies
-     * @return array<array-key,array{ok:bool,text?:string,input?:int,output?:int,error?:string,transient?:bool,retry_without?:string,retry_after_at?:int,time?:float,stop_reason?:?string}>
-     */
-    private function streamChunk(array $bodies): array
-    {
-        $multi = curl_multi_init();
-        $handles = [];
         $raw = [];
         $retryAfterDeadlines = [];
-        foreach ($bodies as $key => $body) {
+
+        $buildHandle = function (string|int $key, array $body) use (&$raw, &$retryAfterDeadlines): \CurlHandle {
             $raw[$key] = '';
             $ch = curl_init($this->endpoint);
             $options = [
@@ -567,31 +578,16 @@ final class OpenAiCompatibleClient implements Llm
                 };
             }
             curl_setopt_array($ch, $options);
-            $handles[$key] = $ch;
-            curl_multi_add_handle($multi, $ch);
-        }
+            return $ch;
+        };
 
-        do {
-            $status = curl_multi_exec($multi, $running);
-            if ($running && curl_multi_select($multi, 1.0) === -1) {
-                usleep(1000);
-            }
-        } while ($running && $status === CURLM_OK);
-
-        $out = [];
-        foreach ($handles as $key => $ch) {
-            $errno  = curl_errno($ch);
-            $error  = curl_error($ch);
-            $httpStatus = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            $time   = (float) curl_getinfo($ch, CURLINFO_TOTAL_TIME);
-            curl_multi_remove_handle($multi, $ch);
-            curl_close($ch);
+        $classify = function (string|int $key, \CurlHandle $ch, int $httpStatus) use (&$raw, &$retryAfterDeadlines): array {
             $outcome = self::interpretStream(
                 $raw[$key],
-                $errno,
-                $error,
+                curl_errno($ch),
+                curl_error($ch),
                 $httpStatus,
-                $time,
+                (float) curl_getinfo($ch, CURLINFO_TOTAL_TIME),
                 true,
                 $this->provider,
             );
@@ -605,11 +601,11 @@ final class OpenAiCompatibleClient implements Llm
                     $outcome['retry_after_at'] = $retryAfterDeadline;
                 }
             }
-            $out[$key] = $outcome;
-        }
+            unset($raw[$key], $retryAfterDeadlines[$key]);
+            return $outcome;
+        };
 
-        curl_multi_close($multi);
-        return $out;
+        return (new CurlMultiPool())->run($bodies, $buildHandle, $classify, $this->maxConcurrency);
     }
 
     /**
@@ -667,12 +663,12 @@ final class OpenAiCompatibleClient implements Llm
                 : self::isLegacyTransientStreamError($parsed);
             return ['ok' => false, 'transient' => $transient, 'error' => "stream error: {$parsed['error']}", 'time' => $time];
         }
-        $terminationError = JsonBatchRecovery::terminationError($parsed['stop_reason']);
+        $terminationError = StopReasons::terminationError($parsed['stop_reason']);
         // Batch callers preserve abnormal terminal responses so
         // TextBatchRecovery / JsonBatchRecovery can selectively regenerate
         // only the affected member. Keep the explicit false mode for callers
         // that need the legacy immediate rejection policy.
-        if (!$preserveAbnormalTerminal && self::isTruncationStopReason($parsed['stop_reason'])) {
+        if (!$preserveAbnormalTerminal && StopReasons::isTruncation($parsed['stop_reason'])) {
             return [
                 'ok' => false,
                 'transient' => false,
@@ -700,7 +696,7 @@ final class OpenAiCompatibleClient implements Llm
 
     private static function isTransientCurl(int $errno): bool
     {
-        return in_array($errno, [6, 7, 28, 35, 52, 55, 56], true);
+        return in_array($errno, TransientApiException::TRANSIENT_CURL_ERRNOS, true);
     }
 
     private static function isTransientStatus(int $status, string $provider = 'openai'): bool
@@ -789,9 +785,12 @@ final class OpenAiCompatibleClient implements Llm
     private function requestWithRetry(array &$body, bool $tolerateEmpty = false): array
     {
         $retryAfterDeadline = null;
-        $transport = function (array $requestBody) use (&$retryAfterDeadline): array {
-            return $this->streamRequest($requestBody, $retryAfterDeadline);
-        };
+        $transport = $this->singleTransport;
+        if ($transport === null) {
+            $transport = function (array $requestBody) use (&$retryAfterDeadline): array {
+                return $this->streamRequest($requestBody, $retryAfterDeadline);
+            };
+        }
         $retryDelay = null;
         if ($this->provider === 'openrouter') {
             $retryDelay = static function (int $fallback) use (&$retryAfterDeadline): int {
@@ -809,6 +808,8 @@ final class OpenAiCompatibleClient implements Llm
             $tolerateEmpty,
             $this->provider === 'openrouter',
             $retryDelay,
+            null,
+            $this->provider === 'openrouter' && !$tolerateEmpty,
         );
     }
 
@@ -827,6 +828,8 @@ final class OpenAiCompatibleClient implements Llm
      * @param null|callable(int):int $retryDelay Resolve a provider-specific
      *        wait from the configured fallback after a transient failure.
      * @param null|callable(int):void $sleeper Test seam; defaults to sleep().
+     * @param bool $surfaceTruncatedPartial Return a non-empty truncated result
+     *        so caller-owned continuation recovery can append to it.
      * @return array{text:string,input:int,output:int,time:float,stop_reason?:?string}
      */
     public static function retrySingleRequest(
@@ -837,8 +840,12 @@ final class OpenAiCompatibleClient implements Llm
         bool $recoverTerminalReasons = false,
         ?callable $retryDelay = null,
         ?callable $sleeper = null,
+        bool $surfaceTruncatedPartial = false,
     ): array
     {
+        $sleeper ??= static function (int $seconds): void {
+            sleep($seconds);
+        };
         $attempt = 0;
         $retriedTruncation = false;
         while (true) {
@@ -846,15 +853,17 @@ final class OpenAiCompatibleClient implements Llm
                 $result = $transport($body);
                 $empty = trim($result['text']) === '';
                 $stopReason = $result['stop_reason'] ?? null;
-                $normalizedStopReason = is_string($stopReason) ? trim($stopReason) : '';
-                $probeReachedOutputLimit = in_array(
-                    $normalizedStopReason,
-                    ['length', 'max_tokens'],
-                    true,
-                );
+                // Deliberately narrower than isTruncation — see StopReasons::OUTPUT_LIMIT.
+                $probeReachedOutputLimit = StopReasons::isOutputLimit($stopReason);
                 $terminationError = $recoverTerminalReasons
-                    ? JsonBatchRecovery::terminationError($stopReason)
+                    ? StopReasons::terminationError($stopReason)
                     : null;
+                if ($surfaceTruncatedPartial
+                    && !$empty
+                    && TextBatchRecovery::isTruncation($stopReason)
+                ) {
+                    return $result;
+                }
                 if ($terminationError !== null && !($tolerateEmpty && $probeReachedOutputLimit)) {
                     if ($probeReachedOutputLimit && !$retriedTruncation) {
                         $newBudget = self::prepareSingleTruncationRetry($body);
@@ -881,11 +890,7 @@ final class OpenAiCompatibleClient implements Llm
                     : max($fallback, (int) $retryDelay($fallback));
                 $attempt++;
                 Narrator::write("    (transient API error: {$e->getMessage()}; retry {$attempt} in {$wait}s)\n");
-                if ($sleeper !== null) {
-                    $sleeper($wait);
-                } else {
-                    sleep($wait);
-                }
+                $sleeper($wait);
             } catch (\RuntimeException $e) {
                 $param = self::rejectedParam($e->getMessage());
                 if ($param === null || !array_key_exists($param, $body)) {
@@ -1231,12 +1236,6 @@ final class OpenAiCompatibleClient implements Llm
             'error_type'  => $errorType,
             'stop_reason' => $stopReason,
         ];
-    }
-
-    private static function isTruncationStopReason(mixed $reason): bool
-    {
-        return is_string($reason)
-            && in_array(trim($reason), ['max_tokens', 'length', 'model_context_window_exceeded'], true);
     }
 
     private static function truncate(string $s, int $max = 300): string

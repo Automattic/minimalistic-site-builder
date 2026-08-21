@@ -1,8 +1,13 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/../FakeFontFetcher.php';
+
 use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\AboveFoldPartFacts;
 use Automattic\SiteBuild\BlockFixers;
+use Automattic\SiteBuild\ContrastMath;
+use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\SiteBuilder;
 use Automattic\SiteBuild\Steps\SectionRhythmStep;
@@ -24,7 +29,23 @@ function make_integration_builder(FakeLlm $llm, string $outputRoot): SiteBuilder
         outputRoot: $outputRoot,
         blockFixer: BlockFixers::default(),
         models: [],
+        fontFetcher: new \Automattic\SiteBuild\Tests\FakeFontFetcher(),
     );
+}
+
+function blocks_integration_pipeline(SiteBuilder $builder): \Automattic\SiteBuild\BuildPipeline
+{
+    $previous = getenv('SITE_BUILD_HTML_FIRST');
+    // Env::get falls back to the .env map bootstrap.php loads, so clearing the
+    // process env alone leaves a developer's SITE_BUILD_HTML_FIRST=1 in force.
+    putenv('SITE_BUILD_HTML_FIRST=0');
+    try {
+        return $builder->pipeline();
+    } finally {
+        $previous === false
+            ? putenv('SITE_BUILD_HTML_FIRST')
+            : putenv('SITE_BUILD_HTML_FIRST=' . $previous);
+    }
 }
 
 test('full pipeline produces a structurally valid theme and content plugin', function () {
@@ -57,15 +78,29 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
         'title' => 'Hearth & Grain',
         'description' => 'Editorial-magazine warmth, 1970s print feel. Earthy neutrals, one electric accent; serif display over grotesque body. Avoid the centered all-sans hero.',
         'palette' => ['base' => '#FDF6EC', 'contrast' => '#2B2118', 'primary' => '#8A5A2B', 'secondary' => '#CC9988', 'accent' => '#E08A3C'],
-        'type' => ['heading' => 'Fraunces 700/900', 'body' => 'Source Sans 3 400/600'],
+        'type' => [
+            'heading' => [
+                'family' => 'Fraunces',
+                'weights' => [700, 900],
+                'italic' => false,
+                'axes' => [],
+                'character' => 'warm display serif',
+            ],
+            'body' => [
+                'family' => 'Source Sans 3',
+                'weights' => [400, 600],
+                'italic' => false,
+                'axes' => [],
+                'character' => 'clear editorial sans',
+            ],
+        ],
         'image_grade' => 'warm kodachrome color, soft golden light, gentle film grain',
         'motion' => 'calm',
         'motion_note' => 'Let the hero settle gently and keep card hover restrained.',
-        'signature_device' => 'hairline rules with small caps folios',
-        'hero_composition' => 'full-bleed bakery photo, headline pinned lower-left',
+        'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
     ]]);
     // Concurrent group, request order is [theme-json, page-plan(home), page-plan(menu)]:
-    // theme-json (json) — design decisions made inline, no design.md
+    // theme-json (json) — translates the committed design direction into tokens
     $llm->queueJson([
         'settings' => [
             'color' => ['palette' => [
@@ -83,13 +118,16 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     ]);
     // page-plan home (json) — ordered list of the front page's sections
     $llm->queueJson(['sections' => [
-        ['slug' => 'hero', 'title' => 'Hero', 'role' => 'hero', 'type' => 'immersive-welcome', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the base specials grid below.'],
-        ['slug' => 'specials', 'title' => 'Specials', 'role' => 'closing', 'type' => 'seasonal-specials', 'layout_archetype' => 'equal-card-grid', 'background' => 'base', 'vertical_density' => 'compact', 'handoff' => 'Between the image hero above and the footer below.'],
+        ['slug' => 'hero', 'title' => 'Hero', 'role' => 'hero', 'type' => 'immersive-welcome', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the contrast overview split below.', 'primary_action' => null],
+        // A third planned section keeps the front plan above the deterministic
+        // thin-plan padding threshold, so parts map 1:1 to the queued texts.
+        ['slug' => 'overview', 'title' => 'Overview', 'role' => 'content', 'type' => 'bakery-story', 'layout_archetype' => 'asymmetric-split', 'background' => 'contrast', 'vertical_density' => 'standard', 'handoff' => 'Between the image hero above and the base specials grid below.', 'primary_action' => null],
+        ['slug' => 'specials', 'title' => 'Specials', 'role' => 'closing', 'type' => 'seasonal-specials', 'layout_archetype' => 'equal-card-grid', 'background' => 'base', 'vertical_density' => 'compact', 'handoff' => 'Between the contrast overview split above and the footer below.', 'primary_action' => null],
     ]]);
     // page-plan menu (json) — the interior page's sections
     $llm->queueJson(['sections' => [
-        ['slug' => 'menu-hero', 'title' => 'Our Menu', 'role' => 'hero', 'type' => 'menu-introduction', 'layout_archetype' => 'centered-stack', 'background' => 'tinted', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the base bread list below.'],
-        ['slug' => 'breads', 'title' => 'Breads', 'role' => 'closing', 'type' => 'bread-catalog', 'layout_archetype' => 'list-with-thumbnails', 'background' => 'base', 'vertical_density' => 'compact', 'handoff' => 'Between the tinted page hero above and the footer below.'],
+        ['slug' => 'menu-hero', 'title' => 'Our Menu', 'role' => 'hero', 'type' => 'menu-introduction', 'layout_archetype' => 'centered-stack', 'background' => 'tinted', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the base bread list below.', 'primary_action' => null],
+        ['slug' => 'breads', 'title' => 'Breads', 'role' => 'closing', 'type' => 'bread-catalog', 'layout_archetype' => 'list-with-thumbnails', 'background' => 'base', 'vertical_density' => 'compact', 'handoff' => 'Between the tinted page hero above and the footer below.', 'primary_action' => null],
     ]]);
     // sections (raw markup) — disposable cache probe, then header, footer,
     // home's parts, and menu's parts in requests() order
@@ -110,6 +148,13 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
         . '<!-- wp:heading {"level":1,"textColor":"base"} --><h1 class="wp-block-heading has-base-color has-text-color">Hero</h1><!-- /wp:heading -->'
         . '</div><!-- /wp:group -->'
         . '</div></div><!-- /wp:cover -->'
+        . '</div><!-- /wp:group -->'
+    );
+    $llm->queueText(
+        '<!-- wp:group {"backgroundColor":"contrast","textColor":"base","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group has-contrast-background-color has-base-color has-text-color has-background">'
+        . '<!-- wp:heading --><h2>Our Story</h2><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>Artisan bread baked daily.</p><!-- /wp:paragraph -->'
         . '</div><!-- /wp:group -->'
     );
     // The specials section opts into one generated layout utility (overlap-up)
@@ -150,18 +195,28 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     $llm->queueText(
         ".overlap-up {\n    margin-top: -4rem;\n    position: relative;\n    z-index: 2;\n}"
     );
-    // fonts-php (text) — the generated fonts module; must cover the scanned
-    // 400/700 floor for both theme.json families or the step falls back.
-    $llm->queueText(
-        "<?php\nadd_action('enqueue_block_assets', function () {\n"
-        . "    wp_enqueue_style('preconnect-gfonts', 'https://fonts.gstatic.com', array(), null);\n"
-        . "    wp_enqueue_style('demo-fonts', 'https://fonts.googleapis.com/css2?family=Fraunces:wght@400;700&family=Source+Sans+3:wght@400;700&display=swap', array(), null);\n"
-        . "});\n"
-    );
-
     $builder = make_integration_builder($llm, $tmp);
-    $project = $builder->createProject('A cozy neighborhood bakery', 'demo', multiPage: true);
-    $builder->pipeline()->runThrough($project);
+    $project = $builder->createProject(
+        'A cozy neighborhood bakery',
+        'demo',
+        multiPage: true,
+        designConstraints: [
+            'allowed_hero_media_modes' => ['cover-image'],
+            'max_hero_images' => 1,
+            'hero_copy_capacity' => 'compact',
+        ],
+    );
+    $project->writeText('design/site.css', '/* STALE-HTML-FIRST-CSS */');
+    // The queued fixture responses script a cinematic-safe-zone build, but
+    // the cover+compact constraint pool now holds two recipes (BIGR-775
+    // downgraded layered-poster to compact) and the stable identifier is a
+    // uniqid temp path — pin the recipe so selection stays deterministic.
+    putenv('HERO_RECIPE=cinematic-safe-zone');
+    try {
+        blocks_integration_pipeline($builder)->runThrough($project);
+    } finally {
+        putenv('HERO_RECIPE');
+    }
 
     $problems = ThemeValidator::validate($project);
     assert_eq([], $problems, 'theme should validate; problems: ' . implode('; ', $problems));
@@ -170,18 +225,135 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
 
     // Identity propagated end to end — theme AND content plugin.
     assert_contains('Theme Name: Hearth & Crumb', $project->readText('theme/style.css'));
+    assert_true(
+        !str_contains($project->readText('theme/style.css'), 'STALE-HTML-FIRST-CSS'),
+        'the default blocks graph ignores stale HTML-first CSS',
+    );
+    assert_true($project->exists('logs/contrast-report.txt'), 'blocks-path contrast fix still runs');
+    assert_true($project->exists('logs/motion-sanity.txt'), 'blocks-path motion fix still runs');
+    assert_true(
+        !isset(($project->readJson('warnings.json'))['fixup_skipped']),
+        'blocks-path fixups never inherit stale HTML-first skip mode',
+    );
     assert_contains('Plugin Name: Hearth & Crumb Content', $project->readText('plugin/site-content.php'));
     assert_eq(3, $project->readJson('theme/theme.json')['version']);
+
+    // The two-page composition benefits from persistent navigation, while its
+    // mixed opening treatments make an overlay unsafe. The deterministic
+    // resolver therefore commits a closed sticky-soft contract whose palette
+    // pair remains readable in both visual states.
+    $headerBehavior = $project->readJson('headerBehavior.json');
+    assert_eq([
+        'behavior',
+        'mode',
+        'transition',
+        'topSurface',
+        'scrolledSurface',
+        'foreground',
+        'topTreatment',
+        'scrolledTreatment',
+    ], array_keys($headerBehavior), 'header behavior artifact is closed');
+    assert_eq('sticky-soft', $headerBehavior['behavior']);
+    assert_eq('stacked', $headerBehavior['mode']);
+    // The image-led home opening rules out a verifiable transparent start, but
+    // the light base tint at GLASS_ALPHA stays readable under the dark
+    // foreground for any content, so the resolver grants a frosted top state;
+    // the scrolled tint cannot make the same guarantee and stays solid.
+    assert_eq('glass', $headerBehavior['topTreatment']);
+    assert_eq('solid', $headerBehavior['scrolledTreatment']);
+    assert_true(in_array($headerBehavior['transition'], ['smooth', 'instant'], true));
+    $headerPalette = array_column(
+        $project->readJson('theme/theme.json')['settings']['color']['palette'],
+        'color',
+        'slug',
+    );
+    foreach (['topSurface', 'scrolledSurface', 'foreground'] as $field) {
+        assert_true(isset($headerPalette[$headerBehavior[$field]]), "{$field} is a canonical palette slug");
+    }
+    $headerForeground = ContrastMath::hexToRgb($headerPalette[$headerBehavior['foreground']]);
+    assert_true($headerForeground !== null, 'header foreground resolves to RGB');
+    foreach (['topSurface', 'scrolledSurface'] as $surfaceField) {
+        $surface = ContrastMath::hexToRgb($headerPalette[$headerBehavior[$surfaceField]]);
+        assert_true($surface !== null, "{$surfaceField} resolves to RGB");
+        assert_true(
+            ContrastMath::ratio($headerForeground, $surface) >= ContrastMath::NORMAL_TEXT,
+            "header foreground clears 4.5:1 on {$surfaceField}",
+        );
+    }
+
+    $headerMarkup = $project->readText('theme/parts/header.html');
+    foreach ([
+        'header-behavior-sticky-soft',
+        'header-start-' . $headerBehavior['topSurface'],
+        'header-scrolled-' . $headerBehavior['scrolledSurface'],
+        'header-foreground-' . $headerBehavior['foreground'],
+        'header-top-' . $headerBehavior['topTreatment'],
+    ] as $class) {
+        assert_contains($class, $headerMarkup, "header carries canonical {$class} hook");
+    }
+    assert_true(
+        !str_contains($headerMarkup, 'header-scrolled-glass'),
+        'a solid scrolled treatment ships no glass hook',
+    );
+    if ($headerBehavior['transition'] === 'instant') {
+        assert_contains('header-transition-instant', $headerMarkup);
+    } else {
+        assert_true(!str_contains($headerMarkup, 'header-transition-instant'), 'smooth transition has no instant hook');
+    }
+    assert_true(!str_contains($headerMarkup, 'header-overlay'), 'legacy inner overlay positioning is absent');
+    $headerBlocks = BlockMarkup::parse($headerMarkup);
+    $headerTop = $headerBlocks->topLevel();
+    assert_true($headerTop !== null, 'header has a top-level block');
+    $headerRoot = $headerBlocks->attrs($headerTop);
+    assert_true(!isset($headerRoot['style']['position']), 'outer template-part owns sticky positioning');
+
+    $pageTemplate = $project->readText('theme/templates/page.html');
+    assert_contains(
+        '"className":"site-header-shell site-header-shell--sticky-soft"',
+        $pageTemplate,
+    );
+    $indexTemplate = $project->readText('theme/templates/index.html');
+    assert_contains(
+        '"className":"site-header-shell site-header-shell--sticky-soft"',
+        $indexTemplate,
+    );
+    assert_true(!str_contains($indexTemplate, 'site-header-shell--overlay-to-solid'), 'blog index never starts transparent');
+    assert_true($project->exists('theme/assets/header/header.css'), 'trusted header stylesheet ships');
+    assert_true($project->exists('theme/assets/header/header.js'), 'trusted header driver ships');
+    $headerValidationWarnings = array_values(array_filter(
+        $project->readJson('warnings.json')['validate-theme'] ?? [],
+        static fn (string $warning): bool => str_starts_with($warning, 'header behavior contract:'),
+    ));
+    assert_eq([], $headerValidationWarnings, 'final validation accepts the resolved header contract');
 
     // Structural role is constrained independently while semantic section
     // types remain open-ended and survive the complete pipeline.
     $plannedPages = $project->readJson('pages.json')['pages'];
-    assert_eq(['hero', 'closing'], array_column($plannedPages[0]['sections'], 'role'));
-    assert_eq(['immersive-welcome', 'seasonal-specials'], array_column($plannedPages[0]['sections'], 'type'));
+    assert_eq(['hero', 'content', 'closing'], array_column($plannedPages[0]['sections'], 'role'));
+    assert_eq(['immersive-welcome', 'bakery-story', 'seasonal-specials'], array_column($plannedPages[0]['sections'], 'type'));
 
     // Every page's content was inlined into the plugin in plan order, and the
     // transient page parts left the theme.
     $home = $project->readText('plugin/pages/home.html');
+    $direction = $project->readJson('designDirection.json');
+    assert_eq('cinematic-safe-zone', $direction['hero_blueprint']['recipe']);
+    $aboveFold = $project->readJson('aboveFold.json');
+    assert_eq('final', $aboveFold['phase']);
+    assert_eq('cinematic-safe-zone', $aboveFold['recipe']);
+    assert_eq('stacked', $aboveFold['header']['mode'], 'the tinted interior opening rules out one global overlay');
+    assert_eq(null, $aboveFold['primary_action']);
+    assert_contains('hero-composition--cinematic-safe-zone', $home);
+    assert_contains('hero-mobile--stack-media-first', $home);
+    $headerFacts = AboveFoldPartFacts::headerFacts($project->readText('theme/parts/header.html'));
+    assert_eq($aboveFold['header']['mode'], $headerFacts['mode']);
+    assert_eq($aboveFold['header']['archetype'], $headerFacts['archetype']);
+    assert_true(
+        !str_contains(
+            implode("\n", $project->readJson('warnings.json')['validate-theme'] ?? []),
+            'above-fold final validation',
+        ),
+        'downstream serialization preserves the final above-fold contract',
+    );
     assert_contains('>Hero<', $home);
     assert_true(strpos($home, 'Hero') < strpos($home, 'Specials'), 'home sections in plan order');
     assert_contains('>Breads<', $project->readText('plugin/pages/menu.html'));
@@ -212,7 +384,8 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
 
     // The rhythm pass owned each section root's vertical spacing before the
     // markup moved into the plugin: judge the assembled home page's chunks.
-    [$heroHtml, $specialsHtml] = SectionRhythmStep::splitTopLevel($home);
+    [$heroHtml, $overviewHtml, $specialsHtml] = SectionRhythmStep::splitTopLevel($home);
+    assert_contains('Our Story', $overviewHtml, 'the planned middle section survives assembly in order');
     assert_contains('hero-entrance', $heroHtml, 'first section keeps its page-load entrance');
     assert_contains('ken-burns', $heroHtml, 'first section keeps the page ambient effect');
     $heroBlocks = BlockMarkup::parse($heroHtml);
@@ -260,26 +433,51 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
         'appendix appended after the theme header'
     );
 
-    // fonts-php accepted the model's module; finalize-theme wrote the
-    // deterministic loader that enqueues style.css (block themes don't load
-    // it automatically) and require_once's fonts.php.
-    assert_contains('fonts.googleapis.com', $project->readText('theme/fonts.php'));
+    // bundle-fonts shipped every Google family as theme assets declared in
+    // theme.json, so no fonts.php exists and nothing hotlinks Google; the
+    // guarded require in functions.php keeps the fontless theme valid.
+    assert_true(!is_file($project->themePath('fonts.php')), 'all families bundled; no fonts.php');
+    $bundledTheme = $project->readJson('theme/theme.json');
+    $bundledFaces = [];
+    foreach ($bundledTheme['settings']['typography']['fontFamilies'] as $bundledFamily) {
+        foreach ($bundledFamily['fontFace'] ?? [] as $bundledFace) {
+            $bundledFaces[] = $bundledFace['src'][0];
+            assert_true(str_starts_with($project->readText(
+                'theme/' . str_replace('file:./', '', $bundledFace['src'][0])
+            ), 'FONTBYTES:'));
+        }
+    }
+    assert_true($bundledFaces !== [], 'the Google families carry bundled fontFace entries');
+    // The committed direction is a floor for bundling too: these weights appear
+    // in no markup, only in designDirection.json, yet their faces must ship.
+    $bundledSrcs = implode(' ', $bundledFaces);
+    assert_contains(
+        'fraunces-900',
+        $bundledSrcs,
+        'direction-selected heading weight is bundled without explicit markup usage',
+    );
+    assert_contains(
+        'source-sans-3-600',
+        $bundledSrcs,
+        'direction-selected body weight is bundled without explicit markup usage',
+    );
     $functions = $project->readText('theme/functions.php');
     assert_contains('get_stylesheet_uri()', $functions);
-    assert_contains("require_once __DIR__ . '/fonts.php'", $functions);
-    assert_true(!str_contains($functions, 'googleapis'), 'fonts stay in fonts.php');
+    assert_contains("get_theme_file_uri('assets/header/header.css')", $functions);
+    assert_contains("get_theme_file_uri('assets/header/header.js')", $functions);
+    assert_true(!str_contains($functions, 'googleapis'), 'nothing hotlinks Google');
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
 test('pipeline step order is correct', function () {
     $tmp = sys_get_temp_dir() . '/builder_int_order_' . uniqid();
-    $ids = make_integration_builder(new FakeLlm(), $tmp)->pipeline()->stepIds();
+    $ids = blocks_integration_pipeline(make_integration_builder(new FakeLlm(), $tmp))->stepIds();
     assert_eq([
         'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
-        'theme-json+page-plan', 'sections', 'section-rhythm',
+        'theme-json+page-plan', 'reconcile-palette', 'sections', 'section-rhythm', 'copy-dedupe',
         'collect-images', 'normalize-layout', 'header-hero', 'contrast-fix', 'motion-sanity', 'fix-blocks', 'assemble-pages', 'page-styles', 'custom-motion',
-        'fonts-php', 'finalize-theme', 'validate-theme',
+        'bundle-fonts', 'fonts-php', 'finalize-theme', 'theme-screenshot', 'validate-theme',
     ], $ids);
     exec('rm -rf ' . escapeshellarg($tmp));
 });

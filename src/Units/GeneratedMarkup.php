@@ -6,13 +6,26 @@ namespace Automattic\SiteBuild\Units;
 use Automattic\SiteBuild\BlockCommentRepair;
 use Automattic\SiteBuild\BlockDocumentRecovery;
 use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\BlockSerializer\Json\JsJsonEncoder;
+use Automattic\SiteBuild\BlockSerializer\Json\JsonDecoder;
+use Automattic\SiteBuild\BlockSerializer\Json\JsonObject;
+use Automattic\SiteBuild\BlockSerializer\Json\JsonValue;
+use Automattic\SiteBuild\CodeFences;
+use Automattic\SiteBuild\HtmlBlockContext;
 use Automattic\SiteBuild\MarkupSalvage;
 use Automattic\SiteBuild\MarkupSanitizer;
 use Automattic\SiteBuild\Narrator;
+use Automattic\SiteBuild\Warnings;
 
 /** Project-free normalization shared by every generated markup unit. */
 final class GeneratedMarkup
 {
+    /** Generated blocks whose primary rendered purpose is copy, not a surface. */
+    private const COPY_BLOCKS = [
+        'heading', 'paragraph', 'list', 'list-item', 'quote', 'pullquote', 'verse',
+        'site-title', 'site-tagline', 'post-title',
+    ];
+
     /**
      * Strip an accidental code fence, require block markup, repair common
      * malformed preset references, strip script-capable markup, and salvage a
@@ -20,40 +33,153 @@ final class GeneratedMarkup
      * untrusted model output headed for templates and stored post content, so
      * this is the one intake it all passes through.
      *
-     * $notes receives one "part '<key>': …" line per removal or degradation
-     * that changed the delivered content (sanitizer strips, wrapper recovery,
+     * $warnings receives one actionable row per removal or degradation that
+     * changed delivered content (sanitizer strips, wrapper recovery, lossy
      * truncation salvage). Callers with a Project route them to warnings.json;
      * every note is also narrated for live visibility.
      *
-     * $repairs receives lossless block-grammar corrections only after the
-     * repaired document passes every strict gate. Callers keep these in a
-     * repair report rather than warnings.json because no authored value was
-     * lost.
+     * $repairs receives structured rows for semantics-preserving fixes. Those
+     * rows belong in a step report or narration, never warnings.json.
+     *
+     * @param list<string>              $warnings
+     * @param list<array<string,mixed>> $repairs
      */
+    /**
+     * Apply one delimiter repair only where the delimiter view stays visible.
+     *
+     * A malformed delimiter inside `<pre>`, `<code>`, a script, or a non-block
+     * comment is a literal example the response was asked to show, not markup
+     * to fix — "repairing" it rewrites displayed content. The view masks those
+     * spans to spaces without changing length, so a byte that survives masking
+     * is transparent. Segments are repaired independently and concatenated:
+     * masked bytes pass through verbatim, and the whitespace-only segments the
+     * split leaves inside an opaque span cannot match a repair that requires
+     * `<!--`, so the span is reproduced byte for byte.
+     *
+     * @param list<string> $notes
+     * @param callable(string, list<string>): string $repair
+     */
+    private static function repairOutsideOpaqueContexts(
+        string $text,
+        array &$notes,
+        callable $repair
+    ): string {
+        $view = HtmlBlockContext::delimiterView($text);
+        if ($view === $text) {
+            return $repair($text, $notes);
+        }
+        $out = '';
+        $length = strlen($text);
+        $start = 0;
+        while ($start < $length) {
+            $opaque = $view[$start] !== $text[$start];
+            $end = $start;
+            while ($end < $length && (($view[$end] !== $text[$end]) === $opaque)) {
+                $end++;
+            }
+            $segment = substr($text, $start, $end - $start);
+            $out .= $opaque ? $segment : $repair($segment, $notes);
+            $start = $end;
+        }
+        return $out;
+    }
+
     public static function normalize(
         string $text,
         string $key,
-        array &$notes = [],
-        array &$repairs = [],
-    ): string {
-        $record = static function (string $note) use ($key, &$notes): void {
+        array &$warnings = [],
+        array &$repairs = []
+    ): string
+    {
+        $record = static function (string $note) use ($key, &$warnings): void {
             Narrator::write("    (part '{$key}': {$note})\n");
-            $notes[] = "part '{$key}': {$note}";
-        };
-        $recordRepair = static function (string $note) use ($key, &$repairs): void {
-            Narrator::write("    (part '{$key}': repaired block grammar — {$note})\n");
-            $repairs[] = "part '{$key}': {$note}";
+            $warnings[] = "file='theme/parts/{$key}.html'; block='generated part intake'; authored="
+                . (string) json_encode($note, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+                . '; delivered="normalized surviving markup"; disposition=unsafe, incomplete, or displaced '
+                . 'generated bytes were removed at the smallest safe intake boundary and the usable part continued';
         };
 
         // Sanitize the whole response before looking for a document boundary:
         // block-looking comments inside a script body are not payload.
         $sanitizerNotes = [];
-        $text = MarkupSanitizer::sanitize(self::stripFences(trim($text)), $sanitizerNotes);
+        $trimmed = trim($text);
+        $unfenced = CodeFences::strip($trimmed);
+        if ($unfenced !== $trimmed) {
+            $repairs[] = [
+                'code' => 'response-fence-removed',
+                'part' => $key,
+                'disposition' => 'repaired',
+            ];
+        }
+        $text = MarkupSanitizer::sanitize($unfenced, $sanitizerNotes);
         foreach ($sanitizerNotes as $note) {
             $record("sanitized script-capable markup — {$note}");
         }
+
+        // A single dropped `}` in one delimiter's attribute JSON otherwise
+        // poisons every containing frame and discards the whole part. Closing
+        // the object is bounded and idempotent; a key that consequently lands
+        // one nesting level deep is ignored by WordPress, which is strictly
+        // better than losing the section.
+        $attrsRepairs = [];
+        $text = self::repairOutsideOpaqueContexts(
+            $text,
+            $attrsRepairs,
+            static fn (string $part, array &$notes): string
+                => self::closeTruncatedDelimiterComment($part, $notes),
+        );
+        $text = self::repairOutsideOpaqueContexts(
+            $text,
+            $attrsRepairs,
+            static fn (string $part, array &$notes): string
+                => self::closeUnbalancedDelimiterAttrs($part, $notes),
+        );
+        foreach ($attrsRepairs as $note) {
+            Narrator::write("    (part '{$key}': {$note})\n");
+            $repairs[] = [
+                'code' => 'delimiter-attrs-braces-closed',
+                'part' => $key,
+                'authored' => $note,
+                'delivered' => 'parseable delimiter attributes',
+                'disposition' => 'repaired',
+            ];
+        }
+        $wrapperRepairs = [];
+        $text = self::repairOutsideOpaqueContexts(
+            $text,
+            $wrapperRepairs,
+            static fn (string $part, array &$notes): string
+                => self::closeUnbalancedWrapperClosers($part, $notes),
+        );
+        foreach ($wrapperRepairs as $note) {
+            Narrator::write("    (part '{$key}': {$note})\n");
+            $repairs[] = [
+                'code' => 'wrapper-closers-synthesized',
+                'part' => $key,
+                'authored' => $note,
+                'delivered' => 'balanced container shell',
+                'disposition' => 'repaired',
+            ];
+        }
+
+        // Runs after the brace repairs above, which already close missing and
+        // drop surplus closers. What is left for this pass is the defect class
+        // they cannot see: a typo-shaped closing delimiter directly after the
+        // block's real closer. Its attribute pass re-checks decodability, so
+        // anything already repaired above is skipped.
         $commentRepair = BlockCommentRepair::repair($text);
         $text = $commentRepair['markup'];
+        foreach ($commentRepair['notes'] as $note) {
+            Narrator::write("    (part '{$key}': repaired block grammar — {$note})\n");
+            $repairs[] = [
+                'code' => 'block-comment-grammar-repaired',
+                'part' => $key,
+                'authored' => $note,
+                'delivered' => 'well-formed block delimiters',
+                'disposition' => 'repaired',
+            ];
+        }
+
         $recoveryNotes = [];
         try {
             $markup = BlockDocumentRecovery::recover($text, $recoveryNotes);
@@ -63,7 +189,16 @@ final class GeneratedMarkup
         foreach ($recoveryNotes as $note) {
             $record($note);
         }
-        $markup = self::normalizePresetRefs(rtrim($markup));
+        $markup = rtrim($markup);
+        $normalizedPresets = self::normalizePresetRefs($markup);
+        if ($normalizedPresets !== $markup) {
+            $repairs[] = [
+                'code' => 'preset-reference-canonicalized',
+                'part' => $key,
+                'disposition' => 'repaired',
+            ];
+        }
+        $markup = $normalizedPresets;
 
         // A response cut off by the output-token ceiling (or otherwise left
         // structurally unclosed) is trimmed to its last complete block rather
@@ -75,8 +210,18 @@ final class GeneratedMarkup
         } catch (\RuntimeException $e) {
             throw new \RuntimeException("part '{$key}': {$e->getMessage()}");
         }
-        foreach ($salvage['notes'] as $note) {
+        foreach ($salvage['warnings'] as $note) {
             $record($note);
+        }
+        foreach ($salvage['repairs'] as $note) {
+            Narrator::write("    (part '{$key}': {$note})\n");
+            $repairs[] = [
+                'code' => 'truncated-markup-repaired',
+                'part' => $key,
+                'authored' => $note,
+                'delivered' => 'complete block markup',
+                'disposition' => 'repaired',
+            ];
         }
 
         try {
@@ -84,17 +229,440 @@ final class GeneratedMarkup
         } catch (\RuntimeException $e) {
             throw new \RuntimeException("part '{$key}': {$e->getMessage()}");
         }
-        foreach ($commentRepair['notes'] as $note) {
-            $recordRepair($note);
+        return self::stripTextBlockShadow($salvage['markup'], $key, $repairs, $warnings);
+    }
+
+    /**
+     * Remove box and text shadows from generated copy blocks.
+     *
+     * Shadow presets are surface atmosphere for media, cards, and covers. On
+     * a text block a box-shadow traces the block's bounding box, so an offset
+     * or multi-color preset renders as detached bars flanking the copy
+     * (audited: pulso5's "RGB Misregister" preset on the hero H1 drew a cyan
+     * rule left and an orange rule right of the headline). Typography
+     * textShadow is the same visual defect through a second executable style
+     * path. Remove both paths from headings, paragraphs, lists, and editorial
+     * quote blocks while retaining shadows on media and surface blocks.
+     *
+     * Comment JSON is decoded into typed objects and duplicate object keys are
+     * deep-merged before mutation. This keeps `{}` distinct from `[]` and
+     * prevents a later LayoutFixer duplicate-key merge from resurrecting a
+     * shadow that ordinary last-key-wins decoding hid. The corresponding
+     * inline declaration is removed in the same block transaction, so a later
+     * fix-blocks failure cannot leave the visible shadow behind.
+     *
+     * @param list<array<string,mixed>> $repairs
+     * @param list<string>              $warnings
+     */
+    public static function stripTextBlockShadow(
+        string $markup,
+        string $part,
+        array &$repairs = [],
+        array &$warnings = [],
+    ): string {
+        $document = BlockMarkup::parse($markup);
+        $ops = [];
+        $pendingWarnings = [];
+        $pendingRepairs = [];
+        $strippedBlocks = 0;
+        $strippedDeclarations = 0;
+        foreach ($document->indices() as $index) {
+            $name = $document->name($index);
+            $copyName = str_starts_with($name, 'core/') ? substr($name, strlen('core/')) : $name;
+            if (!in_array($copyName, self::COPY_BLOCKS, true)) {
+                continue;
+            }
+            $block = "wp:{$name}[{$index}]";
+            $blockOps = [];
+            $blockWarnings = [];
+            $blockRepairs = [];
+
+            try {
+                $decoded = self::typedBlockAttributes($document->openingComment($index));
+                $attrs = $decoded['attrs'] ?? null;
+
+                /** @var list<array{path:string,property:string,value:JsonValue}> $removed */
+                $removed = [];
+                $style = $attrs?->get('style');
+                if ($style instanceof JsonObject) {
+                    $shadow = $style->get('shadow');
+                    if (
+                        $style->has('shadow')
+                        && $shadow instanceof JsonValue
+                        && self::isHarmfulShadowValue($shadow)
+                    ) {
+                        $removed[] = ['path' => 'style.shadow', 'property' => 'box-shadow', 'value' => $shadow];
+                        $style->remove('shadow');
+                    }
+                    $typography = $style->get('typography');
+                    if ($typography instanceof JsonObject) {
+                        $textShadow = $typography->get('textShadow');
+                        if (
+                            $typography->has('textShadow')
+                            && $textShadow instanceof JsonValue
+                            && self::isHarmfulShadowValue($textShadow)
+                        ) {
+                            $removed[] = [
+                                'path' => 'style.typography.textShadow',
+                                'property' => 'text-shadow',
+                                'value' => $textShadow,
+                            ];
+                            $typography->remove('textShadow');
+                            if (count($typography) === 0) {
+                                $style->remove('typography');
+                            }
+                        }
+                    }
+                    if (count($style) === 0) {
+                        $attrs?->remove('style');
+                    }
+                }
+
+                // Inspect both visible properties even when comment attributes
+                // omit them. Inline-only shadows otherwise survive whenever a
+                // later block-fixer transaction abandons this file.
+                $ownHtml = $document->ownHtml($index);
+                $inline = self::withoutOwnInlineShadowDeclarations(
+                    $ownHtml,
+                    ['box-shadow', 'text-shadow'],
+                );
+                if ($removed === [] && $inline['html'] === $ownHtml) {
+                    continue;
+                }
+
+                // Stage the whole unit before publishing any op or warning.
+                // An exception below abandons only this block and retains its
+                // pre-transformation bytes.
+                if ($removed !== [] && $attrs instanceof JsonObject) {
+                    $opening = self::serializeTypedOpeningComment($name, $attrs, $document->isVoid($index));
+                    $blockOps[] = [
+                        'start' => $document->openingOffset($index),
+                        'length' => $document->openingLength($index),
+                        'content' => $opening,
+                    ];
+                    $mergedPaths = $decoded['mergedPaths'] ?? [];
+                    if ($mergedPaths !== []) {
+                        $blockRepairs[] = [
+                            'code' => 'duplicate-block-attribute-keys-merged',
+                            'part' => $part,
+                            'block' => $block,
+                            'paths' => $mergedPaths,
+                            'authored' => 'duplicate object keys in the generated block comment',
+                            'delivered' => 'one deep-merged typed JSON object retaining non-conflicting members',
+                            'disposition' => 'repaired',
+                        ];
+                    }
+                }
+                if ($inline['html'] !== $ownHtml) {
+                    $blockOps[] = [
+                        'start' => $document->openingOffset($index) + $document->openingLength($index),
+                        'length' => strlen($ownHtml),
+                        'content' => $inline['html'],
+                    ];
+                }
+
+                foreach ($removed as $declaration) {
+                    $blockWarnings[] = "file='theme/parts/{$part}.html'; block='{$block}'; authored "
+                        . $declaration['path'] . '=' . Warnings::value($declaration['value']->toNative())
+                        . '; delivered=removed; disposition=shadow styling was removed from generated copy while '
+                        . 'the block content and non-shadow styling were retained';
+                }
+                foreach ($inline['removedDeclarations'] as $declaration) {
+                    $blockWarnings[] = "file='theme/parts/{$part}.html'; block='{$block}'; authored saved HTML style."
+                        . $declaration['property'] . '=' . Warnings::value($declaration['value'])
+                        . '; delivered=removed; disposition=the visible inline shadow declaration was removed at '
+                        . 'intake so the delivered copy stays shadow-free even if later serialization stops';
+                }
+                foreach ($inline['removedMalformedStyles'] as $authoredStyle) {
+                    $blockWarnings[] = "file='theme/parts/{$part}.html'; block='{$block}'; authored saved HTML style="
+                        . Warnings::value($authoredStyle)
+                        . '; delivered=removed; disposition=the malformed inline style could not safely isolate its '
+                        . 'shadow declaration, so the smallest safe style attribute was removed with the copy retained';
+                }
+
+                array_push($ops, ...$blockOps);
+                array_push($pendingWarnings, ...$blockWarnings);
+                array_push($pendingRepairs, ...$blockRepairs);
+                $strippedBlocks++;
+                $strippedDeclarations += count($removed)
+                    + count($inline['removedDeclarations'])
+                    + count($inline['removedMalformedStyles']);
+            } catch (\InvalidArgumentException|\RuntimeException $error) {
+                $pendingWarnings[] = "file='theme/parts/{$part}.html'; block='{$block}'; authored shadow repair failure="
+                    . Warnings::value($error->getMessage())
+                    . '; delivered="original block bytes"; disposition=the block-local shadow transaction was '
+                    . 'abandoned without partial edits and the residual block was queued for later repair';
+            }
         }
-        return $salvage['markup'];
+        if ($ops === []) {
+            array_push($warnings, ...$pendingWarnings);
+            return $markup;
+        }
+
+        usort($ops, static fn (array $left, array $right): int => $right['start'] <=> $left['start']);
+        $out = $markup;
+        foreach ($ops as $op) {
+            $out = substr_replace($out, $op['content'], $op['start'], $op['length']);
+        }
+        array_push($warnings, ...$pendingWarnings);
+        array_push($repairs, ...$pendingRepairs);
+        $repairs[] = [
+            'code' => 'text-block-shadow-stripped',
+            'part' => $part,
+            'authored' => "{$strippedDeclarations} shadow declaration(s) across {$strippedBlocks} generated copy block(s)",
+            'delivered' => 'the same copy without box-shadow or text-shadow chrome',
+            'disposition' => 'repaired',
+        ];
+        return $out;
+    }
+
+    /**
+     * Decode one block opener without collapsing duplicate keys or JSON object
+     * shapes. Invalid authored JSON throws into the caller's block-local
+     * transaction; an attrs-less opener is the normal null case.
+     *
+     * @return array{attrs:JsonObject,mergedPaths:list<string>}|null
+     */
+    private static function typedBlockAttributes(string $opening): ?array
+    {
+        if (preg_match('/\s(?<attrs>\{.*\})\s+\/?-->\z/s', $opening, $match) !== 1) {
+            return null;
+        }
+        $decoder = new JsonDecoder($match['attrs'], mergeDuplicateObjectKeys: true);
+        $attrs = $decoder->decode();
+        if (!$attrs instanceof JsonObject) {
+            throw new \InvalidArgumentException('block comment attributes must decode to an object');
+        }
+        return ['attrs' => $attrs, 'mergedPaths' => $decoder->mergedDuplicateKeyPaths()];
+    }
+
+    private static function serializeTypedOpeningComment(string $name, JsonObject $attrs, bool $void): string
+    {
+        $json = count($attrs) === 0 ? '' : ' ' . JsJsonEncoder::serializeAttributes($attrs);
+        return '<!-- wp:' . $name . $json . ' ' . ($void ? '/' : '') . '-->';
+    }
+
+    /** Falsey/reset values cannot draw a shadow and need no repair or warning. */
+    private static function isHarmfulShadowValue(JsonValue $value): bool
+    {
+        $native = $value->toNative();
+        if (is_string($native) && self::isInertCssShadowValue($native)) {
+            return false;
+        }
+        return $native !== null && $native !== false && $native !== 0.0 && $native !== '';
+    }
+
+    private static function isInertCssShadowValue(string $value): bool
+    {
+        $withoutComments = preg_replace('~/\*.*?\*/~s', '', $value) ?? $value;
+        $withoutImportant = preg_replace('/\s*!important\s*\z/i', '', $withoutComments) ?? $withoutComments;
+        return in_array(
+            strtolower(trim($withoutImportant)),
+            ['', 'none', 'initial', 'unset', 'revert', 'revert-layer'],
+            true,
+        );
+    }
+
+    /**
+     * Remove selected declarations from the first saved-HTML tag owned by a
+     * block. A malformed style containing a target property is removed as one
+     * attribute; unrelated malformed attributes are left byte-identical.
+     *
+     * @param list<string> $properties
+     * @return array{
+     *   html:string,
+     *   removedDeclarations:list<array{property:string,value:string}>,
+     *   removedMalformedStyles:list<string>
+     * }
+     */
+    private static function withoutOwnInlineShadowDeclarations(string $ownHtml, array $properties): array
+    {
+        if (preg_match(
+            '~\A(?:(?:\s+)|(?:<!--(?:(?!-->).)*-->))*(?<tag><[a-z][a-z0-9:-]*(?=[\s>])'
+                . '(?:[^>"\']+|"[^"]*"|\'[^\']*\')*>)~is',
+            $ownHtml,
+            $opening,
+            PREG_OFFSET_CAPTURE,
+        ) !== 1) {
+            if (preg_match('/(?:box-shadow|text-shadow)\s*:/i', $ownHtml) === 1) {
+                throw new \RuntimeException('saved HTML shadow declaration has no safely isolated opening tag');
+            }
+            return ['html' => $ownHtml, 'removedDeclarations' => [], 'removedMalformedStyles' => []];
+        }
+
+        $tag = $opening['tag'][0];
+        $removedDeclarations = [];
+        $removedMalformedStyles = [];
+        $styles = self::htmlAttributes($tag, 'style');
+        for ($index = count($styles) - 1; $index >= 0; $index--) {
+            $style = $styles[$index];
+            $filtered = self::withoutInlineStyleProperties($style['value'], $properties);
+            if ($filtered === null) {
+                if (!self::containsInlineStyleProperty($style['value'], $properties)) {
+                    continue;
+                }
+                $removedMalformedStyles[] = $style['value'];
+                $replacement = '';
+            } elseif ($filtered['removed'] === []) {
+                continue;
+            } elseif (trim($filtered['style']) === '') {
+                array_push($removedDeclarations, ...$filtered['removed']);
+                $replacement = '';
+            } else {
+                array_push($removedDeclarations, ...$filtered['removed']);
+                $replacement = substr_replace(
+                    $style['attribute'],
+                    $filtered['style'],
+                    $style['valueOffset'] - $style['attributeOffset'],
+                    strlen($style['value']),
+                );
+            }
+            $tag = substr_replace(
+                $tag,
+                $replacement,
+                $style['attributeOffset'],
+                strlen($style['attribute']),
+            );
+        }
+
+        if ($tag === $opening['tag'][0]) {
+            return ['html' => $ownHtml, 'removedDeclarations' => [], 'removedMalformedStyles' => []];
+        }
+        return [
+            'html' => substr_replace($ownHtml, $tag, $opening['tag'][1], strlen($opening['tag'][0])),
+            'removedDeclarations' => $removedDeclarations,
+            'removedMalformedStyles' => $removedMalformedStyles,
+        ];
+    }
+
+    /**
+     * Remove CSS properties without splitting inside strings, comments, or
+     * function arguments. Null means the declaration list was malformed.
+     *
+     * @param list<string> $properties
+     * @return array{style:string,removed:list<array{property:string,value:string}>}|null
+     */
+    private static function withoutInlineStyleProperties(string $style, array $properties): ?array
+    {
+        $properties = array_fill_keys(array_map('strtolower', $properties), true);
+        $segments = [];
+        $start = 0;
+        $quote = null;
+        $parentheses = 0;
+        $inComment = false;
+        $length = strlen($style);
+        for ($index = 0; $index < $length; $index++) {
+            $character = $style[$index];
+            if ($inComment) {
+                if ($character === '*' && ($style[$index + 1] ?? '') === '/') {
+                    $inComment = false;
+                    $index++;
+                }
+                continue;
+            }
+            if ($quote !== null) {
+                if ($character === '\\') {
+                    if ($index + 1 >= $length) {
+                        return null;
+                    }
+                    $index++;
+                } elseif ($character === $quote) {
+                    $quote = null;
+                }
+                continue;
+            }
+            if ($character === '/' && ($style[$index + 1] ?? '') === '*') {
+                $inComment = true;
+                $index++;
+            } elseif ($character === '"' || $character === "'") {
+                $quote = $character;
+            } elseif ($character === '\\') {
+                if ($index + 1 >= $length) {
+                    return null;
+                }
+                $index++;
+            } elseif ($character === '(') {
+                $parentheses++;
+            } elseif ($character === ')') {
+                if ($parentheses === 0) {
+                    return null;
+                }
+                $parentheses--;
+            } elseif ($character === ';' && $parentheses === 0) {
+                $segments[] = ['declaration' => substr($style, $start, $index - $start), 'separator' => ';'];
+                $start = $index + 1;
+            }
+        }
+        if ($quote !== null || $inComment || $parentheses !== 0) {
+            return null;
+        }
+        $segments[] = ['declaration' => substr($style, $start), 'separator' => ''];
+
+        $out = '';
+        $removed = [];
+        foreach ($segments as $segment) {
+            $declaration = trim($segment['declaration']);
+            if ($declaration === '') {
+                $out .= $segment['declaration'] . $segment['separator'];
+                continue;
+            }
+            if (
+                preg_match(
+                    '/^(?:\/\*.*?\*\/\s*)*([\-\w]+)(?:\s|\/\*.*?\*\/)*:(.*)\z/s',
+                    $declaration,
+                    $property,
+                ) !== 1
+            ) {
+                return null;
+            }
+            if (
+                isset($properties[strtolower($property[1])])
+                && !self::isInertCssShadowValue($property[2])
+            ) {
+                $removed[] = [
+                    'property' => strtolower($property[1]),
+                    'value' => trim($property[2]),
+                ];
+                continue;
+            }
+            $out .= $segment['declaration'] . $segment['separator'];
+        }
+        return ['style' => $removed === [] ? $style : $out, 'removed' => $removed];
+    }
+
+    /** @param list<string> $properties */
+    private static function containsInlineStyleProperty(string $style, array $properties): bool
+    {
+        $pattern = implode('|', array_map(static fn (string $property): string => preg_quote($property, '~'), $properties));
+        if ($pattern === '' || preg_match_all(
+            '~(?:\A|;)\s*(?:/\*.*?\*/\s*)*(?:' . $pattern . ')(?:\s|/\*.*?\*/)*:(?<value>[^;]*)~is',
+            $style,
+            $matches,
+        ) === false) {
+            return false;
+        }
+        foreach ($matches['value'] as $value) {
+            if (is_string($value) && !self::isInertCssShadowValue($value)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
      * Ensure a header/footer top-level wp:group declares a constrained layout.
-     * An explicit layout is preserved.
+     * An explicit layout is preserved. A root whose carried CSS owns layout
+     * stays flow so WordPress does not re-constrain its children.
+     *
+     * This re-assertion runs after the block fixer, so it must recognize the
+     * same design-owned roots the normalization pass deliberately left flow.
+     * Otherwise it puts back the exact stamp that pass withheld, and the only
+     * thing standing between the fix and its own undoing is whether the file
+     * happened to fail its transformation and get rolled back.
+     *
+     * @param list<string> $wideMeasureRootClasses see wideMeasureSubjectClasses()
      */
-    public static function constrainedPart(string $markup): string
+    public static function constrainedPart(string $markup, array $wideMeasureRootClasses = []): string
     {
         if (preg_match('/^<!--\s*wp:group\s*(\{.*?\})?\s*-->/s', $markup, $m) !== 1) {
             return $markup;
@@ -103,9 +671,736 @@ final class GeneratedMarkup
         if (!is_array($attrs) || isset($attrs['layout'])) {
             return $markup;
         }
+        if (self::hasCssOwnedLayoutMarker($attrs)
+            || self::carriesAnyClassToken($attrs, $wideMeasureRootClasses)
+        ) {
+            return $markup;
+        }
         $attrs['layout'] = ['type' => 'constrained'];
         $json = json_encode($attrs, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         return '<!-- wp:group ' . $json . ' -->' . substr($markup, strlen($m[0]));
+    }
+
+    /** Whether block attributes carry the exact marker for CSS-owned layout. */
+    public static function hasCssOwnedLayoutMarker(array|object $attrs): bool
+    {
+        return in_array('blocks-engine-css-owned-layout', self::attrClassTokens($attrs), true);
+    }
+
+    /**
+     * Whether block attributes carry any of the given class tokens. The caller
+     * supplies tokens derived from the design's own stylesheet, so a match is
+     * positive evidence about that specific build rather than a guess.
+     *
+     * @param list<string> $tokens
+     */
+    public static function carriesAnyClassToken(array|object $attrs, array $tokens): bool
+    {
+        if ($tokens === []) {
+            return false;
+        }
+        $carried = array_fill_keys(self::attrClassTokens($attrs), true);
+        foreach ($tokens as $token) {
+            if (isset($carried[$token])) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Classes the design's own stylesheet gives the wide inline measure — and
+     * that own it themselves, rather than merely qualifying an ancestor of the
+     * element that does.
+     *
+     * Steps\SectionLayoutStep::wideClassTokens answers a different question:
+     * every class NAMED anywhere in such a rule, which is what a search for the
+     * outermost carrier inside a part wants. Asking it "does this element own
+     * its width" reads tbilisi4's `header.site-header nav{max-width:var(--wide-size)}`
+     * as though .site-header owned the measure, when the subject is the nav.
+     * Only the subject compound counts here.
+     *
+     * @return list<string>
+     */
+    public static function wideMeasureSubjectClasses(string $css): array
+    {
+        $stripped = preg_replace('~/\*.*?\*/~s', '', $css);
+        if (!is_string($stripped)) {
+            return [];
+        }
+        $stripped = self::withoutAtRuleBlocks($stripped);
+        if (preg_match_all('/([^{}]+)\{([^{}]*)\}/s', $stripped, $rules, PREG_SET_ORDER) === false) {
+            return [];
+        }
+        $classes = [];
+        foreach ($rules as $rule) {
+            if (!self::declaresWideMeasure($rule[2])) {
+                continue;
+            }
+            // Emptying every balanced group first keeps a functional pseudo's
+            // own comma list (`:is(.hdr, .ftr) .nav`) from being split into
+            // fragments whose apparent subject is an ancestor qualifier.
+            $selectorList = preg_replace('/\((?:[^()]++|(?R))*\)/', '()', $rule[1]);
+            if (!is_string($selectorList)) {
+                continue;
+            }
+            foreach (explode(',', $selectorList) as $selector) {
+                foreach (self::subjectClasses($selector) as $class) {
+                    $classes[$class] = true;
+                }
+            }
+        }
+        return array_keys($classes);
+    }
+
+    /**
+     * Drop every at-rule block and its contents.
+     *
+     * The flat rule regex needs a brace-free body, so on `@media (…){.foo{…}}`
+     * it matches the INNER rule and the prelude merely becomes a leading
+     * compound the subject scan discards. A measure that applies at one
+     * breakpoint would then exempt the root at every width — worst case a
+     * `@media (max-width:600px)` override releasing the desktop root. Reading
+     * the condition is its own problem, so a conditional measure is treated as
+     * no measure: the root keeps its stamp, which is the recoverable direction.
+     */
+    private static function withoutAtRuleBlocks(string $css): string
+    {
+        $out = '';
+        $depth = 0;
+        $atDepth = null;
+        $length = strlen($css);
+        for ($i = 0; $i < $length; $i++) {
+            $char = $css[$i];
+            if ($char === '@' && $depth === 0 && $atDepth === null) {
+                $atDepth = 0;
+            }
+            if ($char === '{') {
+                $depth++;
+                if ($atDepth !== null) {
+                    $atDepth++;
+                }
+            } elseif ($char === '}') {
+                $depth = max(0, $depth - 1);
+                if ($atDepth !== null) {
+                    $atDepth--;
+                    if ($atDepth <= 0) {
+                        $atDepth = null;
+                        continue;
+                    }
+                }
+            }
+            // A prelude-only at-rule (`@import …;`) never opens a block.
+            if ($char === ';' && $atDepth === 0) {
+                $atDepth = null;
+                continue;
+            }
+            if ($atDepth === null) {
+                $out .= $char;
+            }
+        }
+        // An unterminated at-rule block swallows the rest; that CSS is already
+        // malformed, and reporting nothing keeps the stamp.
+        return $out;
+    }
+
+    /**
+     * Whether a rule body gives an inline measure the wide size.
+     *
+     * The single definition of that question. Steps\SectionLayoutStep asks it
+     * too, of the same stylesheets, and delegates here rather than keeping a
+     * second copy that can drift.
+     *
+     * Known limit, deliberately unchanged while it is unobserved: the pattern
+     * requires a bare `var(--wide-size)`, so the fallback form
+     * `var(--wide-size, 1200px)` reads as no measure. That direction is safe —
+     * the root keeps its constrained stamp — and no design in the corpus emits
+     * it. Widening it would change which classes both callers report, including
+     * the align:wide carrier promotion, so it wants its own corpus evidence.
+     */
+    public static function declaresWideMeasure(string $body): bool
+    {
+        foreach (explode(';', $body) as $declaration) {
+            $colon = strpos($declaration, ':');
+            if ($colon === false) {
+                continue;
+            }
+            $property = strtolower(trim(substr($declaration, 0, $colon)));
+            if (in_array($property, ['width', 'max-width', 'inline-size', 'max-inline-size'], true)
+                && preg_match('/var\(\s*--wide-size\s*\)/i', substr($declaration, $colon + 1)) === 1
+            ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Classes on the compound a selector actually matches. Combinators are
+     * normalized to descendant spacing so the subject is the last compound
+     * either way, and attribute selectors are dropped rather than parsed —
+     * unsupported grammar contributes nothing instead of being approximated.
+     *
+     * A subject qualified by a functional pseudo-class (`.shell:has(.rail)`,
+     * `.wrap:is(.x,.y)`) matches only some elements carrying that class, so it
+     * is abandoned rather than approximated. Erring toward reporting nothing
+     * keeps the constrained stamp, which is the recoverable direction; a class
+     * wrongly reported as owning its width loses gutters it needs.
+     *
+     * @param string $selector one selector, with balanced groups already emptied
+     * @return list<string>
+     */
+    private static function subjectClasses(string $selector): array
+    {
+        $selector = preg_replace('/\[[^\]]*\]/', '', $selector) ?? '';
+        $selector = preg_replace('/[>+~]/', ' ', $selector) ?? '';
+        $compounds = preg_split('/\s+/', trim($selector), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        if ($compounds === []) {
+            return [];
+        }
+        $subject = (string) end($compounds);
+        // Any pseudo disqualifies the subject. A functional one is already
+        // marked by its emptied `()`; `::before`, `:hover` and `:first-child`
+        // narrow the match just as much, and a decorative pseudo-element sized
+        // to the wide measure says nothing about the width of its host.
+        if (str_contains($subject, ':')) {
+            return [];
+        }
+        if (preg_match_all('/\.(-?[A-Za-z_][A-Za-z0-9_-]*)/', $subject, $matches) < 1) {
+            return [];
+        }
+        return $matches[1];
+    }
+
+    /** @return list<string> the block's own className tokens, never descendants' */
+    private static function attrClassTokens(array|object $attrs): array
+    {
+        $className = is_array($attrs) ? ($attrs['className'] ?? null) : ($attrs->className ?? null);
+        if (!is_string($className)) {
+            return [];
+        }
+        return preg_split('/[\x20\t\r\n\f]+/', trim($className), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+    }
+
+    /**
+     * Give a generated part exactly one root wp:group and one assigned marker
+     * from a class family, preserving every unrelated class token.
+     *
+     * Complete multiple roots and a complete single non-group root are wrapped
+     * instead of discarded. The original block document remains a byte-for-byte
+     * substring of that envelope. Both the block attribute and saved root HTML
+     * are synchronized so later block re-serialization cannot resurrect a
+     * stale recipe marker.
+     *
+     * @param list<array<string,mixed>> $repairs
+     */
+    public static function withRootClassMarker(
+        string $markup,
+        string $markerPrefix,
+        string $assignedMarker,
+        string $part,
+        array &$repairs = []
+    ): string {
+        if (
+            preg_match('/^[a-z0-9_-]+--$/', $markerPrefix) !== 1
+            || preg_match('/^[a-z0-9_-]+$/', $assignedMarker) !== 1
+            || !str_starts_with($assignedMarker, $markerPrefix)
+        ) {
+            throw new \InvalidArgumentException('invalid assigned root class marker');
+        }
+
+        $document = BlockMarkup::parse($markup);
+        $roots = array_values(array_filter(
+            $document->indices(),
+            static fn (int $index): bool => $document->parent($index) === null
+        ));
+        if ($roots === []) {
+            throw new \RuntimeException("part '{$part}': generated markup has no root block");
+        }
+
+        if (count($roots) !== 1 || $document->name($roots[0]) !== 'group') {
+            $authored = count($roots) === 1 ? $document->name($roots[0]) : count($roots) . ' roots';
+            $markup = '<!-- wp:group -->' . "\n"
+                . '<div class="wp-block-group">' . "\n"
+                . $markup . "\n"
+                . '</div>' . "\n"
+                . '<!-- /wp:group -->';
+            $repairs[] = [
+                'code' => 'root-group-wrapped',
+                'part' => $part,
+                'authored' => $authored,
+                'delivered' => 'one wp:group root',
+                'disposition' => 'repaired',
+            ];
+            $document = BlockMarkup::parse($markup);
+            $roots = array_values(array_filter(
+                $document->indices(),
+                static fn (int $index): bool => $document->parent($index) === null
+            ));
+        }
+
+        $root = $roots[0] ?? null;
+        if ($root === null || count($roots) !== 1 || $document->name($root) !== 'group') {
+            throw new \RuntimeException("part '{$part}': could not establish one wp:group root");
+        }
+
+        $attrs = $document->attrs($root) ?? [];
+        $authoredAttributeClasses = is_string($attrs['className'] ?? null)
+            ? self::classTokens($attrs['className'])
+            : [];
+        $deliveredAttributeClasses = self::replaceMarkerTokens(
+            $authoredAttributeClasses,
+            $markerPrefix,
+            $assignedMarker
+        );
+        if ($deliveredAttributeClasses === []) {
+            unset($attrs['className']);
+        } else {
+            $attrs['className'] = implode(' ', $deliveredAttributeClasses);
+        }
+        if ($authoredAttributeClasses !== $deliveredAttributeClasses) {
+            $document->setAttrs($root, $attrs);
+            $markup = $document->render();
+
+            // Reparse after the comment mutation so offsets describe current bytes.
+            $document = BlockMarkup::parse($markup);
+            $root = $document->topLevel();
+        }
+        if ($root === null || $document->name($root) !== 'group') {
+            throw new \RuntimeException("part '{$part}': root group disappeared during marker repair");
+        }
+        $ownHtml = $document->ownHtml($root);
+        if (preg_match(
+            '~\A(?:(?:\s+)|(?:<!--(?:(?!-->).)*-->))*(?<tag><[a-z][a-z0-9:-]*(?=[\s>])'
+                . '(?:[^>"\']+|"[^"]*"|\'[^\']*\')*>)~is',
+            $ownHtml,
+            $opening,
+            PREG_OFFSET_CAPTURE
+        ) !== 1) {
+            $withoutComments = preg_replace('~<!--(?:(?!-->).)*-->~s', '', $ownHtml);
+            if (is_string($withoutComments) && trim($withoutComments) === '') {
+                // Wrapperless block markup can still be serialized from the
+                // canonical comment attributes by the normal block fixer.
+                if ($authoredAttributeClasses !== $deliveredAttributeClasses) {
+                    self::recordMarkerRepair(
+                        $repairs,
+                        $part,
+                        $markerPrefix,
+                        $authoredAttributeClasses,
+                        $assignedMarker
+                    );
+                }
+                return $markup;
+            }
+            throw new \RuntimeException("part '{$part}': root group has no safe saved HTML wrapper");
+        }
+
+        $tag = $opening['tag'][0];
+        $classes = self::htmlAttributes($tag, 'class');
+        $authoredHtmlClasses = $classes === [] ? [] : self::classTokens($classes[0]['value']);
+        $deliveredHtmlClasses = self::replaceMarkerTokens(
+            $authoredHtmlClasses,
+            $markerPrefix,
+            $assignedMarker
+        );
+        $htmlChanged = $classes === []
+            || $authoredHtmlClasses !== $deliveredHtmlClasses
+            || count($classes) > 1;
+        if ($htmlChanged) {
+            for ($index = count($classes) - 1; $index >= 0; $index--) {
+                $class = $classes[$index];
+                $replacement = $index === 0
+                    ? ' class="' . htmlspecialchars(
+                        implode(' ', $deliveredHtmlClasses),
+                        ENT_QUOTES | ENT_HTML5 | ENT_SUBSTITUTE,
+                        'UTF-8'
+                    ) . '"'
+                    : '';
+                $tag = substr_replace(
+                    $tag,
+                    $replacement,
+                    $class['attributeOffset'],
+                    strlen($class['attribute'])
+                );
+            }
+            if ($classes === []) {
+                $tag = substr_replace(
+                    $tag,
+                    ' class="' . $assignedMarker . '"',
+                    strrpos($tag, '>'),
+                    0
+                );
+            }
+
+            $tagStart = $document->openingOffset($root)
+                + $document->openingLength($root)
+                + $opening['tag'][1];
+            $markup = substr_replace($markup, $tag, $tagStart, strlen($opening['tag'][0]));
+        }
+
+        if (
+            $authoredAttributeClasses !== $deliveredAttributeClasses
+            || $htmlChanged
+        ) {
+            self::recordMarkerRepair(
+                $repairs,
+                $part,
+                $markerPrefix,
+                array_values(array_unique(array_merge($authoredAttributeClasses, $authoredHtmlClasses))),
+                $assignedMarker
+            );
+        }
+
+        return $markup;
+    }
+
+    /**
+     * Add one exact class token to both a root group's comment attributes and
+     * saved HTML. Used for contract-owned behavior hooks that are single
+     * tokens rather than a replaceable marker family.
+     *
+     * @param list<array<string,mixed>> $repairs
+     */
+    public static function withRootClassToken(
+        string $markup,
+        string $token,
+        string $part,
+        array &$repairs = [],
+    ): string {
+        if (preg_match('/^[a-z0-9_-]+$/', $token) !== 1) {
+            throw new \InvalidArgumentException('invalid root class token');
+        }
+        $document = BlockMarkup::parse($markup);
+        $root = $document->topLevel();
+        if ($root === null || $document->name($root) !== 'group') {
+            throw new \RuntimeException("part '{$part}': root class token requires one wp:group root");
+        }
+        $changed = false;
+        $attrs = $document->attrs($root) ?? [];
+        $tokens = self::classTokens((string) ($attrs['className'] ?? ''));
+        if (!in_array($token, $tokens, true)) {
+            $tokens[] = $token;
+            $attrs['className'] = implode(' ', $tokens);
+            $document->setAttrs($root, $attrs);
+            $markup = $document->render();
+            $document = BlockMarkup::parse($markup);
+            $root = $document->topLevel();
+            $changed = true;
+        }
+        if ($root === null || $document->name($root) !== 'group') {
+            throw new \RuntimeException("part '{$part}': root group disappeared during class-token repair");
+        }
+        $ownHtml = $document->ownHtml($root);
+        if (preg_match(
+            '~\A(?:(?:\s+)|(?:<!--(?:(?!-->).)*-->))*(?<tag><[a-z][a-z0-9:-]*(?=[\s>])'
+                . '(?:[^>"\']+|"[^"]*"|\'[^\']*\')*>)~is',
+            $ownHtml,
+            $opening,
+            PREG_OFFSET_CAPTURE,
+        ) === 1) {
+            $tag = $opening['tag'][0];
+            $classes = self::htmlAttributes($tag, 'class');
+            $htmlTokens = $classes === [] ? [] : self::classTokens($classes[0]['value']);
+            if (!in_array($token, $htmlTokens, true)) {
+                $htmlTokens[] = $token;
+                $replacement = ' class="' . htmlspecialchars(
+                    implode(' ', $htmlTokens),
+                    ENT_QUOTES | ENT_HTML5 | ENT_SUBSTITUTE,
+                    'UTF-8',
+                ) . '"';
+                if ($classes === []) {
+                    $tag = substr_replace($tag, $replacement, strrpos($tag, '>'), 0);
+                } else {
+                    $tag = substr_replace(
+                        $tag,
+                        $replacement,
+                        $classes[0]['attributeOffset'],
+                        strlen($classes[0]['attribute']),
+                    );
+                }
+                $tagStart = $document->openingOffset($root)
+                    + $document->openingLength($root)
+                    + $opening['tag'][1];
+                $markup = substr_replace($markup, $tag, $tagStart, strlen($opening['tag'][0]));
+                $changed = true;
+            }
+        }
+        if ($changed) {
+            $repairs[] = [
+                'code' => 'root-class-token-added',
+                'part' => $part,
+                'delivered' => $token,
+                'disposition' => 'repaired',
+            ];
+        }
+        return $markup;
+    }
+
+    /**
+     * Reconcile one validated planned primary action against generated hero
+     * markup without guessing at arbitrary controls.
+     *
+     * A unique wp:button anchor at the authoritative destination is safe to
+     * identify. Its plain-text label is restored exactly when needed. When a
+     * generated control can be identified but carries the wrong destination,
+     * only that wp:button is removed. When no action was assigned, every
+     * generated wp:button is an unauthorized control and is excised at that
+     * block boundary. Ambiguous or omitted planned controls are reported as
+     * undelivered so the project-owning parent can atomically null the
+     * plan/contract fact or choose a family fallback.
+     *
+     * @param array{label:string,intent:string,destination:string}|null $action
+     * @return array{
+     *   markup:string,repairs:list<array<string,mixed>>,warnings:list<string>,delivered:bool
+     * }
+     */
+    public static function reconcilePrimaryAction(
+        string $markup,
+        ?array $action,
+        string $part
+    ): array {
+        if ($action === null) {
+            $buttons = self::buttonBlocks($markup);
+            if ($buttons === []) {
+                return ['markup' => $markup, 'repairs' => [], 'warnings' => [], 'delivered' => false];
+            }
+            usort(
+                $buttons,
+                static fn (array $left, array $right): int => $right['blockOffset'] <=> $left['blockOffset'],
+            );
+            foreach ($buttons as $button) {
+                $markup = substr_replace($markup, '', $button['blockOffset'], $button['blockLength']);
+            }
+            $authored = json_encode(
+                array_map(
+                    static fn (array $button): array => [
+                        'path' => $button['path'],
+                        'markup' => $button['markup'],
+                    ],
+                    array_reverse($buttons),
+                ),
+                JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
+            );
+            if (!is_string($authored)) {
+                $authored = 'unplanned wp:button block(s)';
+            }
+            return [
+                'markup' => $markup,
+                'repairs' => [],
+                'warnings' => [
+                    "file='parts/{$part}.html'; block='"
+                        . implode(', ', array_column(array_reverse($buttons), 'path'))
+                        . "'; authored={$authored}; delivered=removed; disposition=no primary action was assigned "
+                        . 'to this hero, so only the unplanned wp:button block(s) were removed and sibling content was retained',
+                ],
+                'delivered' => false,
+            ];
+        }
+        foreach (['label', 'intent', 'destination'] as $field) {
+            if (!isset($action[$field]) || !is_string($action[$field]) || trim($action[$field]) === '') {
+                throw new \InvalidArgumentException("primary action '{$field}' must be a non-empty string");
+            }
+        }
+
+        $buttons = self::buttonAnchors($markup);
+        $destinationMatches = array_values(array_filter(
+            $buttons,
+            static fn (array $button): bool => $button['href'] === $action['destination']
+        ));
+        $labelMatches = array_values(array_filter(
+            $buttons,
+            static fn (array $button): bool => html_entity_decode(
+                strip_tags($button['label']),
+                ENT_QUOTES | ENT_HTML5,
+                'UTF-8'
+            ) === $action['label']
+        ));
+        $exactMatches = array_values(array_filter(
+            $buttons,
+            static fn (array $button): bool => $button['href'] === $action['destination']
+                && html_entity_decode(
+                    strip_tags($button['label']),
+                    ENT_QUOTES | ENT_HTML5,
+                    'UTF-8'
+                ) === $action['label']
+        ));
+        $candidates = [];
+        foreach (array_merge($destinationMatches, $labelMatches) as $candidate) {
+            $candidates[(string) $candidate['blockOffset']] = $candidate;
+        }
+        $candidates = array_values($candidates);
+
+        // One exact visitor-facing pair is authoritative even when an
+        // unrelated secondary control happens to share its destination. The
+        // destination-only control is not ours to rewrite or remove. A second
+        // control reusing the authoritative label for another destination is
+        // identifiable generated drift, however, so isolate that control and
+        // keep the canonical pair delivered.
+        if (count($exactMatches) === 1 && $exactMatches[0]['simple']) {
+            $exactOffset = $exactMatches[0]['blockOffset'];
+            $conflictingLabelMatches = array_values(array_filter(
+                $labelMatches,
+                static fn (array $button): bool => $button['blockOffset'] !== $exactOffset
+            ));
+            if ($conflictingLabelMatches !== []) {
+                return self::removePrimaryActionButtons(
+                    $markup,
+                    $conflictingLabelMatches,
+                    $action,
+                    $part,
+                    'the authoritative action remained delivered, but another generated button reused its label for a non-authoritative destination',
+                    true,
+                );
+            }
+            return ['markup' => $markup, 'repairs' => [], 'warnings' => [], 'delivered' => true];
+        }
+
+        if (count($destinationMatches) === 1 && count($candidates) === 1) {
+            $button = $destinationMatches[0];
+            if (!$button['simple']) {
+                return self::removePrimaryActionButtons(
+                    $markup,
+                    [$button],
+                    $action,
+                    $part,
+                    'the unique destination-matching action used non-plain nested label markup'
+                );
+            }
+
+            $authoredLabel = html_entity_decode(
+                $button['label'],
+                ENT_QUOTES | ENT_HTML5,
+                'UTF-8'
+            );
+            if ($authoredLabel === $action['label']) {
+                return ['markup' => $markup, 'repairs' => [], 'warnings' => [], 'delivered' => true];
+            }
+
+            $replacement = htmlspecialchars(
+                $action['label'],
+                ENT_QUOTES | ENT_HTML5 | ENT_SUBSTITUTE,
+                'UTF-8'
+            );
+            $markup = substr_replace(
+                $markup,
+                $replacement,
+                $button['labelOffset'],
+                $button['labelLength']
+            );
+            return [
+                'markup' => $markup,
+                'repairs' => [[
+                    'code' => 'primary-action-label-restored',
+                    'part' => $part,
+                    'path' => $button['path'],
+                    'authored' => $authoredLabel,
+                    'delivered' => $action['label'],
+                    'disposition' => 'repaired',
+                ]],
+                'warnings' => [],
+                'delivered' => true,
+            ];
+        }
+
+        if ($candidates !== []) {
+            $reason = count($candidates) > 1
+                ? 'multiple generated buttons matched the authoritative primary-action label or destination'
+                : 'the planned action label was attached to a non-authoritative destination';
+            return self::removePrimaryActionButtons(
+                $markup,
+                $candidates,
+                $action,
+                $part,
+                $reason
+            );
+        }
+
+        $authored = json_encode($action, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if (!is_string($authored)) {
+            $authored = get_debug_type($action);
+        }
+        return [
+            'markup' => $markup,
+            'repairs' => [],
+            'warnings' => [
+                "file='parts/{$part}.html'; block='planned primary action'; authored={$authored}; "
+                    . 'delivered=removed; disposition=the generated hero omitted the action or made it ambiguous, '
+                    . 'so no control was guessed and the parent must null the delivered plan/contract action',
+            ],
+            'delivered' => false,
+        ];
+    }
+
+    /**
+     * Report whether the exact authoritative pair is delivered by one simple
+     * wp:button control. This intentionally shares the same structural domain
+     * as reconcilePrimaryAction(); an arbitrary paragraph link cannot revive
+     * an action that the unit finisher rejected.
+     *
+     * @param array{label:string,intent:string,destination:string} $action
+     */
+    public static function containsPrimaryAction(string $markup, array $action): bool
+    {
+        foreach (['label', 'intent', 'destination'] as $field) {
+            if (!isset($action[$field]) || !is_string($action[$field]) || trim($action[$field]) === '') {
+                return false;
+            }
+        }
+        foreach (self::buttonAnchors($markup) as $button) {
+            $label = html_entity_decode(
+                strip_tags($button['label']),
+                ENT_QUOTES | ENT_HTML5,
+                'UTF-8',
+            );
+            if ($button['simple']
+                && $button['href'] === $action['destination']
+                && $label === $action['label']
+            ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Remove only wp:button blocks identifiable as one authoritative action.
+     * Used when delivered-page/anchor facts invalidate an action after the
+     * hero was already authored. Unrelated links and sibling blocks are left
+     * byte-for-byte unchanged.
+     *
+     * @param array{label:string,intent:string,destination:string} $action
+     * @return array{
+     *   markup:string,repairs:list<array<string,mixed>>,warnings:list<string>,delivered:bool
+     * }
+     */
+    public static function withoutPrimaryAction(string $markup, array $action, string $part): array
+    {
+        foreach (['label', 'intent', 'destination'] as $field) {
+            if (!isset($action[$field]) || !is_string($action[$field]) || trim($action[$field]) === '') {
+                throw new \InvalidArgumentException("primary action '{$field}' must be a non-empty string");
+            }
+        }
+        $candidates = [];
+        foreach (self::buttonAnchors($markup) as $button) {
+            $label = html_entity_decode(
+                strip_tags($button['label']),
+                ENT_QUOTES | ENT_HTML5,
+                'UTF-8',
+            );
+            if ($button['href'] === $action['destination'] || $label === $action['label']) {
+                $candidates[(string) $button['blockOffset']] = $button;
+            }
+        }
+        if ($candidates === []) {
+            return ['markup' => $markup, 'repairs' => [], 'warnings' => [], 'delivered' => false];
+        }
+        return self::removePrimaryActionButtons(
+            $markup,
+            array_values($candidates),
+            $action,
+            $part,
+            'the delivered page/anchor set invalidated the authoritative destination',
+        );
     }
 
     /**
@@ -240,59 +1535,6 @@ final class GeneratedMarkup
     }
 
     /**
-     * A one-page footer's dynamic site-title must not render a link back to
-     * the page the visitor is already viewing. Apply the explicit attribute to
-     * every generated site-title so a nested lockup cannot evade the rule.
-     */
-    public static function withoutSiteTitleLinks(string $markup): string
-    {
-        $document = BlockMarkup::parse($markup);
-        foreach ($document->indices() as $index) {
-            if ($document->name($index) !== 'site-title') {
-                continue;
-            }
-            $attrs = $document->attrs($index) ?? [];
-            $attrs['isLink'] = false;
-            $document->setAttrs($index, $attrs);
-        }
-        return $document->render();
-    }
-
-    /**
-     * Cap footer AI_IMAGE placeholders to non-portrait aspect ratios.
-     *
-     * A `portrait` placeholder generates a 9:16 asset; rendered in a footer
-     * column it grows nearly twice as tall as wide, stretches the whole band,
-     * and strands blank space beside the short utility rows. The documented
-     * `<img alt>` form and any mirrored block-JSON "alt" value are rewritten
-     * together so block re-serialization cannot restore the portrait spec.
-     * Idempotent: a capped placeholder no longer matches either pattern.
-     *
-     * @param list<string> $notes appended to once per rewritten placeholder
-     */
-    public static function withoutPortraitImagePlaceholders(string $markup, array &$notes = []): string
-    {
-        $patterns = [
-            '/(?<prefix>alt\s*=\s*(?<quote>["\'])AI_IMAGE:(?:(?!\k{quote}).)*?\|\s*)portrait(?<suffix>\s*\k{quote})/is',
-            '/(?<prefix>"alt"\s*:\s*"AI_IMAGE:(?:[^"\\\\]|\\\\.)*?\|\s*)portrait(?<suffix>\s*")/is',
-        ];
-        foreach ($patterns as $pattern) {
-            $markup = (string) preg_replace_callback(
-                $pattern,
-                static function (array $m) use (&$notes): string {
-                    $notes[] = "file='parts/footer.html'; block='AI_IMAGE placeholder'; "
-                        . 'authored aspect-ratio=portrait; delivered=square; '
-                        . 'disposition=a 9:16 footer image stretches the band and strands blank '
-                        . 'space beside the utility rows, so the placeholder was capped to square';
-                    return $m['prefix'] . 'square' . $m['suffix'];
-                },
-                $markup
-            );
-        }
-        return $markup;
-    }
-
-    /**
      * Enforce the concrete surface shared by the footer and closing sections.
      *
      * The comment attribute is the source of truth consumed by downstream
@@ -304,7 +1546,12 @@ final class GeneratedMarkup
      * @param list<string> $notes appended to when opaque authored styling must
      *                            be removed to make the surface enforceable
      */
-    public static function withRootBackgroundColor(string $markup, string $color, array &$notes = []): string
+    public static function withRootBackgroundColor(
+        string $markup,
+        string $color,
+        array &$notes = [],
+        string $part = 'footer',
+    ): string
     {
         if (preg_match('/^[a-z0-9-]+$/', $color) !== 1) {
             throw new \InvalidArgumentException("invalid root background color slug '{$color}'");
@@ -332,18 +1579,18 @@ final class GeneratedMarkup
         }
         $root = $roots[0] ?? null;
         if ($root === null || $document->name($root) !== 'group') {
-            throw new \RuntimeException('footer root is not a wp:group');
+            throw new \RuntimeException("{$part} root is not a wp:group");
         }
         $attrs = $document->attrs($root) ?? [];
 
         unset($attrs['gradient']);
         if (array_key_exists('style', $attrs) && !is_array($attrs['style'])) {
-            self::recordRemovedRootStyle($notes, 'style', $attrs['style'], $color);
+            self::recordRemovedRootStyle($notes, $part, 'style', $attrs['style'], $color);
             unset($attrs['style']);
         } elseif (is_array($attrs['style'] ?? null)) {
             unset($attrs['style']['background']);
             if (array_key_exists('color', $attrs['style']) && !is_array($attrs['style']['color'])) {
-                self::recordRemovedRootStyle($notes, 'style.color', $attrs['style']['color'], $color);
+                self::recordRemovedRootStyle($notes, $part, 'style.color', $attrs['style']['color'], $color);
                 unset($attrs['style']['color']);
             } elseif (is_array($attrs['style']['color'] ?? null)) {
                 unset($attrs['style']['color']['background'], $attrs['style']['color']['gradient']);
@@ -357,6 +1604,7 @@ final class GeneratedMarkup
                 }
                 self::recordRemovedRootStyle(
                     $notes,
+                    $part,
                     "style.{$opaqueStyle}",
                     $attrs['style'][$opaqueStyle],
                     $color
@@ -382,7 +1630,7 @@ final class GeneratedMarkup
         $document = BlockMarkup::parse($markup);
         $root = $document->topLevel();
         if ($root === null || $document->name($root) !== 'group') {
-            throw new \RuntimeException('footer root group disappeared during surface repair');
+            throw new \RuntimeException("{$part} root group disappeared during surface repair");
         }
         $ownHtml = $document->ownHtml($root);
         if (preg_match(
@@ -399,7 +1647,7 @@ final class GeneratedMarkup
                 // the enforced attribute later.
                 return $markup;
             }
-            throw new \RuntimeException('footer root has no safe saved HTML wrapper');
+            throw new \RuntimeException("{$part} root has no safe saved HTML wrapper");
         }
 
         $tag = $opening['tag'][0];
@@ -442,6 +1690,7 @@ final class GeneratedMarkup
             } catch (\RuntimeException) {
                 self::recordRemovedRootStyle(
                     $notes,
+                    $part,
                     "saved HTML style attribute[{$index}]",
                     $style['value'],
                     $color
@@ -468,6 +1717,324 @@ final class GeneratedMarkup
             + $document->openingLength($root)
             + $opening['tag'][1];
         return substr_replace($markup, $tag, $tagStart, strlen($opening['tag'][0]));
+    }
+
+    /**
+     * Synchronize a contract-owned root text preset into block attributes and
+     * saved HTML. Only the frozen generated palette's text-color support
+     * classes are replaced; unrelated custom classes remain byte-for-byte.
+     *
+     * @param list<array<string,mixed>> $repairs
+     */
+    public static function withRootTextColor(
+        string $markup,
+        string $color,
+        string $part,
+        array &$repairs = [],
+    ): string {
+        if (preg_match('/^[a-z0-9-]+$/', $color) !== 1) {
+            throw new \InvalidArgumentException("invalid root text color slug '{$color}'");
+        }
+        $document = BlockMarkup::parse($markup);
+        $root = $document->topLevel();
+        if ($root === null || $document->name($root) !== 'group') {
+            throw new \RuntimeException("part '{$part}': root text color requires one wp:group root");
+        }
+        $attrs = $document->attrs($root) ?? [];
+        $authored = $attrs['textColor'] ?? null;
+        $attrs['textColor'] = $color;
+        if (is_array($attrs['style']['color'] ?? null)) {
+            unset($attrs['style']['color']['text']);
+            if ($attrs['style']['color'] === []) {
+                unset($attrs['style']['color']);
+            }
+            if (($attrs['style'] ?? []) === []) {
+                unset($attrs['style']);
+            }
+        }
+        $document->setAttrs($root, $attrs);
+        $markup = $document->render();
+
+        $document = BlockMarkup::parse($markup);
+        $root = $document->topLevel();
+        if ($root === null || $document->name($root) !== 'group') {
+            throw new \RuntimeException("part '{$part}': root group disappeared during text-color repair");
+        }
+        $ownHtml = $document->ownHtml($root);
+        if (preg_match(
+            '~\A(?:(?:\s+)|(?:<!--(?:(?!-->).)*-->))*(?<tag><[a-z][a-z0-9:-]*(?=[\s>])'
+                . '(?:[^>"\']+|"[^"]*"|\'[^\']*\')*>)~is',
+            $ownHtml,
+            $opening,
+            PREG_OFFSET_CAPTURE,
+        ) !== 1) {
+            throw new \RuntimeException("part '{$part}': root group has no safe saved HTML wrapper");
+        }
+
+        $tag = $opening['tag'][0];
+        $classes = self::htmlAttributes($tag, 'class');
+        $tokens = [];
+        foreach ($classes as $class) {
+            array_push($tokens, ...self::classTokens($class['value']));
+        }
+        $tokens = array_values(array_filter(
+            array_unique($tokens),
+            static fn (string $token): bool => $token !== 'has-text-color'
+                && preg_match('/^has-(?:base|contrast|primary|secondary|accent)-color$/', $token) !== 1,
+        ));
+        $tokens[] = "has-{$color}-color";
+        $tokens[] = 'has-text-color';
+        $classValue = implode(' ', array_values(array_unique($tokens)));
+        if ($classes === []) {
+            $tag = substr_replace(
+                $tag,
+                ' class="' . htmlspecialchars($classValue, ENT_QUOTES | ENT_HTML5 | ENT_SUBSTITUTE, 'UTF-8') . '"',
+                strrpos($tag, '>'),
+                0,
+            );
+        } else {
+            for ($index = count($classes) - 1; $index >= 0; $index--) {
+                $class = $classes[$index];
+                $replacement = $index === 0
+                    ? ' class="' . htmlspecialchars($classValue, ENT_QUOTES | ENT_HTML5 | ENT_SUBSTITUTE, 'UTF-8') . '"'
+                    : '';
+                $tag = substr_replace(
+                    $tag,
+                    $replacement,
+                    $class['attributeOffset'],
+                    strlen($class['attribute']),
+                );
+            }
+        }
+        $tagStart = $document->openingOffset($root)
+            + $document->openingLength($root)
+            + $opening['tag'][1];
+        $delivered = substr_replace($markup, $tag, $tagStart, strlen($opening['tag'][0]));
+        if ($delivered !== $markup || $authored !== $color) {
+            $repairs[] = [
+                'code' => 'root-text-color-synchronized',
+                'part' => $part,
+                'authored' => $authored,
+                'delivered' => $color,
+                'disposition' => 'repaired',
+            ];
+        }
+        return $delivered;
+    }
+
+    /**
+     * @return list<array{
+     *   href:string,label:string,simple:bool,labelOffset:int,labelLength:int,
+     *   blockOffset:int,blockLength:int,path:string
+     * }>
+     */
+    private static function buttonAnchors(string $markup): array
+    {
+        $document = BlockMarkup::parse($markup);
+        $buttons = [];
+        $ordinal = 0;
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) !== 'button') {
+                continue;
+            }
+            $ordinal++;
+            $end = $document->endOffset($index);
+            if ($end === null) {
+                continue;
+            }
+            $inner = $document->innerHtml($index);
+            if (preg_match_all(
+                '~(?<opening><a\b(?:[^>"\']+|"[^"]*"|\'[^\']*\')*>)(?<content>.*?)</a\s*>~is',
+                $inner,
+                $matches,
+                PREG_SET_ORDER | PREG_OFFSET_CAPTURE
+            ) !== 1) {
+                // A wp:button with zero or multiple anchors is not a simple,
+                // safely identifiable primary-action control.
+                continue;
+            }
+            $match = $matches[0];
+            $opening = $match['opening'][0];
+            $href = null;
+            foreach (MarkupSanitizer::openingTagAttributes($opening) as $attribute) {
+                if (
+                    $attribute['name'] !== 'href'
+                    || $attribute['valueStart'] === null
+                    || $attribute['valueEnd'] === null
+                ) {
+                    continue;
+                }
+                $href = substr(
+                    $opening,
+                    $attribute['valueStart'],
+                    $attribute['valueEnd'] - $attribute['valueStart']
+                );
+                break;
+            }
+            if (!is_string($href)) {
+                $href = '';
+            }
+            $href = html_entity_decode($href, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $content = $match['content'][0];
+            $innerStart = $document->openingOffset($index) + $document->openingLength($index);
+            $buttons[] = [
+                'href' => $href,
+                'label' => $content,
+                'simple' => preg_match('/<[^>]*>/', $content) !== 1,
+                'labelOffset' => $innerStart + $match['content'][1],
+                'labelLength' => strlen($content),
+                'blockOffset' => $document->openingOffset($index),
+                'blockLength' => $end - $document->openingOffset($index),
+                'path' => "wp:button[{$ordinal}]/a",
+            ];
+        }
+        return $buttons;
+    }
+
+    /**
+     * @return list<array{blockOffset:int,blockLength:int,path:string,markup:string}>
+     */
+    private static function buttonBlocks(string $markup): array
+    {
+        $document = BlockMarkup::parse($markup);
+        $buttons = [];
+        $ordinal = 0;
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) !== 'button') {
+                continue;
+            }
+            $ordinal++;
+            $end = $document->endOffset($index);
+            if ($end === null) {
+                continue;
+            }
+            $offset = $document->openingOffset($index);
+            $buttons[] = [
+                'blockOffset' => $offset,
+                'blockLength' => $end - $offset,
+                'path' => "wp:button[{$ordinal}]",
+                'markup' => substr($markup, $offset, $end - $offset),
+            ];
+        }
+        return $buttons;
+    }
+
+    /**
+     * @param list<array{
+     *   href:string,label:string,simple:bool,labelOffset:int,labelLength:int,
+     *   blockOffset:int,blockLength:int,path:string
+     * }> $buttons
+     * @param array{label:string,intent:string,destination:string} $action
+     * @return array{
+     *   markup:string,repairs:list<array<string,mixed>>,warnings:list<string>,delivered:bool
+     * }
+     */
+    private static function removePrimaryActionButtons(
+        string $markup,
+        array $buttons,
+        array $action,
+        string $part,
+        string $reason,
+        bool $actionDelivered = false,
+    ): array {
+        usort(
+            $buttons,
+            static fn (array $left, array $right): int => $right['blockOffset'] <=> $left['blockOffset']
+        );
+        foreach ($buttons as $button) {
+            $markup = substr_replace($markup, '', $button['blockOffset'], $button['blockLength']);
+        }
+        $authored = json_encode(
+            [
+                'planned' => $action,
+                'generated' => array_map(
+                    static fn (array $button): array => [
+                        'path' => $button['path'],
+                        'label' => html_entity_decode(
+                            strip_tags($button['label']),
+                            ENT_QUOTES | ENT_HTML5,
+                            'UTF-8'
+                        ),
+                        'destination' => $button['href'],
+                    ],
+                    $buttons
+                ),
+            ],
+            JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+        );
+        if (!is_string($authored)) {
+            $authored = get_debug_type($action);
+        }
+        $paths = implode(', ', array_map(static fn (array $button): string => $button['path'], $buttons));
+        return [
+            'markup' => $markup,
+            'repairs' => [],
+            'warnings' => [
+                "file='parts/{$part}.html'; block='{$paths}'; authored={$authored}; delivered=removed; "
+                    . "disposition={$reason}; only the identifiable primary-action button block was removed",
+            ],
+            'delivered' => $actionDelivered,
+        ];
+    }
+
+    /** @return list<string> */
+    private static function classTokens(string $classes): array
+    {
+        $classes = html_entity_decode($classes, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        return array_values(array_unique(
+            preg_split('/[\x09\x0A\x0C\x0D\x20]+/', trim($classes), -1, PREG_SPLIT_NO_EMPTY) ?: []
+        ));
+    }
+
+    /** @param list<string> $tokens @return list<string> */
+    private static function replaceMarkerTokens(
+        array $tokens,
+        string $markerPrefix,
+        string $assignedMarker
+    ): array {
+        $out = [];
+        $inserted = false;
+        foreach ($tokens as $token) {
+            if (!str_starts_with($token, $markerPrefix)) {
+                $out[] = $token;
+                continue;
+            }
+            if (!$inserted) {
+                // Replace the first family member in place. Keeping the class
+                // order stable prevents two independent marker families from
+                // moving each other to the end on every fixed-point pass.
+                $out[] = $assignedMarker;
+                $inserted = true;
+            }
+        }
+        if (!$inserted) {
+            $out[] = $assignedMarker;
+        }
+        return array_values(array_unique($out));
+    }
+
+    /**
+     * @param list<array<string,mixed>> $repairs
+     * @param list<string>              $authoredMarkers
+     */
+    private static function recordMarkerRepair(
+        array &$repairs,
+        string $part,
+        string $markerPrefix,
+        array $authoredMarkers,
+        string $assignedMarker
+    ): void {
+        $repairs[] = [
+            'code' => 'root-marker-normalized',
+            'part' => $part,
+            'path' => 'root wp:group.className',
+            'authored' => array_values(array_filter(
+                $authoredMarkers,
+                static fn (string $token): bool => str_starts_with($token, $markerPrefix)
+            )),
+            'delivered' => $assignedMarker,
+            'disposition' => 'repaired',
+        ];
     }
 
     /**
@@ -504,17 +2071,15 @@ final class GeneratedMarkup
     /** @param list<string> $notes */
     private static function recordRemovedRootStyle(
         array &$notes,
+        string $part,
         string $path,
         mixed $authored,
         string $color
     ): void {
-        $encoded = json_encode($authored, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-        if (!is_string($encoded)) {
-            $encoded = get_debug_type($authored);
-        }
-        $notes[] = "file='parts/footer.html'; block='root wp:group'; authored {$path}={$encoded}; "
+        $encoded = Warnings::value($authored);
+        $notes[] = "file='parts/{$part}.html'; block='root wp:group'; authored {$path}={$encoded}; "
             . "delivered=removed; disposition=opaque or malformed root styling removed so the assigned "
-            . "'{$color}' footer surface cannot be overridden";
+            . "'{$color}' {$part} surface cannot be overridden";
     }
 
     /** @return list<string> */
@@ -647,13 +2212,1653 @@ final class GeneratedMarkup
         );
     }
 
-    private static function stripFences(string $text): string
+    /**
+     * Remove text blocks that verbatim repeat the hero H1's reading text.
+     *
+     * Models render decorative "echo"/"misregistration" treatments as a second
+     * heading or paragraph carrying the exact headline text pulled over the
+     * H1 with negative margins — duplicated reading copy that renders as
+     * garble and reads twice to assistive tech. Removing an exact duplicate
+     * loses no words the visitor can read, so this is a repair, not a
+     * warning. Only whole paragraph/heading blocks whose entire normalized
+     * text equals the H1's are removed; short texts (< 10 characters) are
+     * left alone so repeated one-word labels never match.
+     *
+     * @param list<array<string,mixed>> $repairs
+     */
+    public static function dedupeHeadlineEcho(string $markup, string $part, array &$repairs = []): string
     {
-        $text = (string) preg_replace('/^\xEF\xBB\xBF/', '', $text);
-        if (str_starts_with($text, '```')) {
-            $text = preg_replace('/^```[a-zA-Z]*\r?\n/', '', $text);
-            $text = preg_replace('/\r?\n```$/', '', (string) $text);
+        $document = BlockMarkup::parse($markup);
+        $h1 = null;
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) === 'heading'
+                && (int) (($document->attrs($index) ?? [])['level'] ?? 2) === 1
+            ) {
+                $h1 = $index;
+                break;
+            }
         }
-        return trim((string) $text);
+        if ($h1 === null) {
+            return $markup;
+        }
+        $headline = self::readingText($document->innerHtml($h1));
+        if ($headline === '' || mb_strlen($headline, 'UTF-8') < 10) {
+            return $markup;
+        }
+
+        $echoes = [];
+        foreach ($document->indices() as $index) {
+            if ($index === $h1
+                || !in_array($document->name($index), ['heading', 'paragraph'], true)
+                || $document->endOffset($index) === null
+            ) {
+                continue;
+            }
+            if (self::readingText($document->innerHtml($index)) === $headline) {
+                $offset = $document->openingOffset($index);
+                $echoes[] = [
+                    'offset' => $offset,
+                    'length' => (int) $document->endOffset($index) - $offset,
+                    'name' => $document->name($index),
+                ];
+            }
+        }
+        if ($echoes === []) {
+            return $markup;
+        }
+
+        usort($echoes, static fn (array $a, array $b): int => $b['offset'] <=> $a['offset']);
+        foreach ($echoes as $echo) {
+            $markup = substr_replace($markup, '', $echo['offset'], $echo['length']);
+        }
+        $repairs[] = [
+            'code' => 'headline-echo-removed',
+            'part' => $part,
+            'authored' => count($echoes) . ' wp:' . implode(', wp:', array_column($echoes, 'name'))
+                . ' block(s) repeating the H1 text verbatim',
+            'delivered' => 'one headline',
+            'disposition' => 'repaired',
+        ];
+        return $markup;
+    }
+
+    /**
+     * Strip chip/badge chrome from eyebrow-position copy.
+     *
+     * Models render direction devices ("translucent veils", "layered panels")
+     * as filled/bordered groups wrapped around the eyebrow line above the H1 —
+     * a boxed caption chip that reads as UI, not typography (audited:
+     * pulso22's double-bordered eyebrow). The eyebrow is plain tracked text by
+     * contract, so any background, gradient, or border on a short text-only
+     * block that starts and ends before the H1 is removed. Copy containers
+     * holding the headline, media, or actions are never candidates, and the
+     * text itself is untouched — this is a repair, not a warning.
+     *
+     * Attribute-only edit, per the shared convention: stale inline
+     * border/background styles survive in the saved HTML until fix-blocks
+     * re-serializes it from these attributes; the class hooks that make the
+     * chrome visible are removed here.
+     *
+     * @param list<array<string,mixed>> $repairs
+     */
+    public static function stripEyebrowChipChrome(string $markup, string $part, array &$repairs = []): string
+    {
+        $document = BlockMarkup::parse($markup);
+        $h1Offset = null;
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) === 'heading'
+                && (int) (($document->attrs($index) ?? [])['level'] ?? 2) === 1
+            ) {
+                $h1Offset = $document->openingOffset($index);
+                break;
+            }
+        }
+        if ($h1Offset === null) {
+            return $markup;
+        }
+
+        $stripped = 0;
+        foreach ($document->indices() as $index) {
+            $name = $document->name($index);
+            if (!in_array($name, ['group', 'paragraph'], true)) {
+                continue;
+            }
+            // endOffset is exclusive: a chip closing exactly where the H1
+            // opens has end == h1Offset and still sits entirely before it.
+            $end = $document->endOffset($index);
+            if ($end === null || $end > $h1Offset) {
+                continue;
+            }
+            if ($name === 'group' && !self::wrapsOnlyText($document, $index)) {
+                continue;
+            }
+            $text = self::readingText($document->innerHtml($index));
+            if ($text === '' || mb_strlen($text, 'UTF-8') > 80) {
+                continue;
+            }
+            $attrs = $document->attrs($index) ?? [];
+            $hadChrome = false;
+            $background = trim((string) ($attrs['backgroundColor'] ?? ''));
+            if ($background !== '') {
+                unset($attrs['backgroundColor']);
+                $document->removeClassTokenInOwnHtml($index, "has-{$background}-background-color");
+                $hadChrome = true;
+            }
+            $gradient = trim((string) ($attrs['gradient'] ?? ''));
+            if ($gradient !== '') {
+                unset($attrs['gradient']);
+                $document->removeClassTokenInOwnHtml($index, "has-{$gradient}-gradient-background");
+                $document->removeClassTokenInOwnHtml($index, 'has-background-gradient');
+                $hadChrome = true;
+            }
+            $borderColor = trim((string) ($attrs['borderColor'] ?? ''));
+            if ($borderColor !== '') {
+                unset($attrs['borderColor']);
+                $document->removeClassTokenInOwnHtml($index, "has-{$borderColor}-border-color");
+                $hadChrome = true;
+            }
+            if (isset($attrs['style']['color']['background'])) {
+                unset($attrs['style']['color']['background']);
+                if (($attrs['style']['color'] ?? []) === []) {
+                    unset($attrs['style']['color']);
+                }
+                $hadChrome = true;
+            }
+            if (isset($attrs['style']['border'])) {
+                unset($attrs['style']['border']);
+                $hadChrome = true;
+            }
+            if (!$hadChrome) {
+                continue;
+            }
+            if (($attrs['style'] ?? []) === []) {
+                unset($attrs['style']);
+            }
+            $document->removeClassTokenInOwnHtml($index, 'has-background');
+            $document->removeClassTokenInOwnHtml($index, 'has-border-color');
+            $document->setAttrs($index, $attrs);
+            $stripped++;
+        }
+        if ($stripped === 0) {
+            return $markup;
+        }
+        $repairs[] = [
+            'code' => 'eyebrow-chip-chrome-stripped',
+            'part' => $part,
+            'authored' => "{$stripped} filled/bordered block(s) boxing the eyebrow-position text",
+            'delivered' => 'the same text as plain typography',
+            'disposition' => 'repaired',
+        ];
+        return $document->render();
+    }
+
+    /**
+     * Remove hairline separators from the hero.
+     *
+     * Reviewed direction (BIGR-775): a wp:separator inside the opening hero
+     * reads as a stray rule slicing the copy stack, not structure (audited:
+     * portfolio7, atlas7, hearth7). The hero prompt no longer offers the
+     * block; this pass keeps the ban structural when a model authors one
+     * anyway. The whole block is removed — a separator carries no copy, but
+     * its authored visual treatment is still durable loss and is warned.
+     *
+     * @param list<array<string,mixed>> $repairs
+     * @param list<string>              $warnings
+     */
+    public static function stripHeroSeparators(
+        string $markup,
+        string $part,
+        array &$repairs = [],
+        array &$warnings = [],
+    ): string {
+        $document = BlockMarkup::parse($markup);
+        $candidates = [];
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) !== 'separator') {
+                continue;
+            }
+            $end = $document->endOffset($index);
+            if ($end === null) {
+                continue;
+            }
+            $offset = $document->openingOffset($index);
+            $candidates[] = [
+                'index' => $index,
+                'start' => $offset,
+                'end' => $end,
+                'raw_survivor' => self::heroRemovalCandidateHasRawSurvivor($document, $index),
+            ];
+        }
+        if ($candidates === []) {
+            return $markup;
+        }
+
+        $safe = self::heroNestedRemovalSafety($document, $candidates);
+        $safeCandidates = self::outermostRemovalSpans(array_values(array_filter(
+            $candidates,
+            static fn (array $candidate): bool => $safe[$candidate['index']],
+        )));
+        $unsafeCandidates = self::outermostRemovalSpans(array_values(array_filter(
+            $candidates,
+            static fn (array $candidate): bool => !$safe[$candidate['index']],
+        )));
+        $removals = self::outermostRemovalSpans($safeCandidates);
+        $out = self::removeSpans($markup, $removals);
+        $deliveredPaths = self::heroBlockPathsByOffset(BlockMarkup::parse($out));
+
+        $warningRows = [];
+        foreach ($safeCandidates as $span) {
+            $index = $span['index'];
+            $warningRows[] = [
+                'start' => $span['start'],
+                'warning' => "file='theme/parts/{$part}.html'; block='"
+                . self::blockPath($document, $index)
+                . "'; authored=" . Warnings::value(substr(
+                    $markup,
+                    $span['start'],
+                    $span['end'] - $span['start'],
+                ))
+                . '; delivered=removed; disposition=the generated hero separator was removed at its complete '
+                . 'block boundary so the reviewed separator-free copy stack could be delivered',
+            ];
+        }
+        foreach ($unsafeCandidates as $span) {
+            $index = $span['index'];
+            $authored = substr($markup, $span['start'], $span['end'] - $span['start']);
+            $deliveredOffset = self::heroOffsetAfterRemovals($span['start'], $removals);
+            $path = $deliveredPaths[$deliveredOffset] ?? self::blockPath($document, $index);
+            $warningRows[] = [
+                'start' => $span['start'],
+                'warning' => "file='theme/parts/{$part}.html'; block='{$path}'; authored="
+                    . self::heroRemovalWarningValue($authored)
+                    . '; delivered=' . self::heroRemovalWarningValue($authored)
+                    . '; disposition=the generated separator boundary owns raw/non-block payload or a non-target '
+                    . 'descendant selected to survive; its complete nested transaction was retained byte-for-byte '
+                    . 'and the residual separator was queued for later repair',
+            ];
+        }
+        usort($warningRows, static fn (array $left, array $right): int => $left['start'] <=> $right['start']);
+        array_push($warnings, ...array_column($warningRows, 'warning'));
+        return $out;
+    }
+
+    /**
+     * Remove eyebrow/kicker lines above the hero headline.
+     *
+     * Reviewed direction (BIGR-775): the hero opens on its level-1 headline —
+     * orientation micro-copy (place, category, audience) belongs to the
+     * header tagline or the standfirst, never to a tracked caption line above
+     * the H1 (audited: tbilisi7, naturaleza7, lumen7, hearth7). A candidate
+     * is a short pre-H1 paragraph or minor heading carrying eyebrow signals:
+     * caption-scale preset, uppercase transform, wide tracking, or a level-4+
+     * heading. Plain standfirst copy authored above the H1 carries none of
+     * those signals and is left alone.
+     *
+     * A group shell dedicated entirely to removed eyebrow blocks is removed
+     * with them rather than delivered as an empty padded/painted box. A group
+     * with any surviving child or raw content is never widened into the
+     * removal transaction.
+     *
+     * @param list<array<string,mixed>> $repairs
+     * @param list<string>              $warnings
+     */
+    public static function stripHeroEyebrow(
+        string $markup,
+        string $part,
+        array &$repairs = [],
+        array &$warnings = [],
+    ): string {
+        $document = BlockMarkup::parse($markup);
+        $h1Offset = null;
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) === 'heading'
+                && self::heroHeadingLevel(($document->attrs($index) ?? [])['level'] ?? 2) === 1
+            ) {
+                $h1Offset = $document->openingOffset($index);
+                break;
+            }
+        }
+        if ($h1Offset === null) {
+            return $markup;
+        }
+
+        $spans = [];
+        foreach ($document->indices() as $index) {
+            $name = $document->name($index);
+            if (!in_array($name, ['heading', 'paragraph'], true)) {
+                continue;
+            }
+            $attrs = $document->attrs($index) ?? [];
+            if ($name === 'heading') {
+                $level = self::heroHeadingLevel($attrs['level'] ?? 2);
+                if ($level === null || $level < 4) {
+                    // A malformed generated level is not evidence that this
+                    // heading is disposable eyebrow copy. Retain the whole
+                    // block instead of coercing arrays/objects to an integer.
+                    continue;
+                }
+            }
+            // endOffset is exclusive: an eyebrow closing exactly where the H1
+            // opens has end == h1Offset and still sits entirely before it.
+            $end = $document->endOffset($index);
+            if ($end === null || $end > $h1Offset) {
+                continue;
+            }
+            $text = self::readingText($document->innerHtml($index));
+            if ($text === '' || mb_strlen($text, 'UTF-8') > 90) {
+                continue;
+            }
+            $style = $attrs['style'] ?? [];
+            $typography = is_array($style) && is_array($style['typography'] ?? null)
+                ? $style['typography']
+                : [];
+            $fontSize = $attrs['fontSize'] ?? '';
+            $textTransform = $typography['textTransform'] ?? '';
+            $letterSpacing = $typography['letterSpacing'] ?? '';
+            if (!is_string($fontSize)
+                || !is_string($textTransform)
+                || !is_string($letterSpacing)
+            ) {
+                // Generated array/object leaves are not eyebrow evidence. In
+                // particular, never coerce them through `(string)`: embedding
+                // error handlers may promote PHP's conversion warning into an
+                // exception and abort the paid-for build.
+                continue;
+            }
+            $signals = $name === 'heading'
+                || in_array($fontSize, ['caption', 'small', 'x-small', 'tiny'], true)
+                || strtolower($textTransform) === 'uppercase'
+                || trim($letterSpacing) !== '';
+            if (!$signals) {
+                continue;
+            }
+            $offset = $document->openingOffset($index);
+            $spans[] = [
+                'index' => $index,
+                'start' => $offset,
+                'end' => $end,
+                'text' => self::visibleText($document->innerHtml($index)),
+                'raw_survivor' => self::heroRemovalCandidateHasRawSurvivor($document, $index),
+            ];
+        }
+        if ($spans === []) {
+            return $markup;
+        }
+
+        $safe = self::heroNestedRemovalSafety($document, $spans);
+        $safeSpans = array_values(array_filter(
+            $spans,
+            static fn (array $span): bool => $safe[$span['index']],
+        ));
+        $unsafeSpans = self::outermostRemovalSpans(array_values(array_filter(
+            $spans,
+            static fn (array $span): bool => !$safe[$span['index']],
+        )));
+        // Nested safe candidates are one loss boundary. Removing the inner
+        // block first would invalidate the enclosing source length and can eat
+        // the H1 or root closer that follows it.
+        $outermostSafe = self::outermostRemovalSpans($safeSpans);
+        $candidateSet = array_fill_keys(array_column($safeSpans, 'index'), true);
+        $wrapperMemo = [];
+        $removals = [];
+        $warningRows = [];
+        foreach ($outermostSafe as $span) {
+            $index = $span['index'];
+            $wrapper = self::outermostDedicatedRemovalWrapper(
+                $document,
+                $index,
+                $candidateSet,
+                $wrapperMemo,
+            );
+            $removalIndex = $wrapper ?? $index;
+            $removalEnd = $document->endOffset($removalIndex);
+            if ($removalEnd === null) {
+                // Candidate endpoints were already checked. This guard keeps
+                // an unexpectedly unsafe wrapper from widening the deletion.
+                $removalIndex = $index;
+                $removalEnd = $span['end'];
+            }
+            $removals[] = [
+                'index' => $removalIndex,
+                'start' => $document->openingOffset($removalIndex),
+                'end' => $removalEnd,
+            ];
+
+            $disposition = 'the generated eyebrow copy was removed at its complete block boundary so the hero '
+                . 'opens on its level-1 headline';
+            if ($wrapper !== null) {
+                $disposition .= '; its now-empty dedicated wrapper '
+                    . self::blockPath($document, $wrapper)
+                    . ' was removed in the same transaction without touching sibling blocks';
+            }
+            $warningRows[] = [
+                'start' => $span['start'],
+                'warning' => "file='theme/parts/{$part}.html'; block='"
+                    . self::blockPath($document, $index)
+                    . "'; authored=" . Warnings::value($span['text'])
+                    . "; delivered=removed; disposition={$disposition}",
+            ];
+        }
+        $removals = self::outermostRemovalSpans($removals);
+        $out = self::removeSpans($markup, $removals);
+        $deliveredPaths = self::heroBlockPathsByOffset(BlockMarkup::parse($out));
+        foreach ($unsafeSpans as $span) {
+            $index = $span['index'];
+            $authored = substr($markup, $span['start'], $span['end'] - $span['start']);
+            $deliveredOffset = self::heroOffsetAfterRemovals($span['start'], $removals);
+            $path = $deliveredPaths[$deliveredOffset] ?? self::blockPath($document, $index);
+            $warningRows[] = [
+                'start' => $span['start'],
+                'warning' => "file='theme/parts/{$part}.html'; block='{$path}'; authored="
+                    . self::heroRemovalWarningValue($authored)
+                    . '; delivered=' . self::heroRemovalWarningValue($authored)
+                    . '; disposition=the eyebrow candidate boundary owns raw/non-block payload or a non-target '
+                    . 'descendant selected to survive; its complete nested transaction was retained byte-for-byte '
+                    . 'and the residual pre-headline copy was queued for later repair',
+            ];
+        }
+        usort($warningRows, static fn (array $left, array $right): int => $left['start'] <=> $right['start']);
+        array_push($warnings, ...array_column($warningRows, 'warning'));
+        return $out;
+    }
+
+    /**
+     * Move one unambiguous support paragraph behind the hero H1.
+     *
+     * The reviewed hero opens on its headline, but models sometimes place the
+     * sole plain standfirst immediately before it. When that paragraph and H1
+     * are adjacent siblings, no other rendered copy precedes the H1, and no
+     * second paragraph competes for the support role, moving the complete
+     * paragraph block immediately after the H1 preserves every authored byte
+     * and meaning while restoring the required reading order. Ambiguous
+     * pre-headline paragraphs stay byte-for-byte intact and are warned for a
+     * later repair pass.
+     *
+     * @param list<array<string,mixed>> $repairs
+     * @param list<string>              $warnings
+     */
+    public static function headlineFirstHeroCopy(
+        string $markup,
+        string $part,
+        array &$repairs = [],
+        array &$warnings = [],
+    ): string {
+        $document = BlockMarkup::parse($markup);
+        $h1 = null;
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) === 'heading'
+                && self::heroHeadingLevel(($document->attrs($index) ?? [])['level'] ?? 2) === 1
+            ) {
+                $h1 = $index;
+                break;
+            }
+        }
+        if ($h1 === null || $document->endOffset($h1) === null) {
+            return $markup;
+        }
+
+        $h1Offset = $document->openingOffset($h1);
+        $paragraphs = [];
+        $preHeadlineCopy = [];
+        foreach ($document->indices() as $index) {
+            $name = $document->name($index);
+            if (!in_array($name, ['heading', 'paragraph'], true)) {
+                continue;
+            }
+            $end = $document->endOffset($index);
+            if ($end === null || $end > $h1Offset || self::visibleText($document->innerHtml($index)) === '') {
+                continue;
+            }
+            $preHeadlineCopy[] = $index;
+            if ($name === 'paragraph') {
+                $paragraphs[] = $index;
+            }
+        }
+        if ($paragraphs === []) {
+            return $markup;
+        }
+
+        $candidate = count($paragraphs) === 1 ? $paragraphs[0] : null;
+        $parent = $candidate === null ? null : $document->parent($candidate);
+        $h1Parent = $document->parent($h1);
+        $siblings = $parent === null
+            ? array_values(array_filter(
+                $document->indices(),
+                static fn (int $index): bool => $document->parent($index) === null,
+            ))
+            : $document->children($parent);
+        $candidatePosition = $candidate === null ? false : array_search($candidate, $siblings, true);
+        $h1Position = array_search($h1, $siblings, true);
+        $paragraphSiblingCount = count(array_filter(
+            $siblings,
+            static fn (int $index): bool => $document->name($index) === 'paragraph',
+        ));
+        $candidateOffset = $candidate === null ? null : $document->openingOffset($candidate);
+        $candidateEnd = $candidate === null ? null : $document->endOffset($candidate);
+        $betweenIsWhitespace = is_int($candidateEnd)
+            && trim(substr($markup, $candidateEnd, $h1Offset - $candidateEnd)) === '';
+        $parentPrefixStart = $h1Parent === null
+            ? 0
+            : $document->openingOffset($h1Parent) + $document->openingLength($h1Parent);
+        $parentPrefix = substr($markup, $parentPrefixStart, $h1Offset - $parentPrefixStart);
+        if (is_int($candidateOffset)
+            && is_int($candidateEnd)
+            && $candidateOffset >= $parentPrefixStart
+            && $candidateEnd <= $h1Offset
+        ) {
+            $parentPrefix = substr_replace(
+                $parentPrefix,
+                '',
+                $candidateOffset - $parentPrefixStart,
+                $candidateEnd - $candidateOffset,
+            );
+        }
+        $parentPrefixHasNoOtherCopy = self::visibleText($parentPrefix) === '';
+        $safeMove = $candidate !== null
+            && $parent === $h1Parent
+            && count($preHeadlineCopy) === 1
+            && $paragraphSiblingCount === 1
+            && is_int($candidatePosition)
+            && is_int($h1Position)
+            && $candidatePosition + 1 === $h1Position
+            && $betweenIsWhitespace
+            && $parentPrefixHasNoOtherCopy;
+
+        if (!$safeMove) {
+            foreach ($paragraphs as $paragraph) {
+                $warnings[] = "file='theme/parts/{$part}.html'; block='"
+                    . self::blockPath($document, $paragraph)
+                    . "'; authored=" . Warnings::value(self::visibleText($document->innerHtml($paragraph)))
+                    . '; delivered="original pre-headline position"; disposition=the paragraph could not be '
+                    . 'identified as the sole adjacent support line without risking authored reading order, so its '
+                    . 'block bytes were retained and the headline-first defect was queued for later repair';
+            }
+            return $markup;
+        }
+
+        $candidateEnd = (int) $candidateEnd;
+        $h1End = (int) $document->endOffset($h1);
+        $candidateOffset = (int) $candidateOffset;
+        $candidateLength = $candidateEnd - $candidateOffset;
+        $paragraphMarkup = substr($markup, $candidateOffset, $candidateLength);
+        $withoutParagraph = substr_replace($markup, '', $candidateOffset, $candidateLength);
+        $out = substr_replace(
+            $withoutParagraph,
+            $paragraphMarkup,
+            $h1End - $candidateLength,
+            0,
+        );
+        $repairs[] = [
+            'code' => 'hero-support-moved-after-headline',
+            'part' => $part,
+            'block' => self::blockPath($document, $candidate),
+            'authored' => self::visibleText($document->innerHtml($candidate)) . ' before the H1',
+            'delivered' => 'the identical paragraph block immediately after the H1',
+            'disposition' => 'repaired',
+        ];
+        return $out;
+    }
+
+    /** Return a valid generated hero heading level without scalar coercion. */
+    private static function heroHeadingLevel(mixed $level): ?int
+    {
+        if (is_int($level)) {
+            $normalized = $level;
+        } elseif (is_float($level) && is_finite($level) && floor($level) === $level) {
+            $normalized = (int) $level;
+        } elseif (is_string($level) && preg_match('/^[1-6]$/', $level) === 1) {
+            $normalized = (int) $level;
+        } else {
+            return null;
+        }
+
+        return $normalized >= 1 && $normalized <= 6 ? $normalized : null;
+    }
+
+    /**
+     * Center the copy of a center-anchored hero.
+     *
+     * BIGR-775 follow-up: models execute a centered blueprint unevenly — the
+     * standfirst and buttons get centered while the H1 keeps its default
+     * start alignment (audited: pulso8), or a cover is authored with a top
+     * content position that pins the whole copy block against the top edge
+     * of a viewport-scale stage (audited: lumen8). When the blueprint's text
+     * anchor sits on the vertical center, the cover's content position is
+     * rewritten onto the center row; when the anchor is fully centered
+     * (`center`), each heading/paragraph in the copy region is also aligned
+     * center, the copy group's constrained layout centers, and the buttons
+     * row centers. A logical `center-start`/`center-end` anchor also owns the
+     * cover's resolved physical side, including RTL; a model-authored opposite
+     * side or omitted position is repaired to that contract. Attribute-only
+     * edit per the shared convention — stale
+     * saved-HTML classes are corrected by fix-blocks re-serialization; the
+     * contradictory position class tokens are removed here.
+     *
+     * @param list<array<string,mixed>> $repairs
+     * @param list<string>              $warnings
+     */
+    public static function centerHeroCopy(
+        string $markup,
+        string $textAnchor,
+        string $writingDirection,
+        string $part,
+        array &$repairs = [],
+        array &$warnings = [],
+    ): string {
+        $verticallyCentered = $textAnchor === 'center' || str_starts_with($textAnchor, 'center-');
+        if (!$verticallyCentered) {
+            return $markup;
+        }
+        $horizontallyCentered = $textAnchor === 'center';
+        $coverHorizontal = match ($textAnchor) {
+            'center' => 'center',
+            'center-start' => $writingDirection === 'rtl' ? 'right' : ($writingDirection === 'ltr' ? 'left' : ''),
+            'center-end' => $writingDirection === 'rtl' ? 'left' : ($writingDirection === 'ltr' ? 'right' : ''),
+            default => '',
+        };
+        if (!in_array($coverHorizontal, ['left', 'center', 'right'], true)) {
+            $warnings[] = "file='theme/parts/{$part}.html'; block='hero cover alignment'; authored="
+                . Warnings::value([
+                    'text_anchor' => $textAnchor,
+                    'writing_direction' => $writingDirection,
+                ])
+                . '; delivered="original cover position"; disposition=the vertically centered logical anchor had '
+                . 'no resolvable physical side, so cover alignment was left intact and queued for later repair';
+        }
+
+        $document = BlockMarkup::parse($markup);
+        $adjusted = 0;
+        foreach ($document->indices() as $index) {
+            $name = $document->name($index);
+            $attrs = $document->attrs($index) ?? [];
+            if ($name === 'cover') {
+                if (!in_array($coverHorizontal, ['left', 'center', 'right'], true)) {
+                    continue;
+                }
+                $authoredPosition = $attrs['contentPosition'] ?? null;
+                $position = is_string($authoredPosition) ? trim($authoredPosition) : '';
+                $centered = "center {$coverHorizontal}";
+                if ($position === $centered) {
+                    continue;
+                }
+                if ($centered === 'center center'
+                    && !array_key_exists('contentPosition', $attrs)
+                    && !str_contains($document->ownHtml($index), 'is-position-')
+                    && !str_contains($document->ownHtml($index), 'has-custom-content-position')
+                ) {
+                    // No authored override means the cover already uses the
+                    // all-center default; do not publish a no-op mutation.
+                    continue;
+                }
+                foreach (['top', 'center', 'bottom'] as $vertical) {
+                    foreach (['left', 'center', 'right'] as $horizontal) {
+                        $document->removeClassTokenInOwnHtml(
+                            $index,
+                            "is-position-{$vertical}-{$horizontal}",
+                        );
+                    }
+                }
+                if ($centered === 'center center') {
+                    // The all-center position is the cover default: drop the
+                    // attribute and its custom-position marker entirely.
+                    unset($attrs['contentPosition']);
+                    $document->removeClassTokenInOwnHtml($index, 'has-custom-content-position');
+                } else {
+                    $attrs['contentPosition'] = $centered;
+                }
+                $document->setAttrs($index, $attrs);
+                $adjusted++;
+                continue;
+            }
+            if (!$horizontallyCentered) {
+                continue;
+            }
+            $className = $attrs['className'] ?? '';
+            $classes = preg_split(
+                '/\s+/',
+                is_string($className) ? trim($className) : '',
+                -1,
+                PREG_SPLIT_NO_EMPTY,
+            ) ?: [];
+            $isCopyRoot = in_array('hero-composition__copy', $classes, true);
+            if (!$isCopyRoot && !self::insideCopyRegion($document, $index)) {
+                continue;
+            }
+            // Text alignment is written as style.typography.textAlign — the
+            // one form the block re-serializer preserves. A top-level
+            // textAlign/align attribute is NOT sufficient: the serializer's
+            // raw-comment overlay clobbers the migrated style whenever the
+            // block also authored other style keys, and fix-blocks then drops
+            // the has-text-align-center class as unmirrored (audited:
+            // lumen10's H1 with typography.lineHeight lost its centering).
+            if (in_array($name, ['heading', 'paragraph'], true)) {
+                $styleExists = array_key_exists('style', $attrs);
+                $style = $attrs['style'] ?? [];
+                if ($styleExists && !is_array($style)) {
+                    $warnings[] = self::heroAlignmentShapeWarning(
+                        $document,
+                        $index,
+                        $part,
+                        'style',
+                        $style,
+                    );
+                    continue;
+                }
+                $typographyExists = array_key_exists('typography', $style);
+                $typography = $style['typography'] ?? [];
+                if ($typographyExists && !is_array($typography)) {
+                    $warnings[] = self::heroAlignmentShapeWarning(
+                        $document,
+                        $index,
+                        $part,
+                        'style.typography',
+                        $typography,
+                    );
+                    continue;
+                }
+                if (($typography['textAlign'] ?? null) === 'center'
+                    && ($name !== 'heading' || !array_key_exists('textAlign', $attrs))
+                ) {
+                    continue;
+                }
+                $attrs['style']['typography']['textAlign'] = 'center';
+                if ($name === 'heading') {
+                    unset($attrs['textAlign']);
+                }
+                $document->setAttrs($index, $attrs);
+                $adjusted++;
+                continue;
+            }
+            if ($name === 'buttons') {
+                $layoutExists = array_key_exists('layout', $attrs);
+                $layout = $attrs['layout'] ?? [];
+                if ($layoutExists && !is_array($layout)) {
+                    $warnings[] = self::heroAlignmentShapeWarning(
+                        $document,
+                        $index,
+                        $part,
+                        'layout',
+                        $layout,
+                    );
+                    continue;
+                }
+                if (($layout['justifyContent'] ?? null) === 'center') {
+                    continue;
+                }
+                $attrs['layout'] = ['type' => 'flex'] + $layout;
+                $attrs['layout']['justifyContent'] = 'center';
+                $document->setAttrs($index, $attrs);
+                $adjusted++;
+                continue;
+            }
+            if ($name !== 'group' || !$isCopyRoot) {
+                continue;
+            }
+            $layout = $attrs['layout'] ?? null;
+            if (!is_array($layout)) {
+                if (array_key_exists('layout', $attrs)) {
+                    $warnings[] = self::heroAlignmentShapeWarning(
+                        $document,
+                        $index,
+                        $part,
+                        'layout',
+                        $layout,
+                    );
+                }
+                continue;
+            }
+            if (($layout['type'] ?? null) === 'constrained'
+                && ($layout['justifyContent'] ?? null) !== 'center'
+            ) {
+                $attrs['layout']['justifyContent'] = 'center';
+                $document->setAttrs($index, $attrs);
+                $adjusted++;
+            }
+        }
+        if ($adjusted === 0) {
+            return $markup;
+        }
+        $repairs[] = [
+            'code' => 'hero-copy-centered',
+            'part' => $part,
+            'authored' => "{$adjusted} block(s) off the blueprint's centered anchor",
+            'delivered' => "cover position and copy alignment on the '{$textAnchor}' anchor",
+            'disposition' => 'repaired',
+        ];
+        return $document->render();
+    }
+
+    private static function heroAlignmentShapeWarning(
+        BlockMarkup $document,
+        int $index,
+        string $part,
+        string $attribute,
+        mixed $authored,
+    ): string {
+        return "file='theme/parts/{$part}.html'; block='"
+            . self::blockPath($document, $index)
+            . "'; authored {$attribute}=" . Warnings::value($authored)
+            . '; delivered="original block bytes"; disposition=the malformed generated attribute shape could not '
+            . 'be replaced without discarding authored data, so this block-local centering repair was abandoned '
+            . 'and the residual block was queued for later repair';
+    }
+
+    /** Whether a block sits inside a marked hero copy region. */
+    private static function insideCopyRegion(BlockMarkup $document, int $index): bool
+    {
+        for ($parent = $document->parent($index); $parent !== null; $parent = $document->parent($parent)) {
+            $className = ($document->attrs($parent) ?? [])['className'] ?? '';
+            if (!is_string($className)) {
+                continue;
+            }
+            $classes = preg_split(
+                '/\s+/',
+                trim($className),
+                -1,
+                PREG_SPLIT_NO_EMPTY,
+            ) ?: [];
+            if (in_array('hero-composition__copy', $classes, true)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Force a cover-band hero to span the full viewport width.
+     *
+     * The page-opening hero is exempt from the framed canvas: the mat begins
+     * with the second section. Models following the framed direction cap the
+     * hero's root/cover at `"align":"wide"` anyway (audited: portfolio26's
+     * layered-poster rendered with a page-background gutter on both sides),
+     * so for recipes whose projection is a full-bleed cover band the root
+     * group and every cover are upgraded to `"align":"full"`. Attribute-only
+     * edit per the shared convention (fix-blocks re-serializes the saved
+     * HTML's alignfull class from the attrs); the stale alignwide class token
+     * is removed here so re-serialization cannot resurrect it.
+     *
+     * @param list<array<string,mixed>> $repairs
+     */
+    public static function fullBleedCoverAlignment(string $markup, string $part, array &$repairs = []): string
+    {
+        $document = BlockMarkup::parse($markup);
+        $root = $document->topLevel();
+        if ($root === null) {
+            return $markup;
+        }
+        $upgraded = 0;
+        foreach ($document->indices() as $index) {
+            $isTarget = $index === $root || $document->name($index) === 'cover';
+            if (!$isTarget) {
+                continue;
+            }
+            $attrs = $document->attrs($index) ?? [];
+            if ((string) ($attrs['align'] ?? '') === 'full') {
+                continue;
+            }
+            $attrs['align'] = 'full';
+            $document->setAttrs($index, $attrs);
+            $document->removeClassTokenInOwnHtml($index, 'alignwide');
+            $upgraded++;
+        }
+        if ($upgraded === 0) {
+            return $markup;
+        }
+        $repairs[] = [
+            'code' => 'hero-full-bleed-alignment',
+            'part' => $part,
+            'authored' => "{$upgraded} cover-band block(s) capped below full width",
+            'delivered' => 'align:full edge-to-edge (the framed mat never applies to the page-opening hero)',
+            'disposition' => 'repaired',
+        ];
+        return $document->render();
+    }
+
+    /**
+     * Retain non-overlapping outermost source spans.
+     *
+     * Structurally safe block ranges are disjoint or nested. The defensive
+     * partial-overlap branch still unions an unexpected overlap so callers
+     * never publish two edits whose original offsets can invalidate each
+     * other.
+     *
+     * @template T of array{index:int,start:int,end:int}
+     * @param list<T> $spans
+     * @return list<T>
+     */
+    private static function outermostRemovalSpans(array $spans): array
+    {
+        usort($spans, static function (array $left, array $right): int {
+            $byStart = $left['start'] <=> $right['start'];
+            return $byStart !== 0 ? $byStart : $right['end'] <=> $left['end'];
+        });
+        $outermost = [];
+        foreach ($spans as $span) {
+            $last = array_key_last($outermost);
+            if ($last === null || $span['start'] >= $outermost[$last]['end']) {
+                $outermost[] = $span;
+                continue;
+            }
+            if ($span['end'] <= $outermost[$last]['end']) {
+                continue;
+            }
+            $outermost[$last]['end'] = $span['end'];
+        }
+        return $outermost;
+    }
+
+    /** @param list<array{start:int,end:int}> $spans */
+    private static function removeSpans(string $markup, array $spans): string
+    {
+        usort($spans, static fn (array $left, array $right): int => $right['start'] <=> $left['start']);
+        foreach ($spans as $span) {
+            $markup = substr_replace($markup, '', $span['start'], $span['end'] - $span['start']);
+        }
+        return $markup;
+    }
+
+    /** Inline phrasing belongs to an eyebrow text leaf rather than raw payload. */
+    private const HERO_REMOVAL_INLINE_TAGS = [
+        'a', 'abbr', 'b', 'bdi', 'bdo', 'br', 'cite', 'code', 'del', 'em', 'i',
+        'ins', 'kbd', 'mark', 'q', 'rp', 'rt', 'ruby', 's', 'samp', 'small',
+        'span', 'strong', 'sub', 'sup', 'time', 'u', 'var', 'wbr',
+        'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    ];
+
+    /**
+     * Candidate safety is transactional across the whole nested component.
+     * One raw/non-target survivor freezes its candidate, every containing
+     * candidate, and then every candidate contained by that ancestor.
+     *
+     * @param list<array{index:int,start:int,end:int,raw_survivor:bool}> $candidates
+     * @return array<int,bool> candidate node index => safe to remove
+     */
+    private static function heroNestedRemovalSafety(BlockMarkup $document, array $candidates): array
+    {
+        $candidateSet = array_fill_keys(array_column($candidates, 'index'), true);
+        $safe = [];
+        foreach ($candidates as $candidate) {
+            $safe[$candidate['index']] = !$candidate['raw_survivor']
+                && !self::heroRemovalCandidateContainsSurvivor(
+                    $document,
+                    $candidate['index'],
+                    $candidateSet,
+                );
+        }
+
+        do {
+            $changed = false;
+            $unsafe = array_keys(array_filter($safe, static fn (bool $isSafe): bool => !$isSafe));
+            foreach ($candidates as $candidate) {
+                $index = $candidate['index'];
+                if (!$safe[$index]) {
+                    continue;
+                }
+                foreach ($unsafe as $unsafeIndex) {
+                    if (self::heroRemovalIsDescendantOf($document, $index, $unsafeIndex)
+                        || self::heroRemovalIsDescendantOf($document, $unsafeIndex, $index)
+                    ) {
+                        $safe[$index] = false;
+                        $changed = true;
+                        break;
+                    }
+                }
+            }
+        } while ($changed);
+
+        return $safe;
+    }
+
+    /** @param array<int,bool> $candidateSet */
+    private static function heroRemovalCandidateContainsSurvivor(
+        BlockMarkup $document,
+        int $candidate,
+        array $candidateSet,
+    ): bool {
+        foreach ($document->indices() as $index) {
+            if ($index === $candidate || isset($candidateSet[$index])) {
+                continue;
+            }
+            if (self::heroRemovalIsDescendantOf($document, $index, $candidate)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static function heroRemovalIsDescendantOf(
+        BlockMarkup $document,
+        int $index,
+        int $ancestor,
+    ): bool {
+        for ($parent = $document->parent($index); $parent !== null; $parent = $document->parent($parent)) {
+            if ($parent === $ancestor) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Whether a separator/eyebrow leaf owns visible raw media or structure. */
+    private static function heroRemovalCandidateHasRawSurvivor(BlockMarkup $document, int $index): bool
+    {
+        if ($document->isVoid($index)) {
+            return false;
+        }
+        $shell = self::heroRemovalShellWithoutChildBlocks($document, $index);
+        if ($shell === null) {
+            return true;
+        }
+        $shell = preg_replace('/<!--(?!\s*\/?wp:).*?-->/s', '', $shell) ?? $shell;
+        if (trim($shell) === '') {
+            return false;
+        }
+        if (preg_match(
+            '~\A\s*<(?<tag>div|section|article|main|aside|header|footer|nav)\b[^>]*>\s*</\k<tag>>\s*\z~is',
+            $shell,
+        ) === 1) {
+            return false;
+        }
+        if ($document->name($index) === 'separator') {
+            return preg_match('~\A\s*<hr\b[^>]*\/?>\s*\z~is', $shell) !== 1;
+        }
+        if (!preg_match_all('/<\s*\/?\s*([a-z][a-z0-9-]*)\b[^>]*>/i', $shell, $tags)) {
+            return false;
+        }
+        foreach ($tags[1] as $tag) {
+            if (!in_array(strtolower($tag), self::HERO_REMOVAL_INLINE_TAGS, true)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static function heroRemovalShellWithoutChildBlocks(
+        BlockMarkup $document,
+        int $index,
+    ): ?string {
+        $innerStart = $document->openingOffset($index) + $document->openingLength($index);
+        $shell = $document->innerHtml($index);
+        $children = $document->children($index);
+        for ($position = count($children) - 1; $position >= 0; $position--) {
+            $child = $children[$position];
+            $end = $document->endOffset($child);
+            if ($end === null) {
+                return null;
+            }
+            $start = $document->openingOffset($child);
+            $shell = substr_replace($shell, '', $start - $innerStart, $end - $start);
+        }
+        return $shell;
+    }
+
+    /** @return array<int,string> opening byte offset => hierarchical delivered path */
+    private static function heroBlockPathsByOffset(BlockMarkup $document): array
+    {
+        $paths = [];
+        foreach ($document->indices() as $index) {
+            $paths[$document->openingOffset($index)] = self::blockPath($document, $index);
+        }
+        return $paths;
+    }
+
+    /** @param list<array{start:int,end:int}> $removals */
+    private static function heroOffsetAfterRemovals(int $offset, array $removals): int
+    {
+        $shift = 0;
+        foreach ($removals as $removal) {
+            if ($removal['end'] > $offset) {
+                break;
+            }
+            $shift += $removal['end'] - $removal['start'];
+        }
+        return $offset - $shift;
+    }
+
+    private static function heroRemovalWarningValue(mixed $value): string
+    {
+        return (string) json_encode(
+            $value,
+            JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE,
+        );
+    }
+
+    /**
+     * Find the highest group shell whose entire child tree is being removed.
+     *
+     * @param array<int,bool> $candidateSet
+     * @param array<int,bool> $memo
+     */
+    private static function outermostDedicatedRemovalWrapper(
+        BlockMarkup $document,
+        int $candidate,
+        array $candidateSet,
+        array &$memo,
+    ): ?int {
+        $wrapper = null;
+        for ($parent = $document->parent($candidate); $parent !== null; $parent = $document->parent($parent)) {
+            if ($document->name($parent) !== 'group'
+                || !self::isDedicatedRemovalWrapper($document, $parent, $candidateSet, $memo)
+            ) {
+                break;
+            }
+            $wrapper = $parent;
+        }
+        return $wrapper;
+    }
+
+    /**
+     * @param array<int,bool> $candidateSet
+     * @param array<int,bool> $memo
+     */
+    private static function isDedicatedRemovalWrapper(
+        BlockMarkup $document,
+        int $group,
+        array $candidateSet,
+        array &$memo,
+    ): bool {
+        if (array_key_exists($group, $memo)) {
+            return $memo[$group];
+        }
+        $end = $document->endOffset($group);
+        $children = $document->children($group);
+        if ($end === null || $children === []) {
+            return $memo[$group] = false;
+        }
+        foreach ($children as $child) {
+            if (isset($candidateSet[$child])) {
+                continue;
+            }
+            if ($document->name($child) === 'group'
+                && self::isDedicatedRemovalWrapper($document, $child, $candidateSet, $memo)
+            ) {
+                continue;
+            }
+            return $memo[$group] = false;
+        }
+
+        // Remove each direct child from a snapshot of the group's inner HTML.
+        // The remainder must be exactly one ordinary group wrapper shell; raw
+        // text, images, or decorative elements make the group non-dedicated.
+        $innerStart = $document->openingOffset($group) + $document->openingLength($group);
+        $shell = $document->innerHtml($group);
+        for ($i = count($children) - 1; $i >= 0; $i--) {
+            $child = $children[$i];
+            $childEnd = $document->endOffset($child);
+            if ($childEnd === null) {
+                return $memo[$group] = false;
+            }
+            $relativeStart = $document->openingOffset($child) - $innerStart;
+            $shell = substr_replace($shell, '', $relativeStart, $childEnd - $document->openingOffset($child));
+        }
+        $shell = (string) preg_replace('/<!--.*?-->/s', '', $shell);
+        return $memo[$group] = preg_match(
+            '~\A\s*<(?<tag>div|section|article|main|aside|header|footer|nav)\b[^>]*>\s*</\k<tag>>\s*\z~is',
+            $shell,
+        ) === 1;
+    }
+
+    private static function blockPath(BlockMarkup $document, int $index): string
+    {
+        $segments = [];
+        for ($cursor = $index; ; $cursor = $parent) {
+            $parent = $document->parent($cursor);
+            $siblings = $parent === null
+                ? array_values(array_filter(
+                    $document->indices(),
+                    static fn (int $candidate): bool => $document->parent($candidate) === null,
+                ))
+                : $document->children($parent);
+            $ordinal = 0;
+            foreach ($siblings as $sibling) {
+                if ($document->name($sibling) !== $document->name($cursor)) {
+                    continue;
+                }
+                if ($sibling === $cursor) {
+                    break;
+                }
+                $ordinal++;
+            }
+            array_unshift($segments, 'wp:' . $document->name($cursor) . "[{$ordinal}]");
+            if ($parent === null) {
+                break;
+            }
+        }
+        return implode(' > ', $segments);
+    }
+
+    /** Whether a group's descendants are text wrappers only (groups/paragraphs). */
+    private static function wrapsOnlyText(BlockMarkup $document, int $group): bool
+    {
+        $pending = $document->children($group);
+        while ($pending !== []) {
+            $child = array_pop($pending);
+            if (!in_array($document->name($child), ['group', 'paragraph'], true)) {
+                return false;
+            }
+            array_push($pending, ...$document->children($child));
+        }
+        return true;
+    }
+
+    /**
+     * Synthesize wrapper closers a container's closing segment left out.
+     *
+     * Long responses sometimes drop a `</div>` right before a container's
+     * closing comment while the comment tree itself stays balanced — and one
+     * missing wrapper tag makes recovery discard the whole part. This pass
+     * rebuilds the comment tree with a simple stack, then advances the strict
+     * wrapper stack through each static container's own shell segments
+     * (prefix, inter-child gaps, closing suffix). When the prefix and every
+     * gap advance cleanly but the suffix leaves wrapper tags open, the
+     * missing close tags are inserted immediately before the closer comment.
+     * Anything ambiguous — a broken gap, a non-strict shell, an imbalanced
+     * comment tree — is left untouched for recovery to isolate. Idempotent:
+     * a repaired suffix advances to an empty stack. At most four insertions
+     * per document.
+     *
+     * @param list<string> $notes
+     */
+    public static function closeUnbalancedWrapperClosers(string $text, array &$notes = []): string
+    {
+        preg_match_all(
+            '/<!--\s+(?<closer>\/)?wp:(?<name>[a-z][a-z0-9_-]*(?:\/[a-z][a-z0-9_-]*)?)\s+'
+            . '(?:(?<attrs>\{(?:(?!-->).)*?\})\s+)?(?<void>\/)?-->/s',
+            $text,
+            $matches,
+            PREG_OFFSET_CAPTURE | PREG_SET_ORDER
+        );
+        if ($matches === []) {
+            return $text;
+        }
+
+        /** @var list<array{name:string,openEnd:int,children:list<array{start:int,end:int}>,start:int}> $stack */
+        $stack = [];
+        /** @var list<array{name:string,openEnd:int,children:list<array{start:int,end:int}>,closerStart:int}> $containers */
+        $containers = [];
+        /** @var list<array{at:int,html:string,name:string}> $insertions */
+        $insertions = [];
+        /** @var list<string> $crossedInsertions */
+        $crossedInsertions = [];
+        foreach ($matches as $m) {
+            $offset = $m[0][1];
+            $length = strlen($m[0][0]);
+            $isCloser = ($m['closer'][0] ?? '') === '/';
+            $isVoid = ($m['void'][0] ?? '') === '/';
+            if ($isCloser && $isVoid) {
+                return $text;
+            }
+            if ($isVoid) {
+                if ($stack !== []) {
+                    $stack[count($stack) - 1]['children'][] = ['start' => $offset, 'end' => $offset + $length];
+                    $stack[count($stack) - 1]['firstEventStart'] ??= $offset;
+                }
+                continue;
+            }
+            if (!$isCloser) {
+                if ($stack !== []) {
+                    $stack[count($stack) - 1]['firstEventStart'] ??= $offset;
+                }
+                $stack[] = [
+                    'name' => $m['name'][0],
+                    'start' => $offset,
+                    'openEnd' => $offset + $length,
+                    'children' => [],
+                    'firstEventStart' => null,
+                ];
+                continue;
+            }
+            if ($stack === []) {
+                return $text; // stray closer — not this pass's defect
+            }
+            if ($stack[count($stack) - 1]['name'] !== $m['name'][0]) {
+                // A closer crossing still-open frames: the model forgot the
+                // inner containers' closers entirely (observed: a day-grid's
+                // wp:columns/wp:column never closed, so the root's closer
+                // crossed both). When every crossed frame is a static
+                // container, synthesize its wrapper close tags and closer
+                // comment just before the wrapper-close run that precedes
+                // this closer, innermost-first. Anything else stays broken
+                // for recovery to isolate.
+                $matchDepth = null;
+                for ($i = count($stack) - 1; $i >= 0; $i--) {
+                    if ($stack[$i]['name'] === $m['name'][0]) {
+                        $matchDepth = $i;
+                        break;
+                    }
+                }
+                if ($matchDepth === null) {
+                    return $text;
+                }
+                $insertAt = self::wrapperCloseRunStart($text, $offset);
+                $synth = '';
+                for ($i = count($stack) - 1; $i > $matchDepth; $i--) {
+                    $frame = $stack[$i];
+                    if (!in_array($frame['name'], ['group', 'columns', 'column', 'buttons'], true)) {
+                        return $text;
+                    }
+                    $prefixEnd = $frame['firstEventStart'] ?? min($insertAt, $offset);
+                    $shell = MarkupSalvage::advanceStrictWrapperStack(
+                        substr($text, $frame['openEnd'], max(0, $prefixEnd - $frame['openEnd'])),
+                        [],
+                        false
+                    );
+                    if ($shell === null || $shell === []) {
+                        return $text;
+                    }
+                    $synth .= implode('', array_map(
+                        static fn (string $tag): string => "</{$tag}>",
+                        array_reverse($shell)
+                    )) . "<!-- /wp:{$frame['name']} -->";
+                    $crossedInsertions[] = $frame['name'];
+                    array_pop($stack);
+                }
+                if (count($crossedInsertions ?? []) > 4) {
+                    return $text;
+                }
+                $insertions[] = ['at' => $insertAt, 'html' => $synth, 'name' => $m['name'][0], 'crossed' => true];
+            }
+            $node = array_pop($stack);
+            $node['closerStart'] = $offset;
+            if ($stack !== []) {
+                $stack[count($stack) - 1]['children'][] = [
+                    'start' => $node['start'],
+                    'end' => $offset + $length,
+                ];
+            }
+            if (in_array($node['name'], ['group', 'columns', 'column', 'buttons'], true)) {
+                $containers[] = $node;
+            }
+        }
+        if ($stack !== []) {
+            return $text;
+        }
+
+        // Crossed-frame synthesis changed which bytes belong to which frame,
+        // so the container-suffix scan below would compute against stale
+        // offsets; apply only the crossed repairs this pass.
+        if ($crossedInsertions !== []) {
+            usort($insertions, static fn (array $a, array $b): int => $b['at'] <=> $a['at']);
+            foreach ($insertions as $insertion) {
+                $text = substr_replace($text, $insertion['html'], $insertion['at'], 0);
+                $notes[] = 'synthesized missing container closer(s) '
+                    . preg_replace('/\s+/', ' ', $insertion['html'])
+                    . " for frame(s) crossed by a wp:{$insertion['name']} closer";
+            }
+            return $text;
+        }
+
+        foreach ($containers as $node) {
+            $childStart = $node['children'] === [] ? $node['closerStart'] : $node['children'][0]['start'];
+            $wrapper = MarkupSalvage::advanceStrictWrapperStack(
+                substr($text, $node['openEnd'], $childStart - $node['openEnd']),
+                [],
+                false
+            );
+            if ($wrapper === null || $wrapper === []) {
+                continue; // dynamic or non-strict shell — leave to recovery
+            }
+            $cursor = $childStart;
+            foreach ($node['children'] as $child) {
+                $gap = substr($text, $cursor, $child['start'] - $cursor);
+                if ($gap !== '') {
+                    $wrapper = MarkupSalvage::advanceStrictWrapperStack($gap, $wrapper, false);
+                    if ($wrapper === null || $wrapper === []) {
+                        continue 2;
+                    }
+                }
+                $cursor = $child['end'];
+            }
+            $suffix = substr($text, $cursor, $node['closerStart'] - $cursor);
+            $after = MarkupSalvage::advanceStrictWrapperStack($suffix, $wrapper, true);
+            if ($after === null || $after === []) {
+                continue;
+            }
+            $insertions[] = [
+                'at' => $node['closerStart'],
+                'html' => implode('', array_map(
+                    static fn (string $tag): string => "</{$tag}>",
+                    array_reverse($after)
+                )),
+                'name' => $node['name'],
+            ];
+        }
+        if ($insertions === [] || count($insertions) > 4) {
+            return $text;
+        }
+
+        usort($insertions, static fn (array $a, array $b): int => $b['at'] <=> $a['at']);
+        foreach ($insertions as $insertion) {
+            $text = substr_replace($text, $insertion['html'], $insertion['at'], 0);
+            $notes[] = "closed wrapper tag(s) {$insertion['html']} missing before a wp:{$insertion['name']} closer";
+        }
+        return $text;
+    }
+
+    /**
+     * Start of the run of whitespace and HTML close tags directly preceding
+     * an offset. Crossed-frame closers are synthesized before this run so
+     * they land inside the still-open frames, ahead of the wrapper closes
+     * that belong to the outer frames.
+     */
+    private static function wrapperCloseRunStart(string $text, int $offset): int
+    {
+        $start = $offset;
+        while ($start > 0) {
+            $before = rtrim(substr($text, 0, $start));
+            if (!str_ends_with($before, '>')) {
+                break;
+            }
+            $open = strrpos($before, '<');
+            if ($open === false || preg_match('/^<\/[a-z][a-z0-9-]*\s*>$/i', substr($before, $open)) !== 1) {
+                break;
+            }
+            $start = $open;
+        }
+        return $start;
+    }
+
+    /**
+     * Clamp an oversized hero-root top padding preset.
+     *
+     * hero.md caps a media-led hero's root top padding at `sm` (the media is
+     * the section's first visual element, sitting tight under the header),
+     * but models keep authoring `xl` — and copy-led heroes author the same
+     * `xl`, opening a quarter-viewport dead band that pushes the support
+     * line and CTA below the fold. Media-led roots (first child wp:image/
+     * wp:cover marked hero-composition__media) clamp to `sm`; every other
+     * hero root clamps to `md`, keeping the copy-led breathing room without
+     * the dead band. Preset swap only; explicit pixel values and presets at
+     * or under the cap pass through untouched.
+     *
+     * @param list<array<string,mixed>> $repairs
+     */
+    public static function clampHeroTopPadding(string $markup, string $part, array &$repairs = []): string
+    {
+        $document = BlockMarkup::parse($markup);
+        $root = $document->topLevel();
+        if ($root === null) {
+            return $markup;
+        }
+        $children = $document->children($root);
+        if ($children === []) {
+            return $markup;
+        }
+        $first = $children[0];
+        $mediaLed = in_array($document->name($first), ['image', 'cover'], true)
+            && str_contains(
+                (string) (($document->attrs($first) ?? [])['className'] ?? ''),
+                'hero-composition__media'
+            );
+        // Copy-led heroes cap at lg, not md (BIGR-775 follow-up): the tighter
+        // cap sat solid split heroes ~1.5rem under the header (lumen9/atlas9).
+        $cap = $mediaLed ? 'sm' : 'lg';
+        $oversized = $mediaLed ? 'md|lg|xl|xxl' : 'xl|xxl';
+
+        $attrs = $document->attrs($root) ?? [];
+        $top = $attrs['style']['spacing']['padding']['top'] ?? null;
+        if (!is_string($top) || preg_match("/^var:preset\\|spacing\\|({$oversized})\$/", $top, $m) !== 1) {
+            return $markup;
+        }
+
+        // Patch both mirrors inside the root's own byte spans: the attribute
+        // JSON inside the opening comment, and the inline style in the
+        // wrapper tag (replaceInOwnHtml only edits class attributes). The
+        // JSON needle carries the "top" key so a matching sibling value
+        // (e.g. bottom padding) is never touched.
+        $commentEnd = $document->openingOffset($root) + $document->openingLength($root);
+        $htmlEnd = $document->openingOffset($children[0]);
+        $patched = self::replaceFirstInSpan(
+            $markup,
+            $document->openingOffset($root),
+            $commentEnd,
+            "\"top\":\"var:preset|spacing|{$m[1]}\"",
+            "\"top\":\"var:preset|spacing|{$cap}\"",
+        );
+        $patched = self::replaceFirstInSpan(
+            $patched,
+            $commentEnd,
+            $htmlEnd,
+            "padding-top:var(--wp--preset--spacing--{$m[1]})",
+            "padding-top:var(--wp--preset--spacing--{$cap})",
+        );
+        if ($patched === $markup) {
+            return $markup;
+        }
+        $repairs[] = [
+            'code' => 'hero-top-padding-clamped',
+            'part' => $part,
+            'authored' => $top,
+            'delivered' => "var:preset|spacing|{$cap}",
+            'disposition' => 'repaired',
+        ];
+        return $patched;
+    }
+
+    /** Replace the first occurrence of a needle inside [start, end) only. */
+    private static function replaceFirstInSpan(
+        string $text,
+        int $start,
+        int $end,
+        string $needle,
+        string $replace,
+    ): string {
+        $span = substr($text, $start, $end - $start);
+        $at = strpos($span, $needle);
+        if ($at === false) {
+            return $text;
+        }
+        $span = substr_replace($span, $replace, $at, strlen($needle));
+        return substr_replace($text, $span, $start, $end - $start);
+    }
+
+    /** Visible authored text with comments/tags removed and whitespace folded. */
+    private static function visibleText(string $innerHtml): string
+    {
+        $text = (string) preg_replace('/<!--.*?-->/s', '', $innerHtml);
+        $text = html_entity_decode(strip_tags($text), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $text = (string) preg_replace('/\s+/u', ' ', $text);
+        return trim($text);
+    }
+
+    /** Visible reading text of a block's inner HTML, normalized for equality. */
+    private static function readingText(string $innerHtml): string
+    {
+        return mb_strtolower(self::visibleText($innerHtml), 'UTF-8');
+    }
+
+    /**
+     * Close delimiter attribute objects the model left short of `}`s.
+     *
+     * Matches the same lazy attrs shape as BlockMarkup::DELIMITER (opening
+     * delimiters only). When the captured JSON fails to parse but appending
+     * one to three closing braces makes it parse, the delimiter is rewritten
+     * in place and a note is recorded. Attributes broken any other way are
+     * left untouched for the recovery pass to isolate. Idempotent: repaired
+     * attrs parse, so a second pass matches nothing.
+     *
+     * @param list<string> $notes
+     */
+    public static function closeUnbalancedDelimiterAttrs(string $text, array &$notes = []): string
+    {
+        return (string) preg_replace_callback(
+            '/(?<head><!--\s+wp:[a-z][a-z0-9_-]*(?:\/[a-z][a-z0-9_-]*)?\s+)'
+            . '(?<attrs>\{(?:(?!-->).)*?\})(?<tail>\s+\/?-->)/s',
+            static function (array $m) use (&$notes): string {
+                $raw = $m['attrs'];
+                if (json_decode($raw) !== null || strtolower(trim($raw, "{} \t\r\n")) === 'null') {
+                    return $m[0];
+                }
+                for ($braces = 1; $braces <= 3; $braces++) {
+                    $candidate = $raw . str_repeat('}', $braces);
+                    if (is_object(json_decode($candidate))) {
+                        $notes[] = "closed {$braces} unbalanced attribute brace(s) in "
+                            . substr(trim($m['head']), 0, 40) . '…';
+                        return $m['head'] . $candidate . $m['tail'];
+                    }
+                }
+                // The inverse slip: one SURPLUS closing brace inside a run
+                // (observed: `"blockGap":"0"}}},"layout"` closed the style
+                // object one level early and poisoned a whole header part).
+                // Dropping a single brace from each run is bounded and only
+                // accepted when the result parses.
+                $offset = 0;
+                while (preg_match('/\}{2,}/', $raw, $run, PREG_OFFSET_CAPTURE, $offset) === 1) {
+                    $at = (int) $run[0][1];
+                    $candidate = substr_replace($raw, '', $at, 1);
+                    if (is_object(json_decode($candidate))) {
+                        $notes[] = 'removed 1 surplus attribute brace in '
+                            . substr(trim($m['head']), 0, 40) . '…';
+                        return $m['head'] . $candidate . $m['tail'];
+                    }
+                    $offset = $at + strlen($run[0][0]);
+                }
+                return $m[0];
+            },
+            $text
+        );
+    }
+
+    /**
+     * Repair a delimiter comment the model terminated with a bare `>`.
+     *
+     * Observed: `<!-- wp:paragraph {"align":"center"> <p …` — the attrs lost
+     * their closing `"}` and the comment its ` -->`, so at the HTML layer the
+     * "comment" swallows real content up to the next closer and the whole
+     * part is discarded. When the fragment plus `}` parses as a JSON object,
+     * rewrite the bare `>` to `} -->`; anything else is left for recovery.
+     * The lookahead requires the `>` to sit directly before markup, so a `>`
+     * inside a legitimate attribute string never matches.
+     *
+     * @param list<string> $notes
+     */
+    public static function closeTruncatedDelimiterComment(string $text, array &$notes = []): string
+    {
+        $text = (string) preg_replace_callback(
+            '/(?<head><!--\s+wp:[a-z][a-z0-9_-]*(?:\/[a-z][a-z0-9_-]*)?\s+)'
+            . '(?<attrs>\{(?:(?!-->)[^{}>])*)>(?=\s*<)/',
+            static function (array $m) use (&$notes): string {
+                if (!is_object(json_decode($m['attrs'] . '}'))) {
+                    return $m[0];
+                }
+                $notes[] = 'closed a `>`-truncated delimiter comment in '
+                    . substr(trim($m['head']), 0, 40) . '…';
+                return $m['head'] . $m['attrs'] . '} -->';
+            },
+            $text
+        );
+
+        // The attrs-less spelling of the same slip: `<!-- wp:paragraph>` or
+        // `<!-- /wp:paragraph>` dropped the ` -->` terminator entirely, so
+        // the "comment" swallows content up to the next real `-->`.
+        return (string) preg_replace_callback(
+            '/<!--\s+(?<closer>\/)?wp:(?<name>[a-z][a-z0-9_-]*(?:\/[a-z][a-z0-9_-]*)?)>(?=\s*<)/',
+            static function (array $m) use (&$notes): string {
+                $notes[] = 'closed a `>`-truncated delimiter comment in <!-- '
+                    . $m['closer'] . 'wp:' . $m['name'] . '…';
+                return '<!-- ' . $m['closer'] . 'wp:' . $m['name'] . ' -->';
+            },
+            $text
+        );
     }
 }

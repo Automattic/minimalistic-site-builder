@@ -7,6 +7,7 @@ use Automattic\SiteBuild\BlockSerializer\Json\JsJsonEncoder;
 use Automattic\SiteBuild\BlockSerializer\Json\JsonDecoder;
 use Automattic\SiteBuild\BlockSerializer\Json\JsonObject;
 use Automattic\SiteBuild\BlockSerializer\Registry\BlockRegistry;
+use Automattic\SiteBuild\Units\GeneratedMarkup;
 
 /**
  * Deterministic width/rhythm normalization for generated block markup.
@@ -72,12 +73,26 @@ final class LayoutFixer
      * settings.layout.contentSize in px (null when unknown — the cover
      * measure rule is skipped without it).
      *
+     * $htmlFirst turns off the three width rules that assume the THEME owns
+     * page width via contentSize. On the HTML-first path the carried design
+     * CSS owns it, and the transformer deliberately emits no layout attribute
+     * on section roots — stamping one back boxes full-bleed heroes. Header and
+     * footer keep every rule unless their root carries the exact marker that
+     * says delivered CSS owns layout; that marker suppresses only the missing
+     * root-layout injection.
+     *
      * @return array{markup:string, notes:string[]} notes are human-readable
      *         descriptions of each change; empty notes means markup is
      *         returned unchanged.
      */
-    public static function fix(string $markup, string $role, ?float $contentSize = null, array $spacingSlugs = []): array
-    {
+    public static function fix(
+        string $markup,
+        string $role,
+        ?float $contentSize = null,
+        array $spacingSlugs = [],
+        bool $htmlFirst = false,
+        array $wideMeasureRootClasses = [],
+    ): array {
         $notes = [];
         $commentRepair = BlockCommentRepair::repair($markup);
         $markup = $commentRepair['markup'];
@@ -107,17 +122,28 @@ final class LayoutFixer
         self::mirrorHtmlOnlyVerticalSpacing($markup, $all, $notes);
         self::mirrorHtmlOnlyGap($markup, $all, $htmlEdits, $notes);
         self::mirrorDynamicChromeSpacing($markup, $all, $htmlEdits, $notes);
-        self::addMissingRootLayout($roots, $notes);
+        $pageWidth = $role === self::ROLE_SECTION || $role === self::ROLE_TEMPLATE;
+        if (!$pageWidth || !$htmlFirst) {
+            self::addMissingRootLayout($roots, $notes, $wideMeasureRootClasses);
+        }
         self::promoteAlignClassNames($all, $notes);
 
+        if ($role === self::ROLE_HEADER) {
+            self::widenHeaderRows($roots, $notes);
+        }
         if ($role === self::ROLE_FOOTER) {
             self::widenFooterColumns($roots, $all, $notes);
             self::evenOutFooterRows($all, $notes);
         }
-        if ($role === self::ROLE_SECTION || $role === self::ROLE_TEMPLATE) {
+        if ($pageWidth && !$htmlFirst) {
             self::freeGridsFromNarrowWrappers($roots, $notes);
             self::restoreCoverMeasure($all, $contentSize, $notes);
         }
+        // Last: the rules above rewrite "align" attributes, and an align class
+        // left behind in the saved HTML is not derivable from the new
+        // attribute, so re-serialization keeps it as an authored className —
+        // where it outranks the attribute in CSS.
+        self::syncAlignClassTokens($markup, $all, $htmlEdits, $notes);
 
         if ($notes === []) {
             return ['markup' => $markup, 'notes' => []];
@@ -168,11 +194,11 @@ final class LayoutFixer
                 continue;
             }
             $tagStart = $node->start + $node->len;
-            $tagHtml = self::wrapperTag($markup, $tagStart);
+            $tagHtml = MarkupScan::wrapperTag($markup, $tagStart);
             if ($tagHtml === null) {
                 continue;
             }
-            $style = self::tagAttribute($tagHtml, 'style');
+            $style = MarkupScan::tagAttribute($tagHtml, 'style');
             if ($style === null || !str_contains($style[0], 'var(--wp--spacing--')) {
                 continue;
             }
@@ -435,15 +461,14 @@ final class LayoutFixer
                     || self::is($node, 'column') || self::is($node, 'cover'));
             if ($trustsHtml) {
                 $short = preg_replace('#^core/#', '', $node->name);
-                $tagHtml = self::wrapperTag($markup, $node->start + $node->len);
+                $tagHtml = MarkupScan::wrapperTag($markup, $node->start + $node->len);
                 if ($tagHtml !== null && self::hasClassToken($tagHtml, "wp-block-{$short}")) {
-                    $styleAttr = self::tagAttribute($tagHtml, 'style');
+                    $styleAttr = MarkupScan::tagAttribute($tagHtml, 'style');
                     if ($styleAttr !== null) {
                         $declared = [];
-                        foreach (explode(';', $styleAttr[0]) as $segment) {
-                            $colon = strpos($segment, ':');
-                            if ($colon !== false) {
-                                $declared[strtolower(trim(substr($segment, 0, $colon)))] = trim(substr($segment, $colon + 1));
+                        foreach (MarkupScan::parseInlineStyle($styleAttr[0]) as $declaration) {
+                            if ($declaration['value'] !== null) {
+                                $declared[$declaration['property']] = trim($declaration['value']);
                             }
                         }
                     }
@@ -529,11 +554,11 @@ final class LayoutFixer
                 continue;
             }
             $tagStart = $node->start + $node->len;
-            $tagHtml = self::wrapperTag($markup, $tagStart);
+            $tagHtml = MarkupScan::wrapperTag($markup, $tagStart);
             if ($tagHtml === null || !self::hasClassToken($tagHtml, "wp-block-{$short}")) {
                 continue;
             }
-            $styleAttr = self::tagAttribute($tagHtml, 'style');
+            $styleAttr = MarkupScan::tagAttribute($tagHtml, 'style');
             if ($styleAttr === null) {
                 continue;
             }
@@ -549,22 +574,21 @@ final class LayoutFixer
             $kept = [];
             $declared = [];
             $unmirrorable = false;
-            foreach (explode(';', $styleAttr[0]) as $segment) {
-                if (trim($segment) === '') {
+            foreach (MarkupScan::parseInlineStyle($styleAttr[0]) as $declaration) {
+                if (trim($declaration['segment']) === '') {
                     continue;
                 }
-                $colon = strpos($segment, ':');
-                $prop = $colon === false ? '' : strtolower(trim(substr($segment, 0, $colon)));
-                if (preg_match('/\A(padding|margin)-(top|right|bottom|left)\z/', $prop, $m) !== 1) {
-                    $kept[] = trim($segment);
+                if ($declaration['value'] === null
+                    || preg_match('/\A(padding|margin)-(top|right|bottom|left)\z/', $declaration['property'], $m) !== 1) {
+                    $kept[] = trim($declaration['segment']);
                     continue;
                 }
-                $value = trim(substr($segment, $colon + 1));
+                $value = trim($declaration['value']);
                 if ($value === '' || self::referencesNonPresetVar($value)) {
                     $unmirrorable = true;
                     break;
                 }
-                $declared[$m[1]][$m[2]] = self::blockSpacingValue($value);
+                $declared[$m[1]][$m[2]] = MarkupScan::blockSpacingValue($value);
             }
             if ($unmirrorable || $declared === []) {
                 continue;
@@ -646,23 +670,22 @@ final class LayoutFixer
             if ($style !== null && !$style instanceof \stdClass) {
                 continue;
             }
-            $tagHtml = self::wrapperTag($markup, $node->start + $node->len);
+            $tagHtml = MarkupScan::wrapperTag($markup, $node->start + $node->len);
             if ($tagHtml === null
                 || !self::hasClassToken($tagHtml, 'wp-block-' . preg_replace('#^core/#', '', $node->name))) {
                 continue;
             }
-            $styleAttr = self::tagAttribute($tagHtml, 'style');
+            $styleAttr = MarkupScan::tagAttribute($tagHtml, 'style');
             if ($styleAttr === null) {
                 continue;
             }
 
-            foreach (explode(';', $styleAttr[0]) as $segment) {
-                $colon = strpos($segment, ':');
-                if ($colon === false
-                    || preg_match('/\A(padding|margin)-(top|bottom)\z/', strtolower(trim(substr($segment, 0, $colon))), $m) !== 1) {
+            foreach (MarkupScan::parseInlineStyle($styleAttr[0]) as $declaration) {
+                if ($declaration['value'] === null
+                    || preg_match('/\A(padding|margin)-(top|bottom)\z/', $declaration['property'], $m) !== 1) {
                     continue;
                 }
-                $value = trim(substr($segment, $colon + 1));
+                $value = trim($declaration['value']);
                 if ($value === '' || self::referencesNonPresetVar($value)) {
                     continue;
                 }
@@ -678,7 +701,7 @@ final class LayoutFixer
                 if (!$box instanceof \stdClass || property_exists($box, $side)) {
                     continue;
                 }
-                $box->{$side} = self::blockSpacingValue($value);
+                $box->{$side} = MarkupScan::blockSpacingValue($value);
                 $node->dirty = true;
                 $notes[] = "wp:{$node->name} carried {$property}-{$side} only in its inline HTML — mirrored it into style.spacing.{$property}.{$side} so re-serialization keeps the declared rhythm";
             }
@@ -721,12 +744,12 @@ final class LayoutFixer
                 continue;
             }
             $tagStart = $node->start + $node->len;
-            $tagHtml = self::wrapperTag($markup, $tagStart);
+            $tagHtml = MarkupScan::wrapperTag($markup, $tagStart);
             if ($tagHtml === null
                 || !self::hasClassToken($tagHtml, 'wp-block-' . preg_replace('#^core/#', '', $node->name))) {
                 continue;
             }
-            $styleAttr = self::tagAttribute($tagHtml, 'style');
+            $styleAttr = MarkupScan::tagAttribute($tagHtml, 'style');
             if ($styleAttr === null) {
                 continue;
             }
@@ -799,26 +822,26 @@ final class LayoutFixer
     {
         $kept = [];
         $declared = [];
-        foreach (explode(';', $styleValue) as $segment) {
-            $colon = strpos($segment, ':');
-            $property = $colon === false ? '' : strtolower(trim(substr($segment, 0, $colon)));
-            if (!in_array($property, ['gap', 'row-gap', 'column-gap'], true)) {
-                if (trim($segment) !== '') {
-                    $kept[] = $segment;
+        foreach (MarkupScan::parseInlineStyle($styleValue) as $declaration) {
+            $property = $declaration['property'];
+            if ($declaration['value'] === null
+                || !in_array($property, ['gap', 'row-gap', 'column-gap'], true)) {
+                if (trim($declaration['segment']) !== '') {
+                    $kept[] = $declaration['segment'];
                 }
                 continue;
             }
-            $value = trim(substr($segment, $colon + 1));
+            $value = trim($declaration['value']);
             $parts = preg_split('/\s+/', $value) ?: [];
             if ($value === '' || str_contains($value, ',') || self::referencesNonPresetVar($value)
                 || count($parts) > 2 || ($property !== 'gap' && count($parts) !== 1)) {
                 return null;
             }
             if ($property !== 'column-gap') {
-                $declared['top'] = self::blockSpacingValue($property === 'gap' ? $parts[0] : $value);
+                $declared['top'] = MarkupScan::blockSpacingValue($property === 'gap' ? $parts[0] : $value);
             }
             if ($property !== 'row-gap') {
-                $declared['left'] = self::blockSpacingValue($property === 'gap' ? ($parts[1] ?? $parts[0]) : $value);
+                $declared['left'] = MarkupScan::blockSpacingValue($property === 'gap' ? ($parts[1] ?? $parts[0]) : $value);
             }
         }
         return $declared;
@@ -829,15 +852,42 @@ final class LayoutFixer
      * no centering, no global padding, so its align:wide children render
      * edge-to-edge at the viewport (tbilisi's "The Cuisine" band). Same
      * contract Units\GeneratedMarkup::constrainedPart enforces for header/footer,
-     * applied to every file's root groups.
+     * applied to every file's root groups. A root carrying the exact
+     * CSS-owned-layout marker stays layout-less; every other repair still runs.
+     *
+     * A root whose className carries a class the design's own stylesheet gives
+     * the wide measure stays layout-less too, because the marker check alone
+     * does not protect it: such a root can and does arrive here unmarked.
+     * Observed on sunny-ember, whose footer root is `.hero-inner` — a class the
+     * stylesheet gives max-width:var(--wide-size) and margin:0 auto. Two
+     * instances of that same class in one build, only one marked:
+     *
+     *   theme/parts/footer.html   hero-inner be-inline-geometry-…       unmarked
+     *   plugin/pages/home.html    hero-inner blocks-engine-css-owned-…  marked
+     *
+     * The footer instance is the one the design writes as
+     * `<div class="hero-inner" style="display:block">`, overriding the class's
+     * own display:grid. Whatever the marker keys on, an inline declaration on
+     * one instance decides it, so a container that unambiguously owns its
+     * horizontal geometry can reach this pass looking unowned. Constraining it
+     * makes core emit margin-inline:auto!important on every child, which
+     * centres any child with its own measure — sunny-ember's 34ch footer
+     * paragraph landed 460px right of where the design puts it.
      *
      * @param object[] $roots
      * @param string[] $notes
+     * @param list<string> $wideMeasureRootClasses classes whose OWN rule in the
+     *        design's stylesheet gives them the wide measure — a class that only
+     *        qualifies an ancestor of the element that has it does not count
      */
-    private static function addMissingRootLayout(array $roots, array &$notes): void
+    private static function addMissingRootLayout(array $roots, array &$notes, array $wideMeasureRootClasses = []): void
     {
         foreach ($roots as $node) {
-            if (self::is($node, 'group') && !isset($node->attrs->layout)) {
+            if (self::is($node, 'group')
+                && !isset($node->attrs->layout)
+                && !GeneratedMarkup::hasCssOwnedLayoutMarker($node->attrs)
+                && !GeneratedMarkup::carriesAnyClassToken($node->attrs, $wideMeasureRootClasses)
+            ) {
                 $node->attrs->layout = (object) ['type' => 'constrained'];
                 $node->dirty = true;
                 $notes[] = 'top-level wp:group had no "layout" — added {"type":"constrained"} so children get page gutters instead of rendering edge-to-edge';
@@ -896,6 +946,36 @@ final class LayoutFixer
      * @param object[] $all
      * @param string[] $notes
      */
+    /**
+     * The header's title/nav rows must share the page's wide band. Sections
+     * and footers put their structural rows at align:wide; a header row left
+     * at content width plants a competing left edge directly above the fold
+     * (naturaleza's fallback title at 860px over 1320px section rows).
+     * Promote direct flex-row group children of a constrained header root
+     * that carry no explicit alignment of their own.
+     *
+     * @param object[] $roots
+     * @param string[] $notes
+     */
+    private static function widenHeaderRows(array $roots, array &$notes): void
+    {
+        $root = $roots[0] ?? null;
+        if ($root === null || !self::is($root, 'group')
+            || ($root->attrs->layout->type ?? null) !== 'constrained') {
+            return;
+        }
+        foreach ($root->children as $child) {
+            if (!self::is($child, 'group')
+                || ($child->attrs->layout->type ?? null) !== 'flex'
+                || self::align($child) !== '') {
+                continue;
+            }
+            $child->attrs->align = 'wide';
+            $child->dirty = true;
+            $notes[] = 'header row did not share the canonical wide band — set "align":"wide"';
+        }
+    }
+
     private static function widenFooterColumns(array $roots, array $all, array &$notes): void
     {
         $root = $roots[0] ?? null;
@@ -941,6 +1021,69 @@ final class LayoutFixer
      * @param object[] $all
      * @param string[] $notes
      */
+    /**
+     * Make a saved align class follow the block's own "align" attribute.
+     *
+     * Only a contradicting token is rewritten — a block with no align class
+     * keeps none, because re-serialization derives it from the attribute.
+     *
+     * @param object[] $all
+     * @param array{int,int,string}[] $htmlEdits splices for render(): offset, length, replacement
+     * @param string[] $notes
+     */
+    private static function syncAlignClassTokens(
+        string $markup,
+        array $all,
+        array &$htmlEdits,
+        array &$notes,
+    ): void {
+        foreach ($all as $node) {
+            if ($node->selfClosing) {
+                continue;
+            }
+            $align = self::align($node);
+            if (!in_array($align, ['wide', 'full'], true)) {
+                continue;
+            }
+            $expected = 'align' . $align;
+            $tagStart = $node->start + $node->len;
+            $tagHtml = MarkupScan::wrapperTag($markup, $tagStart);
+            if ($tagHtml === null) {
+                continue;
+            }
+            $classAttr = MarkupScan::tagAttribute($tagHtml, 'class');
+            if ($classAttr === null) {
+                continue;
+            }
+            $classes = preg_split('/\s+/', trim($classAttr[0])) ?: [];
+            $stale = array_values(array_filter(
+                $classes,
+                static fn (string $token): bool => $token !== $expected
+                    && in_array($token, ['alignwide', 'alignfull'], true),
+            ));
+            if ($stale === []) {
+                continue;
+            }
+
+            $updated = [];
+            $placed = false;
+            foreach ($classes as $token) {
+                if (!in_array($token, ['alignwide', 'alignfull'], true)) {
+                    $updated[] = $token;
+                    continue;
+                }
+                if ($placed) {
+                    continue;
+                }
+                $updated[] = $expected;
+                $placed = true;
+            }
+            $htmlEdits[] = [$tagStart + $classAttr[1], strlen($classAttr[0]), implode(' ', $updated)];
+            $notes[] = "wp:{$node->name} saved HTML carried \"{$stale[0]}\" against \"align\":\"{$align}\""
+                . ' — synced the class to the attribute';
+        }
+    }
+
     private static function evenOutFooterRows(array $all, array &$notes): void
     {
         foreach ($all as $node) {
@@ -1360,62 +1503,10 @@ final class LayoutFixer
         return preg_match('/var\(\s*--(?!wp--preset--)/i', $value) === 1;
     }
 
-    /** Convert a rendered preset variable back to block-attribute syntax. */
-    private static function blockSpacingValue(string $value): string
-    {
-        return preg_match('/^var\(--wp--preset--spacing--([a-z0-9_-]+)\)$/', $value, $match) === 1
-            ? "var:preset|spacing|{$match[1]}"
-            : $value;
-    }
-
-    /**
-     * The first HTML element immediately following a block opener (mirrors
-     * SectionRhythm::wrapperTag — this class must stay usable on markup that
-     * pass rejects, so it keeps its own copy of the scanner).
-     */
-    private static function wrapperTag(string $markup, int $searchOffset): ?string
-    {
-        $rest = substr($markup, $searchOffset);
-        if (preg_match('/\A\s*<[a-zA-Z][a-zA-Z0-9-]*(?=[\x20\t\r\n\f\/>])/', $rest, $start) !== 1) {
-            return null;
-        }
-
-        $quote = null;
-        $length = strlen($rest);
-        for ($i = strlen($start[0]); $i < $length; $i++) {
-            $char = $rest[$i];
-            if ($quote !== null) {
-                if ($char === $quote) {
-                    $quote = null;
-                }
-                continue;
-            }
-            if ($char === '"' || $char === "'") {
-                $quote = $char;
-                continue;
-            }
-            if ($char === '>') {
-                return substr($rest, 0, $i + 1);
-            }
-        }
-        return null;
-    }
-
-    /** @return array{string,int}|null attribute value and its byte offset inside the tag */
-    private static function tagAttribute(string $tagHtml, string $name): ?array
-    {
-        $pattern = '/[\x20\t\r\n\f]' . preg_quote($name, '/')
-            . '\s*=\s*(?:"([^"]*)"|\'([^\']*)\')/i';
-        if (preg_match($pattern, $tagHtml, $match, PREG_OFFSET_CAPTURE) !== 1) {
-            return null;
-        }
-        return ($match[1][1] ?? -1) !== -1 ? $match[1] : $match[2];
-    }
-
     /** Whether the tag's class attribute contains $token as a whole word. */
     private static function hasClassToken(string $tagHtml, string $token): bool
     {
-        $class = self::tagAttribute($tagHtml, 'class');
+        $class = MarkupScan::tagAttribute($tagHtml, 'class');
         return $class !== null
             && in_array($token, preg_split('/\s+/', trim($class[0])) ?: [], true);
     }

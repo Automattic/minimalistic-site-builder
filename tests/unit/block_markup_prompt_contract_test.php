@@ -2,9 +2,11 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\Tests\FakeLlm;
 use Automattic\SiteBuild\Units\FooterUnit;
 use Automattic\SiteBuild\Units\HeaderUnit;
+use Automattic\SiteBuild\Units\HeroUnit;
 use Automattic\SiteBuild\Units\SectionUnit;
 
 /** @return array<string,mixed> */
@@ -36,7 +38,8 @@ test('markup generation units share one output-only contract', function () {
         'header' => (new HeaderUnit($llm, $renderer))->request($input + [
             'hero_brief' => 'A text-led hero.',
             'nav_rule' => '- Use wp:page-list.',
-            'archetype_assignment' => 'ASSIGNED HEADER ARCHETYPE: standard-row',
+            'above_fold_contract' => test_above_fold_contract(),
+            'header_behavior' => 'DETERMINISTIC HEADER BEHAVIOR: static.',
         ]),
         'footer' => (new FooterUnit($llm, $renderer))->request($input + [
             'final_section_brief' => 'A quiet closing section.',
@@ -64,6 +67,30 @@ test('markup generation units share one output-only contract', function () {
             'neighbors' => 'Above: header. Below: content.',
             'header_contract' => '',
         ]),
+        'hero' => (new HeroUnit($llm, $renderer))->request($input + [
+            'page' => [
+                'slug' => 'home',
+                'title' => 'Home',
+                'path' => '/',
+                'front' => true,
+            ],
+            'section' => [
+                'slug' => 'hero',
+                'title' => 'Hero',
+                'role' => 'hero',
+                'type' => 'hero',
+                'purpose' => 'Introduce the site.',
+                'content_notes' => 'Lead with the value proposition.',
+                'layout_archetype' => 'asymmetric-split',
+                'background' => 'base',
+                'vertical_density' => 'standard',
+                'handoff' => 'Between the header and the next section.',
+                'primary_action' => null,
+            ],
+            'neighbors' => 'Above: header. Below: content.',
+            'hero_blueprint' => HeroBlueprint::defaultFor('focal-subject-stage'),
+            'above_fold_contract' => test_above_fold_contract(),
+        ]),
     ];
 
     foreach ($requests as $name => $request) {
@@ -75,8 +102,9 @@ test('markup generation units share one output-only contract', function () {
     }
 
     $section = $requests['section'];
-    assert_contains($contract, $section['cached_prefixes'][0], 'contract stays in the stable build layer');
-    assert_true(!str_contains($section['cached_prefixes'][1], $contract), 'contract is absent from the page layer');
+    assert_true(!str_contains($section['cached_prefixes'][0], $contract), 'contract is absent from the shared site layer');
+    assert_contains($contract, $section['cached_prefixes'][1], 'contract stays in the stable build layer');
+    assert_true(!str_contains($section['cached_prefixes'][2], $contract), 'contract is absent from the page layer');
     assert_true(!str_contains($section['prompt'], $contract), 'contract is absent from the varying brief');
 });
 

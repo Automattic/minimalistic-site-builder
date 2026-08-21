@@ -4,12 +4,15 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\CodeFences;
+use Automattic\SiteBuild\CssChecks;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\Warnings;
 
 /**
  * Step (LLM, optional): implement an EXPLICIT user animation request.
@@ -34,8 +37,11 @@ use Automattic\SiteBuild\StepDeclaration;
  * (no display:none / visibility:hidden anywhere; zero opacity only in a
  * `from`/`0%` keyframe step, so an entrance can start invisible but nothing
  * can END hidden), no resource-loading value forms (url(), image-set(), …) or
- * @import/@font-face, and the whole block is capped.
- * Rejected CSS is logged and skipped — the build never fails over decoration.
+ * @import/@font-face, and the whole block is capped. Shape-owned radius
+ * declarations and profile-owned `--motion-*` custom properties are removed
+ * individually before validation so the remaining requested motion can still
+ * ship; every removal is recorded durably. Rejected CSS is logged and skipped
+ * — the build never fails over decoration.
  */
 final class CustomMotionStep implements Step
 {
@@ -97,21 +103,58 @@ final class CustomMotionStep implements Step
             ]);
             return;
         }
+        $shapeTagged = self::hasShapeTaggedElement($project);
 
         $rendered = $this->renderer->render('custom-motion.md', [
             'animation_request' => $request,
             'design_direction'  => DesignDirectionStep::readFor($project),
             'tagged_elements'   => implode("\n", $tagged),
         ]);
-        $css = self::stripFences(trim(
+        $css = CodeFences::strip(
             $this->llm->complete($rendered, $this->withOptions(['log_label' => $this->id()]))
-        ));
+        );
 
-        $problems = self::validate($css);
+        // Corner language and the committed motion profile are closed
+        // build-owned commitments. Keep the requested animation whenever
+        // possible by removing only those declarations, including inside
+        // keyframes, before applying the rest of the CSS policy below.
+        [$css, $droppedShapeDeclarations] = self::dropShapeOwnedDeclarations($css, $shapeTagged);
+        [$css, $droppedMotionDeclarations] = self::dropProfileOwnedMotionDeclarations($css);
+        foreach (
+            [
+                'shape-owned corner' => $droppedShapeDeclarations,
+                'profile-owned motion custom property' => $droppedMotionDeclarations,
+            ] as $kind => $dropped
+        ) {
+            if ($dropped === []) {
+                continue;
+            }
+            $project->addWarnings($this->id(), array_map(
+                static fn (string $declaration): string =>
+                    "file='theme/style.css'; block='generated custom-motion CSS'; authored="
+                    . Warnings::value($declaration)
+                    . "; delivered=removed; disposition=dropped a {$kind} declaration "
+                    . 'before validating and appending the remaining motion CSS — see logs/' . self::LOG_FILE,
+                $dropped,
+            ));
+        }
+        $problems = self::validate($css, $shapeTagged);
+        $preValidationDropLog = implode('', [
+            $droppedShapeDeclarations === []
+                ? ''
+                : "\nSHAPE-OWNED DECLARATIONS REMOVED BEFORE VALIDATION:\n- "
+                    . implode("\n- ", $droppedShapeDeclarations) . "\n",
+            $droppedMotionDeclarations === []
+                ? ''
+                : "\nPROFILE-OWNED MOTION DECLARATIONS REMOVED BEFORE VALIDATION:\n- "
+                    . implode("\n- ", $droppedMotionDeclarations) . "\n",
+        ]);
         if ($problems !== []) {
             file_put_contents(
                 $project->logPath(self::LOG_FILE),
-                "REJECTED CSS:\n{$css}\n\nPROBLEMS:\n- " . implode("\n- ", $problems) . "\n"
+                "REJECTED CSS:\n{$css}\n"
+                . $preValidationDropLog
+                . "\nPROBLEMS:\n- " . implode("\n- ", $problems) . "\n"
             );
             echo '  custom-motion: CSS rejected (' . count($problems)
                 . ' problem(s)); skipped — see logs/' . self::LOG_FILE . "\n";
@@ -122,6 +165,17 @@ final class CustomMotionStep implements Step
                 self::LOG_FILE,
             )]);
             return;
+        }
+
+        $droppedCount = count($droppedShapeDeclarations) + count($droppedMotionDeclarations);
+        if ($droppedCount > 0) {
+            file_put_contents(
+                $project->logPath(self::LOG_FILE),
+                "SALVAGED CSS (profile-owned declarations removed):\n{$css}\n"
+                . $preValidationDropLog
+            );
+            echo "  custom-motion: dropped {$droppedCount} profile-owned declaration(s), "
+                . 'kept the remaining motion — see logs/' . self::LOG_FILE . "\n";
         }
 
         // The reduced-motion wrapper is added HERE, deterministically, so a
@@ -149,7 +203,7 @@ final class CustomMotionStep implements Step
     {
         $found = [];
         $token = '(?<![\w-])' . self::CLASS_NAME . '(?![\w-])';
-        foreach (FixBlocksStep::themeFiles($project) as $rel) {
+        foreach ($project->themeFiles() as $rel) {
             $doc = BlockMarkup::parse($project->readText('theme/' . $rel));
             foreach ($doc->indices() as $i) {
                 if (preg_match_all('/<[a-z][^>]*class="[^"]*' . $token . '[^"]*"[^>]*>/i', $doc->ownHtml($i), $m) > 0) {
@@ -168,6 +222,32 @@ final class CustomMotionStep implements Step
         return array_slice($found, 0, 10);
     }
 
+    /** Whether the custom-motion class is attached to an owned image/button block. */
+    public static function hasShapeTaggedElement(Project $project): bool
+    {
+        $token = '(?<![\w-])' . self::CLASS_NAME . '(?![\w-])';
+        foreach ($project->themeFiles() as $rel) {
+            $doc = BlockMarkup::parse($project->readText('theme/' . $rel));
+            foreach ($doc->indices() as $i) {
+                $name = $doc->name($i);
+                $name = str_contains($name, '/') ? $name : 'core/' . $name;
+                if (!in_array($name, ['core/image', 'core/button'], true)) {
+                    continue;
+                }
+                $attrs = $doc->attrs($i);
+                $className = is_array($attrs) && is_string($attrs['className'] ?? null)
+                    ? $attrs['className']
+                    : '';
+                if (preg_match('/' . $token . '/', $className) === 1
+                    || preg_match('/\bclass\s*=\s*(["\'])[^"\']*' . $token . '[^"\']*\1/i', $doc->ownHtml($i)) === 1
+                ) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private static function clip(string $element): string
     {
         return strlen($element) > 300 ? substr($element, 0, 300) . '…' : $element;
@@ -179,7 +259,7 @@ final class CustomMotionStep implements Step
      *
      * @return string[]
      */
-    public static function validate(string $css): array
+    public static function validate(string $css, bool $shapeTagged = false): array
     {
         $css = trim($css);
         if ($css === '') {
@@ -192,41 +272,33 @@ final class CustomMotionStep implements Step
         }
 
         $stripped = (string) preg_replace('~/\*.*?\*/~s', '', $css);
-        // Walk the depth instead of comparing totals: a leading stray `}`
-        // (balanced by a trailing open brace) would close the deterministic
-        // reduced-motion wrapper this CSS gets concatenated into, letting the
-        // rest of the block escape it.
-        $depth = 0;
-        foreach (str_split($stripped) as $char) {
-            if ($char === '{') {
-                $depth++;
-            } elseif ($char === '}' && --$depth < 0) {
-                break;
-            }
-        }
-        if ($depth !== 0) {
+        // A stray `}` here would close the deterministic reduced-motion
+        // wrapper this CSS gets concatenated into, letting the rest of the
+        // block escape it.
+        if (!CssChecks::braceDepthBalanced($stripped)) {
             $problems[] = 'unbalanced braces';
             return $problems; // the structural walks below need balanced braces
         }
 
-        // url() is not the only resource-bearing value form: image-set("…"),
-        // image("…"), cross-fade() and friends fetch too (including with
-        // vendor prefixes, which is why the match is a bare substring).
-        if (preg_match('/(?:image-set|cross-fade|element|paint|url|src|image)\s*\(/i', $stripped) === 1) {
-            $problems[] = 'resource-loading CSS functions (url(), image-set(), image(), cross-fade(), …) are not allowed';
+        $resource = CssChecks::resourceLoadingProblem($stripped);
+        if ($resource !== null) {
+            $problems[] = $resource;
         }
-        if (preg_match('/(?<![-\w])display\s*:\s*none/i', $stripped) === 1) {
-            $problems[] = 'display:none hides generated content';
-        }
-        if (preg_match('/(?<![-\w])visibility\s*:\s*hidden/i', $stripped) === 1) {
-            $problems[] = 'visibility:hidden hides generated content';
-        }
-        if (preg_match_all('/@([a-zA-Z-]+)/', $stripped, $atRules) > 0) {
-            foreach (array_unique($atRules[1]) as $at) {
-                if (!in_array(strtolower($at), ['media', 'keyframes'], true)) {
-                    $problems[] = "disallowed at-rule: @{$at}";
-                }
+        foreach (CssChecks::scanDeclarations($stripped) as $declaration) {
+            if (str_starts_with(strtolower($declaration['property']), '--motion-')) {
+                $problems[] = 'motion custom properties are profile-owned and cannot be overridden: '
+                    . trim($declaration['raw']);
             }
+        }
+        foreach (CssChecks::hiddenContentProblems($stripped) as $problem) {
+            $problems[] = $problem;
+        }
+        foreach (CssChecks::disallowedAtRules($stripped, ['media', 'keyframes']) as $problem) {
+            $problems[] = $problem;
+        }
+        foreach (self::shapeOwnedDeclarations($stripped, $shapeTagged) as $declaration) {
+            $problems[] = 'shape-owned image/button corner declaration is not allowed: '
+                . trim($declaration['raw']);
         }
 
         [$keyframeNames, $rules, $keyframeBodies] = self::stripKeyframes($stripped);
@@ -271,21 +343,79 @@ final class CustomMotionStep implements Step
         }
 
         // Every remaining rule selector must live under the dedicated class.
-        $body = (string) preg_replace('/@media[^{]*\{/i', '', $rules);
-        if (preg_match_all('/(?:^|[{}])\s*([^{};]+?)\s*\{/s', $body, $m) > 0) {
-            foreach ($m[1] as $selectorList) {
-                foreach (explode(',', $selectorList) as $selector) {
-                    $selector = trim($selector);
-                    if (preg_match('/^\.' . self::CLASS_NAME . '(?![\w])/', $selector) !== 1
-                        && preg_match('/^\.' . self::CLASS_NAME . '-[\w-]+/', $selector) !== 1
-                    ) {
-                        $problems[] = "selector not scoped under ." . self::CLASS_NAME . ": {$selector}";
-                    }
-                }
-            }
+        $isScoped = static fn (string $selector): bool =>
+            preg_match('/^\.' . self::CLASS_NAME . '(?![\w])/', $selector) === 1
+            || preg_match('/^\.' . self::CLASS_NAME . '-[\w-]+/', $selector) === 1;
+        foreach (CssChecks::unscopedSelectors($rules, $isScoped) as $selector) {
+            $problems[] = "selector not scoped under ." . self::CLASS_NAME . ": {$selector}";
         }
 
         return $problems;
+    }
+
+    /**
+     * Remove only declarations that can change the committed corner language.
+     * Innermost rule bodies cover ordinary style rules and individual keyframe
+     * steps, including rules nested under @media. Selectors, at-rules, and all
+     * non-radius declarations survive for the normal validator to assess.
+     *
+     * Comments are stripped only when a repair is needed: braces inside a
+     * comment must not confuse the rule-body walk. Generated comments carry no
+     * runtime behavior, so this does not lose authored motion semantics.
+     *
+     * @return array{0:string,1:list<string>} repaired CSS and dropped declarations
+     */
+    public static function dropShapeOwnedDeclarations(string $css, bool $shapeTagged = false): array
+    {
+        $owned = self::shapeOwnedDeclarations($css, $shapeTagged);
+        $ownedStarts = array_fill_keys(array_column($owned, 'start'), true);
+        [$repaired, $dropped] = CssChecks::dropDeclarations(
+            $css,
+            static fn (array $declaration): bool => isset($ownedStarts[$declaration['start']]),
+        );
+        return [
+            $repaired,
+            array_map(static fn (array $declaration): string => trim($declaration['raw']), $dropped),
+        ];
+    }
+
+    /**
+     * Remove only `--motion-*` custom properties. The committed profile owns
+     * those values on `:root`; a local override retunes the element and
+     * everything under it. Selectors, at-rules, and every other declaration
+     * survive for the normal validator to assess.
+     *
+     * @return array{0:string,1:list<string>} repaired CSS and dropped declarations
+     */
+    public static function dropProfileOwnedMotionDeclarations(string $css): array
+    {
+        [$repaired, $dropped] = CssChecks::dropDeclarations(
+            $css,
+            static fn (array $declaration): bool =>
+                str_starts_with(strtolower($declaration['property']), '--motion-'),
+        );
+        return [
+            $repaired,
+            array_map(static fn (array $declaration): string => trim($declaration['raw']), $dropped),
+        ];
+    }
+
+    /**
+     * @return list<array{property:string,value:string,raw:string,start:int,end:int,
+     *     context:string,ancestors:list<string>,kind:string}>
+     */
+    private static function shapeOwnedDeclarations(string $css, bool $shapeTagged): array
+    {
+        return CssChecks::shapeAffectingDeclarations(
+            $css,
+            static fn (string $selector): bool => CssChecks::selectorTargetsShape($selector)
+                || ($shapeTagged && self::selectorTargetsCustomMotionRoot($selector)),
+        );
+    }
+
+    private static function selectorTargetsCustomMotionRoot(string $selector): bool
+    {
+        return CssChecks::selectorTargetsSubject($selector, '.' . self::CLASS_NAME);
     }
 
     /**
@@ -338,15 +468,5 @@ final class CustomMotionStep implements Step
         }
         $number = (float) $m[1];
         return ($m[2] === '%' ? $number / 100 : $number) <= 0.0;
-    }
-
-    /** Strip a leading/trailing markdown code fence if the model added one. */
-    private static function stripFences(string $text): string
-    {
-        if (str_starts_with($text, '```')) {
-            $text = preg_replace('/^```[a-zA-Z]*\n/', '', $text);
-            $text = preg_replace('/\n```$/', '', (string) $text);
-        }
-        return trim((string) $text);
     }
 }

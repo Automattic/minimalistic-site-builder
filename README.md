@@ -1,11 +1,12 @@
 # builder2
 
 Generates a complete multi-page WordPress site from a one-line prompt: a block
-theme (theme.json + templates + header/footer parts) plus a companion content
-plugin that seeds every generated page on activation and removes them on
-deactivation. The site spec carries a page tree (home, menu, about, …); every
-page gets its own planned and generated sections. Optionally turns the
-`AI_IMAGE` placeholders it emits into real assets via Google Imagen (through
+theme (theme.json + templates + header/footer parts + the preview screenshot
+WordPress shows on the theme card) plus a companion content plugin that seeds
+every generated page on activation and removes them on deactivation. The site
+spec carries a page tree (home, menu, about, …); every page gets its own
+planned and generated sections. Optionally turns the
+`AI_IMAGE` placeholders it emits into real assets via Google Gemini (through
 the WPCOM AI proxy).
 
 The split is deliberate: design lives in the theme, content lives in
@@ -50,7 +51,64 @@ php bin/build.php "A cozy neighborhood bakery" --with-images   # also generate i
 php bin/build.php "A cozy neighborhood bakery" --provider=openai   # build on GPT-5.x instead of Claude
 php bin/build.php "A cozy neighborhood bakery" --multi-page    # let the site plan inner pages beyond the homepage
 php bin/build.php "A cozy neighborhood bakery" --multi-page --pages="Home, Menu, About, Visit"   # fix the page list yourself (first = homepage)
+php bin/build.php "A Persian poetry archive" --writing-direction=rtl --hero-canvas=framed --hero-media-modes=none,foreground-image --max-hero-images=1
 ```
+
+Hero composition is selected from a reviewed code-owned catalog after filtering
+the optional caller constraints `--hero-canvas`, `--hero-media-modes`,
+`--max-hero-images`, and `--hero-copy-capacity`.
+`--use-jetpack-placeholders` is for hosts that own a form backend: a section
+that needs a form reserves its place with a `JP_FORM` placeholder block the
+host substitutes after the build, instead of the default of emitting no form
+markup at all. `--writing-direction=ltr|rtl`
+is an explicit caller override; otherwise the site language determines logical
+direction. The selected recipe and normalized blueprint are persisted in
+`designDirection.json`, while `aboveFold.json` records the two-phase shared
+header/hero/page-opening contract.
+
+### Embedding with an existing site spec
+
+An embedding host that already owns the factual site specification can pass
+the package-canonical decoded object to `SiteBuilder::createProject()` instead
+of paying for the `site-spec` LLM call:
+
+```php
+$project = $builder->createProject(
+    prompt: $userPrompt,
+    slug: $projectSlug,
+    siteSpec: $canonicalSiteSpec,
+);
+$builder->pipeline()->runThrough($project);
+```
+
+The consumer contract ships with the package in two forms:
+
+- [`schemas/site-spec.schema.json`](schemas/site-spec.schema.json) — JSON
+  Schema Draft 2020-12 for the complete canonical object.
+- [`examples/site-spec.json`](examples/site-spec.json) — a complete payload,
+  including nested pages and host-defined factual fields.
+
+Vendored consumers can resolve those files without assuming an installation
+path through `Package::siteSpecSchemaPath()` and
+`Package::siteSpecExamplePath()`. The schema describes the recommended input
+and normalized `siteSpec.json` artifact. Runtime intake remains deliberately
+forgiving: missing or malformed candidate fields are normalized, repaired, or
+warned about rather than becoming a new build-stopping validation gate.
+
+The value crosses the portable project boundary as `meta.json.site_spec`; the
+normal `site-spec` step still canonicalizes it and writes `siteSpec.json`, but
+makes no LLM request. With `multiPage` omitted, a supplied spec keeps its page
+tree. Pass `multiPage: false` to deliberately force one homepage. A non-empty
+`pages:` list implies multi-page scope and replaces the supplied tree with an
+exact caller-owned list. The user prompt is still required because the design
+and content steps consume both inputs.
+
+The fixed properties use this package's canonical snake-case fields. Additional
+top-level properties may carry grounded facts such as hours, location, or
+services; page objects have the exact recursive `title` / `slug` / `purpose` /
+`children` shape shown in the schema. A host with its own metadata shape
+(including WordPress.com) maps that payload in its adapter rather than adding
+host-specific aliases to this package.
 
 ### Choosing the model / provider
 
@@ -74,8 +132,8 @@ one step (any model id, wins over the config):
 - `LLM_MODEL_<STEP>` — a single step, e.g. `LLM_MODEL_SITE_SPEC=gpt-5.5`
 
 The OpenRouter profile uses K3 for every quality-critical large-tier step:
-`design-direction`, `theme-json`, `sections`, `page-styles`, `custom-motion`,
-and `fonts-php`. Fast K2.5 `:nitro`, with optional reasoning disabled, is
+`design-direction`, `theme-json`, `sections`, `page-styles`, and
+`custom-motion`. Fast K2.5 `:nitro`, with optional reasoning disabled, is
 reserved for the small structural steps. K3's maximum-effort reasoning shares
 its completion budget with the visible answer, so the transport gives it a
 larger token budget and timeout. OpenRouter demo batches run up to three sites
@@ -117,6 +175,11 @@ in one command — useful as testing evidence for pipeline/theme changes:
 ```bash
 php bin/build-demos.php --with-images   # build every demo, with generated images
 ```
+
+An entry may carry a canonical `site_spec` object (the `hearth` demo does): it
+is pre-seeded into the project's `meta.json`, so the site-spec step normalizes
+it deterministically instead of generating one via LLM — a fixed, reproducible
+probe of the host-supplied-spec path described above.
 
 The demos build **in parallel** by default (up to three at once for OpenRouter) —
 one `bin/build.php` child process per entry, output streamed with a `[slug]`
@@ -180,7 +243,7 @@ Uploaded ZIPs are browsable online at
 A standalone page for iterating on `AI_IMAGE` prompts **without building a whole
 theme**. It drives the real `GenerateImagesStep` against a throwaway temp
 project, so what you see is exactly what the pipeline would produce: the same
-prompt composition, the same site-context grounding, the same Imagen call.
+prompt composition, the same site-context grounding, the same Gemini call.
 
 It comes pre-filled with a site context and 10 example prompts, each with an
 editable subject / page-context / style / aspect-ratio. Use **Generate** on a

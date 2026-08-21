@@ -6,6 +6,8 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\ContrastFix;
 use Automattic\SiteBuild\ContrastMath;
+use Automattic\SiteBuild\HeaderBehavior;
+use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
@@ -33,6 +35,9 @@ use Automattic\SiteBuild\StepDeclaration;
  * The header part is linted but never repaired: it commonly floats
  * transparently over the hero image, so judging it against the `base` page
  * background would produce confidently wrong "fixes".
+ *
+ * HTML-first composition mode skips this legacy attribute-level pass. Mode is
+ * injected by StepComposition; stale design artifacts never choose behavior.
  */
 final class ContrastFixStep implements Step
 {
@@ -40,6 +45,8 @@ final class ContrastFixStep implements Step
 
     /** base↔contrast should be comfortably readable, not borderline. */
     private const PALETTE_TARGET = 7.0;
+
+    public function __construct(private bool $htmlFirst = false) {}
 
     public function id(): string
     {
@@ -58,7 +65,7 @@ final class ContrastFixStep implements Step
             label: $this->label(),
             // Templates are only scanned when they exist; in the default graph
             // they are written by assemble-pages, which runs after this step.
-            reads: ['theme/theme.json', 'pages.json', 'theme/parts/*'],
+            reads: ['theme/theme.json', 'pages.json', 'designDirection.json', 'theme/parts/*'],
             writes: ['theme/theme.json', 'theme/parts/*', 'warnings.json'],
             concurrent: false,
         );
@@ -66,6 +73,14 @@ final class ContrastFixStep implements Step
 
     public function run(Project $project): void
     {
+        if ($this->htmlFirst) {
+            $project->addWarnings('fixup_skipped', [
+                'step=contrast-fix; signal=composition-mode:html-first; disposition=skipped; '
+                    . 'reason=new CSS path uses CSS-aware contrast handling',
+            ]);
+            return;
+        }
+
         $themeJson = $project->readJson('theme/theme.json');
         $palette = self::paletteMap($themeJson);
         $gradients = self::gradientMap($themeJson);
@@ -91,30 +106,28 @@ final class ContrastFixStep implements Step
             is_string($defaultText) ? $defaultText : null,
             is_string($headingText) ? $headingText : null,
             self::fontSizeMap($themeJson),
+            Surface::contrastFloor(DesignDirectionStep::surfaceFor($project)),
         );
 
-        foreach (['parts', 'templates'] as $dir) {
-            foreach (glob($project->themePath($dir . '/*.html')) ?: [] as $abs) {
-                $rel = $dir . '/' . basename($abs);
-                $markup = $project->readText('theme/' . $rel);
-                // The header floats over the hero — lint only (see class doc).
-                $repair = basename($abs) !== 'header.html';
-                $result = $fix->process($markup, $repair);
-                if ($result['changed']) {
-                    $project->writeText('theme/' . $rel, $result['markup']);
+        foreach ($project->themeFiles() as $rel) {
+            $markup = $project->readText('theme/' . $rel);
+            // The header floats over the hero — lint only (see class doc).
+            $repair = basename($rel) !== 'header.html';
+            $result = $fix->process($markup, $repair);
+            if ($result['changed']) {
+                $project->writeText('theme/' . $rel, $result['markup']);
+            }
+            foreach ($result['findings'] as $f) {
+                $warning = !$f['repaired'] || ($f['residual'] ?? false);
+                $disposition = $f['repaired']
+                    ? ($warning ? '(repaired) (warning)' : '(repaired)')
+                    : '(warning)';
+                $report[] = sprintf('[%s] %s %s', $rel, $f['detail'], $disposition);
+                if ($f['repaired']) {
+                    $repaired++;
                 }
-                foreach ($result['findings'] as $f) {
-                    $warning = !$f['repaired'] || ($f['residual'] ?? false);
-                    $disposition = $f['repaired']
-                        ? ($warning ? '(repaired) (warning)' : '(repaired)')
-                        : '(warning)';
-                    $report[] = sprintf('[%s] %s %s', $rel, $f['detail'], $disposition);
-                    if ($f['repaired']) {
-                        $repaired++;
-                    }
-                    if ($warning) {
-                        $warnings++;
-                    }
+                if ($warning) {
+                    $warnings++;
                 }
             }
         }
@@ -142,17 +155,22 @@ final class ContrastFixStep implements Step
     }
 
     /**
-     * Overlay-header lint. A `header-overlay` header renders transparently on
-     * EVERY page, floating over each page's FIRST section — but the header
+     * Overlay-header lint. A `header-behavior-overlay-to-solid` header starts
+     * translucently on EVERY generated page, floating over each page's FIRST
+     * section — but the header
      * and the sections are generated concurrently, blind to each other, so
      * nothing upstream guarantees the one text color the header committed to
      * reads against every page's opening background. This is the
      * deterministic backstop: the header's effective text color is checked
-     * against each page's first-section background. Warnings only — the right
-     * fix (recolor the header, darken the section, or drop the overlay) is a
-     * design decision this step must not make — and image-backed covers are
-     * skipped like everywhere else in phase one (their pixels are unknowable
-     * until images exist).
+     * against each page's first-section background AS THE TRUSTED KIT PAINTS
+     * IT — the overlay's top state always composites its verified black scrim
+     * (HeaderBehavior::OVERLAY_SCRIM_ALPHA) under the header text, bounding
+     * every pixel to the worst case the foreground was already selected
+     * against, so the lint judges the scrimmed background rather than the raw
+     * one. Warnings only — the right fix (recolor the header, darken the
+     * section, or drop the overlay) is a design decision this step must not
+     * make — and image-backed covers are skipped like everywhere else in
+     * phase one (their pixels are unknowable until images exist).
      *
      * @param list<string> $report
      */
@@ -167,7 +185,8 @@ final class ContrastFixStep implements Step
             return;
         }
         $attrs = $header->attrs($top) ?? [];
-        if (!str_contains((string) ($attrs['className'] ?? ''), 'header-overlay')) {
+        $classes = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        if (!in_array('header-behavior-overlay-to-solid', $classes, true)) {
             return;
         }
 
@@ -228,21 +247,30 @@ final class ContrastFixStep implements Step
                 [$bg, $bgLabel] = $ownBg !== null ? [$ownBg['colors'], $ownBg['label']] : [[$base], 'base'];
             }
 
+            // The trusted kit's top state always paints its verified scrim
+            // between the raw background and the header text; lint what the
+            // viewer sees, not the unscrimmed surface beneath it.
             $min = PHP_FLOAT_MAX;
             foreach ($bg as $color) {
-                $min = min($min, ContrastMath::ratio($fg['rgb'], $color));
+                $scrimmed = ContrastMath::compositeOver(
+                    [0, 0, 0],
+                    HeaderBehavior::OVERLAY_SCRIM_ALPHA,
+                    $color,
+                );
+                $min = min($min, ContrastMath::ratio($fg['rgb'], $scrimmed));
             }
             if ($min >= ContrastMath::NORMAL_TEXT) {
                 continue;
             }
             $report[] = sprintf(
-                "[parts/header.html] overlay header text %s floats over page '%s' opening section '%s' on %s: %.2f < %.1f — the transparent header renders on EVERY page; keep opening backgrounds consistent with it or pick another archetype (warning)",
-                $fg['label'], $pageSlug, $sectionSlug, $bgLabel, $min, ContrastMath::NORMAL_TEXT
+                "[parts/header.html] overlay header text %s floats over page '%s' opening section '%s' on %s under the trusted %d%%-black scrim: %.2f < %.1f — the transparent header renders on EVERY page; keep opening backgrounds consistent with it or pick another archetype (warning)",
+                $fg['label'], $pageSlug, $sectionSlug, $bgLabel,
+                (int) round(HeaderBehavior::OVERLAY_SCRIM_ALPHA * 100),
+                $min, ContrastMath::NORMAL_TEXT
             );
             $warnings++;
         }
     }
-
 
     /**
      * Check and repair the theme.json global pairs: base↔contrast (report
@@ -276,96 +304,107 @@ final class ContrastFixStep implements Step
             }
         }
 
-        // Global link color on the page background.
-        $linkValue = $themeJson['styles']['elements']['link']['color']['text'] ?? null;
-        $link = is_string($linkValue) ? self::resolve($palette, $linkValue) : null;
-        if ($base !== null && $link !== null) {
-            $ratio = ContrastMath::ratio($link['rgb'], $base);
-            if ($ratio < ContrastMath::NORMAL_TEXT) {
-                [$slug, $best] = self::best($palette, ['primary', 'contrast', 'secondary', 'accent'], $base);
-                if ($slug !== null && $best >= ContrastMath::NORMAL_TEXT) {
-                    $themeJson['styles']['elements']['link']['color']['text'] = "var(--wp--preset--color--{$slug})";
-                    $report[] = sprintf(
-                        '[theme.json] global link color %s on base: %.2f < %.1f → %s (%.2f) (repaired)',
-                        $link['label'], $ratio, ContrastMath::NORMAL_TEXT, $slug, $best
-                    );
-                    $repaired++;
-                    $changed = true;
-                } else {
-                    $report[] = sprintf(
-                        '[theme.json] global link color %s on base: %.2f < %.1f and no palette color passes (warning)',
-                        $link['label'], $ratio, ContrastMath::NORMAL_TEXT
-                    );
-                    $warnings++;
-                }
-            }
-        }
-
-        // Global link hover color on the page background — hover text is
-        // body-size too, so it gets the same 4.5:1 bar as the resting state.
-        $hoverValue = $themeJson['styles']['elements']['link'][':hover']['color']['text'] ?? null;
-        $hover = is_string($hoverValue) ? self::resolve($palette, $hoverValue) : null;
-        if ($base !== null && $hover !== null) {
-            $ratio = ContrastMath::ratio($hover['rgb'], $base);
-            if ($ratio < ContrastMath::NORMAL_TEXT) {
-                [$slug, $best] = self::best($palette, ['primary', 'contrast', 'secondary', 'accent'], $base);
-                if ($slug !== null && $best >= ContrastMath::NORMAL_TEXT) {
-                    $themeJson['styles']['elements']['link'][':hover']['color']['text'] = "var(--wp--preset--color--{$slug})";
-                    $report[] = sprintf(
-                        '[theme.json] global link hover color %s on base: %.2f < %.1f → %s (%.2f) (repaired)',
-                        $hover['label'], $ratio, ContrastMath::NORMAL_TEXT, $slug, $best
-                    );
-                    $repaired++;
-                    $changed = true;
-                } else {
-                    $report[] = sprintf(
-                        '[theme.json] global link hover color %s on base: %.2f < %.1f and no palette color passes (warning)',
-                        $hover['label'], $ratio, ContrastMath::NORMAL_TEXT
-                    );
-                    $warnings++;
-                }
-            }
+        // Global link and link hover colors on the page background — hover
+        // text is body-size too, so it gets the same 4.5:1 bar as the
+        // resting state.
+        if ($base !== null) {
+            $onBase = ['rgb' => $base, 'label' => 'base'];
+            $candidates = ['primary', 'contrast', 'secondary', 'accent'];
+            $changed = $this->repairThemePair(
+                $themeJson, $palette, 'styles.elements.link.color.text',
+                'global link color', $onBase, $candidates, false,
+                $report, $repaired, $warnings
+            ) || $changed;
+            $changed = $this->repairThemePair(
+                $themeJson, $palette, 'styles.elements.link.:hover.color.text',
+                'global link hover color', $onBase, $candidates, false,
+                $report, $repaired, $warnings
+            ) || $changed;
         }
 
         // Button label on the button background.
         $btnBgValue = $themeJson['styles']['elements']['button']['color']['background'] ?? null;
-        $btnTextValue = $themeJson['styles']['elements']['button']['color']['text'] ?? null;
         $btnBg = is_string($btnBgValue) ? self::resolve($palette, $btnBgValue) : null;
-        $btnText = is_string($btnTextValue) ? self::resolve($palette, $btnTextValue) : null;
-        if ($btnBg !== null && $btnText !== null) {
-            $ratio = ContrastMath::ratio($btnText['rgb'], $btnBg['rgb']);
-            if ($ratio < ContrastMath::NORMAL_TEXT) {
-                [$slug, $best] = self::best($palette, ['base', 'contrast'], $btnBg['rgb']);
-                if ($slug !== null && $best >= ContrastMath::NORMAL_TEXT) {
-                    $themeJson['styles']['elements']['button']['color']['text'] = "var(--wp--preset--color--{$slug})";
-                    $report[] = sprintf(
-                        '[theme.json] button text %s on %s: %.2f < %.1f → %s (%.2f) (repaired)',
-                        $btnText['label'], $btnBg['label'], $ratio, ContrastMath::NORMAL_TEXT, $slug, $best
-                    );
-                    $repaired++;
-                    $changed = true;
-                } elseif ($slug !== null && $best > $ratio) {
-                    // Mid-tone button background nothing passes against: take
-                    // the improvement but keep the failure on the record.
-                    $themeJson['styles']['elements']['button']['color']['text'] = "var(--wp--preset--color--{$slug})";
-                    $report[] = sprintf(
-                        '[theme.json] button text %s on %s: %.2f < %.1f → %s (%.2f) — best available, still below threshold (repaired) (warning)',
-                        $btnText['label'], $btnBg['label'], $ratio, ContrastMath::NORMAL_TEXT, $slug, $best
-                    );
-                    $repaired++;
-                    $warnings++;
-                    $changed = true;
-                } else {
-                    $report[] = sprintf(
-                        '[theme.json] button text %s on %s: %.2f < %.1f and no palette color improves it (warning)',
-                        $btnText['label'], $btnBg['label'], $ratio, ContrastMath::NORMAL_TEXT
-                    );
-                    $warnings++;
-                }
-            }
+        if ($btnBg !== null) {
+            $changed = $this->repairThemePair(
+                $themeJson, $palette, 'styles.elements.button.color.text',
+                'button text', $btnBg, ['base', 'contrast'], true,
+                $report, $repaired, $warnings
+            ) || $changed;
         }
 
         return $changed;
+    }
+
+    /**
+     * Check the theme.json foreground color at dot-separated $jsonPath
+     * against a background and repair it to the best-reading candidate slug.
+     * With $bestEffort, a candidate that merely improves a failing ratio is
+     * still taken (and the failure kept on the record) — for mid-tone
+     * backgrounds nothing passes against; otherwise only a passing candidate
+     * is written.
+     *
+     * @param array<mixed> $themeJson modified in place
+     * @param array<string,string> $palette
+     * @param string $label report label for the pair, e.g. 'global link color'
+     * @param array{rgb: array{0:int,1:int,2:int}, label: string} $bg
+     * @param list<string> $candidates repair slugs, best ratio wins
+     * @param list<string> $report
+     */
+    private function repairThemePair(
+        array &$themeJson,
+        array $palette,
+        string $jsonPath,
+        string $label,
+        array $bg,
+        array $candidates,
+        bool $bestEffort,
+        array &$report,
+        int &$repaired,
+        int &$warnings,
+    ): bool {
+        $keys = explode('.', $jsonPath);
+        $value = $themeJson;
+        foreach ($keys as $key) {
+            $value = is_array($value) ? ($value[$key] ?? null) : null;
+        }
+        $fg = is_string($value) ? self::resolve($palette, $value) : null;
+        if ($fg === null) {
+            return false;
+        }
+        $ratio = ContrastMath::ratio($fg['rgb'], $bg['rgb']);
+        if ($ratio >= ContrastMath::NORMAL_TEXT) {
+            return false;
+        }
+
+        [$slug, $best] = self::best($palette, $candidates, $bg['rgb']);
+        $passes = $slug !== null && $best >= ContrastMath::NORMAL_TEXT;
+        $improves = $bestEffort && $slug !== null && $best > $ratio;
+        if (!$passes && !$improves) {
+            $report[] = sprintf(
+                '[theme.json] %s %s on %s: %.2f < %.1f and no palette color %s (warning)',
+                $label, $fg['label'], $bg['label'], $ratio, ContrastMath::NORMAL_TEXT,
+                $bestEffort ? 'improves it' : 'passes'
+            );
+            $warnings++;
+            return false;
+        }
+
+        $node = &$themeJson;
+        foreach ($keys as $key) {
+            $node = &$node[$key];
+        }
+        $node = "var(--wp--preset--color--{$slug})";
+        $report[] = sprintf(
+            '[theme.json] %s %s on %s: %.2f < %.1f → %s (%.2f)%s',
+            $label, $fg['label'], $bg['label'], $ratio, ContrastMath::NORMAL_TEXT, $slug, $best,
+            $passes ? ' (repaired)' : ' — best available, still below threshold (repaired) (warning)'
+        );
+        $repaired++;
+        if (!$passes) {
+            $warnings++;
+        }
+        return true;
     }
 
     // ── theme.json readers (public: CoverContrastStep reuses them) ────────

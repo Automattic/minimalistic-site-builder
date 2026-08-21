@@ -2,7 +2,9 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\AnthropicClient;
+use Automattic\SiteBuild\FinishReasonAwareLlm;
 use Automattic\SiteBuild\JsonBatchRecovery;
+use Automattic\SiteBuild\LlmRequestRejected;
 use Automattic\SiteBuild\OpenAiCompatibleClient;
 use Automattic\SiteBuild\TextBatchRecovery;
 use Automattic\SiteBuild\TransientApiException;
@@ -18,6 +20,136 @@ test('OpenAiCompatibleClient endpoint joins baseUrl and /chat/completions', func
 
     $c = new OpenAiCompatibleClient('key', 'gpt-4o', 'https://api.openai.com/v1');
     assert_eq('https://api.openai.com/v1/chat/completions', $c->endpoint());
+});
+
+test('OpenAiCompatibleClient implements the frozen finish-reason capability', function () {
+    $client = new OpenAiCompatibleClient('key', 'gpt-4o');
+
+    assert_true(
+        $client instanceof FinishReasonAwareLlm,
+        'single-completion clients implement the frozen finish-reason capability',
+    );
+    assert_eq(null, $client->lastFinishReason(), 'finish reason starts unknown');
+});
+
+test('OpenAiCompatibleClient has no client-local truncation classifier', function () {
+    assert_true(
+        !method_exists(OpenAiCompatibleClient::class, 'isTruncationStopReason'),
+        'single and batch paths must share TextBatchRecovery::isTruncation()',
+    );
+});
+
+test('OpenAiCompatibleClient single complete exposes the transport finish reason', function () {
+    $client = new OpenAiCompatibleClient(
+        'key',
+        'gpt-4o',
+        singleTransport: fn (array $requestBody): array => [
+            'text' => 'complete response',
+            'input' => 12,
+            'output' => 3,
+            'time' => 0.01,
+            'stop_reason' => 'stop',
+        ],
+    );
+
+    assert_eq('complete response', $client->complete('Generate the page.'));
+    assert_eq('stop', $client->lastFinishReason());
+});
+
+test('OpenRouter single complete returns a truncated partial without regenerating from scratch', function () {
+    $requests = [];
+    $client = new OpenAiCompatibleClient(
+        'key',
+        'openai/gpt-5.5',
+        'https://openrouter.ai/api/v1',
+        16000,
+        'openrouter',
+        singleTransport: function (array $requestBody) use (&$requests): array {
+            $requests[] = $requestBody;
+            return [
+                'text' => '<!-- wp:group {"tagName":"main"} -->',
+                'input' => 100,
+                'output' => 16000,
+                'time' => 0.01,
+                'stop_reason' => 'length',
+            ];
+        },
+    );
+
+    assert_eq(
+        '<!-- wp:group {"tagName":"main"} -->',
+        $client->complete('Generate the page.'),
+        'caller receives the paid-for partial so ContinuationRecovery can stitch it',
+    );
+    assert_eq('length', $client->lastFinishReason());
+    assert_eq(1, count($requests), 'single completion does not use the old from-scratch regeneration');
+    assert_true(
+        !str_contains(
+            (string) $requests[0]['messages'][1]['content'],
+            'Regenerate the COMPLETE response from scratch',
+        ),
+        'request remains the authored prompt',
+    );
+});
+
+test('OpenRouter single complete keeps refusal and filter finish reasons fatal', function () {
+    foreach (['refusal', 'content_filter', 'safety'] as $stopReason) {
+        $calls = 0;
+        $client = new OpenAiCompatibleClient(
+            'key',
+            'openai/gpt-5.5',
+            'https://openrouter.ai/api/v1',
+            16000,
+            'openrouter',
+            singleTransport: function (array $requestBody) use (&$calls, $stopReason): array {
+                $calls++;
+                return [
+                    'text' => 'partial response',
+                    'input' => 100,
+                    'output' => 1,
+                    'time' => 0.01,
+                    'stop_reason' => $stopReason,
+                ];
+            },
+        );
+
+        assert_throws(
+            fn () => $client->complete('Generate the page.'),
+            "{$stopReason}: refusal/filter remains fatal",
+        );
+        assert_eq(1, $calls, "{$stopReason}: failed terminal response is not retried");
+        assert_eq(null, $client->lastFinishReason(), "{$stopReason}: failed attempt exposes no stale finish reason");
+    }
+});
+
+test('OpenAiCompatibleClient clears the last finish reason before a failed complete attempt', function () {
+    $attempt = 0;
+    $client = new OpenAiCompatibleClient(
+        'key',
+        'gpt-4o',
+        singleTransport: function (array $requestBody) use (&$attempt): array {
+            $attempt++;
+            if ($attempt === 1) {
+                return [
+                    'text' => 'first response',
+                    'input' => 1,
+                    'output' => 1,
+                    'time' => 0.01,
+                    'stop_reason' => 'stop',
+                ];
+            }
+            throw new RuntimeException('injected transport failure');
+        },
+    );
+
+    assert_eq('first response', $client->complete('First prompt.'));
+    assert_eq('stop', $client->lastFinishReason());
+
+    assert_throws(
+        fn () => $client->complete('Second prompt.'),
+        'injected transport failure stays fatal',
+    );
+    assert_eq(null, $client->lastFinishReason(), 'failed attempt clears prior successful finish reason');
 });
 
 test('bodyFor builds OpenAI chat messages with system preamble and stream_options', function () {
@@ -75,6 +207,48 @@ test('bodyFor prepends cached prefixes to the OpenAI user content without cache 
         $body['messages'][1]['content'],
     );
     assert_true(!str_contains((string) json_encode($body), 'cache_control'), 'OpenAI body has no explicit cache marker');
+});
+
+test('both reference clients refuse the same cached_prefixes shapes, with the same signal', function () {
+    // These used to diverge: Anthropic rejected, OpenAI-compatible iterated
+    // whatever it was handed, so `cached_prefixes => null` was a silent drop in
+    // a shipped client — this contract's own worst failure mode (BIGR-842).
+    $shapes = [
+        'null'               => null,
+        'string-keyed array' => ['a' => 'x'],
+        'non-string member'  => ['valid', 42],
+        'four layers'        => ['one', 'two', 'three', 'four'],
+    ];
+
+    foreach ($shapes as $label => $invalid) {
+        foreach (['anthropic', 'openai'] as $client) {
+            try {
+                $client === 'anthropic'
+                    ? AnthropicClient::bodyFor(['prompt' => 'Build it.', 'cached_prefixes' => $invalid], 'claude-sonnet-4-6', 16000)
+                    : OpenAiCompatibleClient::bodyFor(['prompt' => 'Build it.', 'cached_prefixes' => $invalid], 'gpt-4o', 16000, 'openai');
+                assert_true(false, "{$client} accepted {$label} cached_prefixes");
+            } catch (LlmRequestRejected $e) {
+                // The type is the signal LlmConformance reads; the message is
+                // what a host maintainer reads. Both must be present.
+                assert_contains('cached_prefixes', $e->getMessage());
+            }
+        }
+    }
+});
+
+test('a rejected request never reaches the transport', function () {
+    $client = new OpenAiCompatibleClient('key', 'gpt-4o', 'https://api.openai.com/v1');
+
+    try {
+        $client->complete('Build it.', ['cached_prefixes' => null]);
+        assert_true(false, 'expected a rejection');
+    } catch (LlmRequestRejected $e) {
+        assert_contains('cached_prefixes must be a list of strings', $e->getMessage());
+    }
+
+    // No key was spent and no request was counted: the refusal happened while
+    // building the body, which is what makes the structural tier zero-spend.
+    assert_eq(0, $client->usageTotals()['requests']);
 });
 
 test('retrySingleRequest tolerates an empty truncated probe response without retrying', function () {
@@ -335,7 +509,8 @@ test('OpenRouter batch retries wait only until the latest Retry-After deadline',
 
     assert_eq('A', $result['a']['text']);
     assert_eq('B', $result['b']['text']);
-    assert_eq([2], $slept, 'expired and elapsed portions of server delays are not slept again');
+    // [0] is the shared helper's forwarded zero-second backoff wave.
+    assert_eq([0, 2], $slept, 'expired and elapsed portions of server delays are not slept again');
 });
 
 test('a huge Retry-After is clamped so a quota 429 cannot park the build', function () {
@@ -374,8 +549,8 @@ test('a huge Retry-After is clamped so a quota 429 cannot park the build', funct
     );
 
     assert_eq('A', $result['a']['text']);
-    assert_eq(1, count($slept), 'one honored wait');
-    assert_eq(120, $slept[0], 'the hour-long server delay is capped');
+    // [0] is the shared helper's forwarded zero-second backoff wave.
+    assert_eq([0, 120], $slept, 'the hour-long server delay is capped');
 });
 
 test('Retry-After parsing supports seconds and HTTP dates as absolute deadlines', function () {
@@ -1138,15 +1313,68 @@ test('parseSse recognizes nested choice errors only for OpenRouter', function ()
     }
 });
 
-test('OpenAiCompatibleClient concurrencyWindows applies a provider-specific cap', function () {
-    $bodies = [];
-    for ($i = 0; $i < 9; $i++) {
-        $bodies["r{$i}"] = ['model' => 'm'];
-    }
-    assert_eq([9], array_map('count', OpenAiCompatibleClient::concurrencyWindows($bodies)));
-    $windows = OpenAiCompatibleClient::concurrencyWindows($bodies, 4);
-    assert_eq([4, 4, 1], array_map('count', $windows));
-    assert_eq(array_keys($bodies), array_keys(array_merge(...$windows)), 'keys and order are preserved');
+test('OpenRouter batch retries pooled held launches without burning the transient budget', function () {
+    // The OpenAI-compatible transport now runs the shared rolling pool, so a
+    // held outcome ('held' => true, never sent after a sibling 429) can reach
+    // its retry layer too. It must ride retryOpenRouterBatch without charging
+    // the finite transient rounds and without capturing a Retry-After
+    // deadline it never received. delays = [0]: one transient round for
+    // really-attempted requests.
+    $bodies = ['real' => ['model' => 'm'], 'held' => ['model' => 'm']];
+    $round = 0;
+    $slept = [];
+    $results = OpenAiCompatibleClient::retryOpenRouterBatch(
+        $bodies,
+        function (array $subset) use (&$round): array {
+            $round++;
+            $out = [];
+            foreach ($subset as $key => $_body) {
+                $out[$key] = match (true) {
+                    $key === 'real' && $round === 1 => ['ok' => false, 'transient' => true, 'error' => 'HTTP 429: slow down'],
+                    $key === 'held' && $round <= 2 => ['ok' => false, 'transient' => true, 'held' => true, 'error' => 'launch held: a sibling request was rate-limited (HTTP 429)'],
+                    default => ['ok' => true, 'text' => strtoupper((string) $key), 'input' => 1, 'output' => 1],
+                };
+            }
+            return $out;
+        },
+        [0],
+        null,
+        function (int $seconds) use (&$slept): void {
+            $slept[] = $seconds;
+        },
+        static fn (): int => 100,
+    );
+    assert_eq('REAL', $results['real']['text']);
+    assert_eq('HELD', $results['held']['text'], 'a twice-held launch still gets its real attempt after the budget');
+    assert_eq(3, $round, 'held keys retry in their own round instead of aborting');
+    // Only the shared helper's forwarded zero-second backoff waves: no
+    // Retry-After deadline is invented for a request that was never sent.
+    assert_eq([0, 0], $slept, 'no Retry-After wait for a request that was never sent');
+});
+
+test('OpenRouter batch forwards its test sleeper to the shared backoff', function () {
+    // retryOpenRouterBatch delegates the normal backoff to retryTextBatch; if
+    // the injected sleeper were not forwarded, tests with nonzero delays (and
+    // the held-only-wave backoff) would really sleep.
+    $bodies = ['a' => ['model' => 'm']];
+    $round = 0;
+    $slept = [];
+    $results = OpenAiCompatibleClient::retryOpenRouterBatch(
+        $bodies,
+        function (array $subset) use (&$round): array {
+            $round++;
+            return ['a' => $round === 1
+                ? ['ok' => false, 'transient' => true, 'error' => 'HTTP 500']
+                : ['ok' => true, 'text' => 'A', 'input' => 1, 'output' => 1]];
+        },
+        [5],
+        null,
+        function (int $seconds) use (&$slept): void {
+            $slept[] = $seconds;
+        },
+    );
+    assert_eq('A', $results['a']['text']);
+    assert_eq([5], $slept, 'the shared backoff wait goes through the injected sleeper, not sleep()');
 });
 
 test('OpenAiCompatibleClient interpretStream classifies a transfer with no response at all as transient', function () {

@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild;
 
+use Automattic\SiteBuild\BlockSerializer\Html\HtmlFragment;
 use Automattic\SiteBuild\BlockSerializer\Json\JsonObject;
 use Automattic\SiteBuild\BlockSerializer\Json\JsonValue;
 use Automattic\SiteBuild\BlockSerializer\Json\JsJsonEncoder;
@@ -13,10 +14,10 @@ use Automattic\SiteBuild\BlockSerializer\Json\JsJsonEncoder;
  * Parses a markup document into a flat node list (tree via parent indices),
  * exposing each block's comment JSON attributes for inspection, and lets a
  * caller replace a node's attributes. render() reproduces the document
- * byte-for-byte except for the rewritten opening comments — the HTML inside
- * blocks is never touched. Attribute edits therefore leave the saved HTML
- * out of sync with the comment JSON; callers rely on the block fixer
- * (re-serialization from attributes) running afterwards to re-sync it.
+ * byte-for-byte except for explicit opening-comment rewrites, the bounded
+ * own-HTML class edits, and spliceOwnHtml() slices. Attribute edits otherwise
+ * leave saved HTML out of sync with comment JSON; callers rely on the block
+ * fixer (re-serialization from attributes) running afterwards to re-sync it.
  *
  * The comment grammar (delimiter regex, attribute escaping) mirrors
  * WordPress core's WP_Block_Parser / serialize_block_attributes().
@@ -39,7 +40,7 @@ final class BlockMarkup
 
     /**
      * @param string $source the original document
-     * @param list<array{name:string, attrs:?array<mixed>, void:bool, unsafe:bool, parent:?int,
+     * @param list<array{name:string, attrs:?array<mixed>, typedAttrs:?JsonObject, void:bool, unsafe:bool, parent:?int,
      *                    children:list<int>, offset:int, length:int,
      *                    innerStart:int, innerEnd:int, end:?int}> $nodes
      * @param list<int> $unclosed indices of blocks still open at end of document
@@ -62,12 +63,19 @@ final class BlockMarkup
     /** @var array<int,array<mixed>> node index => replacement attrs */
     private array $mutations = [];
 
+    /** @var array<int,array<mixed>> replacement attrs with sourced JSON object identity restored */
+    private array $mutationShapes = [];
+
     /**
      * @var list<array{start:int, end:int, search:string, replace:string, token:?string}>
-     *      a non-null token means "remove this class token"; search/replace are
-     *      then unused, and vice versa
+     *      a non-null token means "replace this class token with the
+     *      whitespace-delimited tokens in replace"; search is then unused,
+     *      and vice versa
      */
     private array $innerEdits = [];
+
+    /** @var list<array{start:int, length:int, content:string}> */
+    private array $htmlSplices = [];
 
     /**
      * @param string|null $delimiterView same-length lexical view used only to
@@ -97,6 +105,7 @@ final class BlockMarkup
                 $isVoid = ($m['void'][0] ?? '') === '/';
                 $validDelimiterRanges[] = [$offset, $offset + $length];
                 $attrs = null;
+                $typedAttrs = null;
                 $rawAttrs = trim($m['attrs'][0] ?? '');
                 $attrsMalformed = false;
                 if ($rawAttrs !== '') {
@@ -178,6 +187,7 @@ final class BlockMarkup
                 $nodes[] = [
                     'name'       => $name,
                     'attrs'      => $attrs,
+                    'typedAttrs' => $typedAttrs,
                     'void'       => $isVoid,
                     'unsafe'     => $attrsMalformed,
                     'parent'     => $parent,
@@ -405,6 +415,17 @@ final class BlockMarkup
         return $this->nodes[$i]['end'];
     }
 
+    /**
+     * Whether this block has a complete, uncrossed delimiter boundary and no
+     * malformed Gutenberg marker inside it. Editing callers can still inspect
+     * unsafe nodes, but should leave them for structural recovery rather than
+     * committing a partial attribute rewrite.
+     */
+    public function isStructurallySafe(int $i): bool
+    {
+        return !$this->nodes[$i]['unsafe'] && $this->nodes[$i]['end'] !== null;
+    }
+
     /** Closing-delimiter start for a closed block; EOF for an open block. */
     public function innerEndOffset(int $i): int
     {
@@ -436,6 +457,30 @@ final class BlockMarkup
     public function setAttrs(int $i, array $attrs): void
     {
         $this->mutations[$i] = $attrs;
+        // PHP projects both `{}` and `[]` onto an empty array. Keep the native
+        // projection convenient for editing, but restore sourced empty-object
+        // identity at the serialization boundary so an unrelated edit cannot
+        // turn metadata:{} into metadata:[] (or force callers to delete every
+        // empty list just to avoid that corruption).
+        $original = $this->nodes[$i]['typedAttrs']?->toNative();
+        $this->mutationShapes[$i] = $attrs === []
+            ? []
+            : self::restoreSourcedObjectShapes($attrs, $original, true);
+    }
+
+    /**
+     * Replace a node's attributes from the typed JSON model.
+     *
+     * Callers that deep-merge duplicate generated keys must not project the
+     * result through an ordinary PHP array before rendering: that would lose
+     * empty-object and numeric-string-key identity. Keep the typed native
+     * shapes authoritative while retaining the array projection for attrs().
+     */
+    public function setTypedAttrs(int $i, JsonObject $attrs): void
+    {
+        $native = $attrs->toNative();
+        $this->mutations[$i] = self::typedObjectToArray($attrs);
+        $this->mutationShapes[$i] = get_object_vars($native);
     }
 
     /**
@@ -479,18 +524,96 @@ final class BlockMarkup
         $end = $n['children'] !== []
             ? $this->nodes[$n['children'][0]]['offset']
             : $n['innerEnd'];
+        $this->replaceClassTokenInRange($n['innerStart'], $end, $token, '');
+    }
+
+    /**
+     * Replace one exact class token in this node's own saved HTML. The
+     * replacement may contain multiple whitespace-delimited tokens, which is
+     * useful when a canonical state expands one default token into a more
+     * specific token plus the default (for example Cover dim classes).
+     */
+    public function replaceClassTokenInOwnHtml(int $i, string $token, string $replacement): void
+    {
+        $n = $this->nodes[$i];
+        $end = $n['children'] !== []
+            ? $this->nodes[$n['children'][0]]['offset']
+            : $n['innerEnd'];
+        $this->replaceClassTokenInRange($n['innerStart'], $end, $token, $replacement);
+    }
+
+    /**
+     * Remove a class token only within one source range of this block's own
+     * HTML. Offsets are relative to ownHtml(); callers use this to target the
+     * selector-effective root/link opening tag without touching descendants.
+     */
+    public function removeClassTokenInOwnHtmlRange(
+        int $i,
+        string $token,
+        int $relativeStart,
+        int $relativeEnd,
+    ): void {
+        $n = $this->nodes[$i];
+        $ownEnd = $n['children'] !== []
+            ? $this->nodes[$n['children'][0]]['offset']
+            : $n['innerEnd'];
+        $ownLength = $ownEnd - $n['innerStart'];
+        if ($relativeStart < 0
+            || $relativeEnd < $relativeStart
+            || $relativeEnd > $ownLength) {
+            throw new \InvalidArgumentException('class-token edit range must stay inside the block own HTML');
+        }
+        $this->replaceClassTokenInRange(
+            $n['innerStart'] + $relativeStart,
+            $n['innerStart'] + $relativeEnd,
+            $token,
+            '',
+        );
+    }
+
+    private function replaceClassTokenInRange(
+        int $start,
+        int $end,
+        string $token,
+        string $replacement,
+    ): void
+    {
         $this->innerEdits[] = [
-            'start'   => $n['innerStart'],
+            'start'   => $start,
             'end'     => $end,
             'search'  => '',
-            'replace' => '',
+            'replace' => $replacement,
             'token'   => $token,
+        ];
+    }
+
+    /**
+     * Replace a slice of this node's own HTML. Offsets are relative to
+     * ownHtml(). Comment-delimiter rewrites stay on a disjoint range; do not
+     * overlap a class-token edit on the same node.
+     */
+    public function spliceOwnHtml(int $i, int $relativeStart, int $relativeLength, string $replacement): void
+    {
+        $n = $this->nodes[$i];
+        $end = $n['children'] !== []
+            ? $this->nodes[$n['children'][0]]['offset']
+            : $n['innerEnd'];
+        $ownLength = $end - $n['innerStart'];
+        if ($relativeStart < 0
+            || $relativeLength < 0
+            || $relativeStart + $relativeLength > $ownLength) {
+            throw new \InvalidArgumentException('splice must stay inside the block own HTML');
+        }
+        $this->htmlSplices[] = [
+            'start'   => $n['innerStart'] + $relativeStart,
+            'length'  => $relativeLength,
+            'content' => $replacement,
         ];
     }
 
     public function isMutated(): bool
     {
-        return $this->mutations !== [] || $this->innerEdits !== [];
+        return $this->mutations !== [] || $this->innerEdits !== [] || $this->htmlSplices !== [];
     }
 
     /** The document with every mutation applied at its original offsets. */
@@ -509,7 +632,11 @@ final class BlockMarkup
             $ops[] = [
                 'start'   => $n['offset'],
                 'length'  => $n['length'],
-                'content' => self::serializeComment($n['name'], $attrs, $n['void']),
+                'content' => self::serializeComment(
+                    $n['name'],
+                    $this->mutationShapes[$i] ?? $attrs,
+                    $n['void'],
+                ),
             ];
         }
         // Multiple edits to the same region compose (grouped so the second
@@ -522,24 +649,36 @@ final class BlockMarkup
                 'length'  => $edit['end'] - $edit['start'],
                 'content' => substr($this->source, $edit['start'], $edit['end'] - $edit['start']),
             ];
-            $regions[$key]['content'] = (string) preg_replace_callback(
-                '/\bclass\s*=\s*(["\'])(.*?)\1/is',
+            $regions[$key]['content'] = self::rewriteClassAttributes(
+                $regions[$key]['content'],
                 static function (array $m) use ($edit): string {
                     if ($edit['token'] === null) {
                         return str_replace($edit['search'], $edit['replace'], $m[0]);
                     }
-                    $kept = array_filter(
-                        preg_split('/\s+/', $m[2], -1, PREG_SPLIT_NO_EMPTY) ?: [],
-                        static fn (string $t): bool => $t !== $edit['token']
-                    );
+                    $replacement = preg_split(
+                        '/\s+/',
+                        trim($edit['replace']),
+                        -1,
+                        PREG_SPLIT_NO_EMPTY,
+                    ) ?: [];
+                    $kept = [];
+                    foreach (preg_split('/\s+/', $m[2], -1, PREG_SPLIT_NO_EMPTY) ?: [] as $token) {
+                        if ($token === $edit['token']) {
+                            array_push($kept, ...$replacement);
+                        } else {
+                            $kept[] = $token;
+                        }
+                    }
                     return substr($m[0], 0, strlen($m[0]) - strlen($m[2]) - 1)
                         . implode(' ', $kept) . $m[1];
                 },
-                $regions[$key]['content']
             );
         }
         foreach ($regions as $region) {
             $ops[] = $region;
+        }
+        foreach ($this->htmlSplices as $splice) {
+            $ops[] = $splice;
         }
         usort($ops, static fn (array $a, array $b) => $b['start'] <=> $a['start']);
 
@@ -548,6 +687,103 @@ final class BlockMarkup
             $out = substr_replace($out, $op['content'], $op['start'], $op['length']);
         }
         return $out;
+    }
+
+    /**
+     * Restore JSON object identities PHP loses in its editable array
+     * projection: empty objects and objects made solely of array-index keys.
+     */
+    private static function restoreSourcedObjectShapes(
+        mixed $value,
+        mixed $original,
+        bool $root = false,
+    ): mixed
+    {
+        if (!is_array($value)) {
+            return $value;
+        }
+        if ($value === []) {
+            return $original instanceof \stdClass ? new \stdClass() : [];
+        }
+
+        // Numeric-string object keys become integer PHP array keys in the
+        // editable projection. The sourced typed value still tells us this is
+        // an object, so retain that identity instead of serializing it as a
+        // JSON list. The outer attributes container stays a PHP array because
+        // serializeComment() deliberately requires an object-shaped array.
+        if (!$root && $original instanceof \stdClass) {
+            $restored = new \stdClass();
+            $originalEntries = get_object_vars($original);
+            foreach ($value as $key => $child) {
+                $key = (string) $key;
+                $restored->{$key} = self::restoreSourcedObjectShapes(
+                    $child,
+                    $originalEntries[$key] ?? null,
+                );
+            }
+            return $restored;
+        }
+
+        if (array_is_list($value)) {
+            foreach ($value as $index => $child) {
+                $value[$index] = self::restoreSourcedObjectShapes(
+                    $child,
+                    is_array($original) ? ($original[$index] ?? null) : null,
+                );
+            }
+            return $value;
+        }
+
+        $originalEntries = $original instanceof \stdClass ? get_object_vars($original) : [];
+        foreach ($value as $key => $child) {
+            $value[$key] = self::restoreSourcedObjectShapes(
+                $child,
+                $originalEntries[(string) $key] ?? null,
+            );
+        }
+        return $value;
+    }
+
+    /**
+     * Rewrite only genuine class attributes on parsed element opening tags.
+     * Class-like text can legitimately occur inside another sourced attribute
+     * (for example `href="...?class='value'"`) and must remain byte-identical.
+     *
+     * @param callable(array<int,string>):string $rewrite
+     */
+    private static function rewriteClassAttributes(string $html, callable $rewrite): string
+    {
+        $ops = [];
+        foreach (HtmlFragment::parse($html)->querySelectorAll('*') as $element) {
+            $start = $element->startOffset();
+            $end = $element->innerStartOffset();
+            if ($end <= $start) {
+                continue;
+            }
+            $tag = substr($html, $start, $end - $start);
+            $rewritten = (string) preg_replace_callback(
+                // Skip every other quoted attribute value before looking for
+                // an actual whitespace-delimited class attribute. Starting at
+                // `class` lets its own quoted value be consumed by that branch.
+                '/"[^"]*"(*SKIP)(*F)|\'[^\']*\'(*SKIP)(*F)|(?<!\S)class\s*=\s*(["\'])(.*?)\1/is',
+                $rewrite,
+                $tag,
+            );
+            if ($rewritten === $tag) {
+                continue;
+            }
+            $ops[] = [
+                'start' => $start,
+                'length' => $end - $start,
+                'content' => $rewritten,
+            ];
+        }
+
+        usort($ops, static fn (array $a, array $b): int => $b['start'] <=> $a['start']);
+        foreach ($ops as $op) {
+            $html = substr_replace($html, $op['content'], $op['start'], $op['length']);
+        }
+        return $html;
     }
 
     /** An opening block comment, escaped the way WP serialize_block_attributes() does. */
