@@ -72,7 +72,7 @@ Card & grid recipes — let the DESIGN DIRECTION and the section's purpose pick 
    - Any card image: add `"className":"card-media"` to the wp:image (`<figure class="wp-block-image size-large card-media">`) — the theme's style.css crops it to a uniform 3:2 landscape ratio that scales with the column width. NEVER write the cropping as inline CSS.
    - For a bottom-aligned CTA, wrap it in `wp:buttons` with `"className":"cta-bottom"`.
      (The supporting `.equal-cards` / `.card-body` / `.cta-bottom` / `.card-media*` / `.card-flush` CSS already ships in the theme's style.css — just use these class hooks.)
-2. `staggered-grid` — offset rhythm, for directions that promise energy or a broken grid:
+2. `staggered-grid` — offset rhythm, ONLY for a photography or gallery site (SITE SPEC area/topic is photography, a photographer, photojournalism, or a gallery) whose direction promises a broken grid. Never stagger sibling tops on any other site — use `equal-grid` or `editorial-row` instead.
    - `wp:columns` (no equal-cards class); each `wp:column` still gets a `"width"` and the widths MUST sum to 100%.
    - Push every SECOND column's card down by giving its inner card `wp:group` `"style":{"spacing":{"margin":{"top":"3rem"}}}` (odd columns get no offset). Use "4rem" for a stronger stagger.
    - For image galleries with more than six mixed-aspect items, prefer one `masonry-3` group over repeated `wp:columns` rows. Repeated unequal rows inherit the tallest card's height and create large accidental vertical holes. If masonry does not fit the direction, normalize image media with the documented card crop classes and keep row margins at md/lg — never stack xl/xxl row margins on top of outer section spacing.

@@ -47,6 +47,7 @@ Every image needs meaningful `alt` text written as a usable image generation pro
 
 ## Responsive CSS contract
 
+- Do not stagger a row of siblings (different top margins, translateY offsets, or nth-child even/odd vertical offsets) unless SITE SPEC is clearly a photography or gallery site (photographer, photography, photojournalism, or a gallery). Keep card and image rows level for every other site.
 - Write mobile-first responsive CSS, then add min-width media queries only where composition needs them.
 - Use fluid type with `clamp()` for display and section-heading scales while keeping body text readable.
 - Use flexible grid and flex layouts, bounded content widths, responsive spacing, and images that cannot overflow.

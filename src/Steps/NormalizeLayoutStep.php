@@ -49,6 +49,8 @@ final class NormalizeLayoutStep implements Step
             // they are written by assemble-pages, which runs after this step.
             reads: [
                 ...($this->htmlFirst ? ['design/site.css'] : []),
+                'meta.json',
+                'siteSpec.json',
                 'theme/theme.json',
                 'theme/parts/*',
             ],
