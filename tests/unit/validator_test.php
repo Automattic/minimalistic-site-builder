@@ -467,7 +467,7 @@ test('validator flags raw form markup in generated markup', function () {
     $joined = implode(' ', ThemeValidator::validate($project));
     assert_contains('plugin/pages/contact.html', $joined);
     assert_contains('form markup', $joined);
-    assert_contains('no form backend', $joined);
+    assert_contains('sections never author form controls', $joined);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
