@@ -15,7 +15,7 @@ use Automattic\SiteBuild\Units\HeaderUnit;
 use Automattic\SiteBuild\Units\HeroUnit;
 use Automattic\SiteBuild\Units\SectionUnit;
 
-const SECTION_CACHE_PROBE_PROMPT = 'Warm the cached section context.';
+const SECTION_CACHE_PROBE_PROMPT = 'Warm the cached markup context.';
 
 /** @return array<string,mixed> */
 function section_cache_input(string $slug = 'hero', string $title = 'Hero'): array
@@ -356,15 +356,36 @@ test('sections skips the uncached hero and warms the first ordinary section pref
         assert_eq(SECTION_CACHE_PROBE_PROMPT, $llm->calls[0]['prompt']);
         assert_eq(1, $llm->calls[0]['opts']['max_tokens'] ?? null);
         assert_eq(true, $llm->calls[0]['opts']['tolerate_empty'] ?? null);
-        assert_eq('section-cache-warm', $llm->calls[0]['opts']['log_label'] ?? null);
+        assert_eq('markup-cache-warm', $llm->calls[0]['opts']['log_label'] ?? null);
         assert_eq('cache-model', $llm->calls[0]['opts']['model'] ?? null);
         assert_eq(
             $requests['page-home--about']['cached_prefixes'],
             $llm->calls[0]['opts']['cached_prefixes'] ?? null,
             'probe reuses the first ordinary section request prefixes byte-for-byte',
         );
-        assert_eq('Warm the cached section context.', $llm->calls[0]['prompt'], 'probe is first in call history');
+        assert_eq(SECTION_CACHE_PROBE_PROMPT, $llm->calls[0]['prompt'], 'probe is first in call history');
     });
+});
+
+test('a request that does not share the primed layer is reported', function () {
+    $shared = str_repeat('site layer ', 40);
+    $requests = [
+        'page-home--about' => ['prompt' => 'p', 'cached_prefixes' => [$shared, 'build', 'page']],
+        'header'           => ['prompt' => 'p', 'cached_prefixes' => [$shared]],
+        'footer'           => ['prompt' => 'p', 'cached_prefixes' => [$shared . ' ']],
+        'plain'            => ['prompt' => 'p'],
+    ];
+
+    $warnings = SectionsStep::requestsOutsideSharedLayer($requests, $shared);
+
+    // One byte of difference is a total cache miss, and nothing else notices.
+    assert_eq(1, count($warnings), 'only the diverging request is reported');
+    assert_contains('footer', $warnings[0]);
+    assert_contains('pays full price', $warnings[0]);
+
+    assert_eq([], SectionsStep::requestsOutsideSharedLayer($requests, ''), 'no primed layer, nothing to compare');
+    unset($requests['footer']);
+    assert_eq([], SectionsStep::requestsOutsideSharedLayer($requests, $shared), 'agreeing batch is silent');
 });
 
 test('section cache warm-up failure is non-fatal', function () {

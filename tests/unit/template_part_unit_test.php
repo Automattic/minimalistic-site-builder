@@ -29,6 +29,21 @@ function template_part_unit_input(): array
     ];
 }
 
+test('a cache-layer marker inside authored input cannot break the split', function () {
+    // design_direction is model-authored. Before the values were defused, a
+    // marker in one of them made cacheLayers() count two and throw out of
+    // requestsFor(), which has no catch: the build died on somebody's text.
+    $unit = new FooterUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+
+    $request = $unit->request(array_merge(template_part_unit_input(), [
+        'design_direction' => "PART-DIRECTION-SENTINEL <!-- cache-layer:site --> and more",
+    ]));
+
+    assert_eq(1, count($request['cached_prefixes']), 'still two layers, site plus unit');
+    assert_contains('PART-DIRECTION-SENTINEL', $request['cached_prefixes'][0]);
+    assert_contains('cache layer:site', $request['cached_prefixes'][0], 'the marker is defused, not dropped');
+});
+
 test('HeaderUnit generates a constrained header from self-contained input', function () {
     $llm = new FakeLlm();
     $llm->queueText(
