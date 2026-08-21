@@ -1468,15 +1468,13 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                         . "; disposition kept the model hex because the design-direction hex {$preferred} scored "
                         . self::ratioLabel($preferred, $deliveredBase) . ':1 on base ' . $deliveredBase
                         . ', below the ' . self::CONTRAST_FLOORS[$slug] . ':1 floor for this slug, '
-                        . 'which the model hex clears at ' . self::ratioLabel($current, $deliveredBase) . ':1';
+                        . 'which the model hex clears at ' . self::ratioLabel($current, $deliveredBase) . ':1'
+                        . self::hueDriftNote($slug, $current, $preferred);
                 } else {
                     $entry['color'] = $preferred;
                     $repairs[] = "palette slug '{$slug}': authored {$authored}; delivered {$preferred}"
                         . '; disposition wrote the design-direction hex back'
-                        . (in_array($slug, ['secondary', 'accent'], true)
-                            && self::hueDistance($authored, $preferred) > 30.0
-                            ? '; hue distance exceeded 30 degrees'
-                            : '');
+                        . self::hueDriftNote($slug, $authored, $preferred);
                 }
             }
             $entries[] = $entry;
@@ -1493,11 +1491,28 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             }
             $rawPreferred = $preferredHexes[$needed] ?? null;
             $preferred = is_string($rawPreferred) ? strtoupper(trim($rawPreferred)) : '';
-            $hex = preg_match('/^#[0-9A-F]{6}$/', $preferred) === 1
-                ? $preferred
-                : self::FALLBACK_COLORS[$needed];
+            $fromDirection = preg_match('/^#[0-9A-F]{6}$/', $preferred) === 1 ? $preferred : null;
+            $neutral = self::FALLBACK_COLORS[$needed];
+            if ($fromDirection === null || self::clearsFloor($needed, $fromDirection, $deliveredBase)) {
+                $hex = $fromDirection ?? $neutral;
+                $warnings[] = "theme.json palette missing slug '{$needed}'; filled with {$hex}";
+            } else {
+                // Same floor the writeback above enforces, applied to the one
+                // other way a direction hex reaches the palette. There is no
+                // model hex to keep here, so the choice is the direction's own
+                // against the neutral default: take whichever actually reads on
+                // the delivered base, and never make the slug less readable.
+                $hex = (self::ratioOn($neutral, $deliveredBase) ?? 0.0)
+                    > (self::ratioOn($fromDirection, $deliveredBase) ?? 0.0)
+                    ? $neutral
+                    : $fromDirection;
+                $warnings[] = "theme.json palette missing slug '{$needed}': authored {$fromDirection}"
+                    . "; delivered {$hex}; disposition the design-direction hex scored "
+                    . self::ratioLabel($fromDirection, $deliveredBase) . ':1 on base ' . $deliveredBase
+                    . ', below the ' . self::CONTRAST_FLOORS[$needed] . ':1 floor for this slug'
+                    . self::hueDriftNote($needed, $fromDirection, $hex);
+            }
             $palette[] = ['slug' => $needed, 'color' => $hex, 'name' => ucfirst($needed)];
-            $warnings[] = "theme.json palette missing slug '{$needed}'; filled with {$hex}";
         }
         $theme['settings']['color']['palette'] = $palette;
         return [$theme, $warnings, $repairs];
@@ -1645,16 +1660,36 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         string $preferred,
         string $base,
     ): bool {
+        return self::clearsFloor($slug, $authored, $base)
+            && !self::clearsFloor($slug, $preferred, $base);
+    }
+
+    /**
+     * Whether one hex meets the floor its slug carries on the delivered base.
+     * A slug with no floor, and a hex we cannot measure, both pass: this gate
+     * exists to catch a measured failure, not to reject unfamiliar input.
+     */
+    private static function clearsFloor(string $slug, string $hex, string $base): bool
+    {
         $floor = self::CONTRAST_FLOORS[$slug] ?? null;
         if ($floor === null) {
-            return false;
+            return true;
         }
-        $authoredRatio = self::ratioOn($authored, $base);
-        $preferredRatio = self::ratioOn($preferred, $base);
-        if ($authoredRatio === null || $preferredRatio === null) {
-            return false;
-        }
-        return $authoredRatio >= $floor && $preferredRatio < $floor;
+        $ratio = self::ratioOn($hex, $base);
+        return $ratio === null || $ratio >= $floor;
+    }
+
+    /**
+     * The direction names its colors ("rosa goiaba"), so past 30 degrees of
+     * hue the delivered hex reads as a different color than the name it
+     * shipped under. Only secondary and accent carry a name worth reporting.
+     */
+    private static function hueDriftNote(string $slug, string $from, string $to): string
+    {
+        return in_array($slug, ['secondary', 'accent'], true)
+            && self::hueDistance($from, $to) > 30.0
+            ? '; hue distance exceeded 30 degrees'
+            : '';
     }
 
     /** WCAG ratio of one hex against another, or null when either is unreadable. */

@@ -718,10 +718,11 @@ test('theme-json fills a missing required color slug from the direction, then de
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
-    // The direction committed an accent hex — the fill honors it.
+    // The direction committed an accent hex that clears the 4.5:1 floor its
+    // slug carries on this base — the fill honors it.
     $project->writeJson('designDirection.json', [
         'description' => 'Warm hearth tones.',
-        'palette'     => ['accent' => '#C0FFEE'],
+        'palette'     => ['accent' => '#B4541E'],
         'hero_blueprint' => \Automattic\SiteBuild\HeroBlueprint::defaultFor('cinematic-safe-zone'),
     ]);
 
@@ -739,7 +740,7 @@ test('theme-json fills a missing required color slug from the direction, then de
 
     $palette = $project->readJson('theme/theme.json')['settings']['color']['palette'];
     $bySlug = array_column($palette, 'color', 'slug');
-    assert_eq('#C0FFEE', $bySlug['accent'], 'the direction hex fills the gap');
+    assert_eq('#B4541E', $bySlug['accent'], 'the direction hex fills the gap');
     $joined = implode(' ', $project->readJson('warnings.json')['theme-json'] ?? []);
     assert_contains("palette missing slug 'accent'", $joined);
     exec('rm -rf ' . escapeshellarg($tmp));
@@ -1038,6 +1039,80 @@ test('repairColors keeps a model hex the direction would make unreadable', funct
 
     [$again] = ThemeJsonStep::repairColors($theme, $preferred);
     assert_eq($theme, $again, 'a rejected writeback reaches a fixed point too');
+});
+
+test('repairColors will not fill a missing slug with an unreadable direction hex', function () {
+    // The gate the writeback applies is not skippable by omitting the slug:
+    // #777777 scores 4.48:1 on white, under the 4.5 floor secondary carries,
+    // so the neutral default ships instead of an unreadable caption color.
+    [$theme, $warnings, $repairs] = ThemeJsonStep::repairColors(
+        ['settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#FFFFFF', 'name' => 'Base'],
+            ['slug' => 'contrast', 'color' => '#111111', 'name' => 'Contrast'],
+            ['slug' => 'primary', 'color' => '#111111', 'name' => 'Primary'],
+            ['slug' => 'accent', 'color' => '#B4541E', 'name' => 'Accent'],
+        ]]]],
+        ['secondary' => '#777777'],
+    );
+    $bySlug = array_column($theme['settings']['color']['palette'], 'color', 'slug');
+    assert_eq('#444444', $bySlug['secondary'], 'the neutral default outranks an unreadable direction hex');
+    assert_eq([], $repairs, 'a gated fill is not a writeback receipt');
+    $joined = implode(' ', $warnings);
+    assert_contains("palette missing slug 'secondary'", $joined);
+    assert_contains('4.48:1', $joined);
+    assert_contains('below the 4.5:1 floor', $joined);
+});
+
+test('repairColors never fills a gap with a hex that reads worse than the one it replaced', function () {
+    // The neutral defaults are tuned for a light page. On a dark delivered base
+    // #444444 scores 1.94:1, so a gate that always fell back to it would make
+    // the slug less readable, not more. A readable direction hex is taken
+    // outright; an unreadable one still wins when the neutral is worse.
+    [$readable] = ThemeJsonStep::repairColors(
+        ['settings' => ['color' => ['palette' => [
+            ['slug' => 'contrast', 'color' => '#FFFFFF', 'name' => 'Contrast'],
+            ['slug' => 'primary', 'color' => '#EEEEEE', 'name' => 'Primary'],
+            ['slug' => 'accent', 'color' => '#FFB4A2', 'name' => 'Accent'],
+        ]]]],
+        ['base' => '#111111', 'secondary' => '#C9C4BC'],
+    );
+    $bySlug = array_column($readable['settings']['color']['palette'], 'color', 'slug');
+    assert_eq('#111111', $bySlug['base']);
+    assert_eq('#C9C4BC', $bySlug['secondary'], '10.89:1 clears the floor and is taken outright');
+
+    // #6A6A6A fails the 4.5 floor at 3.49:1, but the neutral it would be
+    // swapped for is worse still, so the direction hex has to survive.
+    [$degraded, $warnings] = ThemeJsonStep::repairColors(
+        ['settings' => ['color' => ['palette' => [
+            ['slug' => 'contrast', 'color' => '#FFFFFF', 'name' => 'Contrast'],
+            ['slug' => 'primary', 'color' => '#EEEEEE', 'name' => 'Primary'],
+            ['slug' => 'accent', 'color' => '#FFB4A2', 'name' => 'Accent'],
+        ]]]],
+        ['base' => '#111111', 'secondary' => '#6A6A6A'],
+    );
+    $bySlug = array_column($degraded['settings']['color']['palette'], 'color', 'slug');
+    assert_eq('#6A6A6A', $bySlug['secondary'], 'the better-reading hex survives even when it fails the floor');
+    $joined = implode(' ', $warnings);
+    assert_contains('3.49:1', $joined);
+    assert_contains('below the 4.5:1 floor', $joined);
+});
+
+test('repairColors reports hue drift on the branch where the named color is lost', function () {
+    // The writeback is rejected, so the delivered hex stays far from the color
+    // the direction named — that is the case worth naming in warnings.json.
+    [, $warnings] = ThemeJsonStep::repairColors(
+        ['settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#FFFFFF', 'name' => 'Base'],
+            ['slug' => 'contrast', 'color' => '#111111', 'name' => 'Contrast'],
+            ['slug' => 'primary', 'color' => '#111111', 'name' => 'Primary'],
+            ['slug' => 'secondary', 'color' => '#1B5E20', 'name' => 'Secondary'],
+            ['slug' => 'accent', 'color' => '#B4541E', 'name' => 'Accent'],
+        ]]]],
+        ['secondary' => '#E88AA0'],
+    );
+    $joined = implode(' ', $warnings);
+    assert_contains('kept the model hex', $joined);
+    assert_contains('hue distance exceeded 30 degrees', $joined);
 });
 
 test('repairColors judges each slug against the floor its own role carries', function () {
