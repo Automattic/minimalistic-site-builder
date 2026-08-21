@@ -6,7 +6,9 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\AboveFoldContract;
 use Automattic\SiteBuild\CardStyle;
 use Automattic\SiteBuild\ConceptSeeds;
+use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\Env;
+use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
@@ -18,6 +20,7 @@ use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\BoundedChoice;
 use Automattic\SiteBuild\Warnings;
 
 /**
@@ -280,13 +283,16 @@ final class DesignDirectionStep implements Step
             'type'             => [
                 'heading' => self::emptyTypeSlot(),
                 'body'    => self::emptyTypeSlot(),
+                'accent'  => self::emptyTypeSlot(),
             ],
             'image_grade'      => '',
             'canvas'           => $canvas,
             'card_style'       => 'flush',
             'shape'            => 'sharp',
+            'surface'          => Surface::DEFAULT,
+            'device'           => Device::DEFAULT,
             'motion'           => Motion::DEFAULT_PROFILE,
-            'motion_note'      => '',
+            'motion_note'      => [],
             'concept_seed'     => $seed,
             'hero_blueprint'   => HeroBlueprint::defaultFor($recipe),
         ];
@@ -591,6 +597,8 @@ final class DesignDirectionStep implements Step
         }
 
         $cardStyle = self::normalizeCardStyle($raw['card_style'] ?? null, $warnings);
+        $surface = self::normalizeSurface($raw['surface'] ?? null, $warnings);
+        $device = self::normalizeDevice($raw['device'] ?? null, $warnings);
 
         $motion = self::motionProfile($raw['motion'] ?? null);
         $rawMotion = is_string($raw['motion'] ?? null)
@@ -600,6 +608,45 @@ final class DesignDirectionStep implements Step
             $repairs[] = 'designDirection.json: field motion authored '
                 . self::describe($raw['motion']) . ' delivered ' . self::describe($motion)
                 . '; disposition repaired invalid profile';
+        }
+
+        // motion_note names kit classes; it is not art direction to interpret.
+        // Every token must be a class exactly, so a phrase the kit cannot ship
+        // drops whole instead of turning on whichever class its letters
+        // happen to contain. Persist the list; format() renders the sentence.
+        $rawMotionNote = $raw['motion_note'] ?? null;
+        $authoredNote = self::describeNote($rawMotionNote);
+        $validated = Motion::validateNote($rawMotionNote, $motion);
+        $motionNote = $validated['classes'];
+        $notePresent = $rawMotionNote !== null && $rawMotionNote !== '' && $rawMotionNote !== [];
+        $alreadyCanonical = is_array($rawMotionNote)
+            && array_is_list($rawMotionNote)
+            && $rawMotionNote === $motionNote;
+        if (
+            array_key_exists('motion_note', $raw)
+            && $rawMotionNote !== null
+            && !is_string($rawMotionNote)
+            && !is_array($rawMotionNote)
+        ) {
+            $warnings[] = "file='designDirection.json'; path=\"motion_note\"; authored="
+                . Warnings::value($rawMotionNote)
+                . '; delivered=' . Warnings::value($motionNote)
+                . '; disposition=motion note was neither a class list nor a string and was removed';
+        } elseif ($notePresent && $validated['classes'] === []) {
+            $warnings[] = 'designDirection.json: field motion_note authored '
+                . Warnings::value($authoredNote)
+                . '; delivered=' . Warnings::value($motionNote)
+                . '; disposition named no motion-kit class the '
+                . $motion . ' profile ships (' . implode('; ', $validated['dropped']) . ')';
+        } elseif ($validated['dropped'] !== []) {
+            $warnings[] = 'designDirection.json: field motion_note authored '
+                . Warnings::value($authoredNote)
+                . '; delivered=' . Warnings::value($motionNote)
+                . '; disposition dropped ' . implode('; ', $validated['dropped']);
+        } elseif ($notePresent && !$alreadyCanonical) {
+            $repairs[] = 'designDirection.json: field motion_note authored '
+                . self::describe($rawMotionNote) . ' delivered ' . self::describe($motionNote)
+                . '; disposition rendered the committed classes as the note list';
         }
 
         // The corner language is a fixed list; anything unrecognized falls
@@ -624,6 +671,7 @@ final class DesignDirectionStep implements Step
             'type'             => [
                 'heading' => self::normalizeTypeSlot($type['heading'] ?? null, 'heading', $warnings),
                 'body'    => self::normalizeTypeSlot($type['body'] ?? null, 'body', $warnings),
+                'accent'  => self::normalizeTypeSlot($type['accent'] ?? null, 'accent', $warnings),
             ],
             'image_grade'      => trim((string) ($raw['image_grade'] ?? '')),
             // Anything that isn't an explicit "framed" commitment is full-bleed:
@@ -634,11 +682,13 @@ final class DesignDirectionStep implements Step
             // the accidental look every site gets.
             'card_style'       => $cardStyle,
             'shape'            => $shape,
+            'surface'          => $surface,
+            'device'           => $device,
             // The motion profile is a fixed list (the kit ships exactly these);
             // anything unrecognized falls back to the default so every build
             // commits to ONE profile the downstream steps can gate on.
             'motion'           => $motion,
-            'motion_note'      => trim((string) ($raw['motion_note'] ?? '')),
+            'motion_note'      => $motionNote,
             'concept_seed'     => $conceptSeed,
             'hero_blueprint'   => $blueprint,
         ];
@@ -654,18 +704,44 @@ final class DesignDirectionStep implements Step
      */
     public static function normalizeCardStyle(mixed $authored, array &$warnings = []): string
     {
-        $normalized = is_string($authored) ? strtolower(trim($authored)) : '';
-        if (in_array($normalized, self::CARD_STYLES, true)) {
-            return $normalized;
-        }
-        if ($authored === null || (is_string($authored) && $normalized === '')) {
-            return 'flush';
-        }
+        return BoundedChoice::normalize(
+            $authored,
+            self::CARD_STYLES,
+            'flush',
+            'card_style',
+            $warnings,
+            'unsupported generated card treatment replaced by default',
+        );
+    }
 
-        $warnings[] = 'designDirection.json: field card_style authored '
-            . Warnings::value($authored)
-            . '; delivered "flush"; disposition unsupported generated card treatment replaced by default';
-        return 'flush';
+    /**
+     * @param list<string> $warnings
+     */
+    public static function normalizeSurface(mixed $authored, array &$warnings = []): string
+    {
+        return BoundedChoice::normalize(
+            $authored,
+            Surface::ALL,
+            Surface::DEFAULT,
+            'surface',
+            $warnings,
+            'unsupported texture replaced by none',
+        );
+    }
+
+    /**
+     * @param list<string> $warnings
+     */
+    public static function normalizeDevice(mixed $authored, array &$warnings = []): string
+    {
+        return BoundedChoice::normalize(
+            $authored,
+            Device::ALL,
+            Device::DEFAULT,
+            'device',
+            $warnings,
+            'unbuildable motif replaced by none',
+        );
     }
 
     /**
@@ -847,7 +923,7 @@ final class DesignDirectionStep implements Step
 
         $type = is_array($direction['type'] ?? null) ? $direction['type'] : [];
         $pair = [];
-        foreach (['heading', 'body'] as $slot) {
+        foreach (['heading', 'body', 'accent'] as $slot) {
             $typeSlot = is_array($type[$slot] ?? null) ? $type[$slot] : [];
             $family = is_string($typeSlot['family'] ?? null) ? trim($typeSlot['family']) : '';
             if ($family === '') {
@@ -917,6 +993,30 @@ final class DesignDirectionStep implements Step
             };
         }
 
+        $surface = Surface::explicit($direction['surface'] ?? null);
+        if ($surface !== null && $surface !== 'none') {
+            $surfaceMeaning = match ($surface) {
+                'paper'    => 'a paper tooth overlay on the page',
+                'concrete' => 'a concrete grit overlay on the page',
+                'film'     => 'a film grain overlay on the page',
+                'fabric'   => 'a fabric weave overlay on the page',
+                default    => 'the committed surface overlay',
+            };
+            $facts[] = "- **Surface**: {$surface} — {$surfaceMeaning}.";
+        }
+
+        $device = Device::explicit($direction['device'] ?? null);
+        $deviceClass = Device::className($device);
+        if ($device !== null && $device !== 'none' && $deviceClass !== null) {
+            $deviceMeaning = match ($device) {
+                'hairline-rule'  => 'a 1px rule in the current text color on ONE non-hero band',
+                'section-numeral'=> 'a folio numeral on ONE non-hero band',
+                'stamp'          => 'a rotated stamp mark on ONE non-hero band',
+                default          => 'the committed one-band CSS device',
+            };
+            $facts[] = "- **Device**: {$deviceClass} — {$deviceMeaning}. Never the hero. Never two bands.";
+        }
+
         // Render the motion commitment with its executable meaning: the
         // section prompts gate their motion-class placement on this line.
         $motion = strtolower(trim((string) ($direction['motion'] ?? '')));
@@ -930,7 +1030,7 @@ final class DesignDirectionStep implements Step
                     'dramatic'  => 'long directional masks and a cinematic hero focus pull',
                 ][$motion] . ' — place motion classes sparingly, per their budget rules',
             };
-            $note = trim((string) ($direction['motion_note'] ?? ''));
+            $note = self::formatMotionNote($direction['motion_note'] ?? null);
             $facts[] = "- **Motion**: {$motion} — {$meaning}." . ($note !== '' ? " Motion note: {$note}" : '');
         }
 
@@ -940,6 +1040,34 @@ final class DesignDirectionStep implements Step
         }
 
         return $head . ($facts === [] ? '' : "\n\n" . implode("\n", $facts));
+    }
+
+    /** A motion note as one readable string, whether authored as a list or a line. */
+    private static function describeNote(mixed $raw): string
+    {
+        if (is_array($raw)) {
+            $parts = array_filter($raw, 'is_string');
+            return implode(', ', array_map('trim', $parts));
+        }
+        return is_string($raw) ? trim($raw) : '';
+    }
+
+    /**
+     * Prompt sentence for a persisted class list. A leftover string (hand-written
+     * fixtures, predating this contract) is passed through unchanged.
+     */
+    private static function formatMotionNote(mixed $raw): string
+    {
+        if (is_array($raw)) {
+            $classes = [];
+            foreach ($raw as $item) {
+                if (is_string($item) && trim($item) !== '') {
+                    $classes[] = trim($item);
+                }
+            }
+            return Motion::formatNote($classes);
+        }
+        return is_string($raw) ? trim($raw) : '';
     }
 
     private static function formatNumber(float $value): string
@@ -1109,14 +1237,31 @@ final class DesignDirectionStep implements Step
         return self::explicitShape($project->readJson(self::FILE)['shape'] ?? null);
     }
 
+    /**
+     * The committed page surface, or `none` when no direction was persisted
+     * or the field is absent.
+     */
+    public static function surfaceFor(Project $project): string
+    {
+        if (!$project->exists(self::FILE)) {
+            return Surface::DEFAULT;
+        }
+        return self::normalizeSurface($project->readJson(self::FILE)['surface'] ?? null);
+    }
+
+    /** The committed one-band CSS device, or `none`. */
+    public static function deviceFor(Project $project): string
+    {
+        if (!$project->exists(self::FILE)) {
+            return Device::DEFAULT;
+        }
+        return self::normalizeDevice($project->readJson(self::FILE)['device'] ?? null);
+    }
+
     /** Parse only an explicit valid corner-language commitment. */
     private static function explicitShape(mixed $raw): ?string
     {
-        if (!is_string($raw)) {
-            return null;
-        }
-        $shape = strtolower(trim($raw));
-        return in_array($shape, self::SHAPES, true) ? $shape : null;
+        return BoundedChoice::explicit($raw, self::SHAPES);
     }
 
 

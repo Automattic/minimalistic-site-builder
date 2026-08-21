@@ -1946,3 +1946,51 @@ test('header-hero declares the design stylesheet it reads on the HTML-first grap
         'the legacy graph, which writes no design/site.css, does not declare it',
     );
 });
+
+test('header-hero does not restore a planned Add to cart label after storefront degrade', function () {
+    $tmp = sys_get_temp_dir() . '/builder_hh_cart_restore_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    $project->writeJson('theme/theme.json', hh_theme_json());
+    $action = ['label' => 'Add to cart', 'intent' => 'Buy the product.', 'destination' => '/cart'];
+    $pages = [
+        [
+            'slug' => 'home', 'title' => 'Home', 'path' => '/', 'front' => true,
+            'sections' => [[
+                'slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'mixed-width-editorial',
+                'background' => 'base', 'primary_action' => $action,
+            ]],
+        ],
+        // A live /cart route is what lets reconcile restore the planned label
+        // instead of treating the button as a dead control.
+        [
+            'slug' => 'cart', 'title' => 'Cart', 'path' => '/cart', 'front' => false,
+            'sections' => [['slug' => 'body', 'role' => 'section', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+        ],
+    ];
+    $project->writeJson('pages.json', ['pages' => $pages]);
+    hh_above_fold($project, $pages);
+    $project->writeText(
+        'theme/parts/header.html',
+        hh_header('{"className":"header-archetype--standard-row","backgroundColor":"base","textColor":"contrast","layout":{"type":"constrained"}}'),
+    );
+    $button = '<!-- wp:button --><div class="wp-block-button">'
+        . '<a class="wp-block-button__link wp-element-button" href="/cart">Enquire</a>'
+        . '</div><!-- /wp:button -->';
+    $project->writeText(
+        'theme/parts/page-home--hero.html',
+        hh_authored_hero(
+            '<!-- wp:heading {"level":1} --><h1>Shop the catalog</h1><!-- /wp:heading -->'
+            . '<!-- wp:buttons --><div class="wp-block-buttons">' . $button . '</div><!-- /wp:buttons -->',
+        ),
+    );
+
+    putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
+    (new HeaderHeroStep())->run($project);
+
+    $delivered = $project->readText('theme/parts/page-home--hero.html');
+    assert_contains('Enquire', $delivered);
+    assert_true(!str_contains($delivered, 'Add to cart'), 'reconcile must not put the purchase label back');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\FooterComposition;
 use Automattic\SiteBuild\FooterSectionIdentity;
 use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\GeneratedJsonFallbackStep;
@@ -10,6 +11,7 @@ use Automattic\SiteBuild\HeroComposition;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
 use Automattic\SiteBuild\Narrator;
+use Automattic\SiteBuild\PhotographySite;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
@@ -23,11 +25,12 @@ use Automattic\SiteBuild\StepDeclaration;
  * ConcurrentGroup).
  *
  * Input:  meta.json (user prompt) + siteSpec.json (with its `pages` tree).
- * Output: pages.json — { "pages": [ { slug, title, path, front, parent,
+ * Output: pages.json — { "footer_archetype": "<catalog id>", "pages": [ { slug, title, path, front, parent,
  *         menu_order, purpose, sections: [ { slug, title, role, type, purpose,
  *         content_notes, layout_archetype, background, vertical_density,
  *         handoff, primary_action } ] } ] }, a FLAT list in display order, parents before
- *         children; warnings.json records every generated value removed or
+ *         children; footer_archetype is the pick hashed at plan time so later
+ *         direction rewrites cannot retarget the footer; warnings.json records every generated value removed or
  *         replaced by a deterministic fallback.
  *
  * Each page's plan enriches the spec's purpose into concrete section briefs,
@@ -62,6 +65,16 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
 
     /** The most default-looking archetype is capped so it can't dominate a page. */
     private const MAX_EQUAL_CARD_GRIDS = 2;
+
+    /**
+     * Level replacements for an ineligible offset-grid. Matches the page-plan
+     * prompt: never a cover, prefer a card row, honor the grid cap.
+     */
+    private const LEVEL_ROW_ARCHETYPES = [
+        'equal-card-grid',
+        'mixed-width-editorial',
+        'list-with-thumbnails',
+    ];
 
     /** Whitespace-led pauses are accents, not a page's default cadence. */
     private const MAX_SPACIOUS_SECTIONS = 2;
@@ -259,12 +272,21 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         $blueprint = DesignDirectionStep::heroBlueprintFor($project);
         $projection = HeroComposition::planProjection($blueprint);
 
+        $siteSpec = $project->readText('siteSpec.json');
+        $designDirection = DesignDirectionStep::readFor($project);
         $shared = [
             'user_prompt'      => (string) ($meta['prompt'] ?? ''),
-            'site_spec'        => $project->readText('siteSpec.json'),
+            'site_spec'        => $siteSpec,
             'language'         => SiteSpecStep::languageOf($project),
-            'design_direction' => DesignDirectionStep::readFor($project),
+            'design_direction' => $designDirection,
             'site_pages'       => self::sitePagesList($sitePages ?? $pages),
+            // One footer part renders below every page here, and these requests
+            // fan out concurrently blind to each other — so this is the only
+            // point where the MODEL can be steered off it. The deterministic
+            // floor in consumeResults() is what guarantees the result.
+            'footer_surface_rule' => FooterComposition::closingSectionRule(
+                FooterComposition::surface(FooterComposition::archetypeFor($siteSpec, $designDirection)),
+            ),
         ];
 
         $requests = [];
@@ -330,6 +352,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         $pages = self::flattenPages($siteSpec);
         $blueprint = DesignDirectionStep::heroBlueprintFor($project);
         $frontProjection = HeroComposition::planProjection($blueprint);
+        $allowOffsetGrid = self::allowOffsetGridFor($project, $siteSpec);
         $actionContext = self::withPlannedSectionAnchors(
             self::primaryActionContext($siteSpec, $pages),
             $pages,
@@ -386,6 +409,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                     $normalizationWarnings,
                     $slug,
                     $normalizationRepairs,
+                    $allowOffsetGrid,
                 );
                 if ($sections === []) {
                     throw new \RuntimeException(
@@ -496,6 +520,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                     $normalizationWarnings,
                     $slug,
                     $normalizationRepairs,
+                    $allowOffsetGrid,
                 );
                 $warnings = array_merge($warnings, $normalizationWarnings);
                 $successfulRepairs = array_merge($successfulRepairs, $normalizationRepairs);
@@ -508,6 +533,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                     $front ? $frontProjection : null,
                     $repairActionContext,
                     $successfulRepairs,
+                    $allowOffsetGrid,
                 );
             }
             if ($sections === []) {
@@ -549,7 +575,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         // a SaaS brief delivered hero-only, shipping a 1.5-screen site).
         // Pad below the delivered sections with reviewed generic briefs so
         // the sections step still writes a whole page, and record the loss.
-        $out = self::padThinFrontPlan($out, $frontProjection, $actionContext, $warnings);
+        $out = self::padThinFrontPlan($out, $frontProjection, $actionContext, $warnings, $allowOffsetGrid);
 
         // Anchors cannot be judged until every normal, repair, and fallback
         // path has produced its final page/section set. Recheck the sole
@@ -567,8 +593,79 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         // Only removals, fallback substitutions, and other delivered-value
         // losses reach the durable queue. Exact recipe projection repairs are
         // recorded in the report above instead.
+        // Last: one footer part renders below every page here, so no page may
+        // close on its surface. The plan prompt says so, but the page requests
+        // fan out concurrently and the model still lands on it often enough
+        // that the seam merges — this is the deterministic floor.
+        // Hash the direction as it stands NOW, then persist the pick so later
+        // steps (reconcile-palette rewrites those hexes) cannot retarget the
+        // footer recipe by rehashing mutated prose (BIGR-850).
+        $footerArchetype = FooterComposition::archetypeFor(
+            $project->readText('siteSpec.json'),
+            DesignDirectionStep::readFor($project),
+        );
+        $out = self::withClosingBandOffFooterSurface(
+            $out,
+            FooterComposition::surface($footerArchetype),
+            $warnings,
+        );
+
         $project->addWarnings($this->id(), $warnings);
-        $project->writeJson('pages.json', ['pages' => $out]);
+        $project->writeJson('pages.json', [
+            'pages' => $out,
+            'footer_archetype' => $footerArchetype,
+        ]);
+    }
+
+    /**
+     * Move any page's LAST section off the footer's surface, so the footer
+     * always reads as its own band. Bands above the closing one are deliberate
+     * page rhythm and are never touched; `tinted` and `image` already differ
+     * from an exact solid surface and are left alone. Pure — unit-testable.
+     *
+     * @param array<int,array<string,mixed>> $pages
+     * @param list<string> $warnings
+     * @return array<int,array<string,mixed>>
+     */
+    public static function withClosingBandOffFooterSurface(
+        array $pages,
+        string $footerSurface,
+        array &$warnings = [],
+    ): array {
+        // A light footer takes a soft tint above it; forcing contrast would end
+        // every non-compliant page on a dark band.
+        $replacement = $footerSurface === 'base' ? 'tinted' : 'base';
+
+        foreach ($pages as $index => $page) {
+            $sections = $page['sections'] ?? null;
+            if (!is_array($sections) || $sections === []) {
+                continue;
+            }
+            $keys = array_keys($sections);
+            $lastKey = end($keys);
+            $last = $sections[$lastKey];
+            if (!is_array($last) || ($last['background'] ?? null) !== $footerSurface) {
+                continue;
+            }
+            $slug = (string) ($page['slug'] ?? '');
+            $sections[$lastKey]['background'] = $replacement;
+            // The plan's own handoff prose names the background it chose, and
+            // both the section author and the footer author read that line —
+            // correct it in place or they get two contradictory briefs.
+            $handoff = trim((string) ($last['handoff'] ?? ''));
+            $sections[$lastKey]['handoff'] = trim($handoff . ' Build correction: this section\'s background is now "'
+                . $replacement . '" so the site footer\'s "' . $footerSurface . '" band below reads as its own '
+                . 'surface; this supersedes any background named earlier in this line.');
+            $pages[$index]['sections'] = $sections;
+            $warnings[] = self::valueLossWarning(
+                self::sectionPath($slug, (int) $lastKey) . '.background',
+                $footerSurface,
+                $replacement,
+                "the footer renders on {$footerSurface} directly below it, so the planned band would have left "
+                . 'that page with no visible footer boundary',
+            );
+        }
+        return $pages;
     }
 
     /**
@@ -586,6 +683,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     {
         $siteSpec = $project->readJson('siteSpec.json');
         $actionContext = self::primaryActionContext($siteSpec, $pages);
+        $allowOffsetGrid = self::allowOffsetGridFor($project, $siteSpec);
         $warnings = [];
         $repairs = [];
         $out = [];
@@ -611,12 +709,12 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             }
             $rawSections = self::removeTemplateFooterSections($plan['sections'] ?? null, $warnings, $slug);
             try {
-                $sections = self::normalize($rawSections, $front, $projection, $actionContext, $warnings, $slug, $repairs);
+                $sections = self::normalize($rawSections, $front, $projection, $actionContext, $warnings, $slug, $repairs, $allowOffsetGrid);
                 if ($sections === []) {
                     throw new \RuntimeException("page-plan: page '{$slug}' has no sections");
                 }
             } catch (\RuntimeException $e) {
-                $sections = self::recoverSections($rawSections, $front, $warnings, $slug, $projection, $actionContext, $repairs);
+                $sections = self::recoverSections($rawSections, $front, $warnings, $slug, $projection, $actionContext, $repairs, $allowOffsetGrid);
                 if ($sections === []) {
                     $sections = self::fallbackSections($front, $projection, $actionContext);
                 }
@@ -895,6 +993,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      * @param array<string,mixed> $actionContext known page/contact targets
      * @param list<string> $warnings appended only for delivered value loss
      * @param list<string> $repairs appended for semantics-preserving fixes
+     * @param bool $allowOffsetGrid staggered rows are photography- and gallery-only
      * @return array<int,array<string,mixed>>
      */
     public static function normalize(
@@ -905,6 +1004,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         array &$warnings = [],
         string $pageSlug = '',
         array &$repairs = [],
+        bool $allowOffsetGrid = true,
     ): array {
         if (!is_array($raw)) {
             return [];
@@ -1038,6 +1138,8 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 . 'action (label AND destination together, so the label still describes where the '
                 . 'button goes) at a section the target page really contains';
         }
+
+        $out = self::restrictOffsetGrid($out, $allowOffsetGrid, $front, $warnings, $pageSlug);
 
         // An interior page that opens with a full-viewport cover is a second
         // homepage, not an inner page (the prompt demands a COMPACT opening).
@@ -1527,6 +1629,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      *
      * @param array<int,array<string,mixed>> $pages
      * @param list<string> $warnings
+     * @param bool $allowOffsetGrid
      * @return array<int,array<string,mixed>>
      */
     public static function padThinFrontPlan(
@@ -1534,6 +1637,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         ?array $frontProjection,
         array $actionContext,
         array &$warnings = [],
+        bool $allowOffsetGrid = true,
     ): array {
         foreach ($pages as $index => $page) {
             if (!is_array($page) || empty($page['front'])) {
@@ -1550,7 +1654,9 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             // hero-only plan appends, so the appended tail takes the role.
             // Each inserted archetype avoids both neighbors so the adjacency
             // variety rule holds by construction.
-            $safeArchetypes = ['centered-stack', 'asymmetric-split', 'offset-grid'];
+            $safeArchetypes = $allowOffsetGrid
+                ? ['centered-stack', 'asymmetric-split', 'offset-grid']
+                : ['centered-stack', 'asymmetric-split', 'mixed-width-editorial'];
             $briefs = [
                 [
                     'slug'          => 'overview',
@@ -1609,6 +1715,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                     $warnings,
                     (string) ($page['slug'] ?? ''),
                     $repairs,
+                    $allowOffsetGrid,
                 );
             } catch (\Throwable) {
                 // Padding must never make a deliverable plan worse: keep the
@@ -1811,6 +1918,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      *
      * @param mixed $raw
      * @param list<string> $warnings appended to in place
+     * @param bool $allowOffsetGrid
      * @return array<int,array<string,mixed>>
      */
     public static function recoverSections(
@@ -1821,6 +1929,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         ?array $frontProjection = null,
         array $actionContext = [],
         array &$repairs = [],
+        bool $allowOffsetGrid = true,
     ): array {
         if (!is_array($raw)) {
             return [];
@@ -1833,12 +1942,13 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             $pageSlug,
         );
         $mechanically = self::repairVariety(
-            self::repairFields($prepared, $warnings, $pageSlug),
+            self::repairFields($prepared, $warnings, $pageSlug, $allowOffsetGrid),
             $front,
             $frontProjection,
             $warnings,
             $pageSlug,
             $repairs,
+            $allowOffsetGrid,
         );
         $mechanically = self::repairUnresolvedPrimaryActionAnchor(
             $mechanically,
@@ -1858,6 +1968,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             $frontProjection,
             $actionContext,
             $repairs,
+            $allowOffsetGrid,
         );
     }
 
@@ -1972,6 +2083,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      *
      * @param array<int,array<string,mixed>> $sections
      * @param list<string> $warnings appended to in place
+     * @param bool $allowOffsetGrid
      * @return array<int,array<string,mixed>>
      */
     public static function acceptRepairedSections(
@@ -1982,6 +2094,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         ?array $frontProjection = null,
         array $actionContext = [],
         array &$repairs = [],
+        bool $allowOffsetGrid = true,
     ): array {
         try {
             return self::normalize(
@@ -1992,6 +2105,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 $warnings,
                 $pageSlug,
                 $repairs,
+                $allowOffsetGrid,
             );
         } catch (\RuntimeException $residual) {
             $path = $pageSlug === '' ? 'pages[].sections' : "pages[slug='{$pageSlug}'].sections";
@@ -2067,9 +2181,10 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      *
      * @param mixed $raw
      * @param list<string> $warnings appended to in place, one per coercion
+     * @param bool $allowOffsetGrid
      * @return array<int,array<string,mixed>>
      */
-    public static function repairFields($raw, array &$warnings = [], string $pageSlug = ''): array
+    public static function repairFields($raw, array &$warnings = [], string $pageSlug = '', bool $allowOffsetGrid = true): array
     {
         if (!is_array($raw)) {
             return [];
@@ -2078,7 +2193,11 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
 
         // Neither of these is a safe landing spot for a value we are guessing:
         // a cover has its own interior-page rule and a grid has a cap.
-        $candidates = array_values(array_diff(self::ARCHETYPES, ['full-bleed-cover', 'equal-card-grid']));
+        $excluded = ['full-bleed-cover', 'equal-card-grid'];
+        if (!$allowOffsetGrid) {
+            $excluded[] = 'offset-grid';
+        }
+        $candidates = array_values(array_diff(self::ARCHETYPES, $excluded));
 
         $archetypes = array_map(
             fn (array $s) => trim((string) ($s['layout_archetype'] ?? '')),
@@ -2180,6 +2299,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      * @param array<string,mixed>|null $frontProjection
      * @param list<string> $warnings
      * @param list<string> $repairs
+     * @param bool $allowOffsetGrid
      * @return array<int,array<string,mixed>>
      */
     public static function repairVariety(
@@ -2189,6 +2309,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         array &$warnings = [],
         string $pageSlug = '',
         array &$repairs = [],
+        bool $allowOffsetGrid = true,
     ): array {
         if (!is_array($raw)) {
             return [];
@@ -2207,18 +2328,21 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         );
         $authoredArchetypes = $archetypes;
 
-        $pick = function (int $i, string ...$exclude) use (&$archetypes): string {
-            foreach (self::ARCHETYPES as $candidate) {
-                if ($candidate !== 'equal-card-grid'
-                    && !in_array($candidate, $exclude, true)
-                    && $candidate !== ($archetypes[$i - 1] ?? null)
-                    && $candidate !== ($archetypes[$i + 1] ?? null)
-                ) {
-                    return $candidate;
+        $pick = function (int $i, string ...$exclude) use (&$archetypes, $allowOffsetGrid): string {
+            return self::pickArchetype($archetypes, $i, $allowOffsetGrid, ...$exclude);
+        };
+
+        if (!$allowOffsetGrid) {
+            foreach ($archetypes as $i => $archetype) {
+                if ($archetype === 'offset-grid') {
+                    $exclude = ['offset-grid'];
+                    if (!$front && $i === 0) {
+                        $exclude[] = 'full-bleed-cover';
+                    }
+                    $archetypes[$i] = self::pickLevelRow($archetypes, (int) $i, ...$exclude);
                 }
             }
-            return $archetypes[$i]; // unreachable: 6 non-grid archetypes vs 2 neighbors + 1 exclusion
-        };
+        }
 
         // Interior-opening pass: normalize() rejects an interior page whose
         // first section is a full-bleed cover, so demote it to a compact
@@ -2336,6 +2460,118 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             }
         }
         return $sections;
+    }
+
+    /**
+     * @param array<int,array<string,mixed>> $sections
+     * @param list<string> $warnings
+     * @return array<int,array<string,mixed>>
+     */
+    private static function restrictOffsetGrid(
+        array $sections,
+        bool $allowOffsetGrid,
+        bool $front,
+        array &$warnings,
+        string $pageSlug,
+    ): array {
+        if ($allowOffsetGrid) {
+            return $sections;
+        }
+        $archetypes = array_map(
+            fn (array $s) => trim((string) ($s['layout_archetype'] ?? '')),
+            $sections
+        );
+        foreach ($sections as $i => $section) {
+            if ($archetypes[$i] !== 'offset-grid') {
+                continue;
+            }
+            $exclude = ['offset-grid'];
+            if (!$front && $i === 0) {
+                $exclude[] = 'full-bleed-cover';
+            }
+            $replacement = self::pickLevelRow($archetypes, (int) $i, ...$exclude);
+            $archetypes[$i] = $replacement;
+            $sections[$i]['layout_archetype'] = $replacement;
+            $slug = trim((string) ($section['slug'] ?? '')) ?: "section-{$i}";
+            $warnings[] = self::valueLossWarning(
+                self::sectionPath($pageSlug, (int) $i) . '.layout_archetype',
+                'offset-grid',
+                $replacement,
+                "replaced offset-grid for section '{$slug}' because staggered rows are reserved for photography and gallery sites",
+            );
+        }
+        return $sections;
+    }
+
+    /**
+     * @param list<string> $archetypes
+     */
+    private static function pickLevelRow(array $archetypes, int $i, string ...$exclude): string
+    {
+        $grids = 0;
+        foreach ($archetypes as $j => $archetype) {
+            if ($archetype === 'equal-card-grid' && $j !== $i) {
+                $grids++;
+            }
+        }
+        foreach (self::LEVEL_ROW_ARCHETYPES as $candidate) {
+            if (in_array($candidate, $exclude, true)) {
+                continue;
+            }
+            if ($candidate === 'equal-card-grid' && $grids >= self::MAX_EQUAL_CARD_GRIDS) {
+                continue;
+            }
+            if ($candidate === ($archetypes[$i - 1] ?? null)) {
+                continue;
+            }
+            if ($candidate === ($archetypes[$i + 1] ?? null)) {
+                continue;
+            }
+            return $candidate;
+        }
+        return self::pickArchetype($archetypes, $i, false, 'full-bleed-cover', ...$exclude);
+    }
+
+    /**
+     * @param list<string> $archetypes
+     */
+    private static function pickArchetype(
+        array $archetypes,
+        int $i,
+        bool $allowOffsetGrid,
+        string ...$exclude,
+    ): string {
+        foreach (self::ARCHETYPES as $candidate) {
+            if ($candidate === 'equal-card-grid') {
+                continue;
+            }
+            if (!$allowOffsetGrid && $candidate === 'offset-grid') {
+                continue;
+            }
+            if (in_array($candidate, $exclude, true)) {
+                continue;
+            }
+            if ($candidate === ($archetypes[$i - 1] ?? null)) {
+                continue;
+            }
+            if ($candidate === ($archetypes[$i + 1] ?? null)) {
+                continue;
+            }
+            return $candidate;
+        }
+        return $archetypes[$i];
+    }
+
+    /**
+     * @param array<mixed> $siteSpec
+     */
+    private static function allowOffsetGridFor(Project $project, array $siteSpec): bool
+    {
+        $meta = $project->exists('meta.json') ? $project->readJson('meta.json') : [];
+        return PhotographySite::matches(
+            $siteSpec,
+            (string) ($meta['prompt'] ?? ''),
+        );
     }
 
     /**

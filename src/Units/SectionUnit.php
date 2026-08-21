@@ -18,15 +18,18 @@ namespace Automattic\SiteBuild\Units;
  * - neighbors: the preceding/following composition summary
  * - header_contract: the header-mode contract for hero-role sections (how the
  *   site header shares the first viewport with this section); '' otherwise
+ * - form_placeholders: true when the host owns a form backend and wants the
+ *   section to reserve a form's place with a JP_FORM placeholder block instead
+ *   of the default no-form-markup rule; absent/false keeps the default
  *
  * Static authoring rules come from the package's prompt templates; no Project
  * or project artifact is read or written here.
  */
 final class SectionUnit extends AbstractPageSectionUnit
 {
-    private const BUILD_LAYER_MARKER = '<!-- section-cache-layer:build -->';
-    private const PAGE_LAYER_MARKER = '<!-- section-cache-layer:page -->';
-    private const BRIEF_LAYER_MARKER = '<!-- section-cache-layer:brief -->';
+    private const BUILD_LAYER_MARKER = '<!-- cache-layer:build -->';
+    private const PAGE_LAYER_MARKER = '<!-- cache-layer:page -->';
+    private const BRIEF_LAYER_MARKER = '<!-- cache-layer:brief -->';
 
     /**
      * @param array{
@@ -43,7 +46,8 @@ final class SectionUnit extends AbstractPageSectionUnit
      *     layout_archetype:string,background:string,vertical_density:string,handoff:string
      *   },
      *   neighbors:string,
-     *   header_contract:string
+     *   header_contract:string,
+     *   form_placeholders?:bool
      * } $input
      */
     public function request(array $input): array
@@ -86,10 +90,22 @@ final class SectionUnit extends AbstractPageSectionUnit
             'composition'       => $composition,
             'header_contract'   => $this->inputString($input, 'header_contract'),
             'image_instructions' => $this->renderer->render('image-generation.md', []),
+            'form_instructions'  => $this->renderer->render(
+                ($input['form_placeholders'] ?? false) ? 'jetpack-form.md' : 'no-forms.md',
+                [],
+            ),
         ]);
 
-        [$buildLayer, $pageLayer, $brief] = self::cacheLayers($request['prompt']);
-        $request['cached_prefixes'] = [$buildLayer, $pageLayer];
+        // The site layer is byte-identical to the one the header, footer and
+        // hero open with, so one warm-up primes the context for every markup
+        // call in the batch instead of only the sections (BIGR-851).
+        [$siteLayer, $buildLayer, $pageLayer, $brief] = self::cacheLayers($request['prompt'], [
+            self::SITE_LAYER_MARKER,
+            self::BUILD_LAYER_MARKER,
+            self::PAGE_LAYER_MARKER,
+            self::BRIEF_LAYER_MARKER,
+        ]);
+        $request['cached_prefixes'] = [$siteLayer, $buildLayer, $pageLayer];
         $request['prompt'] = $brief;
         return $request;
     }
@@ -126,48 +142,4 @@ final class SectionUnit extends AbstractPageSectionUnit
         }
         return $style;
     }
-
-    /**
-     * Split the rendered section template at its frozen cache-layer markers.
-     * Cached build/page prefixes are returned with trailing newlines removed
-     * and exactly "\n\n" appended; the varying brief is newline-trimmed and
-     * unsuffixed. The explicit prefix separators are part of the wire contract,
-     * so adjacent Anthropic blocks and OpenAI-compatible text assemble equally.
-     *
-     * @return array{0:string,1:string,2:string} build layer, page layer, brief
-     */
-    private static function cacheLayers(string $rendered): array
-    {
-        foreach ([self::BUILD_LAYER_MARKER, self::PAGE_LAYER_MARKER, self::BRIEF_LAYER_MARKER] as $marker) {
-            if (substr_count($rendered, $marker) !== 1) {
-                throw new \RuntimeException("section prompt must contain exactly one {$marker} marker");
-            }
-        }
-        $buildPos = strpos($rendered, self::BUILD_LAYER_MARKER);
-        $pagePos = strpos($rendered, self::PAGE_LAYER_MARKER);
-        $briefPos = strpos($rendered, self::BRIEF_LAYER_MARKER);
-        if (!is_int($buildPos) || !is_int($pagePos) || !is_int($briefPos)
-            || !($buildPos < $pagePos && $pagePos < $briefPos)) {
-            throw new \RuntimeException('section prompt cache layer markers are out of order');
-        }
-
-        [$beforeBuild, $afterBuild] = explode(self::BUILD_LAYER_MARKER, $rendered, 2);
-        [$buildLayer, $afterPage] = explode(self::PAGE_LAYER_MARKER, $afterBuild, 2);
-        [$pageLayer, $brief] = explode(self::BRIEF_LAYER_MARKER, $afterPage, 2);
-
-        if (trim($beforeBuild, "\r\n") !== '') {
-            throw new \RuntimeException('section prompt has content before the build cache layer');
-        }
-
-        // Remove only newlines belonging to the marker separators. Preserve
-        // every other byte of each rendered layer, including indentation.
-        $buildLayer = rtrim(ltrim($buildLayer, "\r\n"), "\r\n");
-        $pageLayer = rtrim(ltrim($pageLayer, "\r\n"), "\r\n");
-        $brief = trim($brief, "\r\n");
-        if (in_array('', [$buildLayer, $pageLayer, $brief], true)) {
-            throw new \RuntimeException('section prompt cache layers must not be empty');
-        }
-        return [$buildLayer . "\n\n", $pageLayer . "\n\n", $brief];
-    }
-
 }

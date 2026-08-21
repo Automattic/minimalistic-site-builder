@@ -21,8 +21,8 @@ final class CssContrastCheck
      *     suggested: ?string
      * }>
      */
-    public static function check(string $css, string $markup): array
+    public static function check(string $css, string $markup, float $normalText = ContrastMath::NORMAL_TEXT): array
     {
-        return CssContrastCheckEngine::check($css, $markup);
+        return CssContrastCheckEngine::check($css, $markup, $normalText);
     }
 }

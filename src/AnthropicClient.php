@@ -288,24 +288,9 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting
     public static function bodyFor(array $req, string $defaultModel, int $defaultMaxTokens): array
     {
         $model = (string) ($req['model'] ?? $defaultModel);
-        $cachedPrefixes = [];
-        if (array_key_exists('cached_prefixes', $req)) {
-            $providedPrefixes = $req['cached_prefixes'];
-            if (!is_array($providedPrefixes) || !array_is_list($providedPrefixes)) {
-                throw new \RuntimeException('cached_prefixes must be a list of strings');
-            }
-            foreach ($providedPrefixes as $index => $prefix) {
-                if (!is_string($prefix)) {
-                    throw new \RuntimeException("cached_prefixes[{$index}] must be a string");
-                }
-                if (trim($prefix) !== '') {
-                    $cachedPrefixes[] = $prefix;
-                }
-            }
-        }
-        if (count($cachedPrefixes) > 3) {
-            throw new \RuntimeException('Anthropic requests support at most three cached_prefixes');
-        }
+        $cachedPrefixes = array_key_exists('cached_prefixes', $req)
+            ? CachedPrefixes::normalize($req['cached_prefixes'], 'Anthropic requests')
+            : [];
         $content = (string) $req['prompt'];
         if ($cachedPrefixes !== []) {
             $content = [];

@@ -28,17 +28,18 @@ final class FooterUnit extends AbstractMarkupUnit
     {
         $archetype = $this->inputString($input, 'composition_archetype');
         FooterComposition::assertKnown($archetype);
+        $surface = $this->surface($input, $archetype);
         $pageCount = $this->pageCount($input);
         $imageInstructions = FooterComposition::usesGeneratedImage($archetype)
             ? $this->renderer->render('image-generation.md', [])
             : '';
 
-        return $this->renderedRequest('footer.md', $this->commonVars($input) + [
+        return $this->siteLayeredRequest('footer.md', $this->commonVars($input) + [
             'site_pages' => $this->inputString($input, 'site_pages'),
             'nav_rule' => FooterComposition::navigationRule($pageCount),
             'composition' => $this->renderer->render('footer-composition.md', [
                 'composition_assignment' => FooterComposition::assignment($archetype),
-                'footer_surface' => FooterComposition::surface($archetype),
+                'footer_surface' => $surface,
                 'final_section_brief'    => $this->inputString($input, 'final_section_brief'),
                 'composition_recipe' => $this->renderer->render(
                     FooterComposition::recipeTemplate($archetype),
@@ -74,7 +75,7 @@ final class FooterUnit extends AbstractMarkupUnit
         $before = $markup;
         $markup = FooterMarkup::withRootBackgroundColor(
             $markup,
-            FooterComposition::surface($archetype),
+            $this->surface($input, $archetype),
             $warnings
         );
         if ($markup !== $before) {
@@ -86,6 +87,24 @@ final class FooterUnit extends AbstractMarkupUnit
             $repairs[] = self::repair('root-layout-constrained', $key);
         }
         return new MarkupResult($markup, $repairs, $warnings);
+    }
+
+    /**
+     * The surface the caller resolved against every page's closing section, or
+     * the archetype's own preference when the adapter did not resolve one.
+     *
+     * @param array<string,mixed> $input
+     */
+    private function surface(array $input, string $archetype): string
+    {
+        $surface = $input['surface'] ?? null;
+        if ($surface === null || $surface === '') {
+            return FooterComposition::surface($archetype);
+        }
+        if (!is_string($surface)) {
+            throw new \InvalidArgumentException("unit input 'surface' must be a string");
+        }
+        return $surface;
     }
 
     private function pageCount(array $input): int

@@ -39,7 +39,7 @@ Return one `<main>` fragment and nothing else. Return only the fragment: no prea
 
 Use only headings, paragraphs, lists, block quotes, code, tables, images, buttons, links, and semantic or presentational wrappers such as `main`, `section`, `nav`, `article`, `aside`, `div`, and `span`.
 
-There are no forms or form controls, no SVG, no custom elements, and no JavaScript. Do not emit `<form>`, `<input>`, `<textarea>`, `<select>`, `<button>` with scripted behavior, `<svg>`, `<script>`, inline event handlers, or `javascript:` URLs. Express layout, ornament, and interaction states with HTML and CSS only.
+There are no forms or form controls, no SVG, no custom elements, and no JavaScript. Do not emit `<form>`, `<input>`, `<textarea>`, `<select>`, `<button>` with scripted behavior, `<svg>`, `<script>`, inline event handlers, or `javascript:` URLs. Express layout, ornament, and interaction states with HTML and CSS only. A shop is a catalog storefront: no cart, checkout, quantity input, add-to-cart control, price-per-unit purchase flow, or WooCommerce block — product cards that invite a contact enquiry are the whole store.
 
 Use `<button>` only for a real non-scripted action. Prefer an `<a>` link styled as a button for navigation or a CTA.
 
@@ -47,6 +47,7 @@ Every image needs meaningful `alt` text written as a usable image generation pro
 
 ## Responsive CSS contract
 
+- Do not stagger a row of siblings (different top margins, translateY offsets, or nth-child even/odd vertical offsets) unless SITE SPEC is clearly a photography or gallery site (photographer, photography, photojournalism, or a gallery). Keep card and image rows level for every other site.
 - Write mobile-first responsive CSS, then add min-width media queries only where composition needs them.
 - Use fluid type with `clamp()` for display and section-heading scales while keeping body text readable.
 - Use flexible grid and flex layouts, bounded content widths, responsive spacing, and images that cannot overflow.

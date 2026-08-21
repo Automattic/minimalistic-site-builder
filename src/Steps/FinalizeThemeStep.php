@@ -5,6 +5,9 @@ namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\HeaderBehavior;
 use Automattic\SiteBuild\Narrator;
+use Automattic\SiteBuild\Device;
+use Automattic\SiteBuild\OverlayKit;
+use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\PageScope;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
@@ -45,6 +48,9 @@ use Automattic\SiteBuild\Warnings;
  *           rounds contained media surfaces theme.json cannot reach — the
  *           media half of core/media-text and the core/cover canvas — while
  *           its selectors keep alignfull media square; `sharp` ships no kit.
+ *         - for a committed page surface other than `none`, writes and
+ *           enqueues the build-owned overlay (assets/surface/surface.css) that
+ *           claims `body::before` as a fixed grain sheet; `none` prunes it.
  *         - require_once's the generated fonts.php (written by the fonts-php
  *           step) when present, guarded so a fontless theme stays valid.
  */
@@ -69,6 +75,7 @@ final class FinalizeThemeStep implements Step
                 'designDirection.json',
                 'headerBehavior.json',
                 'theme/theme.json',
+                'theme/style.css',
                 'theme/parts/header.html',
                 'theme/assets/motion/*',
                 'theme/assets/header/*',
@@ -78,7 +85,12 @@ final class FinalizeThemeStep implements Step
                 'theme/parts/header.html',
                 'theme/assets/motion/*',
                 'theme/assets/header/*',
-                'theme/assets/shape/*',
+                // Every overlay kit this theme can ship, so the declaration
+                // moves with the catalog instead of being restated per kit.
+                ...array_map(
+                    static fn (OverlayKit $kit): string => $kit->declaredWrites(),
+                    self::overlayKits(),
+                ),
                 'warnings.json',
             ],
             concurrent: false,
@@ -87,6 +99,15 @@ final class FinalizeThemeStep implements Step
 
     public function run(Project $project): void
     {
+        // Every read that can fail happens before the first write. A corrupt
+        // theme.json is fatal (AGENTS.md:53 puts a corrupt required artifact in
+        // the fatal list), and discovering that halfway through would leave the
+        // theme half-written — a pruned kit with no functions.php naming it.
+        $shape = DesignDirectionStep::shapeFor($project);
+        $surface = DesignDirectionStep::surfaceFor($project);
+        $palette = self::paletteColors($project);
+        $surfaceCss = Surface::kitCss($surface, $palette['base'], $palette['contrast']);
+
         $profile = DesignDirectionStep::motionProfileFor($project);
         $motion = $profile !== 'none' && $project->exists('theme/assets/motion/motion.css')
             ? $profile
@@ -105,14 +126,29 @@ final class FinalizeThemeStep implements Step
         }
         self::pruneMotionKit($project, $motion);
         self::pruneHeaderKit($project, $header);
-        $shape = DesignDirectionStep::shapeFor($project);
-        $shapeKit = self::writeShapeKit($project, $shape);
+        $device = DesignDirectionStep::deviceFor($project);
+        // Per kit, not `$overlays !== []`: the catalog-wide predicate would
+        // report shape on a second kit's behalf as soon as one joins the list.
+        $shapeShipped = self::writeOverlayKit($project, self::shapeKit(), ShapeMarkup::kitCss($shape), $headerWarnings);
+        $surfaceShipped = self::writeOverlayKit($project, self::surfaceKit(), $surfaceCss, $headerWarnings);
+        $deviceShipped = self::writeOverlayKit($project, self::deviceKit(), Device::kitCss($device), $headerWarnings);
+        $overlays = [];
+        if ($shapeShipped) {
+            $overlays[] = self::shapeKit();
+        }
+        if ($surfaceShipped) {
+            $overlays[] = self::surfaceKit();
+            array_push($headerWarnings, ...self::claimedPseudoElementWarnings($project, $surface));
+        }
+        if ($deviceShipped) {
+            $overlays[] = self::deviceKit();
+        }
         if ($headerWarnings !== []) {
             $project->addWarnings($this->id(), $headerWarnings);
         }
         $project->writeText(
             'theme/functions.php',
-            self::functionsPhp($project->slug(), $motion, $header, $shapeKit),
+            self::functionsPhp($project->slug(), $motion, $header, $overlays),
         );
         Narrator::write($motion === null
             ? "  motion: none (kit not shipped)\n"
@@ -120,31 +156,129 @@ final class FinalizeThemeStep implements Step
         Narrator::write($header
             ? "  header: '{$headerBehavior}' state kit enqueued\n"
             : "  header: static (kit not shipped)\n");
-        Narrator::write($shapeKit
+        Narrator::write($surfaceShipped
+            ? "  surface: '{$surface}' overlay enqueued\n"
+            : "  surface: {$surface} (kit not shipped)\n");
+        Narrator::write($deviceShipped
+            ? "  device: '{$device}' utility enqueued\n"
+            : "  device: {$device} (kit not shipped)\n");
+        Narrator::write($shapeShipped
             ? "  shape: '{$shape}' corner kit enqueued\n"
             : '  shape: ' . ($shape ?? 'none committed') . " (kit not shipped)\n");
     }
 
     /**
-     * Write the build-owned corner-language stylesheet for a rounded shape
-     * commitment: contained media surfaces theme.json cannot reach (the media
-     * half of core/media-text, the core/cover canvas). `sharp` and an absent
-     * commitment ship no kit — those surfaces are square by default — and any
-     * kit left by an earlier finalize run is pruned so the shape cannot go
-     * stale.
+     * The surface overlay claims `body::before`, so if the generated
+     * stylesheet was already using it, something lost its layer. Silence there
+     * would mean a design's own decoration vanishing with nothing said.
+     *
+     * @return list<string>
      */
-    private static function writeShapeKit(Project $project, ?string $shape): bool
+    private static function claimedPseudoElementWarnings(Project $project, string $surface): array
     {
-        $css = ShapeMarkup::kitCss($shape);
+        if (!$project->exists('theme/style.css')) {
+            return [];
+        }
+        $css = $project->readText('theme/style.css');
+        if (preg_match('/\bbody\b(?:\s|:where\([^)]*\))*::?before\b/i', $css) !== 1) {
+            return [];
+        }
+        return ["file='theme/style.css'; path=\"body::before\"; authored=generated design rule;"
+            . " delivered=overridden; disposition the '{$surface}' surface overlay claims html body::before"
+            . ' and resets it, so a generated rule on the same pseudo-element no longer renders'];
+    }
+
+    /**
+     * Page-background and body-text hexes from the delivered theme.
+     *
+     * @return array{base:?string, contrast:?string}
+     */
+    private static function paletteColors(Project $project): array
+    {
+        $out = ['base' => null, 'contrast' => null];
+        if (!$project->exists('theme/theme.json')) {
+            return $out;
+        }
+        foreach ($project->readJson('theme/theme.json')['settings']['color']['palette'] ?? [] as $entry) {
+            if (!is_array($entry) || !is_string($entry['color'] ?? null)) {
+                continue;
+            }
+            $slug = $entry['slug'] ?? '';
+            if ($slug === 'base' || $slug === 'contrast') {
+                $out[$slug] = $entry['color'];
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Every overlay kit this step knows how to ship, in load order. Describing
+     * a kit as data rather than spelling it out at each of its four use sites
+     * (declaration, write, enqueue, editor mirror) is what keeps the next CSS
+     * commitment to one entry instead of another copy of this wiring.
+     *
+     * @return list<OverlayKit>
+     */
+    public static function overlayKits(): array
+    {
+        return [self::shapeKit(), self::surfaceKit(), self::deviceKit()];
+    }
+
+    public static function surfaceKit(): OverlayKit
+    {
+        return new OverlayKit(
+            'surface',
+            "// Committed page surface: a fixed overlay, never on a scrolling\n"
+                . '// container. Loads after generated style.css.',
+        );
+    }
+
+    public static function deviceKit(): OverlayKit
+    {
+        return new OverlayKit(
+            'device',
+            '// Committed one-band CSS device. Loads after generated style.css.',
+        );
+    }
+
+    /**
+     * The corner-language kit: contained media surfaces theme.json cannot reach
+     * (the media half of core/media-text, the core/cover canvas). `sharp` and an
+     * absent commitment resolve to no CSS, so the kit is pruned instead.
+     */
+    public static function shapeKit(): OverlayKit
+    {
+        return new OverlayKit(
+            'shape',
+            "// Committed corner language for contained media surfaces theme.json\n"
+                . "// cannot reach (media-text halves, contained covers). Loads after\n"
+                . '// generated style.css so the commitment outranks generated utilities.',
+        );
+    }
+
+    /**
+     * Write a build-owned overlay stylesheet, or prune it when the commitment
+     * resolved to nothing.
+     *
+     * A leftover file that cannot be deleted is omitted from the loader and
+     * warned rather than aborting the build: the previous functions.php would
+     * otherwise keep enqueueing it after we threw.
+     *
+     * @param list<string> $warnings
+     */
+    private static function writeOverlayKit(Project $project, OverlayKit $kit, ?string $css, array &$warnings): bool
+    {
         if ($css !== null) {
-            $project->writeText('theme/assets/shape/shape.css', $css);
+            $project->writeText($kit->projectRelPath(), $css);
             return true;
         }
-        $file = $project->themePath('assets/shape/shape.css');
-        if (is_file($file)) {
-            unlink($file);
+        $file = $project->themePath($kit->themeRelPath());
+        if (is_file($file) && !@unlink($file) && is_file($file)) {
+            $warnings[] = "file='{$kit->projectRelPath()}'; path=\"stylesheet\"; authored=stale overlay;"
+                . ' delivered=removed from loader; disposition leftover bytes could not be deleted, enqueue omitted';
+            return false;
         }
-        @rmdir($project->themePath('assets/shape'));
+        @rmdir($project->themePath("assets/{$kit->folder}"));
         @rmdir($project->themePath('assets'));
         return false;
     }
@@ -290,11 +424,25 @@ final class FinalizeThemeStep implements Step
         @rmdir($project->themePath('assets'));
     }
 
+    /** Put every line of a block at the enqueue body's indentation. */
+    private static function indentBlock(string $block): string
+    {
+        return implode("\n", array_map(
+            static fn (string $line): string => $line === '' ? '' : '    ' . $line,
+            explode("\n", $block),
+        ));
+    }
+
+    /**
+     * @param list<OverlayKit> $overlays the build-owned stylesheets this theme
+     *        ships, in load order. Each one enqueues after style.css and is
+     *        mirrored into the editor; an empty list is a theme with none.
+     */
     private static function functionsPhp(
         string $slug,
         ?string $motion,
         bool $header,
-        bool $shapeKit,
+        array $overlays = [],
     ): string {
         $slug = ProjectStore::slugify($slug);
         $scopePrefix = PageScope::CLASS_PREFIX;
@@ -315,18 +463,24 @@ final class FinalizeThemeStep implements Step
             PHP;
         }
 
-        $shapeEnqueues = '';
-        $editorStyles = "add_editor_style('style.css');";
-        if ($shapeKit) {
-            $editorStyles = "add_editor_style(array('style.css', 'assets/shape/shape.css'));";
-            $shapeEnqueues = <<<PHP
-
-                // Committed corner language for contained media surfaces theme.json
-                // cannot reach (media-text halves, contained covers). Loads after
-                // generated style.css so the commitment outranks generated utilities.
-                wp_enqueue_style('{$slug}-shape', get_theme_file_uri('assets/shape/shape.css'), array('{$slug}-style'), \$ver);
-            PHP;
+        // Built line by line rather than through a heredoc: the comment is
+        // per-kit data, and a heredoc would de-indent its literal lines while
+        // leaving the interpolated ones alone.
+        $overlayEnqueues = '';
+        $editorStyleList = ['style.css'];
+        foreach ($overlays as $overlay) {
+            $editorStyleList[] = $overlay->themeRelPath();
+            $overlayEnqueues .= "\n" . self::indentBlock($overlay->comment)
+                . "\n" . self::indentBlock(sprintf(
+                    "wp_enqueue_style('%s', get_theme_file_uri('%s'), array('%s-style'), \$ver);",
+                    $overlay->handle($slug),
+                    $overlay->themeRelPath(),
+                    $slug,
+                ));
         }
+        $editorStyles = count($editorStyleList) === 1
+            ? "add_editor_style('style.css');"
+            : "add_editor_style(array('" . implode("', '", $editorStyleList) . "'));";
 
         $headerEnqueues = '';
         if ($header) {
@@ -351,7 +505,7 @@ final class FinalizeThemeStep implements Step
                 \$ver = wp_get_theme()->get('Version');{$motionEnqueues}
                 // Block themes do not load style.css automatically — without this
                 // enqueue its utility CSS (card layouts, layout utilities) never applies.
-                wp_enqueue_style('{$slug}-style', get_stylesheet_uri(), {$styleDeps}, \$ver);{$shapeEnqueues}{$headerEnqueues}
+                wp_enqueue_style('{$slug}-style', get_stylesheet_uri(), {$styleDeps}, \$ver);{$overlayEnqueues}{$headerEnqueues}
             });
 
             // Mirror the theme stylesheets into the editor so previews match the front end.

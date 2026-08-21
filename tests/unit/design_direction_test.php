@@ -116,6 +116,10 @@ test('design-direction expands a picked seed into structured designDirection.jso
     foreach (['palette', 'type', 'image_grade', 'card_style', 'hero_blueprint'] as $field) {
         assert_contains($field, $llm->calls[1]['prompt']);
     }
+    assert_contains(
+        '"motion_note": ["Zero or more motion-kit class names the profile ships, chosen per the motion_note field above."],',
+        $llm->calls[1]['prompt'],
+    );
     $assigned = $written['hero_blueprint']['recipe'];
     assert_contains($assigned, $llm->calls[1]['prompt']);
     foreach (HeroComposition::RECIPES as $other) {
@@ -123,6 +127,63 @@ test('design-direction expands a picked seed into structured designDirection.jso
             assert_true(!str_contains($llm->calls[1]['prompt'], $other), "{$other} recipe does not leak");
         }
     }
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('design-direction persists an unmappable motion-note warning and reaches a fixed point', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $llm->queueJson(['seeds' => designdir_seeds()]);
+    $authored = designdir_direction();
+    $authored['motion'] = 'calm';
+    $authored['motion_note'] = 'a cinematic wipe nobody ships';
+    $llm->queueJson(['direction' => $authored]);
+
+    (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $written = $project->readJson('designDirection.json');
+    assert_eq([], $written['motion_note']);
+    foreach (['title', 'palette', 'image_grade', 'card_style'] as $sibling) {
+        assert_eq($authored[$sibling], $written[$sibling], "{$sibling} survives motion-note removal");
+    }
+    foreach (['heading', 'body'] as $face) {
+        assert_eq($authored['type'][$face], $written['type'][$face], "type.{$face} survives motion-note removal");
+    }
+    assert_eq('', $written['type']['accent']['family'], 'no accent face is invented');
+
+    $motionWarning = '';
+    foreach ($project->readJson('warnings.json')['design-direction'] ?? [] as $warning) {
+        if (str_contains($warning, 'field motion_note')) {
+            $motionWarning = $warning;
+            break;
+        }
+    }
+    foreach ([
+        'designDirection.json',
+        'field motion_note',
+        'a cinematic wipe nobody ships',
+        'delivered=[]',
+        'named no motion-kit class the calm profile ships',
+    ] as $context) {
+        assert_contains($context, $motionWarning);
+    }
+
+    $repairs = [];
+    $warnings = [];
+    $normalizedAgain = DesignDirectionStep::normalize(
+        $written,
+        $written['hero_blueprint']['recipe'],
+        $written['concept_seed'],
+        $repairs,
+        $warnings,
+    );
+    assert_eq(
+        json_encode($written, JSON_THROW_ON_ERROR),
+        json_encode($normalizedAgain, JSON_THROW_ON_ERROR),
+        'serialized delivered direction is a fixed point',
+    );
+    assert_eq([], $repairs);
+    assert_eq([], $warnings);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -1063,13 +1124,75 @@ test('normalize commits a motion profile: valid values pass, anything else defau
     assert_eq('calm', DesignDirectionStep::normalize(['description' => 'x'], 'cinematic-safe-zone')['motion'], 'missing → default');
     assert_eq('calm', DesignDirectionStep::normalize(['description' => 'x', 'motion' => 'bouncy'], 'cinematic-safe-zone')['motion'], 'unknown → default');
     assert_eq('calm', DesignDirectionStep::normalize(['description' => 'x', 'motion' => ['calm']], 'cinematic-safe-zone')['motion'], 'non-string → default');
-    assert_eq('a note', DesignDirectionStep::normalize(['description' => 'x', 'motion_note' => ' a note '], 'cinematic-safe-zone')['motion_note']);
+    $mapped = DesignDirectionStep::normalize([
+        'description' => 'x',
+        'motion' => 'calm',
+        'motion_note' => ['hover-lift'],
+    ], 'cinematic-safe-zone');
+    assert_eq(['hover-lift'], $mapped['motion_note'], 'a named kit class survives as the persisted list');
+    $roundTripRepairs = [];
+    $roundTripWarnings = [];
+    $roundTrip = DesignDirectionStep::normalize(
+        $mapped,
+        'cinematic-safe-zone',
+        $mapped['concept_seed'],
+        $roundTripRepairs,
+        $roundTripWarnings,
+    );
+    assert_eq(
+        json_encode($mapped, JSON_THROW_ON_ERROR),
+        json_encode($roundTrip, JSON_THROW_ON_ERROR),
+        'a mapped note is a warning-free fixed point',
+    );
+    assert_eq([], $roundTripRepairs);
+    assert_eq([], $roundTripWarnings);
+    assert_eq(
+        [],
+        DesignDirectionStep::normalize(['description' => 'x', 'motion_note' => ' a note '], 'cinematic-safe-zone')['motion_note'],
+        'prose names no class',
+    );
+
+    $repairs = [];
+    $warnings = [];
+    $unusable = DesignDirectionStep::normalize([
+        'description' => 'x',
+        'motion' => 'calm',
+        'motion_note' => 42,
+    ], 'cinematic-safe-zone', '', $repairs, $warnings);
+    assert_eq([], $unusable['motion_note']);
+    assert_eq([], $repairs, 'type loss is a degradation, not a successful repair');
+    $motionWarnings = array_values(array_filter(
+        $warnings,
+        static fn (string $warning): bool => str_contains($warning, 'path="motion_note"'),
+    ));
+    assert_eq(1, count($motionWarnings));
+    foreach ([
+        "file='designDirection.json'",
+        'path="motion_note"',
+        'authored=42',
+        'delivered=[]',
+        'disposition=motion note was neither a class list nor a string and was removed',
+    ] as $context) {
+        assert_contains($context, $motionWarnings[0]);
+    }
+
+    // A list carrying a class the profile cannot ship keeps the rest and says
+    // what it dropped, rather than discarding the whole commitment.
+    $partialWarnings = [];
+    $partialRepairs = [];
+    $partial = DesignDirectionStep::normalize([
+        'description' => 'x',
+        'motion' => 'minimal',
+        'motion_note' => ['hover-lift', 'ken-burns'],
+    ], 'cinematic-safe-zone', '', $partialRepairs, $partialWarnings);
+    assert_eq(['hover-lift'], $partial['motion_note']);
+    assert_contains('ken-burns', implode(' ', $partialWarnings));
 });
 
 test('format renders the motion commitment with its executable meaning', function () {
-    $calm = DesignDirectionStep::format(['description' => 'x', 'motion' => 'calm', 'motion_note' => 'let the hero breathe']);
+    $calm = DesignDirectionStep::format(['description' => 'x', 'motion' => 'calm', 'motion_note' => ['ken-burns']]);
     assert_contains('**Motion**: calm', $calm);
-    assert_contains('let the hero breathe', $calm);
+    assert_contains('Use kit classes: ken-burns.', $calm);
 
     $minimal = DesignDirectionStep::format(['description' => 'x', 'motion' => 'minimal']);
     assert_contains('hover-lift', $minimal, 'minimal names the only classes allowed');
@@ -1324,6 +1447,67 @@ test('shapeFor returns only an explicit valid commitment', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('normalize commits a catalog surface and falls unknown textures back to none', function () {
+    $direction = DesignDirectionStep::normalize([
+        'description' => 'Paper ground.',
+        'surface' => 'Paper',
+    ], 'cinematic-safe-zone');
+    assert_eq('paper', $direction['surface']);
+    assert_contains('**Surface**: paper', DesignDirectionStep::format($direction));
+
+    $warnings = [];
+    $none = DesignDirectionStep::normalizeSurface('kraft', $warnings);
+    assert_eq('none', $none);
+    assert_contains('unsupported texture', implode(' ', $warnings));
+    assert_eq('none', DesignDirectionStep::normalizeSurface(null));
+});
+
+test('normalize commits a catalog device', function () {
+    $direction = DesignDirectionStep::normalize([
+        'description' => 'A stamp on the menu.',
+        'device' => 'stamp',
+    ], 'cinematic-safe-zone');
+    assert_eq('stamp', $direction['device']);
+    assert_contains('device--stamp', DesignDirectionStep::format($direction));
+
+    $warnings = [];
+    assert_eq('none', DesignDirectionStep::normalizeDevice('twine', $warnings));
+    assert_contains('unbuildable motif', implode(' ', $warnings));
+});
+
+test('the direction description is never edited to remove motif words', function () {
+    // Deleting motif words mid-sentence left broken English in the text every
+    // downstream prompt reads through format(): "Kraft labels with twine and
+    // tape corners on the loaf" came out as "Kraft labels with and on the
+    // loaf". prompts/design-direction.md already says twine and tape are not
+    // devices, so it owns the rule and the description ships as authored.
+    $authored = 'Kraft labels with twine and tape corners on the loaf.';
+    $repairs = [];
+    $warnings = [];
+    $direction = DesignDirectionStep::normalize([
+        'description' => $authored,
+        'device' => 'none',
+    ], 'cinematic-safe-zone', '', $repairs, $warnings);
+
+    assert_eq($authored, $direction['description'], 'the sentence stays readable');
+    assert_true(
+        !str_contains(implode(' ', $warnings), 'unbuildable motif phrases removed'),
+        'no removal is claimed',
+    );
+});
+
+test('a description naming the accent font is left alone', function () {
+    // The removal list carried "rotated caveat", and Caveat is a real font a
+    // direction can commit to (#290). A direction that used it in the
+    // narrative had the phrase deleted and was warned it was unbuildable.
+    $authored = 'Flavor labels in a rotated Caveat, hand-written on kraft.';
+    $direction = DesignDirectionStep::normalize([
+        'description' => $authored,
+        'device' => 'none',
+    ], 'cinematic-safe-zone');
+    assert_eq($authored, $direction['description']);
+});
+
 test('directionFor returns nothing when no direction was committed', function () {
     $project = new Project(sys_get_temp_dir() . '/design-direction-absent-' . uniqid());
     try {
@@ -1331,4 +1515,41 @@ test('directionFor returns nothing when no direction was committed', function ()
     } finally {
         exec('rm -rf ' . escapeshellarg($project->root));
     }
+});
+
+test('normalize commits optional accent type and leaves an empty accent valid', function () {
+    $prompt = file_get_contents(repo_path('prompts/design-direction.md')) ?: '';
+    assert_eq(1, preg_match(
+        '/"accent":\s*\{\s*"family":\s*"",\s*"weights":\s*\[\],\s*'
+            . '"italic":\s*false,\s*"axes":\s*\{\},\s*"character":\s*""\s*\}/',
+        $prompt,
+    ), 'the empty-accent prompt example is warning-free');
+
+    $withAccent = DesignDirectionStep::normalize([
+        'description' => 'Caveat on flavor labels.',
+        'type' => [
+            'heading' => ['family' => 'Oswald', 'weights' => [700], 'italic' => false, 'axes' => [], 'character' => ''],
+            'body' => ['family' => 'Source Sans 3', 'weights' => [400], 'italic' => false, 'axes' => [], 'character' => ''],
+            'accent' => ['family' => 'Caveat', 'weights' => [400, 700], 'italic' => false, 'axes' => [], 'character' => 'hand labels'],
+        ],
+    ], 'cinematic-safe-zone');
+
+    assert_eq('Caveat', $withAccent['type']['accent']['family']);
+    assert_eq([400, 700], $withAccent['type']['accent']['weights']);
+    assert_contains('accent — Caveat', DesignDirectionStep::format($withAccent));
+
+    $repairs = [];
+    $warnings = [];
+    $empty = DesignDirectionStep::normalize([
+        'description' => 'Two faces only.',
+        'type' => [
+            'heading' => ['family' => 'Oswald', 'weights' => [700], 'italic' => false, 'axes' => [], 'character' => ''],
+            'body' => ['family' => 'Source Sans 3', 'weights' => [400], 'italic' => false, 'axes' => [], 'character' => ''],
+            'accent' => ['family' => '', 'weights' => [], 'italic' => false, 'axes' => [], 'character' => ''],
+        ],
+        'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
+    ], 'cinematic-safe-zone', '', $repairs, $warnings);
+    assert_eq('', $empty['type']['accent']['family']);
+    assert_true(!str_contains(DesignDirectionStep::format($empty), 'accent —'));
+    assert_eq([], $warnings, 'valid empty accent emits no durable warning');
 });
