@@ -378,6 +378,32 @@ test('scaffold-theme copies the trusted adaptive-header kit verbatim', function 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('scaffold-theme unbullets a page-list rendered outside a navigation', function () {
+    // Core ships `.wp-block-page-list { box-sizing: border-box }` and nothing
+    // else — its flex/list-style rules are all scoped under
+    // `.wp-block-navigation`. Footers use the block bare (4 of 7 demo builds),
+    // so the UA stylesheet's discs and 40px indent ship to the visitor.
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+
+    (new ScaffoldThemeStep())->run($project);
+    $css = $project->readText('theme/style.css');
+
+    // Pull the standalone rule specifically: the pre-existing
+    // `.is-menu-open … .wp-block-page-list` rule must not be able to satisfy
+    // this assertion, or the reset could be deleted without a failure.
+    $matched = preg_match(
+        '~(?<!\S)\.wp-site-blocks\s+\.wp-block-page-list\s*\{(?<body>[^}]*)\}~',
+        $css,
+        $rule
+    );
+    assert_eq(1, $matched, 'a standalone .wp-block-page-list reset exists');
+    assert_contains('list-style: none', $rule['body']);
+    assert_contains('padding-inline-start: 0', $rule['body']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('scaffold-theme has stable id and label', function () {
     $s = new ScaffoldThemeStep();
     assert_eq('scaffold-theme', $s->id());

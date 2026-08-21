@@ -168,6 +168,15 @@ final class GenerateImagesStep implements Step
                 count($pending)
             ));
 
+            // The grade pass rewrites the subject we deliver, so it owes a
+            // durable row: AGENTS.md asks that a removal we could not preserve
+            // is recorded in warnings.json, and a log line alone is not enough
+            // once delivered output changed.
+            $gradeNotes = self::gradeSubjectWarnings($pending, $imageGrade);
+            if ($gradeNotes !== []) {
+                $project->addWarnings($this->id(), $gradeNotes);
+            }
+
             // Map original images.json indices to generation specs (order kept).
             $indices = array_keys($pending);
             $batchSpecs = array_map(
@@ -378,6 +387,66 @@ final class GenerateImagesStep implements Step
     }
 
     /**
+     * One warnings.json row per subject the grade pass touched: the clauses it
+     * dropped, and the clauses that carried grade wording it could not remove
+     * without rewriting the scene. Both matter — the first changed what we
+     * delivered, the second means the subject still contradicts the grade.
+     *
+     * @param array<int,array<string,mixed>> $pending
+     * @return list<string>
+     */
+    private static function gradeSubjectWarnings(array $pending, string $imageGrade): array
+    {
+        $rows = [];
+        foreach ($pending as $spec) {
+            $rows = array_merge($rows, self::gradeSubjectWarningsFor(
+                (string) ($spec['filename'] ?? ''),
+                (string) ($spec['subject'] ?? ''),
+                $imageGrade,
+            ));
+        }
+        return $rows;
+    }
+
+    /**
+     * The rows one subject owes. Split out from the batch above because the
+     * repair pass rewrites a subject after that batch has been reported, and
+     * a rewritten subject the grade pass edits owes the same receipt.
+     *
+     * The clauses are reported, not the whole subject: Warnings::value caps a
+     * value at 160 characters and a subject runs several hundred, so an
+     * authored/delivered pair rendered as the same truncated head twice and
+     * showed nothing. AGENTS.md takes `removed` in place of the delivered
+     * value for exactly this reason.
+     *
+     * @return list<string>
+     */
+    private static function gradeSubjectWarningsFor(string $filename, string $subject, string $imageGrade): array
+    {
+        $authored = trim($subject);
+        // Transparent assets keep their subject: the isolation clause owns
+        // the backdrop and no grade is appended.
+        if (trim($imageGrade) === '' || $authored === ''
+            || GeminiImage::mimeForFilename($filename) === 'image/png') {
+            return [];
+        }
+        $rows = [];
+        $result = ImagePromptComposer::stripCompetingGradeTokens($authored, $imageGrade);
+        if ($result['removed'] !== []) {
+            $rows[] = "images.json '{$filename}': authored subject clause(s) "
+                . Warnings::value(implode('; ', $result['removed']))
+                . '; delivered removed; disposition photographic grade competing with the'
+                . ' site-wide grade, per prompts/image-generation.md:63';
+        }
+        foreach ($result['kept'] as $clause) {
+            $rows[] = "images.json '{$filename}': subject clause " . Warnings::value($clause)
+                . '; delivered unchanged; disposition names photographic grade but also names the'
+                . ' scene, and no edit removes the grade wording without changing what is rendered';
+        }
+        return $rows;
+    }
+
+    /**
      * The full prompt + every parameter that shaped one request, in the shape
      * ImageLogger::log() records — logged whether the request succeeds or
      * fails. $subject overrides the row's subject for a repaired request, so
@@ -399,7 +468,30 @@ final class GenerateImagesStep implements Step
             'page_context'      => (string) ($spec['pageContext'] ?? ''),
             'style'             => (string) ($spec['style'] ?? ''),
             'image_grade'       => $imageGrade,
-        ];
+        ] + self::deliveredSubjectLog($spec, $imageGrade, $subject);
+    }
+
+    /**
+     * The subject actually sent, but only when the grade pass changed it.
+     * Without this the log shows the authored SUBJECT beside a PROMPT built
+     * from a different one, with nothing saying they differ — which is what
+     * made an unintended edit hard to notice in a build log.
+     *
+     * @param array<string,mixed> $spec
+     * @return array<string,string>
+     */
+    private static function deliveredSubjectLog(array $spec, string $imageGrade, ?string $subject): array
+    {
+        $authored = $subject ?? (string) ($spec['subject'] ?? '');
+        $filename = (string) ($spec['filename'] ?? '');
+        if (trim($imageGrade) === '' || trim($authored) === '') {
+            return [];
+        }
+        if (GeminiImage::mimeForFilename($filename) === 'image/png') {
+            return [];
+        }
+        $delivered = ImagePromptComposer::stripCompetingGradeTokens($authored, $imageGrade)['subject'];
+        return $delivered === trim($authored) ? [] : ['subject_delivered' => $delivered];
     }
 
     /**
@@ -552,6 +644,21 @@ final class GenerateImagesStep implements Step
         }
         if ($regenSpecs === []) {
             return;
+        }
+
+        // The rewrite is a fresh subject the grade pass has never seen, and it
+        // is what ships. A rewrite that reintroduces grade wording was being
+        // edited with only a log line behind it.
+        $repairNotes = [];
+        foreach ($subjects as $i => $subject) {
+            $repairNotes = array_merge($repairNotes, self::gradeSubjectWarningsFor(
+                (string) ($specs[$i]['filename'] ?? ''),
+                $subject,
+                $imageGrade,
+            ));
+        }
+        if ($repairNotes !== []) {
+            $project->addWarnings($this->id(), $repairNotes);
         }
 
         // Stream repaired images through the same bounded-memory contract as

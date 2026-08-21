@@ -137,6 +137,11 @@ final class LayoutFixer
             self::freeGridsFromNarrowWrappers($roots, $notes);
             self::restoreCoverMeasure($all, $contentSize, $notes);
         }
+        // Last: the rules above rewrite "align" attributes, and an align class
+        // left behind in the saved HTML is not derivable from the new
+        // attribute, so re-serialization keeps it as an authored className —
+        // where it outranks the attribute in CSS.
+        self::syncAlignClassTokens($markup, $all, $htmlEdits, $notes);
 
         if ($notes === []) {
             return ['markup' => $markup, 'notes' => []];
@@ -1014,6 +1019,69 @@ final class LayoutFixer
      * @param object[] $all
      * @param string[] $notes
      */
+    /**
+     * Make a saved align class follow the block's own "align" attribute.
+     *
+     * Only a contradicting token is rewritten — a block with no align class
+     * keeps none, because re-serialization derives it from the attribute.
+     *
+     * @param object[] $all
+     * @param array{int,int,string}[] $htmlEdits splices for render(): offset, length, replacement
+     * @param string[] $notes
+     */
+    private static function syncAlignClassTokens(
+        string $markup,
+        array $all,
+        array &$htmlEdits,
+        array &$notes,
+    ): void {
+        foreach ($all as $node) {
+            if ($node->selfClosing) {
+                continue;
+            }
+            $align = self::align($node);
+            if (!in_array($align, ['wide', 'full'], true)) {
+                continue;
+            }
+            $expected = 'align' . $align;
+            $tagStart = $node->start + $node->len;
+            $tagHtml = MarkupScan::wrapperTag($markup, $tagStart);
+            if ($tagHtml === null) {
+                continue;
+            }
+            $classAttr = MarkupScan::tagAttribute($tagHtml, 'class');
+            if ($classAttr === null) {
+                continue;
+            }
+            $classes = preg_split('/\s+/', trim($classAttr[0])) ?: [];
+            $stale = array_values(array_filter(
+                $classes,
+                static fn (string $token): bool => $token !== $expected
+                    && in_array($token, ['alignwide', 'alignfull'], true),
+            ));
+            if ($stale === []) {
+                continue;
+            }
+
+            $updated = [];
+            $placed = false;
+            foreach ($classes as $token) {
+                if (!in_array($token, ['alignwide', 'alignfull'], true)) {
+                    $updated[] = $token;
+                    continue;
+                }
+                if ($placed) {
+                    continue;
+                }
+                $updated[] = $expected;
+                $placed = true;
+            }
+            $htmlEdits[] = [$tagStart + $classAttr[1], strlen($classAttr[0]), implode(' ', $updated)];
+            $notes[] = "wp:{$node->name} saved HTML carried \"{$stale[0]}\" against \"align\":\"{$align}\""
+                . ' — synced the class to the attribute';
+        }
+    }
+
     private static function evenOutFooterRows(array $all, array &$notes): void
     {
         foreach ($all as $node) {

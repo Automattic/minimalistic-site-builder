@@ -4,6 +4,7 @@ declare(strict_types=1);
 use Automattic\SiteBuild\AnthropicClient;
 use Automattic\SiteBuild\FinishReasonAwareLlm;
 use Automattic\SiteBuild\JsonBatchRecovery;
+use Automattic\SiteBuild\LlmRequestRejected;
 use Automattic\SiteBuild\OpenAiCompatibleClient;
 use Automattic\SiteBuild\TextBatchRecovery;
 use Automattic\SiteBuild\TransientApiException;
@@ -206,6 +207,48 @@ test('bodyFor prepends cached prefixes to the OpenAI user content without cache 
         $body['messages'][1]['content'],
     );
     assert_true(!str_contains((string) json_encode($body), 'cache_control'), 'OpenAI body has no explicit cache marker');
+});
+
+test('both reference clients refuse the same cached_prefixes shapes, with the same signal', function () {
+    // These used to diverge: Anthropic rejected, OpenAI-compatible iterated
+    // whatever it was handed, so `cached_prefixes => null` was a silent drop in
+    // a shipped client — this contract's own worst failure mode (BIGR-842).
+    $shapes = [
+        'null'               => null,
+        'string-keyed array' => ['a' => 'x'],
+        'non-string member'  => ['valid', 42],
+        'four layers'        => ['one', 'two', 'three', 'four'],
+    ];
+
+    foreach ($shapes as $label => $invalid) {
+        foreach (['anthropic', 'openai'] as $client) {
+            try {
+                $client === 'anthropic'
+                    ? AnthropicClient::bodyFor(['prompt' => 'Build it.', 'cached_prefixes' => $invalid], 'claude-sonnet-4-6', 16000)
+                    : OpenAiCompatibleClient::bodyFor(['prompt' => 'Build it.', 'cached_prefixes' => $invalid], 'gpt-4o', 16000, 'openai');
+                assert_true(false, "{$client} accepted {$label} cached_prefixes");
+            } catch (LlmRequestRejected $e) {
+                // The type is the signal LlmConformance reads; the message is
+                // what a host maintainer reads. Both must be present.
+                assert_contains('cached_prefixes', $e->getMessage());
+            }
+        }
+    }
+});
+
+test('a rejected request never reaches the transport', function () {
+    $client = new OpenAiCompatibleClient('key', 'gpt-4o', 'https://api.openai.com/v1');
+
+    try {
+        $client->complete('Build it.', ['cached_prefixes' => null]);
+        assert_true(false, 'expected a rejection');
+    } catch (LlmRequestRejected $e) {
+        assert_contains('cached_prefixes must be a list of strings', $e->getMessage());
+    }
+
+    // No key was spent and no request was counted: the refusal happened while
+    // building the body, which is what makes the structural tier zero-spend.
+    assert_eq(0, $client->usageTotals()['requests']);
 });
 
 test('retrySingleRequest tolerates an empty truncated probe response without retrying', function () {

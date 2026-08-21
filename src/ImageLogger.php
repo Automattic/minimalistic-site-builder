@@ -37,7 +37,7 @@ final class ImageLogger
      * so a partial build is still inspectable.
      *
      * @param string $label the asset filename the request produced, e.g. "hero.jpg"
-     * @param array{model?:string,prompt?:string,aspect_ratio?:string,sample_image_size?:string,subject?:string,page_context?:string,style?:string,image_grade?:string} $request
+     * @param array{model?:string,prompt?:string,aspect_ratio?:string,sample_image_size?:string,subject?:string,subject_delivered?:string,page_context?:string,style?:string,image_grade?:string} $request
      *        the composed prompt and every parameter that shaped the request
      * @param array{path?:string,bytes?:int} $result output asset path and size
      *        (ignored for a failed request)
@@ -54,11 +54,12 @@ final class ImageLogger
 
     /**
      * Render the full log file: a summary header (file, model, aspect ratio,
-     * status, output), the spec fields that shaped the request (subject, page
-     * context, style), the full prompt text exactly as sent to the API, and —
+     * status, output), the spec fields that shaped the request (subject, the
+     * delivered subject when the grade pass rewrote it, page context, style),
+     * the full prompt text exactly as sent to the API, and —
      * for a failed request — the error last. Pure — unit-testable.
      *
-     * @param array{model?:string,prompt?:string,aspect_ratio?:string,sample_image_size?:string,subject?:string,page_context?:string,style?:string,image_grade?:string} $request
+     * @param array{model?:string,prompt?:string,aspect_ratio?:string,sample_image_size?:string,subject?:string,subject_delivered?:string,page_context?:string,style?:string,image_grade?:string} $request
      * @param array{path?:string,bytes?:int} $result
      * @param ?string $error failure message, or null for a successful request
      */
@@ -101,10 +102,14 @@ final class ImageLogger
         // the ones that were actually present are shown.
         $specSections = [];
         foreach ([
-            'subject'      => 'SUBJECT',
-            'page_context' => 'PAGE CONTEXT',
-            'style'        => 'STYLE',
-            'image_grade'  => 'IMAGE GRADE',
+            'subject'           => 'SUBJECT',
+            // Present only when the grade pass rewrote the subject. It sits
+            // right after the authored one so a reader sees both, instead of
+            // an authored SUBJECT beside a PROMPT built from a different one.
+            'subject_delivered' => 'SUBJECT DELIVERED',
+            'page_context'      => 'PAGE CONTEXT',
+            'style'             => 'STYLE',
+            'image_grade'       => 'IMAGE GRADE',
         ] as $key => $heading) {
             $value = trim((string) ($request[$key] ?? ''));
             if ($value !== '') {
