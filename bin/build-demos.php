@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\Narrator;
+use Automattic\SiteBuild\ProcessPool;
 use Automattic\SiteBuild\ProjectStore;
 
 /**
@@ -26,8 +27,8 @@ use Automattic\SiteBuild\ProjectStore;
  * its LLM client, so each demo's logs/project.log carries exactly its own
  * numbers, and one demo failing never aborts the others. Slugs are reserved in
  * this parent before spawning (concurrent children calling freeSlug() would
- * race to the same folder name). Each child's output is streamed here with a
- * [slug] prefix.
+ * race to the same folder name). Each child's captured output is replayed here
+ * with a [slug] prefix after that child completes.
  *
  * Note: each build normally fires up to ~10 concurrent LLM requests (the
  * OpenRouter transport caps its own fan-out at 4), so outer parallelism still
@@ -176,14 +177,18 @@ foreach ($entries as $i => $entry) {
     $jobs[] = [
         'slug' => $project->slug(),
         'path' => $project->path(),
-        'cmd'  => 'exec php ' . escapeshellarg(repo_path('bin/build.php'))
-            . ' ' . escapeshellarg($prompt)
-            . ' --slug=' . escapeshellarg($project->slug())
-            . ' --no-serve'
-            . ($provider !== null ? ' --provider=' . escapeshellarg($provider) : '')
-            . ($withImages ? ' --with-images' : '')
-            . ($multiPage ? ' --multi-page' : '')
-            . ($pagesArg !== null ? ' --pages=' . escapeshellarg($pagesArg) : ''),
+        'argv' => [
+            'php',
+            repo_path('bin/build.php'),
+            $prompt,
+            '--slug=' . $project->slug(),
+            '--no-serve',
+            ...($provider !== null ? ['--provider=' . $provider] : []),
+            ...($withImages ? ['--with-images'] : []),
+            ...($multiPage ? ['--multi-page'] : []),
+            ...($pagesArg !== null ? ['--pages=' . $pagesArg] : []),
+        ],
+        'cwd' => repo_path(),
     ];
 }
 
@@ -198,7 +203,15 @@ $cap = $parallel > 0
     : ($activeProvider === 'openrouter' ? min(3, count($jobs)) : count($jobs));
 echo "\nBuilding " . count($jobs) . ' demo(s), up to ' . $cap . " in parallel…\n\n";
 
-$results = run_jobs($jobs, $cap);
+$results = ProcessPool::run($jobs, $cap, 3600);
+foreach ($results as $idx => $result) {
+    if ($result['stdout'] !== '') {
+        Narrator::write("[{$jobs[$idx]['slug']}] " . $result['stdout']);
+    }
+    if ($result['stderr'] !== '') {
+        Narrator::write("[{$jobs[$idx]['slug']}] " . $result['stderr']);
+    }
+}
 
 $built = [];
 foreach ($jobs as $i => $job) {
@@ -234,17 +247,29 @@ if ($screenshot && $built !== []) {
     foreach ($built as $i => $b) {
         $shotJobs[] = [
             'slug' => $b['slug'],
-            'cmd'  => 'exec php ' . escapeshellarg(repo_path('bin/screenshot.php'))
-                . ' ' . escapeshellarg($b['slug'])
-                . ' --port=' . ($port + $i * PORT_STRIDE)
-                . ' --out=' . escapeshellarg($b['path'] . '/logs/home.png'),
+            'argv' => [
+                'php',
+                repo_path('bin/screenshot.php'),
+                $b['slug'],
+                '--port=' . ($port + $i * PORT_STRIDE),
+                '--out=' . $b['path'] . '/logs/home.png',
+            ],
+            'cwd' => repo_path(),
         ];
     }
     // The provider-aware OpenRouter cap protects LLM generation only. Keep
     // independent screenshots parallel unless the caller explicitly supplied
     // --parallel to cap every batch in this command.
     $shotCap = $parallel > 0 ? $parallel : count($shotJobs);
-    $shotResults = run_jobs($shotJobs, $shotCap);
+    $shotResults = ProcessPool::run($shotJobs, $shotCap, 3600);
+    foreach ($shotResults as $idx => $result) {
+        if ($result['stdout'] !== '') {
+            Narrator::write("[{$shotJobs[$idx]['slug']}] " . $result['stdout']);
+        }
+        if ($result['stderr'] !== '') {
+            Narrator::write("[{$shotJobs[$idx]['slug']}] " . $result['stderr']);
+        }
+    }
     foreach ($built as $i => &$b) {
         $shot = $b['path'] . '/logs/home.png';
         if ($shotResults[$i]['exit'] === 0 && is_file($shot)) {
@@ -279,69 +304,10 @@ if ($serve && $built !== []) {
 exit($exitCode);
 
 /**
- * Run each job's shell command as a child process, at most $cap at a time,
- * streaming stdout/stderr line-by-line with a [slug] prefix so interleaved
- * output from concurrent children stays attributable. Returns, per job index:
- * ['exit' => int, 'secs' => float wall-clock].
- *
- * @param list<array{slug: string, cmd: string}> $jobs
- * @return array<int, array{exit: int, secs: float}>
- */
-function run_jobs(array $jobs, int $cap): array
-{
-    $pending = array_keys($jobs);
-    $running = [];
-    $results = [];
-
-    while ($pending !== [] || $running !== []) {
-        while (count($running) < $cap && $pending !== []) {
-            $idx = array_shift($pending);
-            $proc = proc_open(
-                $jobs[$idx]['cmd'],
-                [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
-                $pipes,
-                repo_path()
-            );
-            if (!is_resource($proc)) {
-                fwrite(STDERR, "[{$jobs[$idx]['slug']}] failed to start child process\n");
-                $results[$idx] = ['exit' => 1, 'secs' => 0.0];
-                continue;
-            }
-            stream_set_blocking($pipes[1], false);
-            stream_set_blocking($pipes[2], false);
-            $running[$idx] = [
-                'proc'  => $proc,
-                'pipes' => [1 => $pipes[1], 2 => $pipes[2]],
-                'buf'   => [1 => '', 2 => ''],
-                'start' => microtime(true),
-            ];
-        }
-
-        pump_children($running, static function (int $idx, int $fd, string $line) use ($jobs): void {
-            $out = "[{$jobs[$idx]['slug']}] " . $line;
-            $fd === 2 ? fwrite(STDERR, $out) : print($out);
-        });
-
-        foreach ($running as $idx => $r) {
-            $status = proc_get_status($r['proc']);
-            if ($status['running'] || $r['pipes'][1] !== null || $r['pipes'][2] !== null) {
-                continue;
-            }
-            $results[$idx] = ['exit' => $status['exitcode'], 'secs' => microtime(true) - $r['start']];
-            proc_close($r['proc']);
-            unset($running[$idx]);
-        }
-    }
-
-    ksort($results);
-    return $results;
-}
-
-/**
- * One multiplexing pass over all running children: wait briefly for output on
- * any pipe, then drain complete lines through $emit(idx, fd, line). Closed
- * pipes are set to null in place; a trailing unterminated line is flushed when
- * its pipe closes.
+ * One multiplexing pass over long-lived Playground servers: wait briefly for
+ * output on any pipe, then drain complete lines through $emit(idx, fd, line).
+ * Closed pipes are set to null in place; a trailing unterminated line is flushed
+ * when its pipe closes.
  *
  * @param array<int, array{proc: resource, pipes: array<int, resource|null>, buf: array<int, string>, start: float}> $running
  */
