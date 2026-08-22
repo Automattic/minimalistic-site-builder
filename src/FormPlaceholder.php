@@ -165,6 +165,6 @@ final class FormPlaceholder
     /** The readable text of a placeholder paragraph's inner HTML. */
     private static function text(string $inner): string
     {
-        return trim(html_entity_decode(strip_tags($inner), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+        return trim(PlainText::fromMarkup($inner));
     }
 }

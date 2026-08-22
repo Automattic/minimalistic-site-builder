@@ -985,7 +985,7 @@ final class HeroCopyBudget
     private static function readingText(string $html): string
     {
         $text = (string) preg_replace('/<!--.*?-->/s', '', $html);
-        $text = html_entity_decode(strip_tags($text), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $text = PlainText::fromMarkup($text);
         return trim((string) preg_replace('/\s+/u', ' ', $text));
     }
 

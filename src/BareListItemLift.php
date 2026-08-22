@@ -230,7 +230,7 @@ final class BareListItemLift
     private static function hasMeaningfulContent(string $content): bool
     {
         $withoutComments = preg_replace('/<!--(?:(?!-->)[\s\S])*-->/', '', $content) ?? $content;
-        $text = html_entity_decode(strip_tags($withoutComments), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $text = PlainText::fromMarkup($withoutComments);
         $text = preg_replace('/[\s\p{Z}\x{FEFF}]+/u', '', $text) ?? $text;
         if ($text !== '') {
             return true;
