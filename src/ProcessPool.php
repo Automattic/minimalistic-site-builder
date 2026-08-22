@@ -122,7 +122,7 @@ final class ProcessPool
                     }
 
                     if ($slot['in'] !== '' && is_resource($slot['pipes'][0] ?? null)) {
-                        $written = @fwrite($slot['pipes'][0], substr($slot['in'], 0, 65536));
+                        $written = @fwrite($slot['pipes'][0], $slot['in']);
                         if ($written === false) {
                             fclose($slot['pipes'][0]);
                             $slot['pipes'][0] = null;
