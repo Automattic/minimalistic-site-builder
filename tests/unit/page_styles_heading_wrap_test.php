@@ -43,3 +43,12 @@ test('WORD_WRAP_CSS keeps headings at normal wrap with no hyphens or word-break 
     assert_contains('hyphens: none', $body, 'headings forbid hyphenation');
     assert_true(!str_contains($body, 'break-all'), 'headings never word-break:break-all');
 });
+
+test('WORD_WRAP_CSS names the hero heading subjects so it can beat scaffold specificity', function () {
+    $css = PageStylesStep::WORD_WRAP_CSS;
+    $body = css_block_for_selector($css, '.hero-composition__copy .wp-block-heading');
+    assert_true($body !== null, 'wrap policy includes the hero copy heading subject');
+    assert_contains('overflow-wrap: normal', $body);
+    $layered = css_block_for_selector($css, '.hero-composition--layered-poster .wp-block-heading');
+    assert_true($layered !== null, 'wrap policy includes the layered-poster heading subject');
+});

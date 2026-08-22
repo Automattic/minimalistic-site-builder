@@ -9,9 +9,11 @@ namespace Automattic\SiteBuild;
  * The display preset is sized by one model call and the hero headline is
  * written by another, so nothing stops a long brand word ("ELECTRONIC")
  * from outgrowing the copy column at the preset's desktop maximum. When
- * that happens the CSS last-resort (`overflow-wrap: break-word`) snaps the
- * word mid-line with no hyphen on browsers without hyphenation
- * dictionaries — a broken first screen (BIGR-798).
+ * that happens a too-wide word used to snap mid-line with no hyphen
+ * (`overflow-wrap: break-word`) on browsers without hyphenation
+ * dictionaries — a broken first screen (BIGR-798, BIGR-864). Headings now
+ * wrap at spaces only; this pass still pins the size so the longest word
+ * fits the measure instead of overflowing.
  *
  * This pass runs where both facts are finally known (the delivered hero
  * markup and theme.json): it estimates the widest word of every

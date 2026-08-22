@@ -94,17 +94,22 @@ final class PageStylesStep implements Step
     /**
      * Deterministic wrap policy for the HTML-first path. Display headlines set
      * at hero scale are where a browser's hyphenation or an inherited
-     * word-break splits a word across lines ("SQUIRR·EL"); headings wrap only
-     * at spaces and never split a token. overflow-wrap:break-word is the
-     * last-resort escape hatch for body copy only (p, li), where a single
-     * unbreakable token like a URL would otherwise overflow its container.
-     * word-break:break-all is deliberately absent everywhere.
+     * word-break splits a word across lines ("SQUIRR·EL" / "Conversatio n");
+     * headings wrap only at spaces and never split a token (BIGR-864). The
+     * hero-composition subjects are named at two-class specificity so this
+     * rule can beat the scaffold's `.hero-composition__copy .wp-block-heading`
+     * hook. overflow-wrap:break-word is the last-resort escape hatch for body
+     * copy only (p, li), where a single unbreakable token like a URL would
+     * otherwise overflow its container. word-break:break-all is deliberately
+     * absent everywhere.
      */
     public const WORD_WRAP_CSS = <<<'CSS'
 /* Wrap at spaces only — never split a word mid-token. */
 body,
 h1, h2, h3, h4, h5, h6,
 p, li, dt, dd, blockquote, figcaption, caption, th, td,
+.hero-composition__copy .wp-block-heading,
+.hero-composition--layered-poster .wp-block-heading,
 .wp-block-heading,
 .wp-block-post-title,
 .wp-block-button__link {
@@ -516,12 +521,14 @@ CSS;
             $findings,
             $floor,
         );
-        // Wrap policy first, so a design that deliberately hyphenates still
-        // wins; the foundation ships even when the design contributed no CSS
-        // at all. The nested-landmark reset joins the other foundation resets;
-        // the heading baseline joins them rather than the design chunks,
-        // because it declares no color and the contrast pass above has nothing
-        // to say about it beyond an unverified-selector row.
+        // Wrap policy first as the default. Heading wrap/hyphen declarations
+        // are stripped from the design chunks above, so a generated
+        // `h1 { overflow-wrap: anywhere }` cannot re-enable a mid-word snap
+        // (BIGR-864). Body copy may still opt into hyphenation by ordering.
+        // The nested-landmark reset joins the other foundation resets; the
+        // heading baseline joins them rather than the design chunks, because
+        // it declares no color and the contrast pass above has nothing to say
+        // about it beyond an unverified-selector row.
         $tail = self::WORD_WRAP_CSS . "\n" . self::TABLE_BORDER_RESET_CSS . "\n"
             . self::NESTED_LANDMARK_CSS . "\n"
             . ($baseline === '' ? '' : $baseline . "\n") . $design
@@ -599,6 +606,7 @@ CSS;
         array &$warnings,
     ): string {
         $css = self::scrubChunk($css, $source, $warnings);
+        [$css] = CssChecks::dropHeadingWordSplitDeclarations($css);
         if ($css === '' || $sectionRootIds['roots'] === []) {
             return $css;
         }

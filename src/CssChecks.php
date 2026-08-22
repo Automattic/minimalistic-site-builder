@@ -211,6 +211,82 @@ final class CssChecks
      * functional pseudos are walked without treating :not() or :has()
      * arguments as the selected subject.
      */
+    /**
+     * Whether a selector's subject is a heading: h1–h6, `.wp-block-heading`,
+     * or `.wp-block-post-title`. Only the rightmost compound is considered, so
+     * `h1 + p` does not count as a heading rule. :is() and :where() keep their
+     * subject semantics and are walked.
+     */
+    public static function selectorTargetsHeading(string $selector): bool
+    {
+        foreach (self::splitSelectorList($selector) as $candidate) {
+            $compound = self::rightmostSelectorCompound($candidate);
+            if ($compound === '' || self::hasSubjectPseudoElement($compound)) {
+                continue;
+            }
+
+            [$plain, $functionalTargetsHeading] = self::withoutFunctionalPseudos(
+                $compound,
+                static fn (string $arguments): bool => self::selectorTargetsHeading($arguments),
+            );
+            if ($functionalTargetsHeading) {
+                return true;
+            }
+            $plain = self::withoutSelectorAttributes($plain);
+            if (preg_match(
+                '/(?<![-\\\\\w])\.(?:wp-block-heading|wp-block-post-title)(?![-\w])/i',
+                $plain,
+            ) === 1) {
+                return true;
+            }
+            if (preg_match('/^(?:(?:\*|[-\w]+)\|)?h[1-6](?![-\w])/i', ltrim($plain)) === 1) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Properties that split a word across lines: hyphenation, overflow-wrap,
+     * and word-break (including the legacy `word-wrap` alias and vendor
+     * hyphen prefixes).
+     */
+    public static function isWordSplitProperty(string $property): bool
+    {
+        $property = strtolower($property);
+        return in_array($property, [
+            'overflow-wrap',
+            'word-wrap',
+            'word-break',
+            'hyphens',
+            '-webkit-hyphens',
+            '-ms-hyphens',
+            '-moz-hyphens',
+        ], true);
+    }
+
+    /**
+     * Drop wrap/hyphen declarations whose selector subject is a heading.
+     * Body copy and non-heading siblings keep their authored wrap. Keyframe
+     * steps are left alone.
+     *
+     * @return array{0:string,1:list<string>} repaired CSS and dropped declarations
+     */
+    public static function dropHeadingWordSplitDeclarations(string $css): array
+    {
+        [$repaired, $dropped] = self::dropDeclarations(
+            $css,
+            static fn (array $declaration): bool => $declaration['kind'] === 'style'
+                && self::isWordSplitProperty($declaration['property'])
+                && self::selectorTargetsHeading($declaration['context']),
+            self::looksLikeDeclarationList($css),
+        );
+        return [
+            $repaired,
+            array_map(static fn (array $declaration): string => trim($declaration['raw']), $dropped),
+        ];
+    }
+
     public static function selectorTargetsSubject(string $selector, string $subject): bool
     {
         if ($subject !== '&'
