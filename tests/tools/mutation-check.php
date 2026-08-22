@@ -4,21 +4,81 @@ declare(strict_types=1);
 /**
  * Manual mutation-resistance gate for the transport billing boundary.
  *
- * Each mutant gets a fresh minimal copy of the source tree. The two transport
- * test files must pass in an unmodified copy and fail after every mutation.
+ * Each mutant gets a fresh minimal copy of the source tree. The transport and
+ * process-pool test files must pass unmodified and fail after every mutation.
  * Usage: php tests/tools/mutation-check.php
  */
 
 const MUTATION_ROOT = __DIR__ . '/../..';
+const MUTATION_RUN_TIMEOUT_SECONDS = 8;
 
-/** @return array{status:int,output:string} */
+/**
+ * @param list<string> $command
+ * @return array{status:int,output:string,timedOut:bool}
+ */
+function mutation_exec(array $command): array
+{
+    $proc = proc_open(
+        $command,
+        [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['redirect', 1]],
+        $pipes,
+    );
+    if (!is_resource($proc)) {
+        return ['status' => 2, 'output' => 'could not start mutation runner', 'timedOut' => false];
+    }
+
+    stream_set_blocking($pipes[1], false);
+    $output = '';
+    $deadline = microtime(true) + MUTATION_RUN_TIMEOUT_SECONDS;
+    $timedOut = false;
+    $exit = -1;
+    while (true) {
+        $chunk = stream_get_contents($pipes[1]);
+        if ($chunk !== false && $chunk !== '') {
+            $output .= $chunk;
+        }
+
+        $status = proc_get_status($proc);
+        if (!$status['running']) {
+            $exit = (int) $status['exitcode'];
+            break;
+        }
+        if (microtime(true) >= $deadline) {
+            $timedOut = true;
+            proc_terminate($proc, 9);
+            break;
+        }
+
+        $read = [$pipes[1]];
+        $write = $except = null;
+        @stream_select($read, $write, $except, 0, 100_000);
+    }
+
+    $chunk = stream_get_contents($pipes[1]);
+    if ($chunk !== false && $chunk !== '') {
+        $output .= $chunk;
+    }
+    fclose($pipes[1]);
+    $closed = proc_close($proc);
+    if (!$timedOut && $exit < 0 && $closed >= 0) {
+        $exit = $closed;
+    }
+
+    return [
+        'status' => $timedOut ? 124 : $exit,
+        'output' => rtrim($output, "\r\n"),
+        'timedOut' => $timedOut,
+    ];
+}
+
+/** @return array{status:int,output:string,timedOut:bool} */
 function mutation_run(string $root, bool $lintOnly = false, ?string $lintFile = null): array
 {
     if ($lintOnly) {
         if ($lintFile === null) {
             throw new RuntimeException('Mutation lint needs a file path.');
         }
-        $command = escapeshellarg(PHP_BINARY) . ' -l ' . escapeshellarg($root . '/' . $lintFile) . ' 2>&1';
+        $command = [PHP_BINARY, '-l', $root . '/' . $lintFile];
     } else {
         $runner = $root . '/mutation-runner.php';
         $runnerBytes = <<<'PHP'
@@ -28,19 +88,16 @@ declare(strict_types=1);
 require_once __DIR__ . '/tests/lib.php';
 require_once __DIR__ . '/tests/unit/transport_choice_test.php';
 require_once __DIR__ . '/tests/unit/transport_resolver_test.php';
+require_once __DIR__ . '/tests/unit/process_pool_test.php';
 
 exit(run_tests());
 PHP;
         if (file_put_contents($runner, $runnerBytes) !== strlen($runnerBytes)) {
             throw new RuntimeException("Could not write mutation runner: {$runner}");
         }
-        $command = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($runner) . ' 2>&1';
+        $command = [PHP_BINARY, $runner];
     }
-
-    $output = [];
-    $status = 0;
-    exec($command, $output, $status);
-    return ['status' => $status, 'output' => implode("\n", $output)];
+    return mutation_exec($command);
 }
 
 function mutation_copy_path(string $source, string $target): void
@@ -78,6 +135,7 @@ function mutation_copy_tree(string $target): void
     }
     foreach ([
         'autoload.php',
+        'bin/build-demos.php',
         'config',
         'src',
         'tests/lib.php',
@@ -85,6 +143,8 @@ function mutation_copy_tree(string $target): void
         'tests/doubles.php',
         'tests/unit/transport_choice_test.php',
         'tests/unit/transport_resolver_test.php',
+        'tests/unit/process_pool_test.php',
+        'tests/fixtures/fake-harness',
     ] as $path) {
         mutation_copy_path(MUTATION_ROOT . '/' . $path, $target . '/' . $path);
     }
@@ -161,11 +221,18 @@ function mutation_parse_summary(string $output): ?array
 }
 
 /**
- * @param array{status:int,output:string} $result
+ * @param array{status:int,output:string,timedOut:bool} $result
  * @return array{verdict:string,detail:string,summary:array{passed:int,failed:int,skipped:int}|null}
  */
 function mutation_classify(array $result): array
 {
+    if ($result['timedOut']) {
+        return [
+            'verdict' => 'KILLED',
+            'detail' => 'timeout=' . MUTATION_RUN_TIMEOUT_SECONDS . 's',
+            'summary' => null,
+        ];
+    }
     $summary = mutation_parse_summary($result['output']);
     if ($summary === null) {
         return [
@@ -542,6 +609,36 @@ PHP,
 PHP,
         '',
     ],
+    [
+        '23 blocking stdin pipe',
+        'src/ProcessPool.php',
+        <<<'PHP'
+                stream_set_blocking($pipes[0], false);
+PHP,
+        <<<'PHP'
+                stream_set_blocking($pipes[0], true);
+PHP,
+    ],
+    [
+        '24 await returns before a child completes',
+        'src/ProcessPool.php',
+        <<<'PHP'
+            while ($done === [] && $live !== []) {
+PHP,
+        <<<'PHP'
+            if ($done === [] && $live !== []) {
+PHP,
+    ],
+    [
+        '25 argv element loses literal process boundary',
+        'src/ProcessPool.php',
+        <<<'PHP'
+                $job['argv'],
+PHP,
+        <<<'PHP'
+                implode(' ', $job['argv']),
+PHP,
+    ],
 ];
 
 $args = array_slice($argv, 1);
@@ -641,7 +738,7 @@ try {
             echo "{$classification['verdict']} {$label} {$classification['detail']}\n";
         }
         echo "RESULT {$counts['KILLED']} KILLED, {$counts['SURVIVED']} SURVIVED, {$counts['HARD ERROR']} HARD ERROR\n";
-        $failed = $counts['KILLED'] < 22 || $counts['SURVIVED'] !== 0 || $counts['HARD ERROR'] !== 0;
+        $failed = $counts['KILLED'] < 25 || $counts['SURVIVED'] !== 0 || $counts['HARD ERROR'] !== 0;
     }
 } catch (Throwable $e) {
     echo 'MUTATION ERROR: ' . $e->getMessage() . "\n";
