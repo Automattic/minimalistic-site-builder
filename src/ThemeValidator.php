@@ -621,10 +621,7 @@ final class ThemeValidator
 
             // Destinations live both in the rendered href and in block-JSON
             // "url" attributes (wp:navigation-link has no rendered HTML).
-            $links = self::hrefsIn($markup);
-            foreach (preg_match_all('/"url"\s*:\s*"([^"]*)"/', $markup, $m) ? $m[1] : [] as $url) {
-                $links[] = str_replace('\/', '/', $url);
-            }
+            $links = LinkTargets::allTargets($markup);
 
             foreach ($links as $href) {
                 if ($href === '#') {
@@ -773,7 +770,7 @@ final class ThemeValidator
     /** @return list<string> */
     private static function hrefsIn(string $markup): array
     {
-        return self::htmlAttributeValues(self::HTML_HREF_PATTERN, $markup);
+        return LinkTargets::hrefsIn($markup);
     }
 
     /**
@@ -896,14 +893,7 @@ final class ThemeValidator
      */
     private static function anchorsIn(string $markup): array
     {
-        $set = [];
-        foreach (preg_match_all('/\bid="([^"]+)"/', $markup, $m) ? $m[1] : [] as $id) {
-            $set[$id] = true;
-        }
-        foreach (preg_match_all('/"anchor"\s*:\s*"([^"]+)"/', $markup, $m) ? $m[1] : [] as $id) {
-            $set[$id] = true;
-        }
-        return $set;
+        return LinkTargets::anchorsIn($markup);
     }
 
     /**
@@ -914,10 +904,7 @@ final class ThemeValidator
      */
     private static function isThemeAssetPath(string $path): bool
     {
-        if (str_contains($path, '/wp-content/themes/') && str_contains($path, '/assets/')) {
-            return true;
-        }
-        return (bool) preg_match('/\.(?:jpe?g|png|gif|webp|svg|css|js|woff2?|ttf|eot|ico)(?:$|\?)/i', $path);
+        return LinkTargets::isThemeAssetPath($path);
     }
 
     /** Page paths compared in one canonical form: leading + trailing slash. */
