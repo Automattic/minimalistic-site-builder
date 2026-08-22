@@ -243,3 +243,122 @@ test('an unsupported sibling leaves every other block fully serialized', functio
         exec('rm -rf ' . escapeshellarg($tmp));
     }
 });
+
+/**
+ * Strip the class tokens the serializer regenerates from comment JSON, which
+ * is what the ATTRIBUTE-LIGHT BLOCK SAVE MARKUP contract tells the model to
+ * omit. Custom and source-critical tokens (gallery item/caption hooks, author
+ * classes) are not serializer-derived, so they are kept — exactly what the
+ * contract requires. Inline styles are left alone here; the hand-written
+ * matrix above is what covers omitting those.
+ */
+function cle_leanify(string $html): string
+{
+    return preg_replace_callback(
+        '/\sclass="([^"]*)"/',
+        static function (array $match): string {
+            $kept = array_values(array_filter(
+                preg_split('/\s+/', trim($match[1])) ?: [],
+                static fn (string $token): bool => $token !== ''
+                    && !str_starts_with($token, 'wp-block-')
+                    && !str_starts_with($token, 'has-')
+                    && !str_starts_with($token, 'align')
+                    && !str_starts_with($token, 'is-')
+                    && !str_starts_with($token, 'size-'),
+            ));
+            return $kept === [] ? '' : ' class="' . implode(' ', $kept) . '"';
+        },
+        $html
+    ) ?? $html;
+}
+
+/**
+ * Oracle cases whose lean variant does NOT reach the runtime-certified output,
+ * with the reason. Listed cases are asserted to STILL diverge, so a fix cannot
+ * land without removing its entry and the list cannot quietly rot into a claim
+ * of coverage it no longer has.
+ */
+const CLE_KNOWN_LEAN_DIVERGENCES = [
+    'generated-demo-layout-and-paragraph-signatures' =>
+        'paragraph roots carrying an authored inline style not derivable from comment JSON',
+    'paragraph-conflicting-text-align' =>
+        'reviewed degradation policy: the authored conflict is delivered verbatim by design',
+    'paragraph-inline-color-carryover' =>
+        'omitting the preset font-size class routes the block to a deprecation candidate that does '
+        . 'not carry authored bytes, so it ships preserved-verbatim without its generated classes',
+    'paragraph-opacity-reviewed-drop' =>
+        'reviewed opacity-removal policy, which Gutenberg reserialization does not implement',
+    'site-tagline-legacy-text-align' =>
+        'intake legacy conversion folds textAlign into an existing style.typography, where the '
+        . 'certified runtime migration drops it',
+    'tbilisi25-footer-fixed-point' =>
+        'observed real-build fixed point whose lean variant re-routes at least one block',
+    'tbilisi60-traditional-offerings-fixed-point' =>
+        'documented cosmetic attribute-order divergence held outside the generator',
+];
+
+test('a lean variant of every oracle case reaches the runtime-certified output', function () {
+    // The oracle certifies the PHP fixer against the real Gutenberg runtime
+    // using CANONICAL inputs. This walks the same corpus from the other end:
+    // feed the attribute-light variant through the real pipeline (intake
+    // legacy conversion, then the fixer) and require the runtime-certified
+    // bytes back. Together they close the chain the review asked for — lean
+    // equals canonical, canonical equals the runtime, therefore lean equals
+    // the runtime — over one shared corpus instead of two unrelated ones.
+    $root = repo_path('tests/fixtures/block-fixer/cases');
+    $cases = array_values(array_filter(
+        scandir($root) ?: [],
+        static fn (string $entry): bool => $entry[0] !== '.' && is_dir($root . '/' . $entry),
+    ));
+    assert_true(count($cases) > 0, 'the oracle corpus is readable');
+
+    $matched = 0;
+    $diverged = [];
+    foreach ($cases as $case) {
+        foreach (glob("{$root}/{$case}/input/parts/*.html") ?: [] as $input) {
+            $name = basename($input);
+            $expectedPath = "{$root}/{$case}/expected/parts/{$name}";
+            if (!file_exists($expectedPath)) {
+                continue;
+            }
+            $lean = cle_leanify((string) file_get_contents($input));
+            $converted = LegacyAttributes::normalize($lean)['markup'];
+
+            $tmp = sys_get_temp_dir() . '/builder_oracle_lean_' . uniqid();
+            mkdir($tmp . '/theme/parts', 0777, true);
+            file_put_contents($tmp . '/theme/parts/' . $name, $converted);
+            try {
+                (new PhpBlockFixer())->fix($tmp . '/theme');
+                $got = (string) file_get_contents($tmp . '/theme/parts/' . $name);
+            } finally {
+                exec('rm -rf ' . escapeshellarg($tmp));
+            }
+
+            if (trim($got) === trim((string) file_get_contents($expectedPath))) {
+                $matched++;
+            } else {
+                $diverged[$case] = true;
+            }
+        }
+    }
+
+    // Every divergence is accounted for, and every accounted-for divergence
+    // still diverges. Neither list can drift without failing here.
+    foreach (array_keys($diverged) as $case) {
+        assert_true(
+            isset(CLE_KNOWN_LEAN_DIVERGENCES[$case]),
+            "{$case}: lean variant diverges from the runtime-certified output with no recorded reason",
+        );
+    }
+    foreach (CLE_KNOWN_LEAN_DIVERGENCES as $case => $why) {
+        assert_true(
+            in_array($case, $cases, true),
+            "{$case}: recorded as a lean divergence but no longer in the oracle corpus",
+        );
+        assert_true(
+            isset($diverged[$case]),
+            "{$case}: recorded as a lean divergence ({$why}) but now converges — remove the entry",
+        );
+    }
+    assert_eq(51, $matched, 'lean variants reaching the runtime-certified output');
+});
