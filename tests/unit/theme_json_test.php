@@ -2278,6 +2278,38 @@ test('theme-json sparse CSS keeps direction prompt and writes actionable warning
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('theme-json html-first resume does not abort when design css was never written', function () {
+    // --from can resume mid-graph on a project that never ran design-preview.
+    // readText() throws on a missing file; this must degrade like sparse tokens.
+    $tmp = sys_get_temp_dir() . '/builder_tj_absent_css_' . getmypid() . '_' . uniqid('', true);
+    $store = new ProjectStore($tmp);
+    $legacy = $store->create('legacy');
+    $absent = $store->create('absent');
+    foreach ([$legacy, $absent] as $project) {
+        $project->writeJson('meta.json', ['prompt' => 'A cold-water swim club']);
+        $project->writeJson('siteSpec.json', ['name' => 'Teal Valley']);
+        seed_test_design_direction($project);
+    }
+
+    $legacyStep = new ThemeJsonStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    $htmlFirstStep = new ThemeJsonStep(
+        new FakeLlm(),
+        new PromptRenderer(repo_path('prompts')),
+        htmlFirst: true,
+    );
+
+    assert_true(!$absent->exists('design/site.css'), 'fixture must have no design css');
+
+    $legacyPrompt = $legacyStep->requests($legacy)['theme-json']['prompt'];
+    $absentPrompt = $htmlFirstStep->requests($absent)['theme-json']['prompt'];
+
+    assert_eq($legacyPrompt, $absentPrompt, 'absent design css falls back to the direction prompt');
+    $warnings = implode(' ', $absent->readJson('warnings.json')['theme-json'] ?? []);
+    assert_contains('sparse_tokens', $warnings);
+    assert_contains('delivered design-direction values', $warnings);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('theme-json invalid UTF-8 CSS keeps direction prompt and writes sparse warning', function () {
     $tmp = sys_get_temp_dir() . '/builder_tj_invalid_utf8_tokens_' . uniqid();
     $store = new ProjectStore($tmp);

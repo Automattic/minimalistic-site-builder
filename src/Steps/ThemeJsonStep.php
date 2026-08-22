@@ -369,7 +369,13 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         $meta = $project->readJson('meta.json');
         $designDirection = DesignDirectionStep::readFor($project);
         if ($this->htmlFirst) {
-            $tokens = CssTokenExtractor::extract($project->readText('design/site.css'));
+            // --from can resume mid-graph on a project that never ran design-preview,
+            // and readText() throws on a missing file. An empty stylesheet extracts to
+            // empty tokens, which the sparse_tokens branch below already degrades.
+            $designCss = $project->exists('design/site.css')
+                ? $project->readText('design/site.css')
+                : '';
+            $tokens = CssTokenExtractor::extract($designCss);
             if ($tokens['palette'] !== [] && $tokens['fonts'] !== []) {
                 $designDirection .= "\n\n"
                     . "DESIGN CSS TOKENS (authoritative evidence from design/site.css):\n"
@@ -438,7 +444,9 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         $theme = self::normalizeSpacingSettings($theme);
         [$theme, $layoutWarnings] = self::normalizeLayoutWidths(
             $theme,
-            $this->htmlFirst ? $project->readText('design/site.css') : null,
+            $this->htmlFirst && $project->exists('design/site.css')
+                ? $project->readText('design/site.css')
+                : null,
         );
 
         // A default vertical rhythm between sibling blocks: without it, per-block
