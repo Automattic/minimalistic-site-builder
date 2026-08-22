@@ -33,6 +33,14 @@ final class ConceptSeeds
     public const ACCENTS = ['warm', 'cool', 'earth', 'jewel', 'neutral'];
 
     /**
+     * Which way the ground itself is tinted. `ground` says light or dark;
+     * this says warm, cool, violet, green, blush or neutral. Kept as one
+     * vocabulary with the build's own classifier so a seed cannot commit to
+     * a family the palette check does not recognise.
+     */
+    public const TINTS = GroundTint::ALL;
+
+    /**
      * Looks a brief may lock that are not on the universal lists. Canonical
      * word => phrases in the user's prompt that count as naming it. Topic
      * clichés do not belong here — only words the user actually wrote.
@@ -56,7 +64,7 @@ final class ConceptSeeds
     ];
 
     /**
-     * Coerce one raw seed into `{text, ground, register, accent}`.
+     * Coerce one raw seed into `{text, ground, register, accent, tint}`.
      *
      * The prompt asks for an object; a bare string (the older shape, and what
      * a small model falls back to under load) still parses, with no
@@ -69,7 +77,7 @@ final class ConceptSeeds
      *
      * @param mixed $raw
      * @param array{registers?:list<string>,accents?:list<string>} $locked
-     * @return array{text:string,ground:?string,register:?string,accent:?string}|null
+     * @return array{text:string,ground:?string,register:?string,accent:?string,tint:?string}|null
      */
     public static function normalize($raw, array $locked = []): ?array
     {
@@ -77,7 +85,7 @@ final class ConceptSeeds
             $text = trim($raw);
             return $text === ''
                 ? null
-                : ['text' => $text, 'ground' => null, 'register' => null, 'accent' => null];
+                : ['text' => $text, 'ground' => null, 'register' => null, 'accent' => null, 'tint' => null];
         }
         if (!is_array($raw)) {
             return null;
@@ -105,6 +113,7 @@ final class ConceptSeeds
             'ground'   => self::axis($raw['ground'] ?? null, self::GROUNDS),
             'register' => self::axis($raw['register'] ?? null, $registers),
             'accent'   => self::axis($raw['accent'] ?? null, $accents),
+            'tint'     => self::axis($raw['tint'] ?? null, self::TINTS),
         ];
     }
 
@@ -159,7 +168,7 @@ final class ConceptSeeds
      * triple: an unstated axis is not evidence of sameness. Byte-identical
      * text still is, because the pick lands on the sentence.
      *
-     * @param array{text:string,ground:?string,register:?string,accent:?string} $seed
+     * @param array{text:string,ground:?string,register:?string,accent:?string,tint:?string} $seed
      */
     public static function axisKey(array $seed): ?string
     {
@@ -183,9 +192,9 @@ final class ConceptSeeds
      * the spread keeps collapsing is visible in the build's warnings instead of
      * only in the sameness of the finished sites.
      *
-     * @param list<array{text:string,ground:?string,register:?string,accent:?string}> $seeds
+     * @param list<array{text:string,ground:?string,register:?string,accent:?string,tint:?string}> $seeds
      * @param list<string> $warnings
-     * @return list<array{text:string,ground:?string,register:?string,accent:?string}>
+     * @return list<array{text:string,ground:?string,register:?string,accent:?string,tint:?string}>
      */
     public static function distinct(array $seeds, array &$warnings = []): array
     {
@@ -250,7 +259,7 @@ final class ConceptSeeds
      * misspelling `ground` on two of three is not exotic, and "every seed is
      * light-grounded" must not be derived from a single vote.
      *
-     * @param list<array{text:string,ground:?string,register:?string,accent:?string}> $seeds
+     * @param list<array{text:string,ground:?string,register:?string,accent:?string,tint:?string}> $seeds
      */
     public static function sharedGround(array $seeds): ?string
     {

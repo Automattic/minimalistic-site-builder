@@ -10,6 +10,7 @@ use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\GeneratedJsonException;
+use Automattic\SiteBuild\GroundTint;
 use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
 use Automattic\SiteBuild\Llm;
@@ -64,8 +65,9 @@ final class DesignDirectionStep implements Step
      */
     private const FALLBACK = '(No explicit design direction was provided. Make bold, '
         . 'specific, non-generic design choices that fit the brand, and consciously avoid '
-        . 'default treatments like a centered hero, all-sans-serif typography, and a '
-        . 'blue/teal palette.)';
+        . 'default treatments like a centered hero, all-sans-serif typography, and an '
+        . 'unmotivated page background. No hue is off-limits — a reflexive warm off-white '
+        . 'is the most common default of all.)';
 
     /**
      * Injected as the {{seed}} when the seed call fails or returns nothing
@@ -155,7 +157,7 @@ final class DesignDirectionStep implements Step
         $specData = $project->readJson('siteSpec.json');
 
         $warnings = [];
-        $seed = $this->chooseSeed($prompt, $spec, $warnings);
+        ['text' => $seed, 'tint' => $seedTint] = $this->chooseSeed($prompt, $spec, $warnings);
         $recipe = self::selectHeroRecipe(
             $meta,
             (string) ($specData['slug'] ?? $project->slug()),
@@ -179,6 +181,10 @@ final class DesignDirectionStep implements Step
             'user_prompt' => $prompt,
             'site_spec'   => $spec,
             'seed'        => $seed,
+            // Empty when the seed round degraded and committed no ground; the
+            // prompt then asks for the field without naming a family, and
+            // normalize() enforces the direction's own answer instead.
+            'ground_tint' => $seedTint === '' ? 'not committed by the seed — choose one and say which' : $seedTint,
             'hero_composition' => $heroComposition,
         ]);
         try {
@@ -200,6 +206,7 @@ final class DesignDirectionStep implements Step
             $seed,
             $repairs,
             $warnings,
+            $seedTint,
         );
         if ($direction === null) {
             // A build without a committed direction still works — every
@@ -274,12 +281,14 @@ final class DesignDirectionStep implements Step
         $description = $seed !== '' && $seed !== self::SEED_FALLBACK
             ? $seed
             : 'Make bold, specific, non-generic design choices that fit the brand, and consciously '
-                . 'avoid default treatments like a centered hero, all-sans-serif typography, and a '
-                . 'blue/teal palette.';
+                . 'avoid default treatments like a centered hero, all-sans-serif typography, and an '
+                . 'unmotivated page background. No hue is off-limits — a reflexive warm off-white '
+                . 'is the most common default of all.';
         return [
             'title'            => '',
             'description'      => $description,
             'palette'          => [],
+            'ground_tint'      => '',
             'type'             => [
                 'heading' => self::emptyTypeSlot(),
                 'body'    => self::emptyTypeSlot(),
@@ -314,7 +323,7 @@ final class DesignDirectionStep implements Step
      * the pipeline's variety source, and the small models still support
      * sampling.
      */
-    private function chooseSeed(string $brief, string $spec, array &$warnings = []): string
+    private function chooseSeed(string $brief, string $spec, array &$warnings = []): array
     {
         $forced = Env::get(self::CHOICE_ENV);
         $isForced = $forced !== null && $forced !== '';
@@ -357,11 +366,11 @@ final class DesignDirectionStep implements Step
                     count($seeds),
                 ));
             }
-            return $seeds[$n - 1]['text'];
+            return self::chosen($seeds[$n - 1]);
         }
 
         if ($seeds === []) {
-            return self::SEED_FALLBACK;
+            return ['text' => self::SEED_FALLBACK, 'tint' => ''];
         }
         $pool = ConceptSeeds::distinct($seeds, $warnings);
         $sharedGround = ConceptSeeds::sharedGround($pool);
@@ -381,7 +390,19 @@ final class DesignDirectionStep implements Step
                     . '-grounded; picked from it anyway; disposition tolerated';
             }
         }
-        return $pool[random_int(0, count($pool) - 1)]['text'];
+        return self::chosen($pool[random_int(0, count($pool) - 1)]);
+    }
+
+    /**
+     * The chosen seed as the pair the expansion needs: the sentence the
+     * prompts consume, and the ground family the palette check enforces.
+     *
+     * @param array{text:string,ground:?string,register:?string,accent:?string,tint:?string} $seed
+     * @return array{text:string,tint:string}
+     */
+    private static function chosen(array $seed): array
+    {
+        return ['text' => $seed['text'], 'tint' => $seed['tint'] ?? ''];
     }
 
     /**
@@ -557,6 +578,7 @@ final class DesignDirectionStep implements Step
         string $conceptSeed = '',
         array &$repairs = [],
         array &$warnings = [],
+        string $conceptTint = '',
     ): ?array {
         if (!is_array($raw)) {
             return null;
@@ -576,6 +598,27 @@ final class DesignDirectionStep implements Step
                 $repairs[] = 'designDirection.json: field palette.' . $role
                     . ' authored ' . self::describe($rawPalette[$role])
                     . ' delivered removed; disposition dropped invalid generated color';
+            }
+        }
+
+        // The ground the concept committed to, preferring the seed's own
+        // coordinate over the direction's restatement of it — the seed is the
+        // creative commitment, the direction is what drifted from it. A base
+        // outside that family is moved into it at equal relative luminance,
+        // so every contrast floor stated against this color still holds. An
+        // uncommitted tint enforces nothing: nothing was violated.
+        $groundTint = BoundedChoice::explicit($conceptTint, GroundTint::ALL)
+            ?? BoundedChoice::explicit($raw['ground_tint'] ?? null, GroundTint::ALL);
+        if ($groundTint !== null && isset($palette['base'])) {
+            $authored = $palette['base'];
+            if (GroundTint::classify($authored) !== $groundTint) {
+                $moved = GroundTint::retint($authored, $groundTint);
+                if ($moved !== null) {
+                    $palette['base'] = $moved;
+                    $repairs[] = 'designDirection.json: field palette.base authored '
+                        . self::describe($authored) . ' delivered ' . self::describe($moved)
+                        . '; disposition moved onto the committed "' . $groundTint . '" ground';
+                }
             }
         }
 
@@ -669,6 +712,7 @@ final class DesignDirectionStep implements Step
             'title'            => trim((string) ($raw['title'] ?? '')),
             'description'      => $description,
             'palette'          => $palette,
+            'ground_tint'      => $groundTint ?? '',
             'type'             => [
                 'heading' => self::normalizeTypeSlot($type['heading'] ?? null, 'heading', $warnings),
                 'body'    => self::normalizeTypeSlot($type['body'] ?? null, 'body', $warnings),
@@ -920,6 +964,15 @@ final class DesignDirectionStep implements Step
         }
         if ($swatches !== []) {
             $facts[] = '- **Palette**: ' . implode(' · ', $swatches);
+        }
+
+        // Stated alongside the hexes because downstream steps re-pick colors
+        // from this block; without it they only see a base hex and read the
+        // family back out of it, which is how a committed ground drifts.
+        $groundTint = BoundedChoice::explicit($direction['ground_tint'] ?? null, GroundTint::ALL);
+        if ($groundTint !== null) {
+            $facts[] = '- **Ground tint**: ' . $groundTint
+                . ' — the page background belongs to this family; do not re-hue it.';
         }
 
         $type = is_array($direction['type'] ?? null) ? $direction['type'] : [];

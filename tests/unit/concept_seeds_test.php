@@ -212,3 +212,35 @@ test('ConceptSeeds::distinct drops a repeat that used a locked extra label', fun
     assert_eq(2, count($pool));
     assert_contains('light/luxury/warm', $warnings[0]);
 });
+
+test('ConceptSeeds::normalize reads the tint the seed commits its ground to', function () {
+    $seed = ConceptSeeds::normalize([
+        'seed'   => 'Ink & Brass — a deep blue reading room.',
+        'ground' => 'dark',
+        'tint'   => ' Cool ',
+    ]);
+    assert_eq('cool', $seed['tint'], 'tint is case and space insensitive like the other axes');
+
+    foreach (['warm', 'cool', 'violet', 'green', 'blush', 'neutral'] as $tint) {
+        $read = ConceptSeeds::normalize(['seed' => 'S', 'tint' => $tint]);
+        assert_eq($tint, $read['tint'], "{$tint} is a first-class ground family");
+    }
+});
+
+test('ConceptSeeds::normalize drops a tint outside the vocabulary and says nothing', function () {
+    $seed = ConceptSeeds::normalize(['seed' => 'Sea Glass', 'tint' => 'chartreuse']);
+    assert_eq(null, $seed['tint']);
+    assert_eq(null, ConceptSeeds::normalize('Sea Glass')['tint'], 'a bare string commits no tint');
+});
+
+test('ConceptSeeds::axisKey leaves tint out, so the dedup key stays the triple', function () {
+    // A fourth coordinate would make two seeds look distinct more easily and
+    // quietly weaken the collapse guard. Same triple, different tint, still
+    // one world.
+    $a = ConceptSeeds::normalize(['seed' => 'One', 'ground' => 'light', 'register' => 'editorial', 'accent' => 'warm', 'tint' => 'warm']);
+    $b = ConceptSeeds::normalize(['seed' => 'Two', 'ground' => 'light', 'register' => 'editorial', 'accent' => 'warm', 'tint' => 'cool']);
+    assert_eq(ConceptSeeds::axisKey($a), ConceptSeeds::axisKey($b));
+
+    $warnings = [];
+    assert_eq(2, count(ConceptSeeds::distinct([$a, $b], $warnings)), 'a pool of two is never narrowed to one');
+});

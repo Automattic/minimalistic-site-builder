@@ -517,7 +517,7 @@ test('legacy mode ignores stale site CSS and keeps the recorded call trace and s
     assert_eq(0, $llm->completeBatchCalls, 'legacy path makes no batch call');
     assert_eq(1, count($llm->calls), 'legacy call trace count');
     assert_eq(
-        'bc28b64ca84829ab8cda4d50355fde0e788a314c7c9aa0b723bfde9632cbd2e0',
+        '62969b1b61e6493b111cb9e479a46888b3e97d9c4741076b9d8210c1ce7f4ac6',
         hash('sha256', $llm->calls[0]['prompt']),
         'legacy prompt bytes'
     );
