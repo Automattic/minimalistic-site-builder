@@ -128,6 +128,66 @@ function mutation_apply(string $root, string $file, string $search, string $repl
     }
 }
 
+function mutation_append(string $root, string $file, string $bytes): void
+{
+    $path = $root . '/' . $file;
+    $source = file_get_contents($path);
+    if ($source === false) {
+        throw new RuntimeException("Could not read mutation target: {$path}");
+    }
+    $mutated = $source . $bytes;
+    if ($mutated === $source || file_put_contents($path, $mutated) !== strlen($mutated)) {
+        throw new RuntimeException("Could not append mutation to {$file}.");
+    }
+}
+
+/** @return array{passed:int,failed:int,skipped:int}|null */
+function mutation_parse_summary(string $output): ?array
+{
+    preg_match_all(
+        '/^([0-9]+) passed, ([0-9]+) failed, ([0-9]+) skipped\r?$/m',
+        $output,
+        $matches,
+        PREG_SET_ORDER,
+    );
+    if (count($matches) !== 1) {
+        return null;
+    }
+    return [
+        'passed' => (int) $matches[0][1],
+        'failed' => (int) $matches[0][2],
+        'skipped' => (int) $matches[0][3],
+    ];
+}
+
+/**
+ * @param array{status:int,output:string} $result
+ * @return array{verdict:string,detail:string,summary:array{passed:int,failed:int,skipped:int}|null}
+ */
+function mutation_classify(array $result): array
+{
+    $summary = mutation_parse_summary($result['output']);
+    if ($summary === null) {
+        return [
+            'verdict' => 'HARD ERROR',
+            'detail' => "exit={$result['status']} [NO COUNT LINE OR MALFORMED COUNT LINE]",
+            'summary' => null,
+        ];
+    }
+
+    $detail = "exit={$result['status']} passed={$summary['passed']} failed={$summary['failed']} skipped={$summary['skipped']}";
+    if (array_sum($summary) === 0) {
+        return ['verdict' => 'HARD ERROR', 'detail' => $detail . ' [ZERO TESTS REGISTERED]', 'summary' => $summary];
+    }
+    if ($result['status'] === 0 && $summary['passed'] >= 1 && $summary['failed'] === 0) {
+        return ['verdict' => 'SURVIVED', 'detail' => $detail, 'summary' => $summary];
+    }
+    if ($result['status'] === 1 && $summary['failed'] >= 1) {
+        return ['verdict' => 'KILLED', 'detail' => $detail, 'summary' => $summary];
+    }
+    return ['verdict' => 'HARD ERROR', 'detail' => $detail . ' [EXIT/COUNT MISMATCH]', 'summary' => $summary];
+}
+
 $mutants = [
     [
         '1 isSubscription billing map',
@@ -206,17 +266,15 @@ PHP,
         '6 unknown provider refusal',
         'src/TransportResolver.php',
         <<<'PHP'
-        $provider = self::normalizeProvider(
-            $explicit ? $configured : $defaultProvider,
-            $explicit ? 'LLM_PROVIDER' : 'default provider',
-        );
+        $configured = strtolower(trim((string) ($env['LLM_PROVIDER'] ?? '')));
+        $explicit = $configured !== '';
+        $provider = self::apiProvider($env, $defaultProvider);
 PHP,
         <<<'PHP'
+        $configured = strtolower(trim((string) ($env['LLM_PROVIDER'] ?? '')));
+        $explicit = $configured !== '';
         try {
-            $provider = self::normalizeProvider(
-                $explicit ? $configured : $defaultProvider,
-                $explicit ? 'LLM_PROVIDER' : 'default provider',
-            );
+            $provider = self::apiProvider($env, $defaultProvider);
         } catch (TransportUnavailable) {
             return null;
         }
@@ -231,7 +289,9 @@ PHP,
             throw new TransportUnavailable(
                 "Default provider {$provider} has no " . implode(' or ', self::PROVIDER_KEYS[$provider])
                 . ', but other provider keys are present: ' . implode(', ', $otherKeys) . '. '
-                . 'Set LLM_PROVIDER to choose their provider, or unset the listed key(s) before using a harness transport.'
+                . 'Set SITE_BUILD_LLM=api|claude-cli|codex-cli|grok-cli explicitly. '
+                . 'Set LLM_PROVIDER only to use the present API key(s) and choose their provider; '
+                . 'otherwise unset the listed key(s).'
             );
         }
 PHP,
@@ -268,35 +328,157 @@ PHP,
     }
 PHP,
     ],
+    [
+        '9 rung-2 explicit-provider refusal',
+        'src/TransportResolver.php',
+        <<<'PHP'
+        if ($explicit) {
+            throw new TransportUnavailable(
+                "LLM_PROVIDER={$provider} requires " . implode(' or ', self::PROVIDER_KEYS[$provider]) . '. '
+                . 'Set its provider key, or set SITE_BUILD_LLM to an available harness transport.'
+            );
+        }
+PHP,
+        '',
+    ],
+    [
+        '10 resolved provider source',
+        'src/TransportResolver.php',
+        <<<'PHP'
+            $provider = self::normalizeProvider($choice->provider, 'resolved API provider');
+PHP,
+        <<<'PHP'
+            $provider = self::normalizeProvider((string) getenv('LLM_PROVIDER'), 'LLM_PROVIDER');
+PHP,
+    ],
+    [
+        '11 case-insensitive ancestry matching',
+        'src/TransportResolver.php',
+        <<<'PHP'
+    private static function rungAncestry(
+        array $env,
+        callable $onPath,
+        callable $ancestry,
+        string $defaultProvider,
+    ): ?TransportChoice
+    {
+        $matches = [];
+        foreach ($ancestry() as $name) {
+            $kind = self::HARNESSES[strtolower(trim($name))] ?? null;
+PHP,
+        <<<'PHP'
+    private static function rungAncestry(
+        array $env,
+        callable $onPath,
+        callable $ancestry,
+        string $defaultProvider,
+    ): ?TransportChoice
+    {
+        $matches = [];
+        foreach ($ancestry() as $name) {
+            $kind = self::HARNESSES[trim($name)] ?? null;
+PHP,
+    ],
 ];
+
+$args = array_slice($argv, 1);
+if ($args !== [] && $args !== ['--self-test']) {
+    echo 'ERROR: unknown arguments: ' . implode(' ', $args) . "\n";
+    echo "Usage: php tests/tools/mutation-check.php [--self-test]\n";
+    exit(2);
+}
 
 $tempBase = sys_get_temp_dir() . '/msb-transport-mutations-' . getmypid() . '-' . bin2hex(random_bytes(6));
 $failed = false;
 
 try {
-    $baseline = $tempBase . '/baseline';
-    mutation_copy_tree($baseline);
-    $baselineResult = mutation_run($baseline);
-    if ($baselineResult['status'] !== 0) {
-        throw new RuntimeException("Unmutated transport tests failed in copied tree:\n" . $baselineResult['output']);
-    }
+    if ($args === ['--self-test']) {
+        $expectations = [
+            ['no-op', 'SURVIVED'],
+            ['rung-2 explicit-provider guard deletion', 'KILLED'],
+            ['bootstrap crash', 'HARD ERROR'],
+        ];
+        foreach ($expectations as $index => [$label, $expected]) {
+            $root = $tempBase . '/self-test-' . ($index + 1);
+            mutation_copy_tree($root);
+            if ($index === 0) {
+                mutation_apply(
+                    $root,
+                    'src/TransportResolver.php',
+                    "final class TransportResolver\n{",
+                    "/* mutation self-test: intentional semantic no-op */\nfinal class TransportResolver\n{",
+                );
+            } elseif ($index === 1) {
+                [, $file, $search, $replace] = $mutants[8];
+                mutation_apply($root, $file, $search, $replace);
+            } else {
+                mutation_append($root, 'src/bootstrap.php', "\nundefined_function_zzz();\n");
+            }
 
-    foreach ($mutants as $index => [$label, $file, $search, $replace]) {
-        $root = $tempBase . '/mutant-' . ($index + 1);
-        mutation_copy_tree($root);
-        mutation_apply($root, $file, $search, $replace);
-
-        $lint = mutation_run($root, true, $file);
-        if ($lint['status'] !== 0) {
-            throw new RuntimeException("Mutant {$label} produced invalid PHP:\n" . $lint['output']);
+            $result = mutation_run($root);
+            $classification = mutation_classify($result);
+            $extra = '';
+            if ($index === 2) {
+                preg_match_all('/^  (?:PASS|FAIL|SKIP)\b/m', $result['output'], $testLines);
+                $registered = count($testLines[0]);
+                $extra = " registered-test-lines={$registered}";
+                if ($registered !== 0 || !str_contains($result['output'], 'undefined_function_zzz')) {
+                    $failed = true;
+                }
+            }
+            echo "{$classification['verdict']} self-test {$label} {$classification['detail']}{$extra}\n";
+            if ($classification['verdict'] !== $expected) {
+                echo "SELF-TEST ERROR: {$label} expected {$expected}, got {$classification['verdict']}\n";
+                $failed = true;
+            }
         }
-
-        $result = mutation_run($root);
-        $verdict = $result['status'] === 0 ? 'SURVIVED' : 'KILLED';
-        echo "{$verdict} {$label}\n";
-        if ($verdict === 'SURVIVED') {
-            $failed = true;
+        echo $failed
+            ? "SELF-TEST FAIL\n"
+            : "SELF-TEST PASS: 1 SURVIVED, 1 KILLED, 1 HARD ERROR\n";
+    } else {
+        $baseline = $tempBase . '/baseline';
+        mutation_copy_tree($baseline);
+        $baselineResult = mutation_run($baseline);
+        $baselineClassification = mutation_classify($baselineResult);
+        if ($baselineClassification['verdict'] !== 'SURVIVED') {
+            throw new RuntimeException(
+                "Unmutated transport tests were classified {$baselineClassification['verdict']} "
+                . $baselineClassification['detail'] . ":\n" . $baselineResult['output'],
+            );
         }
+        echo "BASELINE PASS {$baselineClassification['detail']}\n";
+
+        $counts = ['KILLED' => 0, 'SURVIVED' => 0, 'HARD ERROR' => 0];
+
+        foreach ($mutants as $index => [$label, $file, $search, $replace]) {
+            $root = $tempBase . '/mutant-' . ($index + 1);
+            try {
+                mutation_copy_tree($root);
+                mutation_apply($root, $file, $search, $replace);
+
+                $lint = mutation_run($root, true, $file);
+                if ($lint['status'] !== 0) {
+                    $classification = [
+                        'verdict' => 'HARD ERROR',
+                        'detail' => "lint-exit={$lint['status']} [INVALID PHP]",
+                        'summary' => null,
+                    ];
+                } else {
+                    $classification = mutation_classify(mutation_run($root));
+                }
+            } catch (Throwable $e) {
+                $classification = [
+                    'verdict' => 'HARD ERROR',
+                    'detail' => '[MUTATION SETUP FAILED] ' . $e->getMessage(),
+                    'summary' => null,
+                ];
+            }
+
+            $counts[$classification['verdict']]++;
+            echo "{$classification['verdict']} {$label} {$classification['detail']}\n";
+        }
+        echo "RESULT {$counts['KILLED']} KILLED, {$counts['SURVIVED']} SURVIVED, {$counts['HARD ERROR']} HARD ERROR\n";
+        $failed = $counts['KILLED'] < 11 || $counts['SURVIVED'] !== 0 || $counts['HARD ERROR'] !== 0;
     }
 } catch (Throwable $e) {
     echo 'MUTATION ERROR: ' . $e->getMessage() . "\n";
