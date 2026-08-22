@@ -27,6 +27,10 @@ final class SectionPattern
         'form' => 'contact',
     ];
 
+    private const TRAILING_HEAD_NOUNS = [
+        'hero', 'cta', 'gallery', 'contact', 'testimonial', 'faq', 'pricing', 'team',
+    ];
+
     /**
      * @param list<array<mixed>> $plannedSections
      * @return array{
@@ -142,13 +146,18 @@ final class SectionPattern
             $tokens = $withoutQualifiers;
         }
 
-        $head = $tokens[0] ?? '';
-        if (strlen($head) > 1 && str_ends_with($head, 's')) {
+        $phrase = implode('-', $tokens);
+        $last = $tokens[count($tokens) - 1] ?? '';
+        $head = in_array($last, self::TRAILING_HEAD_NOUNS, true)
+            ? $last
+            : ($tokens[0] ?? '');
+        if (
+            str_ends_with($head, 's')
+            && preg_match('/(?:ss|us|is|xs)$/', $head) !== 1
+            && strlen($head) - 1 >= 3
+        ) {
             $head = substr($head, 0, -1);
         }
-
-        $tokens[0] = $head;
-        $phrase = implode('-', $tokens);
 
         return self::SYNONYMS[$phrase] ?? self::SYNONYMS[$head] ?? $head;
     }
