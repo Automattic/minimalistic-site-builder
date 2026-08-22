@@ -256,8 +256,8 @@ final class ExtractPatternsStep implements Step
             $log[] = "winner {$key}: {$winner['page']}/{$winner['section']} total {$winner['score']['total']}";
         }
 
-        usort($winners, [self::class, 'compareGlobalWinners']);
-        foreach (array_splice($winners, self::PATTERN_CAP) as $overflow) {
+        [$winners, $overflowWinners] = self::applyPatternCap($winners);
+        foreach ($overflowWinners as $overflow) {
             $key = (string) $overflow['key'];
             $total = (int) ($overflow['score']['total'] ?? 0);
             $dropped[] = ['key' => $key, 'reason' => 'cap', 'total' => $total];
@@ -728,6 +728,61 @@ final class ExtractPatternsStep implements Step
             return $index;
         }
         return strcmp((string) ($left['key'] ?? ''), (string) ($right['key'] ?? ''));
+    }
+
+    /**
+     * Reserve semantic endpoint coverage before score-ranked cap fill.
+     *
+     * @param list<array<mixed>> $winners
+     * @return array{0:list<array<mixed>>,1:list<array<mixed>>} kept, overflow
+     */
+    private static function applyPatternCap(array $winners): array
+    {
+        if (count($winners) <= self::PATTERN_CAP) {
+            return [$winners, []];
+        }
+
+        $ranked = $winners;
+        usort($ranked, [self::class, 'compareCapWinners']);
+        $keptByKey = [];
+
+        foreach ([['hero'], ['cta', 'closing']] as $reservedLabels) {
+            $matches = array_values(array_filter(
+                $winners,
+                static fn (array $winner): bool => in_array($winner['label'] ?? null, $reservedLabels, true),
+            ));
+            if ($matches === []) {
+                continue;
+            }
+            usort($matches, [self::class, 'compareGlobalWinners']);
+            $reserved = $matches[0];
+            $keptByKey[(string) $reserved['key']] = $reserved;
+        }
+
+        foreach ($ranked as $winner) {
+            if (count($keptByKey) >= self::PATTERN_CAP) {
+                break;
+            }
+            $key = (string) $winner['key'];
+            if (!isset($keptByKey[$key])) {
+                $keptByKey[$key] = $winner;
+            }
+        }
+
+        $overflow = array_values(array_filter(
+            $ranked,
+            static fn (array $winner): bool => !isset($keptByKey[(string) $winner['key']]),
+        ));
+        return [array_values($keptByKey), $overflow];
+    }
+
+    /** @param array<mixed> $left @param array<mixed> $right */
+    private static function compareCapWinners(array $left, array $right): int
+    {
+        $score = ((int) ($right['score']['total'] ?? 0)) <=> ((int) ($left['score']['total'] ?? 0));
+        return $score !== 0
+            ? $score
+            : strcmp((string) ($left['key'] ?? ''), (string) ($right['key'] ?? ''));
     }
 
     /** @param array<mixed> $winner */
