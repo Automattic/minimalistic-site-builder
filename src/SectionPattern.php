@@ -152,6 +152,11 @@ final class SectionPattern
             ? $last
             : ($tokens[0] ?? '');
         if (
+            preg_match('/(?:sses|xes|zes|ches|shes)$/', $head) === 1
+            && strlen($head) - 2 >= 3
+        ) {
+            $head = substr($head, 0, -2);
+        } elseif (
             str_ends_with($head, 's')
             && preg_match('/(?:ss|us|is|xs)$/', $head) !== 1
             && strlen($head) - 1 >= 3
