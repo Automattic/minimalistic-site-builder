@@ -93,14 +93,19 @@ final class TransportResolver
         );
     }
 
-    /** Construct the chosen transport. The only half that touches the filesystem. */
-    public static function build(TransportChoice $choice): Llm
+    /**
+     * Construct the chosen transport. Harness choices touch the filesystem;
+     * embedding hosts inject their API factory without loading CLI bootstrap glue.
+     *
+     * @param null|callable():Llm $apiFactory
+     */
+    public static function build(TransportChoice $choice, ?callable $apiFactory = null): Llm
     {
         if ($choice->kind === TransportChoice::KIND_API) {
-            if (!function_exists('make_llm')) {
+            if ($apiFactory === null) {
                 throw new TransportUnavailable(
-                    'Transport api needs the make_llm() factory from src/bootstrap.php. '
-                    . 'Require src/bootstrap.php before calling TransportResolver::build().'
+                    'Transport api cannot be built because the host must supply an API factory '
+                    . 'as the second argument to TransportResolver::build().'
                 );
             }
             if ($choice->provider === null || trim($choice->provider) === '') {
@@ -115,7 +120,7 @@ final class TransportResolver
             $ambientProvider = getenv('LLM_PROVIDER');
             putenv("LLM_PROVIDER={$provider}");
             try {
-                return \make_llm();
+                return $apiFactory();
             } finally {
                 $ambientProvider === false
                     ? putenv('LLM_PROVIDER')
