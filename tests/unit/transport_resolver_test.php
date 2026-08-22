@@ -646,21 +646,22 @@ test('billing N1: audit provider matches the provider used by the constructed cl
     assert_contains('provider: openrouter', $output);
 });
 
-test('billing N1: API build restores the ambient provider after construction', function (): void {
-    $bootstrap = dirname(__DIR__, 2) . '/src/bootstrap.php';
-    $code = 'require ' . var_export($bootstrap, true) . '; '
-        . 'putenv("LLM_PROVIDER=anthropic"); putenv("OPEN_ROUTER_API_KEY=test-only-key"); '
-        . '$r = new ReflectionClass(\\Automattic\\SiteBuild\\Env::class); '
-        . '$p = $r->getProperty("vars"); $p->setValue(null, []); '
+test('billing N1: API build leaves the ambient provider unchanged', function (): void {
+    $root = dirname(__DIR__, 2);
+    $code = 'require ' . var_export($root . '/autoload.php', true) . '; '
+        . 'require ' . var_export($root . '/tests/FakeLlm.php', true) . '; '
+        . 'putenv("LLM_PROVIDER=anthropic"); '
         . '$c = new \\Automattic\\SiteBuild\\TransportChoice('
         . '\\Automattic\\SiteBuild\\TransportChoice::KIND_API, '
         . '"OPEN_ROUTER_API_KEY present (provider: openrouter)", null, "openrouter"); '
-        . '$llm = \\Automattic\\SiteBuild\\TransportResolver::build($c, static fn (): '
-        . '\\Automattic\\SiteBuild\\Llm => \\make_llm()); '
-        . 'echo get_class($llm) . " | " . getenv("LLM_PROVIDER");';
+        . '$fake = new \\Automattic\\SiteBuild\\Tests\\FakeLlm(); $factoryProvider = null; '
+        . '$llm = \\Automattic\\SiteBuild\\TransportResolver::build($c, '
+        . 'static function (string $provider) use ($fake, &$factoryProvider): '
+        . '\\Automattic\\SiteBuild\\Llm { $factoryProvider = $provider; return $fake; }); '
+        . 'echo get_class($llm) . " | " . $factoryProvider . " | " . getenv("LLM_PROVIDER");';
     [$output, $status] = tr_php($code);
     assert_eq(0, $status, $output);
-    assert_contains('OpenAiCompatibleClient | anthropic', $output);
+    assert_contains('FakeLlm | openrouter | anthropic', $output);
 });
 
 test('billing host layering: src classes do not reference bootstrap-only globals', function (): void {
@@ -705,12 +706,53 @@ test('billing host layering: build returns an injected Llm without loading boots
         . '$c = new \\Automattic\\SiteBuild\\TransportChoice('
         . '\\Automattic\\SiteBuild\\TransportChoice::KIND_API, "host injection", null, "anthropic"); '
         . '$fake = new \\Automattic\\SiteBuild\\Tests\\FakeLlm(); '
-        . '$llm = \\Automattic\\SiteBuild\\TransportResolver::build($c, static fn (): '
+        . '$llm = \\Automattic\\SiteBuild\\TransportResolver::build($c, static fn (string $provider): '
         . '\\Automattic\\SiteBuild\\Llm => $fake); '
         . 'echo $llm === $fake ? "INJECTED" : "WRONG";';
     [$output, $status] = tr_php($code);
     assert_eq(0, $status, $output);
     assert_eq('INJECTED', $output);
+});
+
+test('billing Q9: host-2 factory receives the resolved provider and returns its double', function (): void {
+    $root = dirname(__DIR__, 2);
+    $code = 'require ' . var_export($root . '/autoload.php', true) . '; '
+        . 'require ' . var_export($root . '/tests/FakeLlm.php', true) . '; '
+        . 'foreach (["LLM_PROVIDER", "ANTHROPIC_API_KEY", "XAI_API_KEY", "OPENAI_API_KEY", '
+        . '"OPENROUTER_API_KEY", "OPEN_ROUTER_API_KEY"] as $key) { putenv($key); } '
+        . '$c = new \\Automattic\\SiteBuild\\TransportChoice('
+        . '\\Automattic\\SiteBuild\\TransportChoice::KIND_API, "host-2", null, "anthropic"); '
+        . '$fake = new \\Automattic\\SiteBuild\\Tests\\FakeLlm(); $factoryProvider = null; '
+        . '$llm = \\Automattic\\SiteBuild\\TransportResolver::build($c, '
+        . 'static function (string $provider) use ($fake, &$factoryProvider): '
+        . '\\Automattic\\SiteBuild\\Llm { $factoryProvider = $provider; return $fake; }); '
+        . 'echo ($llm === $fake ? "INJECTED" : "WRONG") . " | " . $factoryProvider;';
+    [$output, $status] = tr_php($code);
+    assert_eq(0, $status, $output);
+    assert_eq('INJECTED | anthropic', $output);
+});
+
+test('billing Q10: TransportResolver contains no putenv call', function (): void {
+    $source = (string) file_get_contents(dirname(__DIR__, 2) . '/src/TransportResolver.php');
+    $tokens = token_get_all($source);
+    $calls = 0;
+
+    foreach ($tokens as $index => $token) {
+        if (!is_array($token) || $token[0] !== T_STRING || strtolower($token[1]) !== 'putenv') {
+            continue;
+        }
+        for ($next = $index + 1; isset($tokens[$next]); $next++) {
+            if (is_array($tokens[$next]) && $tokens[$next][0] === T_WHITESPACE) {
+                continue;
+            }
+            if ($tokens[$next] === '(') {
+                $calls++;
+            }
+            break;
+        }
+    }
+
+    assert_eq(0, $calls, 'TransportResolver must not mutate process environment');
 });
 
 test('describe() names the transport, the billing boundary and the rung', function (): void {
