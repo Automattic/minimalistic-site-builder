@@ -43,6 +43,9 @@ use Automattic\SiteBuild\Warnings;
  *           resolved behavior, even when site motion is `none`; static headers
  *           prune the whole kit. The script is head-loaded so its fixed-overlay
  *           enhancement scope is present before paint.
+ *         - registers the theme's generated section patterns under one
+ *           theme-scoped category whose label comes from the delivered theme
+ *           header (or a deterministic project-slug fallback).
  *         - for a rounded shape commitment (`soft`/`round`), writes and
  *           enqueues the build-owned shape kit (assets/shape/shape.css) that
  *           rounds contained media surfaces theme.json cannot reach — the
@@ -148,7 +151,13 @@ final class FinalizeThemeStep implements Step
         }
         $project->writeText(
             'theme/functions.php',
-            self::functionsPhp($project->slug(), $motion, $header, $overlays),
+            self::functionsPhp(
+                $project->slug(),
+                self::patternCategoryLabel($project),
+                $motion,
+                $header,
+                $overlays,
+            ),
         );
         Narrator::write($motion === null
             ? "  motion: none (kit not shipped)\n"
@@ -440,12 +449,14 @@ final class FinalizeThemeStep implements Step
      */
     private static function functionsPhp(
         string $slug,
+        string $patternCategoryLabel,
         ?string $motion,
         bool $header,
         array $overlays = [],
     ): string {
         $slug = ProjectStore::slugify($slug);
         $scopePrefix = PageScope::CLASS_PREFIX;
+        $patternCategoryLabel = var_export($patternCategoryLabel, true);
 
         $motionEnqueues = '';
         $styleDeps = 'array()';
@@ -513,6 +524,10 @@ final class FinalizeThemeStep implements Step
                 {$editorStyles}
             });
 
+            register_block_pattern_category('{$slug}-sections', array(
+                'label' => {$patternCategoryLabel},
+            ));
+
             // Carried design CSS is authored one page at a time; page-styles scopes
             // each page's chunk to this class, so the front end has to publish it.
             add_filter('body_class', function (\$classes) {
@@ -533,5 +548,21 @@ final class FinalizeThemeStep implements Step
             }
 
             PHP;
+    }
+
+    /** Label for the generated section-pattern category. */
+    private static function patternCategoryLabel(Project $project): string
+    {
+        if ($project->exists('theme/style.css')) {
+            $style = $project->readText('theme/style.css');
+            if (preg_match('/^[ \t*]*Theme Name:[ \t]*(.*)$/mi', $style, $match) === 1) {
+                $label = trim($match[1]);
+                if ($label !== '') {
+                    return $label;
+                }
+            }
+        }
+
+        return ucwords(str_replace('-', ' ', ProjectStore::slugify($project->slug())));
     }
 }

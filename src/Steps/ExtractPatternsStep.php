@@ -1,0 +1,1088 @@
+<?php
+declare(strict_types=1);
+
+namespace Automattic\SiteBuild\Steps;
+
+use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\LinkTargets;
+use Automattic\SiteBuild\Narrator;
+use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\SectionPattern;
+use Automattic\SiteBuild\SectionRole;
+use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\Warnings;
+
+/**
+ * Extract reusable theme patterns from the assembled generated pages.
+ *
+ * Generated-content defects are isolated to one page or section and recorded
+ * as warnings. Required-input and filesystem failures remain fatal because no
+ * truthful pattern output can be produced from missing artifacts or failed
+ * writes.
+ */
+final class ExtractPatternsStep implements Step
+{
+    private const LOG_FILE = 'extract-patterns.log';
+    private const PATTERN_CAP = 12;
+
+    /** @var array<string,string> normalized labels that map to core pattern categories */
+    private const CORE_CATEGORIES = [
+        'cta' => 'call-to-action',
+        'service' => 'services',
+        'testimonial' => 'testimonials',
+        'about' => 'about',
+        'contact' => 'contact',
+        'gallery' => 'gallery',
+        'team' => 'team',
+        'portfolio' => 'portfolio',
+        'hero' => 'banner',
+        'banner' => 'banner',
+        'text' => 'text',
+        'featured' => 'featured',
+    ];
+
+    public function id(): string
+    {
+        return 'extract-patterns';
+    }
+
+    public function label(): string
+    {
+        return 'Extract theme patterns';
+    }
+
+    public function declaration(): StepDeclaration
+    {
+        return new StepDeclaration(
+            id: $this->id(),
+            label: $this->label(),
+            reads: [
+                'plugin/pages/*',
+                'plugin/pages.json',
+                'pages.json',
+                'theme/style.css',
+                'theme/theme.json',
+            ],
+            writes: ['theme/patterns/*', 'patterns.json', 'warnings.json'],
+            concurrent: false,
+        );
+    }
+
+    public function run(Project $project): void
+    {
+        $this->deletePatternDirectory($project);
+
+        $plan = $project->readJson('pages.json');
+        $pageManifest = $project->readJson('plugin/pages.json');
+        $css = $project->readText('theme/style.css');
+        // Validate this declared, required upstream artifact even though pattern
+        // headers and markup do not otherwise need to inspect its values.
+        $project->readJson('theme/theme.json');
+
+        $planPages = $this->pagesBySlug($plan['pages'] ?? []);
+        $manifestPages = is_array($pageManifest['pages'] ?? null) ? $pageManifest['pages'] : [];
+        $routes = $this->routeSet($manifestPages, $planPages);
+        $registeredBlocks = $this->registeredPluginBlocks($project);
+        $cssIds = self::idSelectorsIn($css);
+
+        /** @var array<string,list<array<mixed>>> $candidatesByKey */
+        $candidatesByKey = [];
+        /** @var array<string,int> $ineligibleByKey */
+        $ineligibleByKey = [];
+        $warnings = [];
+        $log = [];
+
+        foreach ($manifestPages as $manifestPage) {
+            if (!is_array($manifestPage)) {
+                continue;
+            }
+            $pageSlug = (string) ($manifestPage['slug'] ?? '');
+            if ($pageSlug === '') {
+                $warnings[] = 'plugin/pages.json: page entry has no slug; authored entry retained outside pattern library; '
+                    . 'delivered no patterns; disposition: skipped unaddressable page entry';
+                continue;
+            }
+
+            $relative = "plugin/pages/{$pageSlug}.html";
+            if (!$project->exists($relative)) {
+                $warnings[] = "{$relative}: authored page listed in plugin/pages.json; delivered no patterns; "
+                    . 'disposition: skipped because required page markup is absent';
+                continue;
+            }
+            $plannedPage = $planPages[$pageSlug] ?? null;
+            if (!is_array($plannedPage)) {
+                $warnings[] = "{$relative}: authored page has no matching pages.json plan; delivered no patterns; "
+                    . 'disposition: skipped because section boundaries are unprovable';
+                continue;
+            }
+            $plannedSections = is_array($plannedPage['sections'] ?? null) ? $plannedPage['sections'] : [];
+            $pageMarkup = $project->readText($relative);
+
+            try {
+                $pageDocument = BlockMarkup::parse($pageMarkup);
+            } catch (\Throwable $error) {
+                $warnings[] = "{$relative}: authored page markup could not be parsed ({$error->getMessage()}); "
+                    . 'delivered no patterns from this page; disposition: kept page bytes and skipped extraction';
+                $log[] = "page {$pageSlug}: parse failed: {$error->getMessage()}";
+                continue;
+            }
+            if (
+                $pageDocument->hasMalformedDelimiters()
+                || $pageDocument->hasMismatchedDelimiters()
+                || $pageDocument->unclosedIndices() !== []
+            ) {
+                $warnings[] = "{$relative}: authored page has a structural block-delimiter defect; delivered no patterns "
+                    . 'from this page; disposition: kept page bytes and skipped whole page';
+                $log[] = "page {$pageSlug}: structural delimiter defect; skipped whole page";
+                continue;
+            }
+
+            try {
+                $split = SectionPattern::split($pageMarkup, $plannedSections);
+            } catch (\Throwable $error) {
+                $warnings[] = "{$relative}: authored page markup could not be split ({$error->getMessage()}); "
+                    . 'delivered no patterns from this page; disposition: kept page bytes and skipped extraction';
+                $log[] = "page {$pageSlug}: split failed: {$error->getMessage()}";
+                continue;
+            }
+
+            foreach ($split['warnings'] as $warning) {
+                $warnings[] = "{$relative}: {$warning} delivered page bytes unchanged; disposition: extraction degraded";
+                $log[] = "page {$pageSlug}: {$warning}";
+            }
+            if ($split['sections'] === []) {
+                $warnings[] = "{$relative}: authored page yielded zero safe sections; delivered no patterns from this page; "
+                    . 'disposition: kept page bytes and skipped extraction';
+                continue;
+            }
+
+            $plannedCount = count($plannedSections);
+            foreach ($split['sections'] as $section) {
+                $index = (int) ($section['index'] ?? -1);
+                $planSection = $plannedSections[$index] ?? null;
+                if (!is_array($planSection) || $index < 0 || $index >= $plannedCount) {
+                    $warnings[] = "{$relative}: block path /{$index}; authored section lacks a matching plan entry; "
+                        . 'delivered no pattern; disposition: skipped unclassifiable section';
+                    continue;
+                }
+
+                $markup = (string) ($section['markup'] ?? '');
+                $sectionSlug = (string) ($planSection['slug'] ?? $section['slug'] ?? "section-{$index}");
+                try {
+                    $classification = $this->classify($markup, $planSection, $index, $plannedCount);
+                } catch (\Throwable $error) {
+                    $warnings[] = "{$relative}: block path /{$index}, section '{$sectionSlug}'; authored markup could not "
+                        . "be classified ({$error->getMessage()}); delivered no pattern; disposition: skipped section";
+                    $log[] = "candidate {$pageSlug}/{$sectionSlug}: classification failed: {$error->getMessage()}";
+                    continue;
+                }
+
+                $key = $classification['key'];
+                $eligibilityFailure = self::eligibilityFailure($markup, $registeredBlocks);
+                if ($eligibilityFailure !== null) {
+                    $ineligibleByKey[$key] = ($ineligibleByKey[$key] ?? 0) + 1;
+                    $warnings[] = "{$relative}: block path /{$index}, section '{$sectionSlug}'; authored value "
+                        . Warnings::value($eligibilityFailure['value'])
+                        . '; delivered value "removed"; disposition: rejected section because '
+                        . ($eligibilityFailure['kind'] === 'raw_php'
+                            ? 'raw PHP open tag would execute from included pattern PHP'
+                            : 'non-core block is absent from generated plugin registration list');
+                    $log[] = "candidate {$pageSlug}/{$sectionSlug} key {$key}: ineligible "
+                        . $eligibilityFailure['kind'] . ' ' . Warnings::value($eligibilityFailure['value']);
+                    continue;
+                }
+
+                try {
+                    $score = SectionPattern::score($markup, $routes);
+                    $contains = self::contains($markup);
+                } catch (\Throwable $error) {
+                    $ineligibleByKey[$key] = ($ineligibleByKey[$key] ?? 0) + 1;
+                    $warnings[] = "{$relative}: block path /{$index}, section '{$sectionSlug}'; authored candidate could "
+                        . "not be scored ({$error->getMessage()}); delivered removed from pattern candidates; "
+                        . 'disposition: skipped failed candidate';
+                    $log[] = "candidate {$pageSlug}/{$sectionSlug} key {$key}: score failed: {$error->getMessage()}";
+                    continue;
+                }
+
+                $role = (string) ($planSection['role'] ?? '');
+                if (!in_array($role, SectionRole::ALL, true)) {
+                    $role = SectionRole::forPosition($index, $plannedCount);
+                }
+                $candidate = [
+                    'key' => $key,
+                    'label' => $classification['label'],
+                    'shape' => $classification['shape'],
+                    'markup' => $markup,
+                    'page' => $pageSlug,
+                    'section' => $sectionSlug,
+                    'index' => $index,
+                    'menu_order' => (int) ($manifestPage['menu_order'] ?? $plannedPage['menu_order'] ?? 0),
+                    'slug' => $pageSlug,
+                    'score' => $score,
+                    'contains' => $contains,
+                    'role' => $role,
+                    'background' => self::background($markup),
+                ];
+                $candidatesByKey[$key][] = $candidate;
+                $log[] = 'candidate ' . $pageSlug . '/' . $sectionSlug . ' key ' . $key . ': '
+                    . json_encode($score, JSON_UNESCAPED_SLASHES);
+            }
+        }
+
+        /** @var list<array<mixed>> $winners */
+        $winners = [];
+        $dropped = [];
+        $allKeys = array_values(array_unique(array_merge(
+            array_keys($candidatesByKey),
+            array_keys($ineligibleByKey),
+        )));
+        sort($allKeys, SORT_STRING);
+        foreach ($allKeys as $key) {
+            $candidates = $candidatesByKey[$key] ?? [];
+            if ($candidates === []) {
+                $dropped[] = ['key' => $key, 'reason' => 'ineligible', 'total' => 0];
+                $warnings[] = "pattern key '{$key}': authored candidates " . ($ineligibleByKey[$key] ?? 0)
+                    . '; delivered removed; disposition: every candidate was ineligible';
+                $log[] = "drop {$key}: every candidate ineligible";
+                continue;
+            }
+
+            // Guard belongs here: SectionPattern::pickWinner() intentionally
+            // rejects an empty list, while extraction must degrade instead.
+            $winner = SectionPattern::pickWinner($candidates);
+            $winner['alternates'] = $this->alternates($candidates, $winner);
+            $winners[] = $winner;
+            $log[] = "winner {$key}: {$winner['page']}/{$winner['section']} total {$winner['score']['total']}";
+        }
+
+        [$winners, $overflowWinners] = self::applyPatternCap($winners);
+        foreach ($overflowWinners as $overflow) {
+            $key = (string) $overflow['key'];
+            $total = (int) ($overflow['score']['total'] ?? 0);
+            $dropped[] = ['key' => $key, 'reason' => 'cap', 'total' => $total];
+            $warnings[] = "pattern key '{$key}': authored winner score {$total}; delivered removed; "
+                . 'disposition: dropped by 12-pattern cap';
+            $log[] = "drop {$key}: cap, total {$total}";
+        }
+
+        usort($winners, static fn (array $left, array $right): int => strcmp($left['key'], $right['key']));
+        $manifestPatterns = [];
+        foreach ($winners as &$winner) {
+            $winner['delivered_markup'] = self::rewriteLinks(
+                self::rewriteAnchors(self::rewriteAssets($winner['markup']), $cssIds),
+                $routes,
+            );
+            $project->writeText(
+                'theme/patterns/' . $winner['key'] . '.php',
+                $this->patternFile($project, $winner),
+            );
+            $manifestPatterns[] = $this->manifestPattern($project, $winner);
+        }
+        unset($winner);
+
+        $starter = $this->writeStarter($project, $winners, $warnings, $log);
+        $project->writeJson('patterns.json', [
+            'version' => 1,
+            'patterns' => $manifestPatterns,
+            'starter' => $starter,
+            'dropped' => $dropped,
+        ]);
+        $project->writeText('logs/' . self::LOG_FILE, implode("\n", $log) . ($log === [] ? '' : "\n"));
+        $project->addWarnings($this->id(), $warnings);
+
+        Narrator::write(sprintf(
+            "  extracted %d pattern(s); %d dropped\n",
+            count($manifestPatterns),
+            count($dropped),
+        ));
+    }
+
+    /** @param array<string,true> $registeredBlocks */
+    public static function isEligible(string $markup, array $registeredBlocks): bool
+    {
+        return self::eligibilityFailure($markup, $registeredBlocks) === null;
+    }
+
+    /**
+     * @param array<string,true> $registeredBlocks
+     * @return array{kind:'raw_php'|'unregistered_block',value:string}|null
+     */
+    private static function eligibilityFailure(string $markup, array $registeredBlocks): ?array
+    {
+        if (preg_match('/<\?(?:=|php\b)?/i', $markup, $phpMatch) === 1) {
+            return ['kind' => 'raw_php', 'value' => $phpMatch[0]];
+        }
+        $doc = BlockMarkup::parse($markup);
+        foreach ($doc->indices() as $index) {
+            $name = $doc->name($index);
+            if (!str_contains($name, '/')) {
+                continue;
+            }
+            $canonical = str_starts_with($name, 'core/') ? substr($name, 5) : $name;
+            if ($canonical !== $name) {
+                continue;
+            }
+            if (!isset($registeredBlocks[$name])) {
+                return ['kind' => 'unregistered_block', 'value' => $name];
+            }
+        }
+        return null;
+    }
+
+    public static function rewriteAssets(string $markup): string
+    {
+        $replacement = static function (array $match): string {
+            $filename = $match[1];
+            return "<?php echo esc_url( get_theme_file_uri( 'assets/{$filename}' ) ); ?>";
+        };
+        $markup = preg_replace_callback(
+            '/theme:\.\/assets\/([a-z0-9][a-z0-9._-]*)/i',
+            $replacement,
+            $markup,
+        ) ?? $markup;
+        return preg_replace_callback(
+            '#/wp-content/themes/[^/"\'\\s]+/assets/([a-z0-9][a-z0-9._-]*)#i',
+            $replacement,
+            $markup,
+        ) ?? $markup;
+    }
+
+    /** @return array<string,true> */
+    public static function idSelectorsIn(string $css): array
+    {
+        $ids = [];
+        $stack = [];
+        $prelude = '';
+        $length = strlen($css);
+        $quote = null;
+        $comment = false;
+
+        for ($i = 0; $i < $length; $i++) {
+            $char = $css[$i];
+            $next = $i + 1 < $length ? $css[$i + 1] : '';
+            if ($comment) {
+                if ($char === '*' && $next === '/') {
+                    $comment = false;
+                    $i++;
+                }
+                continue;
+            }
+            if ($quote !== null) {
+                if ($char === '\\') {
+                    $i++;
+                } elseif ($char === $quote) {
+                    $quote = null;
+                }
+                continue;
+            }
+            if ($char === '/' && $next === '*') {
+                $comment = true;
+                $i++;
+                continue;
+            }
+            if ($char === '"' || $char === "'") {
+                $quote = $char;
+                continue;
+            }
+            if ($char === '{') {
+                $trimmed = trim($prelude);
+                $insideRule = in_array('rule', $stack, true);
+                $isAtRule = str_starts_with($trimmed, '@');
+                if (!$insideRule && !$isAtRule && $trimmed !== '') {
+                    if (preg_match_all('/(?:^|[\s,>+~(])#([a-z_][a-z0-9_-]*)/i', $trimmed, $matches)) {
+                        foreach ($matches[1] as $id) {
+                            $ids[$id] = true;
+                        }
+                    }
+                }
+                $stack[] = $isAtRule ? 'at' : 'rule';
+                $prelude = '';
+                continue;
+            }
+            if ($char === '}') {
+                array_pop($stack);
+                $prelude = '';
+                continue;
+            }
+            if ($char === ';' && !in_array('rule', $stack, true)) {
+                $prelude = '';
+                continue;
+            }
+            if (!in_array('rule', $stack, true)) {
+                $prelude .= $char;
+            }
+        }
+        return $ids;
+    }
+
+    /** @param array<string,true> $cssIds */
+    public static function rewriteAnchors(string $markup, array $cssIds): string
+    {
+        $doc = BlockMarkup::parse($markup);
+        foreach ($doc->indices() as $index) {
+            $attrs = $doc->attrs($index);
+            if (!is_array($attrs) || !isset($attrs['anchor']) || !is_string($attrs['anchor'])) {
+                continue;
+            }
+            if (!isset($cssIds[$attrs['anchor']])) {
+                unset($attrs['anchor']);
+                $doc->setAttrs($index, $attrs);
+            }
+        }
+        $markup = $doc->render();
+        return preg_replace_callback(
+            '/\s+id\s*=\s*(["\'])(.*?)\1/is',
+            static fn (array $match): string => isset($cssIds[html_entity_decode(
+                $match[2],
+                ENT_QUOTES | ENT_HTML5,
+                'UTF-8',
+            )]) ? $match[0] : '',
+            $markup,
+        ) ?? $markup;
+    }
+
+    /** @param array<string,true> $resolvableRoutes */
+    public static function rewriteLinks(string $markup, array $resolvableRoutes): string
+    {
+        $anchors = LinkTargets::anchorsIn($markup);
+        $outside = [];
+        foreach (LinkTargets::allTargets($markup) as $target) {
+            $decoded = html_entity_decode(trim($target), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            if (!self::targetResolves($decoded, $resolvableRoutes, $anchors) && str_starts_with($decoded, '#')) {
+                $outside[$decoded] = true;
+            }
+        }
+        if ($outside === []) {
+            return $markup;
+        }
+
+        $markup = preg_replace_callback(
+            '/(\bhref\s*=\s*)(["\'])(.*?)\2/is',
+            static function (array $match) use ($outside): string {
+                $decoded = html_entity_decode(trim($match[3]), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                return isset($outside[$decoded]) ? $match[1] . $match[2] . '#' . $match[2] : $match[0];
+            },
+            $markup,
+        ) ?? $markup;
+        $markup = preg_replace_callback(
+            '/(\bhref\s*=\s*)(?!["\'])([^\s"\'=<>`]+)/is',
+            static function (array $match) use ($outside): string {
+                $decoded = html_entity_decode(trim($match[2]), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                return isset($outside[$decoded]) ? $match[1] . '#' : $match[0];
+            },
+            $markup,
+        ) ?? $markup;
+        return preg_replace_callback(
+            '/("url"\s*:\s*")([^"]*)(")/i',
+            static function (array $match) use ($outside): string {
+                $decoded = str_replace('\\/', '/', $match[2]);
+                return isset($outside[$decoded]) ? $match[1] . '#' . $match[3] : $match[0];
+            },
+            $markup,
+        ) ?? $markup;
+    }
+
+    private function deletePatternDirectory(Project $project): void
+    {
+        $directory = $project->themePath('patterns');
+        if (!is_dir($directory)) {
+            return;
+        }
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($directory, \FilesystemIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::CHILD_FIRST,
+        );
+        foreach ($iterator as $entry) {
+            $removed = $entry->isDir() ? rmdir($entry->getPathname()) : unlink($entry->getPathname());
+            if (!$removed) {
+                throw new \RuntimeException("Could not remove stale pattern path: {$entry->getPathname()}");
+            }
+        }
+        if (!rmdir($directory)) {
+            throw new \RuntimeException("Could not remove stale pattern directory: {$directory}");
+        }
+    }
+
+    /** @param mixed $pages @return array<string,array<mixed>> */
+    private function pagesBySlug(mixed $pages): array
+    {
+        $out = [];
+        if (!is_array($pages)) {
+            return $out;
+        }
+        foreach ($pages as $page) {
+            if (!is_array($page)) {
+                continue;
+            }
+            $slug = (string) ($page['slug'] ?? '');
+            if ($slug !== '') {
+                $out[$slug] = $page;
+            }
+        }
+        return $out;
+    }
+
+    /** @return array<string,true> */
+    private function registeredPluginBlocks(Project $project): array
+    {
+        if (!$project->exists(ScaffoldPluginStep::MAIN_FILE)) {
+            return [];
+        }
+
+        $plugin = $project->readText(ScaffoldPluginStep::MAIN_FILE);
+        $registrationRows = self::registrationRows($plugin);
+        if ($registrationRows === []) {
+            return [];
+        }
+
+        $registered = [];
+        foreach ($registrationRows as $name => $directory) {
+            $relative = "plugin/blocks/{$directory}/block.json";
+            if (!$project->exists($relative)) {
+                continue;
+            }
+            try {
+                $definition = $project->readJson($relative);
+            } catch (\Throwable) {
+                return [];
+            }
+            if (($definition['name'] ?? null) === $name) {
+                $registered[$name] = true;
+            }
+        }
+        return $registered;
+    }
+
+    /**
+     * Parse the one registration array from executable PHP tokens. Comment,
+     * docblock, quoted-string, heredoc and nowdoc contents stay opaque tokens,
+     * so row-shaped text in them cannot grant block eligibility.
+     *
+     * @return array<string,string> registered block name => metadata directory
+     */
+    private static function registrationRows(string $plugin): array
+    {
+        $tokens = array_values(array_filter(
+            token_get_all($plugin),
+            static fn (array|string $token): bool => !is_array($token)
+                || !in_array($token[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true),
+        ));
+
+        $assignments = [];
+        $count = count($tokens);
+        for ($index = 0; $index < $count; $index++) {
+            if (!self::tokenIs($tokens[$index], T_VARIABLE, '$blocks')) {
+                continue;
+            }
+            if (($tokens[$index + 1] ?? null) !== '=') {
+                continue;
+            }
+            $assignments[] = $index;
+        }
+        if (count($assignments) !== 1) {
+            return [];
+        }
+
+        $index = $assignments[0] + 2;
+        if (!self::tokenIs($tokens[$index] ?? null, T_ARRAY) || ($tokens[$index + 1] ?? null) !== '(') {
+            return [];
+        }
+        $index += 2;
+        $rows = [];
+        $directories = [];
+        while (($tokens[$index] ?? null) !== ')') {
+            $name = self::constantStringValue($tokens[$index] ?? null);
+            if (
+                $name === null
+                || preg_match('/^[a-z0-9][a-z0-9_-]*\/[a-z0-9][a-z0-9_-]*$/', $name) !== 1
+                || !self::tokenIs($tokens[$index + 1] ?? null, T_DOUBLE_ARROW)
+                || !self::tokenIs($tokens[$index + 2] ?? null, T_DIR)
+                || ($tokens[$index + 3] ?? null) !== '.'
+            ) {
+                return [];
+            }
+            $path = self::constantStringValue($tokens[$index + 4] ?? null);
+            if (
+                $path === null
+                || preg_match('#^/blocks/([a-z0-9][a-z0-9_-]*)$#', $path, $pathMatch) !== 1
+                || ($tokens[$index + 5] ?? null) !== ','
+            ) {
+                return [];
+            }
+            $directory = $pathMatch[1];
+            if (isset($rows[$name]) || isset($directories[$directory])) {
+                return [];
+            }
+            $rows[$name] = $directory;
+            $directories[$directory] = true;
+            $index += 6;
+        }
+
+        if ($rows === [] || ($tokens[$index + 1] ?? null) !== ';') {
+            return [];
+        }
+        return $rows;
+    }
+
+    private static function tokenIs(array|string|null $token, int $kind, ?string $text = null): bool
+    {
+        return is_array($token)
+            && $token[0] === $kind
+            && ($text === null || $token[1] === $text);
+    }
+
+    private static function constantStringValue(array|string|null $token): ?string
+    {
+        if (!self::tokenIs($token, T_CONSTANT_ENCAPSED_STRING)) {
+            return null;
+        }
+        $source = $token[1];
+        $quote = $source[0] ?? '';
+        if (($quote !== "'" && $quote !== '"') || substr($source, -1) !== $quote) {
+            return null;
+        }
+        $value = substr($source, 1, -1);
+        // Names and registration paths use a deliberately closed ASCII domain;
+        // escapes would make source identity ambiguous, so fail closed.
+        return str_contains($value, '\\') ? null : $value;
+    }
+
+    /**
+     * @param list<array<mixed>> $manifestPages
+     * @param array<string,array<mixed>> $planPages
+     * @return array<string,true>
+     */
+    private function routeSet(array $manifestPages, array $planPages): array
+    {
+        $routes = [];
+        foreach ($manifestPages as $page) {
+            if (!is_array($page)) {
+                continue;
+            }
+            $slug = (string) ($page['slug'] ?? '');
+            if ($slug === '') {
+                continue;
+            }
+            $path = $planPages[$slug]['path'] ?? null;
+            if (is_string($path) && $path !== '') {
+                $routes[$path] = true;
+            }
+            if (($page['front'] ?? false) === true) {
+                $routes['/'] = true;
+            }
+            $routes['/' . trim($slug, '/') . '/'] = true;
+            $routes['/' . trim($slug, '/')] = true;
+        }
+        return $routes;
+    }
+
+    /** @param array<mixed> $planSection @return array{key:string,label:?string,shape:string} */
+    private function classify(string $markup, array $planSection, int $index, int $count): array
+    {
+        $doc = BlockMarkup::parse($markup);
+        $root = $doc->topLevel();
+        if ($root === null || !$doc->isStructurallySafe($root)) {
+            throw new \InvalidArgumentException('section has no safe top-level block');
+        }
+        $label = SectionPattern::label($planSection, $index, $count);
+        $shape = SectionPattern::shape($doc, $root);
+        return [
+            'key' => $label === null ? $shape : $label . '-' . $shape,
+            'label' => $label,
+            'shape' => $shape,
+        ];
+    }
+
+    /** @param list<array<mixed>> $candidates @param array<mixed> $winner @return list<array<string,mixed>> */
+    private function alternates(array $candidates, array $winner): array
+    {
+        $alternates = array_values(array_filter(
+            $candidates,
+            static fn (array $candidate): bool => $candidate !== $winner,
+        ));
+        usort($alternates, [self::class, 'compareGlobalWinners']);
+        return array_map(
+            static fn (array $candidate): array => [
+                'page' => $candidate['page'],
+                'section' => $candidate['section'],
+                'total' => (int) ($candidate['score']['total'] ?? 0),
+            ],
+            $alternates,
+        );
+    }
+
+    /** @param array<mixed> $left @param array<mixed> $right */
+    private static function compareGlobalWinners(array $left, array $right): int
+    {
+        $score = ((int) ($right['score']['total'] ?? 0)) <=> ((int) ($left['score']['total'] ?? 0));
+        if ($score !== 0) {
+            return $score;
+        }
+        $menu = ((int) ($left['menu_order'] ?? 0)) <=> ((int) ($right['menu_order'] ?? 0));
+        if ($menu !== 0) {
+            return $menu;
+        }
+        $index = ((int) ($left['index'] ?? 0)) <=> ((int) ($right['index'] ?? 0));
+        if ($index !== 0) {
+            return $index;
+        }
+        return strcmp((string) ($left['key'] ?? ''), (string) ($right['key'] ?? ''));
+    }
+
+    /**
+     * Reserve semantic endpoint coverage before score-ranked cap fill.
+     *
+     * @param list<array<mixed>> $winners
+     * @return array{0:list<array<mixed>>,1:list<array<mixed>>} kept, overflow
+     */
+    private static function applyPatternCap(array $winners): array
+    {
+        if (count($winners) <= self::PATTERN_CAP) {
+            return [$winners, []];
+        }
+
+        $ranked = $winners;
+        usort($ranked, [self::class, 'compareCapWinners']);
+        $keptByKey = [];
+
+        foreach ([['hero'], ['cta', 'closing']] as $reservedLabels) {
+            $matches = array_values(array_filter(
+                $winners,
+                static fn (array $winner): bool => in_array($winner['label'] ?? null, $reservedLabels, true),
+            ));
+            if ($matches === []) {
+                continue;
+            }
+            usort($matches, [self::class, 'compareGlobalWinners']);
+            $reserved = $matches[0];
+            $keptByKey[(string) $reserved['key']] = $reserved;
+        }
+
+        foreach ($ranked as $winner) {
+            if (count($keptByKey) >= self::PATTERN_CAP) {
+                break;
+            }
+            $key = (string) $winner['key'];
+            if (!isset($keptByKey[$key])) {
+                $keptByKey[$key] = $winner;
+            }
+        }
+
+        $overflow = array_values(array_filter(
+            $ranked,
+            static fn (array $winner): bool => !isset($keptByKey[(string) $winner['key']]),
+        ));
+        return [array_values($keptByKey), $overflow];
+    }
+
+    /** @param array<mixed> $left @param array<mixed> $right */
+    private static function compareCapWinners(array $left, array $right): int
+    {
+        $score = ((int) ($right['score']['total'] ?? 0)) <=> ((int) ($left['score']['total'] ?? 0));
+        return $score !== 0
+            ? $score
+            : strcmp((string) ($left['key'] ?? ''), (string) ($right['key'] ?? ''));
+    }
+
+    /** @param array<mixed> $winner */
+    private function patternFile(Project $project, array $winner, bool $starter = false): string
+    {
+        $label = $starter ? 'page' : ($winner['label'] ?? null);
+        $shape = $starter ? 'starter' : (string) $winner['shape'];
+        $title = $starter ? 'Page starter' : self::patternTitle($label, $shape);
+        $slug = $starter ? 'page-starter' : (string) $winner['key'];
+        $categories = $starter
+            ? [$project->slug() . '-sections']
+            : $this->categories($project, is_string($label) ? $label : null);
+        $description = $starter
+            ? 'A complete page starter layout.'
+            : self::patternDescription(is_string($label) ? $label : null, $shape);
+        $keywords = $starter
+            ? 'page, starter'
+            : implode(', ', array_values(array_filter([is_string($label) ? $label : null, $shape])));
+        $extra = $starter ? " * Template Types: page\n * Inserter: no\n" : '';
+
+        return "<?php\n/**\n"
+            . " * Title: {$title}\n"
+            . " * Slug: {$project->slug()}/{$slug}\n"
+            . ' * Categories: ' . implode(', ', $categories) . "\n"
+            . " * Description: {$description}\n"
+            . " * Keywords: {$keywords}\n"
+            . $extra
+            . " * Viewport Width: 1400\n"
+            . " */\n?>\n"
+            . (string) $winner['delivered_markup']
+            . "\n";
+    }
+
+    /** @param array<mixed> $winner @return array<string,mixed> */
+    private function manifestPattern(Project $project, array $winner): array
+    {
+        $label = is_string($winner['label']) ? $winner['label'] : null;
+        return [
+            'slug' => $winner['key'],
+            'label' => $label,
+            'shape' => $winner['shape'],
+            'title' => self::patternTitle($label, (string) $winner['shape']),
+            'categories' => $this->categories($project, $label),
+            'source' => [
+                'page' => $winner['page'],
+                'section' => $winner['section'],
+                'index' => $winner['index'],
+            ],
+            'score' => $winner['score'],
+            'contains' => $winner['contains'],
+            'alternates' => $winner['alternates'],
+        ];
+    }
+
+    /** @return list<string> */
+    private function categories(Project $project, ?string $label): array
+    {
+        $categories = [$project->slug() . '-sections'];
+        if ($label !== null && isset(self::CORE_CATEGORIES[$label])) {
+            $categories[] = self::CORE_CATEGORIES[$label];
+        }
+        return $categories;
+    }
+
+    private static function patternTitle(?string $label, string $shape): string
+    {
+        $shapeTitle = self::displayName($shape);
+        return $label === null
+            ? ucfirst($shapeTitle) . ' section'
+            : self::displayName($label) . ', ' . $shapeTitle;
+    }
+
+    private static function patternDescription(?string $label, string $shape): string
+    {
+        return $label === null
+            ? 'A ' . self::displayName($shape) . ' section layout.'
+            : 'A ' . strtolower(self::displayName($label)) . ' section, '
+                . strtolower(self::displayName($shape)) . ' layout.';
+    }
+
+    private static function displayName(string $value): string
+    {
+        return match ($value) {
+            'cta' => 'Call to action',
+            'faq' => 'FAQ',
+            'grid' => 'Card grid',
+            default => ucfirst(str_replace('-', ' ', $value)),
+        };
+    }
+
+    /**
+     * @param list<array<mixed>> $winners
+     * @param list<string> $warnings
+     * @param list<string> $log
+     * @return array{slug:string,sections:list<string>}|null
+     */
+    private function writeStarter(Project $project, array $winners, array &$warnings, array &$log): ?array
+    {
+        $byRole = [SectionRole::HERO => [], SectionRole::CONTENT => [], SectionRole::CLOSING => []];
+        foreach ($winners as $winner) {
+            $role = $winner['role'] ?? null;
+            if (is_string($role) && isset($byRole[$role])) {
+                $byRole[$role][] = $winner;
+            }
+        }
+        foreach ($byRole as &$roleWinners) {
+            usort($roleWinners, [self::class, 'compareSourceOrder']);
+        }
+        unset($roleWinners);
+
+        if ($byRole[SectionRole::HERO] === []) {
+            $warnings[] = 'theme/patterns/page-starter.php: authored starter has no eligible hero winner; '
+                . 'delivered removed; disposition: starter omitted';
+            $log[] = 'drop page-starter: no hero winner';
+            return null;
+        }
+
+        $sections = [$byRole[SectionRole::HERO][0]];
+        array_push($sections, ...array_slice($byRole[SectionRole::CONTENT], 0, 3));
+        if ($byRole[SectionRole::CLOSING] !== []) {
+            $sections[] = $byRole[SectionRole::CLOSING][0];
+        }
+
+        if (array_filter($sections, static fn (array $section): bool => $section['background'] !== null) !== []) {
+            $sections = self::alternateBackgrounds($sections);
+        }
+        $markup = implode("\n", array_map(
+            static fn (array $winner): string => (string) $winner['delivered_markup'],
+            $sections,
+        ));
+        $starterWinner = [
+            'key' => 'page-starter',
+            'label' => 'page',
+            'shape' => 'starter',
+            'delivered_markup' => $markup,
+        ];
+        $project->writeText(
+            'theme/patterns/page-starter.php',
+            $this->patternFile($project, $starterWinner, true),
+        );
+        $slugs = array_values(array_map(static fn (array $winner): string => $winner['key'], $sections));
+        $log[] = 'winner page-starter: ' . implode(', ', $slugs);
+        return ['slug' => 'page-starter', 'sections' => $slugs];
+    }
+
+    /** @param array<mixed> $left @param array<mixed> $right */
+    private static function compareSourceOrder(array $left, array $right): int
+    {
+        $menu = ((int) ($left['menu_order'] ?? 0)) <=> ((int) ($right['menu_order'] ?? 0));
+        if ($menu !== 0) {
+            return $menu;
+        }
+        $index = ((int) ($left['index'] ?? 0)) <=> ((int) ($right['index'] ?? 0));
+        if ($index !== 0) {
+            return $index;
+        }
+        return strcmp((string) ($left['key'] ?? ''), (string) ($right['key'] ?? ''));
+    }
+
+    /** @param list<array<mixed>> $sections @return list<array<mixed>> */
+    private static function alternateBackgrounds(array $sections): array
+    {
+        if (count($sections) < 3) {
+            return $sections;
+        }
+
+        $hero = $sections[0];
+        $closing = ($sections[count($sections) - 1]['role'] ?? null) === SectionRole::CLOSING
+            ? $sections[count($sections) - 1]
+            : null;
+        $contentEnd = $closing === null ? count($sections) : count($sections) - 1;
+        $content = array_slice($sections, 1, $contentEnd - 1);
+        if ($content === []) {
+            return $sections;
+        }
+
+        $best = $content;
+        $bestConflicts = PHP_INT_MAX;
+        foreach (self::permutations($content) as $permutation) {
+            $candidate = [$hero, ...$permutation];
+            if ($closing !== null) {
+                $candidate[] = $closing;
+            }
+            $conflicts = self::backgroundConflicts($candidate);
+            if ($conflicts < $bestConflicts) {
+                $best = $permutation;
+                $bestConflicts = $conflicts;
+            }
+        }
+
+        $ordered = [$hero, ...$best];
+        if ($closing !== null) {
+            $ordered[] = $closing;
+        }
+        return $ordered;
+    }
+
+    /** @param list<array<mixed>> $items @return list<list<array<mixed>>> */
+    private static function permutations(array $items): array
+    {
+        if (count($items) < 2) {
+            return [$items];
+        }
+        $out = [];
+        foreach ($items as $index => $item) {
+            $remaining = $items;
+            array_splice($remaining, $index, 1);
+            foreach (self::permutations($remaining) as $tail) {
+                $out[] = [$item, ...$tail];
+            }
+        }
+        return $out;
+    }
+
+    /** @param list<array<mixed>> $sections */
+    private static function backgroundConflicts(array $sections): int
+    {
+        $conflicts = 0;
+        for ($index = 1, $count = count($sections); $index < $count; $index++) {
+            $previous = $sections[$index - 1]['background'] ?? null;
+            $current = $sections[$index]['background'] ?? null;
+            if ($previous !== null && $previous === $current) {
+                $conflicts++;
+            }
+        }
+        return $conflicts;
+    }
+
+    /** @return array{headings:int,media:int,actions:int,items:int} */
+    private static function contains(string $markup): array
+    {
+        $doc = BlockMarkup::parse($markup);
+        $headings = 0;
+        $media = 0;
+        $actions = 0;
+        $columns = 0;
+        $listItems = 0;
+        foreach ($doc->indices() as $index) {
+            $name = $doc->name($index);
+            $name = str_starts_with($name, 'core/') ? substr($name, 5) : $name;
+            if ($name === 'heading') {
+                $headings++;
+            }
+            if (in_array($name, ['image', 'gallery', 'cover', 'video', 'audio', 'media-text'], true)) {
+                $media++;
+            }
+            if (in_array($name, ['button', 'navigation-link'], true)) {
+                $actions++;
+            }
+            if ($name === 'column') {
+                $columns++;
+            }
+            if ($name === 'list-item') {
+                $listItems++;
+            }
+        }
+        if ($actions === 0) {
+            $actions = preg_match_all('/<a\b[^>]*\bhref\s*=/i', $markup);
+        }
+        return [
+            'headings' => $headings,
+            'media' => $media,
+            'actions' => $actions,
+            'items' => max($columns, $listItems),
+        ];
+    }
+
+    /** @param array<string,true> $routes @param array<string,true> $anchors */
+    private static function targetResolves(string $target, array $routes, array $anchors): bool
+    {
+        if ($target === '' || $target === '#') {
+            return true;
+        }
+        if (str_starts_with($target, '#')) {
+            return isset($anchors[rawurldecode(substr($target, 1))]);
+        }
+        if (
+            str_starts_with($target, '//')
+            || preg_match('/^[a-z][a-z0-9+.-]*:/i', $target) === 1
+            || str_starts_with($target, 'theme:./assets/')
+            || LinkTargets::isThemeAssetPath($target)
+        ) {
+            return true;
+        }
+        if (isset($routes[$target])) {
+            return true;
+        }
+        $path = parse_url($target, PHP_URL_PATH);
+        return is_string($path) && isset($routes[$path]);
+    }
+
+    private static function background(string $markup): ?string
+    {
+        $doc = BlockMarkup::parse($markup);
+        $root = $doc->topLevel();
+        if ($root === null) {
+            return null;
+        }
+        $attrs = $doc->attrs($root) ?? [];
+        $background = $attrs['backgroundColor'] ?? ($attrs['style']['color']['background'] ?? null);
+        return is_string($background) && $background !== '' ? $background : null;
+    }
+}

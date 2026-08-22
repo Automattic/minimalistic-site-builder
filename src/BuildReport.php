@@ -5,10 +5,10 @@ namespace Automattic\SiteBuild;
 
 /**
  * Accumulates the per-step accounting of a build (wall time, token spend and
- * the configured model(s) attributable to that spend) plus the image-generation
- * tally, and renders it two ways: the run overview printed on the console AND
- * written to projects/<slug>/logs/project.log (render), and the machine-readable
- * projects/<slug>/build-stats.json (stats).
+ * the configured model(s) attributable to that spend) plus image-generation and
+ * reusable-pattern tallies, and renders it two ways: the run overview printed on
+ * the console AND written to projects/<slug>/logs/project.log (render), and the
+ * machine-readable projects/<slug>/build-stats.json (stats).
  *
  * It is a passive ledger: bin/build.php feeds it the LLM client's cumulative
  * token totals after each step, and it attributes the delta to the step that
@@ -43,6 +43,10 @@ final class BuildReport
     private int $imagesGenerated = 0;
     private int $imagesFailed = 0;
     private int $imagesTotal = 0;
+
+    private bool $hasPatterns = false;
+    private int $patternsWritten = 0;
+    private int $patternsDropped = 0;
 
     private int $requests = 0;
 
@@ -109,6 +113,14 @@ final class BuildReport
         $this->imagesGenerated = $generated;
         $this->imagesFailed = $failed;
         $this->imagesTotal = $total;
+    }
+
+    /** Record the reusable-pattern tally (only when patterns.json exists). */
+    public function setPatterns(int $written, int $dropped): void
+    {
+        $this->hasPatterns = true;
+        $this->patternsWritten = $written;
+        $this->patternsDropped = $dropped;
     }
 
     /**
@@ -293,9 +305,22 @@ final class BuildReport
         );
     }
 
+    /** The patterns summary line, or null when no pattern manifest exists. Pure. */
+    public function patternsLine(): ?string
+    {
+        if (!$this->hasPatterns) {
+            return null;
+        }
+        return sprintf(
+            'Patterns: %d written, %d dropped',
+            $this->patternsWritten,
+            $this->patternsDropped
+        );
+    }
+
     /**
      * Render the full project.log document: header, the per-step table, totals,
-     * and the image/request summary. Pure — unit-testable.
+     * and the image/pattern/request summary. Pure — unit-testable.
      */
     public function render(): string
     {
@@ -326,6 +351,9 @@ final class BuildReport
         $lines[] = 'LLM requests : ' . $this->requests;
         if (($img = $this->imagesLine()) !== null) {
             $lines[] = $img;
+        }
+        if (($patterns = $this->patternsLine()) !== null) {
+            $lines[] = $patterns;
         }
         if (($warnings = $this->warningsLine()) !== null) {
             $lines[] = $warnings;

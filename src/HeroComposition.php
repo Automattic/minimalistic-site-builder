@@ -505,7 +505,7 @@ final class HeroComposition
         // BIGR-775 advisory headline-punctuation check: an em/en dash joins
         // two thoughts the H1 should not carry together (audited: atlas7).
         if (preg_match('~<h1\b[^>]*>(.*?)</h1>~is', $markup, $h1Match) === 1) {
-            $headline = html_entity_decode(strip_tags($h1Match[1]), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $headline = PlainText::fromMarkup($h1Match[1]);
             if (preg_match('/[\x{2013}\x{2014}]/u', $headline) === 1) {
                 $warnings[] = self::markupWarning(
                     $part,

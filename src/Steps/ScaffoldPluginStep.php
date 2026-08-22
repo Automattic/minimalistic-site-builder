@@ -3,6 +3,10 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\BlocksEngine\PhpTransformer\HtmlToBlocks\AuthoredInputBlockGenerator;
+use Automattic\BlocksEngine\PhpTransformer\HtmlToBlocks\AuthoredSelectBlockGenerator;
+use Automattic\BlocksEngine\PhpTransformer\HtmlToBlocks\AuthorLayoutBlockGenerator;
+use Automattic\BlocksEngine\PhpTransformer\HtmlToBlocks\DescriptionListBlockGenerator;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
@@ -13,7 +17,8 @@ use Automattic\SiteBuild\StepDeclaration;
  * Input:  none
  * Output: plugin/site-content.php — the complete, static plugin code with
  *         {{placeholders}} that ApplyIdentityStep fills once the site
- *         name/slug are known.
+ *         name/slug are known; plugin/blocks/* — generator-owned metadata and
+ *         assets for the fixed companion blocks emitted by the transformer.
  *
  * The plugin is identical for every site (only its header identity varies):
  * on activation it imports the bundled content images (plugin/images/, listed
@@ -48,7 +53,7 @@ final class ScaffoldPluginStep implements Step
             id: $this->id(),
             label: $this->label(),
             reads: [],
-            writes: [self::MAIN_FILE],
+            writes: [self::MAIN_FILE, 'plugin/blocks/*'],
             concurrent: false,
         );
     }
@@ -56,6 +61,21 @@ final class ScaffoldPluginStep implements Step
     public function run(Project $project): void
     {
         $project->writeText(self::MAIN_FILE, self::PLUGIN_PHP);
+
+        $generators = [
+            new AuthoredInputBlockGenerator(),
+            new AuthoredSelectBlockGenerator(),
+            new AuthorLayoutBlockGenerator(),
+            new DescriptionListBlockGenerator(),
+        ];
+        foreach ($generators as $generator) {
+            $definition = $generator->definition();
+            $directory = 'plugin/blocks/' . $definition['name'];
+            $project->writeJson($directory . '/block.json', $definition['block_json']);
+            foreach ($definition['assets'] as $filename => $contents) {
+                $project->writeText($directory . '/' . $filename, $contents);
+            }
+        }
     }
 
     private const PLUGIN_PHP = <<<'PHP'
@@ -79,6 +99,27 @@ final class ScaffoldPluginStep implements Step
 
         register_activation_hook(__FILE__, '{{FN_PREFIX}}_content_activate');
         register_deactivation_hook(__FILE__, '{{FN_PREFIX}}_content_deactivate');
+        add_action('init', '{{FN_PREFIX}}_content_register_companion_blocks');
+
+        /** Register the fixed companion blocks emitted by the transformer. */
+        function {{FN_PREFIX}}_content_register_companion_blocks() {
+            if (!function_exists('register_block_type') || !class_exists('WP_Block_Type_Registry')) {
+                return;
+            }
+
+            $registry = WP_Block_Type_Registry::get_instance();
+            $blocks = array(
+                'blocks-engine/authored-input'    => __DIR__ . '/blocks/authored-input',
+                'blocks-engine/authored-select'   => __DIR__ . '/blocks/authored-select',
+                'blocks-engine/author-layout'     => __DIR__ . '/blocks/author-layout',
+                'blocks-engine/description-list'  => __DIR__ . '/blocks/description-list',
+            );
+            foreach ($blocks as $name => $directory) {
+                if (!$registry->is_registered($name)) {
+                    register_block_type($directory);
+                }
+            }
+        }
 
         /**
          * Create every page listed in pages.json from its pages/<slug>.html

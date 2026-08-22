@@ -479,7 +479,7 @@ final class HeaderNav
 
     private static function visibleLabel(string $html): string
     {
-        $text = html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $text = PlainText::fromMarkup($html);
         $collapsed = preg_replace('/\s+/u', ' ', trim($text));
         return $collapsed ?? trim($text);
     }
@@ -532,7 +532,7 @@ final class HeaderNav
 
     private static function normalizedLabel(string $label): string
     {
-        $decoded = html_entity_decode(strip_tags($label), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $decoded = PlainText::fromMarkup($label);
         $words = preg_replace('/[^\p{L}\p{N}]+/u', ' ', trim($decoded));
         $collapsed = preg_replace('/\s+/u', ' ', trim($words ?? $decoded));
         return mb_strtolower($collapsed ?? trim($decoded), 'UTF-8');
