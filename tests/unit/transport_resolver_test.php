@@ -300,17 +300,62 @@ test('billing C3: mixed Claude and Codex fingerprints refuse as ambiguous', func
     assert_contains('SITE_BUILD_LLM', $e->getMessage());
 });
 
-test('billing review: Claude fingerprint refuses conflicting Codex ancestry', function (): void {
-    $e = assert_throws(fn () => TransportResolver::decide(
+test('billing N7: Codex ancestry overrides an inherited Claude fingerprint', function (): void {
+    $c = TransportResolver::decide(
         ['CLAUDECODE' => '1'],
         tr_on_path('claude', 'codex'),
         static fn (): array => ['php', 'codex', 'zsh'],
+    );
+    assert_eq(TransportChoice::KIND_CODEX_CLI, $c->kind);
+    assert_eq('process ancestry found codex (inherited CLAUDECODE=1 ignored)', $c->reason);
+});
+
+test('billing N7: mixed-case Claude ancestry overrides an inherited Codex marker', function (): void {
+    $c = TransportResolver::decide(
+        ['CODEX_THREAD_ID' => 'inherited'],
+        tr_on_path('claude', 'codex'),
+        static fn (): array => ['php', 'Claude', 'zsh'],
+    );
+    assert_eq(TransportChoice::KIND_CLAUDE_CLI, $c->kind);
+    assert_eq('process ancestry found Claude (inherited CODEX_THREAD_ID present ignored)', $c->reason);
+});
+
+test('billing N7: one ancestry kind breaks a multiple-fingerprint tie', function (): void {
+    $c = TransportResolver::decide(
+        ['CLAUDECODE' => '1', 'CODEX_THREAD_ID' => 'inherited'],
+        tr_on_path('claude', 'codex', 'grok'),
+        static fn (): array => ['php', 'grok', 'zsh'],
+    );
+    assert_eq(TransportChoice::KIND_GROK_CLI, $c->kind);
+    assert_eq(
+        'process ancestry found grok (inherited CLAUDECODE=1 ignored; '
+        . 'inherited CODEX_THREAD_ID present ignored)',
+        $c->reason,
+    );
+});
+
+test('billing N7: two ancestry kinds remain ambiguous despite a fingerprint', function (): void {
+    $e = assert_throws(fn () => TransportResolver::decide(
+        ['CLAUDECODE' => '1'],
+        tr_on_path('claude', 'codex', 'grok'),
+        static fn (): array => ['php', 'codex', 'grok', 'zsh'],
     ));
     assert_true($e instanceof TransportUnavailable);
     assert_contains('Ambiguous transport', $e->getMessage());
-    assert_contains('claude', $e->getMessage());
     assert_contains('codex', $e->getMessage());
-    assert_contains('process ancestry', $e->getMessage());
+    assert_contains('grok', $e->getMessage());
+    assert_contains('process ancestry identifies multiple harnesses', $e->getMessage());
+});
+
+test('billing N7: same-kind ancestry remains the winning reason', function (): void {
+    $c = TransportResolver::decide(
+        ['CLAUDECODE' => '1'],
+        tr_on_path('claude'),
+        static fn (): array => ['php', 'Claude', 'zsh'],
+    );
+    assert_eq(TransportChoice::KIND_CLAUDE_CLI, $c->kind);
+    assert_eq('process ancestry found Claude', $c->reason);
+    assert_true(!str_contains($c->reason, 'ignored'));
 });
 
 test('billing C4: OpenCode fingerprint refuses instead of spending the Claude subscription', function (): void {

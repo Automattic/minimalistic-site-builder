@@ -307,7 +307,7 @@ final class TransportResolver
         return null;
     }
 
-    /** Rung 3 — exact-value fingerprints; multiple distinct harnesses are ambiguous. */
+    /** Rung 3 — exact-value fingerprints; live ancestry wins inherited supported signals. */
     private static function rungFingerprint(
         array $env,
         callable $onPath,
@@ -341,11 +341,35 @@ final class TransportResolver
             }
         }
         if ($matches !== []) {
+            $ancestryMatches = [];
             foreach ($ancestry() as $name) {
                 $kind = self::HARNESSES[strtolower(trim($name))] ?? null;
-                if ($kind !== null && !isset($matches[$kind])) {
-                    $matches[$kind][] = "process ancestry found '{$name}'";
+                if ($kind !== null && !isset($ancestryMatches[$kind])) {
+                    $ancestryMatches[$kind] = $name;
                 }
+            }
+            if (count($ancestryMatches) > 1) {
+                $names = array_map(
+                    static fn (string $kind): string => self::BINARY_FOR[$kind],
+                    array_keys($ancestryMatches),
+                );
+                throw self::ambiguousTransport($names, 'process ancestry identifies multiple harnesses');
+            }
+            if ($ancestryMatches !== []) {
+                $kind = array_key_first($ancestryMatches);
+                $name = $ancestryMatches[$kind];
+                $ignored = [];
+                foreach ($matches as $fingerprintKind => $signals) {
+                    if ($fingerprintKind === $kind) {
+                        continue;
+                    }
+                    foreach ($signals as $signal) {
+                        $ignored[] = "inherited {$signal} ignored";
+                    }
+                }
+                $reason = "process ancestry found {$name}"
+                    . ($ignored === [] ? '' : ' (' . implode('; ', $ignored) . ')');
+                return self::harnessChoice($kind, $reason, $onPath);
             }
         }
         if (count($matches) > 1) {
@@ -355,7 +379,7 @@ final class TransportResolver
             );
             throw self::ambiguousTransport(
                 $names,
-                'environment fingerprints and process ancestry identify multiple harnesses',
+                'environment fingerprints identify multiple harnesses',
             );
         }
         if ($matches === []) {
