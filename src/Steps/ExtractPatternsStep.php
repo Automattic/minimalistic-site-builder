@@ -530,30 +530,122 @@ final class ExtractPatternsStep implements Step
             return [];
         }
 
-        $registered = [];
         $plugin = $project->readText(ScaffoldPluginStep::MAIN_FILE);
-        if (!preg_match_all(
-            "/^[ \\t]*'([a-z0-9][a-z0-9_-]*\\/[a-z0-9][a-z0-9_-]*)'[ \\t]*=>[ \\t]*"
-                . "__DIR__[ \\t]*\\.[ \\t]*'\\/blocks\\/([a-z0-9][a-z0-9_-]*)',[ \\t]*$/mi",
-            $plugin,
-            $matches,
-            PREG_SET_ORDER,
-        )) {
+        $registrationRows = self::registrationRows($plugin);
+        if ($registrationRows === []) {
             return [];
         }
-        foreach ($matches as $match) {
-            $name = $match[1];
-            $directory = $match[2];
+
+        $registered = [];
+        foreach ($registrationRows as $name => $directory) {
             $relative = "plugin/blocks/{$directory}/block.json";
             if (!$project->exists($relative)) {
                 continue;
             }
-            $definition = $project->readJson($relative);
+            try {
+                $definition = $project->readJson($relative);
+            } catch (\Throwable) {
+                return [];
+            }
             if (($definition['name'] ?? null) === $name) {
                 $registered[$name] = true;
             }
         }
         return $registered;
+    }
+
+    /**
+     * Parse the one registration array from executable PHP tokens. Comment,
+     * docblock, quoted-string, heredoc and nowdoc contents stay opaque tokens,
+     * so row-shaped text in them cannot grant block eligibility.
+     *
+     * @return array<string,string> registered block name => metadata directory
+     */
+    private static function registrationRows(string $plugin): array
+    {
+        $tokens = array_values(array_filter(
+            token_get_all($plugin),
+            static fn (array|string $token): bool => !is_array($token)
+                || !in_array($token[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true),
+        ));
+
+        $assignments = [];
+        $count = count($tokens);
+        for ($index = 0; $index < $count; $index++) {
+            if (!self::tokenIs($tokens[$index], T_VARIABLE, '$blocks')) {
+                continue;
+            }
+            if (($tokens[$index + 1] ?? null) !== '=') {
+                continue;
+            }
+            $assignments[] = $index;
+        }
+        if (count($assignments) !== 1) {
+            return [];
+        }
+
+        $index = $assignments[0] + 2;
+        if (!self::tokenIs($tokens[$index] ?? null, T_ARRAY) || ($tokens[$index + 1] ?? null) !== '(') {
+            return [];
+        }
+        $index += 2;
+        $rows = [];
+        $directories = [];
+        while (($tokens[$index] ?? null) !== ')') {
+            $name = self::constantStringValue($tokens[$index] ?? null);
+            if (
+                $name === null
+                || preg_match('/^[a-z0-9][a-z0-9_-]*\/[a-z0-9][a-z0-9_-]*$/', $name) !== 1
+                || !self::tokenIs($tokens[$index + 1] ?? null, T_DOUBLE_ARROW)
+                || !self::tokenIs($tokens[$index + 2] ?? null, T_DIR)
+                || ($tokens[$index + 3] ?? null) !== '.'
+            ) {
+                return [];
+            }
+            $path = self::constantStringValue($tokens[$index + 4] ?? null);
+            if (
+                $path === null
+                || preg_match('#^/blocks/([a-z0-9][a-z0-9_-]*)$#', $path, $pathMatch) !== 1
+                || ($tokens[$index + 5] ?? null) !== ','
+            ) {
+                return [];
+            }
+            $directory = $pathMatch[1];
+            if (isset($rows[$name]) || isset($directories[$directory])) {
+                return [];
+            }
+            $rows[$name] = $directory;
+            $directories[$directory] = true;
+            $index += 6;
+        }
+
+        if ($rows === [] || ($tokens[$index + 1] ?? null) !== ';') {
+            return [];
+        }
+        return $rows;
+    }
+
+    private static function tokenIs(array|string|null $token, int $kind, ?string $text = null): bool
+    {
+        return is_array($token)
+            && $token[0] === $kind
+            && ($text === null || $token[1] === $text);
+    }
+
+    private static function constantStringValue(array|string|null $token): ?string
+    {
+        if (!self::tokenIs($token, T_CONSTANT_ENCAPSED_STRING)) {
+            return null;
+        }
+        $source = $token[1];
+        $quote = $source[0] ?? '';
+        if (($quote !== "'" && $quote !== '"') || substr($source, -1) !== $quote) {
+            return null;
+        }
+        $value = substr($source, 1, -1);
+        // Names and registration paths use a deliberately closed ASCII domain;
+        // escapes would make source identity ambiguous, so fail closed.
+        return str_contains($value, '\\') ? null : $value;
     }
 
     /**
