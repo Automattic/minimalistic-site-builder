@@ -575,7 +575,7 @@ test('billing N1: API build with an injected factory refuses a providerless manu
     $code = 'require ' . var_export($bootstrap, true) . '; '
         . '$c = new \\Automattic\\SiteBuild\\TransportChoice('
         . '\\Automattic\\SiteBuild\\TransportChoice::KIND_API, "manual"); '
-        . 'try { \\Automattic\\SiteBuild\\TransportResolver::build($c, static fn (): '
+        . 'try { \\Automattic\\SiteBuild\\TransportResolver::build($c, static fn (string $provider): '
         . '\\Automattic\\SiteBuild\\Llm => \\make_llm()); echo "NO_ERROR"; } '
         . 'catch (Throwable $e) { echo get_class($e) . " | " . $e->getMessage(); }';
     [$output, $status] = tr_php($code);
@@ -595,51 +595,50 @@ test('billing C5c: API build without provider key throws instead of exiting', fu
         . '$p = $r->getProperty("vars"); $p->setValue(null, []); '
         . '$c = new \\Automattic\\SiteBuild\\TransportChoice('
         . '\\Automattic\\SiteBuild\\TransportChoice::KIND_API, "explicit", null, "anthropic"); '
-        . 'try { \\Automattic\\SiteBuild\\TransportResolver::build($c, static function (): '
+        . 'try { \\Automattic\\SiteBuild\\TransportResolver::build($c, static function (string $provider): '
         . '\\Automattic\\SiteBuild\\Llm { throw new \\Automattic\\SiteBuild\\TransportUnavailable('
-        . '"ANTHROPIC_API_KEY is unavailable to the injected API factory."); }); echo "NO_ERROR"; } '
+        . '"{$provider} credentials are unavailable to the injected API factory."); }); echo "NO_ERROR"; } '
         . 'catch (Throwable $e) { echo get_class($e) . " | " . $e->getMessage(); }';
     [$output, $status] = tr_php($code);
     assert_eq(0, $status);
     assert_contains(TransportUnavailable::class, $output);
-    assert_contains('ANTHROPIC_API_KEY', $output);
+    assert_contains('anthropic credentials are unavailable to the injected API factory', $output);
     assert_true(!str_contains($output, 'Missing required env var'));
     assert_true(!str_contains($output, 'NO_ERROR'));
 });
 
-test('billing M4: API build canonicalizes grok so downstream model lookup succeeds', function (): void {
-    $bootstrap = dirname(__DIR__, 2) . '/src/bootstrap.php';
-    $code = 'require ' . var_export($bootstrap, true) . '; '
-        . 'putenv("LLM_PROVIDER=grok"); putenv("XAI_API_KEY=test-only-key"); '
-        . '$r = new ReflectionClass(\\Automattic\\SiteBuild\\Env::class); '
-        . '$p = $r->getProperty("vars"); $p->setValue(null, []); '
+test('billing M4: API build passes the canonical grok provider to its factory', function (): void {
+    $root = dirname(__DIR__, 2);
+    $code = 'require ' . var_export($root . '/autoload.php', true) . '; '
+        . 'require ' . var_export($root . '/tests/FakeLlm.php', true) . '; '
         . '$c = \\Automattic\\SiteBuild\\TransportResolver::decide('
         . '["LLM_PROVIDER" => "grok", "XAI_API_KEY" => "test-only-key"], '
         . 'static fn (string $name): ?string => null, static fn (): array => []); '
-        . 'try { $llm = \\Automattic\\SiteBuild\\TransportResolver::build($c, static fn (): '
-        . '\\Automattic\\SiteBuild\\Llm => \\make_llm()); '
-        . 'echo get_class($llm) . " | " . getenv("LLM_PROVIDER"); } '
+        . '$fake = new \\Automattic\\SiteBuild\\Tests\\FakeLlm(); $factoryProvider = null; '
+        . 'try { $llm = \\Automattic\\SiteBuild\\TransportResolver::build($c, '
+        . 'static function (string $provider) use ($fake, &$factoryProvider): '
+        . '\\Automattic\\SiteBuild\\Llm { $factoryProvider = $provider; return $fake; }); '
+        . 'echo get_class($llm) . " | " . $factoryProvider; } '
         . 'catch (Throwable $e) { echo "ERROR | " . get_class($e) . " | " . $e->getMessage(); }';
     [$output, $status] = tr_php($code);
     assert_eq(0, $status, $output);
-    assert_contains('OpenAiCompatibleClient | grok', $output);
+    assert_contains('FakeLlm | xai', $output);
     assert_true(!str_contains($output, 'ERROR'));
 });
 
-test('billing N1: audit provider matches the provider used by the constructed client', function (): void {
-    $bootstrap = dirname(__DIR__, 2) . '/src/bootstrap.php';
-    $code = 'require ' . var_export($bootstrap, true) . '; '
-        . 'putenv("LLM_PROVIDER=anthropic"); putenv("OPEN_ROUTER_API_KEY=test-only-key"); '
-        . '$r = new ReflectionClass(\\Automattic\\SiteBuild\\Env::class); '
-        . '$p = $r->getProperty("vars"); $p->setValue(null, []); '
+test('billing N1: audit provider matches the provider passed to the factory', function (): void {
+    $root = dirname(__DIR__, 2);
+    $code = 'require ' . var_export($root . '/autoload.php', true) . '; '
+        . 'require ' . var_export($root . '/tests/FakeLlm.php', true) . '; '
         . '$c = \\Automattic\\SiteBuild\\TransportResolver::decide('
         . '["OPEN_ROUTER_API_KEY" => "test-only-key"], '
         . 'static fn (string $name): ?string => null, static fn (): array => [], "openrouter"); '
         . '$line = \\Automattic\\SiteBuild\\TransportResolver::describe($c); '
-        . '$llm = \\Automattic\\SiteBuild\\TransportResolver::build($c, static fn (): '
-        . '\\Automattic\\SiteBuild\\Llm => \\make_llm()); '
-        . '$clientProvider = (new ReflectionClass($llm))->getProperty("provider")->getValue($llm); '
-        . 'echo $c->provider . " | " . $clientProvider . " | " . $line;';
+        . '$fake = new \\Automattic\\SiteBuild\\Tests\\FakeLlm(); $factoryProvider = null; '
+        . '$llm = \\Automattic\\SiteBuild\\TransportResolver::build($c, '
+        . 'static function (string $provider) use ($fake, &$factoryProvider): '
+        . '\\Automattic\\SiteBuild\\Llm { $factoryProvider = $provider; return $fake; }); '
+        . 'echo $c->provider . " | " . $factoryProvider . " | " . $line;';
     [$output, $status] = tr_php($code);
     assert_eq(0, $status, $output);
     assert_contains('openrouter | openrouter | Transport: api', $output);
