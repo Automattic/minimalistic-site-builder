@@ -118,6 +118,28 @@ test('normalizeLabel collapses qualifier variants and synonyms', function (): vo
     assert_eq('grid', SectionPattern::normalizeLabel('grid'), 'normalization never returns empty');
 });
 
+test('normalizeLabel picks the head noun from the END of a compound', function (): void {
+    // English compounds put the head noun last. First-token-wins gets every one
+    // of these wrong, and the -cta pair would mint duplicate CTA patterns.
+    assert_eq('hero', SectionPattern::normalizeLabel('page-hero'));      // 16x in corpus
+    assert_eq('hero', SectionPattern::normalizeLabel('cover-hero'));     //  2x
+    assert_eq('hero', SectionPattern::normalizeLabel('contact-hero'));   //  3x
+    assert_eq('cta',  SectionPattern::normalizeLabel('closing-cta'));    //  5x
+    assert_eq('cta',  SectionPattern::normalizeLabel('contact-cta'));    //  2x
+    // ...but only for known head nouns; an unknown last token keeps the first.
+    assert_eq('case', SectionPattern::normalizeLabel('case-study'));
+});
+
+test('normalizeLabel does not strip a false plural', function (): void {
+    assert_eq('process', SectionPattern::normalizeLabel('process'));     // 13x; NOT "proces"
+    assert_eq('status',  SectionPattern::normalizeLabel('status'));
+    assert_eq('analysis', SectionPattern::normalizeLabel('analysis'));
+    // real plurals still collapse
+    assert_eq('service', SectionPattern::normalizeLabel('services'));
+    assert_eq('testimonial', SectionPattern::normalizeLabel('testimonials'));
+    assert_eq('credential', SectionPattern::normalizeLabel('credentials'));
+});
+
 test('isGenericSlug rejects positional ids', function (): void {
     foreach (['section-1', 'section-12', 'div-3', 'nav-2', 'col-1', 'row'] as $slug) {
         assert_true(SectionPattern::isGenericSlug($slug), "{$slug} should be generic");
