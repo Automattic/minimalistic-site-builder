@@ -8,7 +8,7 @@ THEME TOKENS (theme.json — its presets are available as CSS custom properties)
 
 UTILITY CLASSES USED BY THE SECTIONS — write CSS for exactly these, nothing else. Each line is that class's behavior contract; implement it with values suited to the design direction:
 {{used_classes}}
-HARD RULES — the output is machine-validated and the whole appendix is rejected if any rule breaks them:
+HARD RULES — the output is machine-validated. An unscoped rule or offending declaration is dropped alone; document-level defects or any residual invalid CSS reject the whole appendix:
 - Every rule's selector MUST start with one of the class names listed above (descendant selectors like `.masonry-3 > *` are fine). No element-only, universal, `body`, `:root`, or any other selector not scoped under those classes.
 - Colors and shadows come from theme presets: `var(--wp--preset--color--<slug>)` (slugs: base, contrast, primary, secondary, accent), shadow slugs declared in theme.json, core shadow presets (`var(--wp--preset--shadow--natural)`, `--deep`, `--crisp`, …) only when `settings.shadow.defaultPresets` is not false, or `color-mix()` over those variables. NEVER write raw hex, rgb()/rgba()/hsl() color literals.
 - Do not visually hide generated content. NEVER use `opacity: 0`, `visibility: hidden`, or `display: none`; full-page screenshots and non-hover browsing must show all images and text.

@@ -454,6 +454,10 @@ final class DesignPreviewStep implements Step
             }
         }
 
+        if (self::headStyleContents($html) === null) {
+            return 'document has no inline head style';
+        }
+
         $styles = $xpath->query('/html/head/style');
         if ($styles->length !== 1 || $xpath->query('//style')->length !== 1) {
             return 'document must contain exactly one inline head style';

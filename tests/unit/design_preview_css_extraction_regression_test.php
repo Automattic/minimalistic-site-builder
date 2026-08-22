@@ -7,7 +7,7 @@ use Automattic\SiteBuild\Steps\DesignPreviewStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
 
 test('design-preview extracts byte-faithful CSS from the actual head style', function () {
-    $tmp = sys_get_temp_dir() . '/builder_design_preview_css_source_' . uniqid();
+    $tmp = sys_get_temp_dir() . '/builder_design_preview_css_source_' . getmypid() . '_' . uniqid('', true);
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A neighborhood bakery']);
     $project->writeJson('siteSpec.json', [
