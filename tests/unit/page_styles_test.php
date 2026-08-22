@@ -382,7 +382,7 @@ test('run drops offending declarations and ships the rest of the appendix', func
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('an unscoped rule is dropped, scoped rules survive, and appendix rejected warnings stay additive', function () {
+test('an unscoped rule is dropped, scoped rules survive, and the salvage summary says shipped not rejected', function () {
     [$project, $tmp] = ps_project('builder_ps_rule_salvage_');
     $project->writeText(
         'theme/parts/section-work.html',
@@ -411,7 +411,13 @@ test('an unscoped rule is dropped, scoped rules survive, and appendix rejected w
     assert_true(!str_contains($style, 'h1 { margin: 0; }'), 'unscoped media sibling is removed');
     $warnings = $project->readJson('warnings.json')['page-styles'] ?? [];
     assert_true(count($warnings) >= 2, 'summary and per-rule detail are separate warning rows');
-    assert_contains('model CSS appendix rejected', $warnings[0], 'appendix-level summary stays verbatim');
+    assert_contains('model CSS appendix', $warnings[0], 'greppable stem stays verbatim');
+    assert_contains('partially dropped', $warnings[0], 'salvage must not be reported as a rejection');
+    assert_contains('the remaining rules shipped', $warnings[0], 'summary states what actually happened');
+    assert_true(
+        !str_contains($warnings[0], 'rejected'),
+        'a shipped appendix counted as rejected corrupts every historical grep'
+    );
     $joined = implode("\n", $warnings);
     assert_contains('selector not scoped', $joined, 'detail names the rule defect');
     assert_contains('authored rule selector `body`', $joined, 'detail records the authored selector');

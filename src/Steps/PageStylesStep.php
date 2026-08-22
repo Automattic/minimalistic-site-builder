@@ -358,7 +358,7 @@ CSS;
             $documentProblems = array_values(array_filter(
                 $problems,
                 static fn (string $problem): bool => $problem === 'unbalanced braces'
-                    || str_starts_with($problem, 'more than '),
+                    || $problem === 'more than ' . self::MAX_LINES . ' lines',
             ));
             $salvaged = $css;
             $droppedRules = [];
@@ -392,12 +392,13 @@ CSS;
             );
             echo '  page-styles: dropped ' . $dropCount
                 . ' offending rule(s)/declaration(s), kept the rest — see logs/' . self::LOG_FILE . "\n";
-            // Keep this summary string: BuildReport and the design-quality
-            // loop grep for it. Actionable per-drop detail follows it.
+            // Keep the `model CSS appendix` stem: BuildReport and the
+            // design-quality loop grep for it. The verb must still differ from
+            // the rejection path above — the appendix SHIPPED here, so calling
+            // it rejected would make every grep count a salvage as a failure.
             $project->addWarnings($this->id(), [sprintf(
-                'model CSS appendix rejected (%s); layout utility class(es) %s ship without their CSS — see logs/%s',
+                'model CSS appendix partially dropped (%s); the remaining rules shipped — see logs/%s',
                 $dropCount . ' rule(s)/declaration(s) dropped',
-                implode(', ', $used),
                 self::LOG_FILE,
             )]);
             self::addDropWarnings($project, $droppedRules, $droppedDeclarations);
