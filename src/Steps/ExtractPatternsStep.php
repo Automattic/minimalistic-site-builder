@@ -11,6 +11,7 @@ use Automattic\SiteBuild\SectionPattern;
 use Automattic\SiteBuild\SectionRole;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\Warnings;
 
 /**
  * Extract reusable theme patterns from the assembled generated pages.
@@ -36,6 +37,7 @@ final class ExtractPatternsStep implements Step
         'team' => 'team',
         'portfolio' => 'portfolio',
         'hero' => 'banner',
+        'banner' => 'banner',
         'text' => 'text',
         'featured' => 'featured',
     ];
@@ -177,12 +179,17 @@ final class ExtractPatternsStep implements Step
                 }
 
                 $key = $classification['key'];
-                if (!self::isEligible($markup, $registeredBlocks)) {
+                $eligibilityFailure = self::eligibilityFailure($markup, $registeredBlocks);
+                if ($eligibilityFailure !== null) {
                     $ineligibleByKey[$key] = ($ineligibleByKey[$key] ?? 0) + 1;
-                    $warnings[] = "{$relative}: block path /{$index}, section '{$sectionSlug}'; authored markup contains "
-                        . 'raw PHP or an unregistered non-core block; delivered removed from pattern candidates; '
-                        . 'disposition: rejected unsafe or unsupported section';
-                    $log[] = "candidate {$pageSlug}/{$sectionSlug} key {$key}: ineligible";
+                    $warnings[] = "{$relative}: block path /{$index}, section '{$sectionSlug}'; authored value "
+                        . Warnings::value($eligibilityFailure['value'])
+                        . '; delivered value "removed"; disposition: rejected section because '
+                        . ($eligibilityFailure['kind'] === 'raw_php'
+                            ? 'raw PHP open tag would execute from included pattern PHP'
+                            : 'non-core block is absent from generated plugin registration list');
+                    $log[] = "candidate {$pageSlug}/{$sectionSlug} key {$key}: ineligible "
+                        . $eligibilityFailure['kind'] . ' ' . Warnings::value($eligibilityFailure['value']);
                     continue;
                 }
 
@@ -294,8 +301,17 @@ final class ExtractPatternsStep implements Step
     /** @param array<string,true> $registeredBlocks */
     public static function isEligible(string $markup, array $registeredBlocks): bool
     {
-        if (str_contains($markup, '<?')) {
-            return false;
+        return self::eligibilityFailure($markup, $registeredBlocks) === null;
+    }
+
+    /**
+     * @param array<string,true> $registeredBlocks
+     * @return array{kind:'raw_php'|'unregistered_block',value:string}|null
+     */
+    private static function eligibilityFailure(string $markup, array $registeredBlocks): ?array
+    {
+        if (preg_match('/<\?(?:=|php\b)?/i', $markup, $phpMatch) === 1) {
+            return ['kind' => 'raw_php', 'value' => $phpMatch[0]];
         }
         $doc = BlockMarkup::parse($markup);
         foreach ($doc->indices() as $index) {
@@ -308,10 +324,10 @@ final class ExtractPatternsStep implements Step
                 continue;
             }
             if (!isset($registeredBlocks[$name])) {
-                return false;
+                return ['kind' => 'unregistered_block', 'value' => $name];
             }
         }
-        return true;
+        return null;
     }
 
     public static function rewriteAssets(string $markup): string
@@ -389,6 +405,10 @@ final class ExtractPatternsStep implements Step
                 $prelude = '';
                 continue;
             }
+            if ($char === ';' && !in_array('rule', $stack, true)) {
+                $prelude = '';
+                continue;
+            }
             if (!in_array('rule', $stack, true)) {
                 $prelude .= $char;
             }
@@ -445,6 +465,14 @@ final class ExtractPatternsStep implements Step
             },
             $markup,
         ) ?? $markup;
+        $markup = preg_replace_callback(
+            '/(\bhref\s*=\s*)(?!["\'])([^\s"\'=<>`]+)/is',
+            static function (array $match) use ($outside): string {
+                $decoded = html_entity_decode(trim($match[2]), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                return isset($outside[$decoded]) ? $match[1] . '#' : $match[0];
+            },
+            $markup,
+        ) ?? $markup;
         return preg_replace_callback(
             '/("url"\s*:\s*")([^"]*)(")/i',
             static function (array $match) use ($outside): string {
@@ -495,20 +523,33 @@ final class ExtractPatternsStep implements Step
         return $out;
     }
 
-    /**
-     * Read block names from generated plugin metadata. ScaffoldPluginStep emits
-     * only metadata directories that its fixed registration list registers.
-     *
-     * @return array<string,true>
-     */
+    /** @return array<string,true> */
     private function registeredPluginBlocks(Project $project): array
     {
+        if (!$project->exists(ScaffoldPluginStep::MAIN_FILE)) {
+            return [];
+        }
+
         $registered = [];
-        foreach (glob($project->pluginPath('blocks/*/block.json')) ?: [] as $file) {
-            $relative = ltrim(substr($file, strlen($project->root)), '/');
+        $plugin = $project->readText(ScaffoldPluginStep::MAIN_FILE);
+        if (!preg_match_all(
+            "/^[ \\t]*'([a-z0-9][a-z0-9_-]*\\/[a-z0-9][a-z0-9_-]*)'[ \\t]*=>[ \\t]*"
+                . "__DIR__[ \\t]*\\.[ \\t]*'\\/blocks\\/([a-z0-9][a-z0-9_-]*)',[ \\t]*$/mi",
+            $plugin,
+            $matches,
+            PREG_SET_ORDER,
+        )) {
+            return [];
+        }
+        foreach ($matches as $match) {
+            $name = $match[1];
+            $directory = $match[2];
+            $relative = "plugin/blocks/{$directory}/block.json";
+            if (!$project->exists($relative)) {
+                continue;
+            }
             $definition = $project->readJson($relative);
-            $name = $definition['name'] ?? null;
-            if (is_string($name) && $name !== '') {
+            if (($definition['name'] ?? null) === $name) {
                 $registered[$name] = true;
             }
         }
@@ -760,26 +801,67 @@ final class ExtractPatternsStep implements Step
         if (count($sections) < 3) {
             return $sections;
         }
-        $hero = array_shift($sections);
-        $closing = array_pop($sections);
-        $ordered = [$hero];
-        while ($sections !== []) {
-            $previous = $ordered[count($ordered) - 1]['background'] ?? null;
-            $choice = 0;
-            if ($previous !== null) {
-                foreach ($sections as $index => $section) {
-                    if (($section['background'] ?? null) !== $previous) {
-                        $choice = $index;
-                        break;
-                    }
-                }
-            }
-            $ordered[] = array_splice($sections, $choice, 1)[0];
+
+        $hero = $sections[0];
+        $closing = ($sections[count($sections) - 1]['role'] ?? null) === SectionRole::CLOSING
+            ? $sections[count($sections) - 1]
+            : null;
+        $contentEnd = $closing === null ? count($sections) : count($sections) - 1;
+        $content = array_slice($sections, 1, $contentEnd - 1);
+        if ($content === []) {
+            return $sections;
         }
+
+        $best = $content;
+        $bestConflicts = PHP_INT_MAX;
+        foreach (self::permutations($content) as $permutation) {
+            $candidate = [$hero, ...$permutation];
+            if ($closing !== null) {
+                $candidate[] = $closing;
+            }
+            $conflicts = self::backgroundConflicts($candidate);
+            if ($conflicts < $bestConflicts) {
+                $best = $permutation;
+                $bestConflicts = $conflicts;
+            }
+        }
+
+        $ordered = [$hero, ...$best];
         if ($closing !== null) {
             $ordered[] = $closing;
         }
         return $ordered;
+    }
+
+    /** @param list<array<mixed>> $items @return list<list<array<mixed>>> */
+    private static function permutations(array $items): array
+    {
+        if (count($items) < 2) {
+            return [$items];
+        }
+        $out = [];
+        foreach ($items as $index => $item) {
+            $remaining = $items;
+            array_splice($remaining, $index, 1);
+            foreach (self::permutations($remaining) as $tail) {
+                $out[] = [$item, ...$tail];
+            }
+        }
+        return $out;
+    }
+
+    /** @param list<array<mixed>> $sections */
+    private static function backgroundConflicts(array $sections): int
+    {
+        $conflicts = 0;
+        for ($index = 1, $count = count($sections); $index < $count; $index++) {
+            $previous = $sections[$index - 1]['background'] ?? null;
+            $current = $sections[$index]['background'] ?? null;
+            if ($previous !== null && $previous === $current) {
+                $conflicts++;
+            }
+        }
+        return $conflicts;
     }
 
     /** @return array{headings:int,media:int,actions:int,items:int} */
