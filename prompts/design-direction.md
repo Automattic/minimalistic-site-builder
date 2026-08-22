@@ -29,7 +29,7 @@ Examples of good grades: "monochrome documentary, visible 35mm grain, charcoal m
 ## Anti-Patterns — What to Avoid
 
 Do NOT produce a direction that feels like generic AI output:
-- **Generic palettes**: Purple gradients on white, safe blue-and-gray corporate schemes, arbitrary rainbow accents
+- **Generic palettes**: an unmotivated gradient behind a headline, a mid-tone hue on white with grey supporting text and nothing else committed, arbitrary rainbow accents. This is about the TREATMENT, not the hue: no color is off-limits here. A deep aubergine ground with bone text, ink blue with brass, Klein blue as a flat field — all specific, all welcome. What reads as generic is a color chosen with nothing behind it, and reflexive warm cream is the most common version of that, not the exception to it.
 - **Generic fonts**: Inter, Roboto, Arial, Open Sans, system fonts — never mention these
 - **Topic-agnostic styles**: If you could swap the site topic and the direction still works unchanged, it's too generic
 
@@ -40,6 +40,7 @@ Do NOT produce a direction that feels like generic AI output:
 Besides the vivid narrative, the direction commits to explicit structured fields. Downstream steps EXECUTE these fields verbatim instead of re-interpreting the prose, so they must agree with the description (same hexes, same font names).
 
 - `palette`: the five named hexes the theme will ship. `base` = page background, `contrast` = body text on it (strong contrast required), `primary` = main brand color, `secondary` = supporting color, `accent` = for CTAs/interaction only; never for body text, decorative motifs, or broad fills.
+- `ground_tint`: which family the page background belongs to — one of `"warm"`, `"cool"`, `"violet"`, `"green"`, `"blush"`, `"neutral"`. The chosen concept seed already committed this: **{{ground_tint}}**. Echo that value and make `palette.base` genuinely belong to it. This is checked deterministically after you answer: a `base` outside the committed family is moved onto it at equal luminance, so a mismatch does not survive — it just means the hex you reasoned about is not the hex that ships. `base` is the largest surface on the page; it is the site's color, not a neutral stage for it. Warm off-white is one of six answers, not the safe one.
 - `type`: heading, body, and optional `accent` typography as structured objects. Each `family` MUST be a real Google Fonts family spelled exactly (e.g. "Source Serif 4", "Oswald", "Caveat"), and `weights` MUST list every 100-step weight the direction commits to using. Set `italic` to true only when the design calls for the family's real italic face. `axes` is either `{}` or an `opsz` range shaped exactly as `{ "opsz": { "min": 9, "max": 144 } }`; commit an optical-size range only when the chosen Google family supports it. Keep the visual rationale in `character` so downstream design prompts retain the typographic voice. `type.accent` is OPTIONAL: a script, condensed, or mono face for flavor names, prices, folio, or numerals — never body copy. Leave `accent.family` as `""` when the seed does not need a third face. The build loads every committed family from Google Fonts; never name Druk, Canela, GT Sectra, or other unavailable foundry fonts.
 - `image_grade`: the one-sentence photographic treatment per the Image Grade section above.
 - `motion`: how the page MOVES — one of `"calm"`, `"energetic"`, `"dramatic"`, `"minimal"`, `"none"`. The theme ships fixed, hand-tuned motion families, not one animation at different speeds: `calm` = soft fades and gentle settling; `energetic` = quick diagonal arrivals, spring overshoot, and livelier hover; `dramatic` = long directional masks, a hero focus pull, and cinematic image movement; `minimal` = hover micro-interactions only, no scroll motion; `none` = completely static. Pick the movement language that serves the concept instead of defaulting to `calm` — a contemplative portfolio may want `calm`, a kids' brand `energetic`, a theatrical launch `dramatic`, and a brutalist manifesto perhaps `none`.
@@ -69,6 +70,7 @@ Respond with ONLY a JSON object. No explanation, no commentary, no text before o
       "secondary": "#RRGGBB",
       "accent": "#RRGGBB"
     },
+    "ground_tint": "The committed ground family, echoed per the ground_tint field above.",
     "type": {
       "heading": {
         "family": "Fraunces",

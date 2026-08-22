@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\JsonBatchRecovery;
+use Automattic\SiteBuild\GroundTint;
 use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
 use Automattic\SiteBuild\Llm;
@@ -505,6 +506,167 @@ test('normalize keeps valid palette hexes, drops invalid ones, and requires a de
 
     assert_eq(null, DesignDirectionStep::normalize(['title' => 'Empty', 'description' => '   '], 'cinematic-safe-zone'));
     assert_eq(null, DesignDirectionStep::normalize('not an array', 'cinematic-safe-zone'));
+});
+
+test('format renders the ground tint as a fact, so downstream prompts can cite it', function () {
+    // theme-json.md tells the model a **Ground tint** fact may arrive. If
+    // format() never emits one, that instruction describes something that
+    // does not exist.
+    $rendered = DesignDirectionStep::format([
+        'description' => 'x',
+        'palette'     => ['base' => '#1B2233'],
+        'ground_tint' => 'cool',
+    ]);
+    assert_contains('**Ground tint**', $rendered);
+    assert_contains('cool', $rendered);
+
+    assert_true(
+        !str_contains(DesignDirectionStep::format(['description' => 'x']), 'Ground tint'),
+        'an uncommitted ground states nothing',
+    );
+});
+
+test('the seed and expansion prompts ask for the ground tint, and ban treatments not hues', function () {
+    $renderer = new PromptRenderer(repo_path('prompts'));
+
+    $seeds = $renderer->render('design-direction-seeds.md', [
+        'user_prompt' => 'a bakery', 'site_spec' => '{}', 'locked_labels' => '',
+    ]);
+    assert_contains('`tint`', $seeds, 'seeds declare which way their ground leans');
+    foreach (['warm', 'cool', 'violet', 'green', 'blush', 'neutral'] as $family) {
+        assert_contains('"' . $family . '"', $seeds, "{$family} is offered as a ground");
+    }
+
+    $direction = $renderer->render('design-direction.md', [
+        'user_prompt' => 'a bakery', 'site_spec' => '{}', 'seed' => 'Seed',
+        'hero_composition' => '', 'ground_tint' => 'violet',
+    ]);
+    assert_contains('ground_tint', $direction, 'the expansion commits the field the build enforces');
+    assert_contains('violet', $direction, 'and is told which family the seed chose');
+
+    // No hue may be forbidden outright — only the cliche treatment.
+    foreach ([$direction, $renderer->render('theme-json.md', [
+        'user_prompt' => 'a bakery', 'site_spec' => '{}', 'design_direction' => 'x',
+        'hero_sizing_context' => '',
+    ])] as $prompt) {
+        foreach (['Avoid purple-on-white', 'blue-and-gray corporate', 'generic blue-gray'] as $hueBan) {
+            assert_true(!str_contains($prompt, $hueBan), "hue ban removed: {$hueBan}");
+        }
+    }
+});
+
+test('design-direction carries the chosen seed tint into the direction it writes', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    // One seed, so the uniform pick is deterministic. It commits a cool
+    // ground; the expansion hands back the usual cream anyway.
+    $llm->queueJson(['seeds' => [
+        ['seed' => 'Ink & Brass — a deep blue reading room.', 'ground' => 'light',
+            'register' => 'editorial', 'accent' => 'cool', 'tint' => 'cool'],
+    ]]);
+    $llm->queueJson(['direction' => designdir_direction()]);
+
+    (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $written = $project->readJson('designDirection.json');
+    assert_eq('cool', $written['ground_tint'], 'the seed coordinate reaches the written direction');
+    assert_eq('cool', GroundTint::classify($written['palette']['base']), 'and the cream ground was moved onto it');
+    assert_eq('#26221E', $written['palette']['contrast'], 'siblings are untouched');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('normalize moves a base that drifted off the tint its seed committed', function () {
+    // The audited failure: a seed commits deep jewel tones and the expansion
+    // hands back a cream page anyway. Measured on real builds, nine of the
+    // nineteen beige grounds came from seeds that never named a warm neutral.
+    $repairs = [];
+    $warnings = [];
+    $direction = DesignDirectionStep::normalize(
+        [
+            'description' => 'Stark editorial layout, deep jewel tones.',
+            'palette'     => [
+                'base'     => '#F4EBDA',
+                'contrast' => '#1A1A1A',
+                'accent'   => '#B4472A',
+            ],
+        ],
+        'cinematic-safe-zone',
+        'Threshold — deep jewel tones.',
+        $repairs,
+        $warnings,
+        'cool',
+    );
+
+    assert_eq('cool', GroundTint::classify($direction['palette']['base']), 'the ground joins its committed family');
+    assert_eq('cool', $direction['ground_tint'], 'and the direction records what it committed to');
+    assert_eq('#1A1A1A', $direction['palette']['contrast'], 'only the ground moves');
+    assert_eq('#B4472A', $direction['palette']['accent']);
+    assert_contains('palette.base', $repairs[0]);
+    assert_contains('cool', $repairs[0]);
+});
+
+test('normalize leaves an earned warm ground exactly as authored', function () {
+    // A bakery whose seed committed to cream keeps its cream.
+    $repairs = [];
+    $warnings = [];
+    $direction = DesignDirectionStep::normalize(
+        ['description' => 'Flour-dusted warmth.', 'palette' => ['base' => '#F4EBDA']],
+        'cinematic-safe-zone',
+        'Hearth & Crumb — warm cream and amber.',
+        $repairs,
+        $warnings,
+        'warm',
+    );
+    assert_eq('#F4EBDA', $direction['palette']['base']);
+    assert_eq([], $repairs, 'an honored commitment is not a repair');
+});
+
+test('normalize enforces nothing when no tint was committed', function () {
+    $repairs = [];
+    $warnings = [];
+    $direction = DesignDirectionStep::normalize(
+        ['description' => 'x', 'palette' => ['base' => '#F4EBDA']],
+        'cinematic-safe-zone',
+        'A seed from a round that declared no coordinates.',
+        $repairs,
+        $warnings,
+    );
+    assert_eq('#F4EBDA', $direction['palette']['base'], 'nothing was committed, so nothing was violated');
+    assert_eq('', $direction['ground_tint']);
+    assert_eq([], $repairs);
+});
+
+test('normalize falls back to the direction own ground_tint when the seed committed none', function () {
+    // Still a real check: the model declared a family, then painted another.
+    $repairs = [];
+    $warnings = [];
+    $direction = DesignDirectionStep::normalize(
+        [
+            'description' => 'x',
+            'ground_tint' => 'violet',
+            'palette'     => ['base' => '#F4EBDA'],
+        ],
+        'cinematic-safe-zone',
+        'seed without coordinates',
+        $repairs,
+        $warnings,
+    );
+    assert_eq('violet', GroundTint::classify($direction['palette']['base']));
+    assert_eq('violet', $direction['ground_tint']);
+});
+
+test('normalize ignores a ground_tint outside the vocabulary', function () {
+    $repairs = [];
+    $warnings = [];
+    $direction = DesignDirectionStep::normalize(
+        ['description' => 'x', 'ground_tint' => 'chartreuse', 'palette' => ['base' => '#F4EBDA']],
+        'cinematic-safe-zone',
+        '',
+        $repairs,
+        $warnings,
+    );
+    assert_eq('#F4EBDA', $direction['palette']['base']);
+    assert_eq('', $direction['ground_tint']);
 });
 
 test('design-direction persists structured typography and warns when an axis is removed', function () {
