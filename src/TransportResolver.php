@@ -301,12 +301,23 @@ final class TransportResolver
                 $matches[TransportChoice::KIND_CODEX_CLI][] = "{$var} present";
             }
         }
+        if ($matches !== []) {
+            foreach ($ancestry() as $name) {
+                $kind = self::HARNESSES[strtolower(trim($name))] ?? null;
+                if ($kind !== null && !isset($matches[$kind])) {
+                    $matches[$kind][] = "process ancestry found '{$name}'";
+                }
+            }
+        }
         if (count($matches) > 1) {
             $names = array_map(
                 static fn (string $kind): string => self::BINARY_FOR[$kind],
                 array_keys($matches),
             );
-            throw self::ambiguousTransport($names, 'environment fingerprints identify multiple harnesses');
+            throw self::ambiguousTransport(
+                $names,
+                'environment fingerprints and process ancestry identify multiple harnesses',
+            );
         }
         if ($matches === []) {
             return null;
@@ -423,12 +434,12 @@ final class TransportResolver
         if ($path === '') {
             return false;
         }
-        if ($path[0] === '/' || $path[0] === '\\') {
-            return true;
+        if (DIRECTORY_SEPARATOR === '/') {
+            return $path[0] === '/';
         }
-        return strlen($path) >= 3
+        return $path[0] === '/' || $path[0] === '\\' || (strlen($path) >= 3
             && ctype_alpha($path[0])
             && $path[1] === ':'
-            && ($path[2] === '/' || $path[2] === '\\');
+            && ($path[2] === '/' || $path[2] === '\\'));
     }
 }

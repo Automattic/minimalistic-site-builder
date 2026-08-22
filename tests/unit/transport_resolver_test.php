@@ -193,6 +193,19 @@ test('billing C3: mixed Claude and Codex fingerprints refuse as ambiguous', func
     assert_contains('SITE_BUILD_LLM', $e->getMessage());
 });
 
+test('billing review: Claude fingerprint refuses conflicting Codex ancestry', function (): void {
+    $e = assert_throws(fn () => TransportResolver::decide(
+        ['CLAUDECODE' => '1'],
+        tr_on_path('claude', 'codex'),
+        static fn (): array => ['php', 'codex', 'zsh'],
+    ));
+    assert_true($e instanceof TransportUnavailable);
+    assert_contains('Ambiguous transport', $e->getMessage());
+    assert_contains('claude', $e->getMessage());
+    assert_contains('codex', $e->getMessage());
+    assert_contains('process ancestry', $e->getMessage());
+});
+
 test('billing C4: OpenCode fingerprint refuses instead of spending the Claude subscription', function (): void {
     [, $anc] = tr_nothing();
     $e = assert_throws(fn () => TransportResolver::decide(
@@ -364,6 +377,36 @@ test('billing C6: relative PATH entry cannot select a cwd harness', function ():
         try {
             chdir($dir);
             putenv('PATH=.' . PATH_SEPARATOR . '/usr/bin');
+            assert_eq(null, TransportResolver::binaryPath('claude'));
+            $e = assert_throws(fn () => TransportResolver::decide(
+                [],
+                static fn (string $name): ?string => TransportResolver::binaryPath($name),
+                static fn (): array => [],
+            ));
+            assert_true($e instanceof TransportUnavailable);
+            assert_contains('No LLM transport', $e->getMessage());
+        } finally {
+            chdir($oldCwd);
+            $oldPath === false ? putenv('PATH') : putenv("PATH={$oldPath}");
+        }
+    });
+});
+
+test('billing review: POSIX backslash-leading PATH entry stays relative', function (): void {
+    if (DIRECTORY_SEPARATOR !== '/') {
+        return;
+    }
+    with_temp_dir('backslash-harness-', function (string $dir): void {
+        $relativeDir = '\\evil';
+        mkdir($dir . '/' . $relativeDir);
+        $binary = $dir . '/' . $relativeDir . '/claude';
+        file_put_contents($binary, "#!/bin/sh\nexit 0\n");
+        chmod($binary, 0755);
+        $oldPath = getenv('PATH');
+        $oldCwd = getcwd();
+        try {
+            chdir($dir);
+            putenv("PATH={$relativeDir}");
             assert_eq(null, TransportResolver::binaryPath('claude'));
             $e = assert_throws(fn () => TransportResolver::decide(
                 [],
