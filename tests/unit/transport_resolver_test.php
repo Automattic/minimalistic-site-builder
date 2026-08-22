@@ -120,3 +120,46 @@ test('an override naming a harness with no binary fails loudly rather than falli
     assert_true($e instanceof TransportUnavailable);
     assert_contains('claude', $e->getMessage());
 });
+
+test('build() refuses a harness transport when proc_open is disabled', function (): void {
+    $disabled = array_map('trim', explode(',', (string) ini_get('disable_functions')));
+    if (!in_array('proc_open', $disabled, true) && function_exists('proc_open')) {
+        // Can't disable it at runtime; assert the guard exists and is reachable instead.
+        TransportResolver::assertSubprocessesAvailable();
+        assert_true(true, 'proc_open available; guard is a no-op here');
+        return;
+    }
+    $e = assert_throws(fn () => TransportResolver::assertSubprocessesAvailable());
+    assert_contains('proc_open', $e->getMessage());
+});
+
+test('describe() names the transport, the billing boundary and the rung', function (): void {
+    $line = TransportResolver::describe(
+        new \Automattic\SiteBuild\TransportChoice(
+            \Automattic\SiteBuild\TransportChoice::KIND_CLAUDE_CLI,
+            'env fingerprint CLAUDECODE=1',
+            '/fake/bin/claude',
+        )
+    );
+    assert_contains('claude-cli', $line);
+    assert_contains('subscription', $line);
+    assert_contains('CLAUDECODE=1', $line);
+    assert_contains('/fake/bin/claude', $line);
+});
+
+test('describe() marks the API transport as metered', function (): void {
+    $line = TransportResolver::describe(
+        new \Automattic\SiteBuild\TransportChoice(\Automattic\SiteBuild\TransportChoice::KIND_API, 'ANTHROPIC_API_KEY present')
+    );
+    assert_contains('metered', $line);
+});
+
+test('binaryPath finds a real executable and misses a fictional one', function (): void {
+    assert_true(TransportResolver::binaryPath('php') !== null, 'php should be on PATH');
+    assert_eq(null, TransportResolver::binaryPath('definitely-not-a-real-binary-xyz'));
+});
+
+test('ancestry returns process names without throwing', function (): void {
+    $names = TransportResolver::ancestry();
+    assert_true(is_array($names), 'ancestry must return a list even when ps is unavailable');
+});

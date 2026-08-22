@@ -52,6 +52,9 @@ final class TransportResolver
         'openrouter' => 'OPENROUTER_API_KEY',
     ];
 
+    /** Depth cap for the ancestry walk — a cycle or a deep tree must not hang resolution. */
+    private const ANCESTRY_MAX_DEPTH = 12;
+
     /**
      * @param array<string,string>        $env      environment as data
      * @param callable(string):?string    $onPath   binary name => absolute path or null
@@ -70,6 +73,112 @@ final class TransportResolver
             . 'for the metered API, or SITE_BUILD_LLM=claude-cli|codex-cli|grok-cli to spend a '
             . 'coding-agent subscription.'
         );
+    }
+
+    /** Construct the chosen transport. The only half that touches the filesystem. */
+    public static function build(TransportChoice $choice, string $model): Llm
+    {
+        if ($choice->kind === TransportChoice::KIND_API) {
+            return make_llm();
+        }
+        self::assertSubprocessesAvailable();
+        $binary = $choice->binary;
+        if ($binary === null || !is_file($binary) || !is_executable($binary)) {
+            throw new TransportUnavailable(
+                "Transport {$choice->kind} resolved to '" . ($binary ?? 'nothing') . "', which is not an executable file. "
+                . 'Install it, or set SITE_BUILD_LLM=api with the configured provider key.'
+            );
+        }
+        return match ($choice->kind) {
+            TransportChoice::KIND_CLAUDE_CLI => throw new TransportUnavailable(
+                'Transport claude-cli is resolved but not yet implemented. '
+                . 'Use SITE_BUILD_LLM=api with the configured provider key until this transport is implemented.'
+            ),
+            TransportChoice::KIND_CODEX_CLI => throw new TransportUnavailable(
+                'Transport codex-cli is resolved but not yet implemented. '
+                . 'Use SITE_BUILD_LLM=api with the configured provider key until this transport is implemented.'
+            ),
+            TransportChoice::KIND_GROK_CLI => throw new TransportUnavailable(
+                'Transport grok-cli is resolved but not yet implemented. '
+                . 'Use SITE_BUILD_LLM=api with the configured provider key until this transport is implemented.'
+            ),
+            default => throw new TransportUnavailable(
+                "Transport {$choice->kind} is resolved but not implemented. "
+                . 'Set SITE_BUILD_LLM=api with the configured provider key.'
+            ),
+        };
+    }
+
+    /**
+     * Harness transports shell out, so a host with proc_open disabled cannot use
+     * them. Checked at resolve time so this reads as a named configuration error
+     * rather than a fatal on the first completion, after the build has started.
+     */
+    public static function assertSubprocessesAvailable(): void
+    {
+        $disabled = array_map('trim', explode(',', (string) ini_get('disable_functions')));
+        if (!function_exists('proc_open') || in_array('proc_open', $disabled, true)) {
+            throw new TransportUnavailable(
+                'Harness transports need proc_open, which this PHP disables via disable_functions. '
+                . 'Set SITE_BUILD_LLM=api with LLM_PROVIDER and its provider key instead.'
+            );
+        }
+    }
+
+    /** The line echoed before any spend. Names the rung, not just the transport. */
+    public static function describe(TransportChoice $choice): string
+    {
+        $billing = $choice->isSubscription() ? 'subscription' : 'metered';
+        $where = $choice->binary !== null ? " via {$choice->binary}" : '';
+        return "Transport: {$choice->kind}{$where} ({$billing}) — resolved by {$choice->reason}";
+    }
+
+    /** Absolute path to an executable on PATH, or null. */
+    public static function binaryPath(string $name): ?string
+    {
+        foreach (explode(PATH_SEPARATOR, (string) getenv('PATH')) as $dir) {
+            if ($dir === '') {
+                continue;
+            }
+            $candidate = rtrim($dir, '/') . '/' . $name;
+            if (is_file($candidate) && is_executable($candidate)) {
+                return $candidate;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Ancestor process names, nearest first. Best effort by design: an
+     * unreadable `ps` returns an empty list rather than failing resolution,
+     * because ancestry is one rung of a ladder, not the whole answer.
+     *
+     * @return list<string>
+     */
+    public static function ancestry(): array
+    {
+        if (!function_exists('proc_open') || !function_exists('shell_exec')) {
+            return [];
+        }
+        $names = [];
+        $pid = function_exists('posix_getppid') ? posix_getppid() : getmypid();
+        for ($depth = 0; $depth < self::ANCESTRY_MAX_DEPTH && $pid > 1; $depth++) {
+            $out = @shell_exec('ps -o ppid=,comm= -p ' . (int) $pid . ' 2>/dev/null');
+            if (!is_string($out) || trim($out) === '') {
+                break;
+            }
+            $parts = preg_split('/\s+/', trim($out), 2);
+            if ($parts === false || count($parts) < 2) {
+                break;
+            }
+            $names[] = basename(trim($parts[1]));
+            $next = (int) $parts[0];
+            if ($next === $pid) {
+                break;
+            }
+            $pid = $next;
+        }
+        return $names;
     }
 
     /** Rung 1 — explicit intent. Validates; never falls through to another billing path. */
