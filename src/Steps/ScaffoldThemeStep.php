@@ -296,6 +296,27 @@ final class ScaffoldThemeStep implements Step
             }
         }
 
+        /* One hamburger per header, not one per nav. A split-nav header holds
+           two wp:navigation blocks flanking the wordmark, and below the
+           breakpoint core gives each its own toggle — two identical hamburgers
+           opening half the site each. HeaderHeroStep::consolidateMobileNav
+           marks the second nav header-nav-wide-only and copies its items into
+           the first as header-nav-overlay-only; these two rules show exactly
+           one of each pair. The 720px boundary is the raised breakpoint above,
+           so the swap happens on the same edge as the hamburger's.
+           (Class names are HeaderHeroStep::NAV_WIDE_ONLY_CLASS and
+           NAV_OVERLAY_ONLY_CLASS — keep the three in step.) */
+        @media (max-width: 719.98px) {
+            .wp-site-blocks .header-nav-wide-only {
+                display: none !important;
+            }
+        }
+        @media (min-width: 720px) {
+            .wp-site-blocks .header-nav-overlay-only {
+                display: none !important;
+            }
+        }
+
         /* Hamburger / overlay panel.
            Color: core paints `:not(.has-background) .is-menu-open { #fff }`,
            so contrast-colored labels on a dark canvas become cream-on-white.
@@ -321,6 +342,12 @@ final class ScaffoldThemeStep implements Step
             color: var(--wp--preset--color--contrast) !important;
             background-color: var(--wp--preset--color--base) !important;
             background-image: none !important;
+
+            /* Name the pair this panel is painted from, so the active state
+               below can invert it instead of inventing a third color. The
+               header kit re-points both at its resolved behavior surface. */
+            --menu-panel-ink: var(--wp--preset--color--contrast);
+            --menu-panel-surface: var(--wp--preset--color--base);
         }
         .wp-site-blocks .wp-block-navigation__responsive-container.is-menu-open
             .wp-block-navigation__responsive-dialog,
@@ -356,9 +383,17 @@ final class ScaffoldThemeStep implements Step
         .wp-site-blocks .wp-block-navigation__responsive-container.is-menu-open
             .wp-block-navigation-item__content:not(.wp-element-button) {
             display: block !important;
-            width: 100% !important;
+            /* Inline padding so the active row below is a padded bar rather
+               than a band cropped to the text. The matching negative margin
+               keeps every label optically aligned with the panel's content
+               edge, at rest and active alike — the bar bleeds, the text does
+               not move. */
+            width: calc(100% + 1.8rem) !important;
+            margin-inline: -0.9rem !important;
             box-sizing: border-box !important;
             padding-block: 0.85rem !important;
+            padding-inline: 0.9rem !important;
+            border-radius: 0.25rem;
             text-align: start !important;
             font-size: var(--wp--preset--font-size--heading, 1.5rem) !important;
             line-height: 1.25 !important;
@@ -379,9 +414,23 @@ final class ScaffoldThemeStep implements Step
             inset-inline-end: max(1rem, env(safe-area-inset-right, 0px)) !important;
             inset-inline-start: auto !important;
         }
+        /* The active row INVERTS the panel's own pair: its ink becomes the bar,
+           its surface becomes the label. Contrast is therefore identical to
+           the resting state's by construction — the same two colors, swapped —
+           on every build, with no third color to check.
+
+           Two wrong answers this replaces. A fixed `accent` vanished on every
+           build whose panel surface IS accent (contrast 1.0). And tinting the
+           bar with the ink at low alpha reads as "safe" but is not: it drags
+           the background TOWARD the text, so contrast falls as the tint
+           strengthens (14% measured 3.8:1, under AA). Only a full swap keeps
+           the proven ratio. A fixed white would fail the same way — it is
+           3.85:1 on this orange panel and invisible on a light one. */
         .wp-site-blocks .wp-block-navigation__responsive-container.is-menu-open
             .wp-block-navigation-item__content:not(.wp-element-button):is(:hover, :focus) {
-            color: var(--wp--preset--color--accent) !important;
+            background-color: var(--menu-panel-ink, currentColor);
+            color: var(--menu-panel-surface, inherit) !important;
+            text-decoration: none !important;
         }
 
         /* Core gives a page-list flex and list-style only under

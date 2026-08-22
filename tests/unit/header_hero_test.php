@@ -9,6 +9,7 @@ use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroCopyBudget;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Steps\HeaderHeroStep;
+use Automattic\SiteBuild\Steps\ScaffoldThemeStep;
 
 /**
  * Unit tests for HeaderHeroStep: the deterministic backstop for the
@@ -1993,4 +1994,372 @@ test('header-hero does not restore a planned Add to cart label after storefront 
     assert_true(!str_contains($delivered, 'Add to cart'), 'reconcile must not put the purchase label back');
 
     exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+/**
+ * A split-nav header: two navigations flanking the wordmark, each holding its
+ * own hand-authored links (the one archetype that authors links by hand).
+ */
+function hh_split_nav_header(string $leftAttrs = '', string $rightAttrs = ''): string
+{
+    return hh_header(
+        '{"backgroundColor":"base","layout":{"type":"constrained"}}',
+        '<!-- wp:navigation ' . ($leftAttrs !== '' ? $leftAttrs . ' ' : '') . '-->'
+        . '<!-- wp:navigation-link {"label":"About","url":"/about/"} /-->'
+        . '<!-- wp:navigation-link {"label":"Services","url":"/services/"} /-->'
+        . '<!-- /wp:navigation -->'
+        . '<!-- wp:site-title /-->'
+        . '<!-- wp:navigation ' . ($rightAttrs !== '' ? $rightAttrs . ' ' : '') . '-->'
+        . '<!-- wp:navigation-link {"label":"Home","url":"/"} /-->'
+        . '<!-- wp:navigation-link {"label":"Contact","url":"/contact/"} /-->'
+        . '<!-- /wp:navigation -->',
+    );
+}
+
+/**
+ * Every wp:navigation in the markup as [overlayMenu, className], in document
+ * order — the emitted values, not merely their presence.
+ *
+ * @return list<array{string,string}>
+ */
+function hh_nav_states(string $markup): array
+{
+    $doc = BlockMarkup::parse($markup);
+    $out = [];
+    foreach ($doc->indices() as $i) {
+        if ($doc->name($i) !== 'navigation') {
+            continue;
+        }
+        $attrs = $doc->attrs($i) ?? [];
+        $out[] = [(string) ($attrs['overlayMenu'] ?? ''), (string) ($attrs['className'] ?? '')];
+    }
+    return $out;
+}
+
+/**
+ * Every navigation-link label in document order, paired with its className,
+ * grouped by the nav it sits in.
+ *
+ * @return list<list<array{string,string}>>
+ */
+function hh_nav_items(string $markup): array
+{
+    $doc = BlockMarkup::parse($markup);
+    $out = [];
+    foreach ($doc->indices() as $i) {
+        if ($doc->name($i) !== 'navigation') {
+            continue;
+        }
+        $items = [];
+        foreach ($doc->children($i) as $child) {
+            $attrs = $doc->attrs($child) ?? [];
+            $items[] = [
+                (string) ($attrs['label'] ?? $doc->name($child)),
+                (string) ($attrs['className'] ?? ''),
+            ];
+        }
+        $out[] = $items;
+    }
+    return $out;
+}
+
+test('a header nav authored overlayMenu:never is raised to mobile', function () {
+    // The reported failure: core's is_responsive() treats "never" as opt-out
+    // and returns the bare inner list, so the header renders NO hamburger at
+    // any width and its nowrap row runs off a 375px screen.
+    $markup = hh_header(
+        '{"backgroundColor":"base","layout":{"type":"constrained"}}',
+        '<!-- wp:site-title /--><!-- wp:navigation {"overlayMenu":"never","fontSize":"caption"} -->'
+        . '<!-- wp:navigation-link {"label":"Menu"} /--><!-- wp:navigation-link {"label":"Visit"} /-->'
+        . '<!-- /wp:navigation -->',
+    );
+    $result = HeaderHeroStep::fixHeader($markup, AboveFoldContract::MODE_STACKED, 'Demo');
+
+    assert_eq([['mobile', '']], hh_nav_states($result['markup']));
+    assert_true(
+        !str_contains($result['markup'], '"overlayMenu":"never"'),
+        'no header nav may keep the value that disables the hamburger',
+    );
+    assert_contains('overlayMenu:never raised to mobile', implode(' ', $result['notes']));
+});
+
+test('a lone header nav that already collapses is left exactly as authored', function () {
+    foreach (['', '{"overlayMenu":"mobile"}', '{"overlayMenu":"always"}'] as $attrs) {
+        $markup = hh_header(
+            '{"backgroundColor":"base","layout":{"type":"constrained"}}',
+            '<!-- wp:site-title /--><!-- wp:navigation ' . ($attrs !== '' ? $attrs . ' ' : '') . '-->'
+            . '<!-- wp:navigation-link {"label":"Menu"} /--><!-- wp:navigation-link {"label":"Visit"} /-->'
+            . '<!-- /wp:navigation -->',
+        );
+        $result = HeaderHeroStep::fixHeader($markup, AboveFoldContract::MODE_STACKED, 'Demo');
+        assert_eq($markup, $result['markup'], "a one-nav header needs no consolidation ({$attrs})");
+        assert_eq([], $result['notes']);
+    }
+});
+
+test('a two-nav header collapses to one menu carrying every link', function () {
+    // Two navs each get their own hamburger below the breakpoint — two
+    // identical toggles flanking the wordmark, each opening half the site.
+    $result = HeaderHeroStep::fixHeader(
+        hh_split_nav_header(),
+        AboveFoldContract::MODE_STACKED,
+        'Demo',
+    );
+
+    // The LAST nav is the menu, so the toggle lands at the end of the row and
+    // a space-between header leaves the wordmark at the start. The first is
+    // hidden below the breakpoint and must NOT emit a toggle of its own —
+    // the one place "never" is the right value.
+    assert_eq(
+        [['never', HeaderHeroStep::NAV_WIDE_ONLY_CLASS], ['', '']],
+        hh_nav_states($result['markup']),
+    );
+
+    // Every link reaches the collapsed menu exactly once, still in document
+    // order, and the copies are the ones the theme hides above the breakpoint.
+    assert_eq(
+        [
+            [
+                ['About', ''],
+                ['Services', ''],
+            ],
+            [
+                ['About', HeaderHeroStep::NAV_OVERLAY_ONLY_CLASS],
+                ['Services', HeaderHeroStep::NAV_OVERLAY_ONLY_CLASS],
+                ['Home', ''],
+                ['Contact', ''],
+            ],
+        ],
+        hh_nav_items($result['markup']),
+    );
+    assert_contains('header collapses to one menu', implode(' ', $result['notes']));
+});
+
+test('consolidating a two-nav header is a fixed point', function () {
+    // Re-running must not copy the copies: the pass runs on every build, and
+    // fix-blocks re-serializes this markup afterwards.
+    $once = HeaderHeroStep::fixHeader(hh_split_nav_header(), AboveFoldContract::MODE_STACKED, 'Demo');
+    $twice = HeaderHeroStep::fixHeader($once['markup'], AboveFoldContract::MODE_STACKED, 'Demo');
+    $thrice = HeaderHeroStep::fixHeader($twice['markup'], AboveFoldContract::MODE_STACKED, 'Demo');
+
+    assert_eq($once['markup'], $twice['markup']);
+    assert_eq($twice['markup'], $thrice['markup']);
+    assert_eq([], $twice['notes']);
+});
+
+test('a never-valued split nav is both raised and consolidated', function () {
+    // The delivered rustic-orchard shape: both halves authored "never".
+    $result = HeaderHeroStep::fixHeader(
+        hh_split_nav_header('{"overlayMenu":"never"}', '{"overlayMenu":"never"}'),
+        AboveFoldContract::MODE_STACKED,
+        'Super Coaching',
+    );
+    assert_eq(
+        [['never', HeaderHeroStep::NAV_WIDE_ONLY_CLASS], ['mobile', '']],
+        hh_nav_states($result['markup']),
+    );
+});
+
+test('overlay-only copies do not count against the single-row width budget', function () {
+    // The copies are hidden at the width this estimate is about. Charging for
+    // them would push a comfortable row over the budget and collapse a desktop
+    // header that never needed collapsing.
+    $before = HeaderHeroStep::estimatedRowWidth(BlockMarkup::parse(hh_split_nav_header()), 'Demo');
+    $after = HeaderHeroStep::fixHeader(hh_split_nav_header(), AboveFoldContract::MODE_STACKED, 'Demo');
+
+    assert_eq($before, HeaderHeroStep::estimatedRowWidth(BlockMarkup::parse($after['markup']), 'Demo'));
+    assert_true(
+        !str_contains($after['markup'], '"overlayMenu":"always"'),
+        'consolidation must not trip the over-wide collapse',
+    );
+});
+
+test('a second nav page-list is not copied over the menu own page-list', function () {
+    // Two page-lists in one menu render every site page twice.
+    $markup = hh_header(
+        '{"backgroundColor":"base","layout":{"type":"constrained"}}',
+        '<!-- wp:navigation --><!-- wp:page-list /-->'
+        . '<!-- wp:navigation-link {"label":"Contact"} /--><!-- /wp:navigation -->'
+        . '<!-- wp:site-title /-->'
+        . '<!-- wp:navigation --><!-- wp:page-list /--><!-- /wp:navigation -->',
+    );
+    $result = HeaderHeroStep::fixHeader($markup, AboveFoldContract::MODE_STACKED, 'Demo', ['Menu', 'Visit']);
+
+    // The hidden nav's link is copied; its page-list is not, because the menu
+    // already carries one.
+    assert_eq(
+        [
+            [['page-list', ''], ['Contact', '']],
+            [['Contact', HeaderHeroStep::NAV_OVERLAY_ONLY_CLASS], ['page-list', '']],
+        ],
+        hh_nav_items($result['markup']),
+    );
+});
+
+test('the theme stylesheet hides exactly one of each consolidated pair', function () {
+    // The repair marks the markup; only these rules make the marks mean
+    // anything. Renaming a constant without the stylesheet fails here.
+    $tmp = sys_get_temp_dir() . '/hh-css-' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Demo');
+    (new ScaffoldThemeStep())->run($project);
+    $css = $project->readText('theme/style.css');
+
+    assert_contains('@media (max-width: 719.98px)', $css);
+    assert_contains('.wp-site-blocks .' . HeaderHeroStep::NAV_WIDE_ONLY_CLASS, $css);
+    assert_contains('@media (min-width: 720px)', $css);
+    assert_contains('.wp-site-blocks .' . HeaderHeroStep::NAV_OVERLAY_ONLY_CLASS, $css);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('the active menu row inverts the panel pair instead of picking a color', function () {
+    // The panel's surface is chosen per build — base for a static header, the
+    // resolved scrolled surface for sticky-soft/overlay-to-solid — so the
+    // active row cannot name a color of its own. Two ways that has gone wrong:
+    // a fixed `accent`, invisible on every accent-surfaced panel (1.0:1); and
+    // a low-alpha tint of the ink, which drags the background TOWARD the text
+    // and drops contrast as it strengthens (14% measured 3.8:1, under AA).
+    // Only swapping the panel's own two colors keeps the proven ratio.
+    $tmp = sys_get_temp_dir() . '/hh-hover-' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Demo');
+    (new ScaffoldThemeStep())->run($project);
+    $css = $project->readText('theme/style.css');
+
+    // Every rule block whose selector reaches into an open menu panel AND
+    // carries :hover/:focus.
+    preg_match_all('/([^{}]*is-menu-open[^{}]*)\{([^}]*)\}/', $css, $blocks, PREG_SET_ORDER);
+    $checked = 0;
+    foreach ($blocks as [, $selector, $body]) {
+        if (!str_contains($selector, ':hover') && !str_contains($selector, ':focus')) {
+            continue;
+        }
+        $checked++;
+        $where = ' (selector: ' . trim(preg_replace('/\s+/', ' ', $selector) ?? '') . ')';
+
+        // Neither half of the pair may be pinned to a palette slug.
+        preg_match_all('/(?<![-\w])(background-color|color)\s*:\s*([^;]+);/', $body, $decls, PREG_SET_ORDER);
+        $seen = [];
+        foreach ($decls as [, $prop, $value]) {
+            $seen[$prop] = trim($value);
+            assert_true(
+                !str_contains($value, '--wp--preset--color--'),
+                "menu active {$prop} must not be a fixed palette slug, got: " . trim($value) . $where,
+            );
+            // A translucent fill silently lowers contrast against whatever it
+            // sits on; the active row must be opaque.
+            assert_true(
+                !str_contains($value, 'color-mix') && !str_contains($value, 'rgba('),
+                "menu active {$prop} must be opaque, got: " . trim($value) . $where,
+            );
+        }
+
+        // And it must actually be the inversion: panel ink behind panel surface.
+        assert_contains('--menu-panel-ink', $seen['background-color'] ?? '', 'active row background' . $where);
+        assert_contains('--menu-panel-surface', $seen['color'] ?? '', 'active row label' . $where);
+    }
+    assert_true($checked > 0, 'the menu panel should have at least one hover/focus rule to police');
+
+    // The row the bar paints must carry inline padding, or the fill is a band
+    // cropped to the glyphs. Asserted on that rule's own body — `padding-inline`
+    // occurs elsewhere in this stylesheet, so a whole-file search proves nothing.
+    $itemRule = null;
+    foreach ($blocks as [, $selector, $body]) {
+        if (str_contains($selector, 'navigation-item__content:not(.wp-element-button)')
+            && !str_contains($selector, ':hover')
+        ) {
+            $itemRule = $body;
+        }
+    }
+    assert_true($itemRule !== null, 'the menu item rule should exist');
+    assert_contains('padding-inline:', (string) $itemRule, 'menu row needs inline padding for the bar');
+    assert_contains('margin-inline:', (string) $itemRule, 'the bar must bleed without shifting the label');
+
+    // Both panels must publish the pair, or the inversion falls back to a
+    // currentColor bar with an inherited label — the invisible case again.
+    assert_contains('--menu-panel-ink: var(--wp--preset--color--contrast)', $css);
+    assert_contains('--menu-panel-surface: var(--wp--preset--color--base)', $css);
+    $kit = $project->readText('theme/assets/header/header.css');
+    assert_contains('--menu-panel-ink: var(--header-foreground)', $kit);
+    assert_contains('--menu-panel-surface: var(--header-scrolled-solid)', $kit);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('a copied submenu carries its own links across whole', function () {
+    // overlayOnlyClone rewrites ONLY the opening delimiter and carries the
+    // rest of the node's source verbatim, so a nested subtree has to survive
+    // intact. The docblock claims that; nothing else proved it.
+    $markup = hh_header(
+        '{"backgroundColor":"base","layout":{"type":"constrained"}}',
+        '<!-- wp:navigation -->'
+        . '<!-- wp:navigation-submenu {"label":"Work","url":"/work/"} -->'
+        . '<!-- wp:navigation-link {"label":"Studio","url":"/studio/"} /-->'
+        . '<!-- wp:navigation-link {"label":"Field","url":"/field/"} /-->'
+        . '<!-- /wp:navigation-submenu -->'
+        . '<!-- /wp:navigation -->'
+        . '<!-- wp:site-title /-->'
+        . '<!-- wp:navigation --><!-- wp:navigation-link {"label":"Contact"} /--><!-- /wp:navigation -->',
+    );
+    $result = HeaderHeroStep::fixHeader($markup, AboveFoldContract::MODE_STACKED, 'Demo');
+
+    $doc = BlockMarkup::parse($result['markup']);
+    $navs = [];
+    foreach ($doc->indices() as $i) {
+        if ($doc->name($i) === 'navigation') {
+            $navs[] = $i;
+        }
+    }
+    $menu = $navs[count($navs) - 1];
+    $copy = $doc->children($menu)[0];
+
+    assert_eq('navigation-submenu', $doc->name($copy));
+    assert_eq(
+        HeaderHeroStep::NAV_OVERLAY_ONLY_CLASS,
+        (string) (($doc->attrs($copy) ?? [])['className'] ?? ''),
+    );
+    // Hiding the submenu hides these with it, so they stay unmarked.
+    assert_eq(
+        [['Studio', ''], ['Field', '']],
+        array_map(
+            static fn (int $c): array => [
+                (string) (($doc->attrs($c) ?? [])['label'] ?? ''),
+                (string) (($doc->attrs($c) ?? [])['className'] ?? ''),
+            ],
+            $doc->children($copy),
+        ),
+    );
+});
+
+test('a three-nav header collapses to the one trailing menu', function () {
+    // array_slice($navs, 0, -1) is written for N leading navs; only the
+    // two-nav case was covered.
+    $markup = hh_header(
+        '{"backgroundColor":"base","layout":{"type":"constrained"}}',
+        '<!-- wp:navigation --><!-- wp:navigation-link {"label":"About"} /--><!-- /wp:navigation -->'
+        . '<!-- wp:site-title /-->'
+        . '<!-- wp:navigation --><!-- wp:navigation-link {"label":"Work"} /--><!-- /wp:navigation -->'
+        . '<!-- wp:navigation --><!-- wp:navigation-link {"label":"Contact"} /--><!-- /wp:navigation -->',
+    );
+    $result = HeaderHeroStep::fixHeader($markup, AboveFoldContract::MODE_STACKED, 'Demo');
+
+    assert_eq(
+        [
+            ['never', HeaderHeroStep::NAV_WIDE_ONLY_CLASS],
+            ['never', HeaderHeroStep::NAV_WIDE_ONLY_CLASS],
+            ['', ''],
+        ],
+        hh_nav_states($result['markup']),
+    );
+    assert_eq(
+        [
+            [['About', '']],
+            [['Work', '']],
+            [
+                ['About', HeaderHeroStep::NAV_OVERLAY_ONLY_CLASS],
+                ['Work', HeaderHeroStep::NAV_OVERLAY_ONLY_CLASS],
+                ['Contact', ''],
+            ],
+        ],
+        hh_nav_items($result['markup']),
+    );
 });
