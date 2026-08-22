@@ -43,9 +43,9 @@ use Automattic\SiteBuild\Warnings;
  *           resolved behavior, even when site motion is `none`; static headers
  *           prune the whole kit. The script is head-loaded so its fixed-overlay
  *           enhancement scope is present before paint.
- *         - registers the theme's generated section patterns under one
- *           theme-scoped category whose label comes from the delivered theme
- *           header (or a deterministic project-slug fallback).
+ *         - registers the theme's generated section and component patterns
+ *           under theme-scoped categories whose label comes from the delivered
+ *           theme header (or a deterministic project-slug fallback).
  *         - for a rounded shape commitment (`soft`/`round`), writes and
  *           enqueues the build-owned shape kit (assets/shape/shape.css) that
  *           rounds contained media surfaces theme.json cannot reach — the
@@ -527,6 +527,9 @@ final class FinalizeThemeStep implements Step
             register_block_pattern_category('{$slug}-sections', array(
                 'label' => {$patternCategoryLabel},
             ));
+            register_block_pattern_category('{$slug}-components', array(
+                'label' => {$patternCategoryLabel},
+            ));
 
             // Carried design CSS is authored one page at a time; page-styles scopes
             // each page's chunk to this class, so the front end has to publish it.
@@ -550,7 +553,7 @@ final class FinalizeThemeStep implements Step
             PHP;
     }
 
-    /** Label for the generated section-pattern category. */
+    /** Shared label for the generated pattern categories. */
     private static function patternCategoryLabel(Project $project): string
     {
         if ($project->exists('theme/style.css')) {
