@@ -24,7 +24,8 @@ use Automattic\SiteBuild\Warnings;
 final class ExtractPatternsStep implements Step
 {
     private const LOG_FILE = 'extract-patterns.log';
-    private const PATTERN_CAP = 12;
+    private const SECTION_PATTERN_CAP = 10;
+    private const COMPONENT_SOURCE_CAP = 6;
     private const BAND_CTA_EXEMPT_LABELS = ['cta', 'closing', 'contact'];
 
     /** @var array<string,string> normalized labels that map to core pattern categories */
@@ -87,10 +88,14 @@ final class ExtractPatternsStep implements Step
         $registeredBlocks = $this->registeredPluginBlocks($project);
         $cssIds = self::idSelectorsIn($css);
 
-        /** @var array<string,list<array<mixed>>> $candidatesByKey */
-        $candidatesByKey = [];
-        /** @var array<string,int> $ineligibleByKey */
-        $ineligibleByKey = [];
+        /** @var array<string,list<array<mixed>>> $sectionCandidatesByKey */
+        $sectionCandidatesByKey = [];
+        /** @var array<string,int> $sectionIneligibleByKey */
+        $sectionIneligibleByKey = [];
+        /** @var array<string,list<array<mixed>>> $componentCandidatesByKey */
+        $componentCandidatesByKey = [];
+        /** @var array<string,int> $componentIneligibleByKey */
+        $componentIneligibleByKey = [];
         $warnings = [];
         $log = [];
 
@@ -180,29 +185,40 @@ final class ExtractPatternsStep implements Step
                 }
 
                 $key = $classification['key'];
-                $eligibilityFailure = self::eligibilityFailure($markup, $registeredBlocks);
-                if ($eligibilityFailure !== null) {
-                    $ineligibleByKey[$key] = ($ineligibleByKey[$key] ?? 0) + 1;
-                    $warnings[] = "{$relative}: block path /{$index}, section '{$sectionSlug}'; authored value "
-                        . Warnings::value($eligibilityFailure['value'])
-                        . '; delivered value "removed"; disposition: rejected section because '
-                        . ($eligibilityFailure['kind'] === 'raw_php'
-                            ? 'raw PHP open tag would execute from included pattern PHP'
-                            : 'non-core block is absent from generated plugin registration list');
-                    $log[] = "candidate {$pageSlug}/{$sectionSlug} key {$key}: ineligible "
-                        . $eligibilityFailure['kind'] . ' ' . Warnings::value($eligibilityFailure['value']);
-                    continue;
+                $componentKey = is_string($classification['label']) && $classification['label'] !== ''
+                    ? $classification['label']
+                    : null;
+                $components = null;
+                if ($componentKey !== null) {
+                    try {
+                        $components = self::componentMarkup($markup, $classification['shape']);
+                    } catch (\Throwable $error) {
+                        $componentIneligibleByKey[$componentKey] = ($componentIneligibleByKey[$componentKey] ?? 0) + 1;
+                        $warnings[] = "{$relative}: block path /{$index}, section '{$sectionSlug}'; component boundary "
+                            . "could not be isolated ({$error->getMessage()}); delivered no component patterns; "
+                            . 'disposition: kept section candidate and skipped component source';
+                        $log[] = "component candidate {$pageSlug}/{$sectionSlug} key {$componentKey}: extraction failed: "
+                            . $error->getMessage();
+                    }
                 }
 
                 try {
                     $score = SectionPattern::score($markup, $routes);
                     $contains = self::contains($markup);
                 } catch (\Throwable $error) {
-                    $ineligibleByKey[$key] = ($ineligibleByKey[$key] ?? 0) + 1;
+                    $sectionIneligibleByKey[$key] = ($sectionIneligibleByKey[$key] ?? 0) + 1;
                     $warnings[] = "{$relative}: block path /{$index}, section '{$sectionSlug}'; authored candidate could "
                         . "not be scored ({$error->getMessage()}); delivered removed from pattern candidates; "
                         . 'disposition: skipped failed candidate';
                     $log[] = "candidate {$pageSlug}/{$sectionSlug} key {$key}: score failed: {$error->getMessage()}";
+                    if ($components !== null && $componentKey !== null) {
+                        $componentIneligibleByKey[$componentKey] = ($componentIneligibleByKey[$componentKey] ?? 0) + 1;
+                        $warnings[] = "{$relative}: block path /{$index}, section '{$sectionSlug}'; component source "
+                            . "could not be scored ({$error->getMessage()}); delivered no component pair; "
+                            . 'disposition: skipped failed component source';
+                        $log[] = "component candidate {$pageSlug}/{$sectionSlug} key {$componentKey}: score failed: "
+                            . $error->getMessage();
+                    }
                     continue;
                 }
 
@@ -212,6 +228,7 @@ final class ExtractPatternsStep implements Step
                 }
                 $candidate = [
                     'key' => $key,
+                    'kind' => 'section',
                     'label' => $classification['label'],
                     'shape' => $classification['shape'],
                     'markup' => $markup,
@@ -225,72 +242,150 @@ final class ExtractPatternsStep implements Step
                     'role' => $role,
                     'background' => self::background($markup),
                 ];
-                $candidatesByKey[$key][] = $candidate;
-                $log[] = 'candidate ' . $pageSlug . '/' . $sectionSlug . ' key ' . $key . ': '
-                    . json_encode($score, JSON_UNESCAPED_SLASHES);
+                $eligibilityFailure = self::eligibilityFailure($markup, $registeredBlocks);
+                if ($eligibilityFailure === null) {
+                    $sectionCandidatesByKey[$key][] = $candidate;
+                    $log[] = 'candidate ' . $pageSlug . '/' . $sectionSlug . ' key ' . $key . ': '
+                        . json_encode($score, JSON_UNESCAPED_SLASHES);
+                } else {
+                    $sectionIneligibleByKey[$key] = ($sectionIneligibleByKey[$key] ?? 0) + 1;
+                    $warnings[] = "{$relative}: block path /{$index}, section '{$sectionSlug}'; authored value "
+                        . Warnings::value($eligibilityFailure['value'])
+                        . '; delivered value "removed"; disposition: rejected section because '
+                        . ($eligibilityFailure['kind'] === 'raw_php'
+                            ? 'raw PHP open tag would execute from included pattern PHP'
+                            : 'non-core block is absent from generated plugin registration list');
+                    $log[] = "candidate {$pageSlug}/{$sectionSlug} key {$key}: ineligible "
+                        . $eligibilityFailure['kind'] . ' ' . Warnings::value($eligibilityFailure['value']);
+                }
+
+                if ($components !== null && $componentKey !== null) {
+                    $componentEligibilityFailure = null;
+                    $componentContains = [];
+                    try {
+                        foreach ($components as $component => $componentMarkup) {
+                            $componentEligibilityFailure ??= self::eligibilityFailure(
+                                $componentMarkup,
+                                $registeredBlocks,
+                            );
+                            $componentContains[$component] = self::contains($componentMarkup);
+                        }
+                    } catch (\Throwable $error) {
+                        $componentIneligibleByKey[$componentKey] = ($componentIneligibleByKey[$componentKey] ?? 0) + 1;
+                        $warnings[] = "{$relative}: block path /{$index}, section '{$sectionSlug}'; component source "
+                            . "could not be inspected ({$error->getMessage()}); delivered no component pair; "
+                            . 'disposition: skipped failed component source';
+                        $log[] = "component candidate {$pageSlug}/{$sectionSlug} key {$componentKey}: inspection failed: "
+                            . $error->getMessage();
+                        continue;
+                    }
+
+                    if ($componentEligibilityFailure !== null) {
+                        $componentIneligibleByKey[$componentKey] = ($componentIneligibleByKey[$componentKey] ?? 0) + 1;
+                        $warnings[] = "{$relative}: block path /{$index}, section '{$sectionSlug}'; component source "
+                            . 'authored value ' . Warnings::value($componentEligibilityFailure['value'])
+                            . '; delivered value "removed"; disposition: rejected component pair because '
+                            . ($componentEligibilityFailure['kind'] === 'raw_php'
+                                ? 'raw PHP open tag would execute from included pattern PHP'
+                                : 'non-core block is absent from generated plugin registration list');
+                        $log[] = "component candidate {$pageSlug}/{$sectionSlug} key {$componentKey}: ineligible "
+                            . $componentEligibilityFailure['kind'] . ' '
+                            . Warnings::value($componentEligibilityFailure['value']);
+                    } else {
+                        $componentCandidate = $candidate;
+                        $componentCandidate['key'] = $componentKey;
+                        $componentCandidate['kind'] = 'component';
+                        $componentCandidate['from'] = $key;
+                        $componentCandidate['components'] = $components;
+                        $componentCandidate['component_contains'] = $componentContains;
+                        $componentCandidatesByKey[$componentKey][] = $componentCandidate;
+                        $log[] = 'component candidate ' . $pageSlug . '/' . $sectionSlug . ' key '
+                            . $componentKey . ' from ' . $key . ': '
+                            . json_encode($score, JSON_UNESCAPED_SLASHES);
+                    }
+                }
             }
         }
 
-        /** @var list<array<mixed>> $winners */
-        $winners = [];
         $dropped = [];
-        $allKeys = array_values(array_unique(array_merge(
-            array_keys($candidatesByKey),
-            array_keys($ineligibleByKey),
-        )));
-        sort($allKeys, SORT_STRING);
-        foreach ($allKeys as $key) {
-            $candidates = $candidatesByKey[$key] ?? [];
-            if ($candidates === []) {
-                $dropped[] = ['key' => $key, 'reason' => 'ineligible', 'total' => 0];
-                $warnings[] = "pattern key '{$key}': authored candidates " . ($ineligibleByKey[$key] ?? 0)
-                    . '; delivered removed; disposition: every candidate was ineligible';
-                $log[] = "drop {$key}: every candidate ineligible";
-                continue;
-            }
+        $sectionWinners = $this->resolveWinners(
+            $sectionCandidatesByKey,
+            $sectionIneligibleByKey,
+            'section',
+            $dropped,
+            $warnings,
+            $log,
+        );
+        $componentSources = $this->resolveWinners(
+            $componentCandidatesByKey,
+            $componentIneligibleByKey,
+            'component',
+            $dropped,
+            $warnings,
+            $log,
+        );
 
-            // Guard belongs here: SectionPattern::pickWinner() intentionally
-            // rejects an empty list, while extraction must degrade instead.
-            $winner = SectionPattern::pickWinner($candidates);
-            $winner['alternates'] = $this->alternates($candidates, $winner);
-            $winners[] = $winner;
-            $log[] = "winner {$key}: {$winner['page']}/{$winner['section']} total {$winner['score']['total']}";
-        }
-
-        [$winners, $overflowWinners] = self::applyPatternCap($winners);
-        foreach ($overflowWinners as $overflow) {
+        [$sectionWinners, $overflowSections] = self::applySectionCap($sectionWinners);
+        foreach ($overflowSections as $overflow) {
             $key = (string) $overflow['key'];
             $total = (int) ($overflow['score']['total'] ?? 0);
-            $dropped[] = ['key' => $key, 'reason' => 'cap', 'total' => $total];
-            $warnings[] = "pattern key '{$key}': authored winner score {$total}; delivered removed; "
-                . 'disposition: dropped by 12-pattern cap';
-            $log[] = "drop {$key}: cap, total {$total}";
+            $dropped[] = ['kind' => 'section', 'key' => $key, 'reason' => 'cap', 'total' => $total];
+            $warnings[] = "section pattern key '{$key}': authored winner score {$total}; delivered removed; "
+                . 'disposition: dropped by 10-section cap';
+            $log[] = "drop section {$key}: cap, total {$total}";
         }
 
+        [$componentSources, $overflowComponentSources] = self::applyComponentCap($componentSources);
+        foreach ($overflowComponentSources as $overflow) {
+            $key = (string) $overflow['key'];
+            $total = (int) ($overflow['score']['total'] ?? 0);
+            $dropped[] = ['kind' => 'component', 'key' => $key, 'reason' => 'cap', 'total' => $total];
+            $warnings[] = "component source key '{$key}': authored winner score {$total}; delivered removed; "
+                . 'disposition: dropped complete row/card pair by 6-source cap';
+            $log[] = "drop component source {$key}: cap, total {$total}";
+        }
+
+        $componentWinners = [];
+        foreach ($componentSources as $source) {
+            foreach (['row', 'card'] as $component) {
+                $winner = $source;
+                $winner['key'] = (string) $source['key'] . '-' . $component;
+                $winner['component'] = $component;
+                $winner['markup'] = $source['components'][$component];
+                $winner['contains'] = $source['component_contains'][$component];
+                unset($winner['components'], $winner['component_contains']);
+                $componentWinners[] = $winner;
+            }
+        }
+
+        $winners = [...$sectionWinners, ...$componentWinners];
         usort($winners, static fn (array $left, array $right): int => strcmp($left['key'], $right['key']));
         $manifestPatterns = [];
+        $deliveredSections = [];
         foreach ($winners as &$winner) {
             $deliveredMarkup = self::rewriteLinks(
                 self::rewriteAnchors(self::rewriteAssets($winner['markup']), $cssIds),
                 $routes,
             );
             $patternFile = 'theme/patterns/' . $winner['key'] . '.php';
-            try {
-                $strip = self::stripBandButtons(
-                    $deliveredMarkup,
-                    (string) $winner['label'],
-                    $patternFile,
-                );
-                $deliveredMarkup = $strip['markup'];
-                array_push($warnings, ...$strip['warnings']);
-                if ($strip['removed'] > 0) {
-                    $log[] = "repair {$winner['key']}: removed {$strip['removed']} band-level CTA block(s)";
+            if (($winner['kind'] ?? null) === 'section') {
+                try {
+                    $strip = self::stripBandButtons(
+                        $deliveredMarkup,
+                        (string) $winner['label'],
+                        $patternFile,
+                    );
+                    $deliveredMarkup = $strip['markup'];
+                    array_push($warnings, ...$strip['warnings']);
+                    if ($strip['removed'] > 0) {
+                        $log[] = "repair {$winner['key']}: removed {$strip['removed']} band-level CTA block(s)";
+                    }
+                } catch (\Throwable $error) {
+                    $warnings[] = "{$patternFile}: block path unprovable; authored value \"core/buttons\"; "
+                        . 'delivered value "pre-transformation bytes"; disposition: kept emitted pattern because '
+                        . 'band-level CTA removal could not be completed (' . $error->getMessage() . ')';
+                    $log[] = "repair {$winner['key']}: band-level CTA removal failed: {$error->getMessage()}";
                 }
-            } catch (\Throwable $error) {
-                $warnings[] = "{$patternFile}: block path unprovable; authored value \"core/buttons\"; "
-                    . 'delivered value "pre-transformation bytes"; disposition: kept emitted pattern because '
-                    . 'band-level CTA removal could not be completed (' . $error->getMessage() . ')';
-                $log[] = "repair {$winner['key']}: band-level CTA removal failed: {$error->getMessage()}";
             }
             $winner['delivered_markup'] = $deliveredMarkup;
             $project->writeText(
@@ -298,12 +393,15 @@ final class ExtractPatternsStep implements Step
                 $this->patternFile($project, $winner),
             );
             $manifestPatterns[] = $this->manifestPattern($project, $winner);
+            if (($winner['kind'] ?? null) === 'section') {
+                $deliveredSections[] = $winner;
+            }
         }
         unset($winner);
 
-        $starter = $this->writeStarter($project, $winners, $warnings, $log);
+        $starter = $this->writeStarter($project, $deliveredSections, $warnings, $log);
         $project->writeJson('patterns.json', [
-            'version' => 1,
+            'version' => 2,
             'patterns' => $manifestPatterns,
             'starter' => $starter,
             'dropped' => $dropped,
@@ -930,6 +1028,158 @@ final class ExtractPatternsStep implements Step
         ];
     }
 
+    /** @return array{row:string,card:string}|null */
+    private static function componentMarkup(string $markup, string $shape): ?array
+    {
+        if (!in_array($shape, ['grid', 'quotes'], true)) {
+            return null;
+        }
+
+        $document = BlockMarkup::parse($markup);
+        if (
+            $document->hasMalformedDelimiters()
+            || $document->hasMismatchedDelimiters()
+            || $document->unclosedIndices() !== []
+        ) {
+            throw new \RuntimeException('component source block delimiters are not structurally safe');
+        }
+
+        if ($shape === 'grid') {
+            $row = null;
+            $rowColumns = [];
+            foreach ($document->indices() as $index) {
+                if (!self::isCoreBlock($document->name($index), 'columns')) {
+                    continue;
+                }
+                $columns = array_values(array_filter(
+                    $document->children($index),
+                    static fn (int $child): bool => self::isCoreBlock($document->name($child), 'column'),
+                ));
+                if (count($columns) >= 3 && count($columns) > count($rowColumns)) {
+                    $row = $index;
+                    $rowColumns = $columns;
+                }
+            }
+            if ($row === null) {
+                return null;
+            }
+
+            $firstColumn = $rowColumns[0];
+            $children = $document->children($firstColumn);
+            if ($children === []) {
+                return null;
+            }
+            $card = count($children) === 1 ? $children[0] : $firstColumn;
+            return [
+                'row' => self::blockSlice($document, $markup, $row),
+                'card' => self::blockSlice($document, $markup, $card),
+            ];
+        }
+
+        $quotes = array_values(array_filter(
+            $document->indices(),
+            static fn (int $index): bool => self::isCoreBlock($document->name($index), 'quote')
+                || self::isCoreBlock($document->name($index), 'pullquote'),
+        ));
+        if ($quotes === []) {
+            return null;
+        }
+        $container = self::nearestCommonBlockAncestor($document, $quotes);
+        if ($container === null) {
+            return null;
+        }
+        return [
+            'row' => self::blockSlice($document, $markup, $container),
+            'card' => self::blockSlice($document, $markup, $quotes[0]),
+        ];
+    }
+
+    /** @param list<int> $indices */
+    private static function nearestCommonBlockAncestor(BlockMarkup $document, array $indices): ?int
+    {
+        $candidate = $document->parent($indices[0]);
+        while ($candidate !== null) {
+            $containsAll = true;
+            foreach (array_slice($indices, 1) as $index) {
+                if (!self::isBlockAncestor($document, $candidate, $index)) {
+                    $containsAll = false;
+                    break;
+                }
+            }
+            if ($containsAll) {
+                return $candidate;
+            }
+            $candidate = $document->parent($candidate);
+        }
+        return null;
+    }
+
+    private static function isBlockAncestor(BlockMarkup $document, int $ancestor, int $index): bool
+    {
+        for ($parent = $document->parent($index); $parent !== null; $parent = $document->parent($parent)) {
+            if ($parent === $ancestor) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static function blockSlice(BlockMarkup $document, string $markup, int $index): string
+    {
+        $end = $document->endOffset($index);
+        if (!$document->isStructurallySafe($index) || $end === null) {
+            throw new \RuntimeException('component block has no safe endpoint');
+        }
+        $start = $document->openingOffset($index);
+        return substr($markup, $start, $end - $start);
+    }
+
+    /**
+     * Apply the shared per-key exemplar selection and ineligible-key degrade
+     * behavior to one pattern kind.
+     *
+     * @param array<string,list<array<mixed>>> $candidatesByKey
+     * @param array<string,int> $ineligibleByKey
+     * @param list<array<string,mixed>> $dropped
+     * @param list<string> $warnings
+     * @param list<string> $log
+     * @return list<array<mixed>>
+     */
+    private function resolveWinners(
+        array $candidatesByKey,
+        array $ineligibleByKey,
+        string $kind,
+        array &$dropped,
+        array &$warnings,
+        array &$log,
+    ): array {
+        $winners = [];
+        $allKeys = array_values(array_unique(array_merge(
+            array_keys($candidatesByKey),
+            array_keys($ineligibleByKey),
+        )));
+        sort($allKeys, SORT_STRING);
+        foreach ($allKeys as $key) {
+            $candidates = $candidatesByKey[$key] ?? [];
+            if ($candidates === []) {
+                $dropped[] = ['kind' => $kind, 'key' => $key, 'reason' => 'ineligible', 'total' => 0];
+                $warnings[] = "{$kind} pattern key '{$key}': authored candidates " . ($ineligibleByKey[$key] ?? 0)
+                    . '; delivered removed; disposition: every candidate was ineligible';
+                $log[] = "drop {$kind} {$key}: every candidate ineligible";
+                continue;
+            }
+
+            // Guard belongs here: SectionPattern::pickWinner() intentionally
+            // rejects an empty list, while extraction must degrade instead.
+            $winner = SectionPattern::pickWinner($candidates);
+            $winner['alternates'] = $this->alternates($candidates, $winner);
+            $winners[] = $winner;
+            $log[] = "winner {$kind} {$key}: {$winner['page']}/{$winner['section']} "
+                . "total {$winner['score']['total']}";
+        }
+        return $winners;
+    }
+
     /** @param list<array<mixed>> $candidates @param array<mixed> $winner @return list<array<string,mixed>> */
     private function alternates(array $candidates, array $winner): array
     {
@@ -972,9 +1222,9 @@ final class ExtractPatternsStep implements Step
      * @param list<array<mixed>> $winners
      * @return array{0:list<array<mixed>>,1:list<array<mixed>>} kept, overflow
      */
-    private static function applyPatternCap(array $winners): array
+    private static function applySectionCap(array $winners): array
     {
-        if (count($winners) <= self::PATTERN_CAP) {
+        if (count($winners) <= self::SECTION_PATTERN_CAP) {
             return [$winners, []];
         }
 
@@ -996,7 +1246,7 @@ final class ExtractPatternsStep implements Step
         }
 
         foreach ($ranked as $winner) {
-            if (count($keptByKey) >= self::PATTERN_CAP) {
+            if (count($keptByKey) >= self::SECTION_PATTERN_CAP) {
                 break;
             }
             $key = (string) $winner['key'];
@@ -1010,6 +1260,22 @@ final class ExtractPatternsStep implements Step
             static fn (array $winner): bool => !isset($keptByKey[(string) $winner['key']]),
         ));
         return [array_values($keptByKey), $overflow];
+    }
+
+    /**
+     * Component budget counts source pairs, never individual emitted files.
+     *
+     * @param list<array<mixed>> $winners
+     * @return array{0:list<array<mixed>>,1:list<array<mixed>>} kept, overflow
+     */
+    private static function applyComponentCap(array $winners): array
+    {
+        $ranked = $winners;
+        usort($ranked, [self::class, 'compareCapWinners']);
+        return [
+            array_slice($ranked, 0, self::COMPONENT_SOURCE_CAP),
+            array_slice($ranked, self::COMPONENT_SOURCE_CAP),
+        ];
     }
 
     /** @param array<mixed> $left @param array<mixed> $right */
@@ -1026,17 +1292,25 @@ final class ExtractPatternsStep implements Step
     {
         $label = $starter ? 'page' : ($winner['label'] ?? null);
         $shape = $starter ? 'starter' : (string) $winner['shape'];
-        $title = $starter ? 'Page starter' : self::patternTitle($label, $shape);
+        $component = is_string($winner['component'] ?? null) ? $winner['component'] : null;
+        $title = $starter ? 'Page starter' : self::patternTitle($label, $shape, $component);
         $slug = $starter ? 'page-starter' : (string) $winner['key'];
         $categories = $starter
             ? [$project->slug() . '-sections']
-            : $this->categories($project, is_string($label) ? $label : null);
+            : $this->categories(
+                $project,
+                is_string($label) ? $label : null,
+                (string) ($winner['kind'] ?? 'section'),
+            );
         $description = $starter
             ? 'A complete page starter layout.'
-            : self::patternDescription(is_string($label) ? $label : null, $shape);
+            : self::patternDescription(is_string($label) ? $label : null, $shape, $component);
         $keywords = $starter
             ? 'page, starter'
-            : implode(', ', array_values(array_filter([is_string($label) ? $label : null, $shape])));
+            : implode(', ', array_values(array_filter([
+                is_string($label) ? $label : null,
+                $component ?? $shape,
+            ])));
         $extra = $starter ? " * Template Types: page\n * Inserter: no\n" : '';
 
         return "<?php\n/**\n"
@@ -1056,12 +1330,16 @@ final class ExtractPatternsStep implements Step
     private function manifestPattern(Project $project, array $winner): array
     {
         $label = is_string($winner['label']) ? $winner['label'] : null;
-        return [
-            'slug' => $winner['key'],
+        $kind = (string) ($winner['kind'] ?? 'section');
+        $tail = [
             'label' => $label,
             'shape' => $winner['shape'],
-            'title' => self::patternTitle($label, (string) $winner['shape']),
-            'categories' => $this->categories($project, $label),
+            'title' => self::patternTitle(
+                $label,
+                (string) $winner['shape'],
+                is_string($winner['component'] ?? null) ? $winner['component'] : null,
+            ),
+            'categories' => $this->categories($project, $label, $kind),
             'source' => [
                 'page' => $winner['page'],
                 'section' => $winner['section'],
@@ -1071,11 +1349,28 @@ final class ExtractPatternsStep implements Step
             'contains' => $winner['contains'],
             'alternates' => $winner['alternates'],
         ];
+        if ($kind === 'component') {
+            return [
+                'slug' => $winner['key'],
+                'kind' => 'component',
+                'component' => $winner['component'],
+                'from' => $winner['from'],
+                ...$tail,
+            ];
+        }
+        return [
+            'slug' => $winner['key'],
+            'kind' => 'section',
+            ...$tail,
+        ];
     }
 
     /** @return list<string> */
-    private function categories(Project $project, ?string $label): array
+    private function categories(Project $project, ?string $label, string $kind = 'section'): array
     {
+        if ($kind === 'component') {
+            return [$project->slug() . '-components'];
+        }
         $categories = [$project->slug() . '-sections'];
         if ($label !== null && isset(self::CORE_CATEGORIES[$label])) {
             $categories[] = self::CORE_CATEGORIES[$label];
@@ -1083,16 +1378,22 @@ final class ExtractPatternsStep implements Step
         return $categories;
     }
 
-    private static function patternTitle(?string $label, string $shape): string
+    private static function patternTitle(?string $label, string $shape, ?string $component = null): string
     {
+        if ($component !== null) {
+            return 'Testimonial ' . $component;
+        }
         $shapeTitle = self::displayName($shape);
         return $label === null
             ? ucfirst($shapeTitle) . ' section'
             : self::displayName($label) . ', ' . $shapeTitle;
     }
 
-    private static function patternDescription(?string $label, string $shape): string
+    private static function patternDescription(?string $label, string $shape, ?string $component = null): string
     {
+        if ($component !== null) {
+            return 'A ' . strtolower(self::displayName((string) $label)) . ' ' . $component . ' component.';
+        }
         return $label === null
             ? 'A ' . self::displayName($shape) . ' section layout.'
             : 'A ' . strtolower(self::displayName($label)) . ' section, '
