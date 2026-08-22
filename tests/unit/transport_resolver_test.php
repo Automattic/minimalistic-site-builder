@@ -549,30 +549,34 @@ test('C9: subprocess guard throws when proc_open is disabled in a real child run
 
 test('billing C5a: build has no ignored model parameter', function (): void {
     $method = new ReflectionMethod(TransportResolver::class, 'build');
-    assert_eq(1, $method->getNumberOfParameters());
+    assert_eq(2, $method->getNumberOfParameters());
     assert_eq('choice', $method->getParameters()[0]->getName());
+    assert_eq('apiFactory', $method->getParameters()[1]->getName());
+    assert_true($method->getParameters()[1]->isOptional());
 });
 
-test('billing C5b: API build without bootstrap throws a named TransportUnavailable', function (): void {
+test('billing C5b: API build without a factory tells the host to supply one', function (): void {
     $autoload = dirname(__DIR__, 2) . '/autoload.php';
     $code = 'require ' . var_export($autoload, true) . '; '
         . '$c = new \\Automattic\\SiteBuild\\TransportChoice('
-        . '\\Automattic\\SiteBuild\\TransportChoice::KIND_API, "explicit"); '
+        . '\\Automattic\\SiteBuild\\TransportChoice::KIND_API, "explicit", null, "anthropic"); '
         . 'try { \\Automattic\\SiteBuild\\TransportResolver::build($c); echo "NO_ERROR"; } '
         . 'catch (Throwable $e) { echo get_class($e) . " | " . $e->getMessage(); }';
     [$output, $status] = tr_php($code);
     assert_eq(0, $status);
     assert_contains(TransportUnavailable::class, $output);
-    assert_contains('src/bootstrap.php', $output);
+    assert_contains('host must supply an API factory', $output);
+    assert_true(!str_contains($output, 'src/bootstrap.php'));
     assert_true(!str_contains($output, 'NO_ERROR'));
 });
 
-test('billing N1: API build with bootstrap refuses a providerless manual choice', function (): void {
+test('billing N1: API build with an injected factory refuses a providerless manual choice', function (): void {
     $bootstrap = dirname(__DIR__, 2) . '/src/bootstrap.php';
     $code = 'require ' . var_export($bootstrap, true) . '; '
         . '$c = new \\Automattic\\SiteBuild\\TransportChoice('
         . '\\Automattic\\SiteBuild\\TransportChoice::KIND_API, "manual"); '
-        . 'try { \\Automattic\\SiteBuild\\TransportResolver::build($c); echo "NO_ERROR"; } '
+        . 'try { \\Automattic\\SiteBuild\\TransportResolver::build($c, static fn (): '
+        . '\\Automattic\\SiteBuild\\Llm => \\make_llm()); echo "NO_ERROR"; } '
         . 'catch (Throwable $e) { echo get_class($e) . " | " . $e->getMessage(); }';
     [$output, $status] = tr_php($code);
     assert_eq(0, $status, $output);
@@ -591,7 +595,8 @@ test('billing C5c: API build without provider key throws instead of exiting', fu
         . '$p = $r->getProperty("vars"); $p->setValue(null, []); '
         . '$c = new \\Automattic\\SiteBuild\\TransportChoice('
         . '\\Automattic\\SiteBuild\\TransportChoice::KIND_API, "explicit", null, "anthropic"); '
-        . 'try { \\Automattic\\SiteBuild\\TransportResolver::build($c); echo "NO_ERROR"; } '
+        . 'try { \\Automattic\\SiteBuild\\TransportResolver::build($c, static fn (): '
+        . '\\Automattic\\SiteBuild\\Llm => \\make_llm()); echo "NO_ERROR"; } '
         . 'catch (Throwable $e) { echo get_class($e) . " | " . $e->getMessage(); }';
     [$output, $status] = tr_php($code);
     assert_eq(0, $status);
@@ -610,7 +615,8 @@ test('billing M4: API build canonicalizes grok so downstream model lookup succee
         . '$c = \\Automattic\\SiteBuild\\TransportResolver::decide('
         . '["LLM_PROVIDER" => "grok", "XAI_API_KEY" => "test-only-key"], '
         . 'static fn (string $name): ?string => null, static fn (): array => []); '
-        . 'try { $llm = \\Automattic\\SiteBuild\\TransportResolver::build($c); '
+        . 'try { $llm = \\Automattic\\SiteBuild\\TransportResolver::build($c, static fn (): '
+        . '\\Automattic\\SiteBuild\\Llm => \\make_llm()); '
         . 'echo get_class($llm) . " | " . getenv("LLM_PROVIDER"); } '
         . 'catch (Throwable $e) { echo "ERROR | " . get_class($e) . " | " . $e->getMessage(); }';
     [$output, $status] = tr_php($code);
@@ -629,7 +635,8 @@ test('billing N1: audit provider matches the provider used by the constructed cl
         . '["OPEN_ROUTER_API_KEY" => "test-only-key"], '
         . 'static fn (string $name): ?string => null, static fn (): array => [], "openrouter"); '
         . '$line = \\Automattic\\SiteBuild\\TransportResolver::describe($c); '
-        . '$llm = \\Automattic\\SiteBuild\\TransportResolver::build($c); '
+        . '$llm = \\Automattic\\SiteBuild\\TransportResolver::build($c, static fn (): '
+        . '\\Automattic\\SiteBuild\\Llm => \\make_llm()); '
         . '$clientProvider = (new ReflectionClass($llm))->getProperty("provider")->getValue($llm); '
         . 'echo $c->provider . " | " . $clientProvider . " | " . $line;';
     [$output, $status] = tr_php($code);
@@ -647,11 +654,63 @@ test('billing N1: API build restores the ambient provider after construction', f
         . '$c = new \\Automattic\\SiteBuild\\TransportChoice('
         . '\\Automattic\\SiteBuild\\TransportChoice::KIND_API, '
         . '"OPEN_ROUTER_API_KEY present (provider: openrouter)", null, "openrouter"); '
-        . '$llm = \\Automattic\\SiteBuild\\TransportResolver::build($c); '
+        . '$llm = \\Automattic\\SiteBuild\\TransportResolver::build($c, static fn (): '
+        . '\\Automattic\\SiteBuild\\Llm => \\make_llm()); '
         . 'echo get_class($llm) . " | " . getenv("LLM_PROVIDER");';
     [$output, $status] = tr_php($code);
     assert_eq(0, $status, $output);
     assert_contains('OpenAiCompatibleClient | anthropic', $output);
+});
+
+test('billing host layering: src classes do not reference bootstrap-only globals', function (): void {
+    $src = dirname(__DIR__, 2) . '/src';
+    $forbidden = [
+        'make_llm',
+        'make_api_llm',
+        'default_llm_model',
+        'step_models',
+        'repo_path',
+        'make_site_builder',
+        'resolve_llm',
+    ];
+    $hits = [];
+
+    foreach (glob($src . '/*.php') ?: [] as $file) {
+        if (basename($file) === 'bootstrap.php') {
+            continue;
+        }
+        $tokens = token_get_all((string) file_get_contents($file));
+        $code = '';
+        foreach ($tokens as $token) {
+            if (is_array($token) && in_array($token[0], [T_COMMENT, T_DOC_COMMENT, T_CONSTANT_ENCAPSED_STRING], true)) {
+                continue;
+            }
+            $code .= is_array($token) ? $token[1] : $token;
+        }
+        foreach ($forbidden as $name) {
+            if (preg_match('/\\b' . preg_quote($name, '/') . '\\b/', $code) === 1) {
+                $hits[] = basename($file) . ':' . $name;
+            }
+        }
+    }
+
+    assert_eq([], $hits, 'src classes must not depend on CLI bootstrap globals');
+});
+
+test('billing host layering: build returns an injected Llm without loading bootstrap', function (): void {
+    $root = dirname(__DIR__, 2);
+    $code = 'require ' . var_export($root . '/autoload.php', true) . '; '
+        . 'require ' . var_export($root . '/tests/FakeLlm.php', true) . '; '
+        . 'putenv("ANTHROPIC_API_KEY=test-only-key"); '
+        . '$c = new \\Automattic\\SiteBuild\\TransportChoice('
+        . '\\Automattic\\SiteBuild\\TransportChoice::KIND_API, "host injection", null, "anthropic"); '
+        . '$fake = new \\Automattic\\SiteBuild\\Tests\\FakeLlm(); '
+        . '$llm = \\Automattic\\SiteBuild\\TransportResolver::build($c, static fn (): '
+        . '\\Automattic\\SiteBuild\\Llm => $fake); '
+        . 'echo $llm === $fake ? "INJECTED" : "WRONG";';
+    [$output, $status] = tr_php($code);
+    assert_eq(0, $status, $output);
+    assert_eq('INJECTED', $output);
 });
 
 test('describe() names the transport, the billing boundary and the rung', function (): void {
