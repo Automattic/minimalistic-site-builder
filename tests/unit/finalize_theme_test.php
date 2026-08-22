@@ -23,6 +23,7 @@ function finalize_static_header(\Automattic\SiteBuild\Project $project): void
 test('finalize-theme writes the deterministic functions.php loader', function () {
     $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
     $project = (new ProjectStore($tmp))->create('Forno Vero');
+    $project->writeText('theme/style.css', "/*\nTheme Name: Forno Vero\n*/\n");
     finalize_static_header($project);
 
     quietly(fn () => (new FinalizeThemeStep())->run($project));
@@ -35,9 +36,29 @@ test('finalize-theme writes the deterministic functions.php loader', function ()
     // The generated fonts module is loaded guardedly, so a fontless theme stays valid.
     assert_contains("require_once __DIR__ . '/fonts.php'", $php);
     assert_contains('is_readable', $php);
+    assert_contains("register_block_pattern_category('forno-vero-sections'", $php);
+    assert_contains("'label' => 'Forno Vero'", $php);
     // No model output belongs here — no font URLs, ever.
     assert_true(!str_contains($php, 'googleapis'), 'fonts stay in fonts.php');
     // PHP must be syntactically valid.
+    $out = [];
+    $rc = 0;
+    exec('php -l ' . escapeshellarg($project->themePath('functions.php')) . ' 2>&1', $out, $rc);
+    assert_eq(0, $rc, implode("\n", $out));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('finalize-theme keeps a hostile pattern category label inert', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fin_category_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('hostile');
+    $project->writeText('theme/style.css', "/*\nTheme Name: O'Brien); phpinfo(); //\n*/\n");
+    finalize_static_header($project);
+
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+
+    $php = $project->readText('theme/functions.php');
+    assert_contains("'label' => 'O\\'Brien); phpinfo(); //'", $php);
     $out = [];
     $rc = 0;
     exec('php -l ' . escapeshellarg($project->themePath('functions.php')) . ' 2>&1', $out, $rc);

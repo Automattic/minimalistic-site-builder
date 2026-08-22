@@ -140,6 +140,26 @@ test('normalizeLabel does not strip a false plural', function (): void {
     assert_eq('credential', SectionPattern::normalizeLabel('credentials'));
 });
 
+test('normalizeLabel singularizes ies and preserves other plural rules', function (): void {
+    foreach ([
+        'studies' => 'study',
+        'galleries' => 'gallery',
+        'stories' => 'story',
+        'categories' => 'category',
+        'classes' => 'class',
+        'courses' => 'course',
+        'processes' => 'process',
+        'boxes' => 'box',
+        'services' => 'service',
+        'process' => 'process',
+        'class' => 'class',
+        'status' => 'status',
+        'analysis' => 'analysis',
+    ] as $authored => $expected) {
+        assert_eq($expected, SectionPattern::normalizeLabel($authored), $authored);
+    }
+});
+
 test('isGenericSlug rejects positional ids', function (): void {
     foreach (['section-1', 'section-12', 'div-3', 'nav-2', 'col-1', 'row'] as $slug) {
         assert_true(SectionPattern::isGenericSlug($slug), "{$slug} should be generic");
