@@ -92,6 +92,8 @@ final class ProcessPool
                     $w = array_values($write);
                     $x = [];
                     @stream_select($r, $w, $x, 0, self::SELECT_TIMEOUT_US);
+                } else {
+                    usleep(self::SELECT_TIMEOUT_US);
                 }
 
                 foreach ($live as $key => &$slot) {
@@ -167,6 +169,21 @@ final class ProcessPool
             return $done;
         };
 
-        return RollingPool::run($jobs, $start, $await, $cap);
+        try {
+            return RollingPool::run($jobs, $start, $await, $cap);
+        } finally {
+            foreach ($live as $slot) {
+                if (!is_resource($slot['proc'] ?? null)) {
+                    continue;
+                }
+                @proc_terminate($slot['proc'], 9);
+                foreach ([0, 1, 2] as $fd) {
+                    if (is_resource($slot['pipes'][$fd] ?? null)) {
+                        fclose($slot['pipes'][$fd]);
+                    }
+                }
+                @proc_close($slot['proc']);
+            }
+        }
     }
 }
