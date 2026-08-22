@@ -165,8 +165,12 @@ test('empty bare items are removed narrowly and recorded as durable warnings', f
 });
 
 test('a failed file rolls back list repairs and warnings without affecting a sibling', function () {
+    // A root text-alignment conflict still fails the WHOLE file (an
+    // unsupported block no longer does — that is isolated to its own block),
+    // so it is the device for exercising file-level rollback.
     $failed = "<!-- wp:list -->\n<ul class=\"wp-block-list\"><li></li></ul>\n<!-- /wp:list -->\n"
-        . '<!-- wp:query --><div class="wp-block-query"></div><!-- /wp:query -->';
+        . '<!-- wp:heading --><h2 class="wp-block-heading has-text-align-center" '
+        . 'style="text-align:right">Conflicting title</h2><!-- /wp:heading -->';
     $tmp = sys_get_temp_dir() . '/fix-blocks-bare-li-rollback-' . uniqid();
     $project = new Project($tmp);
     $project->writeText('theme/parts/failed.html', $failed);

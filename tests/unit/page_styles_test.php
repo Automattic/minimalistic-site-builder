@@ -1909,9 +1909,32 @@ test('site CSS path always merges a wrap policy that never splits words', functi
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('site CSS path lets design CSS override the wrap policy by ordering', function () {
-    [$project, $tmp] = ps_project('builder_ps_word_wrap_order_');
-    $project->writeText(TransformArtifacts::SITE_CSS, 'h1{hyphens:auto;}');
+test('site CSS path strips heading wrap overrides so words never split mid-token', function () {
+    [$project, $tmp] = ps_project('builder_ps_word_wrap_heading_lock_');
+    $project->writeText(
+        TransformArtifacts::SITE_CSS,
+        '.hero h1{overflow-wrap:anywhere;word-break:break-all;hyphens:auto;font-size:5rem;}'
+    );
+    $project->writeJson('pages.json', ['pages' => [['slug' => 'home', 'front' => true]]]);
+    $project->writeText('design/home.html', '<main>Home</main>');
+
+    ps_html_first_step(new FakeLlm())->run($project);
+
+    $style = $project->readText('theme/style.css');
+    $bodies = ps_css_bodies_for_selector($style, '.hero h1');
+    assert_true($bodies !== [], 'the design heading rule is still delivered');
+    $body = implode(' ', $bodies);
+    assert_contains('font-size:5rem', $body, 'unrelated heading declarations survive');
+    assert_true(!str_contains($body, 'overflow-wrap'), 'heading overflow-wrap is stripped');
+    assert_true(!str_contains($body, 'word-break'), 'heading word-break is stripped');
+    assert_true(!str_contains($body, 'hyphens'), 'heading hyphens are stripped');
+    assert_contains('overflow-wrap: normal;', $style, 'wrap policy still ships');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site CSS path still lets body copy override wrap policy by ordering', function () {
+    [$project, $tmp] = ps_project('builder_ps_word_wrap_body_order_');
+    $project->writeText(TransformArtifacts::SITE_CSS, 'p{hyphens:auto;}');
     $project->writeJson('pages.json', ['pages' => [['slug' => 'home', 'front' => true]]]);
     $project->writeText('design/home.html', '<main>Home</main>');
 
@@ -1920,7 +1943,7 @@ test('site CSS path lets design CSS override the wrap policy by ordering', funct
     $style = $project->readText('theme/style.css');
     assert_true(
         strpos($style, 'hyphens: none;') < strpos($style, 'hyphens:auto;'),
-        'the policy is a default the design can still override',
+        'body copy may still opt into hyphenation after the wrap default',
     );
     exec('rm -rf ' . escapeshellarg($tmp));
 });

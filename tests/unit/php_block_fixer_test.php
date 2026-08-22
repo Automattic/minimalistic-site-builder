@@ -370,7 +370,7 @@ test('PhpBlockFixer isolates a throwing file and still fixes its siblings', func
     }
 });
 
-test('PhpBlockFixer isolates a file carrying an unsupported registered block', function () {
+test('PhpBlockFixer preserves an unsupported registered block in place of failing its file', function () {
     $aOriginal = '<!-- wp:paragraph --><p>Supported</p><!-- /wp:paragraph -->';
     $bOriginal = '<!-- wp:query --><div class="wp-block-query"></div><!-- /wp:query -->';
     $theme = php_block_fixer_test_theme([
@@ -382,17 +382,22 @@ test('PhpBlockFixer isolates a file carrying an unsupported registered block', f
     try {
         $report = (new PhpBlockFixer(writer: $writer))->fix($theme);
 
-        assert_contains('FAILED parts/b.html', $report);
+        assert_true(!str_contains($report, 'FAILED'), 'block-level isolation replaces the per-file failure');
+        assert_contains('REPAIR preserved core/query', $report);
         assert_contains("Registered block 'core/query' is outside the supported PHP domain", $report);
         assert_contains('FIXED  parts/a.html', $report, 'the supported sibling is still re-serialized');
-        assert_eq(1, $writer->replaceCalls);
-        assert_eq($bOriginal, file_get_contents($theme . '/parts/b.html'));
+        $b = (string) file_get_contents($theme . '/parts/b.html');
+        assert_eq(
+            str_replace("\n", '', $bOriginal),
+            str_replace("\n", '', $b),
+            'the preserved block keeps its authored bytes modulo delimiter newlines',
+        );
     } finally {
         remove_tree(dirname($theme));
     }
 });
 
-test('PhpBlockFixer isolates a file carrying an unknown deprecation signature', function () {
+test('PhpBlockFixer preserves a block with an unknown deprecation signature', function () {
     $aOriginal = '<!-- wp:paragraph --><p>Supported</p><!-- /wp:paragraph -->';
     $bOriginal = '<!-- wp:paragraph {"customTextColor":"#ff0000"} -->'
         . '<p style="color:#ff0000">Legacy</p><!-- /wp:paragraph -->';
@@ -405,10 +410,11 @@ test('PhpBlockFixer isolates a file carrying an unknown deprecation signature', 
     try {
         $report = (new PhpBlockFixer(writer: $writer))->fix($theme);
 
-        assert_contains('FAILED parts/b.html', $report);
+        assert_true(!str_contains($report, 'FAILED'), 'block-level isolation replaces the per-file failure');
+        assert_contains('REPAIR preserved core/paragraph', $report);
         assert_contains("Unsupported comment attribute 'customTextColor' for core/paragraph", $report);
-        assert_contains('a reviewed deprecation adapter is required', $report);
-        assert_eq($bOriginal, file_get_contents($theme . '/parts/b.html'));
+        $b = (string) file_get_contents($theme . '/parts/b.html');
+        assert_eq(str_replace("\n", '', $bOriginal), str_replace("\n", '', $b));
     } finally {
         remove_tree(dirname($theme));
     }
@@ -456,7 +462,10 @@ test('PhpBlockFixer re-serializes a navigation-link carrying the transformer anc
 
 test('PhpBlockFixer still rejects an unregistered navigation-link attribute with no reviewed adapter', function () {
     // The anchorClassName adapter is one reviewed key for one block, not a
-    // blanket permissive mode; any other unregistered key must still fail closed.
+    // blanket permissive mode; any other unregistered key must still fail
+    // closed. Closed is now per block: the key is preserved verbatim with a
+    // diagnostic rather than failing the whole file, so it is still never
+    // silently dropped.
     $original = '<!-- wp:navigation {"className":"nav-links","overlayMenu":"mobile"} -->'
         . '<!-- wp:navigation-link {"label":"Reservations","url":"/visit/",'
         . '"kind":"custom","anchorTarget":"_blank"} /-->'
@@ -466,10 +475,15 @@ test('PhpBlockFixer still rejects an unregistered navigation-link attribute with
     try {
         $report = (new PhpBlockFixer())->fix($theme);
 
-        assert_contains('FAILED parts/header.html', $report);
+        assert_true(!str_contains($report, 'FAILED'), 'one unsupported block no longer fails the file');
+        assert_contains('REPAIR preserved core/navigation-link', $report);
         assert_contains("Unsupported comment attribute 'anchorTarget' for core/navigation-link", $report);
         assert_contains('a reviewed deprecation adapter is required', $report);
-        assert_eq($original, file_get_contents($theme . '/parts/header.html'));
+        assert_contains(
+            '"anchorTarget":"_blank"',
+            (string) file_get_contents($theme . '/parts/header.html'),
+            'the unregistered key is preserved verbatim, never silently dropped',
+        );
     } finally {
         remove_tree(dirname($theme));
     }
@@ -669,19 +683,22 @@ test('PhpBlockFixer keeps the anchorClassName adapter scoped to core/navigation-
     try {
         $report = (new PhpBlockFixer())->fix($theme);
 
-        assert_contains('FAILED parts/header.html', $report);
+        assert_true(!str_contains($report, 'FAILED'), 'one unsupported block no longer fails the file');
+        assert_contains('REPAIR preserved core/paragraph', $report);
         assert_contains("Unsupported comment attribute 'anchorClassName' for core/paragraph", $report);
-        assert_eq($original, file_get_contents($theme . '/parts/header.html'));
+        $delivered = (string) file_get_contents($theme . '/parts/header.html');
+        assert_contains('"anchorClassName":"brand"', $delivered, 'the scoped key is preserved, never dropped');
+        assert_contains('<p>Brand</p>', $delivered, 'the block content survives');
     } finally {
         remove_tree(dirname($theme));
     }
 });
 
-test('PhpBlockFixer isolates a current-key historical style signature to its file', function () {
+test('PhpBlockFixer preserves a current-key historical style signature per block', function () {
     $aOriginal = '<!-- wp:paragraph --><p>Supported</p><!-- /wp:paragraph -->';
     // An invalid paragraph whose root is not a <p> is outside the reviewed
     // selector-less carryover (paragraph-inline-color-carryover golden), so
-    // its authored inline color still fails closed before staging.
+    // its authored bytes are preserved verbatim rather than re-saved.
     $bOriginal = '<!-- wp:paragraph {"style":{"typography":{"letterSpacing":"0.12em"}}} -->'
         . '<div style="letter-spacing:0.12em;color:var(--wp--preset--color--accent)">'
         . 'Legacy</div><!-- /wp:paragraph -->';
@@ -694,18 +711,21 @@ test('PhpBlockFixer isolates a current-key historical style signature to its fil
     try {
         $report = (new PhpBlockFixer(writer: $writer))->fix($theme);
 
-        assert_contains('FAILED parts/b.html', $report);
+        assert_true(!str_contains($report, 'FAILED'), 'block-level isolation replaces the per-file failure');
+        assert_contains('REPAIR preserved core/paragraph', $report);
         assert_contains('Unsupported deprecated core/paragraph style signature at 0: color', $report);
-        assert_eq($bOriginal, file_get_contents($theme . '/parts/b.html'));
+        $b = (string) file_get_contents($theme . '/parts/b.html');
+        assert_eq(str_replace("\n", '', $bOriginal), str_replace("\n", '', $b));
     } finally {
         remove_tree(dirname($theme));
     }
 });
 
-test('PhpBlockFixer isolates an unsupported block-support family to its file', function () {
-    // background is the one pinned-unimplemented family that stays
-    // fail-closed: StyleEngine consumes style.background wholesale, so an
-    // unreviewed shape could change the emitted bytes.
+test('PhpBlockFixer preserves an unsupported block-support family per block', function () {
+    // background is the one pinned-unimplemented family that stays outside
+    // the supported domain: StyleEngine consumes style.background wholesale,
+    // so an unreviewed shape could change the emitted bytes. The block is
+    // delivered verbatim instead of re-saved.
     $original = '<!-- wp:group {"style":{"background":{"backgroundImage":{"id":42}}}} -->'
         . '<div class="wp-block-group"></div><!-- /wp:group -->';
     $theme = php_block_fixer_test_theme(['parts/unsupported.html' => $original]);
@@ -714,30 +734,33 @@ test('PhpBlockFixer isolates an unsupported block-support family to its file', f
     try {
         $report = (new PhpBlockFixer(writer: $writer))->fix($theme);
 
-        assert_contains('FAILED parts/unsupported.html', $report);
+        assert_true(!str_contains($report, 'FAILED'), 'block-level isolation replaces the per-file failure');
+        assert_contains('REPAIR preserved core/group', $report);
         assert_contains(
             "Unsupported block-support path 'style.background.backgroundImage.id' for core/group at 0",
             $report,
         );
-        assert_eq(0, $writer->stageCalls);
-        assert_eq($original, file_get_contents($theme . '/parts/unsupported.html'));
+        $delivered = (string) file_get_contents($theme . '/parts/unsupported.html');
+        assert_eq(str_replace("\n", '', $original), str_replace("\n", '', $delivered));
     } finally {
         remove_tree(dirname($theme));
     }
 });
 
-test('PhpBlockFixer isolates unreviewed layout variants to their file', function () {
+test('PhpBlockFixer preserves unreviewed layout variants per block', function () {
     // 'masonry' is an unreviewed layout type outside the guard's allowlist
-    // (grid is now supported); the fixer must isolate it to its own file.
+    // (grid is now supported); the fixer must preserve that one block and
+    // leave the rest of the file serialized.
     $original = '<!-- wp:group {"layout":{"type":"masonry"}} -->'
         . '<div class="wp-block-group"></div><!-- /wp:group -->';
     $theme = php_block_fixer_test_theme(['parts/unsupported.html' => $original]);
     $writer = new PhpBlockFixerTestWriter();
     try {
         $report = (new PhpBlockFixer(writer: $writer))->fix($theme);
-        assert_contains('FAILED parts/unsupported.html', $report);
-        assert_eq(0, $writer->stageCalls);
-        assert_eq($original, file_get_contents($theme . '/parts/unsupported.html'));
+        assert_true(!str_contains($report, 'FAILED'), 'block-level isolation replaces the per-file failure');
+        assert_contains('REPAIR preserved core/group', $report);
+        $delivered = (string) file_get_contents($theme . '/parts/unsupported.html');
+        assert_eq(str_replace("\n", '', $original), str_replace("\n", '', $delivered));
     } finally {
         remove_tree(dirname($theme));
     }
@@ -802,7 +825,8 @@ test('PhpBlockFixer deep-merges duplicate comment JSON keys instead of failing t
     $theme = php_block_fixer_test_theme(['parts/page-home--contact-and-location.html' => $original]);
     try {
         $collapsedReport = (new PhpBlockFixer(writer: new PhpBlockFixerTestWriter()))->fix($collapsedTheme);
-        assert_contains('FAILED parts/page-home--contact-and-location.html', $collapsedReport);
+        assert_true(!str_contains($collapsedReport, 'FAILED'), 'the collapsed variant is preserved per block, not failed per file');
+        assert_contains('REPAIR preserved core/paragraph', $collapsedReport);
         assert_contains('Unsupported deprecated core/paragraph style signature', $collapsedReport);
         assert_contains('margin-top', $collapsedReport);
 

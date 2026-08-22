@@ -124,7 +124,13 @@ final class PhpBlockFixer implements ReportingBlockFixer
             }
 
             $changed = $current !== $original;
-            $fileRepairs = $changed ? Repair::dedupe($repairs) : [];
+            // A byte-identical file reports no repairs — except preservation
+            // rows, whose whole point is a durable warning that a block was
+            // delivered verbatim because it could not be re-serialized.
+            $fileRepairs = Repair::dedupe($changed ? $repairs : array_values(array_filter(
+                $repairs,
+                static fn (Repair $repair): bool => str_starts_with($repair->code, Repair::PRESERVED_PREFIX),
+            )));
             $dropped = $changed ? $this->drops->detect($original, $current) : [];
             $reports[] = new FileReport(
                 $relative,

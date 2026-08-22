@@ -12,6 +12,7 @@ use Automattic\SiteBuild\PhpBlockFixer;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ReportingBlockFixer;
 use Automattic\SiteBuild\SectionRhythm;
+use Automattic\SiteBuild\Steps\CollectImagesStep;
 use Automattic\SiteBuild\Steps\FixBlocksStep;
 use Automattic\SiteBuild\ThemeValidator;
 
@@ -1211,15 +1212,17 @@ test('FixBlocksStep isolates malformed legacy alignment containers with actionab
     try {
         (new FixBlocksStep(new PhpBlockFixer()))->run($project);
 
+        // Delimiter line breaks are the fixer's normal formatting; what must
+        // survive intact is every attribute, class, and byte of content.
         assert_eq(
-            $badStyle,
-            $project->readText('theme/parts/a-bad-style.html'),
-            'a malformed style container is delivered byte-for-byte',
+            str_replace("\n", '', $badStyle),
+            str_replace("\n", '', $project->readText('theme/parts/a-bad-style.html')),
+            'a malformed style container is delivered with its content intact',
         );
         assert_eq(
-            $badTypography,
-            $project->readText('theme/parts/b-bad-typography.html'),
-            'a malformed typography container is delivered byte-for-byte',
+            str_replace("\n", '', $badTypography),
+            str_replace("\n", '', $project->readText('theme/parts/b-bad-typography.html')),
+            'a malformed typography container is delivered with its content intact',
         );
         assert_contains(
             '"typography":{"lineHeight":"1.1","textAlign":"center"}',
@@ -1228,20 +1231,22 @@ test('FixBlocksStep isolates malformed legacy alignment containers with actionab
         );
 
         $joined = implode("\n", $project->readJson('warnings.json')['fix-blocks'] ?? []);
-        assert_contains('left parts/a-bad-style.html unmodified', $joined);
+        assert_contains('preserved core/heading', $joined);
+        assert_contains('at parts/a-bad-style.html', $joined);
         assert_contains('core/heading at 0: authored style "keep-style" is not an object', $joined);
-        assert_contains('left parts/b-bad-typography.html unmodified', $joined);
+        assert_contains('preserved core/paragraph', $joined);
+        assert_contains('at parts/b-bad-typography.html', $joined);
         assert_contains(
             'core/paragraph at 0: authored style.typography "keep-typography" is not an object',
             $joined,
         );
-        assert_contains('pre-step markup delivered byte-for-byte', $joined);
+        assert_contains('its authored bytes were delivered while sibling blocks were still normalized', $joined);
     } finally {
         exec('rm -rf ' . escapeshellarg($tmp));
     }
 });
 
-test('FixBlocksStep isolates unreviewed validation failures per file with a durable warning', function () {
+test('FixBlocksStep isolates unreviewed validation failures per block with a durable warning', function () {
     $cases = [
         'unsupported-block' => '<!-- wp:query --><div class="wp-block-query"></div><!-- /wp:query -->',
         'unreviewed-style' => '<!-- wp:paragraph {"align":"center"} -->'
@@ -1284,21 +1289,22 @@ test('FixBlocksStep isolates unreviewed validation failures per file with a dura
         $project->writeText('theme/parts/section.html', $original);
         try {
             // Unreviewed signatures stay outside the transformation domain,
-            // but the failure is isolated to the file: its pre-fixer bytes
-            // are delivered untouched with a durable warnings.json record,
-            // and the build continues.
+            // but the failure is isolated to the BLOCK: its authored bytes
+            // are delivered (modulo delimiter newlines) with a durable
+            // warnings.json record naming the block, and the build continues.
             (new FixBlocksStep(new PhpBlockFixer()))->run($project);
             assert_eq(
-                $original,
-                $project->readText('theme/parts/section.html'),
-                "{$name} must deliver its pre-fixer bytes untouched",
+                str_replace("\n", '', $original),
+                str_replace("\n", '', $project->readText('theme/parts/section.html')),
+                "{$name} must deliver its authored bytes",
             );
             $joined = implode(' ', $project->readJson('warnings.json')['fix-blocks'] ?? []);
             assert_contains(
-                'left parts/section.html unmodified',
+                'preserved core/',
                 $joined,
-                "{$name} must be recorded as a delivered-through defect",
+                "{$name} must be recorded as a preserved block",
             );
+            assert_contains('parts/section.html', $joined);
         } finally {
             exec('rm -rf ' . escapeshellarg($tmp));
         }
@@ -1345,38 +1351,48 @@ test('FixBlocksStep still normalizes siblings when one file fails validation', f
     try {
         (new FixBlocksStep(new PhpBlockFixer()))->run($project);
 
-        // The unsupported file is delivered untouched with a durable record;
+        // The unsupported block is delivered verbatim with a durable record;
         // its sibling's width-contract repair still lands.
-        assert_eq($unsupportedOriginal, $project->readText('theme/parts/b-unsupported.html'));
+        assert_eq(
+            str_replace("\n", '', $unsupportedOriginal),
+            str_replace("\n", '', $project->readText('theme/parts/b-unsupported.html')),
+        );
         assert_contains('"layout"', $project->readText('theme/parts/a-layout.html'));
         $joined = implode(' ', $project->readJson('warnings.json')['fix-blocks'] ?? []);
-        assert_contains('left parts/b-unsupported.html unmodified', $joined);
+        assert_contains('preserved core/query', $joined);
+        assert_contains('parts/b-unsupported.html', $joined);
     } finally {
         exec('rm -rf ' . escapeshellarg($tmp));
     }
 });
 
-test('FixBlocksStep restores step-entry bytes when layout normalization and validation fail in one file', function () {
+test('FixBlocksStep keeps layout work and preserves only the unsupported child block', function () {
     $tmp = sys_get_temp_dir() . '/builder_fix_compound_failure_' . uniqid();
     $project = new Project($tmp);
-    $failedOriginal = '<!-- wp:group {"align":"full"} -->'
+    $mixedOriginal = '<!-- wp:group {"align":"full"} -->'
         . '<div class="wp-block-group alignfull">'
         . '<!-- wp:query --><div class="wp-block-query"></div><!-- /wp:query -->'
         . '</div><!-- /wp:group -->';
     $siblingOriginal = '<!-- wp:group {"align":"full"} -->'
         . '<div class="wp-block-group alignfull"></div><!-- /wp:group -->';
-    // Use header.html so the final constrained-part reassertion is also proven
-    // not to mutate a file whose complete step transaction was abandoned.
-    $project->writeText('theme/parts/header.html', $failedOriginal);
+    // header.html also exercises the final constrained-part reassertion on a
+    // file that now carries a preserved child.
+    $project->writeText('theme/parts/header.html', $mixedOriginal);
     $project->writeText('theme/parts/b-sibling.html', $siblingOriginal);
 
     try {
         (new FixBlocksStep(new PhpBlockFixer()))->run($project);
 
-        assert_eq(
-            $failedOriginal,
-            $project->readText('theme/parts/header.html'),
-            'the failed file rolls LayoutFixer back too, not merely PhpBlockFixer',
+        $header = $project->readText('theme/parts/header.html');
+        assert_contains(
+            '"layout"',
+            $header,
+            'the parent group keeps its layout normalization and re-serialization',
+        );
+        assert_contains(
+            '<div class="wp-block-query"></div>',
+            $header,
+            'the unsupported child is preserved inside the normalized parent',
         );
         assert_contains(
             '"layout":{"type":"constrained"}',
@@ -1384,9 +1400,8 @@ test('FixBlocksStep restores step-entry bytes when layout normalization and vali
             'a healthy sibling keeps its successful layout and serialization work',
         );
         $joined = implode(' ', $project->readJson('warnings.json')['fix-blocks'] ?? []);
+        assert_contains('preserved core/query', $joined);
         assert_contains('parts/header.html', $joined);
-        assert_contains("Registered block 'core/query'", $joined);
-        assert_contains('pre-step markup delivered byte-for-byte', $joined);
     } finally {
         exec('rm -rf ' . escapeshellarg($tmp));
     }
@@ -1752,4 +1767,113 @@ HTML;
 
     assert_contains('"mediaType":"image"', $fixed);
     assert_contains('<img src="theme:./assets/hero.jpg"', $fixed);
+});
+
+test('attribute-light section markup converges to the same save markup without losing design data', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fix_blocks_' . uniqid();
+    $theme = $tmp . '/theme';
+    mkdir($theme . '/parts', 0777, true);
+
+    $attributes = '{"anchor":"story","className":"reveal","backgroundColor":"contrast","textColor":"base","style":{"spacing":{"padding":{"top":"var:preset|spacing|lg","bottom":"var:preset|spacing|lg"}}},"layout":{"type":"constrained"}}';
+    $headingAttributes = '{"level":2,"textColor":"accent","fontFamily":"heading","fontSize":"section-title"}';
+    $imageAttributes = '{"sizeSlug":"large","className":"card-media"}';
+    $image = '<img src="theme:./assets/story.jpg" alt="AI_IMAGE: Hands shaping clay at a studio table | story card | photorealistic | landscape"/>';
+    $richText = 'See <a href="/work/" style="text-decoration-thickness:3px">selected work</a>.';
+
+    $canonical = <<<HTML
+<!-- wp:group {$attributes} -->
+<div id="story" class="wp-block-group reveal has-base-color has-contrast-background-color has-text-color has-background" style="padding-top:var(--wp--preset--spacing--lg);padding-bottom:var(--wp--preset--spacing--lg)">
+<!-- wp:heading {$headingAttributes} -->
+<h2 class="wp-block-heading has-accent-color has-text-color has-heading-font-family has-section-title-font-size">A material practice</h2>
+<!-- /wp:heading -->
+<!-- wp:paragraph -->
+<p>{$richText}</p>
+<!-- /wp:paragraph -->
+<!-- wp:image {$imageAttributes} -->
+<figure class="wp-block-image size-large card-media">{$image}</figure>
+<!-- /wp:image -->
+</div>
+<!-- /wp:group -->
+HTML;
+
+    $lean = <<<HTML
+<!-- wp:group {$attributes} -->
+<div class="reveal">
+<!-- wp:heading {$headingAttributes} -->
+<h2>A material practice</h2>
+<!-- /wp:heading -->
+<!-- wp:paragraph -->
+<p>{$richText}</p>
+<!-- /wp:paragraph -->
+<!-- wp:image {$imageAttributes} -->
+<figure class="card-media">{$image}</figure>
+<!-- /wp:image -->
+</div>
+<!-- /wp:group -->
+HTML;
+
+    file_put_contents($theme . '/parts/canonical.html', $canonical);
+    file_put_contents($theme . '/parts/lean.html', $lean);
+
+    try {
+        $report = (new PhpBlockFixer())->fix($theme);
+        $fixedCanonical = (string) file_get_contents($theme . '/parts/canonical.html');
+        $fixedLean = (string) file_get_contents($theme . '/parts/lean.html');
+
+        assert_eq($fixedCanonical, $fixedLean, 'lean and verbose inputs converge byte-for-byte');
+        assert_contains('class="wp-block-group reveal', $fixedLean, 'explicit className hook survives');
+        assert_contains('id="story"', $fixedLean, 'the comment anchor regenerates the wrapper id');
+        assert_contains('padding-top:var(--wp--preset--spacing--lg)', $fixedLean, 'attribute styling is regenerated');
+        assert_contains(
+            '<a href="/work/" style="text-decoration-thickness:3px">selected work</a>',
+            $fixedLean,
+            'RichText inline styling survives',
+        );
+        assert_contains('AI_IMAGE:', $fixedLean, 'semantic image attributes survive');
+        assert_contains('0 style/class value(s) dropped', $report);
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('attribute-light cover markup remains collectable before canonical serialization', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fix_blocks_' . uniqid();
+    $theme = $tmp . '/theme';
+    mkdir($theme . '/parts', 0777, true);
+
+    $markup = <<<'HTML'
+<!-- wp:group {"align":"full","style":{"spacing":{"margin":{"top":"0","bottom":"0"}}},"layout":{"type":"constrained"}} -->
+<div>
+<!-- wp:cover {"url":"theme:./assets/hero-mountain-dawn.jpg","dimRatio":50,"align":"full","minHeight":80,"minHeightUnit":"vh"} -->
+<div>
+<img alt="AI_IMAGE: A misty mountain range at dawn with calm sky behind the headline | full-bleed hero section | photorealistic | landscape" src="theme:./assets/hero-mountain-dawn.jpg"/>
+<div>
+<!-- wp:heading {"level":1,"style":{"typography":{"textAlign":"center"}},"textColor":"base","fontFamily":"heading","fontSize":"display"} -->
+<h1>Into the High Country</h1>
+<!-- /wp:heading -->
+</div>
+</div>
+<!-- /wp:cover -->
+</div>
+<!-- /wp:group -->
+HTML;
+
+    $images = CollectImagesStep::parsePlaceholders($markup);
+    assert_eq(1, count($images), 'classless cover image remains visible to image collection');
+    assert_eq('hero-mountain-dawn.jpg', $images[0]['filename']);
+
+    file_put_contents($theme . '/parts/hero.html', $markup);
+    try {
+        $report = (new PhpBlockFixer())->fix($theme);
+        $fixed = (string) file_get_contents($theme . '/parts/hero.html');
+
+        assert_contains('class="wp-block-cover alignfull"', $fixed, 'cover save classes are regenerated');
+        assert_contains('style="min-height:80vh"', $fixed, 'cover dimensions are regenerated');
+        assert_contains('Into the High Country', $fixed, 'nested RichText content survives');
+        assert_contains('has-text-align-center', $fixed, 'current-schema textAlign regenerates centering');
+        assert_contains('theme:./assets/hero-mountain-dawn.jpg', $fixed, 'cover URL survives');
+        assert_contains('0 style/class value(s) dropped', $report);
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
 });

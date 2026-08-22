@@ -15,6 +15,22 @@ use Automattic\SiteBuild\Units\GeneratedMarkup;
  * each PAGE's sections), validates the markup, and writes the part files.
  */
 
+/**
+ * Assert the sections repair log records no block-grammar repair. The log
+ * holds every semantics-preserving unit repair, so an exact-match assertion
+ * would also pin unrelated marker and layout repairs.
+ */
+function assert_no_grammar_repair(string $log, string $because = 'well-formed markup needs no grammar repair'): void
+{
+    foreach ([
+        'delimiter-attrs-braces-closed',
+        'wrapper-closers-synthesized',
+        'block-comment-grammar-repaired',
+    ] as $code) {
+        assert_true(!str_contains($log, $code), "{$because} ({$code})");
+    }
+}
+
 /** One page entry for a pages.json fixture. */
 function sections_page(string $slug, array $sections, array $overrides = []): array
 {
@@ -695,6 +711,9 @@ test('sections writes header, footer and a part per page section', function () {
         assert_true($project->exists('theme/' . $rel), "{$rel} written");
         assert_contains('wp:', $project->readText('theme/' . $rel));
     }
+    // The log now carries every semantics-preserving unit repair, so assert
+    // the narrower original claim: well-formed markup needs no grammar repair.
+    assert_no_grammar_repair($project->readText('logs/sections.txt'));
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -969,7 +988,12 @@ test('sections falls back to deterministic chrome when the header markup is unus
     [$project, $tmp] = sections_fixture();
     $llm = new FakeLlm();
     $llm->queueText('OK');
-    $llm->queueText('just prose, not a header');                            // header — invalid
+    // The block JSON is losslessly repairable, but the mismatched landmark
+    // wrapper still makes the whole generated part unusable.
+    $llm->queueText(
+        '<!-- wp:group {"tagName":"header","style":{"spacing":{"padding":{"top":"x"}}} -->'
+        . '<header class="wp-block-group">Broken</div><!-- /wp:group -->'
+    );
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');                 // footer — valid
     $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
     $llm->queueText('<!-- wp:heading --><h2>About</h2><!-- /wp:heading -->');
@@ -985,6 +1009,10 @@ test('sections falls back to deterministic chrome when the header markup is unus
     assert_contains('delivered=mode-aware', $joined);
     assert_contains('header fallback', $joined);
     assert_contains('disposition=', $joined);
+    assert_no_grammar_repair(
+        $project->readText('logs/sections.txt'),
+        'a repair to discarded markup is not reported as delivered',
+    );
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -1041,12 +1069,13 @@ test('fallback chrome relies on the template-part landmark instead of nesting on
     );
 });
 
-test('chrome nav rules follow the page count: anchors for one page, page-list for several', function () {
+test('chrome nav rules follow the page count: anchors for one page, inner pages for several', function () {
     [$project, $tmp] = sections_fixture(); // homepage only
     $renderer = new PromptRenderer(repo_path('prompts'));
     $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
 
     assert_contains('do NOT use `<!-- wp:page-list /-->`', $reqs['header']['prompt']);
+    assert_contains('already links home', $reqs['header']['prompt']);
     assert_contains('href="#menu-highlights"', $reqs['header']['prompt']);
     assert_contains('This site is ONE page: NEVER use `wp:page-list`', $reqs['footer']['prompt']);
     assert_contains('root-relative `/#anchor`', $reqs['footer']['prompt']);
@@ -1063,9 +1092,12 @@ test('chrome nav rules follow the page count: anchors for one page, page-list fo
     ]]);
     $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
 
-    assert_contains('should contain `<!-- wp:page-list /-->`', $reqs['header']['prompt']);
-    assert_true(!str_contains($reqs['header']['prompt'], 'do NOT use `<!-- wp:page-list /-->`'), 'multi-page header keeps the page-list default');
-    assert_contains('`wp:navigation` that contains `<!-- wp:page-list /-->`', $reqs['footer']['prompt']);
+    assert_contains('NEVER include the homepage in `wp:navigation`', $reqs['header']['prompt']);
+    assert_contains('Do NOT use `<!-- wp:page-list /-->`', $reqs['header']['prompt']);
+    assert_contains('SITE PAGES except the front page', $reqs['header']['prompt']);
+    assert_contains('SITE PAGES except the front page', $reqs['footer']['prompt']);
+    assert_contains('NEVER include Home', $reqs['footer']['prompt']);
+    assert_contains('never a bare `wp:page-list`', $reqs['footer']['prompt']);
     assert_true(!str_contains($reqs['footer']['prompt'], 'This site is ONE page'), 'multi-page footer may list pages');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -1091,7 +1123,8 @@ test('section prompts carry the slug as the anchor and the outline exposes it', 
 
     $about = sections_request_text($reqs['page-home--about']);
     assert_contains('"anchor":"about"', $about);
-    assert_contains('id="about"', $about);
+    assert_contains('the build restores the matching wrapper `id`', $about);
+    assert_true(!str_contains($about, 'id="about"'), 'the prompt does not ask the model to duplicate the anchor');
     assert_contains('[#about]', $about); // its own outline line ends with the anchor
     assert_contains('[#hero]', $reqs['header']['prompt']); // the header sees the anchors too
     exec('rm -rf ' . escapeshellarg($tmp));
@@ -1128,6 +1161,55 @@ HTML);
         'every group opener has a closer',
     );
     assert_eq(substr_count($about, '<div'), substr_count($about, '</div>'), 'the div stack is rebalanced');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('sections retains deterministically repaired block grammar and reports the repair', function () {
+    [$project, $tmp] = sections_fixture();
+    $llm = new FakeLlm();
+    $llm->queueText('OK'); // cache warm-up probe
+    $llm->queueText('<!-- wp:group --><!-- wp:site-title /--><!-- /wp:group -->');
+    $llm->queueText('<!-- wp:group --><!-- wp:paragraph --><p>(c)</p><!-- /wp:paragraph --><!-- /wp:group -->');
+    $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
+    $llm->queueText(
+        '<!-- wp:group {"anchor":"about","layout":{"type":"constrained"}} -->'
+        . '<div>'
+        . '<!-- wp:paragraph {"backgroundColor":"secondary","style":{"spacing":{"padding":{"top":"var:preset|spacing|sm"}}} -->'
+        . '<p>About survives.</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->',
+    );
+
+    (new SectionsStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    assert_contains(
+        '<p>About survives.</p>',
+        $project->readText('theme/parts/page-home--about.html'),
+        'the repaired section is delivered',
+    );
+    assert_eq(
+        ['hero', 'about'],
+        array_column($project->readJson('pages.json')['pages'][0]['sections'], 'slug'),
+        'the repaired section remains in the page plan',
+    );
+    // The repair is lossless, so the part it repaired contributes no warning.
+    // The fixture's minimal hero draws its own unrelated recipe warnings.
+    $sectionWarnings = $project->exists('warnings.json')
+        ? implode(' ', $project->readJson('warnings.json')['sections'] ?? [])
+        : '';
+    assert_true(
+        !str_contains($sectionWarnings, 'page-home--about'),
+        'the losslessly repaired part contributes no warning',
+    );
+    // The unbalanced root closer is repaired by the delimiter-attrs pass and
+    // reported as a structured repair row, not a warning.
+    assert_contains(
+        'delimiter-attrs-braces-closed',
+        $project->readText('logs/sections.txt'),
+    );
+    assert_contains(
+        'wp:paragraph',
+        $project->readText('logs/sections.txt'),
+    );
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

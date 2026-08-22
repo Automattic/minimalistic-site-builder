@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Units;
 
+use Automattic\SiteBuild\BlockCommentRepair;
 use Automattic\SiteBuild\BlockDocumentRecovery;
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\BlockSerializer\Json\JsJsonEncoder;
@@ -10,6 +11,7 @@ use Automattic\SiteBuild\BlockSerializer\Json\JsonDecoder;
 use Automattic\SiteBuild\BlockSerializer\Json\JsonObject;
 use Automattic\SiteBuild\BlockSerializer\Json\JsonValue;
 use Automattic\SiteBuild\CodeFences;
+use Automattic\SiteBuild\HtmlBlockContext;
 use Automattic\SiteBuild\MarkupSalvage;
 use Automattic\SiteBuild\MarkupSanitizer;
 use Automattic\SiteBuild\Narrator;
@@ -42,6 +44,46 @@ final class GeneratedMarkup
      * @param list<string>              $warnings
      * @param list<array<string,mixed>> $repairs
      */
+    /**
+     * Apply one delimiter repair only where the delimiter view stays visible.
+     *
+     * A malformed delimiter inside `<pre>`, `<code>`, a script, or a non-block
+     * comment is a literal example the response was asked to show, not markup
+     * to fix — "repairing" it rewrites displayed content. The view masks those
+     * spans to spaces without changing length, so a byte that survives masking
+     * is transparent. Segments are repaired independently and concatenated:
+     * masked bytes pass through verbatim, and the whitespace-only segments the
+     * split leaves inside an opaque span cannot match a repair that requires
+     * `<!--`, so the span is reproduced byte for byte.
+     *
+     * @param list<string> $notes
+     * @param callable(string, list<string>): string $repair
+     */
+    private static function repairOutsideOpaqueContexts(
+        string $text,
+        array &$notes,
+        callable $repair
+    ): string {
+        $view = HtmlBlockContext::delimiterView($text);
+        if ($view === $text) {
+            return $repair($text, $notes);
+        }
+        $out = '';
+        $length = strlen($text);
+        $start = 0;
+        while ($start < $length) {
+            $opaque = $view[$start] !== $text[$start];
+            $end = $start;
+            while ($end < $length && (($view[$end] !== $text[$end]) === $opaque)) {
+                $end++;
+            }
+            $segment = substr($text, $start, $end - $start);
+            $out .= $opaque ? $segment : $repair($segment, $notes);
+            $start = $end;
+        }
+        return $out;
+    }
+
     public static function normalize(
         string $text,
         string $key,
@@ -80,8 +122,18 @@ final class GeneratedMarkup
         // one nesting level deep is ignored by WordPress, which is strictly
         // better than losing the section.
         $attrsRepairs = [];
-        $text = self::closeTruncatedDelimiterComment($text, $attrsRepairs);
-        $text = self::closeUnbalancedDelimiterAttrs($text, $attrsRepairs);
+        $text = self::repairOutsideOpaqueContexts(
+            $text,
+            $attrsRepairs,
+            static fn (string $part, array &$notes): string
+                => self::closeTruncatedDelimiterComment($part, $notes),
+        );
+        $text = self::repairOutsideOpaqueContexts(
+            $text,
+            $attrsRepairs,
+            static fn (string $part, array &$notes): string
+                => self::closeUnbalancedDelimiterAttrs($part, $notes),
+        );
         foreach ($attrsRepairs as $note) {
             Narrator::write("    (part '{$key}': {$note})\n");
             $repairs[] = [
@@ -93,7 +145,12 @@ final class GeneratedMarkup
             ];
         }
         $wrapperRepairs = [];
-        $text = self::closeUnbalancedWrapperClosers($text, $wrapperRepairs);
+        $text = self::repairOutsideOpaqueContexts(
+            $text,
+            $wrapperRepairs,
+            static fn (string $part, array &$notes): string
+                => self::closeUnbalancedWrapperClosers($part, $notes),
+        );
         foreach ($wrapperRepairs as $note) {
             Narrator::write("    (part '{$key}': {$note})\n");
             $repairs[] = [
@@ -101,6 +158,24 @@ final class GeneratedMarkup
                 'part' => $key,
                 'authored' => $note,
                 'delivered' => 'balanced container shell',
+                'disposition' => 'repaired',
+            ];
+        }
+
+        // Runs after the brace repairs above, which already close missing and
+        // drop surplus closers. What is left for this pass is the defect class
+        // they cannot see: a typo-shaped closing delimiter directly after the
+        // block's real closer. Its attribute pass re-checks decodability, so
+        // anything already repaired above is skipped.
+        $commentRepair = BlockCommentRepair::repair($text);
+        $text = $commentRepair['markup'];
+        foreach ($commentRepair['notes'] as $note) {
+            Narrator::write("    (part '{$key}': repaired block grammar — {$note})\n");
+            $repairs[] = [
+                'code' => 'block-comment-grammar-repaired',
+                'part' => $key,
+                'authored' => $note,
+                'delivered' => 'well-formed block delimiters',
                 'disposition' => 'repaired',
             ];
         }
@@ -154,7 +229,28 @@ final class GeneratedMarkup
         } catch (\RuntimeException $e) {
             throw new \RuntimeException("part '{$key}': {$e->getMessage()}");
         }
-        return self::stripTextBlockShadow($salvage['markup'], $key, $repairs, $warnings);
+        // Legacy comment attributes are converted onto the current schema
+        // HERE because the serializer's reviewed migrations recover them from
+        // saved has-text-align-* classes, which attribute-light markup no
+        // longer carries. Conversions are lossless (repair report); drops and
+        // missing required sources are degradations (warnings). Running before
+        // the shadow pass leaves that pass one schema to reason about.
+        $legacy = LegacyAttributes::normalize($salvage['markup']);
+        foreach ($legacy['conversions'] as $note) {
+            Narrator::write("    (part '{$key}': {$note})\n");
+            $repairs[] = [
+                'code' => 'legacy-attributes-converted',
+                'part' => $key,
+                'authored' => $note,
+                'delivered' => 'current-schema block attributes',
+                'disposition' => 'repaired',
+            ];
+        }
+        foreach ($legacy['notes'] as $note) {
+            $record($note);
+        }
+
+        return self::stripTextBlockShadow($legacy['markup'], $key, $repairs, $warnings);
     }
 
     /**

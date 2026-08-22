@@ -199,6 +199,36 @@ test('SectionUnit request preparation does not call the LLM', function () {
     assert_eq(0, $llm->completeBatchCalls);
 });
 
+test('SectionUnit teaches the attribute-light markup contract without sacrificing authored design data', function () {
+    $request = (new SectionUnit(
+        new FakeLlm(),
+        new PromptRenderer(repo_path('prompts')),
+    ))->request(section_unit_input());
+    $prompt = section_unit_request_text($request);
+
+    foreach ([
+        'ATTRIBUTE-LIGHT BLOCK SAVE MARKUP',
+        'Omit serializer-generated wrapper classes and inline styles',
+        'copy exactly those custom class tokens onto the block wrapper',
+        'Preserve RichText inline markup and attributes exactly',
+        'Keep source-critical HTML',
+        'AI_IMAGE',
+    ] as $required) {
+        assert_contains($required, $prompt);
+    }
+
+    foreach ([
+        '<h2 class="wp-block-heading has-heading-font-family has-primary-color has-text-color">',
+        '<figure class="wp-block-image size-large"><img',
+        '<div class="wp-block-cover alignfull" style="min-height:80vh">',
+    ] as $redundantExample) {
+        assert_true(
+            !str_contains($prompt, $redundantExample),
+            "section prompt must not teach redundant save markup: {$redundantExample}",
+        );
+    }
+});
+
 test('SectionUnit documents the nested flush-card body contract', function () {
     $request = (new SectionUnit(
         new FakeLlm(),
