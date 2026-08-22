@@ -13,6 +13,7 @@ use Automattic\SiteBuild\Steps\CoverContrastStep;
 use Automattic\SiteBuild\Steps\CustomMotionStep;
 use Automattic\SiteBuild\Steps\DesignDirectionStep;
 use Automattic\SiteBuild\Steps\DesignPreviewStep;
+use Automattic\SiteBuild\Steps\ExtractPatternsStep;
 use Automattic\SiteBuild\Steps\FinalizeThemeStep;
 use Automattic\SiteBuild\Steps\FixBlocksStep;
 use Automattic\SiteBuild\Steps\FixPagesStep;
@@ -216,6 +217,7 @@ final class StepComposition
             // exact fallback stack it rendered instead of adding webfonts only
             // to the transformed theme and changing text geometry.
             new FontsPhpStep(htmlFirst: true),
+            new ExtractPatternsStep(),
             new FinalizeThemeStep(),
             // The theme's preview card. In-pipeline it composes a palette
             // poster; a host that goes on to generate images re-runs this step
@@ -341,6 +343,7 @@ final class StepComposition
             // plus final theme/markup usage — usage may add variants, never remove
             // direction-selected ones. It takes no model — see BIGR-750.
             new FontsPhpStep(),
+            new ExtractPatternsStep(),
             // Sole owner of functions.php: the deterministic loader that enqueues
             // style.css and require_once's the generated fonts.php.
             new FinalizeThemeStep(),
@@ -408,6 +411,9 @@ final class StepComposition
             // Cover text was picked against an image that did not exist yet;
             // re-check it against the real, dimmed pixels.
             new CoverContrastStep($blockFixer ?? BlockFixers::default()),
+            // Cover contrast can rewrite assembled page markup after the graph.
+            // Refresh pattern winners from those final bytes.
+            new ExtractPatternsStep(),
         ];
     }
 
