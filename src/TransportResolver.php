@@ -96,6 +96,7 @@ final class TransportResolver
     /**
      * Construct the chosen transport. Harness choices touch the filesystem;
      * embedding hosts inject their API factory without loading CLI bootstrap glue.
+     * The factory owns credential validation for its transport.
      *
      * @param null|callable():Llm $apiFactory
      */
@@ -115,7 +116,6 @@ final class TransportResolver
                 );
             }
             $provider = self::normalizeProvider($choice->provider, 'resolved API provider');
-            self::assertApiCredentialsAvailable($provider);
 
             $ambientProvider = getenv('LLM_PROVIDER');
             putenv("LLM_PROVIDER={$provider}");
@@ -464,20 +464,6 @@ final class TransportResolver
             );
         }
         return new TransportChoice($kind, $reason, $path);
-    }
-
-    /** Validate the API factory's credentials before legacy Env::getRequired() can exit. */
-    private static function assertApiCredentialsAvailable(string $provider): void
-    {
-        foreach (self::PROVIDER_KEYS[$provider] as $var) {
-            if (trim((string) Env::get($var, '')) !== '') {
-                return;
-            }
-        }
-        throw new TransportUnavailable(
-            "Transport api with LLM_PROVIDER={$provider} requires "
-            . implode(' or ', self::PROVIDER_KEYS[$provider]) . '. Set the provider key before building.'
-        );
     }
 
     /** Resolve and canonicalize the API provider without reading ambient state. */
