@@ -12,9 +12,6 @@ namespace Automattic\SiteBuild;
  */
 final class ThemeValidator
 {
-    private const HTML_HREF_PATTERN =
-        '/\bhref\s*=\s*(?:(["\'])(.*?)\1|([^\s"\'=<>`]+))/is';
-
     private const HTML_SRC_PATTERN =
         '/\bsrc\s*=\s*(?:(["\'])(.*?)\1|([^\s"\'=<>`]+))/is';
 
@@ -62,7 +59,12 @@ final class ThemeValidator
             $checked[] = 'plugin/pages/' . basename($abs);
         }
 
-        foreach ($checked as $rel) {
+        $blockChecked = $checked;
+        foreach (glob($project->themePath('patterns') . '/*.php') ?: [] as $abs) {
+            $blockChecked[] = 'theme/patterns/' . basename($abs);
+        }
+
+        foreach ($blockChecked as $rel) {
             if (!$project->exists($rel)) {
                 if (in_array($rel, $required, true)) {
                     $problems[] = "missing {$rel}";

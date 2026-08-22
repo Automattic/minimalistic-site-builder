@@ -138,6 +138,7 @@ final class PresetReferences
         $files = array_merge(
             glob($project->themePath('parts') . '/*.html') ?: [],
             glob($project->themePath('templates') . '/*.html') ?: [],
+            glob($project->themePath('patterns') . '/*.php') ?: [],
         );
         sort($files, SORT_STRING);
         return $files;

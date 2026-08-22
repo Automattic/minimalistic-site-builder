@@ -68,6 +68,7 @@ final class ValidateThemeStep implements Step
                 'theme/parts/footer.html',
                 'theme/parts/*',
                 'theme/templates/*',
+                'theme/patterns/*',
                 'plugin/pages/*',
                 'plugin/pages.json',
                 'designDirection.json',
