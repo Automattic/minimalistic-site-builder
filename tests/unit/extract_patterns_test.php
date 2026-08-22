@@ -1,0 +1,487 @@
+<?php
+declare(strict_types=1);
+
+use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\BuildReport;
+use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\SectionRole;
+use Automattic\SiteBuild\Steps\ExtractPatternsStep;
+
+/**
+ * Seeds a one-page project the step can run against: the plan, the assembled
+ * page, and a stylesheet. $sections is a list of ['slug' => …, 'markup' => …].
+ */
+function extract_patterns_seed(\Automattic\SiteBuild\Project $project, array $sections = null): void
+{
+    $sections ??= [
+        ['slug' => 'hero',    'markup' => sp_columns(1)],
+        ['slug' => 'service', 'markup' => sp_columns(3)],
+        ['slug' => 'cta',     'markup' => sp_columns(1)],
+    ];
+    $project->writeJson('pages.json', ['pages' => [[
+        'slug' => 'home', 'title' => 'Home', 'path' => '/', 'front' => true,
+        'menu_order' => 0, 'parent' => null,
+        'sections' => array_map(
+            static fn (array $s, int $i): array => [
+                'slug' => $s['slug'],
+                'type' => 'content',
+                'role' => \Automattic\SiteBuild\SectionRole::forPosition($i, count($sections)),
+            ],
+            $sections,
+            array_keys($sections),
+        ),
+    ]]]);
+    $project->writeJson('plugin/pages.json', ['pages' => [
+        ['slug' => 'home', 'title' => 'Home', 'front' => true, 'menu_order' => 0, 'parent' => null],
+    ]]);
+    $project->writeText('plugin/pages/home.html', implode("\n", array_column($sections, 'markup')));
+    $project->writeText('theme/style.css', 'body{color:#fff}');
+    $project->writeJson('theme/theme.json', ['version' => 3]);
+}
+
+/** Everything this step writes, for byte-identical comparison across runs. */
+function extract_patterns_snapshot(\Automattic\SiteBuild\Project $project): array
+{
+    $out = ['patterns.json' => $project->readText('patterns.json')];
+    foreach (glob($project->themePath('patterns/*.php')) ?: [] as $f) {
+        $out[basename($f)] = (string) file_get_contents($f);
+    }
+    ksort($out);
+    return $out;
+}
+
+/** What GenerateImagesStep does to page markup before postImages re-runs us. */
+function extract_patterns_apply_cover_contrast_rewrite(\Automattic\SiteBuild\Project $project): void
+{
+    $project->writeText('plugin/pages/home.html', str_replace(
+        'theme:./assets/',
+        '/wp-content/themes/' . $project->slug() . '/assets/',
+        $project->readText('plugin/pages/home.html'),
+    ));
+}
+
+/** A section group carrying (or not carrying) a background attribute. */
+function sp_bg(string $bg): string
+{
+    $attrs = $bg === '' ? '{}' : '{"backgroundColor":"' . $bg . '"}';
+    return "<!-- wp:group {$attrs} --><div class=\"wp-block-group\">"
+         . '<!-- wp:heading --><h2>Title</h2><!-- /wp:heading -->'
+         . '<!-- wp:paragraph --><p>Body copy that is long enough to score.</p><!-- /wp:paragraph -->'
+         . '</div><!-- /wp:group -->';
+}
+
+/** A grid whose generated heading is deliberately unsafe for PHP docblocks. */
+function extract_patterns_grid_with_heading(string $heading): string
+{
+    return '<!-- wp:group --><div class="wp-block-group">'
+        . '<!-- wp:heading --><h2>' . $heading . '</h2><!-- /wp:heading -->'
+        . sp_columns(3)
+        . '</div><!-- /wp:group -->';
+}
+
+/** @return list<?string> top-level block background values, in source order */
+function extract_patterns_backgrounds(string $markup): array
+{
+    $doc = BlockMarkup::parse($markup);
+    $values = [];
+    foreach ($doc->indices() as $index) {
+        if ($doc->parent($index) !== null) {
+            continue;
+        }
+        $attrs = $doc->attrs($index) ?? [];
+        $background = $attrs['backgroundColor'] ?? ($attrs['style']['color']['background'] ?? null);
+        $values[] = is_string($background) && $background !== '' ? $background : null;
+    }
+    return $values;
+}
+
+test('extract-patterns freezes its step declaration contract', function (): void {
+    $step = new ExtractPatternsStep();
+    $declaration = $step->declaration();
+
+    assert_eq('extract-patterns', $step->id());
+    assert_eq('extract-patterns', $declaration->id);
+    assert_eq([
+        'plugin/pages/*',
+        'plugin/pages.json',
+        'pages.json',
+        'theme/style.css',
+        'theme/theme.json',
+    ], $declaration->reads);
+    assert_eq(['theme/patterns/*', 'patterns.json', 'warnings.json'], $declaration->writes);
+    assert_eq(false, $declaration->concurrent);
+});
+
+test('a section containing a PHP open tag is rejected', function (): void {
+    $escaped = '<!-- wp:code --><pre><code>&lt;?php phpinfo(); ?&gt;</code></pre><!-- /wp:code -->';
+    assert_true(!ExtractPatternsStep::isEligible('<?php echo 1; ?>', []));
+    assert_true(!ExtractPatternsStep::isEligible('<?= 1 ?>', []));
+    assert_true(ExtractPatternsStep::isEligible($escaped, []), 'escaped entity text is safe');
+});
+
+test('eligibility accepts core and registered plugin blocks but rejects unregistered blocks', function (): void {
+    $core = '<!-- wp:group --><div></div><!-- /wp:group -->';
+    $companion = '<!-- wp:blocks-engine/description-list --><dl></dl><!-- /wp:blocks-engine/description-list -->';
+    $unknown = '<!-- wp:vendor/dead-widget --><div></div><!-- /wp:vendor/dead-widget -->';
+
+    assert_true(ExtractPatternsStep::isEligible($core, []));
+    assert_true(ExtractPatternsStep::isEligible($companion, ['blocks-engine/description-list' => true]));
+    assert_true(!ExtractPatternsStep::isEligible($companion, []));
+    assert_true(!ExtractPatternsStep::isEligible($unknown, ['blocks-engine/description-list' => true]));
+});
+
+test('a key whose only candidate is ineligible is dropped without reaching an empty winner list', function (): void {
+    with_project('builder_extract_inelig_', function (Project $project): void {
+        extract_patterns_seed($project, [
+            ['slug' => 'hero',  'markup' => sp_columns(3)],
+            ['slug' => 'specs', 'markup' => '<!-- wp:group --><div><?php echo 1; ?></div><!-- /wp:group -->'],
+        ]);
+
+        (new ExtractPatternsStep())->run($project);
+
+        $manifest = $project->readJson('patterns.json');
+        assert_true($manifest['dropped'] !== [], 'the drop is recorded, never silent');
+        assert_true(!in_array('specs-stack', array_column($manifest['patterns'], 'slug'), true));
+        $warnings = $project->readText('warnings.json');
+        assert_contains('plugin/pages/home.html', $warnings);
+        assert_contains('specs', $warnings);
+        assert_contains('disposition', $warnings);
+    });
+});
+
+test('image rewrite handles both asset URL forms in block JSON and inner HTML', function (): void {
+    $cases = [
+        [
+            '<!-- wp:cover {"url":"theme:./assets/a-1234abcd.jpg"} -->'
+                . '<div><img src="theme:./assets/a-1234abcd.jpg"/></div><!-- /wp:cover -->',
+            'a-1234abcd.jpg',
+        ],
+        [
+            '<!-- wp:cover {"url":"/wp-content/themes/demo/assets/b-99887766.jpg"} -->'
+                . '<div><img src="/wp-content/themes/demo/assets/b-99887766.jpg"/></div><!-- /wp:cover -->',
+            'b-99887766.jpg',
+        ],
+    ];
+
+    foreach ($cases as [$input, $filename]) {
+        $output = ExtractPatternsStep::rewriteAssets($input);
+        $expected = "<?php echo esc_url( get_theme_file_uri( 'assets/{$filename}' ) ); ?>";
+        assert_eq(2, substr_count($output, $expected), 'JSON attribute and inner HTML both rewrite');
+        assert_true(!str_contains($output, 'theme:./assets/'), 'placeholder form gone');
+        assert_true(!str_contains($output, '/wp-content/themes/'), 'hardcoded slug gone');
+    }
+});
+
+test('the id scan ignores hex colors and reads selector positions', function (): void {
+    $css = 'a{color:#fff} #hero > .x,#cta:hover{padding:0}'
+        . '.x{background:#abc;border-color:#123456}@media(min-width:1px){#inside{display:block}}';
+    $ids = ExtractPatternsStep::idSelectorsIn($css);
+
+    assert_true(isset($ids['hero']) && isset($ids['cta']) && isset($ids['inside']));
+    assert_true(!isset($ids['fff']) && !isset($ids['abc']) && !isset($ids['123456']));
+});
+
+test('an anchor targeted by style.css survives and an untargeted anchor is stripped', function (): void {
+    $markup = '<!-- wp:group {"anchor":"hero"} --><section id="hero"></section><!-- /wp:group -->';
+    $kept = ExtractPatternsStep::rewriteAnchors($markup, ['hero' => true]);
+    $stripped = ExtractPatternsStep::rewriteAnchors($markup, []);
+
+    assert_contains('"anchor":"hero"', $kept);
+    assert_contains('id="hero"', $kept);
+    assert_true(!str_contains($stripped, '"anchor":"hero"'));
+    assert_true(!str_contains($stripped, 'id="hero"'));
+});
+
+test('link rewrite keeps self-contained targets and neutralizes outside fragments in HTML and block JSON', function (): void {
+    $markup = '<!-- wp:group {"anchor":"book"} --><section id="book">'
+        . '<a href="#book">stay</a><a href="#pricing">leave</a>'
+        . '<a href="/contact/">page</a><a href="mailto:a@b.co">mail</a>'
+        . '<!-- wp:navigation-link {"url":"#pricing"} /-->'
+        . '</section><!-- /wp:group -->';
+    $output = ExtractPatternsStep::rewriteLinks($markup, ['/contact/' => true]);
+
+    assert_contains('href="#book"', $output);
+    assert_contains('href="#"', $output);
+    assert_contains('href="/contact/"', $output);
+    assert_contains('mailto:a@b.co', $output);
+    assert_contains('"url":"#"', $output, 'block-JSON targets use the shared allTargets domain');
+});
+
+test('a stale pattern file from a prior run is gone after a re-run', function (): void {
+    with_project('builder_extract_patterns_', function (Project $project): void {
+        extract_patterns_seed($project);
+        $project->writeText('theme/patterns/ghost.php', '<?php // stale');
+
+        (new ExtractPatternsStep())->run($project);
+
+        assert_true(!$project->exists('theme/patterns/ghost.php'));
+    });
+});
+
+test('pattern headers use only the closed label and shape vocabulary', function (): void {
+    with_project('builder_extract_header_', function (Project $project): void {
+        extract_patterns_seed($project, [[
+            'slug' => 'hero',
+            'markup' => extract_patterns_grid_with_heading("Spike\n&\nFur */ generated title"),
+        ]]);
+
+        (new ExtractPatternsStep())->run($project);
+
+        $pattern = $project->readText('theme/patterns/hero-grid.php');
+        $header = strstr($pattern, '?>', true);
+        assert_true(is_string($header), 'pattern has a closed PHP header');
+        assert_contains('Title:', $header);
+        assert_contains('Hero', $header);
+        assert_contains('grid', strtolower($header));
+        assert_contains('Slug: demo/hero-grid', $header);
+        assert_contains('Categories: demo-sections', $header);
+        assert_contains('Viewport Width: 1400', $header);
+        assert_true(!str_contains($header, 'Spike'));
+        assert_true(!str_contains($header, 'generated title'));
+        assert_contains('Spike', $pattern, 'winner copy remains seeded verbatim outside the PHP header');
+    });
+});
+
+test('patterns.json matches its frozen contract', function (): void {
+    with_project('builder_extract_manifest_', function (Project $project): void {
+        extract_patterns_seed($project);
+        (new ExtractPatternsStep())->run($project);
+        $manifest = $project->readJson('patterns.json');
+
+        assert_eq(1, $manifest['version']);
+        assert_eq(['version', 'patterns', 'starter', 'dropped'], array_keys($manifest));
+        assert_true($manifest['patterns'] !== []);
+        $pattern = $manifest['patterns'][0];
+        assert_eq([
+            'slug', 'label', 'shape', 'title', 'categories', 'source', 'score', 'contains', 'alternates',
+        ], array_keys($pattern));
+        assert_eq(['page', 'section', 'index'], array_keys($pattern['source']));
+        assert_eq([
+            'total', 'completeness', 'repetition', 'copy_fit', 'fidelity', 'self_containment',
+        ], array_keys($pattern['score']));
+        assert_eq(['headings', 'media', 'actions', 'items'], array_keys($pattern['contains']));
+        assert_eq(['slug', 'sections'], array_keys($manifest['starter']));
+        assert_eq([], $manifest['dropped']);
+        assert_true($project->exists('logs/extract-patterns.log'));
+        assert_contains('winner', strtolower($project->readText('logs/extract-patterns.log')));
+    });
+});
+
+test('same-key candidates emit one winner and record the loser as an alternate', function (): void {
+    with_project('builder_extract_dedupe_', function (Project $project): void {
+        extract_patterns_seed($project, [
+            ['slug' => 'hero', 'markup' => sp_columns(1)],
+            ['slug' => 'service', 'markup' => sp_columns(3)],
+            ['slug' => 'services-grid', 'markup' => sp_columns(3)],
+            ['slug' => 'cta', 'markup' => sp_columns(1)],
+        ]);
+
+        (new ExtractPatternsStep())->run($project);
+
+        $patterns = $project->readJson('patterns.json')['patterns'];
+        $services = array_values(array_filter(
+            $patterns,
+            static fn (array $pattern): bool => $pattern['slug'] === 'service-grid',
+        ));
+        assert_eq(1, count($services));
+        assert_eq(1, count($services[0]['alternates']));
+        assert_eq(['page', 'section', 'total'], array_keys($services[0]['alternates'][0]));
+    });
+});
+
+test('starter greedily alternates adjacent non-empty backgrounds when possible', function (): void {
+    with_project('builder_extract_starter_bg_', function (Project $project): void {
+        extract_patterns_seed($project, [
+            ['slug' => 'hero',    'markup' => sp_bg('contrast')],
+            ['slug' => 'about',   'markup' => sp_bg('contrast')],
+            ['slug' => 'service', 'markup' => sp_bg('')],
+            ['slug' => 'cta',     'markup' => sp_bg('')],
+        ]);
+
+        (new ExtractPatternsStep())->run($project);
+
+        $manifest = $project->readJson('patterns.json');
+        assert_eq([
+            'hero-stack', 'service-stack', 'about-stack', 'cta-stack',
+        ], $manifest['starter']['sections']);
+        $starter = $project->readText('theme/patterns/page-starter.php');
+        assert_eq(['contrast', null, 'contrast', null], extract_patterns_backgrounds($starter));
+        assert_true(!str_contains($starter, '<!-- wp:pattern'), 'starter inlines winners');
+    });
+});
+
+test('starter emits plain source role order when no section carries a background', function (): void {
+    with_project('builder_extract_starter_plain_', function (Project $project): void {
+        extract_patterns_seed($project, [
+            ['slug' => 'hero',  'markup' => sp_bg('')],
+            ['slug' => 'zeta',  'markup' => sp_bg('')],
+            ['slug' => 'alpha', 'markup' => sp_bg('')],
+            ['slug' => 'beta',  'markup' => sp_bg('')],
+            ['slug' => 'cta',   'markup' => sp_bg('')],
+        ]);
+
+        (new ExtractPatternsStep())->run($project);
+
+        assert_eq([
+            'hero-stack', 'zeta-stack', 'alpha-stack', 'beta-stack', 'cta-stack',
+        ], $project->readJson('patterns.json')['starter']['sections']);
+    });
+});
+
+test('starter is omitted with a warning when no hero winner exists', function (): void {
+    with_project('builder_extract_no_hero_', function (Project $project): void {
+        extract_patterns_seed($project, [
+            ['slug' => 'hero',  'markup' => '<!-- wp:group --><div><?php ?></div><!-- /wp:group -->'],
+            ['slug' => 'about', 'markup' => sp_columns(3)],
+        ]);
+
+        (new ExtractPatternsStep())->run($project);
+
+        assert_true(!$project->exists('theme/patterns/page-starter.php'));
+        assert_eq(null, $project->readJson('patterns.json')['starter']);
+        assert_contains('starter', strtolower($project->readText('warnings.json')));
+    });
+});
+
+test('drift warning fires when top-level count differs from planned count', function (): void {
+    with_project('builder_extract_drift_', function (Project $project): void {
+        extract_patterns_seed($project, [
+            ['slug' => 'hero',  'markup' => sp_columns(3)],
+            ['slug' => 'about', 'markup' => sp_columns(3)],
+        ]);
+        $project->writeText(
+            'plugin/pages/home.html',
+            $project->readText('plugin/pages/home.html') . sp_columns(2),
+        );
+
+        (new ExtractPatternsStep())->run($project);
+
+        assert_contains('top-level', strtolower($project->readText('warnings.json')));
+    });
+});
+
+test('healthy shape-only HTML-first sections do not trigger a drift warning', function (): void {
+    with_project('builder_extract_shape_only_', function (Project $project): void {
+        extract_patterns_seed($project, [
+            ['slug' => 'section-1', 'markup' => sp_columns(1)],
+            ['slug' => 'section-2', 'markup' => sp_columns(2)],
+            ['slug' => 'section-3', 'markup' => sp_columns(3)],
+            ['slug' => 'section-4', 'markup' => sp_columns(1)],
+            ['slug' => 'section-5', 'markup' => sp_columns(2)],
+        ]);
+
+        (new ExtractPatternsStep())->run($project);
+
+        $warnings = $project->exists('warnings.json') ? strtolower($project->readText('warnings.json')) : '';
+        assert_true(!str_contains($warnings, 'top-level'));
+    });
+});
+
+test('a site with no eligible section writes no patterns directory and completes', function (): void {
+    with_project('builder_extract_zero_', function (Project $project): void {
+        extract_patterns_seed($project, [
+            ['slug' => 'a', 'markup' => '<!-- wp:group --><div><?php ?></div><!-- /wp:group -->'],
+            ['slug' => 'b', 'markup' => '<!-- wp:group --><div><?= 1 ?></div><!-- /wp:group -->'],
+        ]);
+
+        (new ExtractPatternsStep())->run($project);
+
+        assert_true(!$project->exists('theme/patterns'));
+        assert_eq([], $project->readJson('patterns.json')['patterns']);
+        assert_contains('extract-patterns', $project->readText('warnings.json'));
+    });
+});
+
+test('a page with malformed delimiters is skipped with a warning and completes', function (): void {
+    with_project('builder_extract_malformed_', function (Project $project): void {
+        extract_patterns_seed($project, [[
+            'slug' => 'hero',
+            'markup' => '<!-- wp:group --><div><!-- wp:paragraph --><p>unfinished</p>',
+        ]]);
+
+        (new ExtractPatternsStep())->run($project);
+
+        assert_eq([], $project->readJson('patterns.json')['patterns']);
+        assert_true(!$project->exists('theme/patterns'));
+        assert_contains('structural', strtolower($project->readText('warnings.json')));
+    });
+});
+
+test('cap overflow emits twelve patterns and records every dropped key', function (): void {
+    with_project('builder_extract_cap_', function (Project $project): void {
+        $slugs = [
+            'alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf',
+            'hotel', 'india', 'juliet', 'kilo', 'lima', 'mango',
+        ];
+        extract_patterns_seed($project, array_map(
+            static fn (string $slug): array => ['slug' => $slug, 'markup' => sp_columns(3)],
+            $slugs,
+        ));
+
+        (new ExtractPatternsStep())->run($project);
+
+        $manifest = $project->readJson('patterns.json');
+        assert_eq(12, count($manifest['patterns']));
+        assert_eq(1, count($manifest['dropped']));
+        assert_eq(['key', 'reason', 'total'], array_keys($manifest['dropped'][0]));
+        assert_eq('cap', $manifest['dropped'][0]['reason']);
+        $warnings = $project->readText('warnings.json');
+        assert_contains($manifest['dropped'][0]['key'], $warnings);
+        assert_contains('disposition', $warnings);
+    });
+});
+
+test('postImages URL rewrite leaves pattern outputs byte-identical', function (): void {
+    with_project('builder_extract_idem_', function (Project $project): void {
+        $asset = 'hero-1234abcd.jpg';
+        $markup = '<!-- wp:cover {"url":"theme:./assets/' . $asset . '"} -->'
+            . '<div><img src="theme:./assets/' . $asset . '"/></div><!-- /wp:cover -->';
+        extract_patterns_seed($project, [
+            ['slug' => 'hero', 'markup' => $markup],
+            ['slug' => 'cta', 'markup' => sp_columns(1)],
+        ]);
+
+        (new ExtractPatternsStep())->run($project);
+        $first = extract_patterns_snapshot($project);
+        extract_patterns_apply_cover_contrast_rewrite($project);
+        (new ExtractPatternsStep())->run($project);
+        $second = extract_patterns_snapshot($project);
+
+        assert_eq($first, $second);
+    });
+});
+
+test('every emitted pattern file is valid PHP', function (): void {
+    with_project('builder_extract_php_lint_', function (Project $project): void {
+        extract_patterns_seed($project, [
+            ['slug' => 'hero', 'markup' => extract_patterns_grid_with_heading('Safe */ copy')],
+            ['slug' => 'cta', 'markup' => sp_columns(1)],
+        ]);
+        (new ExtractPatternsStep())->run($project);
+
+        $files = glob($project->themePath('patterns/*.php')) ?: [];
+        assert_true($files !== []);
+        foreach ($files as $file) {
+            $output = [];
+            $status = 1;
+            exec(PHP_BINARY . ' -l ' . escapeshellarg($file), $output, $status);
+            assert_eq(0, $status, basename($file) . ': ' . implode("\n", $output));
+        }
+    });
+});
+
+test('BuildReport exposes and renders the frozen pattern counter', function (): void {
+    $report = new BuildReport('p', 'slug', '/tmp/slug', '2026-08-22T00:00:00+00:00');
+    assert_eq(null, $report->patternsLine());
+
+    $report->setPatterns(4, 1);
+
+    assert_eq('Patterns: 4 written, 1 dropped', $report->patternsLine());
+    assert_contains('Patterns: 4 written, 1 dropped', $report->render());
+});
+
+test('build CLI populates the pattern counter from patterns.json', function (): void {
+    $source = (string) file_get_contents(dirname(__DIR__, 2) . '/bin/build.php');
+    assert_contains('patterns.json', $source);
+    assert_contains('$report->setPatterns(', $source);
+});
