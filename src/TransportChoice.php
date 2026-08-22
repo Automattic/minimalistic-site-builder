@@ -22,6 +22,7 @@ final class TransportChoice
         public readonly string $kind,
         public readonly string $reason,
         public readonly ?string $binary = null,
+        public readonly ?string $provider = null,
     ) {
         if (!in_array($kind, self::KINDS, true)) {
             throw new \InvalidArgumentException(

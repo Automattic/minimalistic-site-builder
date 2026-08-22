@@ -5,11 +5,19 @@ use Automattic\SiteBuild\HarnessCallFailed;
 use Automattic\SiteBuild\TransportChoice;
 use Automattic\SiteBuild\TransportUnavailable;
 
-test('TransportChoice carries kind, reason and binary', function (): void {
+test('TransportChoice carries kind, reason, binary and provider', function (): void {
     $c = new TransportChoice(TransportChoice::KIND_CLAUDE_CLI, 'env fingerprint CLAUDECODE=1', '/usr/bin/claude');
     assert_eq('claude-cli', $c->kind);
     assert_eq('env fingerprint CLAUDECODE=1', $c->reason);
     assert_eq('/usr/bin/claude', $c->binary);
+    assert_eq(null, $c->provider);
+});
+
+test('TransportChoice carries a resolved API provider without changing existing positional arguments', function (): void {
+    $c = new TransportChoice(TransportChoice::KIND_API, 'OPEN_ROUTER_API_KEY present', null, 'openrouter');
+    assert_eq('api', $c->kind);
+    assert_eq(null, $c->binary);
+    assert_eq('openrouter', $c->provider);
 });
 
 test('TransportChoice rejects an unknown kind', function (): void {
