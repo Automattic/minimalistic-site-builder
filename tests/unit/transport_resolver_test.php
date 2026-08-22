@@ -286,6 +286,41 @@ test('rung 3: codex sandbox markers select the codex transport', function (): vo
     assert_eq(TransportChoice::KIND_CODEX_CLI, $c->kind);
 });
 
+test('billing R1g: CODEX_SANDBOX refuses a cross-subscription PATH fallback', function (): void {
+    [, $anc] = tr_nothing();
+    $e = assert_throws(fn () => TransportResolver::decide(
+        ['CODEX_SANDBOX' => 'seatbelt'],
+        tr_on_path('claude'),
+        $anc,
+    ));
+    assert_true($e instanceof TransportUnavailable);
+    assert_contains("Resolved codex-cli", $e->getMessage());
+    assert_contains("'codex' is not on PATH", $e->getMessage());
+});
+
+test('billing R1g: CODEX_SANDBOX_NETWORK_DISABLED refuses a cross-subscription PATH fallback', function (): void {
+    [, $anc] = tr_nothing();
+    $e = assert_throws(fn () => TransportResolver::decide(
+        ['CODEX_SANDBOX_NETWORK_DISABLED' => '1'],
+        tr_on_path('claude'),
+        $anc,
+    ));
+    assert_true($e instanceof TransportUnavailable);
+    assert_contains("Resolved codex-cli", $e->getMessage());
+    assert_contains("'codex' is not on PATH", $e->getMessage());
+});
+
+test('billing R1g: a blank configured-provider credential falls through to the subscription ladder', function (): void {
+    [, $anc] = tr_nothing();
+    $c = TransportResolver::decide(
+        ['ANTHROPIC_API_KEY' => ''],
+        tr_on_path('claude'),
+        $anc,
+    );
+    assert_eq(TransportChoice::KIND_CLAUDE_CLI, $c->kind);
+    assert_contains('only harness on PATH', $c->reason);
+});
+
 test('billing C3: mixed Claude and Codex fingerprints refuse as ambiguous', function (): void {
     [, $anc] = tr_nothing();
     $e = assert_throws(fn () => TransportResolver::decide(
@@ -422,10 +457,44 @@ test('C7: a present null Codex marker continues normally without TypeError', fun
     assert_contains('only harness on PATH', $c->reason);
 });
 
+test('billing R1g: a blank Codex marker is not a harness fingerprint', function (): void {
+    [, $anc] = tr_nothing();
+    $c = TransportResolver::decide(
+        ['CODEX_THREAD_ID' => ''],
+        tr_on_path('claude'),
+        $anc,
+    );
+    assert_eq(TransportChoice::KIND_CLAUDE_CLI, $c->kind);
+    assert_contains('only harness on PATH', $c->reason);
+});
+
+test('billing R1g: rung 3 refuses a fingerprint whose harness binary is missing', function (): void {
+    [, $anc] = tr_nothing();
+    $e = assert_throws(fn () => TransportResolver::decide(
+        ['CODEX_THREAD_ID' => 'current'],
+        tr_on_path('claude'),
+        $anc,
+    ));
+    assert_true($e instanceof TransportUnavailable);
+    assert_contains("Resolved codex-cli", $e->getMessage());
+    assert_contains("'codex' is not on PATH", $e->getMessage());
+});
+
 test('rung 4: process ancestry is codex\'s real signal under danger-full-access', function (): void {
     $c = TransportResolver::decide([], tr_on_path('codex'), static fn (): array => ['php', 'codex', 'zsh']);
     assert_eq(TransportChoice::KIND_CODEX_CLI, $c->kind);
     assert_contains('ancestry', $c->reason);
+});
+
+test('billing R1g: rung 4 refuses ancestry whose harness binary is missing', function (): void {
+    $e = assert_throws(fn () => TransportResolver::decide(
+        [],
+        tr_on_path('claude'),
+        static fn (): array => ['php', 'codex', 'zsh'],
+    ));
+    assert_true($e instanceof TransportUnavailable);
+    assert_contains("Resolved codex-cli", $e->getMessage());
+    assert_contains("'codex' is not on PATH", $e->getMessage());
 });
 
 test('billing M2: rung 4 refuses both exact ancestry-order ambiguity reproductions', function (): void {
@@ -478,6 +547,23 @@ test('rung 5: exactly one harness on PATH is used, and two refuse', function ():
     assert_true($e instanceof TransportUnavailable);
     assert_contains('claude', $e->getMessage());
     assert_contains('codex', $e->getMessage());
+});
+
+test('billing R1g: truncated ancestry is disclosed on a sole-PATH fallback', function (): void {
+    $ancestry = array_fill(0, 12, 'php');
+    $ancestry[] = 'ancestry walk truncated at depth 12';
+
+    $c = TransportResolver::decide(
+        [],
+        tr_on_path('claude'),
+        static fn (): array => $ancestry,
+    );
+
+    assert_eq(TransportChoice::KIND_CLAUDE_CLI, $c->kind);
+    assert_eq(
+        "'claude' is the only harness on PATH (ancestry walk truncated at depth 12)",
+        $c->reason,
+    );
 });
 
 test('rung 6: nothing usable names the fix', function (): void {
@@ -544,6 +630,21 @@ test('C9: subprocess guard throws when proc_open is disabled in a real child run
     assert_eq(0, $status);
     assert_contains(TransportUnavailable::class, $output);
     assert_contains('proc_open', $output);
+    assert_true(!str_contains($output, 'NO_ERROR'));
+});
+
+test('billing R1g: build invokes the subprocess availability guard for harness choices', function (): void {
+    $autoload = dirname(__DIR__, 2) . '/autoload.php';
+    $code = 'require ' . var_export($autoload, true) . '; '
+        . '$c = new \\Automattic\\SiteBuild\\TransportChoice('
+        . '\\Automattic\\SiteBuild\\TransportChoice::KIND_CLAUDE_CLI, "manual", PHP_BINARY); '
+        . 'try { \\Automattic\\SiteBuild\\TransportResolver::build($c); echo "NO_ERROR"; } '
+        . 'catch (Throwable $e) { echo get_class($e) . " | " . $e->getMessage(); }';
+    [$output, $status] = tr_php($code, ['disable_functions=proc_open']);
+    assert_eq(0, $status, $output);
+    assert_contains(TransportUnavailable::class, $output);
+    assert_contains('proc_open', $output);
+    assert_true(!str_contains($output, 'not yet implemented'));
     assert_true(!str_contains($output, 'NO_ERROR'));
 });
 
@@ -624,6 +725,41 @@ test('billing M4: API build passes the canonical grok provider to its factory', 
     assert_eq(0, $status, $output);
     assert_contains('FakeLlm | xai', $output);
     assert_true(!str_contains($output, 'ERROR'));
+});
+
+test('billing R1g: API build canonicalizes every host-supplied provider spelling', function (): void {
+    $root = dirname(__DIR__, 2);
+    $code = 'require ' . var_export($root . '/autoload.php', true) . '; '
+        . 'require ' . var_export($root . '/tests/FakeLlm.php', true) . '; '
+        . '$fake = new \\Automattic\\SiteBuild\\Tests\\FakeLlm(); $seen = []; '
+        . 'try { foreach (["grok", "ANTHROPIC", " xai "] as $authored) { '
+        . '$choice = new \\Automattic\\SiteBuild\\TransportChoice('
+        . '\\Automattic\\SiteBuild\\TransportChoice::KIND_API, "host choice", null, $authored); '
+        . '$llm = \\Automattic\\SiteBuild\\TransportResolver::build($choice, '
+        . 'static function (string $provider) use ($fake, &$seen): \\Automattic\\SiteBuild\\Llm { '
+        . '$seen[] = $provider; return $fake; }); '
+        . 'if ($llm !== $fake) { throw new \\RuntimeException("factory double replaced"); } '
+        . '} echo implode(" | ", $seen); } '
+        . 'catch (Throwable $e) { echo "ERROR | " . get_class($e) . " | " . $e->getMessage(); }';
+
+    [$output, $status] = tr_php($code);
+    assert_eq(0, $status, $output);
+    assert_eq('xai | anthropic | xai', $output);
+});
+
+test('billing R1g: API build refuses an unknown host-supplied provider', function (): void {
+    $factoryCalled = false;
+    $choice = new TransportChoice(TransportChoice::KIND_API, 'host choice', null, 'bogus');
+    $e = assert_throws(fn () => TransportResolver::build(
+        $choice,
+        static function (string $provider) use (&$factoryCalled): \Automattic\SiteBuild\Llm {
+            $factoryCalled = true;
+            return new \Automattic\SiteBuild\Tests\FakeLlm();
+        },
+    ));
+    assert_true($e instanceof TransportUnavailable);
+    assert_contains("Unknown resolved API provider 'bogus'", $e->getMessage());
+    assert_true(!$factoryCalled);
 });
 
 test('billing N1: audit provider matches the provider passed to the factory', function (): void {
@@ -791,6 +927,19 @@ test('describe() marks the API transport as metered', function (): void {
     assert_contains('metered', $line);
 });
 
+test('billing R1g: describe uses the structural provider instead of stale reason text', function (): void {
+    $line = TransportResolver::describe(new TransportChoice(
+        TransportChoice::KIND_API,
+        'copied (provider: anthropic) via host',
+        null,
+        'openai',
+    ));
+
+    assert_contains('provider: openai', $line);
+    assert_contains('resolved by copied via host', $line);
+    assert_true(!str_contains($line, 'provider: anthropic'));
+});
+
 test('binaryPath finds a real executable and misses a fictional one', function (): void {
     assert_true(TransportResolver::binaryPath('php') !== null, 'php should be on PATH');
     assert_eq(null, TransportResolver::binaryPath('definitely-not-a-real-binary-xyz'));
@@ -896,4 +1045,47 @@ test('billing ancestry rejects a non-numeric parent pid from ps', function (): v
             $oldPath === false ? putenv('PATH') : putenv("PATH={$oldPath}");
         }
     });
+});
+
+test('billing R1g: injected ancestry walker reports a bounded deep-tree truncation', function (): void {
+    $autoload = dirname(__DIR__, 2) . '/autoload.php';
+    $code = 'namespace Automattic\\SiteBuild { '
+        . '$GLOBALS["resolver_walker_calls"] = 0; '
+        . 'function posix_getppid(): int { return 100; } '
+        . 'function getmypid(): int { return 100; } '
+        . 'function shell_exec(string $command): string|false { '
+        . '$GLOBALS["resolver_walker_calls"]++; '
+        . 'if ($GLOBALS["resolver_walker_calls"] > 13) { return ""; } '
+        . 'if (preg_match("/ -p ([0-9]+)/", $command, $matches) !== 1) { '
+        . 'throw new \\RuntimeException("missing walker pid"); } '
+        . '$pid = (int) $matches[1]; '
+        . 'return ($pid + 1) . " process-" . $GLOBALS["resolver_walker_calls"]; '
+        . '} } namespace { require ' . var_export($autoload, true) . '; '
+        . '$names = \\Automattic\\SiteBuild\\TransportResolver::ancestry(); '
+        . 'echo count($names) . " | " . $GLOBALS["resolver_walker_calls"] . " | " . end($names); }';
+
+    [$output, $status] = tr_php($code);
+    assert_eq(0, $status, $output);
+    assert_eq('13 | 12 | ancestry walk truncated at depth 12', $output);
+});
+
+test('billing R1g: injected ancestry walker stops on a self-parent cycle', function (): void {
+    $autoload = dirname(__DIR__, 2) . '/autoload.php';
+    $code = 'namespace Automattic\\SiteBuild { '
+        . '$GLOBALS["resolver_walker_calls"] = 0; '
+        . 'function posix_getppid(): int { return 100; } '
+        . 'function getmypid(): int { return 100; } '
+        . 'function shell_exec(string $command): string|false { '
+        . '$GLOBALS["resolver_walker_calls"]++; '
+        . 'if ($GLOBALS["resolver_walker_calls"] > 3) { return ""; } '
+        . 'if (preg_match("/ -p ([0-9]+)/", $command, $matches) !== 1) { '
+        . 'throw new \\RuntimeException("missing walker pid"); } '
+        . 'return $matches[1] . " cycle"; '
+        . '} } namespace { require ' . var_export($autoload, true) . '; '
+        . '$names = \\Automattic\\SiteBuild\\TransportResolver::ancestry(); '
+        . 'echo implode(",", $names) . " | " . $GLOBALS["resolver_walker_calls"]; }';
+
+    [$output, $status] = tr_php($code);
+    assert_eq(0, $status, $output);
+    assert_eq('cycle | 1', $output);
 });

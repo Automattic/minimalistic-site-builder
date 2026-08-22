@@ -11,7 +11,8 @@ namespace Automattic\SiteBuild;
  * present. That matters because this is the code that must never guess a
  * billing path — a wrong answer here silently spends the wrong budget.
  *
- * Rungs are a list, not a conditional chain, so adding a harness is an append.
+ * Rungs are a list, not a conditional chain, so adding a rung is an append.
+ * Adding a harness also requires coordinated kind, binary, build, and billing-map edits.
  */
 final class TransportResolver
 {
@@ -56,6 +57,7 @@ final class TransportResolver
 
     /** Depth cap for the ancestry walk — a cycle or a deep tree must not hang resolution. */
     private const ANCESTRY_MAX_DEPTH = 12;
+    private const ANCESTRY_TRUNCATED = 'ancestry walk truncated at depth ' . self::ANCESTRY_MAX_DEPTH;
 
     /**
      * @param array<string,string|null>   $env      environment as data
@@ -70,6 +72,18 @@ final class TransportResolver
         ?string $defaultProvider = null,
     ): TransportChoice
     {
+        $ancestryWasTruncated = false;
+        $trackedAncestry = static function () use ($ancestry, &$ancestryWasTruncated): array {
+            $names = [];
+            foreach ($ancestry() as $name) {
+                if ($name === self::ANCESTRY_TRUNCATED) {
+                    $ancestryWasTruncated = true;
+                    continue;
+                }
+                $names[] = $name;
+            }
+            return $names;
+        };
         $rungs = [
             self::rungOverride(...),
             self::rungApiKey(...),
@@ -81,8 +95,16 @@ final class TransportResolver
             $defaultProvider = self::COMPILED_DEFAULT_PROVIDER;
         }
         foreach ($rungs as $rung) {
-            $choice = $rung($env, $onPath, $ancestry, $defaultProvider);
+            $choice = $rung($env, $onPath, $trackedAncestry, $defaultProvider);
             if ($choice !== null) {
+                if ($ancestryWasTruncated) {
+                    return new TransportChoice(
+                        $choice->kind,
+                        $choice->reason . ' (' . self::ANCESTRY_TRUNCATED . ')',
+                        $choice->binary,
+                        $choice->provider,
+                    );
+                }
                 return $choice;
             }
         }
@@ -166,8 +188,21 @@ final class TransportResolver
     public static function describe(TransportChoice $choice): string
     {
         $billing = $choice->isSubscription() ? 'subscription' : 'metered';
+        $provider = '';
+        $reason = $choice->reason;
+        if ($choice->kind === TransportChoice::KIND_API) {
+            $canonicalProvider = $choice->provider === null || trim($choice->provider) === ''
+                ? 'unresolved'
+                : self::normalizeProvider($choice->provider, 'resolved API provider');
+            $provider = "; provider: {$canonicalProvider}";
+            $reason = preg_replace('/\s*\(provider:\s*[^()]+\)/i', '', $reason) ?? $reason;
+            $reason = trim(preg_replace('/\s+/', ' ', $reason) ?? $reason);
+            if ($reason === '') {
+                $reason = 'host-supplied API choice';
+            }
+        }
         $where = $choice->binary !== null ? " via {$choice->binary}" : '';
-        return "Transport: {$choice->kind}{$where} ({$billing}) — resolved by {$choice->reason}";
+        return "Transport: {$choice->kind}{$where} ({$billing}{$provider}) — resolved by {$reason}";
     }
 
     /** Absolute path to an executable on PATH, or null. */
@@ -189,6 +224,9 @@ final class TransportResolver
      * Ancestor process names, nearest first. Best effort by design: an
      * unreadable `ps` returns an empty list rather than failing resolution,
      * because ancestry is one rung of a ladder, not the whole answer.
+     *
+     * A terminal truncation notice is appended after process names when the
+     * depth cap stops the walk, so decide() can keep its audit reason truthful.
      *
      * @return list<string>
      */
@@ -219,6 +257,9 @@ final class TransportResolver
                 break;
             }
             $pid = $next;
+        }
+        if ($depth >= self::ANCESTRY_MAX_DEPTH && $pid > 1) {
+            $names[] = self::ANCESTRY_TRUNCATED;
         }
         return $names;
     }

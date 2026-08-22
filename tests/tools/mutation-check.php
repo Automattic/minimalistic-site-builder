@@ -457,6 +457,91 @@ PHP,
             return $apiFactory($provider);
 PHP,
     ],
+    [
+        '15 CODEX_SANDBOX marker',
+        'src/TransportResolver.php',
+        <<<'PHP'
+    private const CODEX_MARKERS = ['CODEX_SANDBOX_NETWORK_DISABLED', 'CODEX_THREAD_ID', 'CODEX_SANDBOX'];
+PHP,
+        <<<'PHP'
+    private const CODEX_MARKERS = ['CODEX_SANDBOX_NETWORK_DISABLED', 'CODEX_THREAD_ID'];
+PHP,
+    ],
+    [
+        '16 CODEX_SANDBOX_NETWORK_DISABLED marker',
+        'src/TransportResolver.php',
+        <<<'PHP'
+    private const CODEX_MARKERS = ['CODEX_SANDBOX_NETWORK_DISABLED', 'CODEX_THREAD_ID', 'CODEX_SANDBOX'];
+PHP,
+        <<<'PHP'
+    private const CODEX_MARKERS = ['CODEX_THREAD_ID', 'CODEX_SANDBOX'];
+PHP,
+    ],
+    [
+        '17 blank credential rejection',
+        'src/TransportResolver.php',
+        <<<'PHP'
+        foreach (self::PROVIDER_KEYS[$provider] as $var) {
+            if (trim((string) ($env[$var] ?? '')) !== '') {
+PHP,
+        <<<'PHP'
+        foreach (self::PROVIDER_KEYS[$provider] as $var) {
+            if (array_key_exists($var, $env)) {
+PHP,
+    ],
+    [
+        '18 blank Codex marker rejection',
+        'src/TransportResolver.php',
+        <<<'PHP'
+        foreach (self::CODEX_MARKERS as $var) {
+            if (trim((string) ($env[$var] ?? '')) !== '') {
+PHP,
+        <<<'PHP'
+        foreach (self::CODEX_MARKERS as $var) {
+            if (isset($env[$var])) {
+PHP,
+    ],
+    [
+        '19 missing harness binary refusal',
+        'src/TransportResolver.php',
+        <<<'PHP'
+        if ($path === null) {
+            throw new TransportUnavailable(
+                "Resolved {$kind} ({$reason}) but '{$binary}' is not on PATH. "
+                . 'Install it, or set SITE_BUILD_LLM / a provider API key.'
+            );
+        }
+PHP,
+        '',
+    ],
+    [
+        '20 ancestry self-parent cycle guard',
+        'src/TransportResolver.php',
+        <<<'PHP'
+            if ($next === $pid) {
+                break;
+            }
+PHP,
+        '',
+    ],
+    [
+        '21 build provider canonicalization',
+        'src/TransportResolver.php',
+        <<<'PHP'
+            $provider = self::normalizeProvider($choice->provider, 'resolved API provider');
+PHP,
+        <<<'PHP'
+            $provider = $choice->provider;
+PHP,
+    ],
+    [
+        '22 build subprocess availability guard',
+        'src/TransportResolver.php',
+        <<<'PHP'
+        self::assertSubprocessesAvailable();
+PHP,
+        '',
+    ],
 ];
 
 $args = array_slice($argv, 1);
@@ -556,7 +641,7 @@ try {
             echo "{$classification['verdict']} {$label} {$classification['detail']}\n";
         }
         echo "RESULT {$counts['KILLED']} KILLED, {$counts['SURVIVED']} SURVIVED, {$counts['HARD ERROR']} HARD ERROR\n";
-        $failed = $counts['KILLED'] < 14 || $counts['SURVIVED'] !== 0 || $counts['HARD ERROR'] !== 0;
+        $failed = $counts['KILLED'] < 22 || $counts['SURVIVED'] !== 0 || $counts['HARD ERROR'] !== 0;
     }
 } catch (Throwable $e) {
     echo 'MUTATION ERROR: ' . $e->getMessage() . "\n";
