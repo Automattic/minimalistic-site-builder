@@ -719,16 +719,21 @@ test('billing Q9: host-2 factory receives the resolved provider and returns its 
         . 'require ' . var_export($root . '/tests/FakeLlm.php', true) . '; '
         . 'foreach (["LLM_PROVIDER", "ANTHROPIC_API_KEY", "XAI_API_KEY", "OPENAI_API_KEY", '
         . '"OPENROUTER_API_KEY", "OPEN_ROUTER_API_KEY"] as $key) { putenv($key); } '
+        . '$bootstrapFunction = "Automattic\\\\SiteBuild\\\\make_llm"; '
+        . '$before = function_exists($bootstrapFunction) ? "BOOTSTRAP" : "NO_BOOTSTRAP"; '
         . '$c = new \\Automattic\\SiteBuild\\TransportChoice('
-        . '\\Automattic\\SiteBuild\\TransportChoice::KIND_API, "host-2", null, "anthropic"); '
-        . '$fake = new \\Automattic\\SiteBuild\\Tests\\FakeLlm(); $factoryProvider = null; '
+        . '\\Automattic\\SiteBuild\\TransportChoice::KIND_API, "host-2", null, "openrouter"); '
+        . '$fake = new \\Automattic\\SiteBuild\\Tests\\FakeLlm(); '
+        . '$factoryProvider = null; $factoryCalls = 0; '
         . '$llm = \\Automattic\\SiteBuild\\TransportResolver::build($c, '
-        . 'static function (string $provider) use ($fake, &$factoryProvider): '
-        . '\\Automattic\\SiteBuild\\Llm { $factoryProvider = $provider; return $fake; }); '
-        . 'echo ($llm === $fake ? "INJECTED" : "WRONG") . " | " . $factoryProvider;';
+        . 'static function (string $provider) use ($fake, &$factoryProvider, &$factoryCalls): '
+        . '\\Automattic\\SiteBuild\\Llm { $factoryCalls++; $factoryProvider = $provider; return $fake; }); '
+        . '$after = function_exists($bootstrapFunction) ? "BOOTSTRAP" : "NO_BOOTSTRAP"; '
+        . 'echo $before . " | " . ($llm === $fake ? "INJECTED" : "WRONG") . " | " '
+        . '. $factoryProvider . " | " . $factoryCalls . " | " . $after;';
     [$output, $status] = tr_php($code);
     assert_eq(0, $status, $output);
-    assert_eq('INJECTED | anthropic', $output);
+    assert_eq('NO_BOOTSTRAP | INJECTED | openrouter | 1 | NO_BOOTSTRAP', $output);
 });
 
 test('billing Q10: TransportResolver contains no putenv call', function (): void {
