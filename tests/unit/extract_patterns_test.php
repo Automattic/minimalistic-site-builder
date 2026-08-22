@@ -485,3 +485,44 @@ test('build CLI populates the pattern counter from patterns.json', function (): 
     assert_contains('patterns.json', $source);
     assert_contains('$report->setPatterns(', $source);
 });
+
+test('cap reserves hero and call-to-action coverage before higher-scoring grid variants', function (): void {
+    with_project('builder_extract_cap_roles_', function (Project $project): void {
+        $sections = [
+            ['slug' => 'hero', 'markup' => sp_columns(1)],
+        ];
+        foreach ([
+            'alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot',
+            'golf', 'hotel', 'india', 'juliet', 'kilo', 'lima',
+        ] as $slug) {
+            $sections[] = ['slug' => $slug, 'markup' => sp_columns(3)];
+        }
+        $sections[] = ['slug' => 'cta', 'markup' => sp_columns(1)];
+        extract_patterns_seed($project, $sections);
+
+        (new ExtractPatternsStep())->run($project);
+
+        $manifest = $project->readJson('patterns.json');
+        $slugs = array_column($manifest['patterns'], 'slug');
+        assert_eq(12, count($slugs));
+        assert_true(in_array('hero-stack', $slugs, true), 'hero coverage survives the cap');
+        assert_true(in_array('cta-stack', $slugs, true), 'call-to-action coverage survives the cap');
+        assert_eq(2, count($manifest['dropped']));
+    });
+});
+
+test('label normalization distinguishes special es plurals from ordinary s plurals', function (): void {
+    assert_eq('class', \Automattic\SiteBuild\SectionPattern::normalizeLabel('classes'));
+    assert_eq('process', \Automattic\SiteBuild\SectionPattern::normalizeLabel('processes'));
+    assert_eq('box', \Automattic\SiteBuild\SectionPattern::normalizeLabel('boxes'));
+    assert_eq('branch', \Automattic\SiteBuild\SectionPattern::normalizeLabel('branches'));
+    assert_eq('wish', \Automattic\SiteBuild\SectionPattern::normalizeLabel('wishes'));
+
+    assert_eq('course', \Automattic\SiteBuild\SectionPattern::normalizeLabel('courses'));
+    assert_eq('service', \Automattic\SiteBuild\SectionPattern::normalizeLabel('services'));
+
+    assert_eq('process', \Automattic\SiteBuild\SectionPattern::normalizeLabel('process'));
+    assert_eq('class', \Automattic\SiteBuild\SectionPattern::normalizeLabel('class'));
+    assert_eq('status', \Automattic\SiteBuild\SectionPattern::normalizeLabel('status'));
+    assert_eq('analysis', \Automattic\SiteBuild\SectionPattern::normalizeLabel('analysis'));
+});
