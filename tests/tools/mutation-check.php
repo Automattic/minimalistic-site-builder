@@ -113,6 +113,10 @@ function mutation_copy_path(string $source, string $target): void
         if (!copy($source, $target)) {
             throw new RuntimeException("Could not copy mutation file: {$source}");
         }
+        $mode = fileperms($source);
+        if ($mode !== false && !chmod($target, $mode & 0777)) {
+            throw new RuntimeException("Could not preserve mutation file mode: {$source}");
+        }
         return;
     }
     if (!is_dir($source)) {
