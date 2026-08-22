@@ -36,10 +36,14 @@ final class TransportChoice
     /** Whether this choice spends a flat subscription rather than a metered key. */
     public function isSubscription(): bool
     {
-        return in_array($this->kind, [
+        return match ($this->kind) {
+            self::KIND_API => false,
             self::KIND_CLAUDE_CLI,
             self::KIND_CODEX_CLI,
-            self::KIND_GROK_CLI,
-        ], true);
+            self::KIND_GROK_CLI => true,
+            default => throw new \LogicException(
+                "transport kind '{$this->kind}' has no billing classification"
+            ),
+        };
     }
 }

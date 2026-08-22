@@ -40,6 +40,18 @@ test('TransportChoice classifies every existing CLI transport as subscription-ba
     }
 });
 
+test('billing map refuses a transport kind without an explicit classification', function (): void {
+    $reflection = new ReflectionClass(TransportChoice::class);
+    /** @var TransportChoice $choice */
+    $choice = $reflection->newInstanceWithoutConstructor();
+    $reflection->getProperty('kind')->setValue($choice, 'telepathy');
+
+    $e = assert_throws(fn () => $choice->isSubscription());
+    assert_true($e instanceof LogicException);
+    assert_contains('telepathy', $e->getMessage());
+    assert_contains('billing classification', $e->getMessage());
+});
+
 test('resolution and runtime failures are distinguishable types', function (): void {
     assert_true(new TransportUnavailable('x') instanceof \RuntimeException);
     assert_true(new HarnessCallFailed('x') instanceof \RuntimeException);
