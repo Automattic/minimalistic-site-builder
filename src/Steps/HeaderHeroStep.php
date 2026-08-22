@@ -68,11 +68,20 @@ use Automattic\SiteBuild\Warnings;
  *     an over-wide title/nav row wraps into a 2-3 row header across the
  *     whole tablet range. When the estimated single-row width exceeds the
  *     budget, the navigation gets `"overlayMenu":"always"`.
- *  8. Title scale — a site title at `section-title`/`display` competes with
+ *  8. Mobile menu — core renders NO hamburger at all for
+ *     `"overlayMenu":"never"` (navigation.php returns the bare inner list
+ *     instead of the responsive container), so a "never" header nav has no
+ *     collapsed state at any width and its nowrap row simply overruns a
+ *     phone viewport. Every header is normalized to exactly ONE collapsed
+ *     menu, on the last nav so the toggle sits at the row's end, carrying
+ *     every header link; see consolidateMobileNav(). Runs after the Home
+ *     strip above, so the copies it makes never carry an item that strip
+ *     already removed.
+ *  9. Title scale — a site title at `section-title`/`display` competes with
  *     the hero's display H1 (audited ratios collapsed to 1.33x); it is
  *     rewritten to `heading` unless the build forced the oversized-wordmark
  *     archetype, whose whole point is a display-scale wordmark.
- *  9. Exact root archetype marker and contract-owned foreground/protection
+ * 10. Exact root archetype marker and contract-owned foreground/protection
  *     tokens, plus authoritative primary-action correspondence, header echo
  *     and duplicate-CTA dedupe against the delivered hero, and objective
  *     overlay-evidence checks on the generated opening markup.
@@ -101,6 +110,22 @@ final class HeaderHeroStep implements Step
      * gutters). Above it the nav collapses to a menu instead of wrapping.
      */
     public const ROW_BUDGET_PX = 1000;
+
+    /**
+     * A header nav that only exists at or above the collapse breakpoint. The
+     * split-nav archetype's first half wears it: below the breakpoint the
+     * theme hides it so the header shows ONE hamburger, not one per nav, and
+     * the row is left holding just the wordmark and the trailing toggle.
+     */
+    public const NAV_WIDE_ONLY_CLASS = 'header-nav-wide-only';
+
+    /**
+     * A link that only exists inside the collapsed overlay. These are the
+     * copies of the hidden navs' links, parked in the surviving menu so the
+     * collapsed header still reaches every page. Hidden above the breakpoint,
+     * where the nav they were copied from is visible again.
+     */
+    public const NAV_OVERLAY_ONLY_CLASS = 'header-nav-overlay-only';
 
     /**
      * Rough per-element widths for the row estimate, in px. Deliberately
@@ -634,6 +659,17 @@ final class HeaderHeroStep implements Step
         $markup = $home['markup'];
         $notes = $home['notes'];
         $warnings = $home['warnings'];
+
+        // Strictly after the Home strip: consolidation COPIES nav items, and a
+        // copy taken first would carry a Home item — or a whole page-list the
+        // strip is about to replace with inner-page links — into the collapsed
+        // menu, where it is the only place anyone would see it. Also before
+        // anything parses: this one splices block source, and the row estimate
+        // below must measure the consolidated shape.
+        $consolidated = self::consolidateMobileNav($markup);
+        $markup = $consolidated['markup'];
+        array_push($notes, ...$consolidated['notes']);
+
         $doc = BlockMarkup::parse($markup);
 
         $top = $doc->topLevel();
@@ -684,20 +720,15 @@ final class HeaderHeroStep implements Step
         }
 
         $width = self::estimatedRowWidth($doc, $siteName, $pageTitles);
-        if ($width > self::ROW_BUDGET_PX) {
-            foreach ($doc->indices() as $i) {
-                if ($doc->name($i) !== 'navigation') {
-                    continue;
-                }
-                $attrs = $doc->attrs($i) ?? [];
-                if (($attrs['overlayMenu'] ?? '') !== 'always') {
-                    $attrs['overlayMenu'] = 'always';
-                    $doc->setAttrs($i, $attrs);
-                    $notes[] = "navigation set to overlayMenu:always (estimated row width ~{$width}px "
-                        . 'exceeds the ' . self::ROW_BUDGET_PX . 'px budget; the core hamburger only '
-                        . 'engages below 600px, so an over-wide row wraps across the whole tablet range)';
-                }
-                break;
+        $menuNav = self::mobileMenuNavIndex($doc);
+        if ($width > self::ROW_BUDGET_PX && $menuNav !== null) {
+            $attrs = $doc->attrs($menuNav) ?? [];
+            if (($attrs['overlayMenu'] ?? '') !== 'always') {
+                $attrs['overlayMenu'] = 'always';
+                $doc->setAttrs($menuNav, $attrs);
+                $notes[] = "navigation set to overlayMenu:always (estimated row width ~{$width}px "
+                    . 'exceeds the ' . self::ROW_BUDGET_PX . 'px budget; the core hamburger only '
+                    . 'engages below 600px, so an over-wide row wraps across the whole tablet range)';
             }
         }
 
@@ -2342,12 +2373,216 @@ final class HeaderHeroStep implements Step
     }
 
     /**
+     * Normalize the header down to exactly ONE collapsed menu.
+     *
+     * Two authored shapes leave a phone with no usable menu. `"overlayMenu":
+     * "never"` makes core skip the responsive container entirely — render()
+     * returns the bare inner list, so there is no hamburger at any width and
+     * the nowrap title/nav row simply overruns the viewport. And a header
+     * carrying two navs (split-nav puts one on each side of the wordmark)
+     * collapses into TWO hamburgers flanking the title, each opening half
+     * the site.
+     *
+     * The LAST nav in the document becomes the menu, so the toggle lands at
+     * the end of the row: with the other navs hidden, a space-between header
+     * leaves the wordmark at the start and the hamburger on the right, which
+     * is where a phone expects it. The earlier navs are marked wide-only —
+     * the theme hides them below the breakpoint — and their items are copied
+     * into the menu as overlay-only items, hidden above the breakpoint where
+     * the nav they came from is visible again. Every link therefore renders
+     * exactly once at every width.
+     *
+     * Idempotent: a menu already holding overlay-only copies is not copied
+     * into a second time. Pure — unit-testable.
+     *
+     * @return array{markup:string,notes:string[]}
+     */
+    public static function consolidateMobileNav(string $markup): array
+    {
+        $notes = [];
+        $doc = BlockMarkup::parse($markup);
+        $navs = self::headerNavIndices($doc);
+        if ($navs === []) {
+            return ['markup' => $markup, 'notes' => $notes];
+        }
+
+        $menu = $navs[count($navs) - 1];
+        $hidden = array_slice($navs, 0, -1);
+        $copied = 0;
+        if ($hidden !== [] && !self::navHasOverlayCopies($doc, $menu)) {
+            $menuHasPageList = false;
+            foreach ($doc->children($menu) as $child) {
+                $menuHasPageList = $menuHasPageList || $doc->name($child) === 'page-list';
+            }
+            $insert = '';
+            foreach ($hidden as $nav) {
+                foreach ($doc->children($nav) as $child) {
+                    // Two page-lists in one menu would render the whole site
+                    // twice; the menu's own already covers those pages.
+                    if ($menuHasPageList && $doc->name($child) === 'page-list') {
+                        continue;
+                    }
+                    $clone = self::overlayOnlyClone($doc, $markup, $child);
+                    if ($clone === null) {
+                        continue;
+                    }
+                    $insert .= "\n" . $clone . "\n";
+                    $copied++;
+                }
+            }
+            if ($insert !== '') {
+                // Prepended, so the menu still lists links in document order:
+                // the earlier navs' items above the menu's own. The splice
+                // covers [innerStart, first child) and the attribute rewrites
+                // below cover the opening delimiters — disjoint ranges, both
+                // applied by one render().
+                $doc->spliceOwnHtml($menu, 0, 0, $insert);
+            }
+        }
+
+        $menuAttrs = $doc->attrs($menu) ?? [];
+        if (($menuAttrs['overlayMenu'] ?? '') === 'never') {
+            $menuAttrs['overlayMenu'] = 'mobile';
+            $doc->setAttrs($menu, $menuAttrs);
+            $notes[] = 'navigation overlayMenu:never raised to mobile (core renders no hamburger '
+                . 'at all for never, so the header had no collapsed state at any width)';
+        }
+
+        $marked = 0;
+        foreach ($hidden as $nav) {
+            $attrs = $doc->attrs($nav) ?? [];
+            $before = $attrs;
+            $attrs['className'] = self::withClassToken(
+                (string) ($attrs['className'] ?? ''),
+                self::NAV_WIDE_ONLY_CLASS,
+            );
+            // The theme hides this nav below the breakpoint, so a hamburger of
+            // its own would be a hidden duplicate: "never" is correct here.
+            $attrs['overlayMenu'] = 'never';
+            if ($attrs !== $before) {
+                $doc->setAttrs($nav, $attrs);
+                $marked++;
+            }
+        }
+
+        // Only report work actually done — this pass re-runs over its own
+        // output, and a note is what the build report grades.
+        if ($copied > 0 || $marked > 0) {
+            $notes[] = sprintf(
+                'header collapses to one menu: %d leading navigation(s) marked %s, %d item(s) '
+                . 'copied into the trailing navigation as %s (two navs otherwise render two '
+                . 'hamburgers, each opening half the site)',
+                $marked,
+                self::NAV_WIDE_ONLY_CLASS,
+                $copied,
+                self::NAV_OVERLAY_ONLY_CLASS,
+            );
+        }
+
+        return ['markup' => $doc->render(), 'notes' => $notes];
+    }
+
+    /**
+     * The header's own navigation blocks, in document order. A nav nested
+     * inside another nav belongs to that nav, not to the header.
+     *
+     * @return list<int>
+     */
+    private static function headerNavIndices(BlockMarkup $doc): array
+    {
+        $navs = [];
+        foreach ($doc->indices() as $i) {
+            if ($doc->name($i) !== 'navigation' || !$doc->isStructurallySafe($i)) {
+                continue;
+            }
+            $ancestor = $doc->parent($i);
+            while ($ancestor !== null && $doc->name($ancestor) !== 'navigation') {
+                $ancestor = $doc->parent($ancestor);
+            }
+            if ($ancestor === null) {
+                $navs[] = $i;
+            }
+        }
+        return $navs;
+    }
+
+    /**
+     * The nav that carries the collapsed menu: the last one in the header, so
+     * its toggle sits at the end of the row. Shared with the row-budget
+     * collapse below, which must target the same nav — pointing "always" at a
+     * wide-only nav would hang a hamburger on the half that is hidden exactly
+     * when a hamburger is wanted.
+     */
+    private static function mobileMenuNavIndex(BlockMarkup $doc): ?int
+    {
+        $navs = self::headerNavIndices($doc);
+        return $navs === [] ? null : $navs[count($navs) - 1];
+    }
+
+    /** Whether this nav already carries copies from an earlier consolidation. */
+    private static function navHasOverlayCopies(BlockMarkup $doc, int $nav): bool
+    {
+        foreach ($doc->children($nav) as $child) {
+            $class = (string) (($doc->attrs($child) ?? [])['className'] ?? '');
+            if (self::hasClassToken($class, self::NAV_OVERLAY_ONLY_CLASS)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The source of one nav item, re-serialized with the overlay-only class.
+     * Only the opening delimiter is rewritten, so a subtree (a submenu and its
+     * links) is carried across whole. Null when the node has no safe end.
+     */
+    private static function overlayOnlyClone(BlockMarkup $doc, string $source, int $i): ?string
+    {
+        $end = $doc->endOffset($i);
+        if ($end === null || !$doc->isStructurallySafe($i)) {
+            return null;
+        }
+        $attrs = $doc->attrs($i) ?? [];
+        $attrs['className'] = self::withClassToken(
+            (string) ($attrs['className'] ?? ''),
+            self::NAV_OVERLAY_ONLY_CLASS,
+        );
+        $openingEnd = $doc->openingOffset($i) + $doc->openingLength($i);
+        return BlockMarkup::serializeComment($doc->name($i), $attrs, $doc->isVoid($i))
+            . substr($source, $openingEnd, $end - $openingEnd);
+    }
+
+    /** @return list<string> */
+    private static function classTokens(string $classes): array
+    {
+        return array_values(array_filter(
+            preg_split('/\s+/', trim($classes)) ?: [],
+            static fn (string $token): bool => $token !== '',
+        ));
+    }
+
+    private static function hasClassToken(string $classes, string $token): bool
+    {
+        return in_array($token, self::classTokens($classes), true);
+    }
+
+    private static function withClassToken(string $classes, string $token): string
+    {
+        $tokens = self::classTokens($classes);
+        if (!in_array($token, $tokens, true)) {
+            $tokens[] = $token;
+        }
+        return implode(' ', $tokens);
+    }
+
+    /**
      * Rough single-row width of the header bar at desktop: wordmark cluster +
      * navigation labels + button labels + gaps. Hand-authored
      * wp:navigation-link labels are read from the markup; a leftover
      * wp:page-list is measured from the site page titles. Home is stripped
-     * before this estimate runs.
-     * Pure — unit-testable.
+     * before this estimate runs. Overlay-only copies are skipped too: they
+     * exist for the collapsed menu and are hidden at the width this estimate
+     * is about. Pure — unit-testable.
      *
      * @param list<string> $pageTitles
      */
@@ -2361,15 +2596,19 @@ final class HeaderHeroStep implements Step
 
         foreach ($doc->indices() as $i) {
             $name = $doc->name($i);
+            $attrs = $doc->attrs($i) ?? [];
+            if (self::hasClassToken((string) ($attrs['className'] ?? ''), self::NAV_OVERLAY_ONLY_CLASS)) {
+                continue;
+            }
             if ($name === 'navigation-link') {
-                $label = (string) (($doc->attrs($i) ?? [])['label'] ?? '');
+                $label = (string) ($attrs['label'] ?? '');
                 $labels[] = html_entity_decode(strip_tags($label), ENT_QUOTES | ENT_HTML5, 'UTF-8');
             } elseif ($name === 'page-list') {
                 $hasPageList = true;
             } elseif ($name === 'site-title') {
                 $hasTitle = true;
             } elseif ($name === 'site-logo') {
-                $width += (int) (($doc->attrs($i) ?? [])['width'] ?? 48) + self::LOGO_GAP_PX;
+                $width += (int) ($attrs['width'] ?? 48) + self::LOGO_GAP_PX;
             } elseif ($name === 'button') {
                 $label = trim(strip_tags($doc->innerHtml($i)));
                 $width += self::BUTTON_PAD_PX + mb_strlen($label) * self::BUTTON_CHAR_PX;
