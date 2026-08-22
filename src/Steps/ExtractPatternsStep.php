@@ -25,6 +25,7 @@ final class ExtractPatternsStep implements Step
 {
     private const LOG_FILE = 'extract-patterns.log';
     private const PATTERN_CAP = 12;
+    private const BAND_CTA_EXEMPT_LABELS = ['cta', 'closing', 'contact'];
 
     /** @var array<string,string> normalized labels that map to core pattern categories */
     private const CORE_CATEGORIES = [
@@ -269,12 +270,31 @@ final class ExtractPatternsStep implements Step
         usort($winners, static fn (array $left, array $right): int => strcmp($left['key'], $right['key']));
         $manifestPatterns = [];
         foreach ($winners as &$winner) {
-            $winner['delivered_markup'] = self::rewriteLinks(
+            $deliveredMarkup = self::rewriteLinks(
                 self::rewriteAnchors(self::rewriteAssets($winner['markup']), $cssIds),
                 $routes,
             );
+            $patternFile = 'theme/patterns/' . $winner['key'] . '.php';
+            try {
+                $strip = self::stripBandButtons(
+                    $deliveredMarkup,
+                    (string) $winner['label'],
+                    $patternFile,
+                );
+                $deliveredMarkup = $strip['markup'];
+                array_push($warnings, ...$strip['warnings']);
+                if ($strip['removed'] > 0) {
+                    $log[] = "repair {$winner['key']}: removed {$strip['removed']} band-level CTA block(s)";
+                }
+            } catch (\Throwable $error) {
+                $warnings[] = "{$patternFile}: block path unprovable; authored value \"core/buttons\"; "
+                    . 'delivered value "pre-transformation bytes"; disposition: kept emitted pattern because '
+                    . 'band-level CTA removal could not be completed (' . $error->getMessage() . ')';
+                $log[] = "repair {$winner['key']}: band-level CTA removal failed: {$error->getMessage()}";
+            }
+            $winner['delivered_markup'] = $deliveredMarkup;
             $project->writeText(
-                'theme/patterns/' . $winner['key'] . '.php',
+                $patternFile,
                 $this->patternFile($project, $winner),
             );
             $manifestPatterns[] = $this->manifestPattern($project, $winner);
@@ -296,6 +316,142 @@ final class ExtractPatternsStep implements Step
             count($manifestPatterns),
             count($dropped),
         ));
+    }
+
+    /**
+     * Remove action rows belonging to a page band while retaining actions
+     * nested in cards. The returned markup is assembled in memory so a failed
+     * transformation cannot expose a partially edited pattern.
+     *
+     * @return array{markup:string,removed:int,warnings:list<string>}
+     */
+    private static function stripBandButtons(string $markup, string $label, string $patternFile): array
+    {
+        if (in_array($label, self::BAND_CTA_EXEMPT_LABELS, true)) {
+            return ['markup' => $markup, 'removed' => 0, 'warnings' => []];
+        }
+
+        $document = BlockMarkup::parse($markup);
+        if (
+            $document->hasMalformedDelimiters()
+            || $document->hasMismatchedDelimiters()
+            || $document->unclosedIndices() !== []
+        ) {
+            throw new \RuntimeException('pattern block delimiters are not structurally safe');
+        }
+
+        $removable = [];
+        foreach ($document->indices() as $index) {
+            if (!self::isCoreBlock($document->name($index), 'buttons')) {
+                continue;
+            }
+            $insideColumn = false;
+            $insideBandButtons = false;
+            for ($parent = $document->parent($index); $parent !== null; $parent = $document->parent($parent)) {
+                if (self::isCoreBlock($document->name($parent), 'column')) {
+                    $insideColumn = true;
+                    break;
+                }
+                if (self::isCoreBlock($document->name($parent), 'buttons')) {
+                    $insideBandButtons = true;
+                }
+            }
+            // Removing an outer buttons block also removes any malformed
+            // nested buttons subtree; avoid overlapping source splices.
+            if (!$insideColumn && !$insideBandButtons) {
+                $removable[] = $index;
+            }
+        }
+        if ($removable === []) {
+            return ['markup' => $markup, 'removed' => 0, 'warnings' => []];
+        }
+
+        $splices = [];
+        foreach ($removable as $index) {
+            $end = $document->endOffset($index);
+            if ($end === null) {
+                throw new \RuntimeException(
+                    'core/buttons at block path ' . self::blockPath($document, $index) . ' has no safe endpoint',
+                );
+            }
+            $start = $document->openingOffset($index);
+            $splices[] = ['start' => $start, 'length' => $end - $start];
+        }
+        usort($splices, static fn (array $left, array $right): int => $right['start'] <=> $left['start']);
+        $stripped = $markup;
+        foreach ($splices as $splice) {
+            $stripped = substr_replace($stripped, '', $splice['start'], $splice['length']);
+        }
+
+        if (!self::hasPatternContent($stripped)) {
+            $warnings = [];
+            foreach ($removable as $index) {
+                $warnings[] = $patternFile . ': block path ' . self::blockPath($document, $index)
+                    . '; authored value "core/buttons"; delivered value "retained"; '
+                    . 'disposition: kept CTA because removal would leave pattern with no content blocks';
+            }
+            return ['markup' => $markup, 'removed' => 0, 'warnings' => $warnings];
+        }
+
+        return ['markup' => $stripped, 'removed' => count($removable), 'warnings' => []];
+    }
+
+    private static function isCoreBlock(string $name, string $block): bool
+    {
+        return $name === $block || $name === 'core/' . $block;
+    }
+
+    /** A wrapper-only tree is not useful pattern content. */
+    private static function hasPatternContent(string $markup): bool
+    {
+        $document = BlockMarkup::parse($markup);
+        if (
+            $document->hasMalformedDelimiters()
+            || $document->hasMismatchedDelimiters()
+            || $document->unclosedIndices() !== []
+        ) {
+            throw new \RuntimeException('CTA removal produced structurally unsafe block markup');
+        }
+        foreach ($document->indices() as $index) {
+            $name = $document->name($index);
+            if (
+                !self::isCoreBlock($name, 'group')
+                && !self::isCoreBlock($name, 'columns')
+                && !self::isCoreBlock($name, 'column')
+            ) {
+                return true;
+            }
+        }
+
+        $withoutComments = preg_replace('/<!--.*?-->/s', '', $markup) ?? $markup;
+        if (trim(html_entity_decode(strip_tags($withoutComments), ENT_QUOTES | ENT_HTML5, 'UTF-8')) !== '') {
+            return true;
+        }
+        return preg_match('/<(?:img|video|audio|iframe|svg|canvas|object|embed)\b/i', $withoutComments) === 1;
+    }
+
+    /** Stable zero-based child path in authored block order. */
+    private static function blockPath(BlockMarkup $document, int $index): string
+    {
+        $segments = [];
+        for ($current = $index; ; $current = $parent) {
+            $parent = $document->parent($current);
+            $siblings = $parent === null
+                ? array_values(array_filter(
+                    $document->indices(),
+                    static fn (int $candidate): bool => $document->parent($candidate) === null,
+                ))
+                : $document->children($parent);
+            $position = array_search($current, $siblings, true);
+            if ($position === false) {
+                throw new \RuntimeException('could not resolve authored block path');
+            }
+            array_unshift($segments, (string) $position);
+            if ($parent === null) {
+                break;
+            }
+        }
+        return '/' . implode('/', $segments);
     }
 
     /** @param array<string,true> $registeredBlocks */
