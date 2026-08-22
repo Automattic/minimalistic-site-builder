@@ -405,6 +405,35 @@ test('band CTA nested in media-text is removed without deleting sibling content'
     });
 });
 
+test('band CTA removal prunes its empty container chain but keeps the section wrapper and sibling bytes', function (): void {
+    with_project('builder_extract_cta_empty_chain_', function (Project $project): void {
+        $sibling = '<!-- wp:paragraph --><p>SURVIVING SIBLING BYTE SENTINEL</p><!-- /wp:paragraph -->';
+        $ctaOnlyChain = extract_patterns_group(
+            extract_patterns_group(extract_patterns_buttons('NESTED BAND ACTION')),
+        );
+        extract_patterns_seed($project, [
+            ['slug' => 'hero', 'markup' => sp_columns(1)],
+            ['slug' => 'testimonial', 'markup' => extract_patterns_group($sibling . $ctaOnlyChain)],
+        ]);
+        $pageBefore = $project->readText('plugin/pages/home.html');
+
+        (new ExtractPatternsStep())->run($project);
+
+        $pattern = extract_patterns_for_label($project, 'testimonial');
+        assert_true(!str_contains($pattern, 'NESTED BAND ACTION'));
+        assert_contains($sibling, $pattern, 'surviving sibling bytes remain exact');
+        $document = BlockMarkup::parse($pattern);
+        $groups = array_values(array_filter(
+            $document->indices(),
+            static fn (int $index): bool => in_array($document->name($index), ['group', 'core/group'], true),
+        ));
+        assert_eq(1, count($groups), 'only top-level section group remains after upward pruning');
+        assert_eq(null, $document->parent($groups[0]), 'section wrapper remains top-level');
+        assert_true(!str_contains($pattern, '<div class="wp-block-group"></div>'), 'no empty group remains');
+        assert_eq($pageBefore, $project->readText('plugin/pages/home.html'));
+    });
+});
+
 test('only cta closing and contact labels retain band-level buttons', function (): void {
     with_project('builder_extract_cta_exempt_', function (Project $project): void {
         $sections = [];
