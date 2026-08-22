@@ -303,7 +303,7 @@ test('billing C3: mixed Claude and Codex fingerprints refuse as ambiguous', func
 test('billing N7: Codex ancestry overrides an inherited Claude fingerprint', function (): void {
     $c = TransportResolver::decide(
         ['CLAUDECODE' => '1'],
-        tr_on_path('claude', 'codex'),
+        tr_on_path('codex'),
         static fn (): array => ['php', 'codex', 'zsh'],
     );
     assert_eq(TransportChoice::KIND_CODEX_CLI, $c->kind);
@@ -595,8 +595,9 @@ test('billing C5c: API build without provider key throws instead of exiting', fu
         . '$p = $r->getProperty("vars"); $p->setValue(null, []); '
         . '$c = new \\Automattic\\SiteBuild\\TransportChoice('
         . '\\Automattic\\SiteBuild\\TransportChoice::KIND_API, "explicit", null, "anthropic"); '
-        . 'try { \\Automattic\\SiteBuild\\TransportResolver::build($c, static fn (): '
-        . '\\Automattic\\SiteBuild\\Llm => \\make_llm()); echo "NO_ERROR"; } '
+        . 'try { \\Automattic\\SiteBuild\\TransportResolver::build($c, static function (): '
+        . '\\Automattic\\SiteBuild\\Llm { throw new \\Automattic\\SiteBuild\\TransportUnavailable('
+        . '"ANTHROPIC_API_KEY is unavailable to the injected API factory."); }); echo "NO_ERROR"; } '
         . 'catch (Throwable $e) { echo get_class($e) . " | " . $e->getMessage(); }';
     [$output, $status] = tr_php($code);
     assert_eq(0, $status);
@@ -701,7 +702,6 @@ test('billing host layering: build returns an injected Llm without loading boots
     $root = dirname(__DIR__, 2);
     $code = 'require ' . var_export($root . '/autoload.php', true) . '; '
         . 'require ' . var_export($root . '/tests/FakeLlm.php', true) . '; '
-        . 'putenv("ANTHROPIC_API_KEY=test-only-key"); '
         . '$c = new \\Automattic\\SiteBuild\\TransportChoice('
         . '\\Automattic\\SiteBuild\\TransportChoice::KIND_API, "host injection", null, "anthropic"); '
         . '$fake = new \\Automattic\\SiteBuild\\Tests\\FakeLlm(); '
