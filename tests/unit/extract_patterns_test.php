@@ -312,13 +312,14 @@ test('patterns.json matches its frozen contract', function (): void {
         (new ExtractPatternsStep())->run($project);
         $manifest = $project->readJson('patterns.json');
 
-        assert_eq(1, $manifest['version']);
+        assert_eq(2, $manifest['version']);
         assert_eq(['version', 'patterns', 'starter', 'dropped'], array_keys($manifest));
         assert_true($manifest['patterns'] !== []);
         $pattern = $manifest['patterns'][0];
         assert_eq([
-            'slug', 'label', 'shape', 'title', 'categories', 'source', 'score', 'contains', 'alternates',
+            'slug', 'kind', 'label', 'shape', 'title', 'categories', 'source', 'score', 'contains', 'alternates',
         ], array_keys($pattern));
+        assert_eq('section', $pattern['kind']);
         assert_eq(['page', 'section', 'index'], array_keys($pattern['source']));
         assert_eq([
             'total', 'completeness', 'repetition', 'copy_fit', 'fidelity', 'self_containment',
@@ -695,7 +696,7 @@ test('a page with malformed delimiters is skipped with a warning and completes',
     });
 });
 
-test('cap overflow emits twelve patterns and records every dropped key', function (): void {
+test('section cap emits ten sections while component cap emits six source pairs', function (): void {
     with_project('builder_extract_cap_', function (Project $project): void {
         $slugs = [
             'alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf',
@@ -709,9 +710,16 @@ test('cap overflow emits twelve patterns and records every dropped key', functio
         (new ExtractPatternsStep())->run($project);
 
         $manifest = $project->readJson('patterns.json');
-        assert_eq(12, count($manifest['patterns']));
-        assert_eq(1, count($manifest['dropped']));
-        assert_eq(['key', 'reason', 'total'], array_keys($manifest['dropped'][0]));
+        assert_eq(10, count(array_filter(
+            $manifest['patterns'],
+            static fn (array $pattern): bool => $pattern['kind'] === 'section',
+        )));
+        assert_eq(12, count(array_filter(
+            $manifest['patterns'],
+            static fn (array $pattern): bool => $pattern['kind'] === 'component',
+        )));
+        assert_eq(10, count($manifest['dropped']));
+        assert_eq(['kind', 'key', 'reason', 'total'], array_keys($manifest['dropped'][0]));
         assert_eq('cap', $manifest['dropped'][0]['reason']);
         $warnings = $project->readText('warnings.json');
         assert_contains($manifest['dropped'][0]['key'], $warnings);
@@ -792,10 +800,10 @@ test('cap reserves hero and call-to-action coverage before higher-scoring grid v
 
         $manifest = $project->readJson('patterns.json');
         $slugs = array_column($manifest['patterns'], 'slug');
-        assert_eq(12, count($slugs));
+        assert_eq(22, count($slugs));
         assert_true(in_array('hero-stack', $slugs, true), 'hero coverage survives the cap');
         assert_true(in_array('cta-stack', $slugs, true), 'call-to-action coverage survives the cap');
-        assert_eq(2, count($manifest['dropped']));
+        assert_eq(10, count($manifest['dropped']));
     });
 });
 
