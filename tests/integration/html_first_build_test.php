@@ -599,6 +599,10 @@ test('G5 HTML-first build delivers only resolved header navigation destinations'
             'shared nav keeps no front-page placeholder, bare or path-prefixed',
         );
         assert_contains('"url":"/about/"', $header, 'About label resolves to the site page path');
+        assert_true(
+            !str_contains($header, '"label":"Home"') && !str_contains($header, '>Home</a>'),
+            'HTML-first header nav has no Home item; the brand is the home link',
+        );
 
         $emptyHrefCount = 0;
         foreach ($project->markupFiles() as $file) {
@@ -668,7 +672,7 @@ test('G6 HTML-first build resolves a list-shaped header navigation too', functio
         $builder->pipeline()->runThrough($project);
 
         $header = $project->readText('theme/parts/header.html');
-        assert_contains('"url":"/"', $header, 'brand link inherits the front page root');
+        assert_contains('Hearth', $header, 'brand identity stays as the home link');
         // Every MENU destination is resolved. The brand anchor is hoisted out of
         // the menu into its own block and still resolves to `/#hero` rather than
         // `/` — a separate resolver behaviour for raw anchors, and the reason this
@@ -684,6 +688,10 @@ test('G6 HTML-first build resolves a list-shaped header navigation too', functio
             'no anchor is left on a bare unresolved fragment',
         );
         assert_contains('"url":"/about/"', $header, 'About label resolves to the site page path');
+        assert_true(
+            !str_contains($header, '"label":"Home"') && !str_contains($header, '>Home</a>'),
+            'HTML-first list nav has no Home item; the brand is the home link',
+        );
         assert_true(
             !str_contains($header, 'aria-current'),
             'a shared header ships no design-time current-page marker',

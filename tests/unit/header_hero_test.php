@@ -619,6 +619,106 @@ test('the step repairs parts, writes the behavior artifact, and keeps successful
     });
 });
 
+test('the step strips a Home page-list from the footer part', function () {
+    with_project('builder_hh_footer_home_', function ($project) {
+        $pages = [
+            [
+                'slug' => 'home', 'title' => 'Home', 'path' => '/', 'front' => true,
+                'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+            ],
+            [
+                'slug' => 'menu', 'title' => 'Menu', 'path' => '/menu/', 'front' => false,
+                'sections' => [['slug' => 'menu-hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+            ],
+            [
+                'slug' => 'visit', 'title' => 'Visit', 'path' => '/visit/', 'front' => false,
+                'sections' => [['slug' => 'visit-hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+            ],
+        ];
+        $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+        $project->writeJson('theme/theme.json', hh_theme_json());
+        $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'calm']);
+        $project->writeJson('pages.json', ['pages' => $pages]);
+        hh_above_fold($project, $pages);
+        $project->writeText(
+            'theme/parts/header.html',
+            hh_header('{"backgroundColor":"base","layout":{"type":"constrained"}}') . "\n",
+        );
+        $project->writeText(
+            'theme/parts/footer.html',
+            '<!-- wp:group {"layout":{"type":"constrained"}} -->' . "\n"
+            . '<div class="wp-block-group">'
+            . '<!-- wp:site-title /-->'
+            . '<!-- wp:navigation --><!-- wp:page-list /--><!-- /wp:navigation -->'
+            . '</div>' . "\n"
+            . '<!-- /wp:group -->' . "\n",
+        );
+        $project->writeText('theme/parts/page-home--hero.html', hh_cover('50') . "\n");
+
+        (new HeaderHeroStep())->run($project);
+
+        $footer = $project->readText('theme/parts/footer.html');
+        assert_contains('<!-- wp:site-title /-->', $footer);
+        assert_true(!str_contains($footer, 'wp:page-list'));
+        assert_true(!str_contains($footer, '"label":"Home"'));
+        assert_contains('"label":"Menu"', $footer);
+        assert_contains('"label":"Visit"', $footer);
+    });
+});
+
+test('HTML-first header-hero strips Home from transformed chrome on both header and footer', function () {
+    with_project('builder_hh_html_first_home_', function ($project) {
+        $pages = [
+            [
+                'slug' => 'home', 'title' => 'Home', 'path' => '/', 'front' => true,
+                'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+            ],
+            [
+                'slug' => 'about', 'title' => 'About', 'path' => '/about/', 'front' => false,
+                'sections' => [['slug' => 'about-hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+            ],
+        ];
+        $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+        $project->writeJson('theme/theme.json', hh_theme_json());
+        $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'calm']);
+        $project->writeJson('pages.json', ['pages' => $pages]);
+        hh_above_fold($project, $pages);
+        $project->writeText(
+            'theme/parts/header.html',
+            hh_header(
+                '{"backgroundColor":"base","layout":{"type":"constrained"}}',
+                '<!-- wp:site-title /-->'
+                . '<a class="brand" href="/">Demo</a>'
+                . '<!-- wp:navigation -->'
+                . '<!-- wp:navigation-link {"label":"Home","url":"/","kind":"custom"} /-->'
+                . '<!-- wp:navigation-link {"label":"About","url":"/about/","kind":"custom"} /-->'
+                . '<!-- /wp:navigation -->',
+            ) . "\n",
+        );
+        $project->writeText(
+            'theme/parts/footer.html',
+            '<!-- wp:group {"layout":{"type":"constrained"}} -->' . "\n"
+            . '<div class="wp-block-group">'
+            . '<!-- wp:site-title /-->'
+            . '<nav><a href="/">Home</a><a href="/about/">About</a></nav>'
+            . '</div>' . "\n"
+            . '<!-- /wp:group -->' . "\n",
+        );
+        $project->writeText('theme/parts/page-home--hero.html', hh_cover('50') . "\n");
+
+        (new HeaderHeroStep(htmlFirst: true))->run($project);
+
+        $header = $project->readText('theme/parts/header.html');
+        $footer = $project->readText('theme/parts/footer.html');
+        assert_contains('<a class="brand" href="/">Demo</a>', $header);
+        assert_contains('"label":"About"', $header);
+        assert_true(!str_contains($header, '"label":"Home"'));
+        assert_contains('<!-- wp:site-title /-->', $footer);
+        assert_contains('<a href="/about/">About</a>', $footer);
+        assert_true(!str_contains($footer, '>Home</a>'));
+    });
+});
+
 test('the step protects a resumed legacy theme with global Group padding', function () {
     with_project('builder_hh_group_padding_', function ($project) {
         $project->writeJson('siteSpec.json', ['name' => 'Atlas Field']);

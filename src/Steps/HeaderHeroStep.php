@@ -10,6 +10,7 @@ use Automattic\SiteBuild\ContrastFix;
 use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\HeaderBehavior;
 use Automattic\SiteBuild\HeaderFallback;
+use Automattic\SiteBuild\HeaderNav;
 use Automattic\SiteBuild\HeroCopyBudget;
 use Automattic\SiteBuild\HeroFallback;
 use Automattic\SiteBuild\HeroHeadlineFit;
@@ -59,15 +60,19 @@ use Automattic\SiteBuild\Warnings;
  *     pushed the hero H1 and CTA below the fold). Only the cover half is
  *     enforced here: the header's own height is asked for in prompts/header.md
  *     and never measured, so the cap assumes a compliant header.
- *  6. Nav collapse — WordPress's hamburger only engages below 600px, while
+ *  6. Home nav — the site title and logo already link home, so a Home item
+ *     in the header or footer nav is removed (wp:home-link, a navigation-link
+ *     whose label is the front page title, a wp:page-list which always
+ *     includes Home, or an HTML anchor with that label in the chrome). Inner pages stay.
+ *  7. Nav collapse — WordPress's hamburger only engages below 600px, while
  *     an over-wide title/nav row wraps into a 2-3 row header across the
  *     whole tablet range. When the estimated single-row width exceeds the
  *     budget, the navigation gets `"overlayMenu":"always"`.
- *  7. Title scale — a site title at `section-title`/`display` competes with
+ *  8. Title scale — a site title at `section-title`/`display` competes with
  *     the hero's display H1 (audited ratios collapsed to 1.33x); it is
  *     rewritten to `heading` unless the build forced the oversized-wordmark
  *     archetype, whose whole point is a display-scale wordmark.
- *  8. Exact root archetype marker and contract-owned foreground/protection
+ *  9. Exact root archetype marker and contract-owned foreground/protection
  *     tokens, plus authoritative primary-action correspondence, header echo
  *     and duplicate-CTA dedupe against the delivered hero, and objective
  *     overlay-evidence checks on the generated opening markup.
@@ -260,11 +265,13 @@ final class HeaderHeroStep implements Step
             $protection,
             $behavior,
             $theme,
+            $pages,
         );
         $writes[$headerRel] = $result['markup'];
         foreach ($result['notes'] as $note) {
             $report[] = "[{$headerRel}] {$note}";
         }
+        array_push($warnings, ...$result['warnings']);
 
         $headerFacts = AboveFoldPartFacts::headerFacts($writes[$headerRel]);
         if (($headerFacts['mode'] ?? null) === null) {
@@ -436,11 +443,13 @@ final class HeaderHeroStep implements Step
                 $protection,
                 $behavior,
                 $theme,
+                $pages,
             );
             $writes[$headerRel] = $headerResult['markup'];
             foreach ($headerResult['notes'] as $note) {
                 $report[] = "[{$headerRel}] {$note}";
             }
+            array_push($warnings, ...$headerResult['warnings']);
         }
 
         // Overlay-evidence rows report the final resolved landing state, so
@@ -495,11 +504,13 @@ final class HeaderHeroStep implements Step
                 $protection,
                 $behavior,
                 $theme,
+                $pages,
             );
             $writes[$headerRel] = $headerResult['markup'];
             foreach ($headerResult['notes'] as $note) {
                 $report[] = "[{$headerRel}] {$note}";
             }
+            array_push($warnings, ...$headerResult['warnings']);
             $report[] = "[{$headerRel}] overlay resting scrim dropped: every opening cover's own dim "
                 . 'proves the foreground, so the header starts truly transparent and gains its '
                 . 'surface immediately when scrolled (the shadow retains the configured transition)';
@@ -531,6 +542,17 @@ final class HeaderHeroStep implements Step
         $final = AboveFoldContract::finalizeMarkup($deliveryForRefinalize, $pages, $facts);
         $mode = (string) $final['header']['mode'];
         array_push($warnings, ...AboveFoldContract::warningRows($final, $degradationOffset));
+
+        $footerRel = 'parts/footer.html';
+        if ($project->exists('theme/' . $footerRel) || isset($writes[$footerRel])) {
+            $footer = $writes[$footerRel] ?? $project->readText('theme/' . $footerRel);
+            $home = HeaderNav::withoutHomeItems($footer, $pages, 'footer', $siteName);
+            $writes[$footerRel] = $home['markup'];
+            foreach ($home['notes'] as $note) {
+                $report[] = "[{$footerRel}] {$note}";
+            }
+            array_push($warnings, ...$home['warnings']);
+        }
 
         // Compute everything above before the first write: parts, pages and
         // final contract describe the same delivered state at the boundary.
@@ -564,7 +586,7 @@ final class HeaderHeroStep implements Step
         $project->writeJson('pages.json', $pagesArtifact);
         $project->writeJson('aboveFold.json', $final);
         $project->writeJson(HeaderBehavior::FILE, $behavior);
-        $project->addWarnings($this->id(), $warnings);
+        $project->addWarnings($this->id(), array_values(array_unique($warnings)));
         if ($report === []) {
             $report[] = "Header mode '{$mode}', behavior '{$behavior['behavior']}': header and page-opening "
                 . 'sections already satisfy the '
@@ -591,7 +613,9 @@ final class HeaderHeroStep implements Step
      * @param array<mixed> $theme generated theme.json; used only to neutralize
      *                            recursive core/group padding on structural
      *                            header descendants
-     * @return array{markup:string,notes:string[]}
+     * @param list<array<string,mixed>> $pages site pages; Home is stripped from
+     *                                         the header nav using this list
+     * @return array{markup:string,notes:string[],warnings:list<string>}
      */
     public static function fixHeader(
         string $markup,
@@ -604,9 +628,13 @@ final class HeaderHeroStep implements Step
         string $protection = '',
         ?array $behavior = null,
         array $theme = [],
+        array $pages = [],
     ): array {
+        $home = HeaderNav::withoutHomeItems($markup, $pages, 'header', $siteName);
+        $markup = $home['markup'];
+        $notes = $home['notes'];
+        $warnings = $home['warnings'];
         $doc = BlockMarkup::parse($markup);
-        $notes = [];
 
         $top = $doc->topLevel();
         if ($top !== null && $mode === AboveFoldContract::MODE_OVERLAY) {
@@ -724,7 +752,7 @@ final class HeaderHeroStep implements Step
             $notes[] = 'removed inline position declaration(s) from the header part '
                 . '(the assembled outer shell exclusively owns header positioning)';
         }
-        return ['markup' => $rendered, 'notes' => $notes];
+        return ['markup' => $rendered, 'notes' => $notes, 'warnings' => $warnings];
     }
 
     /**
@@ -2316,8 +2344,9 @@ final class HeaderHeroStep implements Step
     /**
      * Rough single-row width of the header bar at desktop: wordmark cluster +
      * navigation labels + button labels + gaps. Hand-authored
-     * wp:navigation-link labels are read from the markup; a wp:page-list
-     * renders one item per site page, so page titles stand in for its labels.
+     * wp:navigation-link labels are read from the markup; a leftover
+     * wp:page-list is measured from the site page titles. Home is stripped
+     * before this estimate runs.
      * Pure — unit-testable.
      *
      * @param list<string> $pageTitles
