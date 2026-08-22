@@ -36,6 +36,10 @@ final class TransportChoice
     /** Whether this choice spends a flat subscription rather than a metered key. */
     public function isSubscription(): bool
     {
-        return $this->kind !== self::KIND_API;
+        return in_array($this->kind, [
+            self::KIND_CLAUDE_CLI,
+            self::KIND_CODEX_CLI,
+            self::KIND_GROK_CLI,
+        ], true);
     }
 }

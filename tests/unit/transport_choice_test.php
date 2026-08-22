@@ -22,6 +22,24 @@ test('TransportChoice rejects a blank reason so the echo line always explains it
     assert_contains('reason', $e->getMessage());
 });
 
+test('TransportChoice classifies the API transport as metered', function (): void {
+    $choice = new TransportChoice(TransportChoice::KIND_API, 'explicit API transport');
+    assert_true(!$choice->isSubscription());
+});
+
+test('TransportChoice classifies every existing CLI transport as subscription-backed', function (): void {
+    $subscriptionKinds = [
+        TransportChoice::KIND_CLAUDE_CLI,
+        TransportChoice::KIND_CODEX_CLI,
+        TransportChoice::KIND_GROK_CLI,
+    ];
+
+    foreach ($subscriptionKinds as $kind) {
+        $choice = new TransportChoice($kind, 'explicit CLI transport');
+        assert_true($choice->isSubscription(), "{$kind} should be subscription-backed");
+    }
+});
+
 test('resolution and runtime failures are distinguishable types', function (): void {
     assert_true(new TransportUnavailable('x') instanceof \RuntimeException);
     assert_true(new HarnessCallFailed('x') instanceof \RuntimeException);
