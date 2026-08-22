@@ -489,6 +489,40 @@ test('buttons-only non-exempt pattern keeps its CTA and records actionable warni
     });
 });
 
+test('NBSP-only wrapper content cannot turn CTA removal into a blank pattern', function (): void {
+    with_project('builder_extract_cta_nbsp_nonempty_', function (Project $project): void {
+        extract_patterns_seed($project, [
+            ['slug' => 'hero', 'markup' => sp_columns(1)],
+            [
+                'slug' => 'service',
+                'markup' => extract_patterns_group(
+                    "&nbsp;\u{00A0}" . extract_patterns_buttons('NBSP ONLY ACTION'),
+                ),
+            ],
+        ]);
+        $pageBefore = $project->readText('plugin/pages/home.html');
+
+        (new ExtractPatternsStep())->run($project);
+
+        $pattern = extract_patterns_for_label($project, 'service');
+        assert_eq(['band' => 1, 'in_card' => 0], extract_patterns_button_levels($pattern));
+        assert_contains('NBSP ONLY ACTION', $pattern, 'CTA retained instead of shipping blank wrapper');
+        $warnings = strtolower($project->readText('warnings.json'));
+        foreach ([
+            'theme/patterns/service-stack.php',
+            'block path',
+            'authored value',
+            'core/buttons',
+            'delivered value',
+            'retained',
+            'disposition',
+        ] as $context) {
+            assert_contains($context, $warnings, $context);
+        }
+        assert_eq($pageBefore, $project->readText('plugin/pages/home.html'));
+    });
+});
+
 test('page starter applies shared CTA stripping and keeps exact band and in-card counts', function (): void {
     with_project('builder_extract_cta_starter_', function (Project $project): void {
         $paragraph = '<!-- wp:paragraph --><p>Useful copy</p><!-- /wp:paragraph -->';
