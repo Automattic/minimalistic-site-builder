@@ -91,7 +91,9 @@ function remove_tree(string $path): void
 /** Run $fn($dir) with a fresh temp dir, removing the tree even when the test fails. */
 function with_temp_dir(string $prefix, callable $fn): mixed
 {
-    $dir = sys_get_temp_dir() . '/' . $prefix . uniqid();
+    // uniqid() is a hex timestamp with no process entropy: two builders in the
+    // same microsecond get the same path. The pid makes it per-process unique.
+    $dir = sys_get_temp_dir() . '/' . $prefix . getmypid() . '_' . uniqid('', true);
     if (!mkdir($dir, 0775, true) && !is_dir($dir)) {
         throw new RuntimeException("Could not create temp dir: {$dir}");
     }

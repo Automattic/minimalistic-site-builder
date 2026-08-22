@@ -357,6 +357,13 @@ html.header-state-js
     color: var(--header-foreground) !important;
     background-color: var(--header-scrolled-solid) !important;
     background-image: none !important;
+
+    /* Re-point the panel pair at this behavior's resolved surface. The active
+     * menu row in style.css inverts these two, so it inherits the readability
+     * HeaderBehavior already proved for this exact surface instead of picking
+     * a colour of its own. */
+    --menu-panel-ink: var(--header-foreground);
+    --menu-panel-surface: var(--header-scrolled-solid);
 }
 
 .site-header-shell

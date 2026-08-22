@@ -382,6 +382,90 @@ test('run drops offending declarations and ships the rest of the appendix', func
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('an unscoped rule is dropped, scoped rules survive, and the salvage summary says shipped not rejected', function () {
+    [$project, $tmp] = ps_project('builder_ps_rule_salvage_');
+    $project->writeText(
+        'theme/parts/section-work.html',
+        '<!-- wp:group {"className":"masonry-3"} --><div class="wp-block-group masonry-3"></div><!-- /wp:group -->',
+    );
+    $llm = new FakeLlm();
+    $llm->queueText(
+        ".masonry-3 :is(.card, .tile) { columns: 3; gap: 2rem; }\n"
+        . "body { margin: 0; }\n"
+        . "@media (max-width: 600px) {\n"
+        . "    .masonry-3 > * { break-inside: avoid; }\n"
+        . "    h1 { margin: 0; }\n"
+        . "}",
+    );
+
+    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $style = $project->readText('theme/style.css');
+    assert_contains(
+        '.masonry-3 :is(.card, .tile) { columns: 3; gap: 2rem; }',
+        $style,
+        'scoped rule with a functional-pseudo comma survives',
+    );
+    assert_contains('.masonry-3 > * { break-inside: avoid; }', $style, 'scoped media sibling survives');
+    assert_true(!str_contains($style, 'body { margin: 0; }'), 'unscoped rule is removed');
+    assert_true(!str_contains($style, 'h1 { margin: 0; }'), 'unscoped media sibling is removed');
+    $warnings = $project->readJson('warnings.json')['page-styles'] ?? [];
+    assert_true(count($warnings) >= 2, 'summary and per-rule detail are separate warning rows');
+    assert_contains('model CSS appendix', $warnings[0], 'greppable stem stays verbatim');
+    assert_contains('partially dropped', $warnings[0], 'salvage must not be reported as a rejection');
+    assert_contains('the remaining rules shipped', $warnings[0], 'summary states what actually happened');
+    assert_true(
+        !str_contains($warnings[0], 'rejected'),
+        'a shipped appendix counted as rejected corrupts every historical grep'
+    );
+    $joined = implode("\n", $warnings);
+    assert_contains('selector not scoped', $joined, 'detail names the rule defect');
+    assert_contains('authored rule selector `body`', $joined, 'detail records the authored selector');
+    assert_contains('delivered removed', $joined, 'detail records the delivered value');
+    assert_contains('disposition dropped unscoped CSS rule', $joined, 'detail records the disposition');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('every rule unscoped leaves the appendix empty and warns', function () {
+    [$project, $tmp] = ps_project('builder_ps_all_rules_unscoped_');
+    $project->writeText(
+        'theme/parts/section-work.html',
+        '<!-- wp:group {"className":"masonry-3"} --><div class="wp-block-group masonry-3"></div><!-- /wp:group -->',
+    );
+    $before = $project->readText('theme/style.css');
+    $llm = new FakeLlm();
+    $llm->queueText('body { margin: 0; } h1 { color: red; }');
+
+    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    assert_eq($before, $project->readText('theme/style.css'), 'empty salvage appends no marker or CSS');
+    assert_contains(
+        'model CSS appendix rejected',
+        implode("\n", $project->readJson('warnings.json')['page-styles'] ?? []),
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('unbalanced braces still reject the whole appendix', function () {
+    [$project, $tmp] = ps_project('builder_ps_unbalanced_appendix_');
+    $project->writeText(
+        'theme/parts/section-work.html',
+        '<!-- wp:group {"className":"masonry-3"} --><div class="wp-block-group masonry-3"></div><!-- /wp:group -->',
+    );
+    $before = $project->readText('theme/style.css');
+    $llm = new FakeLlm();
+    $llm->queueText('.masonry-3 { columns: 3;');
+
+    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    assert_eq($before, $project->readText('theme/style.css'), 'unbalanced document appends nothing');
+    assert_contains(
+        'unbalanced braces',
+        implode("\n", $project->readJson('warnings.json')['page-styles'] ?? []),
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('classesIn finds layout utilities only and ignores static hover classes', function () {
     $markup = '<!-- wp:group {"className":"masonry-3 hover-lift hover-reveal"} -->'
         . '<div class="wp-block-group masonry-3 hover-lift hover-reveal"></div><!-- /wp:group -->'
@@ -433,7 +517,7 @@ test('legacy mode ignores stale site CSS and keeps the recorded call trace and s
     assert_eq(0, $llm->completeBatchCalls, 'legacy path makes no batch call');
     assert_eq(1, count($llm->calls), 'legacy call trace count');
     assert_eq(
-        '431b0479251c0a7a747704eebaa70520e883312df8b96a2406d1f2253c3efe57',
+        '62969b1b61e6493b111cb9e479a46888b3e97d9c4741076b9d8210c1ce7f4ac6',
         hash('sha256', $llm->calls[0]['prompt']),
         'legacy prompt bytes'
     );
@@ -2631,14 +2715,13 @@ test('run skips when markup contains only static hover classes', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('run rejects :root motion tuning instead of extracting it', function () {
+test('run drops an unscoped :root motion rule and keeps its scoped sibling', function () {
     [$project, $tmp] = ps_project('builder_ps_no_motion_tuning_');
     $project->writeJson('designDirection.json', ['description' => 'x', 'motion' => 'calm']);
     $project->writeText(
         'theme/parts/section-work.html',
         '<!-- wp:group {"className":"overlap-up"} --><div class="wp-block-group overlap-up"></div><!-- /wp:group -->'
     );
-    $before = $project->readText('theme/style.css');
     $llm = new FakeLlm();
     $llm->queueText(
         ":root {\n    --motion-enter-duration: 150ms;\n}\n"
@@ -2648,8 +2731,13 @@ test('run rejects :root motion tuning instead of extracting it', function () {
     (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
 
     assert_true(!str_contains($llm->calls[0]['prompt'], 'MOTION TUNING'), 'prompt offers no override channel');
-    assert_eq($before, $project->readText('theme/style.css'), 'global override rejects the whole appendix');
-    assert_contains('not scoped', $project->readText('logs/page-styles.log'));
+    $style = $project->readText('theme/style.css');
+    assert_true(!str_contains($style, '--motion-enter-duration'), 'unscoped global rule is dropped');
+    assert_contains('.overlap-up {', $style, 'scoped sibling survives');
+    assert_contains(
+        'not scoped',
+        implode("\n", $project->readJson('warnings.json')['page-styles'] ?? []),
+    );
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
