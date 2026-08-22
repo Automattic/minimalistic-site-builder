@@ -366,12 +366,48 @@ final class ExtractPatternsStep implements Step
             return ['markup' => $markup, 'removed' => 0, 'warnings' => []];
         }
 
-        $splices = [];
         foreach ($removable as $index) {
+            if ($document->endOffset($index) === null) {
+                throw new \RuntimeException(
+                    'core/buttons at block path ' . self::blockPath($document, $index) . ' has no safe endpoint',
+                );
+            }
+        }
+
+        $removed = array_fill_keys($removable, true);
+        foreach ($removable as $index) {
+            for ($parent = $document->parent($index); $parent !== null; $parent = $document->parent($parent)) {
+                if ($document->parent($parent) === null || !self::isPrunableContainer($document->name($parent))) {
+                    break;
+                }
+                $remainingChildren = array_filter(
+                    $document->children($parent),
+                    static fn (int $child): bool => !isset($removed[$child]),
+                );
+                if ($remainingChildren !== [] || self::hasNonWhitespaceOwnedText($document, $parent, $markup)) {
+                    break;
+                }
+                $removed[$parent] = true;
+            }
+        }
+
+        $topmost = array_values(array_filter(
+            array_keys($removed),
+            static function (int $index) use ($document, $removed): bool {
+                for ($parent = $document->parent($index); $parent !== null; $parent = $document->parent($parent)) {
+                    if (isset($removed[$parent])) {
+                        return false;
+                    }
+                }
+                return true;
+            },
+        ));
+        $splices = [];
+        foreach ($topmost as $index) {
             $end = $document->endOffset($index);
             if ($end === null) {
                 throw new \RuntimeException(
-                    'core/buttons at block path ' . self::blockPath($document, $index) . ' has no safe endpoint',
+                    'container at block path ' . self::blockPath($document, $index) . ' has no safe endpoint',
                 );
             }
             $start = $document->openingOffset($index);
@@ -401,6 +437,54 @@ final class ExtractPatternsStep implements Step
         return $name === $block || $name === 'core/' . $block;
     }
 
+    private static function isPrunableContainer(string $name): bool
+    {
+        return self::isCoreBlock($name, 'group')
+            || self::isCoreBlock($name, 'columns')
+            || self::isCoreBlock($name, 'column');
+    }
+
+    /** Whether one container owns visible text outside its child block spans. */
+    private static function hasNonWhitespaceOwnedText(
+        BlockMarkup $document,
+        int $index,
+        string $markup,
+    ): bool {
+        $innerStart = $document->openingOffset($index) + $document->openingLength($index);
+        $innerEnd = $document->innerEndOffset($index);
+        $owned = substr($markup, $innerStart, $innerEnd - $innerStart);
+        $childSplices = [];
+        foreach ($document->children($index) as $child) {
+            $childEnd = $document->endOffset($child);
+            if ($childEnd === null) {
+                throw new \RuntimeException(
+                    'child at block path ' . self::blockPath($document, $child) . ' has no safe endpoint',
+                );
+            }
+            $childStart = $document->openingOffset($child);
+            $childSplices[] = [
+                'start' => $childStart - $innerStart,
+                'length' => $childEnd - $childStart,
+            ];
+        }
+        usort($childSplices, static fn (array $left, array $right): int => $right['start'] <=> $left['start']);
+        foreach ($childSplices as $splice) {
+            $owned = substr_replace($owned, '', $splice['start'], $splice['length']);
+        }
+        $withoutComments = preg_replace('/<!--.*?-->/s', '', $owned) ?? $owned;
+        return self::hasNonWhitespaceText($withoutComments);
+    }
+
+    private static function hasNonWhitespaceText(string $markup): bool
+    {
+        $text = html_entity_decode(strip_tags($markup), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $hasText = preg_match('/[^\s\x{00A0}]/u', $text);
+        if ($hasText === false) {
+            throw new \RuntimeException('pattern text is not valid UTF-8');
+        }
+        return $hasText === 1;
+    }
+
     /** A wrapper-only tree is not useful pattern content. */
     private static function hasPatternContent(string $markup): bool
     {
@@ -414,17 +498,13 @@ final class ExtractPatternsStep implements Step
         }
         foreach ($document->indices() as $index) {
             $name = $document->name($index);
-            if (
-                !self::isCoreBlock($name, 'group')
-                && !self::isCoreBlock($name, 'columns')
-                && !self::isCoreBlock($name, 'column')
-            ) {
+            if (!self::isPrunableContainer($name)) {
                 return true;
             }
         }
 
         $withoutComments = preg_replace('/<!--.*?-->/s', '', $markup) ?? $markup;
-        if (trim(html_entity_decode(strip_tags($withoutComments), ENT_QUOTES | ENT_HTML5, 'UTF-8')) !== '') {
+        if (self::hasNonWhitespaceText($withoutComments)) {
             return true;
         }
         return preg_match('/<(?:img|video|audio|iframe|svg|canvas|object|embed)\b/i', $withoutComments) === 1;
