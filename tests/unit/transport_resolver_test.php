@@ -737,26 +737,37 @@ test('billing Q9: host-2 factory receives the resolved provider and returns its 
 });
 
 test('billing Q10: TransportResolver contains no putenv call', function (): void {
-    $source = (string) file_get_contents(dirname(__DIR__, 2) . '/src/TransportResolver.php');
-    $tokens = token_get_all($source);
-    $calls = 0;
+    $countPutenvCalls = static function (string $source): int {
+        $tokens = token_get_all($source);
+        $nameTokenIds = [T_STRING, T_NAME_QUALIFIED, T_NAME_FULLY_QUALIFIED, T_NAME_RELATIVE];
+        $calls = 0;
 
-    foreach ($tokens as $index => $token) {
-        if (!is_array($token) || $token[0] !== T_STRING || strtolower($token[1]) !== 'putenv') {
-            continue;
-        }
-        for ($next = $index + 1; isset($tokens[$next]); $next++) {
-            if (is_array($tokens[$next]) && $tokens[$next][0] === T_WHITESPACE) {
+        foreach ($tokens as $index => $token) {
+            if (!is_array($token) || !in_array($token[0], $nameTokenIds, true)) {
                 continue;
             }
-            if ($tokens[$next] === '(') {
-                $calls++;
+            $parts = explode('\\', strtolower(ltrim($token[1], '\\')));
+            if (end($parts) !== 'putenv') {
+                continue;
             }
-            break;
-        }
-    }
 
-    assert_eq(0, $calls, 'TransportResolver must not mutate process environment');
+            for ($next = $index + 1; isset($tokens[$next]); $next++) {
+                if (is_array($tokens[$next]) && $tokens[$next][0] === T_WHITESPACE) {
+                    continue;
+                }
+                if ($tokens[$next] === '(') {
+                    $calls++;
+                }
+                break;
+            }
+        }
+
+        return $calls;
+    };
+
+    assert_eq(3, $countPutenvCalls('<?php putenv("A=1"); \\putenv("B=2"); namespace\\putenv("C=3");'));
+    $source = (string) file_get_contents(dirname(__DIR__, 2) . '/src/TransportResolver.php');
+    assert_eq(0, $countPutenvCalls($source), 'TransportResolver must not mutate process environment');
 });
 
 test('describe() names the transport, the billing boundary and the rung', function (): void {
