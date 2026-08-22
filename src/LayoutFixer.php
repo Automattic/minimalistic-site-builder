@@ -94,7 +94,9 @@ final class LayoutFixer
         array $wideMeasureRootClasses = [],
     ): array {
         $notes = [];
-        $markup = self::repairMalformedAttributes($markup, $notes);
+        $commentRepair = BlockCommentRepair::repair($markup);
+        $markup = $commentRepair['markup'];
+        array_push($notes, ...$commentRepair['notes']);
         $markup = self::mergeDuplicateAttributeKeys($markup, $notes);
         $parsed = self::parse($markup);
         if ($parsed === null) {
@@ -1251,49 +1253,6 @@ final class LayoutFixer
     private const TOKEN_RE = '/<!--\s*(\/)?wp:([a-z][a-z0-9_\/-]*)\s*(\{(?:(?!-->).)*?\})?\s*(\/)?-->/s';
 
     /**
-     * Repair attribute JSON containing a stray closer: an extra `}` splits
-     * the opener into a valid prefix and dangling members (tbilisi24 wrote
-     * `{"style":{...,"padding":{...}}},"layout":{...}}`), so json_decode fails,
-     * this fixer skips the whole file, and block serialization erases every
-     * attribute of the block — the fatal rhythm drop plus silent losses.
-     * The repair stays mechanical by refusing to guess: every single-closer
-     * deletion is tried (see withoutPrematureClosers), and the rewrite is
-     * kept only when exactly one distinct valid object can result. Anything
-     * ambiguous stays untouched for the gate to reject.
-     *
-     * @param string[] $notes
-     */
-    private static function repairMalformedAttributes(string $markup, array &$notes): string
-    {
-        if (preg_match_all(self::TOKEN_RE, $markup, $tokens, PREG_OFFSET_CAPTURE | PREG_SET_ORDER) === false) {
-            return $markup;
-        }
-        for ($i = count($tokens) - 1; $i >= 0; $i--) {
-            $t = $tokens[$i];
-            if (!isset($t[3]) || $t[3][1] === -1 || $t[3][0] === '') {
-                continue;
-            }
-            $json = $t[3][0];
-            if (json_decode($json) instanceof \stdClass) {
-                continue;
-            }
-            $completed = self::withMissingRootCloser($json);
-            if ($completed !== null) {
-                $markup = substr_replace($markup, $completed, $t[3][1], strlen($json));
-                $notes[] = "wp:{$t[2][0]} attributes omitted their final root closer — restored it so the declared attributes parse instead of being erased";
-                continue;
-            }
-            $repaired = self::withoutPrematureClosers($json);
-            if ($repaired === null) {
-                continue;
-            }
-            $markup = substr_replace($markup, $repaired, $t[3][1], strlen($json));
-            $notes[] = "wp:{$t[2][0]} attributes closed their JSON object early — removed the stray closer(s) so the declared attributes parse instead of being erased";
-        }
-        return $markup;
-    }
-
-    /**
      * Deep-merge duplicate same-depth keys in otherwise valid comment JSON.
      *
      * A model that writes {"style":{...},"style":{...}} meant one object: the
@@ -1343,144 +1302,6 @@ final class LayoutFixer
                 . 'declarations so re-serialization keeps every member instead of only the last';
         }
         return $markup;
-    }
-
-    /**
-     * Complete only the narrow, unambiguous truncated form where every nested
-     * object/array is already balanced and the sole missing token is the root
-     * object's final `}`. A missing nested closer could change which object a
-     * later member belongs to, so that broader shape remains fail-closed.
-     */
-    private static function withMissingRootCloser(string $json): ?string
-    {
-        $stack = [];
-        $inString = false;
-        $escaped = false;
-        $length = strlen($json);
-        for ($i = 0; $i < $length; $i++) {
-            $char = $json[$i];
-            if ($inString) {
-                if ($escaped) {
-                    $escaped = false;
-                } elseif ($char === '\\') {
-                    $escaped = true;
-                } elseif ($char === '"') {
-                    $inString = false;
-                }
-                continue;
-            }
-            if ($char === '"') {
-                $inString = true;
-                continue;
-            }
-            if ($char === '{') {
-                $stack[] = ['closer' => '}', 'offset' => $i];
-            } elseif ($char === '[') {
-                $stack[] = ['closer' => ']', 'offset' => $i];
-            } elseif ($char === '}' || $char === ']') {
-                $frame = array_pop($stack);
-                if ($frame === null || $frame['closer'] !== $char) {
-                    return null;
-                }
-            }
-        }
-
-        if ($inString || count($stack) !== 1
-            || $stack[0]['offset'] !== 0 || $stack[0]['closer'] !== '}') {
-            return null;
-        }
-        $candidate = $json . '}';
-        return json_decode($candidate) instanceof \stdClass
-            && !self::hasSameDepthDuplicateKeys($candidate)
-            ? $candidate
-            : null;
-    }
-
-    /**
-     * The repaired JSON payload, or null when no UNAMBIGUOUS closer deletion
-     * exists. Every single-closer deletion is enumerated (then two-closer
-     * ones, only when no single deletion parses); a candidate counts when it
-     * decodes to an object AND declares no same-depth duplicate keys — which
-     * json_decode would silently merge, keeping only the last value, so an
-     * apparently clean repair could still lose members. The rewrite is kept
-     * only when all surviving candidates agree on ONE decoded result: several
-     * distinct valid readings mean the authoring error has no mechanical
-     * story to recover, and the block is left for the gate to reject.
-     */
-    private static function withoutPrematureClosers(string $json): ?string
-    {
-        $payloads = [$json];
-        for ($deletions = 0; $deletions < 2; $deletions++) {
-            $results = [];
-            $stillInvalid = [];
-            foreach ($payloads as $payload) {
-                foreach (self::closerOffsets($payload) as $offset) {
-                    $candidate = substr_replace($payload, '', $offset, 1);
-                    $decoded = json_decode($candidate);
-                    if (!$decoded instanceof \stdClass) {
-                        $stillInvalid[$candidate] = true;
-                        continue;
-                    }
-                    if (!self::hasSameDepthDuplicateKeys($candidate)) {
-                        $results[json_encode($decoded)] = $candidate;
-                    }
-                }
-            }
-            if ($results !== []) {
-                return count($results) === 1 ? reset($results) : null;
-            }
-            $payloads = array_keys($stillInvalid);
-            if (count($payloads) > 1024) {
-                return null; // runaway enumeration — not a plausible attrs payload
-            }
-        }
-        return null;
-    }
-
-    /** @return int[] byte offsets of every `}` / `]` outside string literals */
-    private static function closerOffsets(string $json): array
-    {
-        $offsets = [];
-        $inString = false;
-        $escaped = false;
-        $length = strlen($json);
-        for ($i = 0; $i < $length; $i++) {
-            $char = $json[$i];
-            if ($inString) {
-                if ($escaped) {
-                    $escaped = false;
-                } elseif ($char === '\\') {
-                    $escaped = true;
-                } elseif ($char === '"') {
-                    $inString = false;
-                }
-                continue;
-            }
-            if ($char === '"') {
-                $inString = true;
-            } elseif ($char === '}' || $char === ']') {
-                $offsets[] = $i;
-            }
-        }
-        return $offsets;
-    }
-
-    /**
-     * Whether a syntactically valid JSON payload declares the same decoded key
-     * twice in one object. JSON key identity is based on the decoded string, so
-     * raw spellings such as "style" and "\u0073tyle" are duplicates too.
-     * Reuse the same decoder as the canonical merge path so malformed-closer
-     * ambiguity checks cannot drift from the repair semantics.
-     */
-    private static function hasSameDepthDuplicateKeys(string $json): bool
-    {
-        $decoder = new JsonDecoder($json, mergeDuplicateObjectKeys: true);
-        try {
-            $decoder->decode();
-        } catch (\InvalidArgumentException) {
-            return false;
-        }
-        return $decoder->mergedDuplicateKeyPaths() !== [];
     }
 
     /**

@@ -9,6 +9,7 @@ use Automattic\SiteBuild\BlockFixerOutcome;
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\BlockSerializer\AlignmentClassLoss;
 use Automattic\SiteBuild\BlockSerializer\AlignmentClassLossDetector;
+use Automattic\SiteBuild\BlockSerializer\Repair;
 use Automattic\SiteBuild\LayoutFixer;
 use Automattic\SiteBuild\PhotographySite;
 use Automattic\SiteBuild\PhpBlockFixer;
@@ -341,6 +342,19 @@ final class FixBlocksStep implements Step
                 ));
             echo '  [alignment] warning: ' . count($alignmentLosses)
                 . " alignment class(es) dropped; see warnings.json\n";
+        }
+        // Blocks the serializer preserved verbatim (unsupported or
+        // irreparable): the smallest affected unit gets a durable record
+        // while its siblings were still normalized.
+        $preservedBlocks = self::preservedBlockRepairs($outcomes, $failedPaths);
+        foreach ($preservedBlocks as [$file, $repair]) {
+            $warnings[] = "block re-serialization {$repair->code} at {$file} block {$repair->blockPath}; "
+                . 'its authored bytes were delivered while sibling blocks were still normalized — '
+                . 'see logs/' . self::LOG_FILE;
+        }
+        if ($preservedBlocks !== []) {
+            echo '  [fix-blocks] warning: ' . count($preservedBlocks)
+                . " block(s) preserved verbatim (unsupported or irreparable); see warnings.json\n";
         }
         // Files whose transformation the fixer abandoned (unsupported block,
         // unreviewed signature, non-convergence): their pre-fixer bytes were
@@ -1117,6 +1131,41 @@ final class FixBlocksStep implements Step
     private static function failurePaths(array $failures): array
     {
         return array_keys($failures);
+    }
+
+    /**
+     * Preservation rows from every delivered file, deduplicated across fixer
+     * passes. Files whose transaction failed are excluded — they already get
+     * their own file-level warning.
+     *
+     * @param list<BlockFixerOutcome> $outcomes
+     * @param list<string> $failedPaths
+     * @return list<array{0:string,1:Repair}>
+     */
+    private static function preservedBlockRepairs(array $outcomes, array $failedPaths): array
+    {
+        $excluded = array_fill_keys($failedPaths, true);
+        $rows = [];
+        $seen = [];
+        foreach ($outcomes as $outcome) {
+            foreach ($outcome->typed?->files ?? [] as $file) {
+                if (isset($excluded[$file->path])) {
+                    continue;
+                }
+                foreach ($file->repairs as $repair) {
+                    if (!str_starts_with($repair->code, Repair::PRESERVED_PREFIX)) {
+                        continue;
+                    }
+                    $key = $repair->key($file->path);
+                    if (isset($seen[$key])) {
+                        continue;
+                    }
+                    $seen[$key] = true;
+                    $rows[] = [$file->path, $repair];
+                }
+            }
+        }
+        return $rows;
     }
 
     /**

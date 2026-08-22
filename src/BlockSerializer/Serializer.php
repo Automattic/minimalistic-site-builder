@@ -93,30 +93,59 @@ final class Serializer implements TemplateTransformer
     private function serializeBlock(BlockNode $node, string $path): array
     {
         if (!$this->registry->isRegistered($node->name)) {
-            return ['html' => $this->serializeRawBlock($node), 'repairs' => []];
+            try {
+                return ['html' => $this->serializeRawBlock($node), 'repairs' => []];
+            } catch (\Throwable $error) {
+                // The raw path's child guard found a registered descendant it
+                // must not tunnel around. Preserve this subtree instead of
+                // failing the whole file.
+                return $this->preserveBlock($node, $path, $error);
+            }
         }
-        // strategy() is an intentional fail-closed supported-domain guard.
-        $this->registry->strategy($node->name);
+        try {
+            // strategy() is an intentional fail-closed supported-domain guard.
+            $this->registry->strategy($node->name);
 
-        $inner = [];
-        $repairs = [];
-        foreach ($node->innerBlocks as $index => $child) {
-            $result = $this->serializeBlock($child, $path . '/' . $index);
-            $inner[] = $result['html'];
-            $repairs = array_merge($repairs, $result['repairs']);
+            $inner = [];
+            $repairs = [];
+            foreach ($node->innerBlocks as $index => $child) {
+                $result = $this->serializeBlock($child, $path . '/' . $index);
+                $inner[] = $result['html'];
+                $repairs = array_merge($repairs, $result['repairs']);
+            }
+            $innerHtml = implode("\n\n", $inner);
+            $block = $this->normalizer->normalize($node, $innerHtml, $path);
+            $content = $this->saves->save($node->name, $block->attributes, $innerHtml, $node->innerHTML);
+            $html = $this->comments->delimit($node->name, $this->comments->attributes($block), $content);
+            return [
+                'html' => $html,
+                'repairs' => array_merge($repairs, $block->repairs),
+            ];
+        } catch (\Throwable $error) {
+            return $this->preserveBlock($node, $path, $error);
         }
-        $innerHtml = implode("\n\n", $inner);
-        $block = $this->normalizer->normalize($node, $innerHtml, $path);
-        $content = $this->saves->save($node->name, $block->attributes, $innerHtml, $node->innerHTML);
-        $html = $this->comments->delimit($node->name, $this->comments->attributes($block), $content);
+    }
+
+    /**
+     * Block-level isolation: an unsupported or irreparable block keeps its
+     * authored bytes and reports the smallest affected unit, instead of the
+     * whole file reverting to pre-fixer bytes and stripping every sibling of
+     * its generated classes. Children of the preserved subtree are not
+     * re-validated — the subtree is delivered verbatim, never re-saved.
+     *
+     * @return array{html:string,repairs:list<Repair>}
+     */
+    private function preserveBlock(BlockNode $node, string $path, \Throwable $error): array
+    {
+        $reason = str_replace(["\r", "\n"], ' ', $error->getMessage());
         return [
-            'html' => $html,
-            'repairs' => array_merge($repairs, $block->repairs),
+            'html' => $this->serializeRawBlock($node, validateChildren: false),
+            'repairs' => [new Repair(Repair::PRESERVED_PREFIX . "{$node->name} ({$reason})", $path)],
         ];
     }
 
     /** Pinned serializeRawBlock() behavior used by core/missing. */
-    private function serializeRawBlock(BlockNode $node, bool $delimited = true): string
+    private function serializeRawBlock(BlockNode $node, bool $delimited = true, bool $validateChildren = true): string
     {
         $child = 0;
         $content = [];
@@ -132,10 +161,12 @@ final class Serializer implements TemplateTransformer
                 // it must not become a tunnel around the supported-domain
                 // guard for a registered child. Validate the child's strategy
                 // before recursively preserving its raw representation.
-                if ($this->registry->isRegistered($inner->name)) {
+                // (Skipped on the preserveBlock path, which delivers an
+                // already-condemned subtree verbatim.)
+                if ($validateChildren && $this->registry->isRegistered($inner->name)) {
                     $this->registry->strategy($inner->name);
                 }
-                $content[] = $this->serializeRawBlock($inner, $delimited);
+                $content[] = $this->serializeRawBlock($inner, $delimited, $validateChildren);
             }
         }
         $inner = implode("\n", $content);

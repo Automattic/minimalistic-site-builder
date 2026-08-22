@@ -178,6 +178,27 @@ suite separately replays all four against Gutenberg and requires exactly the
 five reviewed mismatching files and output hashes. The committed-case inventory
 gate also rejects any case that is neither generated nor explicitly excluded.
 
+### Lean inputs over the same corpus
+
+Every case input here is canonical markup. `canonical_lean_equivalence_test.php`
+walks the same corpus from the other end: it strips the class tokens the
+serializer regenerates, runs the attribute-light result through the real
+pipeline (intake legacy conversion, then the fixer), and requires the
+runtime-certified `expected/` bytes back. That closes a chain no single test
+asserted before — lean equals canonical, canonical equals the runtime,
+therefore lean equals the runtime — over one shared corpus instead of two
+unrelated ones.
+
+51 of 59 files converge. The seven cases that do not are listed with their
+reason in `CLE_KNOWN_LEAN_DIVERGENCES`, and the test asserts they *still*
+diverge, so a fix cannot land without removing its entry and the list cannot
+rot into a claim of coverage it no longer has. Three are the reviewed policy
+divergences above. The one to fix is `paragraph-inline-color-carryover`:
+omitting the preset font-size class routes the block to a deprecation
+candidate that does not carry authored bytes, so it ships preserved-verbatim
+without its generated classes and renders differently from the same content
+authored canonically.
+
 ### The two runtime divergences, precisely
 
 In `carried-elements-signatures`, a `core/heading` with a legacy top-level

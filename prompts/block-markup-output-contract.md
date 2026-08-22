@@ -8,9 +8,11 @@ Return exactly the intended Gutenberg block document and nothing else.
 
 Valid response example (the entire response):
 <!-- wp:group {"layout":{"type":"constrained"}} -->
-<div class="wp-block-group"><!-- wp:paragraph -->
-<p>Example.</p>
-<!-- /wp:paragraph --></div>
+<div>
+    <!-- wp:paragraph -->
+    <p>Example.</p>
+    <!-- /wp:paragraph -->
+</div>
 <!-- /wp:group -->
 
 Invalid response examples (these wrappers are never valid):

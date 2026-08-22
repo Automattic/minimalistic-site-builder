@@ -326,7 +326,7 @@ test('a fixer failure rolls the persisted cover repairs back', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('cover-contrast rolls back only files in a real PHP fixer FAILED report', function () {
+test('cover-contrast keeps repairs when the fixer preserves an unsupported block', function () {
     if (!extension_loaded('imagick')) {
         return;
     }
@@ -334,14 +334,14 @@ test('cover-contrast rolls back only files in a real PHP fixer FAILED report', f
         . '<div class="wp-block-cover"><div class="wp-block-cover__inner-container">'
         . '<!-- wp:paragraph --><p>Unstyled over a bright photo</p><!-- /wp:paragraph -->'
         . '</div></div>' . "\n" . '<!-- /wp:cover -->';
-    $failed = str_replace(
+    $mixed = str_replace(
         '</div></div>',
         '<!-- wp:query --><div class="wp-block-query"></div><!-- /wp:query --></div></div>',
         $healthy,
     );
-    [$project, $tmp] = cover_step_project($failed, 'white');
+    [$project, $tmp] = cover_step_project($mixed, 'white');
     $project->writeText('theme/templates/page.html', $healthy);
-    $project->writeText('plugin/pages/broken.html', $failed);
+    $project->writeText('plugin/pages/broken.html', $mixed);
     $project->writeText('plugin/pages/healthy.html', $healthy);
 
     try {
@@ -352,16 +352,16 @@ test('cover-contrast rolls back only files in a real PHP fixer FAILED report', f
             $console = (string) ob_get_clean();
         }
 
-        assert_eq(
-            $failed,
-            $project->readText('theme/templates/front-page.html'),
-            'the failed theme file gets its pre-step bytes',
-        );
-        assert_eq(
-            $failed,
-            $project->readText('plugin/pages/broken.html'),
-            'the failed plugin page gets its pre-step bytes',
-        );
+        // Block-level isolation: the unsupported query is preserved inside
+        // the file while the cover repair survives — nothing rolls back.
+        foreach (['theme/templates/front-page.html', 'plugin/pages/broken.html'] as $rel) {
+            $delivered = $project->readText($rel);
+            assert_true(
+                !str_contains($delivered, '"dimRatio":40'),
+                "{$rel} keeps its cover repair despite the preserved block",
+            );
+            assert_contains('<div class="wp-block-query"></div>', $delivered);
+        }
         assert_true(
             !str_contains($project->readText('theme/templates/page.html'), '"dimRatio":40'),
             'a healthy theme sibling keeps its cover repair',
@@ -370,18 +370,15 @@ test('cover-contrast rolls back only files in a real PHP fixer FAILED report', f
             !str_contains($project->readText('plugin/pages/healthy.html'), '"dimRatio":40'),
             'a healthy plugin sibling keeps its cover repair',
         );
-        assert_contains('cover-contrast: 2 cover(s) adjusted', $console);
+        assert_contains('cover-contrast: 4 cover(s) adjusted', $console);
 
-        $warnings = $project->readJson('warnings.json')['cover-contrast'] ?? [];
-        assert_eq(2, count($warnings), 'one actionable warning per rolled-back cover');
-        $joined = implode("\n", $warnings);
-        assert_contains('theme/templates/front-page.html', $joined);
-        assert_contains('plugin/pages/broken.html', $joined);
-        assert_contains('cover block 0', $joined);
-        assert_contains('dimRatio 40 → 60', $joined);
-        assert_contains("Registered block 'core/query'", $joined);
-        assert_contains('pre-step markup delivered byte-for-byte', $joined);
-        assert_contains('cover repair(s) rolled back', $project->readText('logs/cover-contrast-report.txt'));
+        assert_true(
+            !$project->exists('warnings.json'),
+            'no rollback warnings when every repair is delivered',
+        );
+        assert_true(
+            !str_contains($project->readText('logs/cover-contrast-report.txt'), 'rolled back'),
+        );
     } finally {
         exec('rm -rf ' . escapeshellarg($tmp));
     }
