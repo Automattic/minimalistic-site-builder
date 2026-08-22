@@ -49,7 +49,6 @@ final class TransportResolver
         'openai'     => ['OPENAI_API_KEY'],
         'xai'        => ['XAI_API_KEY'],
         'openrouter' => ['OPENROUTER_API_KEY', 'OPEN_ROUTER_API_KEY'],
-        'grok'       => ['XAI_API_KEY'],
     ];
 
     private const COMPILED_DEFAULT_PROVIDER = 'anthropic';
@@ -78,7 +77,9 @@ final class TransportResolver
             self::rungAncestry(...),
             self::rungSolePath(...),
         ];
-        $defaultProvider ??= self::COMPILED_DEFAULT_PROVIDER;
+        if ($defaultProvider === null || trim($defaultProvider) === '') {
+            $defaultProvider = self::COMPILED_DEFAULT_PROVIDER;
+        }
         foreach ($rungs as $rung) {
             $choice = $rung($env, $onPath, $ancestry, $defaultProvider);
             if ($choice !== null) {
@@ -103,6 +104,11 @@ final class TransportResolver
                 );
             }
             self::assertApiCredentialsAvailable();
+            if (strtolower(trim((string) Env::get('LLM_PROVIDER', ''))) === 'grok') {
+                // Keep the supported alias from reaching ModelConfig, whose
+                // provider vocabulary is deliberately limited to config data.
+                putenv('LLM_PROVIDER=xai');
+            }
             return \make_llm();
         }
         self::assertSubprocessesAvailable();
@@ -253,16 +259,28 @@ final class TransportResolver
     ): ?TransportChoice
     {
         $configured = strtolower(trim((string) ($env['LLM_PROVIDER'] ?? '')));
-        $provider = self::normalizeProvider($configured === '' ? $defaultProvider : $configured);
+        $explicit = $configured !== '';
+        $provider = self::normalizeProvider(
+            $explicit ? $configured : $defaultProvider,
+            $explicit ? 'LLM_PROVIDER' : 'default provider',
+        );
         foreach (self::PROVIDER_KEYS[$provider] as $var) {
             if (trim((string) ($env[$var] ?? '')) !== '') {
                 return new TransportChoice(TransportChoice::KIND_API, "{$var} present (provider: {$provider})");
             }
         }
-        if ($configured !== '') {
+        if ($explicit) {
             throw new TransportUnavailable(
                 "LLM_PROVIDER={$provider} requires " . implode(' or ', self::PROVIDER_KEYS[$provider]) . '. '
                 . 'Set its provider key, or set SITE_BUILD_LLM to an available harness transport.'
+            );
+        }
+        $otherKeys = self::presentProviderKeys($env, $provider);
+        if ($otherKeys !== []) {
+            throw new TransportUnavailable(
+                "Default provider {$provider} has no " . implode(' or ', self::PROVIDER_KEYS[$provider])
+                . ', but other provider keys are present: ' . implode(', ', $otherKeys) . '. '
+                . 'Set LLM_PROVIDER to choose their provider, or unset the listed key(s) before using a harness transport.'
             );
         }
         return null;
@@ -338,13 +356,26 @@ final class TransportResolver
         string $defaultProvider,
     ): ?TransportChoice
     {
+        $matches = [];
         foreach ($ancestry() as $name) {
             $kind = self::HARNESSES[strtolower(trim($name))] ?? null;
-            if ($kind !== null) {
-                return self::harnessChoice($kind, "process ancestry found '{$name}'", $onPath);
+            if ($kind !== null && !isset($matches[$kind])) {
+                $matches[$kind] = $name;
             }
         }
-        return null;
+        if (count($matches) > 1) {
+            $names = array_map(
+                static fn (string $kind): string => self::BINARY_FOR[$kind],
+                array_keys($matches),
+            );
+            throw self::ambiguousTransport($names, 'process ancestry identifies multiple harnesses');
+        }
+        if ($matches === []) {
+            return null;
+        }
+        $kind = array_key_first($matches);
+        $name = $matches[$kind];
+        return self::harnessChoice($kind, "process ancestry found '{$name}'", $onPath);
     }
 
     /** Rung 5 — exactly one harness on PATH. Two or more is ambiguous: refuse. */
@@ -400,13 +431,33 @@ final class TransportResolver
         );
     }
 
-    private static function normalizeProvider(string $provider): string
+    /** @return list<string> */
+    private static function presentProviderKeys(array $env, string $exceptProvider): array
+    {
+        $present = [];
+        foreach (self::PROVIDER_KEYS as $provider => $keys) {
+            if ($provider === $exceptProvider) {
+                continue;
+            }
+            foreach ($keys as $key) {
+                if (trim((string) ($env[$key] ?? '')) !== '') {
+                    $present[$key] = true;
+                }
+            }
+        }
+        return array_keys($present);
+    }
+
+    private static function normalizeProvider(string $provider, string $source = 'LLM_PROVIDER'): string
     {
         $provider = strtolower(trim($provider));
+        if ($provider === 'grok') {
+            $provider = 'xai';
+        }
         if (!array_key_exists($provider, self::PROVIDER_KEYS)) {
             throw new TransportUnavailable(
-                "Unknown LLM_PROVIDER '" . self::safeForMessage($provider) . "'. Valid values: "
-                . implode(', ', array_keys(self::PROVIDER_KEYS))
+                "Unknown {$source} '" . self::safeForMessage($provider) . "'. Valid providers: "
+                . implode(', ', array_keys(self::PROVIDER_KEYS)) . '; grok is an alias for xai'
             );
         }
         return $provider;

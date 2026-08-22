@@ -77,7 +77,8 @@ test('billing C1: an unknown provider refuses instead of falling through to clau
     ));
     assert_true($e instanceof TransportUnavailable);
     assert_contains('Unknown LLM_PROVIDER', $e->getMessage());
-    assert_contains('anthropic, openai, xai, openrouter, grok', $e->getMessage());
+    assert_contains('anthropic, openai, xai, openrouter', $e->getMessage());
+    assert_contains('grok is an alias for xai', $e->getMessage());
     assert_true(!str_contains($e->getMessage(), 'credential-must-not-leak'));
 });
 
@@ -90,7 +91,7 @@ test('billing C1: broken openai-compatible alias is rejected by name', function 
     ));
     assert_true($e instanceof TransportUnavailable);
     assert_contains('openai-compatible', $e->getMessage());
-    assert_contains('Valid values', $e->getMessage());
+    assert_contains('Valid providers', $e->getMessage());
 });
 
 test('billing C1: claude provider typo is rejected before PATH fallback', function (): void {
@@ -136,6 +137,50 @@ test('billing C10: explicit provider without its key refuses before harness PATH
     assert_true(!str_contains($e->getMessage(), 'sk-wrong-provider'));
 });
 
+test('billing M1: non-default live keys refuse both exact wrong-budget reproductions', function (): void {
+    [, $anc] = tr_nothing();
+    $cases = [
+        [
+            ['OPENAI_API_KEY' => 'sk-live', 'CLAUDECODE' => '1'],
+            'OPENAI_API_KEY',
+        ],
+        [
+            ['XAI_API_KEY' => 'sk-live'],
+            'XAI_API_KEY',
+        ],
+    ];
+    foreach ($cases as [$env, $key]) {
+        $e = assert_throws(fn () => TransportResolver::decide($env, tr_on_path('claude'), $anc));
+        assert_true($e instanceof TransportUnavailable);
+        assert_contains($key, $e->getMessage());
+        assert_contains('Set LLM_PROVIDER', $e->getMessage());
+        assert_contains('unset', $e->getMessage());
+        assert_true(!str_contains($e->getMessage(), $env[$key]));
+    }
+});
+
+test('billing M1: refusal names every conflicting key name and no credential value', function (): void {
+    [$path, $anc] = tr_nothing();
+    $env = [
+        'OPENAI_API_KEY' => 'openai-secret-value',
+        'XAI_API_KEY' => 'xai-secret-value',
+        'OPEN_ROUTER_API_KEY' => 'openrouter-secret-value',
+    ];
+    $e = assert_throws(fn () => TransportResolver::decide($env, $path, $anc));
+    assert_true($e instanceof TransportUnavailable);
+    foreach (array_keys($env) as $key) {
+        assert_contains($key, $e->getMessage());
+        assert_true(!str_contains($e->getMessage(), $env[$key]));
+    }
+});
+
+test('billing M1: no known provider key still falls through to subscription rungs', function (): void {
+    [, $anc] = tr_nothing();
+    $c = TransportResolver::decide([], tr_on_path('claude'), $anc);
+    assert_eq(TransportChoice::KIND_CLAUDE_CLI, $c->kind);
+    assert_contains('only harness on PATH', $c->reason);
+});
+
 test('billing C1: caller-supplied default provider controls key selection and audit reason', function (): void {
     [$path, $anc] = tr_nothing();
     $c = TransportResolver::decide(['OPEN_ROUTER_API_KEY' => 'sk-x'], $path, $anc, 'openrouter');
@@ -149,6 +194,39 @@ test('rung 2 keeps the compiled anthropic default for existing three-argument ca
     $c = TransportResolver::decide(['ANTHROPIC_API_KEY' => 'sk-x'], $path, $anc);
     assert_eq(TransportChoice::KIND_API, $c->kind);
     assert_contains('provider: anthropic', $c->reason);
+});
+
+test('billing M4: grok is normalized to xai before key lookup and audit', function (): void {
+    [$path, $anc] = tr_nothing();
+    $c = TransportResolver::decide(
+        ['LLM_PROVIDER' => 'grok', 'XAI_API_KEY' => 'xai-secret-value'],
+        $path,
+        $anc,
+    );
+    assert_eq(TransportChoice::KIND_API, $c->kind);
+    assert_contains('XAI_API_KEY present', $c->reason);
+    assert_contains('provider: xai', $c->reason);
+    assert_true(!str_contains($c->reason, 'provider: grok'));
+
+    $providers = (new ReflectionClass(TransportResolver::class))->getConstant('PROVIDER_KEYS');
+    assert_eq(['anthropic', 'openai', 'xai', 'openrouter'], array_keys($providers));
+});
+
+test('billing M5: empty caller default is unset and uses the compiled default', function (): void {
+    [$path, $anc] = tr_nothing();
+    foreach (['', '   '] as $defaultProvider) {
+        $c = TransportResolver::decide(['ANTHROPIC_API_KEY' => 'sk-x'], $path, $anc, $defaultProvider);
+        assert_eq(TransportChoice::KIND_API, $c->kind);
+        assert_contains('provider: anthropic', $c->reason);
+    }
+});
+
+test('billing M5: invalid caller default names the default-provider input', function (): void {
+    [$path, $anc] = tr_nothing();
+    $e = assert_throws(fn () => TransportResolver::decide([], $path, $anc, 'nope'));
+    assert_true($e instanceof TransportUnavailable);
+    assert_contains("Unknown default provider 'nope'", $e->getMessage());
+    assert_true(!str_contains($e->getMessage(), "Unknown LLM_PROVIDER 'nope'"));
 });
 
 test('rung 3: env fingerprints match on exact value', function (): void {
@@ -241,6 +319,24 @@ test('rung 3: unsupported harness refusal guards use exact values', function ():
     assert_contains('only harness on PATH', $c->reason);
 });
 
+test('billing exact-value discipline: every near-miss fingerprint falls through', function (): void {
+    [, $anc] = tr_nothing();
+    $nearMisses = [
+        ['OPENCODE' => '0'],
+        ['OPENCODE' => 'true'],
+        ['PI_CODING_AGENT' => '1'],
+        ['PI_CODING_AGENT' => 'TRUE'],
+        ['CLAUDECODE' => '01'],
+        ['CLAUDECODE' => ' 1 '],
+    ];
+    foreach ($nearMisses as $env) {
+        $c = TransportResolver::decide($env, tr_on_path('claude'), $anc);
+        assert_eq(TransportChoice::KIND_CLAUDE_CLI, $c->kind);
+        assert_contains('only harness on PATH', $c->reason);
+        assert_true(!str_contains($c->reason, 'fingerprint'));
+    }
+});
+
 test('C7: a present null Codex marker continues normally without TypeError', function (): void {
     [, $anc] = tr_nothing();
     $c = TransportResolver::decide(
@@ -256,6 +352,35 @@ test('rung 4: process ancestry is codex\'s real signal under danger-full-access'
     $c = TransportResolver::decide([], tr_on_path('codex'), static fn (): array => ['php', 'codex', 'zsh']);
     assert_eq(TransportChoice::KIND_CODEX_CLI, $c->kind);
     assert_contains('ancestry', $c->reason);
+});
+
+test('billing M2: rung 4 refuses both exact ancestry-order ambiguity reproductions', function (): void {
+    foreach ([
+        ['php', 'claude', 'codex'],
+        ['php', 'codex', 'claude'],
+    ] as $ancestry) {
+        $e = assert_throws(fn () => TransportResolver::decide(
+            [],
+            tr_on_path('claude', 'codex'),
+            static fn (): array => $ancestry,
+        ));
+        assert_true($e instanceof TransportUnavailable);
+        assert_contains('Ambiguous transport', $e->getMessage());
+        assert_contains('claude', $e->getMessage());
+        assert_contains('codex', $e->getMessage());
+        assert_contains('process ancestry', $e->getMessage());
+        assert_contains('SITE_BUILD_LLM', $e->getMessage());
+    }
+});
+
+test('billing M2: repeated ancestry names for one harness remain unambiguous', function (): void {
+    $c = TransportResolver::decide(
+        [],
+        tr_on_path('claude'),
+        static fn (): array => ['php', 'claude', 'claude'],
+    );
+    assert_eq(TransportChoice::KIND_CLAUDE_CLI, $c->kind);
+    assert_contains("process ancestry found 'claude'", $c->reason);
 });
 
 test('rung 5: exactly one harness on PATH is used, and two refuse', function (): void {
@@ -277,6 +402,42 @@ test('rung 6: nothing usable names the fix', function (): void {
     assert_true($e instanceof TransportUnavailable);
     assert_contains('SITE_BUILD_LLM', $e->getMessage());
     assert_contains('ANTHROPIC_API_KEY', $e->getMessage());
+});
+
+test('billing purity: decide exercises every rung with ambient I/O functions disabled', function (): void {
+    $root = dirname(__DIR__, 2);
+    $code = 'require ' . var_export($root . '/src/TransportChoice.php', true) . '; '
+        . 'require ' . var_export($root . '/src/TransportUnavailable.php', true) . '; '
+        . 'require ' . var_export($root . '/src/TransportResolver.php', true) . '; '
+        . '$none = static fn (string $name): ?string => null; '
+        . '$emptyAnc = static fn (): array => []; '
+        . '$path = static fn (string ...$names): callable => '
+        . 'static fn (string $name): ?string => in_array($name, $names, true) ? "/fake/bin/{$name}" : null; '
+        . '$assertKind = static function ($actual, string $expected): void { '
+        . 'if ($actual->kind !== $expected) { throw new RuntimeException("wrong kind"); } }; '
+        . '$assertKind(\\Automattic\\SiteBuild\\TransportResolver::decide('
+        . '["SITE_BUILD_LLM" => "claude-cli"], $path("claude"), $emptyAnc), '
+        . '\\Automattic\\SiteBuild\\TransportChoice::KIND_CLAUDE_CLI); '
+        . '$assertKind(\\Automattic\\SiteBuild\\TransportResolver::decide('
+        . '["ANTHROPIC_API_KEY" => "secret"], $none, $emptyAnc), '
+        . '\\Automattic\\SiteBuild\\TransportChoice::KIND_API); '
+        . '$assertKind(\\Automattic\\SiteBuild\\TransportResolver::decide('
+        . '["CLAUDECODE" => "1"], $path("claude"), $emptyAnc), '
+        . '\\Automattic\\SiteBuild\\TransportChoice::KIND_CLAUDE_CLI); '
+        . '$assertKind(\\Automattic\\SiteBuild\\TransportResolver::decide('
+        . '[], $path("codex"), static fn (): array => ["php", "codex"]), '
+        . '\\Automattic\\SiteBuild\\TransportChoice::KIND_CODEX_CLI); '
+        . '$assertKind(\\Automattic\\SiteBuild\\TransportResolver::decide([], $path("grok"), $emptyAnc), '
+        . '\\Automattic\\SiteBuild\\TransportChoice::KIND_GROK_CLI); '
+        . 'try { \\Automattic\\SiteBuild\\TransportResolver::decide([], $none, $emptyAnc); '
+        . 'throw new RuntimeException("rung 6 did not throw"); } '
+        . 'catch (\\Automattic\\SiteBuild\\TransportUnavailable $e) {} '
+        . 'echo "PURE";';
+    [$output, $status] = tr_php($code, [
+        'disable_functions=getenv,shell_exec,exec,proc_open,ini_get,is_file,is_executable,posix_getppid',
+    ]);
+    assert_eq(0, $status, $output);
+    assert_eq('PURE', $output);
 });
 
 test('an override naming a harness with no binary fails loudly rather than falling through', function (): void {
@@ -339,6 +500,23 @@ test('billing C5c: API build without provider key throws instead of exiting', fu
     assert_contains('ANTHROPIC_API_KEY', $output);
     assert_true(!str_contains($output, 'Missing required env var'));
     assert_true(!str_contains($output, 'NO_ERROR'));
+});
+
+test('billing M4: API build canonicalizes grok so downstream model lookup succeeds', function (): void {
+    $bootstrap = dirname(__DIR__, 2) . '/src/bootstrap.php';
+    $code = 'require ' . var_export($bootstrap, true) . '; '
+        . 'putenv("LLM_PROVIDER=grok"); putenv("XAI_API_KEY=test-only-key"); '
+        . '$r = new ReflectionClass(\\Automattic\\SiteBuild\\Env::class); '
+        . '$p = $r->getProperty("vars"); $p->setValue(null, []); '
+        . '$c = new \\Automattic\\SiteBuild\\TransportChoice('
+        . '\\Automattic\\SiteBuild\\TransportChoice::KIND_API, "XAI_API_KEY present (provider: xai)"); '
+        . 'try { $llm = \\Automattic\\SiteBuild\\TransportResolver::build($c); '
+        . 'echo get_class($llm) . " | " . getenv("LLM_PROVIDER"); } '
+        . 'catch (Throwable $e) { echo "ERROR | " . get_class($e) . " | " . $e->getMessage(); }';
+    [$output, $status] = tr_php($code);
+    assert_eq(0, $status, $output);
+    assert_contains('OpenAiCompatibleClient | xai', $output);
+    assert_true(!str_contains($output, 'ERROR'));
 });
 
 test('describe() names the transport, the billing boundary and the rung', function (): void {
@@ -436,4 +614,35 @@ test('billing C13: unknown override error strips controls and clamps raw input',
 test('ancestry returns process names without throwing', function (): void {
     $names = TransportResolver::ancestry();
     assert_true(is_array($names), 'ancestry must return a list even when ps is unavailable');
+});
+
+test('billing ancestry guard uses shell_exec availability, not proc_open availability', function (): void {
+    $autoload = dirname(__DIR__, 2) . '/autoload.php';
+    $code = 'require ' . var_export($autoload, true) . '; '
+        . 'try { echo json_encode(\\Automattic\\SiteBuild\\TransportResolver::ancestry()); } '
+        . 'catch (Throwable $e) { echo "ERROR | " . get_class($e) . " | " . $e->getMessage(); }';
+
+    [$withoutShellExec, $shellExecStatus] = tr_php($code, ['disable_functions=shell_exec']);
+    [$withoutProcOpen, $procOpenStatus] = tr_php($code, ['disable_functions=proc_open']);
+
+    assert_eq(0, $shellExecStatus, $withoutShellExec);
+    assert_eq('[]', $withoutShellExec);
+    assert_eq(0, $procOpenStatus, $withoutProcOpen);
+    $ancestry = json_decode($withoutProcOpen, true);
+    assert_true(is_array($ancestry) && $ancestry !== [], $withoutProcOpen);
+});
+
+test('billing ancestry rejects a non-numeric parent pid from ps', function (): void {
+    with_temp_dir('fake-ps-', function (string $dir): void {
+        $ps = $dir . '/ps';
+        file_put_contents($ps, "#!/bin/sh\nprintf '%s\\n' 'not-a-pid php'\n");
+        chmod($ps, 0755);
+        $oldPath = getenv('PATH');
+        try {
+            putenv("PATH={$dir}");
+            assert_eq([], TransportResolver::ancestry());
+        } finally {
+            $oldPath === false ? putenv('PATH') : putenv("PATH={$oldPath}");
+        }
+    });
 });
