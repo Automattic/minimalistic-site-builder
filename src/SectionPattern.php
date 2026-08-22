@@ -151,7 +151,9 @@ final class SectionPattern
         $head = in_array($last, self::TRAILING_HEAD_NOUNS, true)
             ? $last
             : ($tokens[0] ?? '');
-        if (
+        if (str_ends_with($head, 'ies') && strlen($head) >= 5) {
+            $head = substr($head, 0, -3) . 'y';
+        } elseif (
             preg_match('/(?:sses|xes|zes|ches|shes)$/', $head) === 1
             && strlen($head) - 2 >= 3
         ) {
