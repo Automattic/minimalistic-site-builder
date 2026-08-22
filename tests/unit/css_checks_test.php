@@ -449,6 +449,48 @@ test('declarationScopeAtViewport reports a width media query false at the render
     );
 });
 
+test('selectorTargetsHeading matches heading subjects and ignores descendant combinators', function () {
+    foreach ([
+        'h1',
+        'h2.hero',
+        '.wp-block-heading',
+        'h1.wp-block-heading',
+        '.hero .wp-block-heading',
+        '.wp-block-post-title',
+        ':is(h1, h2)',
+        ':where(.wp-block-heading)',
+        'section > h3',
+    ] as $selector) {
+        assert_true(CssChecks::selectorTargetsHeading($selector), $selector);
+    }
+    foreach ([
+        'h1 + p',
+        'h1 > span',
+        '.card',
+        '.wp-block-heading-wrapper',
+        '.wp-block-heading::before',
+        'p',
+        'h1 + .wp-block-group',
+        '[data-example="h1 .wp-block-heading"]',
+    ] as $selector) {
+        assert_true(!CssChecks::selectorTargetsHeading($selector), $selector);
+    }
+});
+
+test('dropHeadingWordSplitDeclarations removes wrap/hyphen properties only from heading subjects', function () {
+    $css = '.hero h1 { overflow-wrap: anywhere; word-break: break-all; hyphens: auto; font-size: 5rem; } '
+        . 'h1 + p { overflow-wrap: break-word; color: inherit; } '
+        . 'p { -webkit-hyphens: auto; }';
+    [$repaired, $dropped] = CssChecks::dropHeadingWordSplitDeclarations($css);
+    assert_eq(3, count($dropped), 'three heading wrap declarations dropped');
+    assert_contains('font-size: 5rem', $repaired);
+    assert_contains('h1 + p { overflow-wrap: break-word; color: inherit; }', $repaired);
+    assert_contains('p { -webkit-hyphens: auto; }', $repaired);
+    assert_true(!str_contains($repaired, 'anywhere'));
+    assert_true(!str_contains($repaired, 'break-all'));
+    assert_true(!str_contains($repaired, 'hyphens: auto; font-size'));
+});
+
 test('declarationScopeAtViewport refuses to decide anything a width comparison cannot settle', function () {
     // The only place a @keyframes ancestor can be pinned. Asserting it through
     // SectionLayoutStep instead is vacuous: a keyframe declaration's context is

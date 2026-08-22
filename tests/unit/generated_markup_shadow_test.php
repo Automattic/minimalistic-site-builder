@@ -212,7 +212,11 @@ test('a later fix-blocks file rollback cannot resurrect an inline text-block sha
         . '<!-- wp:paragraph {"style":{"shadow":"var:preset|shadow|misregister"}} -->'
         . '<p style="color:green;box-shadow:var(--wp--preset--shadow--misregister)">Retained copy</p>'
         . '<!-- /wp:paragraph -->'
-        . '<!-- wp:query --><div class="wp-block-query">Unsupported sibling</div><!-- /wp:query -->'
+        // A root text-alignment conflict still rolls back the WHOLE file (an
+        // unsupported block is now isolated to itself), so it is what forces
+        // the file-level rollback this test is about.
+        . '<!-- wp:heading --><h2 class="wp-block-heading has-text-align-center" '
+        . 'style="text-align:right">Conflicting sibling</h2><!-- /wp:heading -->'
         . '</div><!-- /wp:group -->';
     $warnings = [];
     $repairs = [];
@@ -229,11 +233,11 @@ test('a later fix-blocks file rollback cannot resurrect an inline text-block sha
         assert_eq(
             $normalized,
             $project->readText('theme/parts/rollback-proof.html'),
-            'the unsupported sibling restored exactly the already-safe step-entry bytes',
+            'the conflicting sibling restored exactly the already-safe step-entry bytes',
         );
         $fixWarnings = implode("\n", $project->readJson('warnings.json')['fix-blocks'] ?? []);
         assert_contains('parts/rollback-proof.html', $fixWarnings);
-        assert_contains("Registered block 'core/query'", $fixWarnings);
+        assert_contains('has-text-align-center', $fixWarnings);
         assert_contains('pre-step markup delivered byte-for-byte', $fixWarnings);
     });
 });

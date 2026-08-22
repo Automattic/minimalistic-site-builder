@@ -260,6 +260,7 @@ This generates each section's block markup. Inject, adapted to **core blocks**:
   (auto-reflects pages) unless a curated menu is wanted. Consider a **sticky
   nav** when it suits the design (line 59). builder's header prompt currently
   says "primary wp:navigation" — make the page-list default explicit.
+  Superseded by BIGR-863: nav is hand-authored inner pages, never page-list or a Home item.
 - **Footer credit (from `create-project-theme.md` lines 22–23):** include a
   small credit line at the very bottom, styled to match the theme. Telex's line
   credits Telex/WordPress; for builder, use an equivalent neutral credit (or a

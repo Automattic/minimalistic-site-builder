@@ -36,31 +36,49 @@ test('BlockRegistry rejects supported blocks absent from the snapshot', function
     ));
 });
 
-test('missing-block fallback cannot tunnel a registered unsupported child past the domain guard', function () {
+test('missing-block fallback preserves a registered unsupported child as the smallest failing unit', function () {
+    // Previously the domain guard failed the whole document here. Block-level
+    // isolation instead delivers the missing parent's subtree verbatim and
+    // reports the preservation, so sibling blocks elsewhere keep their
+    // generated classes.
     $input = '<!-- wp:vendor/missing -->'
         . '<!-- wp:query --><div class="wp-block-query"></div><!-- /wp:query -->'
         . '<!-- /wp:vendor/missing -->';
 
-    assert_throws(static fn () => (new Serializer())->transform($input));
+    $result = (new Serializer())->transform($input);
+    assert_contains('<div class="wp-block-query"></div>', $result->html);
+    assert_contains('<!-- /wp:vendor/missing -->', $result->html);
+    assert_eq(1, count($result->repairs));
+    assert_contains('preserved vendor/missing', $result->repairs[0]->code);
+    assert_contains("Registered block 'core/query' is outside the supported PHP domain", $result->repairs[0]->code);
+    assert_eq('0', $result->repairs[0]->blockPath);
 });
 
-test('registered blocks reject comment keys outside the current schema', function () {
+test('registered blocks preserve comment keys outside the current schema verbatim', function () {
     $legacy = '<!-- wp:paragraph {"customTextColor":"#ff0000"} -->'
         . '<p style="color:#ff0000">Legacy</p><!-- /wp:paragraph -->';
 
-    assert_throws(static fn () => (new Serializer())->transform($legacy));
+    $result = (new Serializer())->transform($legacy);
+    assert_contains('"customTextColor":"#ff0000"', $result->html, 'the unreviewed attribute is not re-saved, only preserved');
+    assert_contains('<p style="color:#ff0000">Legacy</p>', $result->html);
+    assert_eq(1, count($result->repairs));
+    assert_contains("preserved core/paragraph (Unsupported comment attribute 'customTextColor'", $result->repairs[0]->code);
+    assert_eq('0', $result->repairs[0]->blockPath);
 });
 
-test('registered blocks reject recognizable unreviewed current-key deprecations', function () {
+test('registered blocks preserve recognizable unreviewed current-key deprecations verbatim', function () {
     // A current-key inline color on a valid <p> root is now the reviewed
     // selector-less carryover (paragraph-inline-color-carryover golden). An
     // invalid paragraph whose root is not a <p> stays outside that reviewed
     // domain — the nested-paragraph merge cannot reconcile it — so its
-    // authored inline color must still fail closed.
+    // authored bytes are preserved with a report row instead of re-saved.
     $paragraph = '<!-- wp:paragraph {"style":{"typography":{"letterSpacing":"0.12em"}}} -->'
         . '<div style="letter-spacing:0.12em;color:var(--wp--preset--color--accent)">'
         . 'Legacy</div><!-- /wp:paragraph -->';
-    assert_throws(static fn () => (new Serializer())->transform($paragraph));
+    $result = (new Serializer())->transform($paragraph);
+    assert_contains('color:var(--wp--preset--color--accent)', $result->html);
+    assert_eq(1, count($result->repairs));
+    assert_contains('preserved core/paragraph (Unsupported deprecated core/paragraph style signature', $result->repairs[0]->code);
 });
 
 test('reviewed navigation font-family deprecation supplies pinned defaults', function () {
@@ -184,11 +202,16 @@ test('reviewed legacy button textAlign follows the pinned drop', function () {
     assert_true(!str_contains($result, '"textAlign"'));
     assert_true(!str_contains($result, 'has-text-align-center'));
     assert_contains('href="#contact"', $result);
-    assert_throws(static fn () => (new Serializer())->transform(str_replace(
+    // An unreviewed variant stays outside the pinned drop: the block is
+    // preserved verbatim with a report row instead of failing the document.
+    $unreviewed = (new Serializer())->transform(str_replace(
         '"textAlign":"center"',
         '"textAlign":"justify"',
         $button,
-    )));
+    ));
+    assert_contains('"textAlign":"justify"', $unreviewed->html);
+    assert_eq(1, count($unreviewed->repairs));
+    assert_contains('preserved core/button', $unreviewed->repairs[0]->code);
 });
 
 test('legacy heading textAlign safely folds beside authored typography', function () {
@@ -250,21 +273,35 @@ test('authored alignment class wins without a conflicting folded class', functio
 });
 
 test('legacy textAlign does not overwrite malformed authored containers', function () {
+    // Fail closed is per block: the malformed container is delivered verbatim
+    // with its reason on the preservation row, rather than being canonicalized
+    // over or taking every sibling in the file down with it.
     $cases = [
-        '<!-- wp:heading {"textAlign":"center","style":"keep-style"} -->'
-            . '<h2 class="wp-block-heading has-text-align-center">Title</h2>'
-            . '<!-- /wp:heading -->' => 'authored style "keep-style" is not an object',
-        '<!-- wp:paragraph {"textAlign":"center",'
-            . '"style":{"typography":"keep-typography"}} -->'
-            . '<p class="has-text-align-center">Copy</p><!-- /wp:paragraph -->'
-            => 'authored style.typography "keep-typography" is not an object',
+        [
+            '<!-- wp:heading {"textAlign":"center","style":"keep-style"} -->'
+                . '<h2 class="wp-block-heading has-text-align-center">Title</h2>'
+                . '<!-- /wp:heading -->',
+            'authored style "keep-style" is not an object',
+            'preserved core/heading',
+            '"style":"keep-style"',
+        ],
+        [
+            '<!-- wp:paragraph {"textAlign":"center",'
+                . '"style":{"typography":"keep-typography"}} -->'
+                . '<p class="has-text-align-center">Copy</p><!-- /wp:paragraph -->',
+            'authored style.typography "keep-typography" is not an object',
+            'preserved core/paragraph',
+            '"style":{"typography":"keep-typography"}',
+        ],
     ];
 
-    foreach ($cases as $input => $message) {
-        $error = assert_throws(static fn () => (new Serializer())->transform($input));
-        assert_true($error instanceof RuntimeException);
-        assert_contains('Cannot canonicalize legacy textAlign', $error->getMessage());
-        assert_contains($message, $error->getMessage());
+    foreach ($cases as [$input, $message, $preserved, $container]) {
+        $result = (new Serializer())->transform($input);
+        assert_contains($container, $result->html, 'the authored container is never overwritten');
+        assert_eq(1, count($result->repairs), 'exactly one preserved block');
+        assert_contains($preserved, $result->repairs[0]->code);
+        assert_contains('Cannot canonicalize legacy textAlign', $result->repairs[0]->code);
+        assert_contains($message, $result->repairs[0]->code);
     }
 });
 

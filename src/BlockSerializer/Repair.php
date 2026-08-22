@@ -5,6 +5,9 @@ namespace Automattic\SiteBuild\BlockSerializer;
 
 final class Repair
 {
+    /** Code prefix for a block delivered verbatim by block-level isolation. */
+    public const PRESERVED_PREFIX = 'preserved ';
+
     public function __construct(
         public readonly string $code,
         public readonly string $blockPath,

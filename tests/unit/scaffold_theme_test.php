@@ -409,3 +409,31 @@ test('scaffold-theme has stable id and label', function () {
     assert_eq('scaffold-theme', $s->id());
     assert_true($s->label() !== '');
 });
+
+test('scaffold hero headings wrap at word boundaries and never snap mid-word', function () {
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_wrap_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    (new ScaffoldThemeStep())->run($project);
+    $css = $project->readText('theme/style.css');
+
+    $matched = preg_match(
+        '~\\.hero-composition__copy\s+\\.wp-block-heading,\s*'
+            . '\\.hero-composition--layered-poster\s+\\.wp-block-heading\s*'
+            . '\{(?<body>[^}]*)\}~',
+        $css,
+        $rule
+    );
+    assert_eq(1, $matched, 'hero heading wrap rule exists');
+    assert_contains('overflow-wrap: normal', $rule['body']);
+    assert_contains('word-break: normal', $rule['body']);
+    assert_true(
+        !str_contains($rule['body'], 'break-word'),
+        'hero headings must not use overflow-wrap:break-word as a last-resort snap'
+    );
+    assert_true(
+        !str_contains($rule['body'], 'anywhere'),
+        'hero headings must not overflow-wrap:anywhere'
+    );
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

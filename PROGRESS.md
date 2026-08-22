@@ -255,7 +255,8 @@ The builder now produces a whole site, not a single landing page:
 - **Playground blueprint** installs the plugin next to the theme, activates
   it after the theme, and sets pretty permalinks so the page paths resolve.
 - Nav is automatic: the header's `wp:navigation` + `wp:page-list` reflects the
-  seeded pages in `menu_order` (children nest as submenus).
+  seeded pages in `menu_order` (children nest as submenus). As of BIGR-863 the
+  live default is hand-authored inner-page links — never page-list, and never a Home item.
 
 ### Phase 5.1 — content images live in the media library (2026-07-10)
 

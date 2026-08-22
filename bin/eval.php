@@ -10,8 +10,9 @@ use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\ThemeValidator;
 
 /**
- * Phase 2 evaluation: generate the 5 eval sites, record per-step speed and
- * structural quality, and write eval/report.md + eval/results.json.
+ * Phase 2 evaluation: generate the 5 eval sites, record per-step speed,
+ * token usage, and structural quality, and write eval/report.md +
+ * eval/results.json.
  *
  *   php bin/eval.php            # all 5 sites
  *   php bin/eval.php pizza-menu # a single site by slug
@@ -53,17 +54,56 @@ foreach (SITES as $slug => $prompt) {
     $project = $builder->createProject($prompt, $slug);
 
     $timings = [];
+    $usage = [];
+    $previousUsage = $llm->usageTotals();
     $error = null;
     $total = 0.0;
+    $runningStep = null;
+    $runningStart = 0.0;
     try {
-        $builder->pipeline()->runThrough($project, null, function (Step $s, float $secs) use (&$timings, &$total) {
+        $builder->pipeline()->runThrough($project, null, function (Step $s, float $secs) use (
+            $llm,
+            &$timings,
+            &$usage,
+            &$previousUsage,
+            &$total,
+            &$runningStep,
+        ) {
+            $runningStep = null;
             $timings[$s->id()] = round($secs, 1);
             $total += $secs;
-            printf("  %-22s %6.1fs\n", $s->id(), $secs);
+            $currentUsage = $llm->usageTotals();
+            $inputTokens = $currentUsage['input_tokens'] - $previousUsage['input_tokens'];
+            $outputTokens = $currentUsage['output_tokens'] - $previousUsage['output_tokens'];
+            $usage[$s->id()] = [
+                'input_tokens' => $inputTokens,
+                'output_tokens' => $outputTokens,
+                'total_tokens' => $inputTokens + $outputTokens,
+            ];
+            $previousUsage = $currentUsage;
+            printf("  %-22s %6.1fs %10d out\n", $s->id(), $secs, $outputTokens);
+        }, function (Step $s) use (&$runningStep, &$runningStart) {
+            $runningStep = $s->id();
+            $runningStart = microtime(true);
         });
     } catch (Throwable $e) {
         $error = $e->getMessage();
         echo "  ERROR: {$error}\n";
+        // A throwing step never reaches the reporter, but its requests were
+        // still billed — attribute the unreported delta to the failed step.
+        if ($runningStep !== null) {
+            $secs = microtime(true) - $runningStart;
+            $timings[$runningStep] = round($secs, 1);
+            $total += $secs;
+            $currentUsage = $llm->usageTotals();
+            $inputTokens = $currentUsage['input_tokens'] - $previousUsage['input_tokens'];
+            $outputTokens = $currentUsage['output_tokens'] - $previousUsage['output_tokens'];
+            $usage[$runningStep] = [
+                'input_tokens' => $inputTokens,
+                'output_tokens' => $outputTokens,
+                'total_tokens' => $inputTokens + $outputTokens,
+            ];
+        }
     }
 
     $problems = $error === null ? ThemeValidator::validate($project) : ['build failed before validation'];
@@ -75,6 +115,7 @@ foreach (SITES as $slug => $prompt) {
     $results[$slug] = [
         'prompt'   => $prompt,
         'timings'  => $timings,
+        'usage'    => $usage,
         'total'    => round($total, 1),
         'error'    => $error,
         'problems' => $problems,
@@ -112,10 +153,12 @@ function rebuild_report(): void
         }
         $project = $store->open($slug);
         $timings = $prior[$slug]['timings'] ?? [];
+        $usage = $prior[$slug]['usage'] ?? [];
         $timings['finalize-theme'] = $timings['finalize-theme'] ?? 0.0;
         $results[$slug] = [
             'prompt'   => SITES[$slug],
             'timings'  => $timings,
+            'usage'    => $usage,
             'total'    => array_sum($timings),
             'error'    => null,
             'problems' => ThemeValidator::validate($project),
@@ -135,13 +178,17 @@ function collect_metrics(Project $project): array
 /** @param array<string,mixed> $results */
 function write_report(array $results): void
 {
-    // Derive the columns from the step ids actually recorded (in run order),
-    // so a renamed pipeline step can never silently render as "–".
+    // Derive the columns from what actually ran (in run order): a hardcoded
+    // list silently drops steps — and their real token spend — from the
+    // totals the day the pipeline gains one, and a renamed step would render
+    // as "–".
     $stepIds = [];
     foreach ($results as $r) {
-        foreach (array_keys($r['timings']) as $sid) {
-            if (!in_array($sid, $stepIds, true)) {
-                $stepIds[] = $sid;
+        foreach ([array_keys($r['timings'] ?? []), array_keys($r['usage'] ?? [])] as $ids) {
+            foreach ($ids as $sid) {
+                if (!in_array($sid, $stepIds, true)) {
+                    $stepIds[] = $sid;
+                }
             }
         }
     }
@@ -164,6 +211,29 @@ function write_report(array $results): void
             $row[] = isset($r['timings'][$sid]) ? (string) $r['timings'][$sid] : '–';
         }
         $row[] = '**' . $r['total'] . '**';
+        $md .= '| ' . implode(' | ', $row) . " |\n";
+    }
+
+    // Output-token table. This is the direct regression gate for changes that
+    // shorten model responses without changing request count or model tier.
+    $md .= "\n## Output tokens per step\n\n";
+    $md .= '| Site | ' . implode(' | ', array_map(fn ($s) => short($s), $stepIds)) . " | **Total** |\n";
+    $md .= '|' . str_repeat('---|', count($stepIds) + 2) . "\n";
+    foreach ($results as $slug => $r) {
+        $row = ["`{$slug}`"];
+        $totalOutputTokens = 0;
+        $hasOutputUsage = false;
+        foreach ($stepIds as $sid) {
+            $outputTokens = $r['usage'][$sid]['output_tokens'] ?? null;
+            if (is_int($outputTokens)) {
+                $hasOutputUsage = true;
+                $totalOutputTokens += $outputTokens;
+                $row[] = number_format($outputTokens);
+            } else {
+                $row[] = '–';
+            }
+        }
+        $row[] = $hasOutputUsage ? '**' . number_format($totalOutputTokens) . '**' : '–';
         $md .= '| ' . implode(' | ', $row) . " |\n";
     }
 

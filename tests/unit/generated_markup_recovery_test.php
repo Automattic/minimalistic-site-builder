@@ -192,6 +192,108 @@ test('recovery rejects a malformed delimiter inside a closed root', function () 
     assert_throws(fn () => GeneratedMarkup::normalize($text, 'p'));
 });
 
+test('recovery restores only omitted final root attribute closers', function () {
+    // golden-beacon emitted two complete attribute objects whose sole defect
+    // was one missing final `}`. The nested objects are already balanced, so
+    // restoring the root closer has exactly one syntactic reading.
+    $text = '<!-- wp:group {"anchor":"cards","layout":{"type":"constrained"}} -->'
+        . '<div>'
+        . '<!-- wp:paragraph {"backgroundColor":"secondary","style":{"spacing":{"padding":{"top":"var:preset|spacing|sm"}}} -->'
+        . '<p>First</p><!-- /wp:paragraph -->'
+        . '<!-- wp:paragraph {"fontSize":"caption","style":{"typography":{"letterSpacing":"0.14em"}} -->'
+        . '<p>Second</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->';
+    $warnings = [];
+    $repairs = [];
+
+    $out = GeneratedMarkup::normalize($text, 'p', $warnings, $repairs);
+
+    assert_contains(
+        '<!-- wp:paragraph {"backgroundColor":"secondary","style":{"spacing":{"padding":{"top":"var:preset|spacing|sm"}}}} -->',
+        $out,
+    );
+    assert_contains(
+        '<!-- wp:paragraph {"fontSize":"caption","style":{"typography":{"letterSpacing":"0.14em"}}} -->',
+        $out,
+    );
+    assert_contains('<p>First</p>', $out, 'authored text survives');
+    assert_contains('<p>Second</p>', $out, 'sibling authored text survives');
+    assert_eq([], $warnings, 'lossless grammar repair is not a delivered-output warning');
+    assert_eq(2, count($repairs), 'each repaired delimiter is reported');
+
+    $secondWarnings = [];
+    $secondRepairs = [];
+    assert_eq($out, GeneratedMarkup::normalize($out, 'p', $secondWarnings, $secondRepairs));
+    assert_eq([], $secondWarnings);
+    assert_eq([], $secondRepairs, 'repair reaches a fixed point');
+});
+
+test('recovery removes only a redundant typo closer after the real closer', function () {
+    $text = '<!-- wp:columns --><div>'
+        . '<!-- wp:column --><div>'
+        . '<!-- wp:paragraph --><p>Keep me</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:column -->'
+        . "\n</!-- wp:column -->\n"
+        . '</div><!-- /wp:columns -->';
+    $warnings = [];
+    $repairs = [];
+
+    $out = GeneratedMarkup::normalize($text, 'p', $warnings, $repairs);
+
+    assert_contains('<p>Keep me</p>', $out);
+    assert_true(!str_contains($out, '</!--'), 'redundant typo closer removed');
+    assert_eq([], $warnings, 'removing a duplicate typo token loses no authored content');
+    assert_eq(1, count($repairs));
+
+    $notRedundant = '<!-- wp:columns --><div>'
+        . '<!-- wp:column --><div><p>Unclosed</p></div>'
+        . '</!-- wp:column -->'
+        . '</div><!-- /wp:columns -->';
+    assert_throws(
+        fn () => GeneratedMarkup::normalize($notRedundant, 'p'),
+        'a typo closer without an immediately preceding real closer remains fail-closed',
+    );
+});
+
+test('grammar repair leaves malformed examples in opaque HTML contexts untouched', function () {
+    $hiddenMissingBrace = '<code>'
+        . '<!-- wp:paragraph {"style":{"typography":{"letterSpacing":"0.1em"}} -->'
+        . '</code>';
+    $hiddenTypoCloser = '<pre><!-- /wp:column -->'
+        . "\n</!-- wp:column --></pre>";
+    $warnings = [];
+    $repairs = [];
+
+    $out = GeneratedMarkup::normalize(
+        $hiddenMissingBrace . "\n" . $hiddenTypoCloser . "\n" . GM_ROOT,
+        'p',
+        $warnings,
+        $repairs,
+    );
+
+    assert_eq(GM_ROOT, $out);
+    assert_eq([], $repairs, 'literal examples are not activated or reported as repairs');
+});
+
+test('grammar repair notes commit only when the repaired document passes every gate', function () {
+    $repairable = '<!-- wp:paragraph {"style":{"typography":{"letterSpacing":"0.1em"}} -->'
+        . '<p>First document</p><!-- /wp:paragraph -->';
+    $second = '<!-- wp:paragraph --><p>Second document</p><!-- /wp:paragraph -->';
+    $warnings = [];
+    $repairs = [];
+
+    assert_throws(
+        fn () => GeneratedMarkup::normalize(
+            $repairable . "\nAlternative:\n" . $second,
+            'p',
+            $warnings,
+            $repairs,
+        ),
+        'a locally repairable delimiter must not make an ambiguous response publishable',
+    );
+    assert_eq([], $repairs, 'failed documents do not claim a committed repair');
+});
+
 test('recovery rejects attributes without the delimiter whitespace WordPress requires', function () {
     $text = '<!-- wp:paragraph {"dropCap":true}--><p>x</p><!-- /wp:paragraph -->';
     assert_throws(fn () => GeneratedMarkup::normalize($text, 'p'));

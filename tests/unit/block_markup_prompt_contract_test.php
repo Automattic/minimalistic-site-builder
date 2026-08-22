@@ -140,17 +140,24 @@ test('block-markup output contract pins clean document boundaries and examples',
     assert_eq(1, substr_count($contract, $invalidStart));
     [, $afterExampleStart] = explode($exampleStart, $contract, 2);
     [$example] = explode($invalidStart, $afterExampleStart, 2);
+    // The example must satisfy every consumer's own structural contract:
+    // the header requires a constrained root group, so a paragraph-only
+    // example would teach the exact shape HeaderUnit cannot wrap (PR #170
+    // review, finding 6). Attribute-light wrapper: no generated classes.
     assert_eq(
         "<!-- wp:group {\"layout\":{\"type\":\"constrained\"}} -->\n"
-        . "<div class=\"wp-block-group\"><!-- wp:paragraph -->\n"
-        . "<p>Example.</p>\n"
-        . "<!-- /wp:paragraph --></div>\n"
+        . "<div>\n"
+        . "    <!-- wp:paragraph -->\n"
+        . "    <p>Example.</p>\n"
+        . "    <!-- /wp:paragraph -->\n"
+        . "</div>\n"
         . "<!-- /wp:group -->",
         $example,
-        'positive example is only one valid Gutenberg group document',
+        'positive example is one attribute-light constrained group document',
     );
     assert_true(str_starts_with($example, '<!-- wp:'));
     assert_true(str_ends_with($example, '<!-- /wp:group -->'));
+    assert_true(!str_contains($example, 'wp-block-group'), 'example wrapper stays attribute-light');
     assert_true(!str_contains($example, '```'), 'positive example is unfenced');
 
     foreach (['Here is the markup:', '```html', 'Hope this helps'] as $invalidWrapper) {
