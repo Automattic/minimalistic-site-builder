@@ -98,7 +98,7 @@ final class TransportResolver
      * embedding hosts inject their API factory without loading CLI bootstrap glue.
      * The factory owns credential validation for its transport.
      *
-     * @param null|callable():Llm $apiFactory
+     * @param null|callable(string):Llm $apiFactory
      */
     public static function build(TransportChoice $choice, ?callable $apiFactory = null): Llm
     {
@@ -117,15 +117,7 @@ final class TransportResolver
             }
             $provider = self::normalizeProvider($choice->provider, 'resolved API provider');
 
-            $ambientProvider = getenv('LLM_PROVIDER');
-            putenv("LLM_PROVIDER={$provider}");
-            try {
-                return $apiFactory();
-            } finally {
-                $ambientProvider === false
-                    ? putenv('LLM_PROVIDER')
-                    : putenv("LLM_PROVIDER={$ambientProvider}");
-            }
+            return $apiFactory($provider);
         }
         self::assertSubprocessesAvailable();
         $binary = $choice->binary;

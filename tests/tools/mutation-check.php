@@ -431,10 +431,30 @@ PHP,
         '13 injected API factory boundary',
         'src/TransportResolver.php',
         <<<'PHP'
-                return $apiFactory();
+            return $apiFactory($provider);
 PHP,
         <<<'PHP'
-                return \make_llm();
+            return \make_llm();
+PHP,
+    ],
+    [
+        '14 injected API factory credential ownership',
+        'src/TransportResolver.php',
+        <<<'PHP'
+            $provider = self::normalizeProvider($choice->provider, 'resolved API provider');
+
+            return $apiFactory($provider);
+PHP,
+        <<<'PHP'
+            $provider = self::normalizeProvider($choice->provider, 'resolved API provider');
+
+            if (trim((string) Env::get(self::PROVIDER_KEYS[$provider][0], '')) === '') {
+                throw new TransportUnavailable(
+                    "Transport api with LLM_PROVIDER={$provider} requires "
+                    . self::PROVIDER_KEYS[$provider][0] . '. Set the provider key before building.'
+                );
+            }
+            return $apiFactory($provider);
 PHP,
     ],
 ];
@@ -536,7 +556,7 @@ try {
             echo "{$classification['verdict']} {$label} {$classification['detail']}\n";
         }
         echo "RESULT {$counts['KILLED']} KILLED, {$counts['SURVIVED']} SURVIVED, {$counts['HARD ERROR']} HARD ERROR\n";
-        $failed = $counts['KILLED'] < 13 || $counts['SURVIVED'] !== 0 || $counts['HARD ERROR'] !== 0;
+        $failed = $counts['KILLED'] < 14 || $counts['SURVIVED'] !== 0 || $counts['HARD ERROR'] !== 0;
     }
 } catch (Throwable $e) {
     echo 'MUTATION ERROR: ' . $e->getMessage() . "\n";
