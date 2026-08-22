@@ -137,6 +137,21 @@ test('billing C10: explicit provider without its key refuses before harness PATH
     assert_true(!str_contains($e->getMessage(), 'sk-wrong-provider'));
 });
 
+test('billing C10: explicit provider refusal is covered without any other provider key', function (): void {
+    [, $anc] = tr_nothing();
+    $e = assert_throws(fn () => TransportResolver::decide(
+        ['LLM_PROVIDER' => 'openai'],
+        tr_on_path('claude'),
+        $anc,
+    ));
+    assert_true($e instanceof TransportUnavailable);
+    assert_eq(
+        'LLM_PROVIDER=openai requires OPENAI_API_KEY. Set its provider key, '
+        . 'or set SITE_BUILD_LLM to an available harness transport.',
+        $e->getMessage(),
+    );
+});
+
 test('billing M1: non-default live keys refuse both exact wrong-budget reproductions', function (): void {
     [, $anc] = tr_nothing();
     $cases = [
@@ -153,6 +168,7 @@ test('billing M1: non-default live keys refuse both exact wrong-budget reproduct
         $e = assert_throws(fn () => TransportResolver::decide($env, tr_on_path('claude'), $anc));
         assert_true($e instanceof TransportUnavailable);
         assert_contains($key, $e->getMessage());
+        assert_contains('SITE_BUILD_LLM=api|claude-cli|codex-cli|grok-cli', $e->getMessage());
         assert_contains('Set LLM_PROVIDER', $e->getMessage());
         assert_contains('unset', $e->getMessage());
         assert_true(!str_contains($e->getMessage(), $env[$key]));
@@ -185,8 +201,21 @@ test('billing C1: caller-supplied default provider controls key selection and au
     [$path, $anc] = tr_nothing();
     $c = TransportResolver::decide(['OPEN_ROUTER_API_KEY' => 'sk-x'], $path, $anc, 'openrouter');
     assert_eq(TransportChoice::KIND_API, $c->kind);
+    assert_eq('openrouter', $c->provider);
     assert_contains('OPEN_ROUTER_API_KEY present', $c->reason);
     assert_contains('provider: openrouter', $c->reason);
+});
+
+test('billing N1: explicit API override carries a canonical provider', function (): void {
+    [$path, $anc] = tr_nothing();
+    $c = TransportResolver::decide(
+        ['SITE_BUILD_LLM' => 'api', 'LLM_PROVIDER' => 'grok'],
+        $path,
+        $anc,
+    );
+    assert_eq(TransportChoice::KIND_API, $c->kind);
+    assert_eq('xai', $c->provider);
+    assert_contains('provider: xai', TransportResolver::describe($c));
 });
 
 test('rung 2 keeps the compiled anthropic default for existing three-argument callers', function (): void {
@@ -383,6 +412,16 @@ test('billing M2: repeated ancestry names for one harness remain unambiguous', f
     assert_contains("process ancestry found 'claude'", $c->reason);
 });
 
+test('billing N6: mixed-case ancestry names still identify their harness', function (): void {
+    $c = TransportResolver::decide(
+        [],
+        tr_on_path('claude'),
+        static fn (): array => ['php', 'Claude', 'zsh'],
+    );
+    assert_eq(TransportChoice::KIND_CLAUDE_CLI, $c->kind);
+    assert_contains("process ancestry found 'Claude'", $c->reason);
+});
+
 test('rung 5: exactly one harness on PATH is used, and two refuse', function (): void {
     [, $anc] = tr_nothing();
 
@@ -483,6 +522,21 @@ test('billing C5b: API build without bootstrap throws a named TransportUnavailab
     assert_true(!str_contains($output, 'NO_ERROR'));
 });
 
+test('billing N1: API build with bootstrap refuses a providerless manual choice', function (): void {
+    $bootstrap = dirname(__DIR__, 2) . '/src/bootstrap.php';
+    $code = 'require ' . var_export($bootstrap, true) . '; '
+        . '$c = new \\Automattic\\SiteBuild\\TransportChoice('
+        . '\\Automattic\\SiteBuild\\TransportChoice::KIND_API, "manual"); '
+        . 'try { \\Automattic\\SiteBuild\\TransportResolver::build($c); echo "NO_ERROR"; } '
+        . 'catch (Throwable $e) { echo get_class($e) . " | " . $e->getMessage(); }';
+    [$output, $status] = tr_php($code);
+    assert_eq(0, $status, $output);
+    assert_contains(TransportUnavailable::class, $output);
+    assert_contains('no resolved provider', $output);
+    assert_contains('TransportResolver::decide()', $output);
+    assert_true(!str_contains($output, 'NO_ERROR'));
+});
+
 test('billing C5c: API build without provider key throws instead of exiting', function (): void {
     $bootstrap = dirname(__DIR__, 2) . '/src/bootstrap.php';
     $code = 'require ' . var_export($bootstrap, true) . '; '
@@ -491,7 +545,7 @@ test('billing C5c: API build without provider key throws instead of exiting', fu
         . '$r = new ReflectionClass(\\Automattic\\SiteBuild\\Env::class); '
         . '$p = $r->getProperty("vars"); $p->setValue(null, []); '
         . '$c = new \\Automattic\\SiteBuild\\TransportChoice('
-        . '\\Automattic\\SiteBuild\\TransportChoice::KIND_API, "explicit"); '
+        . '\\Automattic\\SiteBuild\\TransportChoice::KIND_API, "explicit", null, "anthropic"); '
         . 'try { \\Automattic\\SiteBuild\\TransportResolver::build($c); echo "NO_ERROR"; } '
         . 'catch (Throwable $e) { echo get_class($e) . " | " . $e->getMessage(); }';
     [$output, $status] = tr_php($code);
@@ -508,15 +562,51 @@ test('billing M4: API build canonicalizes grok so downstream model lookup succee
         . 'putenv("LLM_PROVIDER=grok"); putenv("XAI_API_KEY=test-only-key"); '
         . '$r = new ReflectionClass(\\Automattic\\SiteBuild\\Env::class); '
         . '$p = $r->getProperty("vars"); $p->setValue(null, []); '
-        . '$c = new \\Automattic\\SiteBuild\\TransportChoice('
-        . '\\Automattic\\SiteBuild\\TransportChoice::KIND_API, "XAI_API_KEY present (provider: xai)"); '
+        . '$c = \\Automattic\\SiteBuild\\TransportResolver::decide('
+        . '["LLM_PROVIDER" => "grok", "XAI_API_KEY" => "test-only-key"], '
+        . 'static fn (string $name): ?string => null, static fn (): array => []); '
         . 'try { $llm = \\Automattic\\SiteBuild\\TransportResolver::build($c); '
         . 'echo get_class($llm) . " | " . getenv("LLM_PROVIDER"); } '
         . 'catch (Throwable $e) { echo "ERROR | " . get_class($e) . " | " . $e->getMessage(); }';
     [$output, $status] = tr_php($code);
     assert_eq(0, $status, $output);
-    assert_contains('OpenAiCompatibleClient | xai', $output);
+    assert_contains('OpenAiCompatibleClient | grok', $output);
     assert_true(!str_contains($output, 'ERROR'));
+});
+
+test('billing N1: audit provider matches the provider used by the constructed client', function (): void {
+    $bootstrap = dirname(__DIR__, 2) . '/src/bootstrap.php';
+    $code = 'require ' . var_export($bootstrap, true) . '; '
+        . 'putenv("LLM_PROVIDER=anthropic"); putenv("OPEN_ROUTER_API_KEY=test-only-key"); '
+        . '$r = new ReflectionClass(\\Automattic\\SiteBuild\\Env::class); '
+        . '$p = $r->getProperty("vars"); $p->setValue(null, []); '
+        . '$c = \\Automattic\\SiteBuild\\TransportResolver::decide('
+        . '["OPEN_ROUTER_API_KEY" => "test-only-key"], '
+        . 'static fn (string $name): ?string => null, static fn (): array => [], "openrouter"); '
+        . '$line = \\Automattic\\SiteBuild\\TransportResolver::describe($c); '
+        . '$llm = \\Automattic\\SiteBuild\\TransportResolver::build($c); '
+        . '$clientProvider = (new ReflectionClass($llm))->getProperty("provider")->getValue($llm); '
+        . 'echo $c->provider . " | " . $clientProvider . " | " . $line;';
+    [$output, $status] = tr_php($code);
+    assert_eq(0, $status, $output);
+    assert_contains('openrouter | openrouter | Transport: api', $output);
+    assert_contains('provider: openrouter', $output);
+});
+
+test('billing N1: API build restores the ambient provider after construction', function (): void {
+    $bootstrap = dirname(__DIR__, 2) . '/src/bootstrap.php';
+    $code = 'require ' . var_export($bootstrap, true) . '; '
+        . 'putenv("LLM_PROVIDER=anthropic"); putenv("OPEN_ROUTER_API_KEY=test-only-key"); '
+        . '$r = new ReflectionClass(\\Automattic\\SiteBuild\\Env::class); '
+        . '$p = $r->getProperty("vars"); $p->setValue(null, []); '
+        . '$c = new \\Automattic\\SiteBuild\\TransportChoice('
+        . '\\Automattic\\SiteBuild\\TransportChoice::KIND_API, '
+        . '"OPEN_ROUTER_API_KEY present (provider: openrouter)", null, "openrouter"); '
+        . '$llm = \\Automattic\\SiteBuild\\TransportResolver::build($c); '
+        . 'echo get_class($llm) . " | " . getenv("LLM_PROVIDER");';
+    [$output, $status] = tr_php($code);
+    assert_eq(0, $status, $output);
+    assert_contains('OpenAiCompatibleClient | anthropic', $output);
 });
 
 test('describe() names the transport, the billing boundary and the rung', function (): void {

@@ -103,13 +103,24 @@ final class TransportResolver
                     . 'Require src/bootstrap.php before calling TransportResolver::build().'
                 );
             }
-            self::assertApiCredentialsAvailable();
-            if (strtolower(trim((string) Env::get('LLM_PROVIDER', ''))) === 'grok') {
-                // Keep the supported alias from reaching ModelConfig, whose
-                // provider vocabulary is deliberately limited to config data.
-                putenv('LLM_PROVIDER=xai');
+            if ($choice->provider === null || trim($choice->provider) === '') {
+                throw new TransportUnavailable(
+                    'Transport api has no resolved provider. Obtain the choice from TransportResolver::decide(), '
+                    . 'or construct it with a canonical provider: anthropic, openai, xai, or openrouter.'
+                );
             }
-            return \make_llm();
+            $provider = self::normalizeProvider($choice->provider, 'resolved API provider');
+            self::assertApiCredentialsAvailable($provider);
+
+            $ambientProvider = getenv('LLM_PROVIDER');
+            putenv("LLM_PROVIDER={$provider}");
+            try {
+                return \make_llm();
+            } finally {
+                $ambientProvider === false
+                    ? putenv('LLM_PROVIDER')
+                    : putenv("LLM_PROVIDER={$ambientProvider}");
+            }
         }
         self::assertSubprocessesAvailable();
         $binary = $choice->binary;
@@ -234,7 +245,13 @@ final class TransportResolver
             );
         }
         if ($override === TransportChoice::KIND_API) {
-            return new TransportChoice($override, 'SITE_BUILD_LLM=api');
+            $provider = self::apiProvider($env, $defaultProvider);
+            return new TransportChoice(
+                $override,
+                "SITE_BUILD_LLM=api (provider: {$provider})",
+                null,
+                $provider,
+            );
         }
         $binary = self::BINARY_FOR[$override];
         $path = $onPath($binary);
@@ -260,13 +277,15 @@ final class TransportResolver
     {
         $configured = strtolower(trim((string) ($env['LLM_PROVIDER'] ?? '')));
         $explicit = $configured !== '';
-        $provider = self::normalizeProvider(
-            $explicit ? $configured : $defaultProvider,
-            $explicit ? 'LLM_PROVIDER' : 'default provider',
-        );
+        $provider = self::apiProvider($env, $defaultProvider);
         foreach (self::PROVIDER_KEYS[$provider] as $var) {
             if (trim((string) ($env[$var] ?? '')) !== '') {
-                return new TransportChoice(TransportChoice::KIND_API, "{$var} present (provider: {$provider})");
+                return new TransportChoice(
+                    TransportChoice::KIND_API,
+                    "{$var} present (provider: {$provider})",
+                    null,
+                    $provider,
+                );
             }
         }
         if ($explicit) {
@@ -280,7 +299,9 @@ final class TransportResolver
             throw new TransportUnavailable(
                 "Default provider {$provider} has no " . implode(' or ', self::PROVIDER_KEYS[$provider])
                 . ', but other provider keys are present: ' . implode(', ', $otherKeys) . '. '
-                . 'Set LLM_PROVIDER to choose their provider, or unset the listed key(s) before using a harness transport.'
+                . 'Set SITE_BUILD_LLM=api|claude-cli|codex-cli|grok-cli explicitly. '
+                . 'Set LLM_PROVIDER only to use the present API key(s) and choose their provider; '
+                . 'otherwise unset the listed key(s).'
             );
         }
         return null;
@@ -417,9 +438,8 @@ final class TransportResolver
     }
 
     /** Validate the API factory's credentials before legacy Env::getRequired() can exit. */
-    private static function assertApiCredentialsAvailable(): void
+    private static function assertApiCredentialsAvailable(string $provider): void
     {
-        $provider = self::normalizeProvider((string) Env::get('LLM_PROVIDER', ModelConfig::defaultProvider()));
         foreach (self::PROVIDER_KEYS[$provider] as $var) {
             if (trim((string) Env::get($var, '')) !== '') {
                 return;
@@ -428,6 +448,16 @@ final class TransportResolver
         throw new TransportUnavailable(
             "Transport api with LLM_PROVIDER={$provider} requires "
             . implode(' or ', self::PROVIDER_KEYS[$provider]) . '. Set the provider key before building.'
+        );
+    }
+
+    /** Resolve and canonicalize the API provider without reading ambient state. */
+    private static function apiProvider(array $env, string $defaultProvider): string
+    {
+        $configured = strtolower(trim((string) ($env['LLM_PROVIDER'] ?? '')));
+        return self::normalizeProvider(
+            $configured !== '' ? $configured : $defaultProvider,
+            $configured !== '' ? 'LLM_PROVIDER' : 'default provider',
         );
     }
 

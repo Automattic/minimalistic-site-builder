@@ -48,6 +48,13 @@ test('TransportChoice classifies every existing CLI transport as subscription-ba
     }
 });
 
+test('billing classification covers every declared transport kind', function (): void {
+    foreach (TransportChoice::KINDS as $kind) {
+        $classification = (new TransportChoice($kind, 'classification coverage'))->isSubscription();
+        assert_true(is_bool($classification), "{$kind} must have a billing classification");
+    }
+});
+
 test('billing map refuses a transport kind without an explicit classification', function (): void {
     $reflection = new ReflectionClass(TransportChoice::class);
     /** @var TransportChoice $choice */
