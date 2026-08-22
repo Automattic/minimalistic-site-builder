@@ -304,6 +304,14 @@ if ($withImages && $until === null) {
     $report->setImages($generated, $failed, count($specs));
 }
 
+if ($project->exists('patterns.json')) {
+    $patternManifest = $project->readJson('patterns.json');
+    $report->setPatterns(
+        count($patternManifest['patterns'] ?? []),
+        count($patternManifest['dropped'] ?? []),
+    );
+}
+
 $usage = $llm->usageTotals();
 $report->setLlmTotals($usage['requests'], $usage['input_tokens'], $usage['output_tokens']);
 $report->setWallSeconds(microtime(true) - $wallStart);
