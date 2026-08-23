@@ -838,7 +838,7 @@ final class ExtractPatternsStep implements Step
                     return $match[0];
                 }
                 $decodedKey = json_decode('"' . $keyMatch[1] . '"');
-                if (!is_string($decodedKey) || !in_array(strtolower($decodedKey), ['href', 'url', 'textlinkhref'], true)) {
+                if (!is_string($decodedKey) || !in_array(strtolower($decodedKey), ['href', 'url', 'textlinkhref', 'src', 'poster'], true)) {
                     return $match[0];
                 }
                 $decoded = LinkTargets::normalizeTarget($match[2]);

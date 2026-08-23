@@ -627,9 +627,7 @@ final class ThemeValidator
             }
 
             // Destinations live in the rendered href and in block-JSON "url",
-            // "href", and "textLinkHref" attributes (navigation-link has no
-            // rendered HTML; image/file/media-text store the click target as
-            // href; core/file also stores textLinkHref).
+            // "href", "textLinkHref", "src", and "poster" attributes.
             $links = LinkTargets::allTargets($markup);
 
             foreach ($links as $href) {

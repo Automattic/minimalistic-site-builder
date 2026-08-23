@@ -489,6 +489,16 @@ test('link rewrite hashes DEL padded hex and unicode JSON keys', function (): vo
     }
 });
 
+test('link rewrite hashes JSON src and poster', function (): void {
+    $markup = '<!-- wp:video {"src":"javascript:alert(1)","poster":"javascript:alert(2)"} /-->';
+    assert_true(LinkTargets::isDangerousScheme(LinkTargets::srcAttrsIn($markup)[0] ?? ''));
+    assert_true(LinkTargets::isDangerousScheme(LinkTargets::posterAttrsIn($markup)[0] ?? ''));
+    $output = ExtractPatternsStep::rewriteLinks($markup, []);
+    foreach (LinkTargets::allTargets($output) as $target) {
+        assert_eq('#', $target);
+    }
+});
+
 test('a stale pattern file from a prior run is gone after a re-run', function (): void {
     with_project('builder_extract_patterns_', function (Project $project): void {
         extract_patterns_seed($project);

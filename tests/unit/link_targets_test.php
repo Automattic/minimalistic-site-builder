@@ -141,3 +141,13 @@ test('LinkTargets::allTargets reads unicode-escaped JSON keys', function (): voi
     assert_true(LinkTargets::isDangerousScheme($split[0] ?? ''));
 });
 
+test('LinkTargets::allTargets includes JSON src and poster', function (): void {
+    $markup = '<!-- wp:video {"src":"javascript:alert(1)","poster":"javascript:alert(2)"} /-->';
+    $targets = LinkTargets::allTargets($markup);
+    assert_true(in_array('javascript:alert(1)', $targets, true), 'JSON src javascript: is visible');
+    assert_true(in_array('javascript:alert(2)', $targets, true), 'JSON poster javascript: is visible');
+    assert_eq(['javascript:alert(1)'], LinkTargets::srcAttrsIn($markup));
+    assert_eq(['javascript:alert(2)'], LinkTargets::posterAttrsIn($markup));
+    assert_true(LinkTargets::isDangerousScheme($targets[array_search('javascript:alert(1)', $targets, true)]));
+});
+

@@ -43,6 +43,27 @@ final class LinkTargets
         return self::jsonStringAttrs('textLinkHref', $markup);
     }
 
+    /**
+     * Media sources stored as block-JSON "src" (core/video, core/audio,
+     * core/embed). Distinct from JSON "url" on images.
+     *
+     * @return list<string>
+     */
+    public static function srcAttrsIn(string $markup): array
+    {
+        return self::jsonStringAttrs('src', $markup);
+    }
+
+    /**
+     * Video poster frames stored as block-JSON "poster" (core/video).
+     *
+     * @return list<string>
+     */
+    public static function posterAttrsIn(string $markup): array
+    {
+        return self::jsonStringAttrs('poster', $markup);
+    }
+
     /** @return list<string> */
     public static function allTargets(string $markup): array
     {
@@ -51,6 +72,8 @@ final class LinkTargets
             self::urlAttrsIn($markup),
             self::hrefAttrsIn($markup),
             self::textLinkHrefAttrsIn($markup),
+            self::srcAttrsIn($markup),
+            self::posterAttrsIn($markup),
         );
     }
 

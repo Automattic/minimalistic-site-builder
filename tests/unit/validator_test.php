@@ -638,6 +638,18 @@ test('validator flags DEL padded hex and unicode JSON keys', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('validator flags javascript in JSON src and poster', function () {
+    [$project, $tmp] = validator_linked_project();
+    $project->writeText(
+        'theme/patterns/video-js.php',
+        '<!-- wp:video {"src":"javascript:alert(1)","poster":"javascript:alert(2)"} /-->',
+    );
+    $joined = implode(' ', ThemeValidator::validate($project));
+    assert_contains('theme/patterns/video-js.php', $joined);
+    assert_contains('dangerous scheme', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('validator judges block-JSON href destinations on image file and media-text', function () {
     [$project, $tmp] = validator_linked_project();
     $project->writeText(
