@@ -2,7 +2,7 @@
 
 ## The problem
 
-A build can be triggered many ways — the CLI, Studio, or a request *from inside a coding agent* (Claude Code, Codex, OpenCode, pi.dev). Something has to decide **which `Llm` to inject** into the pipeline, and therefore into every step. A step never chooses its transport; it calls the injected `$this->llm`. So correctness reduces to one thing: **the entry point resolves the right transport once and injects it everywhere.** `SiteBuilder` takes that single `Llm` in its constructor and hands it to every step and the `ConcurrentGroup`, so there is no per-step drift — the whole build shares one transport (only the *model* varies per step, via `StepDefaults` / model overrides).
+A build can be triggered many ways — the CLI, Studio, or a request *from inside a coding agent* (Claude Code, Codex, OpenCode, pi.dev). "Studio" in these documents means the first-party pipeline **host**; the local desktop app that runs preview sites is `StudioAppRunner`. Something has to decide **which `Llm` to inject** into the pipeline, and therefore into every step. A step never chooses its transport; it calls the injected `$this->llm`. So correctness reduces to one thing: **the entry point resolves the right transport once and injects it everywhere.** `SiteBuilder` takes that single `Llm` in its constructor and hands it to every step and the `ConcurrentGroup`, so there is no per-step drift — the whole build shares one transport (only the *model* varies per step, via `StepDefaults` / model overrides).
 
 ## Principle: declared, not detected — but context-aware
 
