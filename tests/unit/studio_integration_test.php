@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\StudioAppRunner;
 use Automattic\SiteBuild\StudioCli;
 
@@ -12,26 +13,39 @@ use Automattic\SiteBuild\StudioCli;
 function studio_present_requires_assertions(bool $asserted): void
 {
     if (command_exists('studio') && !$asserted) {
-        throw new RuntimeException('studio is present but no assertions ran');
+        throw new RuntimeException('studio is present but the assertion path did not run');
     }
 }
 
-/** Minimal block theme: enough for switch_theme + an HTTP response. */
-function write_minimal_theme(string $themeDir): void
+function studio_int_copy_dir(string $from, string $to): void
 {
-    $templates = $themeDir . '/templates';
-    if (!is_dir($templates) && !mkdir($templates, 0775, true) && !is_dir($templates)) {
-        throw new RuntimeException("Cannot create {$templates}");
+    if (!is_dir($from)) {
+        throw new RuntimeException("Cannot copy missing directory {$from}");
     }
-    file_put_contents($themeDir . '/style.css', "/*\nTheme Name: Studio Integration\n*/\n");
-    file_put_contents(
-        $themeDir . '/theme.json',
-        json_encode(['$schema' => 'https://schemas.wp.org/trunk/theme.json', 'version' => 3], JSON_THROW_ON_ERROR)
+    if (!is_dir($to) && !mkdir($to, 0775, true) && !is_dir($to)) {
+        throw new RuntimeException("Cannot create {$to}");
+    }
+    $iterator = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($from, FilesystemIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::SELF_FIRST,
     );
-    file_put_contents(
-        $templates . '/index.html',
-        "<!-- wp:paragraph --><p>ok</p><!-- /wp:paragraph -->\n"
-    );
+    foreach ($iterator as $item) {
+        /** @var SplFileInfo $item */
+        $target = $to . '/' . $iterator->getSubPathname();
+        if ($item->isDir()) {
+            if (!is_dir($target) && !mkdir($target, 0775, true) && !is_dir($target)) {
+                throw new RuntimeException("Cannot create {$target}");
+            }
+            continue;
+        }
+        $parent = dirname($target);
+        if (!is_dir($parent) && !mkdir($parent, 0775, true) && !is_dir($parent)) {
+            throw new RuntimeException("Cannot create {$parent}");
+        }
+        if (!copy($item->getPathname(), $target)) {
+            throw new RuntimeException("Failed to copy {$item->getPathname()} to {$target}");
+        }
+    }
 }
 
 function studio_http_code(string $url): int
@@ -66,11 +80,22 @@ test('a real Studio site boots, activates and serves', function () {
             $cli = new StudioCli(null, 180);
             $runner = new StudioAppRunner($cli, $root, repo_path());
             $site = null;
-            $slug = null;
+            $slug = 'sb-int-' . getmypid();
             try {
-                with_project('studio_int_proj_', function ($project) use ($cli, $runner, &$asserted, &$site, &$slug): void {
-                    write_minimal_theme($project->themePath());
-                    $slug = $project->slug();
+                with_temp_dir('studio_int_proj_', function (string $projRoot) use ($cli, $runner, &$asserted, &$site, $slug): void {
+                    $src = repo_path('projects/amber-ember');
+                    if (!is_file($src . '/theme/style.css')) {
+                        throw new RuntimeException('projects/amber-ember/theme/style.css is missing');
+                    }
+                    $dest = $projRoot . '/' . $slug;
+                    if (!mkdir($dest, 0775, true) && !is_dir($dest)) {
+                        throw new RuntimeException("Could not create {$dest}");
+                    }
+                    studio_int_copy_dir($src . '/theme', $dest . '/theme');
+                    if (is_file($src . '/plugin/site-content.php')) {
+                        studio_int_copy_dir($src . '/plugin', $dest . '/plugin');
+                    }
+                    $project = (new ProjectStore($projRoot))->open($slug);
                     $site = $runner->start($project);
 
                     $code = studio_http_code($site->url);
@@ -96,11 +121,9 @@ test('a real Studio site boots, activates and serves', function () {
                     } catch (Throwable) {
                     }
                 }
-                if ($slug !== null) {
-                    try {
-                        $runner->stopSite($slug);
-                    } catch (Throwable) {
-                    }
+                try {
+                    $runner->stopSite($slug);
+                } catch (Throwable) {
                 }
                 try {
                     $runner->pruneSites();
