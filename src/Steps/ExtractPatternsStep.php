@@ -861,6 +861,7 @@ final class ExtractPatternsStep implements Step
         $stagedManifest = $writer->stage($liveManifest, $content);
         $exchanged = false;
         $backupReady = false;
+        self::$exchangeAttempts = 0;
         $backupDir = $project->themePath('.patterns-prev');
         $backupWip = $backupDir . '.wip';
         self::removePath($backupDir);
@@ -889,16 +890,26 @@ final class ExtractPatternsStep implements Step
             $writer->replace($stagedManifest, $liveManifest);
         } catch (\Throwable $error) {
             $writer->discard($stagedManifest);
-            if ($exchanged && is_dir($stagingDir)) {
-                if (!self::exchangePaths($liveDir, $stagingDir)) {
-                    self::installDirectoryInPlace($liveDir, self::filesIn($stagingDir));
+            $previousRestored = false;
+            try {
+                if ($exchanged && is_dir($stagingDir)) {
+                    if (!self::exchangePaths($liveDir, $stagingDir)) {
+                        self::installDirectoryInPlace($liveDir, self::filesIn($stagingDir));
+                    }
+                    $previousRestored = true;
+                } elseif ($backupReady && is_dir($backupDir)) {
+                    self::installDirectoryInPlace($liveDir, self::filesIn($backupDir));
+                    $previousRestored = true;
                 }
+            } catch (\Throwable) {
+                $previousRestored = false;
             }
-            if ($backupReady && is_dir($backupDir)) {
-                self::installDirectoryInPlace($liveDir, self::filesIn($backupDir));
+            if (!($exchanged && !$previousRestored)) {
+                self::removePath($stagingDir);
             }
-            self::removePath($stagingDir);
-            self::removePath($backupDir);
+            if (!($backupReady && !$previousRestored && !$exchanged)) {
+                self::removePath($backupDir);
+            }
             self::removePath($backupWip);
             throw $error;
         }
@@ -915,9 +926,15 @@ final class ExtractPatternsStep implements Step
      * Atomically swap two directories when the kernel allows it.
      * Returns false so the caller can install in place (mac, Alpine, NFS, no FFI).
      */
+    private static int $exchangeAttempts = 0;
+
     private static function exchangePaths(string $left, string $right): bool
     {
         if (getenv('MSB_FORCE_PATTERN_INPLACE') === '1' || !extension_loaded('ffi')) {
+            return false;
+        }
+        self::$exchangeAttempts++;
+        if (getenv('MSB_FAIL_EXCHANGE_ROLLBACK') === '1' && self::$exchangeAttempts > 1) {
             return false;
         }
         foreach (['libc.so.6', 'libc.so'] as $library) {
@@ -939,6 +956,9 @@ final class ExtractPatternsStep implements Step
     /** @param array<string,string> $files */
     private static function installDirectoryInPlace(string $directory, array $files): void
     {
+        if (getenv('MSB_FAIL_ROLLBACK_INSTALL') === '1') {
+            throw new \RuntimeException('Forced pattern rollback install failure');
+        }
         if (!is_dir($directory) && !@mkdir($directory, 0775, true) && !is_dir($directory)) {
             throw new \RuntimeException("Could not create pattern directory: {$directory}");
         }
@@ -979,7 +999,7 @@ final class ExtractPatternsStep implements Step
         if (!@mkdir($to, 0775, true) && !is_dir($to)) {
             throw new \RuntimeException("Could not create backup pattern directory: {$to}");
         }
-        foreach (scandir($from) ?: [] as $entry) {
+        foreach (self::listDirectory($from) as $entry) {
             if ($entry === '.' || $entry === '..') {
                 continue;
             }
@@ -1002,7 +1022,7 @@ final class ExtractPatternsStep implements Step
         if (!is_dir($directory)) {
             return $files;
         }
-        foreach (scandir($directory) ?: [] as $entry) {
+        foreach (self::listDirectory($directory) as $entry) {
             if ($entry === '.' || $entry === '..') {
                 continue;
             }
@@ -1025,7 +1045,7 @@ final class ExtractPatternsStep implements Step
         if (!is_dir($directory)) {
             return;
         }
-        foreach (scandir($directory) ?: [] as $entry) {
+        foreach (self::listDirectory($directory) as $entry) {
             if ($entry === '.' || $entry === '..') {
                 continue;
             }
@@ -1049,12 +1069,22 @@ final class ExtractPatternsStep implements Step
         if (!is_dir($directory)) {
             return true;
         }
-        foreach (scandir($directory) ?: [] as $entry) {
+        foreach (self::listDirectory($directory) as $entry) {
             if ($entry !== '.' && $entry !== '..') {
                 return false;
             }
         }
         return true;
+    }
+
+    /** @return list<string> */
+    private static function listDirectory(string $directory): array
+    {
+        $entries = @scandir($directory);
+        if ($entries === false) {
+            throw new \RuntimeException("Could not read pattern directory: {$directory}");
+        }
+        return $entries;
     }
 
     private static function removePath(string $path): void

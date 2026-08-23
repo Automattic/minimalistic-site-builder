@@ -699,6 +699,73 @@ test('in-place fallback restores nested backup files', function (): void {
     });
 });
 
+test('a scandir failure does not restore a hollow backup over live', function (): void {
+    with_project('builder_extract_scandir_fail_', function (Project $project): void {
+        putenv('MSB_FORCE_PATTERN_INPLACE=1');
+        $live = $project->themePath('patterns');
+        $project->writeText('theme/patterns/ghost.php', '<?php // stale');
+        $mode = fileperms($live) & 0777;
+        try {
+            if (!chmod($live, 0000) || @scandir($live) !== false) {
+                skip_test('cannot force scandir to fail on this platform');
+            }
+
+            $method = new \ReflectionMethod(ExtractPatternsStep::class, 'replacePatternOutputs');
+            $method->setAccessible(true);
+            assert_throws(static fn () => $method->invoke(new ExtractPatternsStep(), $project, [
+                'hero.php' => "<?php\n// new\n",
+            ], [
+                'version' => 2,
+                'patterns' => [['slug' => 'hero', 'kind' => 'section']],
+                'starter' => null,
+                'dropped' => [],
+            ]));
+        } finally {
+            chmod($live, $mode !== 0 ? $mode : 0775);
+            putenv('MSB_FORCE_PATTERN_INPLACE');
+        }
+
+        assert_true($project->exists('theme/patterns/ghost.php'), 'unreadable live dir is not wiped by a hollow backup');
+        assert_eq('<?php // stale', $project->readText('theme/patterns/ghost.php'));
+        assert_true(!$project->exists('theme/patterns/hero.php'));
+        assert_true(!is_dir($project->themePath('.patterns-prev')));
+    });
+});
+
+test('a failed rollback keeps staging so the previous tree is not deleted', function (): void {
+    with_project('builder_extract_rollback_keep_', function (Project $project): void {
+        putenv('MSB_FAIL_EXCHANGE_ROLLBACK=1');
+        putenv('MSB_FAIL_ROLLBACK_INSTALL=1');
+        try {
+            $project->writeText('theme/patterns/ghost.php', '<?php // stale');
+            $blocker = $project->path('patterns.json');
+            if (is_file($blocker)) {
+                unlink($blocker);
+            }
+            mkdir($blocker);
+            file_put_contents($blocker . '/keep', 'old');
+
+            $method = new \ReflectionMethod(ExtractPatternsStep::class, 'replacePatternOutputs');
+            $method->setAccessible(true);
+            assert_throws(static fn () => $method->invoke(new ExtractPatternsStep(), $project, [
+                'hero.php' => "<?php\n// new\n",
+            ], [
+                'version' => 2,
+                'patterns' => [['slug' => 'hero', 'kind' => 'section']],
+                'starter' => null,
+                'dropped' => [],
+            ]));
+
+            $staging = $project->themePath('.patterns-next');
+            assert_true(is_dir($staging), 'staging stays when rollback cannot put the old tree back');
+            assert_eq('<?php // stale', file_get_contents($staging . '/ghost.php'));
+        } finally {
+            putenv('MSB_FAIL_EXCHANGE_ROLLBACK');
+            putenv('MSB_FAIL_ROLLBACK_INSTALL');
+        }
+    });
+});
+
 test('pattern headers use only the closed label and shape vocabulary', function (): void {
     with_project('builder_extract_header_', function (Project $project): void {
         extract_patterns_seed($project, [[
