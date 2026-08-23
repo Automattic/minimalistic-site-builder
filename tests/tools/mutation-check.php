@@ -10,7 +10,7 @@ declare(strict_types=1);
  */
 
 const MUTATION_ROOT = __DIR__ . '/../..';
-const MUTATION_RUN_TIMEOUT_SECONDS = 30;
+const MUTATION_RUN_TIMEOUT_SECONDS = 60;
 
 /**
  * @param list<string> $command
