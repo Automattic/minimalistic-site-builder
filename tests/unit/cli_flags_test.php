@@ -165,10 +165,13 @@ test('X-G5 --transport resolves a fake harness without a prompt or subprocess sp
         $text = implode("\n", $output);
 
         assert_eq(0, $exit, $text);
-        assert_eq(1, count(array_filter($output, static fn (string $line): bool => str_starts_with(
-            $line,
-            'Transport: claude-cli (subscription)',
-        ))), $text);
+        $auditLines = array_values(array_filter(
+            $output,
+            static fn (string $line): bool => str_starts_with($line, 'Transport: '),
+        ));
+        assert_eq(1, count($auditLines), $text);
+        assert_contains('claude-cli', $auditLines[0]);
+        assert_contains('(subscription)', $auditLines[0]);
         assert_true(!file_exists($binary . '.count'), 'the fake harness must never be spawned');
     });
 });

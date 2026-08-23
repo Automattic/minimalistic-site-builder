@@ -5,11 +5,13 @@ use Automattic\SiteBuild\BuildReport;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepComposition;
+use Automattic\SiteBuild\TransportUnavailable;
 
 /**
  * Build a site from a prompt.
  *
  *   php bin/build.php "A cozy neighborhood bakery" [--provider=openai] [--slug=my-slug] [--from=step-id] [--until=step-id] [--html-first|--blocks-first] [--multi-page] [--pages="Home, Menu, About"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=foreground-image] [--max-hero-images=1] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--use-jetpack-placeholders] [--port=9400] [--no-serve]
+ *   php bin/build.php --transport
  *
  * --provider=<anthropic|openai|xai|openrouter> picks the model set (config/models.json):
  * each step runs on that provider's large/small tier. Per-step LLM_MODEL_<STEP>
@@ -20,6 +22,9 @@ use Automattic\SiteBuild\StepComposition;
  * blocks-first has it author block markup directly. Either flag overrides
  * SITE_BUILD_HTML_FIRST from the shell or .env. With neither, that env var
  * decides, and unset still means blocks-first.
+ *
+ * --transport resolves and prints the transport audit line, then exits without
+ * assembling or running a build. It needs no prompt and makes no model call.
  *
  * The graph is recorded in meta.json, so --from resumes on whatever built the
  * project without being told again. A flag contradicting that record is refused
@@ -96,6 +101,7 @@ $args = parse_cli_args($argv, [
     '--hero-copy-capacity'       => 'value',
     '--html-first'               => 'bool',
     '--blocks-first'             => 'bool',
+    '--transport'                => 'bool',
     '--with-images'              => 'bool',
     '--use-jetpack-placeholders' => 'bool',
     '--multi-page'               => 'bool',
@@ -112,6 +118,7 @@ $until = $flags['--until'] ?? null;
 $from = $flags['--from'] ?? null;
 $htmlFirst = $flags['--html-first'] ?? false;
 $blocksFirst = $flags['--blocks-first'] ?? false;
+$transportOnly = $flags['--transport'] ?? false;
 $withImages = $flags['--with-images'] ?? false;
 $formPlaceholders = $flags['--use-jetpack-placeholders'] ?? false;
 $multiPage = $flags['--multi-page'] ?? false;
@@ -128,7 +135,7 @@ $heroCopyCapacity = $flags['--hero-copy-capacity'] ?? null;
 // --from resumes an existing build's deterministic tail against on-disk
 // artifacts, so the prompt is optional (the design already exists); every
 // other invocation still requires it.
-if ($from === null && ($prompt === null || trim($prompt) === '')) {
+if (!$transportOnly && $from === null && ($prompt === null || trim($prompt) === '')) {
     usage();
 }
 
@@ -192,7 +199,18 @@ if ($htmlFirst || $blocksFirst) {
     putenv(StepComposition::HTML_FIRST_ENV . '=' . ($htmlFirst ? '1' : '0'));
 }
 
-$llm = resolve_llm();
+try {
+    $llm = resolve_llm();
+} catch (TransportUnavailable $e) {
+    if (!$transportOnly) {
+        throw $e;
+    }
+    Narrator::write($e->getMessage() . "\n");
+    exit(1);
+}
+if ($transportOnly) {
+    exit(0);
+}
 $builder = make_site_builder($llm);
 
 // A resume has to run the graph that built the project, so its record is read
@@ -394,6 +412,6 @@ if ($serve && $until === null) {
 /** The one invocation summary, shared by every path that rejects the line. */
 function usage(): never
 {
-    Narrator::write("Usage: php bin/build.php \"<prompt>\" [--provider=anthropic|openai|xai|openrouter] [--slug=...] [--from=step-id] [--until=step-id] [--html-first|--blocks-first] [--multi-page] [--pages=\"Home, Menu, About\"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=cover-image,foreground-image] [--max-hero-images=1..2] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--use-jetpack-placeholders] [--port=9400] [--no-serve]\n");
+    Narrator::write("Usage: php bin/build.php \"<prompt>\" [--transport] [--provider=anthropic|openai|xai|openrouter] [--slug=...] [--from=step-id] [--until=step-id] [--html-first|--blocks-first] [--multi-page] [--pages=\"Home, Menu, About\"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=cover-image,foreground-image] [--max-hero-images=1..2] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--use-jetpack-placeholders] [--port=9400] [--no-serve]\n");
     exit(1);
 }
