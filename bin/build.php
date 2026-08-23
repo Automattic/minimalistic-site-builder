@@ -161,6 +161,18 @@ if ($step !== null && ($from !== null || $until !== null)) {
     exit(1);
 }
 
+if ($withImages && ($step !== null || $until !== null)) {
+    $conflicts = [];
+    if ($step !== null) {
+        $conflicts[] = '--step';
+    }
+    if ($until !== null) {
+        $conflicts[] = '--until';
+    }
+    Narrator::write('--with-images is mutually exclusive with ' . implode(' and ', $conflicts) . "; pass one form.\n");
+    exit(1);
+}
+
 $resumeRequested = $from !== null || $step !== null;
 
 // --from resumes an existing build's deterministic tail against on-disk
@@ -229,6 +241,14 @@ if ($htmlFirst && $blocksFirst) {
 }
 if ($htmlFirst || $blocksFirst) {
     putenv(StepComposition::HTML_FIRST_ENV . '=' . ($htmlFirst ? '1' : '0'));
+}
+
+// Validate the opt-in image transport before constructing the Llm or creating
+// a project. --transport and --list-steps are inspection modes, not builds, so
+// an otherwise irrelevant image flag must not add a credential requirement.
+$imageClient = null;
+if ($withImages && !$transportOnly && !$listSteps) {
+    $imageClient = make_image_client();
 }
 
 try {
@@ -439,13 +459,14 @@ try {
     exit(1);
 }
 
-// Image generation is opt-in: slow and networked, so it runs only on request
-// and only for a full build (skipped when --until stops the pipeline early).
-if ($withImages && $until === null) {
+// Image generation is opt-in: slow and networked, so it runs only on request.
+// Bounded runs were refused before any work, and the preflight client instance
+// is reused here so credential validation cannot drift from execution.
+if ($withImages) {
     // Image generation goes through the Vertex proxy, not the LLM — its only
     // model use is the Llm rewriting safety-filtered prompts (small tier) and
     // regenerating. The tally comes from images.json below.
-    foreach (StepComposition::postImages(make_generate_images_step($llm)) as $step) {
+    foreach (StepComposition::postImages(make_generate_images_step($llm, $imageClient)) as $step) {
         $runExtraStep($step);
     }
 

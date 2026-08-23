@@ -302,11 +302,16 @@ function make_image_client(): ImageClient
  * Wire the opt-in image-generation step: the Vertex transport, the Llm that
  * rewrites prompts the safety filter rejects, and that repair's model.
  *
- * A null $llm still generates images, minus the prompt repair.
+ * A null $llm still generates images, minus the prompt repair. Callers that
+ * preflight the transport may pass that same client instance for execution.
  */
-function make_generate_images_step(?Llm $llm): GenerateImagesStep
+function make_generate_images_step(?Llm $llm, ?ImageClient $imageClient = null): GenerateImagesStep
 {
-    return new GenerateImagesStep(make_image_client(), $llm, step_models()['image-prompt-repair'] ?? null);
+    return new GenerateImagesStep(
+        $imageClient ?? make_image_client(),
+        $llm,
+        step_models()['image-prompt-repair'] ?? null,
+    );
 }
 
 /** Project root path helper. */
