@@ -348,3 +348,47 @@ test('createProject rejects a site spec that cannot serialize to JSON', function
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('createProject records which graph built the project', function () {
+    // --from reads this back to resume on the same graph, so a wrong or missing
+    // value silently reroutes a resume through artifacts nobody wrote.
+    $tmp = sys_get_temp_dir() . '/builder_graph_' . uniqid();
+    $previous = getenv('SITE_BUILD_HTML_FIRST');
+    try {
+        $builder = make_test_builder(new FakeLlm(), $tmp);
+
+        putenv('SITE_BUILD_HTML_FIRST=0');
+        $blocks = $builder->createProject(prompt: 'a bakery', slug: 'rec-blocks');
+        assert_eq('blocks', $blocks->readJson('meta.json')['graph'] ?? null);
+
+        putenv('SITE_BUILD_HTML_FIRST=1');
+        $html = $builder->createProject(prompt: 'a bakery', slug: 'rec-html');
+        assert_eq('html-first', $html->readJson('meta.json')['graph'] ?? null);
+    } finally {
+        $previous === false
+            ? putenv('SITE_BUILD_HTML_FIRST')
+            : putenv('SITE_BUILD_HTML_FIRST=' . $previous);
+    }
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('an explicit htmlFirst beats the env, so a fixed-composition host records the truth', function () {
+    // A host that hands pipeline() its own StepComposition never consults the
+    // env key, so deriving the record from it would file the wrong graph.
+    $tmp = sys_get_temp_dir() . '/builder_graph_explicit_' . uniqid();
+    $previous = getenv('SITE_BUILD_HTML_FIRST');
+    try {
+        putenv('SITE_BUILD_HTML_FIRST=0');
+        $builder = make_test_builder(new FakeLlm(), $tmp);
+
+        $project = $builder->createProject(prompt: 'a bakery', slug: 'rec-explicit', htmlFirst: true);
+        assert_eq('html-first', $project->readJson('meta.json')['graph'] ?? null);
+    } finally {
+        $previous === false
+            ? putenv('SITE_BUILD_HTML_FIRST')
+            : putenv('SITE_BUILD_HTML_FIRST=' . $previous);
+    }
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

@@ -9,11 +9,21 @@ use Automattic\SiteBuild\StepComposition;
 /**
  * Build a site from a prompt.
  *
- *   php bin/build.php "A cozy neighborhood bakery" [--provider=openai] [--slug=my-slug] [--from=step-id] [--until=step-id] [--multi-page] [--pages="Home, Menu, About"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=foreground-image] [--max-hero-images=1] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--use-jetpack-placeholders] [--port=9400] [--no-serve]
+ *   php bin/build.php "A cozy neighborhood bakery" [--provider=openai] [--slug=my-slug] [--from=step-id] [--until=step-id] [--html-first|--blocks-first] [--multi-page] [--pages="Home, Menu, About"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=foreground-image] [--max-hero-images=1] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--use-jetpack-placeholders] [--port=9400] [--no-serve]
  *
  * --provider=<anthropic|openai|xai|openrouter> picks the model set (config/models.json):
  * each step runs on that provider's large/small tier. Per-step LLM_MODEL_<STEP>
  * env overrides still win. Unset falls back to LLM_PROVIDER / the config default.
+ *
+ * --html-first / --blocks-first pick the pipeline graph. HTML-first has the model
+ * author an HTML+CSS design that transform-site converts to block markup;
+ * blocks-first has it author block markup directly. Either flag overrides
+ * SITE_BUILD_HTML_FIRST from the shell or .env. With neither, that env var
+ * decides, and unset still means blocks-first.
+ *
+ * The graph is recorded in meta.json, so --from resumes on whatever built the
+ * project without being told again. A flag contradicting that record is refused
+ * rather than honored: the other graph never wrote the artifacts a resume reads.
  *
  * Seeds projects/<slug>/meta.json with the prompt, then runs the pipeline,
  * printing per-step timing, token spend and configured model(s) as each step
@@ -32,7 +42,8 @@ use Automattic\SiteBuild\StepComposition;
  * artifacts (design/*.html, site.css, designDirection.json, meta.json, …) as
  * inputs. It requires --slug (the existing project), ignores the prompt (the
  * design already exists), and leaves the reused directory otherwise untouched.
- * Same id list as --until, group members included.
+ * Same id list as --until, group members included, and on a resume that list
+ * comes from the graph the project was built on.
  *
  * Deterministic-tail recipe for the default blocks graph — re-run the passes
  * that require NO LLM and NO image generation, in seconds:
@@ -42,7 +53,7 @@ use Automattic\SiteBuild\StepComposition;
  * On an HTML-first project, page-styles is also deterministic, so its longer
  * no-network tail is:
  *
- *   SITE_BUILD_HTML_FIRST=1 php bin/build.php --slug=portfolio-new --from=transform-site --until=page-styles
+ *   php bin/build.php --html-first --slug=portfolio-new --from=transform-site --until=page-styles
  *
  * Because --until stops before generate-images (and --with-images stays opt-in),
  * both resumes make zero network calls.
@@ -83,6 +94,8 @@ $args = parse_cli_args($argv, [
     '--hero-media-modes'         => 'value',
     '--max-hero-images'          => 'value',
     '--hero-copy-capacity'       => 'value',
+    '--html-first'               => 'bool',
+    '--blocks-first'             => 'bool',
     '--with-images'              => 'bool',
     '--use-jetpack-placeholders' => 'bool',
     '--multi-page'               => 'bool',
@@ -97,6 +110,8 @@ $prompt = $args['positionals'][0] ?? null;
 $slug = $flags['--slug'] ?? null;
 $until = $flags['--until'] ?? null;
 $from = $flags['--from'] ?? null;
+$htmlFirst = $flags['--html-first'] ?? false;
+$blocksFirst = $flags['--blocks-first'] ?? false;
 $withImages = $flags['--with-images'] ?? false;
 $formPlaceholders = $flags['--use-jetpack-placeholders'] ?? false;
 $multiPage = $flags['--multi-page'] ?? false;
@@ -165,8 +180,50 @@ if ($provider !== null) {
     putenv("LLM_PROVIDER={$provider}");
 }
 
+// --html-first / --blocks-first pick the pipeline graph by setting the env key
+// StepComposition::htmlFirstSelected() owns, the same way --provider sets
+// LLM_PROVIDER. Setting it unconditionally is what makes the flag beat an
+// exported SITE_BUILD_HTML_FIRST or an .env line; with no flag the env decides.
+if ($htmlFirst && $blocksFirst) {
+    Narrator::write("--html-first and --blocks-first are mutually exclusive; pass one.\n");
+    exit(1);
+}
+if ($htmlFirst || $blocksFirst) {
+    putenv(StepComposition::HTML_FIRST_ENV . '=' . ($htmlFirst ? '1' : '0'));
+}
+
 $llm = make_llm();
 $builder = make_site_builder($llm);
+
+// A resume has to run the graph that built the project, so its record is read
+// BEFORE the pipeline is assembled. That also makes --from's "valid steps" list
+// come from the right graph instead of whichever one the flags happened to pick.
+$project = null;
+$meta = [];
+if ($from !== null) {
+    try {
+        $project = $builder->store()->open($slug);
+    } catch (RuntimeException $e) {
+        Narrator::write("--from: {$e->getMessage()}\n");
+        exit(1);
+    }
+    $meta = $project->exists('meta.json') ? $project->readJson('meta.json') : [];
+    $recordedGraph = $meta['graph'] ?? null;
+    try {
+        $resumeHtmlFirst = StepComposition::resumeHtmlFirst(
+            is_string($recordedGraph) ? $recordedGraph : null,
+            $htmlFirst || $blocksFirst ? $htmlFirst : null,
+        );
+    } catch (InvalidArgumentException $e) {
+        Narrator::write("--from: {$e->getMessage()}\n");
+        exit(1);
+    }
+    // Null means nothing was recorded to honor, so the flag/env choice stands.
+    if ($resumeHtmlFirst !== null) {
+        putenv(StepComposition::HTML_FIRST_ENV . '=' . ($resumeHtmlFirst ? '1' : '0'));
+    }
+}
+
 $pipeline = $builder->pipeline();
 
 // step id => model, for the model column (see BuildReport::modelLabel).
@@ -190,20 +247,12 @@ if ($from !== null && !in_array($from, $pipeline->stopIds(), true)) {
 }
 
 if ($from !== null) {
-    // Resume: open the existing project untouched (no createProject, which would
-    // re-seed meta.json and could clobber multi_page/design_constraints from the
-    // original build). Its design/*.html, site.css, meta.json etc. are the inputs
-    // the deterministic tail reads, so leave every artifact on disk as-is.
-    try {
-        $project = $builder->store()->open($slug);
-    } catch (RuntimeException $e) {
-        Narrator::write("--from: {$e->getMessage()}\n");
-        exit(1);
-    }
+    // Resume: the project was opened untouched above (no createProject, which
+    // would re-seed meta.json and could clobber multi_page/design_constraints
+    // from the original build). Its design/*.html, site.css, meta.json etc. are
+    // the inputs the deterministic tail reads, so every artifact stays as-is.
     // The prompt argument is ignored on resume; the report reuses the recorded one.
-    $prompt = $project->exists('meta.json')
-        ? (string) ($project->readJson('meta.json')['prompt'] ?? '')
-        : '';
+    $prompt = (string) ($meta['prompt'] ?? '');
 } else {
     // Without an explicit --slug, createProject picks a free random adjective-noun
     // name. Explicit --slug reuses that directory across re-runs. meta.json is
@@ -345,6 +394,6 @@ if ($serve && $until === null) {
 /** The one invocation summary, shared by every path that rejects the line. */
 function usage(): never
 {
-    Narrator::write("Usage: php bin/build.php \"<prompt>\" [--provider=anthropic|openai|xai|openrouter] [--slug=...] [--from=step-id] [--until=step-id] [--multi-page] [--pages=\"Home, Menu, About\"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=cover-image,foreground-image] [--max-hero-images=1..2] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--use-jetpack-placeholders] [--port=9400] [--no-serve]\n");
+    Narrator::write("Usage: php bin/build.php \"<prompt>\" [--provider=anthropic|openai|xai|openrouter] [--slug=...] [--from=step-id] [--until=step-id] [--html-first|--blocks-first] [--multi-page] [--pages=\"Home, Menu, About\"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=cover-image,foreground-image] [--max-hero-images=1..2] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--use-jetpack-placeholders] [--port=9400] [--no-serve]\n");
     exit(1);
 }

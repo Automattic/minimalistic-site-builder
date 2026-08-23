@@ -49,6 +49,8 @@ Node. Use `php bin/build.php "…" --no-serve` for a PHP-only build.
 php bin/build.php "A cozy neighborhood bakery"
 php bin/build.php "A cozy neighborhood bakery" --with-images   # also generate images
 php bin/build.php "A cozy neighborhood bakery" --provider=openai   # build on GPT-5.x instead of Claude
+php bin/build.php "A cozy neighborhood bakery" --html-first     # author an HTML+CSS design, then convert it to blocks
+php bin/build.php "A cozy neighborhood bakery" --blocks-first   # author block markup directly (the default)
 php bin/build.php "A cozy neighborhood bakery" --multi-page    # let the site plan inner pages beyond the homepage
 php bin/build.php "A cozy neighborhood bakery" --multi-page --pages="Home, Menu, About, Visit"   # fix the page list yourself (first = homepage)
 php bin/build.php "A Persian poetry archive" --writing-direction=rtl --hero-canvas=framed --hero-media-modes=none,foreground-image --max-hero-images=1
