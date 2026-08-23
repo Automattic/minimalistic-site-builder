@@ -100,3 +100,12 @@ test('LinkTargets::normalizeTarget decodes unterminated tab entities', function 
     assert_true(LinkTargets::isDangerousScheme('java&#9script:alert(1)'));
 });
 
+test('LinkTargets::normalizeTarget decodes unterminated numeric letter entities', function (): void {
+    assert_eq('javascript:alert(1)', LinkTargets::normalizeTarget('java&#115cript:alert(1)'));
+    assert_eq('javascript:alert(1)', LinkTargets::normalizeTarget('&#106avascript:alert(1)'));
+    assert_eq('javascript:alert(1)', LinkTargets::normalizeTarget('java&#x73cript:alert(1)'));
+    assert_eq('javascript:alert(1)', LinkTargets::normalizeTarget('&#x6aavascript:alert(1)'));
+    assert_true(LinkTargets::isDangerousScheme('java&#115cript:alert(1)'));
+    assert_true(LinkTargets::isDangerousScheme('&#x6aavascript:alert(1)'));
+});
+

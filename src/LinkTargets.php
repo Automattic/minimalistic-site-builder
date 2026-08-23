@@ -116,16 +116,23 @@ final class LinkTargets
 
     /**
      * PHP html_entity_decode leaves numeric and some named entities without a
-     * semicolon. Gutenberg still decodes &#58 / &#x3a / &colon.
+     * semicolon. Gutenberg still decodes them. Hex takes 1-2 digits so
+     * java&#x73cript: becomes javascript: instead of swallowing the next letter.
      */
     private static function decodeUnterminatedEntities(string $value): string
     {
         $value = preg_replace('/&colon(?!;)/i', ':', $value) ?? $value;
-        $value = preg_replace('/&#x0*3a(?!;)/i', ':', $value) ?? $value;
-        $value = preg_replace('/&#0*58(?![0-9])/', ':', $value) ?? $value;
-        $value = preg_replace('/&tab(?!;)/i', "	", $value) ?? $value;
-        $value = preg_replace('/&#x0*9(?!;)/i', "	", $value) ?? $value;
-        $value = preg_replace('/&#0*9(?![0-9])/', "	", $value) ?? $value;
+        $value = preg_replace('/&tab(?!;)/i', "\t", $value) ?? $value;
+        $value = preg_replace_callback(
+            '/&#x0*([0-9a-f]{1,2})(?!;)/i',
+            static fn (array $m): string => html_entity_decode('&#x' . $m[1] . ';', ENT_QUOTES | ENT_HTML5, 'UTF-8'),
+            $value,
+        ) ?? $value;
+        $value = preg_replace_callback(
+            '/&#([0-9]+)(?!;)/',
+            static fn (array $m): string => html_entity_decode('&#' . $m[1] . ';', ENT_QUOTES | ENT_HTML5, 'UTF-8'),
+            $value,
+        ) ?? $value;
         return $value;
     }
 

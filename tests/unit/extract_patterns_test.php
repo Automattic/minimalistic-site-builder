@@ -442,6 +442,22 @@ test('link rewrite hashes unterminated tab entities in javascript', function ():
     }
 });
 
+test('link rewrite hashes unterminated numeric letter entities in javascript', function (): void {
+    $cases = [
+        'dec-s' => '<!-- wp:image {"href":"java&#115cript:alert(1)"} /-->',
+        'dec-j' => '<!-- wp:file {"textLinkHref":"&#106avascript:alert(2)"} /-->',
+        'hex-s' => '<!-- wp:navigation-link {"url":"java&#x73cript:alert(3)"} /-->',
+        'hex-j' => '<!-- wp:image {"href":"&#x6aavascript:alert(4)"} /-->',
+    ];
+    foreach ($cases as $name => $markup) {
+        assert_true(LinkTargets::isDangerousScheme(LinkTargets::allTargets($markup)[0] ?? ''), $name);
+        $output = ExtractPatternsStep::rewriteLinks($markup, []);
+        foreach (LinkTargets::allTargets($output) as $target) {
+            assert_eq('#', $target, $name);
+        }
+    }
+});
+
 test('a stale pattern file from a prior run is gone after a re-run', function (): void {
     with_project('builder_extract_patterns_', function (Project $project): void {
         extract_patterns_seed($project);
