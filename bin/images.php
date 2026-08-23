@@ -49,7 +49,7 @@ printf("  %d placeholder(s), %d to generate\n", count($specs), count($pending));
 // The Llm is only used to rewrite prompts the image safety filter rejects;
 // without LLM credentials the step still runs, minus that repair.
 try {
-    $llm = make_llm();
+    $llm = resolve_llm();
 } catch (\Throwable $e) {
     fwrite(STDERR, "  (no LLM available — safety-filtered prompts won't be repaired: {$e->getMessage()})\n");
     $llm = null;

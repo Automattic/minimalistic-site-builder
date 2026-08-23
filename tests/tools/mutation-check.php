@@ -141,7 +141,11 @@ function mutation_copy_tree(string $target): void
     }
     foreach ([
         'autoload.php',
+        'bin/build.php',
         'bin/build-demos.php',
+        'bin/eval.php',
+        'bin/images.php',
+        'bin/llm-conformance.php',
         'config',
         'src',
         'tests/lib.php',
@@ -755,6 +759,54 @@ PHP,
 PHP,
         '',
     ],
+    [
+        '35 make_llm ignores its explicit provider',
+        'src/bootstrap.php',
+        <<<'PHP'
+    $provider = strtolower((string) ($provider ?? Env::get('LLM_PROVIDER', ModelConfig::defaultProvider())));
+PHP,
+        <<<'PHP'
+    $provider = strtolower((string) Env::get('LLM_PROVIDER', ModelConfig::defaultProvider()));
+PHP,
+    ],
+    [
+        '36 resolve_llm drops its catchable credential pre-check',
+        'src/bootstrap.php',
+        <<<'PHP'
+            $variable = TransportResolver::credentialVariableFor($provider);
+            if ($variable !== null) {
+                $credential = Env::get($variable);
+                if ($credential === null || trim($credential) === '') {
+                    throw new TransportUnavailable(
+                        "Transport api resolved provider {$provider}, but required credential {$variable} is missing. "
+                        . "Set {$variable}, or choose an available harness with SITE_BUILD_LLM."
+                    );
+                }
+            }
+
+PHP,
+        '',
+    ],
+    [
+        '37 resolve_llm discards the resolved provider',
+        'src/bootstrap.php',
+        <<<'PHP'
+            return make_llm($provider);
+PHP,
+        <<<'PHP'
+            return make_llm();
+PHP,
+    ],
+    [
+        '38 resolve_llm misses Env-loaded credentials',
+        'src/bootstrap.php',
+        <<<'PHP'
+        $value = Env::get($variable);
+PHP,
+        <<<'PHP'
+        $value = getenv($variable);
+PHP,
+    ],
 ];
 
 $args = array_slice($argv, 1);
@@ -854,7 +906,7 @@ try {
             echo "{$classification['verdict']} {$label} {$classification['detail']}\n";
         }
         echo "RESULT {$counts['KILLED']} KILLED, {$counts['SURVIVED']} SURVIVED, {$counts['HARD ERROR']} HARD ERROR\n";
-        $failed = $counts['KILLED'] < 34 || $counts['SURVIVED'] !== 0 || $counts['HARD ERROR'] !== 0;
+        $failed = $counts['KILLED'] < 38 || $counts['SURVIVED'] !== 0 || $counts['HARD ERROR'] !== 0;
     }
 } catch (Throwable $e) {
     echo 'MUTATION ERROR: ' . $e->getMessage() . "\n";

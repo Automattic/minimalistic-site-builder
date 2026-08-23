@@ -152,7 +152,7 @@ if ($heroCopyCapacity !== null) {
 }
 
 // --provider selects the model set for the whole run. It just sets LLM_PROVIDER
-// (which make_llm() and StepDefaults both read), so per-step LLM_MODEL_<STEP>
+// (which resolve_llm() and StepDefaults both read), so per-step LLM_MODEL_<STEP>
 // overrides still apply on top. Keep this after the design-constraint checks so
 // a command with multiple invalid flags reports the same first error as before.
 try {
@@ -165,7 +165,7 @@ if ($provider !== null) {
     putenv("LLM_PROVIDER={$provider}");
 }
 
-$llm = make_llm();
+$llm = resolve_llm();
 $builder = make_site_builder($llm);
 $pipeline = $builder->pipeline();
 

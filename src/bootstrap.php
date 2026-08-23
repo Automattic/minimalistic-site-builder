@@ -12,12 +12,15 @@ use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\ImageClient;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\ModelConfig;
+use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\OpenAiCompatibleClient;
 use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\SiteBuilder;
 use Automattic\SiteBuild\StepDefaults;
 use Automattic\SiteBuild\Steps\GenerateImagesStep;
+use Automattic\SiteBuild\TransportResolver;
+use Automattic\SiteBuild\TransportUnavailable;
 use Automattic\SiteBuild\WpcomImageClient;
 
 require_once dirname(__DIR__) . '/autoload.php';
@@ -128,7 +131,7 @@ function openrouter_api_key(): string
  */
 function make_llm(?string $provider = null): Llm
 {
-    $provider = strtolower((string) Env::get('LLM_PROVIDER', ModelConfig::defaultProvider()));
+    $provider = strtolower((string) ($provider ?? Env::get('LLM_PROVIDER', ModelConfig::defaultProvider())));
 
     return match ($provider) {
         'anthropic', '' => new AnthropicClient(
@@ -166,6 +169,65 @@ function make_llm(?string $provider = null): Llm
             "Unknown LLM_PROVIDER '{$provider}'. Use anthropic, xai, openai, or openrouter."
         ),
     };
+}
+
+/**
+ * Resolve, disclose, and construct the production LLM transport.
+ *
+ * Credential values are overlaid through Env::get() so the pure resolver sees
+ * the same process-or-.env configuration that make_llm() will use.
+ */
+function resolve_llm(): Llm
+{
+    $env = getenv();
+    $env = is_array($env) ? $env : [];
+
+    $configuredProvider = Env::get('LLM_PROVIDER');
+    if ($configuredProvider !== null && trim($configuredProvider) !== '') {
+        $env['LLM_PROVIDER'] = $configuredProvider;
+    } else {
+        unset($env['LLM_PROVIDER']);
+    }
+
+    foreach (ModelConfig::providerNames() as $provider) {
+        $variable = TransportResolver::credentialVariableFor($provider);
+        if ($variable === null) {
+            continue;
+        }
+        $value = Env::get($variable);
+        if ($value !== null && trim($value) !== '') {
+            $env[$variable] = $value;
+        } else {
+            unset($env[$variable]);
+        }
+    }
+
+    $choice = TransportResolver::decide(
+        $env,
+        static fn (string $binary): ?string => TransportResolver::binaryPath($binary),
+        static fn (): array => TransportResolver::ancestry(),
+        ModelConfig::defaultProvider(),
+    );
+    Narrator::write(TransportResolver::describe($choice) . "\n");
+
+    return TransportResolver::build(
+        $choice,
+        static function (string $provider): Llm {
+            $variable = TransportResolver::credentialVariableFor($provider);
+            if ($variable !== null) {
+                $credential = Env::get($variable);
+                if ($credential === null || trim($credential) === '') {
+                    throw new TransportUnavailable(
+                        "Transport api resolved provider {$provider}, but required credential {$variable} is missing. "
+                        . "Set {$variable}, or choose an available harness with SITE_BUILD_LLM."
+                    );
+                }
+            }
+
+            return make_llm($provider);
+        },
+        default_llm_model(),
+    );
 }
 
 /**

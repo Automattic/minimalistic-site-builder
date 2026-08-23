@@ -153,10 +153,12 @@ final class TransportResolver
             );
         }
         return match ($choice->kind) {
-            TransportChoice::KIND_CLAUDE_CLI => throw new TransportUnavailable(
-                'Transport claude-cli is resolved but not yet implemented. '
-                . 'Use SITE_BUILD_LLM=api with the configured provider key until this transport is implemented.'
-            ),
+            TransportChoice::KIND_CLAUDE_CLI => $harnessModel === null || trim($harnessModel) === ''
+                ? throw new TransportUnavailable(
+                    'Transport claude-cli cannot be built because its harness model is missing. '
+                    . 'Pass a non-blank model as the third argument to TransportResolver::build().'
+                )
+                : new ClaudeCliLlm($harnessModel, $binary),
             TransportChoice::KIND_CODEX_CLI => throw new TransportUnavailable(
                 'Transport codex-cli is resolved but not yet implemented. '
                 . 'Use SITE_BUILD_LLM=api with the configured provider key until this transport is implemented.'
