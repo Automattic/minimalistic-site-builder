@@ -116,9 +116,20 @@ $site = null;
 $exit = 1;
 try {
     echo "Booting '{$slug}' via {$runner->name()}…\n";
-    $site = $runner->name() === 'playground'
-        ? $runner->start($project, $timeout)
-        : $runner->start($project);
+    try {
+        $site = $runner->name() === 'playground'
+            ? $runner->start($project, $timeout)
+            : $runner->start($project);
+    } catch (RuntimeException $studioFailure) {
+        // Same rule as serve/build: our own choice of Studio degrades, a
+        // caller's --runner=studio does not.
+        if ($runner->name() !== 'studio' || RunnerResolver::requestedName($runnerFlag) !== null) {
+            throw $studioFailure;
+        }
+        fwrite(STDERR, "Studio failed: {$studioFailure->getMessage()}\nFalling back to Playground…\n");
+        $runner = new PlaygroundRunner($port, (string) $workers);
+        $site = $runner->start($project, $timeout);
+    }
     $baseUrl = rtrim($site->url, '/') . $route;
     echo "Capturing {$baseUrl} → {$out}\n";
     $shot = 'node ' . escapeshellarg(repo_path('bin/screenshot/screenshot.js'))

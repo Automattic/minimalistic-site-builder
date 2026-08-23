@@ -39,3 +39,18 @@ test('SITE_BUILD_RUNNER selects the backend when no flag is given', function () 
 test('an unknown runner name is rejected', function () {
     assert_throws(fn () => RunnerResolver::resolve('lando', cli_available(true), fn () => null));
 });
+
+test('requestedName reports null when nobody named a runner', function () {
+    putenv('SITE_BUILD_RUNNER');
+    assert_eq(null, RunnerResolver::requestedName(null), 'auto: callers may fall back');
+    assert_eq(null, RunnerResolver::requestedName(''), 'an empty flag is not a choice');
+});
+
+test('requestedName reports the forced runner, so callers know not to fall back', function () {
+    putenv('SITE_BUILD_RUNNER');
+    assert_eq('studio', RunnerResolver::requestedName('studio'));
+    putenv('SITE_BUILD_RUNNER=studio');
+    assert_eq('studio', RunnerResolver::requestedName(null), 'env counts as forced');
+    assert_eq('playground', RunnerResolver::requestedName('playground'), 'the flag beats the env');
+    putenv('SITE_BUILD_RUNNER');
+});

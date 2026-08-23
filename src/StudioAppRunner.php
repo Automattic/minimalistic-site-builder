@@ -16,6 +16,9 @@ namespace Automattic\SiteBuild;
  */
 final class StudioAppRunner implements SiteRunner
 {
+    /** A cold machine downloads WordPress and the PHP binary inside `create`. */
+    private const CREATE_TIMEOUT_SECONDS = 300;
+
     public function __construct(
         private readonly StudioCli $cli,
         private readonly string $root,
@@ -171,16 +174,25 @@ final class StudioAppRunner implements SiteRunner
             if ($display === '') {
                 $display = $slug;
             }
+            // Every option `studio create` can prompt for is answered here, so
+            // the site is fully specified rather than taking Studio's current
+            // defaults. This is not what makes the command non-interactive:
+            // --domain has no "none" value, so it would still prompt. Only the
+            // /dev/null stdin in StudioCli does that.
             $created = $this->cli->run([
                 'create',
                 '--path', $dir,
                 '--name', $display,
+                '--wp', 'latest',
+                '--php', '8.4',
                 '--runtime', 'native',
                 '--file-access', 'site-directory',
                 '--blueprint', $blueprintPath,
+                '--admin-username', 'admin',
+                '--admin-email', 'admin@localhost.com',
                 '--skip-browser',
                 '--skip-log-details',
-            ]);
+            ], self::CREATE_TIMEOUT_SECONDS);
             if ($created['exitCode'] !== 0) {
                 throw new \RuntimeException(
                     "studio create exited {$created['exitCode']}: " . trim($created['stderr'])
@@ -281,8 +293,9 @@ PHP;
 
     /**
      * Surface PHP notices from the generated theme after configure() and the
-     * HTTP probe (the probe is what actually renders the theme). Missing log
-     * is a no-op: addWarnings drops an empty list.
+     * HTTP probe (the probe is what actually renders the theme). Replaces
+     * rather than merges: the site was just recreated, so this log is the
+     * whole truth and a notice the theme no longer emits must not survive.
      */
     private function captureDebugLog(Project $project, string $dir): void
     {
@@ -295,7 +308,7 @@ PHP;
                 fclose($fh);
             }
         }
-        $project->addWarnings('studio-runner', DebugLogReader::summarize($log));
+        $project->replaceWarnings('studio-runner', DebugLogReader::summarize($log));
     }
 
     private function readUrl(string $slug, string $dir): RunningSite

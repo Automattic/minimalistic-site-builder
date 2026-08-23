@@ -408,6 +408,9 @@ echo "Output: {$project->path()}\n";
 // build stopped early (--until) or the user opted out (--no-serve).
 if ($serve && $until === null) {
     echo "\nStarting preview…\n";
+    // Owned wholly by this run: a resumed build that reaches Studio must not
+    // keep the previous run's "fell back to Playground" receipt.
+    $project->replaceWarnings('site-runner', []);
     $serveRunner = $runner;
     if ($serveRunner->name() === 'playground') {
         $serveRunner = new PlaygroundRunner($port ?? 9400);
@@ -417,8 +420,26 @@ if ($serve && $until === null) {
     try {
         $site = $serveRunner->start($project);
     } catch (RuntimeException $e) {
-        Narrator::write($e->getMessage() . "\n");
-        exit(1);
+        // A Studio we chose ourselves is a preference, not a requirement: the
+        // build is already paid for, so drop to Playground rather than throw
+        // it away (AGENTS.md:56). A runner the caller named still fails hard.
+        if ($serveRunner->name() !== 'studio' || RunnerResolver::requestedName($runnerFlag) !== null) {
+            Narrator::write($e->getMessage() . "\n");
+            exit(1);
+        }
+        Narrator::write("Studio preview failed: {$e->getMessage()}\n");
+        Narrator::write("Falling back to Playground…\n");
+        $project->replaceWarnings('site-runner', ['Studio preview failed; fell back to Playground: ' . $e->getMessage()]);
+        $serveRunner = new PlaygroundRunner($port ?? 9400);
+        $stats['runner'] = $serveRunner->name();
+        $stats['runner_fallback'] = true;
+        $project->writeJson('build-stats.json', $stats);
+        try {
+            $site = $serveRunner->start($project);
+        } catch (RuntimeException $playgroundFailure) {
+            Narrator::write($playgroundFailure->getMessage() . "\n");
+            exit(1);
+        }
     }
     // Post-build WP checks. Not a pipeline step: wpcom/Linux CI cannot boot
     // Studio. Findings warn and the build still exits 0 (AGENTS.md:56).

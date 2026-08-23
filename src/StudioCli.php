@@ -19,11 +19,15 @@ final class StudioCli
         $this->exec = $exec ?? self::realExec(...);
     }
 
-    /** @param list<string> $args @return array{exitCode:int,stdout:string,stderr:string} */
-    public function run(array $args): array
+    /**
+     * @param list<string> $args
+     * @param int|null $timeoutSeconds overrides the instance budget for one slow command
+     * @return array{exitCode:int,stdout:string,stderr:string}
+     */
+    public function run(array $args, ?int $timeoutSeconds = null): array
     {
         $cmd = 'studio ' . implode(' ', array_map(escapeshellarg(...), $args));
-        $r = ($this->exec)($cmd, $this->timeoutSeconds);
+        $r = ($this->exec)($cmd, $timeoutSeconds ?? $this->timeoutSeconds);
         $r['stderr'] = self::redact(self::stripAnsi($r['stderr']));
         $r['stdout'] = self::redact($r['stdout']);
         return $r;
@@ -74,7 +78,10 @@ final class StudioCli
     /** @return array{exitCode:int,stdout:string,stderr:string} */
     private static function realExec(string $cmd, int $timeout): array
     {
-        $descriptors = [1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+        // stdin is /dev/null, not inherited: with a terminal on fd 0 the studio
+        // CLI waits for input it never announces, and every command hangs to
+        // the timeout with zero output.
+        $descriptors = [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
         $proc = proc_open($cmd, $descriptors, $pipes);
         if (!is_resource($proc)) {
             return ['exitCode' => 127, 'stdout' => '', 'stderr' => 'could not start studio'];

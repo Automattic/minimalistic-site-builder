@@ -14,19 +14,25 @@ namespace Automattic\SiteBuild;
 final class RunnerResolver
 {
     /**
+     * The runner the caller asked for by name, or null when the choice is
+     * ours. Callers read this to tell a forced backend (whose failure is an
+     * error) from an automatic one (whose failure falls back to Playground).
+     */
+    public static function requestedName(?string $flag): ?string
+    {
+        if ($flag !== null && $flag !== '') {
+            return $flag;
+        }
+        $fromEnv = Env::get('SITE_BUILD_RUNNER');
+        return $fromEnv !== null && $fromEnv !== '' ? $fromEnv : null;
+    }
+
+    /**
      * @param \Closure(string):void $warn
      */
     public static function resolve(?string $flag, StudioCli $cli, \Closure $warn): SiteRunner
     {
-        $name = null;
-        if ($flag !== null && $flag !== '') {
-            $name = $flag;
-        } else {
-            $fromEnv = Env::get('SITE_BUILD_RUNNER');
-            if ($fromEnv !== null && $fromEnv !== '') {
-                $name = $fromEnv;
-            }
-        }
+        $name = self::requestedName($flag);
 
         if ($name === 'studio') {
             if ($cli->available()) {
