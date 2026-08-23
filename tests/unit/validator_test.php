@@ -562,6 +562,18 @@ test('validator flags encoded javascript in JSON href and textLinkHref', functio
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('validator flags javascript with tab inside the scheme', function () {
+    [$project, $tmp] = validator_linked_project();
+    $project->writeText(
+        'theme/patterns/tab-js.php',
+        "<!-- wp:image {\"href\":\"java\tscript:alert(1)\"} /-->",
+    );
+    $joined = implode(' ', ThemeValidator::validate($project));
+    assert_contains('theme/patterns/tab-js.php', $joined);
+    assert_contains('dangerous scheme', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('validator judges block-JSON href destinations on image file and media-text', function () {
     [$project, $tmp] = validator_linked_project();
     $project->writeText(

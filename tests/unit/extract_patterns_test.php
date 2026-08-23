@@ -401,6 +401,20 @@ test('link rewrite hashes JSON unicode and entity-encoded javascript', function 
     }
 });
 
+test('link rewrite hashes javascript with tab or space inside the scheme', function (): void {
+    $cases = [
+        'image-tab' => "<!-- wp:image {\"href\":\"java\tscript:alert(1)\"} /-->",
+        'file-space' => '<!-- wp:file {"textLinkHref":"java script:alert(2)"} /-->',
+    ];
+    foreach ($cases as $name => $markup) {
+        assert_true(LinkTargets::isDangerousScheme(LinkTargets::allTargets($markup)[0] ?? ''), $name);
+        $output = ExtractPatternsStep::rewriteLinks($markup, []);
+        foreach (LinkTargets::allTargets($output) as $target) {
+            assert_eq('#', $target, $name);
+        }
+    }
+});
+
 test('a stale pattern file from a prior run is gone after a re-run', function (): void {
     with_project('builder_extract_patterns_', function (Project $project): void {
         extract_patterns_seed($project);

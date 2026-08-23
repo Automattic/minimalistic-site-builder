@@ -860,6 +860,9 @@ final class ExtractPatternsStep implements Step
         $writer = new NativeStagedFileWriter();
         $stagedManifest = $writer->stage($liveManifest, $content);
         $exchanged = false;
+        $inPlace = false;
+        $backupDir = $project->themePath('.patterns-prev');
+        self::removePath($backupDir);
         try {
             if (!@mkdir($stagingDir, 0775, true) && !is_dir($stagingDir)) {
                 throw new \RuntimeException("Could not create staged pattern directory: {$stagingDir}");
@@ -873,8 +876,13 @@ final class ExtractPatternsStep implements Step
             if (!is_dir($liveDir) && !@mkdir($liveDir, 0775, true) && !is_dir($liveDir)) {
                 throw new \RuntimeException("Could not create live pattern directory: {$liveDir}");
             }
-            self::exchangePaths($liveDir, $stagingDir);
-            $exchanged = true;
+            if (self::exchangePaths($liveDir, $stagingDir)) {
+                $exchanged = true;
+            } else {
+                self::copyDirectory($liveDir, $backupDir);
+                self::installDirectoryInPlace($liveDir, $files);
+                $inPlace = true;
+            }
 
             $writer->replace($stagedManifest, $liveManifest);
         } catch (\Throwable $error) {
@@ -882,27 +890,110 @@ final class ExtractPatternsStep implements Step
             if ($exchanged && is_dir($liveDir) && is_dir($stagingDir)) {
                 self::exchangePaths($liveDir, $stagingDir);
             }
+            if ($inPlace && is_dir($backupDir)) {
+                self::installDirectoryInPlace($liveDir, self::filesIn($backupDir));
+            }
             self::removePath($stagingDir);
+            self::removePath($backupDir);
             throw $error;
         }
 
         self::removePath($stagingDir);
+        self::removePath($backupDir);
         if ($files === []) {
             self::removePath($liveDir);
         }
     }
 
-    /** Atomically swap two directories so theme/patterns is never missing. */
-    private static function exchangePaths(string $left, string $right): void
+    /**
+     * Atomically swap two directories when the kernel allows it.
+     * Returns false so the caller can install in place (mac, Alpine, NFS, no FFI).
+     */
+    private static function exchangePaths(string $left, string $right): bool
     {
-        $ffi = \FFI::cdef(
-            'int renameat2(int olddirfd, const char *oldpath, int newdirfd, const char *newpath, unsigned int flags);',
-            'libc.so.6',
-        );
-        $result = $ffi->renameat2(-100, $left, -100, $right, 2);
-        if ($result !== 0) {
-            throw new \RuntimeException("Could not exchange {$left} and {$right}");
+        if (!extension_loaded('ffi')) {
+            return false;
         }
+        foreach (['libc.so.6', 'libc.so'] as $library) {
+            try {
+                $ffi = \FFI::cdef(
+                    'int renameat2(int olddirfd, const char *oldpath, int newdirfd, const char *newpath, unsigned int flags);',
+                    $library,
+                );
+                if ($ffi->renameat2(-100, $left, -100, $right, 2) === 0) {
+                    return true;
+                }
+            } catch (\Throwable) {
+                continue;
+            }
+        }
+        return false;
+    }
+
+    /** @param array<string,string> $files */
+    private static function installDirectoryInPlace(string $directory, array $files): void
+    {
+        if (!is_dir($directory) && !@mkdir($directory, 0775, true) && !is_dir($directory)) {
+            throw new \RuntimeException("Could not create pattern directory: {$directory}");
+        }
+        foreach ($files as $basename => $file) {
+            $path = $directory . '/' . $basename;
+            if (file_put_contents($path, $file) === false) {
+                throw new \RuntimeException("Could not write pattern: {$path}");
+            }
+        }
+        foreach (scandir($directory) ?: [] as $entry) {
+            if ($entry === '.' || $entry === '..') {
+                continue;
+            }
+            if (!isset($files[$entry])) {
+                self::removePath($directory . '/' . $entry);
+            }
+        }
+    }
+
+    private static function copyDirectory(string $from, string $to): void
+    {
+        self::removePath($to);
+        if (!is_dir($from)) {
+            return;
+        }
+        if (!@mkdir($to, 0775, true) && !is_dir($to)) {
+            throw new \RuntimeException("Could not create backup pattern directory: {$to}");
+        }
+        foreach (scandir($from) ?: [] as $entry) {
+            if ($entry === '.' || $entry === '..') {
+                continue;
+            }
+            $source = $from . '/' . $entry;
+            $dest = $to . '/' . $entry;
+            if (is_dir($source)) {
+                self::copyDirectory($source, $dest);
+                continue;
+            }
+            if (!@copy($source, $dest)) {
+                throw new \RuntimeException("Could not backup pattern: {$source}");
+            }
+        }
+    }
+
+    /** @return array<string,string> */
+    private static function filesIn(string $directory): array
+    {
+        $files = [];
+        if (!is_dir($directory)) {
+            return $files;
+        }
+        foreach (scandir($directory) ?: [] as $entry) {
+            if ($entry === '.' || $entry === '..') {
+                continue;
+            }
+            $path = $directory . '/' . $entry;
+            if (is_file($path)) {
+                $files[$entry] = (string) file_get_contents($path);
+            }
+        }
+        return $files;
     }
 
     private static function removePath(string $path): void

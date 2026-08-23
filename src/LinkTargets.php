@@ -104,7 +104,13 @@ final class LinkTargets
         if (is_string($fromJson)) {
             $trimmed = $fromJson;
         }
-        return html_entity_decode($trimmed, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $decoded = html_entity_decode($trimmed, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $colon = strpos($decoded, ':');
+        if ($colon === false) {
+            return $decoded;
+        }
+        $scheme = preg_replace('/[\x00-\x20]+/', '', substr($decoded, 0, $colon)) ?? '';
+        return $scheme . substr($decoded, $colon);
     }
 
     /** javascript:/data:/vbscript: — rewrite these destinations to `#`. */

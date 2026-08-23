@@ -77,3 +77,10 @@ test('LinkTargets::normalizeTarget decodes JSON unicode and HTML entities', func
     assert_true(LinkTargets::isDangerousScheme('javascript&colon;alert(1)'));
 });
 
+test('LinkTargets::normalizeTarget strips tab or C0 inside the scheme', function (): void {
+    assert_eq('javascript:alert(1)', LinkTargets::normalizeTarget("java\tscript:alert(1)"));
+    assert_eq('javascript:alert(1)', LinkTargets::normalizeTarget('java script:alert(1)'));
+    assert_true(LinkTargets::isDangerousScheme("java\tscript:alert(1)"));
+    assert_true(LinkTargets::isDangerousScheme('java script:alert(1)'));
+});
+
