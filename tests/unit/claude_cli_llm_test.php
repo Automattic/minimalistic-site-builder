@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\ClaudeCliLlm;
+use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\HarnessCallFailed;
 use Automattic\SiteBuild\Narrator;
 
@@ -150,7 +151,46 @@ test('Claude unparseable stdout raises HarnessCallFailed', function (): void {
     assert_contains('JSON', $error->getMessage());
 });
 
-test('completeBatch uses TextBatchRecovery with zero retries', function (): void {
+test('T14 completeJsonBatch repairs only malformed JSON and retains its sibling', function (): void {
+    with_temp_dir('harness-json-repair-', function (string $dir): void {
+        $binary = $dir . '/fake-harness';
+        assert_true(copy(claude_cli_fixture('claude-json-recovery.sh'), $binary));
+        assert_true(chmod($binary, 0755));
+        $llm = new ClaudeCliLlm('m', $binary, 2);
+
+        $result = $llm->completeJsonBatch([
+            'bad' => ['prompt' => 'T14_REPAIR'],
+            'good' => ['prompt' => 'T14_GOOD'],
+        ]);
+
+        assert_eq(['repaired' => true], $result['bad']);
+        assert_eq(['good' => true], $result['good']);
+        assert_eq('2', file_get_contents($binary . '.repair-count'));
+        assert_eq(3, $llm->usageTotals()['requests']);
+    });
+});
+
+test('T14 completeJsonBatch exposes successful siblings after bounded content repair', function (): void {
+    with_temp_dir('harness-json-partial-', function (string $dir): void {
+        $binary = $dir . '/fake-harness';
+        assert_true(copy(claude_cli_fixture('claude-json-recovery.sh'), $binary));
+        assert_true(chmod($binary, 0755));
+        $llm = new ClaudeCliLlm('m', $binary, 2);
+
+        $error = assert_throws(fn () => $llm->completeJsonBatch([
+            'bad' => ['prompt' => 'T14_ALWAYS_BAD'],
+            'good' => ['prompt' => 'T14_GOOD'],
+        ]));
+
+        assert_true($error instanceof GeneratedJsonException);
+        assert_eq(['good' => ['good' => true]], $error->partialResults);
+        assert_true(array_key_exists('bad', $error->failures));
+        assert_eq('2', file_get_contents($binary . '.persistent-count'));
+        assert_eq(3, $llm->usageTotals()['requests']);
+    });
+});
+
+test('T14 completeBatch does not retry truncated text and returns a degradation note', function (): void {
     $llm = claude_cli_llm('m', 'claude-truncated.sh');
     $result = $llm->completeBatch(['cut' => ['prompt' => 'partial', 'max_tokens' => 5]]);
     assert_eq('partial', $result->texts['cut']);

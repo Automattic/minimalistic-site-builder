@@ -728,6 +728,23 @@ PHP,
         foreach (['temperature'] as $option) {
 PHP,
     ],
+    [
+        '33 JSON content repair retry is disabled',
+        'src/HarnessCliLlm.php',
+        <<<'PHP'
+        return JsonBatchRecovery::run(
+            $requests,
+            fn (array $subset): array => $this->responseBatch($subset),
+        );
+PHP,
+        <<<'PHP'
+        return JsonBatchRecovery::run(
+            $requests,
+            fn (array $subset): array => $this->responseBatch($subset),
+            maxRetries: 0,
+        );
+PHP,
+    ],
 ];
 
 $args = array_slice($argv, 1);
@@ -827,7 +844,7 @@ try {
             echo "{$classification['verdict']} {$label} {$classification['detail']}\n";
         }
         echo "RESULT {$counts['KILLED']} KILLED, {$counts['SURVIVED']} SURVIVED, {$counts['HARD ERROR']} HARD ERROR\n";
-        $failed = $counts['KILLED'] < 32 || $counts['SURVIVED'] !== 0 || $counts['HARD ERROR'] !== 0;
+        $failed = $counts['KILLED'] < 33 || $counts['SURVIVED'] !== 0 || $counts['HARD ERROR'] !== 0;
     }
 } catch (Throwable $e) {
     echo 'MUTATION ERROR: ' . $e->getMessage() . "\n";
