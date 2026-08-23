@@ -104,8 +104,9 @@ final class LinkTargets
         if (is_string($fromJson)) {
             $trimmed = $fromJson;
         }
-        $decoded = html_entity_decode($trimmed, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-        $decoded = self::decodeUnterminatedEntities($decoded);
+        $decoded = self::decodeNumericEntities($trimmed);
+        $decoded = html_entity_decode($decoded, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $decoded = self::decodeUnterminatedNamedEntities($decoded);
         $colon = strpos($decoded, ':');
         if ($colon === false) {
             return $decoded;
@@ -115,24 +116,39 @@ final class LinkTargets
     }
 
     /**
-     * PHP html_entity_decode leaves numeric and some named entities without a
-     * semicolon. Gutenberg still decodes them. Hex takes 1-2 digits so
-     * java&#x73cript: becomes javascript: instead of swallowing the next letter.
+     * PHP html_entity_decode(ENT_HTML5) refuses CR and other C0 controls.
+     * Decode ASCII numerics with chr() the same way MarkupSanitizer does,
+     * including an optional semicolon so &#13; is not eaten as &#1.
+     * Hex stays at 1-2 digits so &#x73cript: does not swallow the next letter.
      */
-    private static function decodeUnterminatedEntities(string $value): string
+    private static function decodeNumericEntities(string $value): string
+    {
+        $decoded = preg_replace_callback(
+            '/&#(?:(?:x|X)([0-9a-fA-F]{1,2})|([0-9]+));?/',
+            static function (array $match): string {
+                $hex = ($match[1] ?? '') !== '';
+                $digits = $hex ? $match[1] : $match[2];
+                $significant = ltrim($digits, '0');
+                if ($significant === '') {
+                    return "\u{FFFD}";
+                }
+                if (strlen($significant) > ($hex ? 2 : 3)) {
+                    return $match[0];
+                }
+                $codepoint = $hex ? hexdec($significant) : (int) $significant;
+                return $codepoint > 0 && $codepoint <= 0x7f
+                    ? chr($codepoint)
+                    : $match[0];
+            },
+            $value,
+        );
+        return $decoded ?? $value;
+    }
+
+    private static function decodeUnterminatedNamedEntities(string $value): string
     {
         $value = preg_replace('/&colon(?!;)/i', ':', $value) ?? $value;
         $value = preg_replace('/&tab(?!;)/i', "\t", $value) ?? $value;
-        $value = preg_replace_callback(
-            '/&#x0*([0-9a-f]{1,2})(?!;)/i',
-            static fn (array $m): string => html_entity_decode('&#x' . $m[1] . ';', ENT_QUOTES | ENT_HTML5, 'UTF-8'),
-            $value,
-        ) ?? $value;
-        $value = preg_replace_callback(
-            '/&#([0-9]+)(?!;)/',
-            static fn (array $m): string => html_entity_decode('&#' . $m[1] . ';', ENT_QUOTES | ENT_HTML5, 'UTF-8'),
-            $value,
-        ) ?? $value;
         return $value;
     }
 

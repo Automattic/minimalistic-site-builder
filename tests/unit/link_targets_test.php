@@ -109,3 +109,13 @@ test('LinkTargets::normalizeTarget decodes unterminated numeric letter entities'
     assert_true(LinkTargets::isDangerousScheme('&#x6aavascript:alert(1)'));
 });
 
+test('LinkTargets::normalizeTarget decodes CR numeric entities with chr', function (): void {
+    assert_eq('javascript:alert(1)', LinkTargets::normalizeTarget('java&#13script:alert(1)'));
+    assert_eq('javascript:alert(1)', LinkTargets::normalizeTarget('java&#13;script:alert(1)'));
+    assert_eq('javascript:alert(1)', LinkTargets::normalizeTarget('java&#x0dscript:alert(1)'));
+    assert_eq('javascript:alert(1)', LinkTargets::normalizeTarget('java&#xd;script:alert(1)'));
+    assert_true(LinkTargets::isDangerousScheme('java&#13;script:alert(1)'));
+    assert_true(LinkTargets::isDangerousScheme('java&#x0d;script:alert(1)'));
+    assert_true(!str_contains(LinkTargets::normalizeTarget('java&#13;script:alert(1)'), '&#1;'));
+});
+

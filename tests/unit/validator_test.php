@@ -611,6 +611,19 @@ test('validator flags unterminated numeric letter entities in javascript hrefs',
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('validator flags CR numeric entities in javascript hrefs', function () {
+    [$project, $tmp] = validator_linked_project();
+    $project->writeText(
+        'theme/patterns/cr-entity-js.php',
+        '<!-- wp:image {"href":"java&#13;script:alert(1)"} /-->'
+        . '<!-- wp:file {"textLinkHref":"java&#x0dscript:alert(2)"} /-->',
+    );
+    $joined = implode(' ', ThemeValidator::validate($project));
+    assert_contains('theme/patterns/cr-entity-js.php', $joined);
+    assert_contains('dangerous scheme', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('validator judges block-JSON href destinations on image file and media-text', function () {
     [$project, $tmp] = validator_linked_project();
     $project->writeText(
