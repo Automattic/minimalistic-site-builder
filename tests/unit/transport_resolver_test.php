@@ -1231,6 +1231,29 @@ test('V14 resolve_llm sees Env-loaded credentials before inherited Codex markers
     });
 });
 
+test('V14 resolve_llm sees the Env-loaded OpenRouter credential alias', function (): void {
+    $bootstrap = dirname(__DIR__, 2) . '/src/bootstrap.php';
+    $code = 'foreach (["SITE_BUILD_LLM", "LLM_PROVIDER", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", '
+        . '"XAI_API_KEY", "OPENROUTER_API_KEY", "OPEN_ROUTER_API_KEY"] as $key) { putenv($key); } '
+        . 'require ' . var_export($bootstrap, true) . '; '
+        . '$r = new ReflectionClass(\\Automattic\\SiteBuild\\Env::class); '
+        . '$p = $r->getProperty("vars"); $p->setValue(null, ['
+        . '"LLM_PROVIDER" => "openrouter", "OPEN_ROUTER_API_KEY" => "from-dotenv-alias"]); '
+        . '$stream = fopen("php://memory", "w+"); '
+        . '\\Automattic\\SiteBuild\\Narrator::setStream($stream); '
+        . 'try { $llm = resolve_llm(); rewind($stream); '
+        . 'echo get_class($llm) . " | " . $llm->endpoint() . " | " . trim((string) stream_get_contents($stream)); } '
+        . 'catch (Throwable $e) { echo "ERROR | " . get_class($e) . " | " . $e->getMessage(); }';
+
+    [$output, $status] = tr_php($code);
+    assert_eq(0, $status, $output);
+    assert_contains('Automattic\\SiteBuild\\OpenAiCompatibleClient', $output);
+    assert_contains('https://openrouter.ai/api/v1/chat/completions', $output);
+    assert_contains('Transport: api', $output);
+    assert_contains('provider: openrouter', $output);
+    assert_true(!str_contains($output, 'ERROR'), $output);
+});
+
 test('V15 explicit codex-cli and grok-cli overrides keep actionable deferred stubs', function (): void {
     with_temp_dir('deferred-harness-', function (string $dir): void {
         foreach (['codex', 'grok'] as $name) {
