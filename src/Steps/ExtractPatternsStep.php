@@ -860,9 +860,11 @@ final class ExtractPatternsStep implements Step
         $writer = new NativeStagedFileWriter();
         $stagedManifest = $writer->stage($liveManifest, $content);
         $exchanged = false;
-        $inPlace = false;
+        $backupReady = false;
         $backupDir = $project->themePath('.patterns-prev');
+        $backupWip = $backupDir . '.wip';
         self::removePath($backupDir);
+        self::removePath($backupWip);
         try {
             if (!@mkdir($stagingDir, 0775, true) && !is_dir($stagingDir)) {
                 throw new \RuntimeException("Could not create staged pattern directory: {$stagingDir}");
@@ -880,7 +882,7 @@ final class ExtractPatternsStep implements Step
                 $exchanged = true;
             } else {
                 self::copyDirectory($liveDir, $backupDir);
-                $inPlace = true;
+                $backupReady = is_dir($backupDir);
                 self::installDirectoryInPlace($liveDir, $files);
             }
 
@@ -890,16 +892,18 @@ final class ExtractPatternsStep implements Step
             if ($exchanged && is_dir($liveDir) && is_dir($stagingDir)) {
                 self::exchangePaths($liveDir, $stagingDir);
             }
-            if (is_dir($backupDir)) {
+            if ($backupReady && is_dir($backupDir)) {
                 self::installDirectoryInPlace($liveDir, self::filesIn($backupDir));
             }
             self::removePath($stagingDir);
             self::removePath($backupDir);
+            self::removePath($backupWip);
             throw $error;
         }
 
         self::removePath($stagingDir);
         self::removePath($backupDir);
+        self::removePath($backupWip);
         if ($files === []) {
             self::removePath($liveDir);
         }
@@ -954,10 +958,21 @@ final class ExtractPatternsStep implements Step
 
     private static function copyDirectory(string $from, string $to): void
     {
-        self::removePath($to);
         if (!is_dir($from)) {
             return;
         }
+        $wip = $to . '.wip';
+        self::removePath($wip);
+        self::copyDirectoryContents($from, $wip);
+        self::removePath($to);
+        if (!@rename($wip, $to)) {
+            self::removePath($wip);
+            throw new \RuntimeException("Could not finalize backup pattern directory: {$to}");
+        }
+    }
+
+    private static function copyDirectoryContents(string $from, string $to): void
+    {
         if (!@mkdir($to, 0775, true) && !is_dir($to)) {
             throw new \RuntimeException("Could not create backup pattern directory: {$to}");
         }
@@ -968,7 +983,7 @@ final class ExtractPatternsStep implements Step
             $source = $from . '/' . $entry;
             $dest = $to . '/' . $entry;
             if (is_dir($source)) {
-                self::copyDirectory($source, $dest);
+                self::copyDirectoryContents($source, $dest);
                 continue;
             }
             if (!@copy($source, $dest)) {

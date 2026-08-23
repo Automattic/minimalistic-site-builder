@@ -573,6 +573,38 @@ test('in-place fallback restores after a throw during the live write', function 
     });
 });
 
+test('a failed backup copy does not wipe the live pattern dir', function (): void {
+    with_project('builder_extract_backup_copy_fail_', function (Project $project): void {
+        putenv('MSB_FORCE_PATTERN_INPLACE=1');
+        try {
+            $project->writeText('theme/patterns/ghost.php', '<?php // stale');
+            $broken = $project->themePath('patterns/broken');
+            symlink('/this/path/does/not/exist', $broken);
+
+            $method = new \ReflectionMethod(ExtractPatternsStep::class, 'replacePatternOutputs');
+            $method->setAccessible(true);
+            $step = new ExtractPatternsStep();
+            assert_throws(static fn () => $method->invoke($step, $project, [
+                'hero.php' => "<?php\n// new\n",
+            ], [
+                'version' => 2,
+                'patterns' => [['slug' => 'hero', 'kind' => 'section']],
+                'starter' => null,
+                'dropped' => [],
+            ]));
+
+            assert_true($project->exists('theme/patterns/ghost.php'), 'partial backup must not restore over live');
+            assert_eq('<?php // stale', $project->readText('theme/patterns/ghost.php'));
+            assert_true(is_link($broken), 'unreadable source stays');
+            assert_true(!$project->exists('theme/patterns/hero.php'));
+            assert_true(!is_dir($project->themePath('.patterns-prev')));
+            assert_true(!is_dir($project->themePath('.patterns-prev.wip')));
+        } finally {
+            putenv('MSB_FORCE_PATTERN_INPLACE');
+        }
+    });
+});
+
 test('pattern headers use only the closed label and shape vocabulary', function (): void {
     with_project('builder_extract_header_', function (Project $project): void {
         extract_patterns_seed($project, [[
