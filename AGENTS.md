@@ -44,7 +44,8 @@ For mixed multi-page HTML-first builds, each `design/<slug>.failed` marker route
 
 `bin/serve.php` boots a built site. Studio is the default when available (macOS/Windows desktop app); Playground is the failover for Linux and CI. Generated Studio sites live under `~/Studio` (`SITE_BUILD_STUDIO_ROOT` overrides). `--stop` / `--stop-all` / `--prune` always go to `StudioAppRunner` (persistent-site ops), never through `RunnerResolver`. `--prune` removes sites this checkout created (`marker.repo === repoPath`), not hand-made `~/Studio` dirs.
 
-- `--runner=studio|playground` (or `SITE_BUILD_RUNNER`) — flag, then env, then Studio if available, else Playground + warn. Forced `studio` that is unavailable is an error, never a silent downgrade.
+- `--runner=studio|playground` (or `SITE_BUILD_RUNNER`) — flag, then env, then Studio if available, else Playground + warn. An auto-picked Studio that fails to boot also falls back (the build is already paid for); the downgrade lands in `warnings.json` under `site-runner`. A runner the caller named is never downgraded, available or not.
+- `StudioCli` runs every `studio` command with `/dev/null` on stdin. With a terminal there, `studio create` prompts for six options it was not given, and the prompts are invisible once stdout is a pipe — the command just waits. `StudioAppRunner::createSite()` passes all of them anyway, but `--domain` has no skip value, so the empty stdin is what makes it non-interactive.
 - `--port` / `--workers` — Playground only; on Studio one note is printed.
 - `php bin/serve.php <slug> --stop` — stop one persistent site.
 - `php bin/serve.php --stop-all` — stop every site this checkout created.

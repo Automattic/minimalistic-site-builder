@@ -77,9 +77,10 @@ if (!is_dir($themeDir) || !is_file($themeDir . '/style.css')) {
 
 $port = (int) ($flags['--port'] ?? 9400);
 $cli  = new StudioCli();
+$runnerFlag = isset($flags['--runner']) ? (string) $flags['--runner'] : null;
 try {
     $runner = RunnerResolver::resolve(
-        isset($flags['--runner']) ? (string) $flags['--runner'] : null,
+        $runnerFlag,
         $cli,
         static function (string $message): void {
             fwrite(STDERR, $message . "\n");
@@ -100,8 +101,20 @@ $project = (new ProjectStore(repo_path('projects')))->open($slug);
 try {
     $site = $runner->start($project);
 } catch (RuntimeException $e) {
-    fwrite(STDERR, $e->getMessage() . "\n");
-    exit(1);
+    // Studio we picked ourselves degrades to Playground; a runner the caller
+    // named fails, so --runner=studio never quietly serves something else.
+    if ($runner->name() !== 'studio' || RunnerResolver::requestedName($runnerFlag) !== null) {
+        fwrite(STDERR, $e->getMessage() . "\n");
+        exit(1);
+    }
+    fwrite(STDERR, "Studio failed: {$e->getMessage()}\nFalling back to Playground…\n");
+    $runner = new PlaygroundRunner($port, (string) $workers);
+    try {
+        $site = $runner->start($project);
+    } catch (RuntimeException $playgroundFailure) {
+        fwrite(STDERR, $playgroundFailure->getMessage() . "\n");
+        exit(1);
+    }
 }
 
 $name = PlaygroundArtifact::themeDisplayName($project);

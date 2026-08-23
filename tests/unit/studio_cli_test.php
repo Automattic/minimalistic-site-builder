@@ -77,3 +77,32 @@ test('available() follows the injected exec, not the real PATH', function () {
     $no = new StudioCli(fake_exec(1, '', 'nope'));
     assert_true($no->available() === false, 'fake exitCode 1 must make available() false');
 });
+
+test('run() lets one slow command override the instance timeout', function () {
+    $seen = [];
+    $cli = new StudioCli(function (string $cmd, int $t) use (&$seen): array {
+        $seen[] = $t;
+        return ['exitCode' => 0, 'stdout' => '', 'stderr' => ''];
+    }, 120);
+    $cli->run(['list']);
+    $cli->run(['create', '--path', '/tmp/x'], 300);
+    $cli->run(['status']);
+    assert_eq([120, 300, 120], $seen, 'the override applies to that call only');
+});
+
+test('the studio process is handed an empty stdin, never the caller terminal', function () {
+    // Deliberately discriminating: the outer shell pipes eight bytes into the
+    // PHP process, so an inherited fd 0 would let the child read them. Studio
+    // prompts for six create options whenever stdin is a terminal, and every
+    // prompt is invisible once stdout is a pipe -- the command just waits.
+    $script = <<<'INNER'
+        require getenv('SB_BOOTSTRAP');
+        $m = new ReflectionMethod(Automattic\SiteBuild\StudioCli::class, 'realExec');
+        $m->setAccessible(true);
+        $r = $m->invoke(null, 'wc -c', 10);
+        echo (int) trim($r['stdout']);
+        INNER;
+    $cmd = 'printf aaaaaaaa | SB_BOOTSTRAP=' . escapeshellarg(repo_path('src/bootstrap.php'))
+        . ' php -r ' . escapeshellarg($script);
+    assert_eq('0', trim((string) shell_exec($cmd)), 'the child read zero bytes, not our eight');
+});

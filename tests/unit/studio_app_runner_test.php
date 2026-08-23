@@ -96,3 +96,68 @@ test('a Studio site is persistent, so build.php returns the shell', function () 
         });
     });
 });
+
+/** Records the command and the timeout each studio invocation was given. */
+function timing_cli(array &$calls): StudioCli
+{
+    return new StudioCli(function (string $cmd, int $t) use (&$calls): array {
+        $calls[] = ['cmd' => $cmd, 'timeout' => $t];
+        if (str_contains($cmd, 'status')) {
+            return ['exitCode' => 0, 'stdout' => json_encode(
+                ['siteUrl' => 'http://localhost:8881/', 'isOnline' => true]
+            ), 'stderr' => ''];
+        }
+        return ['exitCode' => 0, 'stdout' => '', 'stderr' => ''];
+    }, 120);
+}
+
+test('create answers every option studio would otherwise prompt for', function () {
+    with_temp_dir('runner_', function (string $root) {
+        $calls = [];
+        $runner = new StudioAppRunner(timing_cli($calls), $root, '/repo');
+        with_project('runner_proj_', function ($project) use ($runner, &$calls) {
+            mkdir($project->themePath(), 0775, true);
+            file_put_contents($project->themePath('style.css'), "/*\nTheme Name: Demo\n*/");
+            $runner->start($project);
+
+            $create = '';
+            foreach ($calls as $call) {
+                if (str_contains($call['cmd'], "'create'")) {
+                    $create = $call['cmd'];
+                }
+            }
+            assert_true($create !== '', 'a create ran');
+            // Each of these is a prompt studio raises when the option is absent
+            // and stdin is a terminal. --domain has no "skip" value, which is
+            // why StudioCli also denies the child a terminal.
+            foreach (["'--wp'", "'--php'", "'--name'", "'--path'", "'--admin-username'", "'--admin-email'"] as $option) {
+                assert_contains($option, $create);
+            }
+            assert_true(!str_contains($create, '--admin-password'), 'a password on the command line is visible in ps');
+        });
+    });
+});
+
+test('create gets a longer budget than the routine commands', function () {
+    with_temp_dir('runner_', function (string $root) {
+        $calls = [];
+        $runner = new StudioAppRunner(timing_cli($calls), $root, '/repo');
+        with_project('runner_proj_', function ($project) use ($runner, &$calls) {
+            mkdir($project->themePath(), 0775, true);
+            file_put_contents($project->themePath('style.css'), "/*\nTheme Name: Demo\n*/");
+            $runner->start($project);
+
+            $createTimeout = 0;
+            $otherTimeouts = [];
+            foreach ($calls as $call) {
+                if (str_contains($call['cmd'], "'create'")) {
+                    $createTimeout = $call['timeout'];
+                } else {
+                    $otherTimeouts[] = $call['timeout'];
+                }
+            }
+            assert_true($createTimeout > 120, "create budget {$createTimeout}s must exceed the 120s default: a cold machine downloads WordPress and the PHP binary inside it");
+            assert_eq([120], array_values(array_unique($otherTimeouts)), 'everything else keeps the default');
+        });
+    });
+});

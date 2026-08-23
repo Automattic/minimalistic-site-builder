@@ -16,6 +16,9 @@ namespace Automattic\SiteBuild;
  */
 final class StudioAppRunner implements SiteRunner
 {
+    /** A cold machine downloads WordPress and the PHP binary inside `create`. */
+    private const CREATE_TIMEOUT_SECONDS = 300;
+
     public function __construct(
         private readonly StudioCli $cli,
         private readonly string $root,
@@ -158,11 +161,18 @@ final class StudioAppRunner implements SiteRunner
     private function createSite(Project $project, string $slug, string $dir): void
     {
         $blueprint = SitePreset::wrapBlueprint(SitePreset::sharedSteps($project));
-        $blueprintPath = sys_get_temp_dir() . '/sb-bp-' . bin2hex(random_bytes(8)) . '.json';
-        $json = json_encode(
-            $blueprint,
-            JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR
-        );
+        try {
+            // JsonException and a random_bytes failure are not RuntimeExceptions.
+            // Callers catch RuntimeException to decide whether to fall back, so an
+            // unwrapped one escapes the failover and kills an already-paid-for build.
+            $blueprintPath = sys_get_temp_dir() . '/sb-bp-' . bin2hex(random_bytes(8)) . '.json';
+            $json = json_encode(
+                $blueprint,
+                JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR
+            );
+        } catch (\Throwable $e) {
+            throw new \RuntimeException('Could not prepare the Studio blueprint: ' . $e->getMessage(), 0, $e);
+        }
         if (file_put_contents($blueprintPath, $json) === false) {
             throw new \RuntimeException("Failed to write blueprint to {$blueprintPath}");
         }
@@ -171,16 +181,25 @@ final class StudioAppRunner implements SiteRunner
             if ($display === '') {
                 $display = $slug;
             }
+            // Every option `studio create` can prompt for is answered here, so
+            // the site is fully specified rather than taking Studio's current
+            // defaults. This is not what makes the command non-interactive:
+            // --domain has no "none" value, so it would still prompt. Only the
+            // /dev/null stdin in StudioCli does that.
             $created = $this->cli->run([
                 'create',
                 '--path', $dir,
                 '--name', $display,
+                '--wp', 'latest',
+                '--php', '8.4',
                 '--runtime', 'native',
                 '--file-access', 'site-directory',
                 '--blueprint', $blueprintPath,
+                '--admin-username', 'admin',
+                '--admin-email', 'admin@localhost.com',
                 '--skip-browser',
                 '--skip-log-details',
-            ]);
+            ], self::CREATE_TIMEOUT_SECONDS);
             if ($created['exitCode'] !== 0) {
                 throw new \RuntimeException(
                     "studio create exited {$created['exitCode']}: " . trim($created['stderr'])
@@ -189,11 +208,14 @@ final class StudioAppRunner implements SiteRunner
             if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
                 throw new \RuntimeException("studio create did not produce {$dir}");
             }
+            // Log, never display: WP_DEBUG_DISPLAY writes PHP warnings into the
+            // response body, which corrupts wp-admin headers and would put a
+            // notice inside any screenshot we take of the theme.
             $configured = $this->cli->run([
                 'config', 'set',
                 '--path', $dir,
                 '--debug-log',
-                '--debug-display',
+                '--no-debug-display',
             ]);
             if ($configured['exitCode'] !== 0) {
                 throw new \RuntimeException(
@@ -281,8 +303,9 @@ PHP;
 
     /**
      * Surface PHP notices from the generated theme after configure() and the
-     * HTTP probe (the probe is what actually renders the theme). Missing log
-     * is a no-op: addWarnings drops an empty list.
+     * HTTP probe (the probe is what actually renders the theme). Replaces
+     * rather than merges: the site was just recreated, so this log is the
+     * whole truth and a notice the theme no longer emits must not survive.
      */
     private function captureDebugLog(Project $project, string $dir): void
     {
@@ -295,7 +318,7 @@ PHP;
                 fclose($fh);
             }
         }
-        $project->addWarnings('studio-runner', DebugLogReader::summarize($log));
+        $project->replaceWarnings('studio-runner', DebugLogReader::summarize($log));
     }
 
     private function readUrl(string $slug, string $dir): RunningSite
