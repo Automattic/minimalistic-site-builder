@@ -21,7 +21,7 @@ use Automattic\SiteBuild\ThemeValidator;
  *
  * Not a gate: by the time this runs the theme is fully built, and rejecting
  * it over a residual defect would leave the user with no site at all. Every
- * problem is recorded in warnings.json (see Project::addWarnings) and the
+ * problem is recorded in warnings.json (see Project::replaceWarnings) and the
  * theme is delivered anyway.
  */
 final class ValidateThemeStep implements Step
@@ -99,8 +99,15 @@ final class ValidateThemeStep implements Step
         );
         $problems = array_values(array_unique($problems));
 
+        // postImages runs this step a second time, after cover-contrast and
+        // extract-patterns have rewritten the very bytes the in-graph run
+        // judged. This pass re-checks all of them, so it owns the step's rows
+        // outright: merging would keep a residual on record that the final
+        // theme no longer has, and clearing on an empty set is what makes the
+        // "passed" log below true.
+        $project->replaceWarnings($this->id(), $problems);
+
         if ($problems !== []) {
-            $project->addWarnings($this->id(), $problems);
             $report = 'Final theme validation found ' . count($problems)
                 . " problem(s); theme delivered anyway, problems recorded in warnings.json:\n- "
                 . implode("\n- ", $problems) . "\n";

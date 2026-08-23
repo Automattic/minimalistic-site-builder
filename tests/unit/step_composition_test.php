@@ -51,6 +51,50 @@ test('postImages names the phase every image entry point has to run', function (
     );
 });
 
+test('postImages validates against the graph it is handed, not the env selector', function () {
+    $images = new class implements Step {
+        public function id(): string { return 'generate-images'; }
+        public function label(): string { return 'Generate images'; }
+        public function declaration(): StepDeclaration
+        {
+            return new StepDeclaration(id: $this->id(), label: $this->label(), reads: [], writes: []);
+        }
+        public function run(Project $project): void {}
+    };
+    $validateReads = static function (array $steps): array {
+        foreach ($steps as $step) {
+            if ($step->id() === 'validate-theme') {
+                return $step->declaration()->reads;
+            }
+        }
+        throw new RuntimeException('postImages lost its closing validate-theme');
+    };
+
+    // bin/images.php finishes projects it did not build, so the env key says
+    // nothing about which graph did. The closing re-validation dry-runs the
+    // build's width normalization: handed the wrong graph it reports the very
+    // rules that path deliberately skips, and only the HTML-first path has a
+    // design stylesheet to consult.
+    assert_true(
+        in_array('design/site.css', $validateReads(StepComposition::postImages($images, htmlFirst: true)), true),
+        'an HTML-first project is re-validated with the HTML-first width rules',
+    );
+    assert_true(
+        !in_array('design/site.css', $validateReads(StepComposition::postImages($images, htmlFirst: false)), true),
+        'a blocks project is not',
+    );
+});
+
+test('images CLI reads the graph off the project instead of the env selector', function () {
+    $source = (string) file_get_contents(dirname(__DIR__, 2) . '/bin/images.php');
+    assert_contains('StepComposition::resumeHtmlFirst(', $source);
+    assert_contains('htmlFirst: $htmlFirst', $source);
+    assert_true(
+        !str_contains($source, 'htmlFirstSelected'),
+        'the entry point that did not build the project never asks the env selector',
+    );
+});
+
 test('StepComposition htmlFirst matches the HTML-first step order and validates', function () {
     $d = composition_deps();
     $c = StepComposition::htmlFirst(

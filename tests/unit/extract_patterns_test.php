@@ -25,7 +25,10 @@ function extract_patterns_seed(\Automattic\SiteBuild\Project $project, array $se
         'sections' => array_map(
             static fn (array $s, int $i): array => [
                 'slug' => $s['slug'],
-                'type' => 'content',
+                // The plan's `type` is an open-ended semantic name, and it is
+                // the first rung of the label ladder. Cases that care what a
+                // typed section labels itself pass their own.
+                'type' => $s['type'] ?? 'content',
                 'role' => \Automattic\SiteBuild\SectionRole::forPosition($i, count($sections)),
             ],
             $sections,
@@ -1508,6 +1511,62 @@ test('cap reserves hero and call-to-action coverage before higher-scoring grid v
         assert_true(in_array('hero-stack', $slugs, true), 'hero coverage survives the cap');
         assert_true(in_array('cta-stack', $slugs, true), 'call-to-action coverage survives the cap');
         assert_eq(10, count($manifest['dropped']));
+    });
+});
+
+test('cap reserves the plan role hero and closing when their type owns the label', function (): void {
+    with_project('builder_extract_cap_typed_roles_', function (Project $project): void {
+        // A real page plan types its opening section for what it contains, so
+        // the label ladder yields 'story'/'gallery' and never 'hero'. Reserving
+        // on the label leaves grids to take every capped slot, and composeStarter
+        // then finds no role=hero winner and omits the starter entirely.
+        $sections = [['slug' => 'welcome', 'type' => 'story', 'markup' => sp_columns(1)]];
+        foreach ([
+            'alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot',
+            'golf', 'hotel', 'india', 'juliet', 'kilo', 'lima',
+        ] as $slug) {
+            $sections[] = ['slug' => $slug, 'markup' => sp_columns(3)];
+        }
+        $sections[] = ['slug' => 'newsletter', 'type' => 'gallery', 'markup' => sp_columns(1)];
+        extract_patterns_seed($project, $sections);
+
+        (new ExtractPatternsStep())->run($project);
+
+        $manifest = $project->readJson('patterns.json');
+        $slugs = array_column($manifest['patterns'], 'slug');
+        assert_true(in_array('story-stack', $slugs, true), 'the typed role=hero survives the cap');
+        assert_true(in_array('gallery-stack', $slugs, true), 'the typed role=closing survives the cap');
+        assert_true($manifest['starter'] !== null, 'the starter keeps its opening hero');
+        assert_eq('story-stack', $manifest['starter']['sections'][0]);
+    });
+});
+
+test('a second extract-patterns pass owns warnings.json instead of merging the first', function (): void {
+    with_project('builder_extract_warning_replace_', function (Project $project): void {
+        $sections = [['slug' => 'hero', 'markup' => sp_columns(1)]];
+        foreach ([
+            'alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot',
+            'golf', 'hotel', 'india', 'juliet', 'kilo', 'lima',
+        ] as $slug) {
+            $sections[] = ['slug' => $slug, 'markup' => sp_columns(3)];
+        }
+        extract_patterns_seed($project, $sections);
+        (new ExtractPatternsStep())->run($project);
+        assert_true(
+            isset($project->readJson('warnings.json')['extract-patterns']),
+            'the capped first pass records its drops',
+        );
+
+        // postImages re-runs this step over pages cover-contrast rewrote. A
+        // pass that ships every key must not leave the earlier pass's drop
+        // receipts describing bytes the theme no longer contains.
+        extract_patterns_seed($project);
+        (new ExtractPatternsStep())->run($project);
+
+        assert_true(
+            !isset($project->readJson('warnings.json')['extract-patterns']),
+            'the clean second pass clears the stale drop receipts',
+        );
     });
 });
 

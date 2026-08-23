@@ -440,10 +440,18 @@ final class StepComposition
      * The caller builds the image step, because choosing an image client means
      * reading the environment and this package leaves that to its hosts.
      *
+     * @param ?bool $htmlFirst which graph built the project being finished.
+     *        Null asks the env selection, which is only the truth for a host
+     *        that just ran that graph in this process: an entry point resuming
+     *        a project it did not build reads the record and passes it, or the
+     *        re-validation applies the other path's width rules.
      * @return Step[]
      */
-    public static function postImages(Step $generateImages, ?BlockFixer $blockFixer = null): array
-    {
+    public static function postImages(
+        Step $generateImages,
+        ?BlockFixer $blockFixer = null,
+        ?bool $htmlFirst = null,
+    ): array {
         return [
             $generateImages,
             // The pipeline drew a palette poster because no photo existed.
@@ -460,7 +468,7 @@ final class StepComposition
             // the delivered theme (the in-graph ValidateThemeStep ran before
             // this phase rewrote covers and re-extracted patterns).
             new ExtractPatternsStep(),
-            new ValidateThemeStep(htmlFirst: self::htmlFirstSelected()),
+            new ValidateThemeStep(htmlFirst: $htmlFirst ?? self::htmlFirstSelected()),
         ];
     }
 

@@ -146,6 +146,30 @@ test('validate-theme passes and logs a completed contract-valid theme', function
     }
 });
 
+test('the postImages validate-theme pass owns its rows instead of merging the in-graph run', function () {
+    [$project, $tmp] = final_validation_project();
+    // What the in-graph run recorded, before cover-contrast and
+    // extract-patterns rewrote the very bytes it judged.
+    $project->addWarnings('validate-theme', [
+        'theme/parts/footer.html: residual the in-graph pass saw before covers were rewritten',
+    ]);
+    $project->addWarnings('cover-contrast', ['a different step keeps its own rows']);
+
+    try {
+        (new ValidateThemeStep())->run($project);
+
+        $warnings = $project->readJson('warnings.json');
+        assert_true(
+            !isset($warnings['validate-theme']),
+            'a clean second pass clears the rows its own "passed" log says are gone',
+        );
+        assert_eq(['a different step keeps its own rows'], $warnings['cover-contrast']);
+        assert_contains('passed', $project->readText('logs/validate-theme.log'));
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
 test('validate-theme records problems as warnings and still delivers the theme', function () {
     [$project, $tmp] = final_validation_project();
     $project->writeText(

@@ -415,7 +415,11 @@ final class ExtractPatternsStep implements Step
             'dropped' => $dropped,
         ]);
         $project->writeText('logs/' . self::LOG_FILE, implode("\n", $log) . ($log === [] ? '' : "\n"));
-        $project->addWarnings($this->id(), $warnings);
+        // postImages re-runs this step after cover-contrast rewrites the
+        // assembled pages, and every run recomputes the complete warning set
+        // from the current bytes. Merging would keep a first-pass drop on
+        // record after the second pass shipped that key.
+        $project->replaceWarnings($this->id(), $warnings);
 
         Narrator::write(sprintf(
             "  extracted %d pattern(s); %d dropped\n",
@@ -1589,11 +1593,8 @@ final class ExtractPatternsStep implements Step
         usort($ranked, [self::class, 'compareCapWinners']);
         $keptByKey = [];
 
-        foreach ([['hero'], ['cta', 'closing']] as $reservedLabels) {
-            $matches = array_values(array_filter(
-                $winners,
-                static fn (array $winner): bool => in_array($winner['label'] ?? null, $reservedLabels, true),
-            ));
+        foreach (self::capReservations() as $matchesReservation) {
+            $matches = array_values(array_filter($winners, $matchesReservation));
             if ($matches === []) {
                 continue;
             }
@@ -1617,6 +1618,32 @@ final class ExtractPatternsStep implements Step
             static fn (array $winner): bool => !isset($keptByKey[(string) $winner['key']]),
         ));
         return [array_values($keptByKey), $overflow];
+    }
+
+    /**
+     * The endpoints the cap reserves before score-ranked fill, in order.
+     *
+     * Hero and closing match on `role`, not `label`: the label ladder reads
+     * the plan's `type` first, and `type` is an open-ended semantic name, so
+     * a page-opening hero is routinely typed `gallery`, `services`, or
+     * `story` and never carries the `hero` label. composeStarter picks its
+     * sections by role and omits the starter entirely when no hero winner
+     * survived, so reserving by label let the cap drop the starter's opener.
+     *
+     * The CTA slot stays on the label: it is pattern-library coverage rather
+     * than starter structure, and a page can close on something that is not
+     * a call to action. It collapses into the closing reservation whenever
+     * the same winner satisfies both.
+     *
+     * @return list<callable(array<mixed>):bool>
+     */
+    private static function capReservations(): array
+    {
+        return [
+            static fn (array $winner): bool => ($winner['role'] ?? null) === SectionRole::HERO,
+            static fn (array $winner): bool => ($winner['role'] ?? null) === SectionRole::CLOSING,
+            static fn (array $winner): bool => ($winner['label'] ?? null) === 'cta',
+        ];
     }
 
     /**
