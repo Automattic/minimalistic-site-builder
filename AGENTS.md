@@ -40,6 +40,16 @@ Only the HTML-first graph is wrapped in `FallbackBuildPipeline`; the default blo
 
 For mixed multi-page HTML-first builds, each `design/<slug>.failed` marker routes only that slug through scoped blocks-path page planning and section generation. Other pages and shared transformed chrome stay on the HTML-first path; `page-styles` ignores failed-page source HTML.
 
+## Site runner
+
+`bin/serve.php` boots a built site. Studio is the default when available (macOS/Windows desktop app); Playground is the failover for Linux and CI. Generated Studio sites live under `~/Studio` (`SITE_BUILD_STUDIO_ROOT` overrides). `--stop` / `--stop-all` / `--prune` always go to `StudioAppRunner` (persistent-site ops), never through `RunnerResolver`. `--prune` removes sites this checkout created (`marker.repo === repoPath`), not hand-made `~/Studio` dirs.
+
+- `--runner=studio|playground` (or `SITE_BUILD_RUNNER`) — flag, then env, then Studio if available, else Playground + warn. Forced `studio` that is unavailable is an error, never a silent downgrade.
+- `--port` / `--workers` — Playground only; on Studio one note is printed.
+- `php bin/serve.php <slug> --stop` — stop one persistent site.
+- `php bin/serve.php --stop-all` — stop every site this checkout created.
+- `php bin/serve.php --prune` — remove those sites.
+
 ## Generated-content validation: fix, degrade, warn — never crash the build
 
 Every validator and fixer in this pipeline exists because an LLM produced imperfect content. **A defect in generated content must never abort the build.** The user asked for a site; shipping a site with a slightly wrong margin, a missing decorative section, or a dropped inline style is always better than shipping nothing after paying for every LLM call in the graph.
