@@ -240,14 +240,15 @@ function resolve_llm(): Llm
         // CLI-host decisions about provider or credential configuration must
         // use Env::get(), never raw getenv(), so .env and execution agree.
         $explicitProvider = $configuredProvider;
-        if ($explicitProvider !== null
-            && trim($explicitProvider) !== ''
-            && strtolower(trim($explicitProvider)) !== $harnessProvider
-        ) {
-            throw new TransportUnavailable(
-                "Transport {$choice->kind} requires provider {$harnessProvider}, "
-                . "but explicit LLM_PROVIDER={$explicitProvider} disagrees."
-            );
+        if ($explicitProvider !== null && trim($explicitProvider) !== '') {
+            $explicitCredential = TransportResolver::credentialVariableFor($explicitProvider);
+            $harnessCredential = TransportResolver::credentialVariableFor($harnessProvider);
+            if ($explicitCredential !== $harnessCredential) {
+                throw new TransportUnavailable(
+                    "Transport {$choice->kind} requires provider {$harnessProvider}, "
+                    . "but explicit LLM_PROVIDER={$explicitProvider} disagrees."
+                );
+            }
         }
         putenv("LLM_PROVIDER={$harnessProvider}");
     }

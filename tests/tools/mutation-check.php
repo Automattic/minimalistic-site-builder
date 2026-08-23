@@ -889,14 +889,15 @@ PHP,
         '45 incoherent provider and harness pairing is accepted',
         'src/bootstrap.php',
         <<<'PHP'
-        if ($explicitProvider !== null
-            && trim($explicitProvider) !== ''
-            && strtolower(trim($explicitProvider)) !== $harnessProvider
-        ) {
-            throw new TransportUnavailable(
-                "Transport {$choice->kind} requires provider {$harnessProvider}, "
-                . "but explicit LLM_PROVIDER={$explicitProvider} disagrees."
-            );
+        if ($explicitProvider !== null && trim($explicitProvider) !== '') {
+            $explicitCredential = TransportResolver::credentialVariableFor($explicitProvider);
+            $harnessCredential = TransportResolver::credentialVariableFor($harnessProvider);
+            if ($explicitCredential !== $harnessCredential) {
+                throw new TransportUnavailable(
+                    "Transport {$choice->kind} requires provider {$harnessProvider}, "
+                    . "but explicit LLM_PROVIDER={$explicitProvider} disagrees."
+                );
+            }
         }
 PHP,
         '',
