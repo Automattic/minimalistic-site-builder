@@ -8,4 +8,4 @@ echo json_encode([
     "result" => $stdin,
     "usage" => ["input_tokens" => 2, "output_tokens" => 5],
 ], JSON_THROW_ON_ERROR);
-' "$@"
+' -- "$@"

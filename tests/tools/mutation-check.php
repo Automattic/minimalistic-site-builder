@@ -10,7 +10,7 @@ declare(strict_types=1);
  */
 
 const MUTATION_ROOT = __DIR__ . '/../..';
-const MUTATION_RUN_TIMEOUT_SECONDS = 8;
+const MUTATION_RUN_TIMEOUT_SECONDS = 20;
 
 /**
  * @param list<string> $command
@@ -89,6 +89,8 @@ require_once __DIR__ . '/tests/lib.php';
 require_once __DIR__ . '/tests/unit/transport_choice_test.php';
 require_once __DIR__ . '/tests/unit/transport_resolver_test.php';
 require_once __DIR__ . '/tests/unit/process_pool_test.php';
+require_once __DIR__ . '/tests/unit/claude_cli_llm_test.php';
+require_once __DIR__ . '/tests/unit/harness_cli_llm_test.php';
 
 exit(run_tests());
 PHP;
@@ -148,6 +150,8 @@ function mutation_copy_tree(string $target): void
         'tests/unit/transport_choice_test.php',
         'tests/unit/transport_resolver_test.php',
         'tests/unit/process_pool_test.php',
+        'tests/unit/claude_cli_llm_test.php',
+        'tests/unit/harness_cli_llm_test.php',
         'tests/fixtures/fake-harness',
     ] as $path) {
         mutation_copy_path(MUTATION_ROOT . '/' . $path, $target . '/' . $path);
@@ -684,6 +688,46 @@ PHP,
 PHP,
         '',
     ],
+    [
+        '29 Claude argv omits the pinned model',
+        'src/ClaudeCliLlm.php',
+        <<<'PHP'
+            '--model',
+            $model,
+PHP,
+        '',
+    ],
+    [
+        '30 prompt moves from stdin into argv',
+        'src/HarnessCliLlm.php',
+        <<<'PHP'
+                'argv' => $this->argvFor($request, $prepared[$key]['model']),
+                'stdin' => $prepared[$key]['prompt'],
+PHP,
+        <<<'PHP'
+                'argv' => [...$this->argvFor($request, $prepared[$key]['model']), $prepared[$key]['prompt']],
+PHP,
+    ],
+    [
+        '31 cached prefixes are dropped from stdin',
+        'src/HarnessCliLlm.php',
+        <<<'PHP'
+            'prompt' => implode('', $layers) . $request['prompt'],
+PHP,
+        <<<'PHP'
+            'prompt' => $request['prompt'],
+PHP,
+    ],
+    [
+        '32 max_tokens disclosure is swallowed',
+        'src/HarnessCliLlm.php',
+        <<<'PHP'
+        foreach (['temperature', 'max_tokens'] as $option) {
+PHP,
+        <<<'PHP'
+        foreach (['temperature'] as $option) {
+PHP,
+    ],
 ];
 
 $args = array_slice($argv, 1);
@@ -783,7 +827,7 @@ try {
             echo "{$classification['verdict']} {$label} {$classification['detail']}\n";
         }
         echo "RESULT {$counts['KILLED']} KILLED, {$counts['SURVIVED']} SURVIVED, {$counts['HARD ERROR']} HARD ERROR\n";
-        $failed = $counts['KILLED'] < 28 || $counts['SURVIVED'] !== 0 || $counts['HARD ERROR'] !== 0;
+        $failed = $counts['KILLED'] < 32 || $counts['SURVIVED'] !== 0 || $counts['HARD ERROR'] !== 0;
     }
 } catch (Throwable $e) {
     echo 'MUTATION ERROR: ' . $e->getMessage() . "\n";
