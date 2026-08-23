@@ -1258,6 +1258,7 @@ test('sections zero-attempt batch notes do not claim regeneration occurred', fun
     $joined = implode(' ', $project->readJson('warnings.json')['sections'] ?? []);
     assert_contains("cannot honor option 'temperature'", $joined);
     assert_contains('after 0 regeneration(s)', $joined);
+    assert_contains('regeneration was not inferred', $joined);
     assert_true(
         !str_contains($joined, 'only after bounded regeneration'),
         'the disposition must not invent a regeneration attempt',
