@@ -14,6 +14,10 @@ Issues for this repo are tracked in the Linear project **[Generated themes: repl
 
 We don't need to plan for backwards compatibility. This is a green field project in an early dev stage — there are no external consumers or stored data to preserve, so prefer the cleanest design and feel free to make breaking changes without migration paths or compatibility shims.
 
+## Site builds from agent harnesses
+
+When an agent needs to create or resume a generated site, follow [the site-build skill](.claude/skills/site-build/SKILL.md), the source of truth for selecting and confirming its subscription-backed transport.
+
 ## Generation step maps
 
 Default blocks graph (`StepComposition::default()` → `StepComposition::blocks()`), where the model authors block markup directly:
