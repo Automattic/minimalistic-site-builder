@@ -10,7 +10,7 @@ declare(strict_types=1);
  */
 
 const MUTATION_ROOT = __DIR__ . '/../..';
-const MUTATION_RUN_TIMEOUT_SECONDS = 20;
+const MUTATION_RUN_TIMEOUT_SECONDS = 30;
 
 /**
  * @param list<string> $command
@@ -90,6 +90,8 @@ require_once __DIR__ . '/tests/unit/transport_choice_test.php';
 require_once __DIR__ . '/tests/unit/transport_resolver_test.php';
 require_once __DIR__ . '/tests/unit/process_pool_test.php';
 require_once __DIR__ . '/tests/unit/claude_cli_llm_test.php';
+require_once __DIR__ . '/tests/unit/codex_cli_llm_test.php';
+require_once __DIR__ . '/tests/unit/grok_cli_llm_test.php';
 require_once __DIR__ . '/tests/unit/harness_cli_llm_test.php';
 
 exit(run_tests());
@@ -155,6 +157,8 @@ function mutation_copy_tree(string $target): void
         'tests/unit/transport_resolver_test.php',
         'tests/unit/process_pool_test.php',
         'tests/unit/claude_cli_llm_test.php',
+        'tests/unit/codex_cli_llm_test.php',
+        'tests/unit/grok_cli_llm_test.php',
         'tests/unit/harness_cli_llm_test.php',
         'tests/fixtures/fake-harness',
     ] as $path) {
@@ -703,13 +707,12 @@ PHP,
     ],
     [
         '30 prompt moves from stdin into argv',
-        'src/HarnessCliLlm.php',
+        'src/ClaudeCliLlm.php',
         <<<'PHP'
-                'argv' => $this->argvFor($request, $prepared[$key]['model']),
-                'stdin' => $prepared[$key]['prompt'],
+        return ['argv' => $argv, 'stdin' => $prepared['prompt']];
 PHP,
         <<<'PHP'
-                'argv' => [...$this->argvFor($request, $prepared[$key]['model']), $prepared[$key]['prompt']],
+        return ['argv' => [...$argv, $prepared['prompt']]];
 PHP,
     ],
     [
@@ -804,6 +807,109 @@ PHP,
 PHP,
         <<<'PHP'
         $value = getenv($variable);
+PHP,
+    ],
+    [
+        '39 Codex argv omits the pinned model',
+        'src/CodexCliLlm.php',
+        <<<'PHP'
+            '-m',
+            $model,
+PHP,
+        '',
+    ],
+    [
+        '40 Grok argv omits the pinned model',
+        'src/GrokCliLlm.php',
+        <<<'PHP'
+            '-m',
+            $model,
+PHP,
+        '',
+    ],
+    [
+        '41 Grok puts the prompt in argv',
+        'src/GrokCliLlm.php',
+        <<<'PHP'
+            '--prompt-file',
+            $promptPath,
+PHP,
+        <<<'PHP'
+            '-p',
+            $prepared['prompt'],
+PHP,
+    ],
+    [
+        '42 scratch cleanup is skipped on failure',
+        'src/HarnessCliLlm.php',
+        <<<'PHP'
+        } finally {
+            $cleanupFailure = null;
+            foreach (array_reverse($scratchDirs, true) as $scratchDir) {
+                try {
+                    $this->removeScratchPath($scratchDir);
+                } catch (\Throwable $e) {
+                    $cleanupFailure ??= $e;
+                }
+            }
+            if ($cleanupFailure !== null) {
+                throw $cleanupFailure;
+            }
+        }
+PHP,
+        <<<'PHP'
+        } catch (\Throwable $e) {
+            throw $e;
+        }
+PHP,
+    ],
+    [
+        '43 Codex reads the event text instead of the output file',
+        'src/CodexCliLlm.php',
+        <<<'PHP'
+        return [
+            'text' => $answerFromFile,
+PHP,
+        <<<'PHP'
+        $eventLines = preg_split('/\R/', trim($stdout)) ?: [];
+        $eventMessage = isset($eventLines[2]) ? json_decode($eventLines[2], true) : null;
+        return [
+            'text' => (string) ($eventMessage['item']['text'] ?? ''),
+PHP,
+    ],
+    [
+        '44 resolve_llm does not align the harness provider',
+        'src/bootstrap.php',
+        <<<'PHP'
+        putenv("LLM_PROVIDER={$harnessProvider}");
+PHP,
+        '',
+    ],
+    [
+        '45 incoherent provider and harness pairing is accepted',
+        'src/bootstrap.php',
+        <<<'PHP'
+        if (is_string($explicitProvider)
+            && trim($explicitProvider) !== ''
+            && strtolower(trim($explicitProvider)) !== $harnessProvider
+        ) {
+            throw new TransportUnavailable(
+                "Transport {$choice->kind} requires provider {$harnessProvider}, "
+                . "but explicit LLM_PROVIDER={$explicitProvider} disagrees."
+            );
+        }
+PHP,
+        '',
+    ],
+    [
+        '46 Codex double counts cached input',
+        'src/CodexCliLlm.php',
+        <<<'PHP'
+            'input' => (int) ($turnUsage['input_tokens'] ?? 0),
+PHP,
+        <<<'PHP'
+            'input' => (int) ($turnUsage['input_tokens'] ?? 0)
+                + (int) ($turnUsage['cached_input_tokens'] ?? 0),
 PHP,
     ],
 ];
@@ -905,7 +1011,7 @@ try {
             echo "{$classification['verdict']} {$label} {$classification['detail']}\n";
         }
         echo "RESULT {$counts['KILLED']} KILLED, {$counts['SURVIVED']} SURVIVED, {$counts['HARD ERROR']} HARD ERROR\n";
-        $failed = $counts['KILLED'] < 38 || $counts['SURVIVED'] !== 0 || $counts['HARD ERROR'] !== 0;
+        $failed = $counts['KILLED'] < 46 || $counts['SURVIVED'] !== 0 || $counts['HARD ERROR'] !== 0;
     }
 } catch (Throwable $e) {
     echo 'MUTATION ERROR: ' . $e->getMessage() . "\n";

@@ -159,14 +159,18 @@ final class TransportResolver
                     . 'Pass a non-blank model as the third argument to TransportResolver::build().'
                 )
                 : new ClaudeCliLlm($harnessModel, $binary),
-            TransportChoice::KIND_CODEX_CLI => throw new TransportUnavailable(
-                'Transport codex-cli is resolved but not yet implemented. '
-                . 'Use SITE_BUILD_LLM=api with the configured provider key until this transport is implemented.'
-            ),
-            TransportChoice::KIND_GROK_CLI => throw new TransportUnavailable(
-                'Transport grok-cli is resolved but not yet implemented. '
-                . 'Use SITE_BUILD_LLM=api with the configured provider key until this transport is implemented.'
-            ),
+            TransportChoice::KIND_CODEX_CLI => $harnessModel === null || trim($harnessModel) === ''
+                ? throw new TransportUnavailable(
+                    'Transport codex-cli cannot be built because its harness model is missing. '
+                    . 'Pass a non-blank model as the third argument to TransportResolver::build().'
+                )
+                : new CodexCliLlm($harnessModel, $binary),
+            TransportChoice::KIND_GROK_CLI => $harnessModel === null || trim($harnessModel) === ''
+                ? throw new TransportUnavailable(
+                    'Transport grok-cli cannot be built because its harness model is missing. '
+                    . 'Pass a non-blank model as the third argument to TransportResolver::build().'
+                )
+                : new GrokCliLlm($harnessModel, $binary),
             default => throw new TransportUnavailable(
                 "Transport {$choice->kind} is resolved but not implemented. "
                 . 'Set SITE_BUILD_LLM=api with the configured provider key.'

@@ -229,6 +229,26 @@ function resolve_llm(): Llm
         static fn (): array => TransportResolver::ancestry(),
         ModelConfig::defaultProvider(),
     );
+
+    $harnessProvider = match ($choice->kind) {
+        \Automattic\SiteBuild\TransportChoice::KIND_CLAUDE_CLI => 'anthropic',
+        \Automattic\SiteBuild\TransportChoice::KIND_CODEX_CLI => 'openai',
+        \Automattic\SiteBuild\TransportChoice::KIND_GROK_CLI => 'xai',
+        default => null,
+    };
+    if ($harnessProvider !== null) {
+        $explicitProvider = getenv('LLM_PROVIDER');
+        if (is_string($explicitProvider)
+            && trim($explicitProvider) !== ''
+            && strtolower(trim($explicitProvider)) !== $harnessProvider
+        ) {
+            throw new TransportUnavailable(
+                "Transport {$choice->kind} requires provider {$harnessProvider}, "
+                . "but explicit LLM_PROVIDER={$explicitProvider} disagrees."
+            );
+        }
+        putenv("LLM_PROVIDER={$harnessProvider}");
+    }
     Narrator::write(TransportResolver::describe($choice) . "\n");
 
     return TransportResolver::build(
