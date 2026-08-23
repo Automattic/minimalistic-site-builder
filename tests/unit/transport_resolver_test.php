@@ -30,6 +30,32 @@ function tr_php(string $code, array $ini = []): array
     return [implode("\n", $output), $status];
 }
 
+/** Resolve one explicit harness in a child and return [output, status, decoded details]. */
+function tr_harness_probe(string $dir, string $kind, ?string $provider): array
+{
+    $bootstrap = dirname(__DIR__, 2) . '/src/bootstrap.php';
+    $providerSetup = $provider === null
+        ? 'putenv("LLM_PROVIDER"); '
+        : 'putenv("LLM_PROVIDER=' . addslashes($provider) . '"); ';
+    $code = 'putenv("PATH=' . addslashes($dir) . '"); '
+        . 'putenv("SITE_BUILD_LLM=' . addslashes($kind) . '"); '
+        . $providerSetup
+        . 'putenv("LLM_MODEL"); putenv("LLM_MODEL_SMALL"); '
+        . 'require ' . var_export($bootstrap, true) . '; '
+        . '$stream = fopen("php://memory", "w+"); '
+        . '\\Automattic\\SiteBuild\\Narrator::setStream($stream); '
+        . 'try { $llm = resolve_llm(); '
+        . '$r = new ReflectionClass(\\Automattic\\SiteBuild\\HarnessCliLlm::class); '
+        . '$model = $r->getProperty("model")->getValue($llm); '
+        . 'echo json_encode(["class" => get_class($llm), "model" => $model, '
+        . '"provider" => getenv("LLM_PROVIDER"), "default" => default_llm_model(), '
+        . '"steps" => step_models()], JSON_THROW_ON_ERROR); } '
+        . 'catch (Throwable $e) { echo "ERROR|" . get_class($e) . "|" . $e->getMessage(); }';
+    [$output, $status] = tr_php($code);
+    $decoded = json_decode($output, true);
+    return [$output, $status, is_array($decoded) ? $decoded : null];
+}
+
 test('rung 1: an explicit override wins over everything below it', function (): void {
     [$path, $anc] = tr_nothing();
     $c = TransportResolver::decide(
@@ -1260,27 +1286,33 @@ test('V14 resolve_llm sees the Env-loaded OpenRouter credential alias', function
     assert_true(!str_contains($output, 'ERROR'), $output);
 });
 
-test('V15 explicit codex-cli and grok-cli overrides keep actionable deferred stubs', function (): void {
-    with_temp_dir('deferred-harness-', function (string $dir): void {
-        foreach (['codex', 'grok'] as $name) {
-            file_put_contents($dir . '/' . $name, "#!/bin/sh\nexit 0\n");
-            chmod($dir . '/' . $name, 0755);
-        }
-        $bootstrap = dirname(__DIR__, 2) . '/src/bootstrap.php';
-        $code = 'putenv("PATH=' . addslashes($dir) . '"); require ' . var_export($bootstrap, true) . '; '
-            . 'foreach (["codex-cli", "grok-cli"] as $kind) { putenv("SITE_BUILD_LLM={$kind}"); '
-            . 'try { resolve_llm(); echo "{$kind}|NO_ERROR\n"; } '
-            . 'catch (Throwable $e) { echo "{$kind}|" . get_class($e) . "|" . $e->getMessage() . "\n"; } }';
-
-        [$output, $status] = tr_php($code);
-        assert_eq(0, $status, $output);
-        foreach (['codex-cli', 'grok-cli'] as $kind) {
-            assert_contains("{$kind}|" . TransportUnavailable::class, $output);
-            assert_contains("Transport {$kind} is resolved but not yet implemented", $output);
-        }
-        assert_eq(2, substr_count($output, 'SITE_BUILD_LLM=api'));
-        assert_true(!str_contains($output, 'NO_ERROR'));
+test('W11 build wires codex-cli to CodexCliLlm without spawning', function (): void {
+    with_temp_dir('built-codex-', function (string $dir): void {
+        $binary = $dir . '/codex';
+        assert_true(copy(dirname(__DIR__) . '/fixtures/fake-harness/spawn-counter.sh', $binary));
+        assert_true(chmod($binary, 0755));
+        $choice = new TransportChoice(TransportChoice::KIND_CODEX_CLI, 'unit', $binary);
+        $llm = TransportResolver::build($choice, harnessModel: 'gpt-5.5');
+        assert_true($llm instanceof \Automattic\SiteBuild\CodexCliLlm);
+        assert_true(!file_exists($binary . '.count'));
     });
+});
+
+test('W11 build wires grok-cli to GrokCliLlm without spawning', function (): void {
+    with_temp_dir('built-grok-', function (string $dir): void {
+        $binary = $dir . '/grok';
+        assert_true(copy(dirname(__DIR__) . '/fixtures/fake-harness/spawn-counter.sh', $binary));
+        assert_true(chmod($binary, 0755));
+        $choice = new TransportChoice(TransportChoice::KIND_GROK_CLI, 'unit', $binary);
+        $llm = TransportResolver::build($choice, harnessModel: 'grok-4.5');
+        assert_true($llm instanceof \Automattic\SiteBuild\GrokCliLlm);
+        assert_true(!file_exists($binary . '.count'));
+    });
+});
+
+test('W11 resolver source has no deferred harness stub left', function (): void {
+    $source = (string) file_get_contents(dirname(__DIR__, 2) . '/src/TransportResolver.php');
+    assert_true(!str_contains($source, 'not yet implemented'));
 });
 
 test('V15 explicit claude-cli override builds without spending', function (): void {
@@ -1299,5 +1331,89 @@ test('V15 explicit claude-cli override builds without spending', function (): vo
         assert_contains('Automattic\\SiteBuild\\ClaudeCliLlm', $output);
         assert_true(!str_contains($output, 'not yet implemented'));
         assert_true(!str_contains($output, 'ERROR'));
+    });
+});
+
+test('W17 claude-cli implies Anthropic models for transport and steps', function (): void {
+    with_temp_dir('provider-claude-', function (string $dir): void {
+        foreach (['claude', 'codex', 'grok'] as $name) {
+            assert_true(copy(dirname(__DIR__) . '/fixtures/fake-harness/spawn-counter.sh', $dir . '/' . $name));
+            assert_true(chmod($dir . '/' . $name, 0755));
+        }
+        [$output, $status, $details] = tr_harness_probe($dir, 'claude-cli', null);
+        assert_eq(0, $status, $output);
+        assert_true(is_array($details), $output);
+        assert_eq('Automattic\\SiteBuild\\ClaudeCliLlm', $details['class']);
+        assert_eq('anthropic', $details['provider']);
+        assert_eq('claude-opus-5', $details['model']);
+        assert_eq($details['model'], $details['default']);
+        assert_true(str_starts_with($details['steps']['sections'], 'claude-'));
+    });
+});
+
+test('W17 codex-cli implies OpenAI models for transport and steps', function (): void {
+    with_temp_dir('provider-codex-', function (string $dir): void {
+        foreach (['claude', 'codex', 'grok'] as $name) {
+            assert_true(copy(dirname(__DIR__) . '/fixtures/fake-harness/spawn-counter.sh', $dir . '/' . $name));
+            assert_true(chmod($dir . '/' . $name, 0755));
+        }
+        [$output, $status, $details] = tr_harness_probe($dir, 'codex-cli', null);
+        assert_eq(0, $status, $output);
+        assert_true(is_array($details), $output);
+        assert_eq('Automattic\\SiteBuild\\CodexCliLlm', $details['class']);
+        assert_eq('openai', $details['provider']);
+        assert_eq('gpt-5.5', $details['model']);
+        assert_eq($details['model'], $details['default']);
+        assert_eq('gpt-5.4-mini', $details['steps']['refine-prompt']);
+        assert_eq('gpt-5.5', $details['steps']['sections']);
+        assert_true(!str_starts_with($details['steps']['sections'], 'claude-'));
+    });
+});
+
+test('W17 grok-cli implies xAI models for transport and steps', function (): void {
+    with_temp_dir('provider-grok-', function (string $dir): void {
+        foreach (['claude', 'codex', 'grok'] as $name) {
+            assert_true(copy(dirname(__DIR__) . '/fixtures/fake-harness/spawn-counter.sh', $dir . '/' . $name));
+            assert_true(chmod($dir . '/' . $name, 0755));
+        }
+        [$output, $status, $details] = tr_harness_probe($dir, 'grok-cli', null);
+        assert_eq(0, $status, $output);
+        assert_true(is_array($details), $output);
+        assert_eq('Automattic\\SiteBuild\\GrokCliLlm', $details['class']);
+        assert_eq('xai', $details['provider']);
+        assert_eq('grok-4.5', $details['model']);
+        assert_eq($details['model'], $details['default']);
+        assert_eq(['grok-4.5'], array_values(array_unique($details['steps'])));
+    });
+});
+
+test('W18 incoherent explicit provider and harness pairing is refused', function (): void {
+    with_temp_dir('provider-refusal-', function (string $dir): void {
+        $binary = $dir . '/codex';
+        assert_true(copy(dirname(__DIR__) . '/fixtures/fake-harness/spawn-counter.sh', $binary));
+        assert_true(chmod($binary, 0755));
+        [$output, $status, $details] = tr_harness_probe($dir, 'codex-cli', 'anthropic');
+        assert_eq(0, $status, $output);
+        assert_eq(null, $details);
+        assert_contains(TransportUnavailable::class, $output);
+        assert_contains('anthropic', $output);
+        assert_contains('codex-cli', $output);
+        assert_contains('openai', $output);
+        assert_true(!file_exists($binary . '.count'));
+    });
+});
+
+test('W18 coherent explicit provider and harness pairing proceeds', function (): void {
+    with_temp_dir('provider-coherent-', function (string $dir): void {
+        $binary = $dir . '/codex';
+        assert_true(copy(dirname(__DIR__) . '/fixtures/fake-harness/spawn-counter.sh', $binary));
+        assert_true(chmod($binary, 0755));
+        [$output, $status, $details] = tr_harness_probe($dir, 'codex-cli', 'openai');
+        assert_eq(0, $status, $output);
+        assert_true(is_array($details), $output);
+        assert_eq('Automattic\\SiteBuild\\CodexCliLlm', $details['class']);
+        assert_eq('openai', $details['provider']);
+        assert_eq('gpt-5.5', $details['model']);
+        assert_true(!file_exists($binary . '.count'));
     });
 });
