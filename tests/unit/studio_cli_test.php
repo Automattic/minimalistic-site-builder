@@ -64,6 +64,13 @@ test('json blanks adminPassword before returning to callers', function () {
     assert_eq('http://localhost:8881/', $out['siteUrl']);
 });
 
+test('run() redacts adminPassword from stdout', function () {
+    $cli = new StudioCli(fake_exec(0, '{"siteUrl":"http://localhost:8881/","adminPassword":"hunter2SECRET"}'));
+    $r = $cli->run(['status', '--format', 'json']);
+    assert_true(!str_contains($r['stdout'], 'hunter2SECRET'), 'password is gone from run() stdout');
+    assert_contains('siteUrl', $r['stdout'], 'the rest survives');
+});
+
 test('available() follows the injected exec, not the real PATH', function () {
     $ok = new StudioCli(fake_exec(0, '[]'));
     assert_true($ok->available() === true, 'fake exitCode 0 must make available() true even when studio is absent from PATH');

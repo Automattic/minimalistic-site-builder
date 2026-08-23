@@ -25,6 +25,7 @@ final class StudioCli
         $cmd = 'studio ' . implode(' ', array_map(escapeshellarg(...), $args));
         $r = ($this->exec)($cmd, $this->timeoutSeconds);
         $r['stderr'] = self::redact(self::stripAnsi($r['stderr']));
+        $r['stdout'] = self::redact($r['stdout']);
         return $r;
     }
 
