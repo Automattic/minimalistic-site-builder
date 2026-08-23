@@ -803,7 +803,7 @@ final class ExtractPatternsStep implements Step
         $anchors = LinkTargets::anchorsIn($markup);
         $outside = [];
         foreach (LinkTargets::allTargets($markup) as $target) {
-            $decoded = html_entity_decode(trim($target), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $decoded = LinkTargets::normalizeTarget($target);
             if (
                 LinkTargets::isDangerousScheme($decoded)
                 || (!self::targetResolves($decoded, $resolvableRoutes, $anchors) && str_starts_with($decoded, '#'))
@@ -818,7 +818,7 @@ final class ExtractPatternsStep implements Step
         $markup = preg_replace_callback(
             '/(\bhref\s*=\s*)(["\'])(.*?)\2/is',
             static function (array $match) use ($outside): string {
-                $decoded = html_entity_decode(trim($match[3]), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                $decoded = LinkTargets::normalizeTarget($match[3]);
                 return isset($outside[$decoded]) ? $match[1] . $match[2] . '#' . $match[2] : $match[0];
             },
             $markup,
@@ -826,7 +826,7 @@ final class ExtractPatternsStep implements Step
         $markup = preg_replace_callback(
             '/(\bhref\s*=\s*)(?!["\'])([^\s"\'=<>`]+)/is',
             static function (array $match) use ($outside): string {
-                $decoded = html_entity_decode(trim($match[2]), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                $decoded = LinkTargets::normalizeTarget($match[2]);
                 return isset($outside[$decoded]) ? $match[1] . '#' : $match[0];
             },
             $markup,
@@ -834,7 +834,7 @@ final class ExtractPatternsStep implements Step
         return preg_replace_callback(
             '/("(?:textLinkHref|href|url)"\s*:\s*")([^"]*)(")/i',
             static function (array $match) use ($outside): string {
-                $decoded = str_replace('\\/', '/', $match[2]);
+                $decoded = LinkTargets::normalizeTarget($match[2]);
                 return isset($outside[$decoded]) ? $match[1] . '#' . $match[3] : $match[0];
             },
             $markup,
@@ -852,16 +852,14 @@ final class ExtractPatternsStep implements Step
     {
         $liveDir = $project->themePath('patterns');
         $stagingDir = $project->themePath('.patterns-next');
-        $backupDir = $project->themePath('.patterns-prev');
         $liveManifest = $project->path('patterns.json');
 
         self::removePath($stagingDir);
-        self::removePath($backupDir);
 
         $content = json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n";
         $writer = new NativeStagedFileWriter();
         $stagedManifest = $writer->stage($liveManifest, $content);
-        $dirSwapped = false;
+        $exchanged = false;
         try {
             if (!@mkdir($stagingDir, 0775, true) && !is_dir($stagingDir)) {
                 throw new \RuntimeException("Could not create staged pattern directory: {$stagingDir}");
@@ -872,36 +870,39 @@ final class ExtractPatternsStep implements Step
                     throw new \RuntimeException("Could not write staged pattern: {$path}");
                 }
             }
-            if (is_dir($liveDir) && !@rename($liveDir, $backupDir)) {
-                throw new \RuntimeException("Could not move live pattern directory aside: {$liveDir}");
-            }
-            if (!@rename($stagingDir, $liveDir)) {
-                if (is_dir($backupDir) && !is_dir($liveDir)) {
-                    @rename($backupDir, $liveDir);
-                }
+            if (is_dir($liveDir)) {
+                self::exchangePaths($liveDir, $stagingDir);
+                $exchanged = true;
+            } elseif (!@rename($stagingDir, $liveDir)) {
                 throw new \RuntimeException("Could not install staged pattern directory: {$liveDir}");
             }
-            $dirSwapped = true;
 
             $writer->replace($stagedManifest, $liveManifest);
         } catch (\Throwable $error) {
             $writer->discard($stagedManifest);
-            if ($dirSwapped && is_dir($backupDir)) {
-                $failed = $project->themePath('.patterns-failed');
-                self::removePath($failed);
-                if (is_dir($liveDir)) {
-                    @rename($liveDir, $failed);
-                }
-                @rename($backupDir, $liveDir);
-                self::removePath($failed);
+            if ($exchanged && is_dir($liveDir) && is_dir($stagingDir)) {
+                self::exchangePaths($liveDir, $stagingDir);
             }
             self::removePath($stagingDir);
             throw $error;
         }
 
-        self::removePath($backupDir);
+        self::removePath($stagingDir);
         if ($files === []) {
             self::removePath($liveDir);
+        }
+    }
+
+    /** Atomically swap two directories so theme/patterns is never missing. */
+    private static function exchangePaths(string $left, string $right): void
+    {
+        $ffi = \FFI::cdef(
+            'int renameat2(int olddirfd, const char *oldpath, int newdirfd, const char *newpath, unsigned int flags);',
+            'libc.so.6',
+        );
+        $result = $ffi->renameat2(-100, $left, -100, $right, 2);
+        if ($result !== 0) {
+            throw new \RuntimeException("Could not exchange {$left} and {$right}");
         }
     }
 

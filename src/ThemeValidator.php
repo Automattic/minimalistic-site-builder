@@ -633,6 +633,11 @@ final class ThemeValidator
             $links = LinkTargets::allTargets($markup);
 
             foreach ($links as $href) {
+                $href = LinkTargets::normalizeTarget($href);
+                if (LinkTargets::isDangerousScheme($href)) {
+                    $problems[] = "{$rel}: link href carries a dangerous scheme";
+                    continue;
+                }
                 if ($href === '#') {
                     continue; // reported independently even when pages.json is unavailable
                 }

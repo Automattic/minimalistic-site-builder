@@ -549,6 +549,19 @@ test('validator judges block-JSON href destinations on pattern files', function 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('validator flags encoded javascript in JSON href and textLinkHref', function () {
+    [$project, $tmp] = validator_linked_project();
+    $project->writeText(
+        'theme/patterns/encoded-js.php',
+        '<!-- wp:image {"href":"\u006Aavascript:alert(1)"} /-->'
+        . '<!-- wp:file {"textLinkHref":"javascript&colon;alert(2)"} /-->',
+    );
+    $joined = implode(' ', ThemeValidator::validate($project));
+    assert_contains('theme/patterns/encoded-js.php', $joined);
+    assert_contains('dangerous scheme', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('validator judges block-JSON href destinations on image file and media-text', function () {
     [$project, $tmp] = validator_linked_project();
     $project->writeText(

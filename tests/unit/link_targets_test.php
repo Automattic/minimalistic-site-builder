@@ -69,3 +69,11 @@ test('LinkTargets::anchorsIn collects ids', function (): void {
     $ids = LinkTargets::anchorsIn('<section id="hero"></section><div id="cta"></div>');
     assert_true(isset($ids['hero']) && isset($ids['cta']));
 });
+
+test('LinkTargets::normalizeTarget decodes JSON unicode and HTML entities', function (): void {
+    assert_eq('javascript:alert(1)', LinkTargets::normalizeTarget('\u006Aavascript:alert(1)'));
+    assert_eq('javascript:alert(1)', LinkTargets::normalizeTarget('javascript&colon;alert(1)'));
+    assert_true(LinkTargets::isDangerousScheme('\u006Aavascript:alert(1)'));
+    assert_true(LinkTargets::isDangerousScheme('javascript&colon;alert(1)'));
+});
+

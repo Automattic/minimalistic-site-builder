@@ -381,6 +381,26 @@ test('link rewrite collects and rewrites JSON textLinkHref without HTML href or 
 });
 
 
+test('link rewrite hashes JSON unicode and entity-encoded javascript', function (): void {
+    $cases = [
+        'image-unicode' => '<!-- wp:image {"href":"\u006Aavascript:alert(1)"} /-->',
+        'file-entity' => '<!-- wp:file {"href":"javascript&colon;alert(1)"} /-->',
+        'file-text-unicode' => '<!-- wp:file {"textLinkHref":"\u006Aavascript:alert(2)"} /-->',
+        'file-text-entity' => '<!-- wp:file {"textLinkHref":"javascript&colon;alert(2)"} /-->',
+        'nav-unicode' => '<!-- wp:navigation-link {"url":"\u006Aavascript:alert(3)"} /-->',
+    ];
+    foreach ($cases as $name => $markup) {
+        assert_true(LinkTargets::isDangerousScheme(LinkTargets::allTargets($markup)[0] ?? ''), $name . ' is visible as dangerous');
+        $output = ExtractPatternsStep::rewriteLinks($markup, []);
+        assert_true(!str_contains(strtolower($output), 'javascript'), $name);
+        assert_true(!str_contains($output, '\\u006A'), $name);
+        assert_true(!str_contains($output, '&colon;'), $name);
+        foreach (LinkTargets::allTargets($output) as $target) {
+            assert_eq('#', $target, $name);
+        }
+    }
+});
+
 test('a stale pattern file from a prior run is gone after a re-run', function (): void {
     with_project('builder_extract_patterns_', function (Project $project): void {
         extract_patterns_seed($project);

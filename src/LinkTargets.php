@@ -93,10 +93,24 @@ final class LinkTargets
         return preg_match('/^(?:https?:|mailto:|tel:|sms:)/i', $target) === 1;
     }
 
+    /**
+     * Decode JSON string escapes and HTML entities so collectors and rewriters
+     * judge the same destination Gutenberg will.
+     */
+    public static function normalizeTarget(string $target): string
+    {
+        $trimmed = trim($target);
+        $fromJson = json_decode('"' . $trimmed . '"');
+        if (is_string($fromJson)) {
+            $trimmed = $fromJson;
+        }
+        return html_entity_decode($trimmed, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    }
+
     /** javascript:/data:/vbscript: — rewrite these destinations to `#`. */
     public static function isDangerousScheme(string $target): bool
     {
-        return preg_match('/^(?:javascript|data|vbscript):/i', $target) === 1;
+        return preg_match('/^(?:javascript|data|vbscript):/i', self::normalizeTarget($target)) === 1;
     }
 
     /** @return list<string> */
@@ -105,7 +119,7 @@ final class LinkTargets
         $out = [];
         $pattern = '/"' . preg_quote($key, '/') . '"\s*:\s*"([^"]*)"/';
         foreach (preg_match_all($pattern, $markup, $m) ? $m[1] : [] as $value) {
-            $out[] = str_replace('\\/', '/', $value);
+            $out[] = self::normalizeTarget($value);
         }
         return $out;
     }
@@ -122,7 +136,9 @@ final class LinkTargets
             return [];
         }
         return array_map(
-            static fn (array $match): string => $match[2] !== null ? $match[2] : (string) $match[3],
+            static fn (array $match): string => self::normalizeTarget(
+                $match[2] !== null ? $match[2] : (string) $match[3]
+            ),
             $matches
         );
     }
