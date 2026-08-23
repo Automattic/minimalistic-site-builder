@@ -123,3 +123,41 @@ test('empty batches return empty keyed results without spawning', function (): v
     assert_eq([], $llm->completeBatch([])->texts);
     assert_eq(0, $llm->usageTotals()['requests']);
 });
+
+test('completeBatch throws HarnessCallFailed when every member has a missing binary', function (): void {
+    $binary = '/nonexistent/definitely-not-claude';
+    $error = assert_throws(fn () => (new ClaudeCliLlm('m', $binary))->completeBatch([
+        'first' => ['prompt' => 'one'],
+        'second' => ['prompt' => 'two'],
+    ]));
+
+    assert_true($error instanceof HarnessCallFailed);
+    assert_contains($binary, $error->getMessage());
+    assert_contains('executable not found or not executable', $error->getMessage());
+});
+
+test('completeBatch throws HarnessCallFailed when every member exits non-zero', function (): void {
+    $binary = harness_cli_fixture('fail.sh');
+    $error = assert_throws(fn () => (new ClaudeCliLlm('m', $binary))->completeBatch([
+        'first' => ['prompt' => 'one'],
+        'second' => ['prompt' => 'two'],
+    ]));
+
+    assert_true($error instanceof HarnessCallFailed);
+    assert_contains($binary, $error->getMessage());
+    assert_contains('exit 7', $error->getMessage());
+    assert_contains('diagnostic detail', $error->getMessage());
+});
+
+test('completeBatch throws HarnessCallFailed when every member returns an error envelope', function (): void {
+    $binary = harness_cli_fixture('claude-error-envelope.sh');
+    $error = assert_throws(fn () => (new ClaudeCliLlm('m', $binary))->completeBatch([
+        'first' => ['prompt' => 'one'],
+        'second' => ['prompt' => 'two'],
+    ]));
+
+    assert_true($error instanceof HarnessCallFailed);
+    assert_contains($binary, $error->getMessage());
+    assert_contains('is_error', $error->getMessage());
+    assert_contains('diagnostic from error envelope', $error->getMessage());
+});
