@@ -766,6 +766,43 @@ test('a failed rollback keeps staging so the previous tree is not deleted', func
     });
 });
 
+test('leftover staging is promoted so the next run does not delete the old tree', function (): void {
+    with_project('builder_extract_promote_staging_', function (Project $project): void {
+        putenv('MSB_FORCE_PATTERN_INPLACE=1');
+        try {
+            $project->writeText('theme/patterns/hero.php', '<?php // new from the failed run');
+            $staging = $project->themePath('.patterns-next');
+            mkdir($staging, 0775, true);
+            file_put_contents($staging . '/ghost.php', '<?php // stale');
+
+            $blocker = $project->path('patterns.json');
+            if (is_file($blocker)) {
+                unlink($blocker);
+            }
+            mkdir($blocker);
+            file_put_contents($blocker . '/keep', 'old');
+
+            $method = new \ReflectionMethod(ExtractPatternsStep::class, 'replacePatternOutputs');
+            $method->setAccessible(true);
+            assert_throws(static fn () => $method->invoke(new ExtractPatternsStep(), $project, [
+                'other.php' => "<?php\n// next\n",
+            ], [
+                'version' => 2,
+                'patterns' => [['slug' => 'other', 'kind' => 'section']],
+                'starter' => null,
+                'dropped' => [],
+            ]));
+
+            assert_true($project->exists('theme/patterns/ghost.php'), 'leftover staging was the old tree and must come back');
+            assert_eq('<?php // stale', $project->readText('theme/patterns/ghost.php'));
+            assert_true(!$project->exists('theme/patterns/other.php'));
+            assert_true(!$project->exists('theme/patterns/hero.php'));
+        } finally {
+            putenv('MSB_FORCE_PATTERN_INPLACE');
+        }
+    });
+});
+
 test('pattern headers use only the closed label and shape vocabulary', function (): void {
     with_project('builder_extract_header_', function (Project $project): void {
         extract_patterns_seed($project, [[

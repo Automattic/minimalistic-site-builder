@@ -853,8 +853,8 @@ final class ExtractPatternsStep implements Step
         $liveDir = $project->themePath('patterns');
         $stagingDir = $project->themePath('.patterns-next');
         $liveManifest = $project->path('patterns.json');
-
-        self::removePath($stagingDir);
+        $backupDir = $project->themePath('.patterns-prev');
+        $backupWip = $backupDir . '.wip';
 
         $content = json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n";
         $writer = new NativeStagedFileWriter();
@@ -862,10 +862,7 @@ final class ExtractPatternsStep implements Step
         $exchanged = false;
         $backupReady = false;
         self::$exchangeAttempts = 0;
-        $backupDir = $project->themePath('.patterns-prev');
-        $backupWip = $backupDir . '.wip';
-        self::removePath($backupDir);
-        self::removePath($backupWip);
+        self::promoteLeftoverStaging($stagingDir, $backupDir, $backupWip);
         try {
             if (!@mkdir($stagingDir, 0775, true) && !is_dir($stagingDir)) {
                 throw new \RuntimeException("Could not create staged pattern directory: {$stagingDir}");
@@ -882,7 +879,9 @@ final class ExtractPatternsStep implements Step
             if (self::exchangePaths($liveDir, $stagingDir)) {
                 $exchanged = true;
             } else {
-                self::copyDirectory($liveDir, $backupDir);
+                if (!is_dir($backupDir)) {
+                    self::copyDirectory($liveDir, $backupDir);
+                }
                 $backupReady = is_dir($backupDir);
                 self::installDirectoryInPlace($liveDir, $files);
             }
@@ -926,6 +925,29 @@ final class ExtractPatternsStep implements Step
      * Atomically swap two directories when the kernel allows it.
      * Returns false so the caller can install in place (mac, Alpine, NFS, no FFI).
      */
+    /**
+     * A failed rollback can leave the previous tree only in .patterns-next.
+     * Park it as .patterns-prev before this run writes a new staging dir.
+     */
+    private static function promoteLeftoverStaging(string $stagingDir, string $backupDir, string $backupWip): void
+    {
+        self::removePath($backupWip);
+        if (!is_dir($stagingDir)) {
+            return;
+        }
+        if (is_dir($backupDir)) {
+            self::removePath($backupDir);
+        }
+        if (@rename($stagingDir, $backupDir)) {
+            return;
+        }
+        self::copyDirectory($stagingDir, $backupDir);
+        if (!is_dir($backupDir)) {
+            throw new \RuntimeException("Could not preserve leftover pattern staging: {$stagingDir}");
+        }
+        self::removePath($stagingDir);
+    }
+
     private static int $exchangeAttempts = 0;
 
     private static function exchangePaths(string $left, string $right): bool
