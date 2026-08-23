@@ -880,8 +880,8 @@ final class ExtractPatternsStep implements Step
                 $exchanged = true;
             } else {
                 self::copyDirectory($liveDir, $backupDir);
-                self::installDirectoryInPlace($liveDir, $files);
                 $inPlace = true;
+                self::installDirectoryInPlace($liveDir, $files);
             }
 
             $writer->replace($stagedManifest, $liveManifest);
@@ -890,7 +890,7 @@ final class ExtractPatternsStep implements Step
             if ($exchanged && is_dir($liveDir) && is_dir($stagingDir)) {
                 self::exchangePaths($liveDir, $stagingDir);
             }
-            if ($inPlace && is_dir($backupDir)) {
+            if (is_dir($backupDir)) {
                 self::installDirectoryInPlace($liveDir, self::filesIn($backupDir));
             }
             self::removePath($stagingDir);
@@ -911,7 +911,7 @@ final class ExtractPatternsStep implements Step
      */
     private static function exchangePaths(string $left, string $right): bool
     {
-        if (!extension_loaded('ffi')) {
+        if (getenv('MSB_FORCE_PATTERN_INPLACE') === '1' || !extension_loaded('ffi')) {
             return false;
         }
         foreach (['libc.so.6', 'libc.so'] as $library) {

@@ -511,6 +511,68 @@ test('first-run manifest failure does not leave new pattern files', function ():
     });
 });
 
+test('in-place fallback restores the previous dir when the manifest cannot land', function (): void {
+    with_project('builder_extract_inplace_fail_', function (Project $project): void {
+        putenv('MSB_FORCE_PATTERN_INPLACE=1');
+        try {
+            $project->writeText('theme/patterns/ghost.php', '<?php // stale');
+            $blocker = $project->path('patterns.json');
+            if (is_file($blocker)) {
+                unlink($blocker);
+            }
+            mkdir($blocker);
+            file_put_contents($blocker . '/keep', 'old');
+
+            $method = new \ReflectionMethod(ExtractPatternsStep::class, 'replacePatternOutputs');
+            $method->setAccessible(true);
+            $step = new ExtractPatternsStep();
+            assert_throws(static fn () => $method->invoke($step, $project, [
+                'hero.php' => "<?php\n// new\n",
+            ], [
+                'version' => 2,
+                'patterns' => [['slug' => 'hero', 'kind' => 'section']],
+                'starter' => null,
+                'dropped' => [],
+            ]));
+
+            assert_true($project->exists('theme/patterns/ghost.php'), 'backup is restored when in-place install cannot finish the pair');
+            assert_eq('<?php // stale', $project->readText('theme/patterns/ghost.php'));
+            assert_true(!$project->exists('theme/patterns/hero.php'), 'partial new files do not stay');
+        } finally {
+            putenv('MSB_FORCE_PATTERN_INPLACE');
+        }
+    });
+});
+
+test('in-place fallback restores after a throw during the live write', function (): void {
+    with_project('builder_extract_inplace_write_fail_', function (Project $project): void {
+        putenv('MSB_FORCE_PATTERN_INPLACE=1');
+        try {
+            $project->writeText('theme/patterns/ghost.php', '<?php // stale');
+            mkdir($project->themePath('patterns/hero.php'));
+
+            $method = new \ReflectionMethod(ExtractPatternsStep::class, 'replacePatternOutputs');
+            $method->setAccessible(true);
+            $step = new ExtractPatternsStep();
+            assert_throws(static fn () => $method->invoke($step, $project, [
+                'hero.php' => "<?php\n// new\n",
+                'other.php' => "<?php\n// other\n",
+            ], [
+                'version' => 2,
+                'patterns' => [['slug' => 'hero', 'kind' => 'section']],
+                'starter' => null,
+                'dropped' => [],
+            ]));
+
+            assert_true($project->exists('theme/patterns/ghost.php'), 'live write throw still restores the backup');
+            assert_eq('<?php // stale', $project->readText('theme/patterns/ghost.php'));
+            assert_true(!$project->exists('theme/patterns/other.php'));
+        } finally {
+            putenv('MSB_FORCE_PATTERN_INPLACE');
+        }
+    });
+});
+
 test('pattern headers use only the closed label and shape vocabulary', function (): void {
     with_project('builder_extract_header_', function (Project $project): void {
         extract_patterns_seed($project, [[
