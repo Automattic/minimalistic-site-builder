@@ -104,15 +104,27 @@ function normalize_provider(?string $provider): ?string
     return $provider;
 }
 
-/** Prefer OpenRouter's canonical key name while accepting the earlier alias. */
-function openrouter_api_key(): string
+/** @return array{variable:string,value:string}|null */
+function openrouter_api_credential(): ?array
 {
     foreach (['OPENROUTER_API_KEY', 'OPEN_ROUTER_API_KEY'] as $key) {
         $value = Env::get($key);
         if ($value !== null && trim($value) !== '') {
-            return trim($value);
+            return ['variable' => $key, 'value' => trim($value)];
         }
     }
+
+    return null;
+}
+
+/** Prefer OpenRouter's canonical key name while accepting the earlier alias. */
+function openrouter_api_key(): string
+{
+    $credential = openrouter_api_credential();
+    if ($credential !== null) {
+        return $credential['value'];
+    }
+
     return Env::getRequired('OPENROUTER_API_KEY');
 }
 
@@ -131,28 +143,33 @@ function openrouter_api_key(): string
  */
 function make_llm(?string $provider = null): Llm
 {
+    $providerWasExplicit = $provider !== null;
     $provider = strtolower((string) ($provider ?? Env::get('LLM_PROVIDER', ModelConfig::defaultProvider())));
+    $modelProvider = $provider === 'grok' ? 'xai' : $provider;
+    $model = $providerWasExplicit
+        ? Env::get('LLM_MODEL') ?? ModelConfig::tierModel($modelProvider, 'large')
+        : default_llm_model();
 
     return match ($provider) {
         'anthropic', '' => new AnthropicClient(
             apiKey: Env::getRequired('ANTHROPIC_API_KEY'),
-            model:  default_llm_model(),
+            model:  $model,
         ),
         'xai', 'grok' => new OpenAiCompatibleClient(
             apiKey:   Env::getRequired('XAI_API_KEY'),
-            model:    default_llm_model(),
+            model:    $model,
             baseUrl:  Env::get('OPENAI_BASE_URL', 'https://api.x.ai/v1'),
             provider: 'xai',
         ),
         'openai', 'openai-compatible' => new OpenAiCompatibleClient(
             apiKey:   Env::getRequired('OPENAI_API_KEY'),
-            model:    default_llm_model(),
+            model:    $model,
             baseUrl:  Env::get('OPENAI_BASE_URL', 'https://api.openai.com/v1'),
             provider: 'openai',
         ),
         'openrouter' => new OpenAiCompatibleClient(
             apiKey:   openrouter_api_key(),
-            model:    default_llm_model(),
+            model:    $model,
             baseUrl:  'https://openrouter.ai/api/v1',
             provider: 'openrouter',
             // Kimi K3 currently defaults to maximum-effort reasoning. Those
@@ -201,6 +218,10 @@ function resolve_llm(): Llm
             unset($env[$variable]);
         }
     }
+    $openrouterCredential = openrouter_api_credential();
+    if ($openrouterCredential !== null) {
+        $env[$openrouterCredential['variable']] = $openrouterCredential['value'];
+    }
 
     $choice = TransportResolver::decide(
         $env,
@@ -214,14 +235,13 @@ function resolve_llm(): Llm
         $choice,
         static function (string $provider): Llm {
             $variable = TransportResolver::credentialVariableFor($provider);
-            if ($variable !== null) {
-                $credential = Env::get($variable);
-                if ($credential === null || trim($credential) === '') {
-                    throw new TransportUnavailable(
-                        "Transport api resolved provider {$provider}, but required credential {$variable} is missing. "
-                        . "Set {$variable}, or choose an available harness with SITE_BUILD_LLM."
-                    );
-                }
+            $openrouterCredential = $provider === 'openrouter' ? openrouter_api_credential() : null;
+            $credential = $openrouterCredential['value'] ?? ($variable === null ? null : Env::get($variable));
+            if ($variable !== null && ($credential === null || trim($credential) === '')) {
+                throw new TransportUnavailable(
+                    "Transport api resolved provider {$provider}, but required credential {$variable} is missing. "
+                    . "Set {$variable}, or choose an available harness with SITE_BUILD_LLM."
+                );
             }
 
             return make_llm($provider);

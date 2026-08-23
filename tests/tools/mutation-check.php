@@ -774,14 +774,13 @@ PHP,
         'src/bootstrap.php',
         <<<'PHP'
             $variable = TransportResolver::credentialVariableFor($provider);
-            if ($variable !== null) {
-                $credential = Env::get($variable);
-                if ($credential === null || trim($credential) === '') {
-                    throw new TransportUnavailable(
-                        "Transport api resolved provider {$provider}, but required credential {$variable} is missing. "
-                        . "Set {$variable}, or choose an available harness with SITE_BUILD_LLM."
-                    );
-                }
+            $openrouterCredential = $provider === 'openrouter' ? openrouter_api_credential() : null;
+            $credential = $openrouterCredential['value'] ?? ($variable === null ? null : Env::get($variable));
+            if ($variable !== null && ($credential === null || trim($credential) === '')) {
+                throw new TransportUnavailable(
+                    "Transport api resolved provider {$provider}, but required credential {$variable} is missing. "
+                    . "Set {$variable}, or choose an available harness with SITE_BUILD_LLM."
+                );
             }
 
 PHP,
