@@ -54,6 +54,11 @@ final class ClaudeCliLlm extends HarnessCliLlm
         return ['argv' => $argv, 'stdin' => $prepared['prompt']];
     }
 
+    protected function honorsSystemOption(): bool
+    {
+        return true;
+    }
+
     protected function parseResponse(
         string $stdout,
         string $stderr,

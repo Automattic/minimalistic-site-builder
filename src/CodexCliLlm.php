@@ -3,7 +3,12 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild;
 
-/** Codex CLI used as a subscription-backed completion transport. */
+/**
+ * Codex CLI used as a subscription-backed completion transport.
+ *
+ * Unlike Claude, Codex has no first-class system channel that keeps text out
+ * of argv. Non-blank system text is disclosed as unsupported and never sent.
+ */
 final class CodexCliLlm extends HarnessCliLlm
 {
     public function __construct(

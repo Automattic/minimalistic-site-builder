@@ -275,7 +275,14 @@ abstract class HarnessCliLlm implements Llm, UsageReporting
     private function unsupportedOptionNotes(array $request): array
     {
         $notes = [];
-        foreach (['temperature', 'max_tokens'] as $option) {
+        $options = ['temperature', 'max_tokens'];
+        if (!$this->honorsSystemOption()
+            && is_string($request['system'] ?? null)
+            && trim($request['system']) !== ''
+        ) {
+            $options[] = 'system';
+        }
+        foreach ($options as $option) {
             if (!array_key_exists($option, $request)) {
                 continue;
             }
@@ -287,6 +294,12 @@ abstract class HarnessCliLlm implements Llm, UsageReporting
             }
         }
         return $notes;
+    }
+
+    /** Whether this transport has a first-class, non-leaking system channel. */
+    protected function honorsSystemOption(): bool
+    {
+        return false;
     }
 
     /** @return array<string,string> */

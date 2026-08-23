@@ -237,8 +237,10 @@ function resolve_llm(): Llm
         default => null,
     };
     if ($harnessProvider !== null) {
-        $explicitProvider = getenv('LLM_PROVIDER');
-        if (is_string($explicitProvider)
+        // CLI-host decisions about provider or credential configuration must
+        // use Env::get(), never raw getenv(), so .env and execution agree.
+        $explicitProvider = $configuredProvider;
+        if ($explicitProvider !== null
             && trim($explicitProvider) !== ''
             && strtolower(trim($explicitProvider)) !== $harnessProvider
         ) {

@@ -729,10 +729,10 @@ PHP,
         '32 max_tokens disclosure is swallowed',
         'src/HarnessCliLlm.php',
         <<<'PHP'
-        foreach (['temperature', 'max_tokens'] as $option) {
+        $options = ['temperature', 'max_tokens'];
 PHP,
         <<<'PHP'
-        foreach (['temperature'] as $option) {
+        $options = ['temperature'];
 PHP,
     ],
     [
@@ -889,7 +889,7 @@ PHP,
         '45 incoherent provider and harness pairing is accepted',
         'src/bootstrap.php',
         <<<'PHP'
-        if (is_string($explicitProvider)
+        if ($explicitProvider !== null
             && trim($explicitProvider) !== ''
             && strtolower(trim($explicitProvider)) !== $harnessProvider
         ) {
@@ -910,6 +910,40 @@ PHP,
         <<<'PHP'
             'input' => (int) ($turnUsage['input_tokens'] ?? 0)
                 + (int) ($turnUsage['cached_input_tokens'] ?? 0),
+PHP,
+    ],
+    [
+        '47 Codex and Grok swallow system without disclosure',
+        'src/HarnessCliLlm.php',
+        <<<'PHP'
+        if (!$this->honorsSystemOption()
+            && is_string($request['system'] ?? null)
+            && trim($request['system']) !== ''
+        ) {
+            $options[] = 'system';
+        }
+PHP,
+        '',
+    ],
+    [
+        '48 Codex puts system text in argv',
+        'src/CodexCliLlm.php',
+        <<<'PHP'
+        return ['argv' => $argv, 'stdin' => $prepared['prompt']];
+PHP,
+        <<<'PHP'
+        $argv[] = (string) ($prepared['request']['system'] ?? '');
+        return ['argv' => $argv, 'stdin' => $prepared['prompt']];
+PHP,
+    ],
+    [
+        '49 coherence check ignores Env-loaded provider',
+        'src/bootstrap.php',
+        <<<'PHP'
+        $explicitProvider = $configuredProvider;
+PHP,
+        <<<'PHP'
+        $explicitProvider = getenv('LLM_PROVIDER');
 PHP,
     ],
 ];
@@ -1011,7 +1045,7 @@ try {
             echo "{$classification['verdict']} {$label} {$classification['detail']}\n";
         }
         echo "RESULT {$counts['KILLED']} KILLED, {$counts['SURVIVED']} SURVIVED, {$counts['HARD ERROR']} HARD ERROR\n";
-        $failed = $counts['KILLED'] < 46 || $counts['SURVIVED'] !== 0 || $counts['HARD ERROR'] !== 0;
+        $failed = $counts['KILLED'] < 49 || $counts['SURVIVED'] !== 0 || $counts['HARD ERROR'] !== 0;
     }
 } catch (Throwable $e) {
     echo 'MUTATION ERROR: ' . $e->getMessage() . "\n";

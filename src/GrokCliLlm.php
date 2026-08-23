@@ -3,7 +3,12 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild;
 
-/** Grok CLI used as a subscription-backed completion transport. */
+/**
+ * Grok CLI used as a subscription-backed completion transport.
+ *
+ * Unlike Claude, Grok's system override would expose text in argv. Non-blank
+ * system text is disclosed as unsupported and never sent.
+ */
 final class GrokCliLlm extends HarnessCliLlm
 {
     public function __construct(
