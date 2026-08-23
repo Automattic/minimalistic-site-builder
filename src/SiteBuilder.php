@@ -132,6 +132,7 @@ final class SiteBuilder
         array $designConstraints = [],
         ?string $writingDirection = null,
         bool $formPlaceholders = false,
+        ?bool $htmlFirst = null,
     ): Project {
         if ($multiPage === false && $pages !== []) {
             throw new \InvalidArgumentException('A fixed page list requires multiPage to be true or omitted');
@@ -168,6 +169,10 @@ final class SiteBuilder
             'provisional_slug' => $project->slug(),
             'created_at'       => gmdate('c'),
             'multi_page'       => $resolvedMultiPage,
+            // A --from resume reads this to run the graph that built the project.
+            // Hosts driving a fixed composition must pass $htmlFirst; the default
+            // reads the same selector pipeline() does.
+            'graph'            => StepComposition::graphName($htmlFirst),
         ];
         if ($pages !== []) {
             $seed['pages'] = array_values($pages);

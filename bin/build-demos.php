@@ -8,7 +8,7 @@ use Automattic\SiteBuild\ProjectStore;
 /**
  * Build every demo website listed in eval/theme-prompts.json in one command.
  *
- *   php bin/build-demos.php [--with-images] [--provider=<name>] [--no-screenshot] [--only=<slug>] [--parallel=<n>] [--serve] [--port=<n>] [--file=<path>]
+ *   php bin/build-demos.php [--with-images] [--html-first|--blocks-first] [--provider=<name>] [--no-screenshot] [--only=<slug>] [--parallel=<n>] [--serve] [--port=<n>] [--file=<path>]
  *
  * Each entry in the prompts file becomes a project under projects/. If a folder
  * with that entry's slug already exists, a fresh sibling is created by appending
@@ -65,24 +65,28 @@ use Automattic\SiteBuild\ProjectStore;
 require_once __DIR__ . '/../src/bootstrap.php';
 
 $args = parse_cli_args($argv, [
-    '--with-images' => 'bool',
-    '--multi-page'  => 'bool',
-    '--pages'       => 'value',
-    '--only'        => 'value',
-    '--provider'    => 'value',
-    '--parallel'    => 'value',
-    '--port'        => 'value',
-    '--file'        => 'value',
-    '--serve'       => 'toggle',
-    '--screenshot'  => 'toggle',
+    '--with-images'  => 'bool',
+    '--html-first'   => 'bool',
+    '--blocks-first' => 'bool',
+    '--multi-page'   => 'bool',
+    '--pages'        => 'value',
+    '--only'         => 'value',
+    '--provider'     => 'value',
+    '--parallel'     => 'value',
+    '--port'         => 'value',
+    '--file'         => 'value',
+    '--serve'        => 'toggle',
+    '--screenshot'   => 'toggle',
 ]);
 if ($args['unknown'] !== null) {
     fwrite(STDERR, "Unknown argument: {$args['unknown']}\n");
-    fwrite(STDERR, "Usage: php bin/build-demos.php [--multi-page] [--pages=\"Home, Menu, About\"] [--with-images] [--only=<slug>] [--provider=anthropic|openai|xai|openrouter] [--parallel=<n>] [--no-screenshot] [--serve] [--port=9400] [--no-serve] [--file=<path>]\n");
+    fwrite(STDERR, "Usage: php bin/build-demos.php [--html-first|--blocks-first] [--multi-page] [--pages=\"Home, Menu, About\"] [--with-images] [--only=<slug>] [--provider=anthropic|openai|xai|openrouter] [--parallel=<n>] [--no-screenshot] [--serve] [--port=9400] [--no-serve] [--file=<path>]\n");
     exit(1);
 }
 $flags = $args['flags'];
 $withImages = $flags['--with-images'] ?? false;
+$htmlFirst = $flags['--html-first'] ?? false;
+$blocksFirst = $flags['--blocks-first'] ?? false;
 $multiPage = $flags['--multi-page'] ?? false;
 $pagesArg = $flags['--pages'] ?? null;
 $only = $flags['--only'] ?? null;
@@ -93,6 +97,11 @@ $parallel = isset($flags['--parallel']) ? max(1, (int) $flags['--parallel']) : 0
 $port = (int) ($flags['--port'] ?? 9400);
 $provider = $flags['--provider'] ?? null;
 $file = $flags['--file'] ?? repo_path('eval/theme-prompts.json');
+
+if ($htmlFirst && $blocksFirst) {
+    Narrator::write("--html-first and --blocks-first are mutually exclusive; pass one.\n");
+    exit(1);
+}
 
 // Both flags are forwarded to the children, so check them once here rather than
 // let every child build fail with the same message. The page list goes over
@@ -185,6 +194,8 @@ foreach ($entries as $i => $entry) {
             '--no-serve',
             ...($provider !== null ? ['--provider=' . $provider] : []),
             ...($withImages ? ['--with-images'] : []),
+            ...($htmlFirst ? ['--html-first'] : []),
+            ...($blocksFirst ? ['--blocks-first'] : []),
             ...($multiPage ? ['--multi-page'] : []),
             ...($pagesArg !== null ? ['--pages=' . $pagesArg] : []),
         ],

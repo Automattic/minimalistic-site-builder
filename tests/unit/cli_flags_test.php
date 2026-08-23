@@ -91,3 +91,168 @@ test('build CLI preserves design-constraint error precedence over provider valid
     assert_eq(1, $exit);
     assert_eq('--max-hero-images must be an integer from 1 through 2.', implode("\n", $output));
 });
+
+/**
+ * The step ids the build CLI would have run, read back from --until's
+ * validator. That list IS the selected graph, so it distinguishes the two
+ * paths instead of merely proving a flag parsed. $env prefixes the child,
+ * which is how a flag gets tested against a hostile SITE_BUILD_HTML_FIRST.
+ *
+ * @param list<string>          $args
+ * @param array<string, string> $env
+ * @return list<string>
+ */
+function build_cli_graph_ids(array $args, array $env = []): array
+{
+    // A stub key keeps make_llm() from exiting before the validator is reached.
+    // The run stops on the unknown --until id, so nothing is ever sent.
+    $env += ['ANTHROPIC_API_KEY' => 'test-key'];
+    $prefix = '';
+    foreach ($env as $key => $value) {
+        $prefix .= $key . '=' . escapeshellarg($value) . ' ';
+    }
+    $command = $prefix . php_child_command(repo_path('bin/build.php'), array_merge(
+        ['demo', '--provider=anthropic', '--no-serve', '--until=__no-such-step__'],
+        $args,
+    ));
+
+    $output = [];
+    $exit = 0;
+    exec($command . ' 2>&1', $output, $exit);
+
+    assert_eq(1, $exit, implode("\n", $output));
+    assert_eq("Unknown --until step '__no-such-step__'. Valid steps:", $output[0] ?? '');
+
+    return array_values(array_map('trim', array_slice($output, 1)));
+}
+
+test('--html-first runs the build on the HTML-first graph', function () {
+    $ids = build_cli_graph_ids(['--html-first']);
+    $seen = implode(',', $ids);
+
+    assert_true(in_array('design-preview', $ids, true), $seen);
+    assert_true(in_array('transform-site', $ids, true), $seen);
+    assert_true(!in_array('sections', $ids, true), $seen);
+});
+
+test('--blocks-first runs the build on the blocks graph', function () {
+    $ids = build_cli_graph_ids(['--blocks-first']);
+    $seen = implode(',', $ids);
+
+    assert_true(in_array('sections', $ids, true), $seen);
+    assert_true(!in_array('design-preview', $ids, true), $seen);
+    assert_true(!in_array('transform-site', $ids, true), $seen);
+});
+
+test('--blocks-first overrides SITE_BUILD_HTML_FIRST=1', function () {
+    $ids = build_cli_graph_ids(['--blocks-first'], ['SITE_BUILD_HTML_FIRST' => '1']);
+    $seen = implode(',', $ids);
+
+    assert_true(in_array('sections', $ids, true), $seen);
+    assert_true(!in_array('transform-site', $ids, true), $seen);
+});
+
+test('--html-first overrides SITE_BUILD_HTML_FIRST=0', function () {
+    $ids = build_cli_graph_ids(['--html-first'], ['SITE_BUILD_HTML_FIRST' => '0']);
+    $seen = implode(',', $ids);
+
+    assert_true(in_array('transform-site', $ids, true), $seen);
+    assert_true(!in_array('sections', $ids, true), $seen);
+});
+
+test('without either flag SITE_BUILD_HTML_FIRST still picks the graph', function () {
+    $on = build_cli_graph_ids([], ['SITE_BUILD_HTML_FIRST' => '1']);
+    assert_true(in_array('transform-site', $on, true), implode(',', $on));
+
+    $off = build_cli_graph_ids([], ['SITE_BUILD_HTML_FIRST' => '0']);
+    assert_true(in_array('sections', $off, true), implode(',', $off));
+});
+
+test('--html-first and --blocks-first together are refused', function () {
+    $command = php_child_command(repo_path('bin/build.php'), [
+        'demo',
+        '--html-first',
+        '--blocks-first',
+        '--no-serve',
+    ]);
+    $output = [];
+    $exit = 0;
+    exec($command . ' 2>&1', $output, $exit);
+
+    assert_eq(1, $exit);
+    assert_eq(
+        '--html-first and --blocks-first are mutually exclusive; pass one.',
+        implode("\n", $output)
+    );
+});
+
+test('a --from resume runs the graph meta.json recorded, not the ambient one', function () {
+    // The rule itself is unit-tested on StepComposition; this covers the wiring,
+    // which is where deleting one putenv would leave every other gate green.
+    $slug = 'zz-resume-graph-' . getmypid() . '-' . uniqid();
+    $dir = repo_path('projects/' . $slug);
+    mkdir($dir, 0777, true);
+    file_put_contents($dir . '/meta.json', (string) json_encode([
+        'prompt'           => 'a cozy neighborhood bakery',
+        'provisional_slug' => $slug,
+        'multi_page'       => false,
+        'graph'            => 'html-first',
+    ]));
+
+    try {
+        // No flag, and the env explicitly names the OTHER graph: the record wins.
+        $ids = build_cli_graph_ids(
+            ['--slug=' . $slug, '--from=transform-site'],
+            ['SITE_BUILD_HTML_FIRST' => '0']
+        );
+        $seen = implode(',', $ids);
+        assert_true(in_array('transform-site', $ids, true), $seen);
+        assert_true(!in_array('sections', $ids, true), $seen);
+
+        // A flag contradicting the record is refused, not honored: section-rhythm
+        // exists in both graphs, so nothing else would catch the crossed resume.
+        $command = 'ANTHROPIC_API_KEY=' . escapeshellarg('test-key') . ' '
+            . php_child_command(repo_path('bin/build.php'), [
+                'demo',
+                '--provider=anthropic',
+                '--no-serve',
+                '--slug=' . $slug,
+                '--from=section-rhythm',
+                '--blocks-first',
+            ]);
+        $output = [];
+        $exit = 0;
+        exec($command . ' 2>&1', $output, $exit);
+        $text = implode("\n", $output);
+
+        assert_eq(1, $exit, $text);
+        assert_true(str_contains($text, 'built on the html-first graph'), $text);
+        assert_true(str_contains($text, 'blocks-first was passed'), $text);
+    } finally {
+        exec('rm -rf ' . escapeshellarg($dir));
+    }
+});
+
+test('a --from resume on a project with no recorded graph still honors the flag', function () {
+    // Projects created before builds recorded the graph must keep resuming.
+    $slug = 'zz-resume-unrecorded-' . getmypid() . '-' . uniqid();
+    $dir = repo_path('projects/' . $slug);
+    mkdir($dir, 0777, true);
+    file_put_contents($dir . '/meta.json', (string) json_encode([
+        'prompt'           => 'a cozy neighborhood bakery',
+        'provisional_slug' => $slug,
+        'multi_page'       => false,
+    ]));
+
+    try {
+        $ids = build_cli_graph_ids(
+            ['--slug=' . $slug, '--from=transform-site', '--html-first'],
+            ['SITE_BUILD_HTML_FIRST' => '0']
+        );
+        $seen = implode(',', $ids);
+        assert_true(in_array('transform-site', $ids, true), $seen);
+        assert_true(!in_array('sections', $ids, true), $seen);
+    } finally {
+        exec('rm -rf ' . escapeshellarg($dir));
+    }
+});

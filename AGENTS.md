@@ -26,11 +26,15 @@ Image generation is slow and networked, so it is in neither graph. The steps tha
 
 A host that generates images must run that phase too. Mirroring only the graph ships a theme whose cover text was checked against images that did not exist yet, and whose preview card is the palette poster `theme-screenshot` drew in-pipeline rather than the site's own hero.
 
-Set `SITE_BUILD_HTML_FIRST=1` for the HTML-first graph (`StepComposition::htmlFirst()`), where the model authors an HTML+CSS design that `transform-site` converts to blocks:
+Pass `--html-first` (or set `SITE_BUILD_HTML_FIRST=1`) for the HTML-first graph (`StepComposition::htmlFirst()`), where the model authors an HTML+CSS design that `transform-site` converts to blocks:
 
 `scaffold-theme -> scaffold-plugin -> refine-prompt -> site-spec -> apply-identity -> design-direction -> design-preview -> theme-json -> inner-pages-design -> splice-home-design -> assign-image-sources -> transform-site -> resolve-nav-links -> section-rhythm -> section-layout -> collect-images -> normalize-layout -> header-hero -> contrast-fix -> motion-sanity -> fix-blocks -> assemble-pages -> fix-pages -> page-styles -> custom-motion -> fonts-php -> finalize-theme -> theme-screenshot -> validate-theme`
 
 On that path `theme-json` reads CSS-derived design tokens. `assign-image-sources` gives every design `<img>` the theme asset path the rest of the image pipeline generates into. `contrast-fix` and `motion-sanity` stay addressable but skip only in explicit HTML-first composition mode. `normalize-layout`, `fix-blocks`, and `validate-theme` skip the width rules that assume the theme owns page width — here the carried design CSS does. `page-styles` scrubs and merges generated CSS, then runs `CssContrastCheck` and applies safe tail-only adjustments against delivered markup. Stale `design/site.css` bytes never select pipeline behavior.
+
+`createProject()` records the chosen graph in `meta.json` as `graph: html-first|blocks`, and `--from` reads it back so a resume runs the graph that built the project. A flag contradicting the record is refused, not honored — `section-rhythm`, `collect-images` and friends exist in both graphs, so a crossed resume would otherwise read artifacts the other path never wrote and still look like it worked. A project with no recorded graph (built before this landed) falls back to the flag/env choice. A host driving a fixed `StepComposition` must pass `htmlFirst:` to `createProject()`, since the default reads the env key that host never consults.
+
+`bin/build.php` and `bin/build-demos.php` take `--html-first` and `--blocks-first`. Either one sets `SITE_BUILD_HTML_FIRST` for the process, so an explicit flag always beats a shell export or an `.env` line; passing neither leaves that env var in charge. The flags are mutually exclusive. `StepComposition::htmlFirstSelected()` remains the single reader of the key, so nothing has to be taught the choice twice.
 
 Only the HTML-first graph is wrapped in `FallbackBuildPipeline`; the default blocks graph generates no design document, so it is an unwrapped `Pipeline`. The wrapper's whole-build reroute is currently dormant: it only recognizes a `MalformedDesignException` from the retired `homepage-design` step, which no composition contains. Do not rely on it until that trigger is retargeted or removed.
 
