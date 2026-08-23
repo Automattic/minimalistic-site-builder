@@ -123,6 +123,9 @@ final class LinkTargets
         $value = preg_replace('/&colon(?!;)/i', ':', $value) ?? $value;
         $value = preg_replace('/&#x0*3a(?!;)/i', ':', $value) ?? $value;
         $value = preg_replace('/&#0*58(?![0-9])/', ':', $value) ?? $value;
+        $value = preg_replace('/&tab(?!;)/i', "	", $value) ?? $value;
+        $value = preg_replace('/&#x0*9(?!;)/i', "	", $value) ?? $value;
+        $value = preg_replace('/&#0*9(?![0-9])/', "	", $value) ?? $value;
         return $value;
     }
 

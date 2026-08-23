@@ -93,3 +93,10 @@ test('LinkTargets::normalizeTarget decodes unterminated colon entities', functio
     assert_true(LinkTargets::isDangerousScheme('javascript&#x3aalert(1)'));
 });
 
+test('LinkTargets::normalizeTarget decodes unterminated tab entities', function (): void {
+    assert_eq('javascript:alert(1)', LinkTargets::normalizeTarget('java&#9script:alert(1)'));
+    assert_eq('javascript:alert(1)', LinkTargets::normalizeTarget('java&#x9script:alert(1)'));
+    assert_eq('javascript:alert(1)', LinkTargets::normalizeTarget('java&tabscript:alert(1)'));
+    assert_true(LinkTargets::isDangerousScheme('java&#9script:alert(1)'));
+});
+

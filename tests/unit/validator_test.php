@@ -586,6 +586,18 @@ test('validator flags unterminated colon entities in javascript hrefs', function
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('validator flags unterminated tab entities in javascript hrefs', function () {
+    [$project, $tmp] = validator_linked_project();
+    $project->writeText(
+        'theme/patterns/tab-entity-js.php',
+        '<!-- wp:image {"href":"java&#9script:alert(1)"} /-->',
+    );
+    $joined = implode(' ', ThemeValidator::validate($project));
+    assert_contains('theme/patterns/tab-entity-js.php', $joined);
+    assert_contains('dangerous scheme', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('validator judges block-JSON href destinations on image file and media-text', function () {
     [$project, $tmp] = validator_linked_project();
     $project->writeText(

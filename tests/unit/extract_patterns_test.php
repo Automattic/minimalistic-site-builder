@@ -433,6 +433,15 @@ test('link rewrite hashes unterminated colon entities in javascript', function (
     }
 });
 
+test('link rewrite hashes unterminated tab entities in javascript', function (): void {
+    $markup = '<!-- wp:image {"href":"java&#9script:alert(1)"} /-->';
+    assert_true(LinkTargets::isDangerousScheme(LinkTargets::allTargets($markup)[0] ?? ''));
+    $output = ExtractPatternsStep::rewriteLinks($markup, []);
+    foreach (LinkTargets::allTargets($output) as $target) {
+        assert_eq('#', $target);
+    }
+});
+
 test('a stale pattern file from a prior run is gone after a re-run', function (): void {
     with_project('builder_extract_patterns_', function (Project $project): void {
         extract_patterns_seed($project);
@@ -617,6 +626,41 @@ test('a failed backup copy does not wipe the live pattern dir', function (): voi
             assert_true(!$project->exists('theme/patterns/hero.php'));
             assert_true(!is_dir($project->themePath('.patterns-prev')));
             assert_true(!is_dir($project->themePath('.patterns-prev.wip')));
+        } finally {
+            putenv('MSB_FORCE_PATTERN_INPLACE');
+        }
+    });
+});
+
+test('in-place fallback restores nested backup files', function (): void {
+    with_project('builder_extract_nested_backup_', function (Project $project): void {
+        putenv('MSB_FORCE_PATTERN_INPLACE=1');
+        try {
+            $nested = $project->themePath('patterns/components');
+            mkdir($nested, 0775, true);
+            file_put_contents($nested . '/card.php', '<?php // nested');
+            $project->writeText('theme/patterns/ghost.php', '<?php // stale');
+            $blocker = $project->path('patterns.json');
+            if (is_file($blocker)) {
+                unlink($blocker);
+            }
+            mkdir($blocker);
+            file_put_contents($blocker . '/keep', 'old');
+
+            $method = new \ReflectionMethod(ExtractPatternsStep::class, 'replacePatternOutputs');
+            $method->setAccessible(true);
+            assert_throws(static fn () => $method->invoke(new ExtractPatternsStep(), $project, [
+                'hero.php' => "<?php\n// new\n",
+            ], [
+                'version' => 2,
+                'patterns' => [['slug' => 'hero', 'kind' => 'section']],
+                'starter' => null,
+                'dropped' => [],
+            ]));
+
+            assert_eq('<?php // nested', $project->readText('theme/patterns/components/card.php'));
+            assert_eq('<?php // stale', $project->readText('theme/patterns/ghost.php'));
+            assert_true(!$project->exists('theme/patterns/hero.php'));
         } finally {
             putenv('MSB_FORCE_PATTERN_INPLACE');
         }

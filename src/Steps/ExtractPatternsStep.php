@@ -889,8 +889,10 @@ final class ExtractPatternsStep implements Step
             $writer->replace($stagedManifest, $liveManifest);
         } catch (\Throwable $error) {
             $writer->discard($stagedManifest);
-            if ($exchanged && is_dir($liveDir) && is_dir($stagingDir)) {
-                self::exchangePaths($liveDir, $stagingDir);
+            if ($exchanged && is_dir($stagingDir)) {
+                if (!self::exchangePaths($liveDir, $stagingDir)) {
+                    self::installDirectoryInPlace($liveDir, self::filesIn($stagingDir));
+                }
             }
             if ($backupReady && is_dir($backupDir)) {
                 self::installDirectoryInPlace($liveDir, self::filesIn($backupDir));
@@ -940,20 +942,21 @@ final class ExtractPatternsStep implements Step
         if (!is_dir($directory) && !@mkdir($directory, 0775, true) && !is_dir($directory)) {
             throw new \RuntimeException("Could not create pattern directory: {$directory}");
         }
-        foreach ($files as $basename => $file) {
-            $path = $directory . '/' . $basename;
+        foreach ($files as $relative => $file) {
+            $relative = str_replace('\\', '/', (string) $relative);
+            if ($relative === '' || str_contains($relative, '..')) {
+                throw new \RuntimeException("Invalid pattern path: {$relative}");
+            }
+            $path = $directory . '/' . $relative;
+            $parent = dirname($path);
+            if (!is_dir($parent) && !@mkdir($parent, 0775, true) && !is_dir($parent)) {
+                throw new \RuntimeException("Could not create pattern directory: {$parent}");
+            }
             if (file_put_contents($path, $file) === false) {
                 throw new \RuntimeException("Could not write pattern: {$path}");
             }
         }
-        foreach (scandir($directory) ?: [] as $entry) {
-            if ($entry === '.' || $entry === '..') {
-                continue;
-            }
-            if (!isset($files[$entry])) {
-                self::removePath($directory . '/' . $entry);
-            }
-        }
+        self::pruneDirectory($directory, $files);
     }
 
     private static function copyDirectory(string $from, string $to): void
@@ -992,8 +995,8 @@ final class ExtractPatternsStep implements Step
         }
     }
 
-    /** @return array<string,string> */
-    private static function filesIn(string $directory): array
+    /** @return array<string,string> relative path => contents, including nested files */
+    private static function filesIn(string $directory, string $prefix = ''): array
     {
         $files = [];
         if (!is_dir($directory)) {
@@ -1004,11 +1007,54 @@ final class ExtractPatternsStep implements Step
                 continue;
             }
             $path = $directory . '/' . $entry;
+            $relative = $prefix . $entry;
+            if (is_dir($path)) {
+                $files += self::filesIn($path, $relative . '/');
+                continue;
+            }
             if (is_file($path)) {
-                $files[$entry] = (string) file_get_contents($path);
+                $files[$relative] = (string) file_get_contents($path);
             }
         }
         return $files;
+    }
+
+    /** @param array<string,string> $keep */
+    private static function pruneDirectory(string $directory, array $keep, string $prefix = ''): void
+    {
+        if (!is_dir($directory)) {
+            return;
+        }
+        foreach (scandir($directory) ?: [] as $entry) {
+            if ($entry === '.' || $entry === '..') {
+                continue;
+            }
+            $relative = $prefix . $entry;
+            $path = $directory . '/' . $entry;
+            if (is_dir($path)) {
+                self::pruneDirectory($path, $keep, $relative . '/');
+                if (self::directoryIsEmpty($path)) {
+                    self::removePath($path);
+                }
+                continue;
+            }
+            if (!isset($keep[$relative])) {
+                self::removePath($path);
+            }
+        }
+    }
+
+    private static function directoryIsEmpty(string $directory): bool
+    {
+        if (!is_dir($directory)) {
+            return true;
+        }
+        foreach (scandir($directory) ?: [] as $entry) {
+            if ($entry !== '.' && $entry !== '..') {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static function removePath(string $path): void
