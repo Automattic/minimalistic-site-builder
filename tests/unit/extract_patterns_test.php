@@ -872,6 +872,48 @@ test('exchange error keeps held leftover and the live backup', function (): void
     });
 });
 
+test('park does not delete held old when leftover next is new', function (): void {
+    with_project('builder_extract_held_keep_', function (Project $project): void {
+        putenv('MSB_FORCE_PATTERN_INPLACE=1');
+        try {
+            $project->writeText('theme/patterns/hero.php', '<?php // live new');
+            $held = $project->themePath('.patterns-held');
+            mkdir($held, 0775, true);
+            file_put_contents($held . '/ghost.php', '<?php // only old copy');
+            $staging = $project->themePath('.patterns-next');
+            mkdir($staging, 0775, true);
+            file_put_contents($staging . '/hero.php', '<?php // live new');
+
+            $blocker = $project->path('patterns.json');
+            if (is_file($blocker)) {
+                unlink($blocker);
+            }
+            mkdir($blocker);
+            file_put_contents($blocker . '/keep', 'old');
+
+            $method = new \ReflectionMethod(ExtractPatternsStep::class, 'replacePatternOutputs');
+            $method->setAccessible(true);
+            assert_throws(static fn () => $method->invoke(new ExtractPatternsStep(), $project, [
+                'other.php' => "<?php\n// next\n",
+            ], [
+                'version' => 2,
+                'patterns' => [['slug' => 'other', 'kind' => 'section']],
+                'starter' => null,
+                'dropped' => [],
+            ]));
+
+            $ghost = is_file($held . '/ghost.php')
+                ? file_get_contents($held . '/ghost.php')
+                : (is_file($held . '-keep/ghost.php') ? file_get_contents($held . '-keep/ghost.php') : null);
+            assert_eq('<?php // only old copy', $ghost);
+            assert_eq('<?php // live new', $project->readText('theme/patterns/hero.php'));
+            assert_true(!$project->exists('theme/patterns/other.php'));
+        } finally {
+            putenv('MSB_FORCE_PATTERN_INPLACE');
+        }
+    });
+});
+
 test('pattern headers use only the closed label and shape vocabulary', function (): void {
     with_project('builder_extract_header_', function (Project $project): void {
         extract_patterns_seed($project, [[

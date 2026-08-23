@@ -863,12 +863,12 @@ final class ExtractPatternsStep implements Step
         $exchanged = false;
         $backupReady = false;
         self::$exchangeAttempts = 0;
-        self::parkLeftoverStaging($stagingDir, $heldDir);
         try {
             if (is_dir($liveDir)) {
                 self::copyDirectory($liveDir, $backupDir);
                 $backupReady = is_dir($backupDir);
             }
+            self::parkLeftoverStaging($stagingDir, $heldDir, $liveDir, $backupDir);
             if (!@mkdir($stagingDir, 0775, true) && !is_dir($stagingDir)) {
                 throw new \RuntimeException("Could not create staged pattern directory: {$stagingDir}");
             }
@@ -914,6 +914,8 @@ final class ExtractPatternsStep implements Step
         self::removePath($stagingDir);
         self::removePath($backupDir);
         self::removePath($heldDir);
+        self::removePath($heldDir . '-keep');
+        self::removePath($heldDir . '-next');
         self::removePath($backupWip);
         if ($files === []) {
             self::removePath($liveDir);
@@ -925,25 +927,66 @@ final class ExtractPatternsStep implements Step
      * Returns false so the caller can install in place (mac, Alpine, NFS, no FFI).
      */
     /**
-     * Leftover .patterns-next may be the old tree or a crash-before-swap new tree.
-     * Park it under a third name. Live always gets its own backup.
+     * Leftover .patterns-next may be old or crash-before-swap new.
+     * Never delete .patterns-held until that tree is copied, unless
+     * the leftover is the same generation as live or held.
      */
-    private static function parkLeftoverStaging(string $stagingDir, string $heldDir): void
-    {
+    private static function parkLeftoverStaging(
+        string $stagingDir,
+        string $heldDir,
+        string $liveDir,
+        string $backupDir,
+    ): void {
         if (!is_dir($stagingDir)) {
             return;
         }
-        if (is_dir($heldDir)) {
-            self::removePath($heldDir);
-        }
-        if (@rename($stagingDir, $heldDir)) {
+        $keepDir = $heldDir . '-keep';
+        $nextDir = $heldDir . '-next';
+        if (
+            self::sameTree($stagingDir, $liveDir)
+            || self::sameTree($stagingDir, $backupDir)
+            || self::sameTree($stagingDir, $heldDir)
+            || self::sameTree($stagingDir, $keepDir)
+            || self::sameTree($stagingDir, $nextDir)
+        ) {
+            self::removePath($stagingDir);
             return;
         }
-        self::copyDirectory($stagingDir, $heldDir);
-        if (!is_dir($heldDir)) {
+
+        $dest = $heldDir;
+        if (is_dir($heldDir)) {
+            if (!is_dir($keepDir)) {
+                self::copyDirectory($heldDir, $keepDir);
+                if (!is_dir($keepDir)) {
+                    throw new \RuntimeException("Could not keep held pattern tree: {$heldDir}");
+                }
+                self::removePath($heldDir);
+            } else {
+                $dest = $nextDir;
+                if (is_dir($nextDir)) {
+                    $dest = $heldDir . '-3';
+                }
+            }
+        }
+        if (is_dir($dest)) {
+            throw new \RuntimeException("Could not park leftover pattern staging: {$stagingDir}");
+        }
+        if (@rename($stagingDir, $dest)) {
+            return;
+        }
+        self::copyDirectory($stagingDir, $dest);
+        if (!is_dir($dest)) {
             throw new \RuntimeException("Could not park leftover pattern staging: {$stagingDir}");
         }
         self::removePath($stagingDir);
+    }
+
+    private static function sameTree(string $left, string $right): bool
+    {
+        if (!is_dir($left) || !is_dir($right)) {
+            return false;
+        }
+        return self::filesIn($left) === self::filesIn($right);
     }
 
     private static int $exchangeAttempts = 0;
