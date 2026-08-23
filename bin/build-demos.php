@@ -3,11 +3,15 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\RunnerResolver;
+use Automattic\SiteBuild\SiteRunner;
+use Automattic\SiteBuild\StudioAppRunner;
+use Automattic\SiteBuild\StudioCli;
 
 /**
  * Build every demo website listed in eval/theme-prompts.json in one command.
  *
- *   php bin/build-demos.php [--with-images] [--html-first|--blocks-first] [--provider=<name>] [--no-screenshot] [--only=<slug>] [--parallel=<n>] [--serve] [--port=<n>] [--file=<path>]
+ *   php bin/build-demos.php [--with-images] [--html-first|--blocks-first] [--provider=<name>] [--no-screenshot] [--only=<slug>] [--parallel=<n>] [--serve] [--stop] [--port=<n>] [--file=<path>]
  *
  * Each entry in the prompts file becomes a project under projects/. If a folder
  * with that entry's slug already exists, a fresh sibling is created by appending
@@ -52,16 +56,34 @@ use Automattic\SiteBuild\ProjectStore;
  *                   OpenRouter is bounded at 3).
  *   --screenshot    capture the post-build home-page screenshots (the default).
  *   --no-screenshot skip the post-build home-page screenshots.
- *   --serve         after the batch, serve ALL built sites simultaneously in
- *                   WordPress Playground, each on its own port, and print every
- *                   URL. A single Ctrl-C stops all servers. Off by default.
+ *   --serve         after the batch, serve ALL built sites. Studio sites are
+ *                   daemons: URLs print and the command returns. Playground
+ *                   still blocks until Ctrl-C. Off by default.
  *   --no-serve      build only, don't boot any previews (the default).
+ *   --stop          stop every Studio site built from the current --file.
+ *                   Does not call `studio stop --all` (that would also stop
+ *                   hand-made sites).
  *   --port=<n>      base Playground port (default 9400); site i gets the port
  *                   window base+50i, and playground.php auto-bumps busy ports.
  *   --file=<path>   override the prompts file (default eval/theme-prompts.json).
  */
 
 require_once __DIR__ . '/../src/bootstrap.php';
+
+// Playground's find_free_port() probes ports without reserving them and scans
+// up to 50 past the requested one, so concurrent children whose scan windows
+// overlap can converge on the SAME free port and race to bind it (the losers
+// die with EADDRINUSE). Spacing the per-site base ports by that same scan
+// range keeps the windows disjoint, so no two children can collide.
+const PORT_STRIDE = 50;
+
+// File-scope functions below stay registered when this file is required as a
+// library (W3 / tests). Skip the CLI body unless we are the entry script.
+$siteBuildDemosIsMain = isset($argv[0]) && is_string($argv[0])
+    && ($argv0 = realpath($argv[0])) !== false
+    && $argv0 === realpath(__FILE__);
+
+if ($siteBuildDemosIsMain) {
 
 $args = parse_cli_args($argv, [
     '--with-images'  => 'bool',
@@ -76,10 +98,11 @@ $args = parse_cli_args($argv, [
     '--file'         => 'value',
     '--serve'        => 'toggle',
     '--screenshot'   => 'toggle',
+    '--stop'         => 'bool',
 ]);
 if ($args['unknown'] !== null) {
     fwrite(STDERR, "Unknown argument: {$args['unknown']}\n");
-    fwrite(STDERR, "Usage: php bin/build-demos.php [--html-first|--blocks-first] [--multi-page] [--pages=\"Home, Menu, About\"] [--with-images] [--only=<slug>] [--provider=anthropic|openai|xai|openrouter] [--parallel=<n>] [--no-screenshot] [--serve] [--port=9400] [--no-serve] [--file=<path>]\n");
+    fwrite(STDERR, "Usage: php bin/build-demos.php [--html-first|--blocks-first] [--multi-page] [--pages=\"Home, Menu, About\"] [--with-images] [--only=<slug>] [--provider=anthropic|openai|xai|openrouter] [--parallel=<n>] [--no-screenshot] [--serve] [--stop] [--port=9400] [--no-serve] [--file=<path>]\n");
     exit(1);
 }
 $flags = $args['flags'];
@@ -96,6 +119,11 @@ $parallel = isset($flags['--parallel']) ? max(1, (int) $flags['--parallel']) : 0
 $port = (int) ($flags['--port'] ?? 9400);
 $provider = $flags['--provider'] ?? null;
 $file = $flags['--file'] ?? repo_path('eval/theme-prompts.json');
+
+if (!empty($flags['--stop'])) {
+    stop_demo_sites($file);
+    exit(0);
+}
 
 if ($htmlFirst && $blocksFirst) {
     Narrator::write("--html-first and --blocks-first are mutually exclusive; pass one.\n");
@@ -227,13 +255,6 @@ foreach ($jobs as $i => $job) {
     ];
 }
 
-// Playground's find_free_port() probes ports without reserving them and scans
-// up to 50 past the requested one, so concurrent children whose scan windows
-// overlap can converge on the SAME free port and race to bind it (the losers
-// die with EADDRINUSE). Spacing the per-site base ports by that same scan
-// range keeps the windows disjoint, so no two children can collide.
-const PORT_STRIDE = 50;
-
 // Capture a full-page screenshot of each home page as visual testing evidence
 // (projects/<slug>/logs/home.png). Each child boots its site headless in
 // Playground on its own port, shoots, tears down — so they run in parallel too.
@@ -281,13 +302,15 @@ foreach ($built as $b) {
 
 $exitCode = $failures > 0 ? 1 : 0;
 
-// Serve all built sites simultaneously, one Playground server per site on its
-// own port, and block until Ctrl-C stops them all.
+// Serve all built sites. Studio: start each, print URLs, return (daemons).
+// Playground: today's concurrent spawn + Ctrl-C teardown.
 if ($serve && $built !== []) {
     serve_all(array_column($built, 'slug'), $port, $exitCode);
 }
 
 exit($exitCode);
+
+}
 
 /**
  * Run each job's shell command as a child process, at most $cap at a time,
@@ -401,6 +424,119 @@ function pump_children(array &$running, callable $emit): void
 }
 
 /**
+ * Boot one site per slug. Studio creates are serialized (N concurrent creates
+ * against one daemon is unverified; twenty sites is about 1.2GB). Playground
+ * keeps today's concurrent spawn + Ctrl-C teardown.
+ *
+ * @param list<string> $slugs
+ */
+function serve_all(array $slugs, int $basePort, int $exitCode): void
+{
+    $cli = new StudioCli();
+    $runner = RunnerResolver::resolve(
+        null,
+        $cli,
+        static function (string $message): void {
+            fwrite(STDERR, $message . "\n");
+        }
+    );
+    if ($runner->name() === 'studio') {
+        if ($basePort !== 9400) {
+            echo "--port applies to Playground only; ignored for Studio.\n";
+        }
+        serve_all_studio($runner, $slugs);
+        return;
+    }
+    serve_all_playground($slugs, $basePort, $exitCode);
+}
+
+/**
+ * Start each Studio site in series, print URLs, return. No pcntl, no
+ * register_shutdown teardown, no pkill — the sites are daemons.
+ *
+ * @param list<string> $slugs
+ */
+function serve_all_studio(SiteRunner $runner, array $slugs): void
+{
+    $store = new ProjectStore(repo_path('projects'));
+    echo "\nStarting " . count($slugs) . " Studio site(s)…\n\n";
+    $sites = [];
+    foreach ($slugs as $slug) {
+        try {
+            $project = $store->open($slug);
+            $site = $runner->start($project);
+            $sites[] = ['slug' => $slug, 'site' => $site];
+        } catch (Throwable $e) {
+            fwrite(STDERR, "  could not start Studio for '{$slug}': {$e->getMessage()}\n");
+        }
+    }
+    if ($sites === []) {
+        return;
+    }
+    announce_sites_up($sites, $sites[0]['site']->persistent);
+}
+
+/**
+ * Stop every Studio site built from $file: projects whose meta.demo_source
+ * matches, plus the prompt slugs listed in that file. Never `studio stop --all`.
+ */
+function stop_demo_sites(string $file): void
+{
+    $runner = new StudioAppRunner(new StudioCli(), StudioAppRunner::defaultRoot(), repo_path());
+    $want = realpath($file) ?: $file;
+    $slugs = [];
+
+    $prompts = is_file($file) ? json_decode((string) file_get_contents($file), true) : null;
+    if (is_array($prompts) && isset($prompts['prompts']) && is_array($prompts['prompts'])) {
+        foreach ($prompts['prompts'] as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            $raw = (string) ($entry['slug'] ?? $entry['id'] ?? '');
+            if ($raw !== '') {
+                $slugs[ProjectStore::slugify($raw)] = true;
+            }
+        }
+    }
+
+    $projectsDir = repo_path('projects');
+    foreach (glob($projectsDir . '/*', GLOB_ONLYDIR) ?: [] as $dir) {
+        $metaFile = $dir . '/meta.json';
+        if (!is_file($metaFile)) {
+            continue;
+        }
+        $meta = json_decode((string) file_get_contents($metaFile), true);
+        $source = is_array($meta) ? ($meta['demo_source'] ?? null) : null;
+        if (!is_string($source) || ($source !== $want && $source !== $file)) {
+            continue;
+        }
+        $slugs[basename($dir)] = true;
+    }
+
+    foreach (array_keys($slugs) as $slug) {
+        $runner->stopSite($slug);
+        echo "stopped {$slug}\n";
+    }
+}
+
+/**
+ * @param list<array{slug:string,site:\Automattic\SiteBuild\RunningSite}> $sites
+ */
+function announce_sites_up(array $sites, bool $persistent): void
+{
+    echo "\n── all sites up ─────────────────\n";
+    echo $persistent
+        ? "  stop them with: php bin/build-demos.php --stop\n"
+        : "  Ctrl-C stops everything\n";
+    foreach ($sites as $row) {
+        $url = $row['site']->url;
+        printf("  %-32s %s\n", $row['slug'], $url);
+        echo "      ↳ admin: {$row['site']->adminUrl} (auto-logged in)\n";
+    }
+    echo "\n";
+}
+
+/**
  * Boot one Playground server per slug (site i on $basePort + i*PORT_STRIDE),
  * print every URL
  * once all are ready, then block until they exit. A single Ctrl-C stops the
@@ -411,7 +547,7 @@ function pump_children(array &$running, callable $emit): void
  *
  * @param list<string> $slugs
  */
-function serve_all(array $slugs, int $basePort, int $exitCode): void
+function serve_all_playground(array $slugs, int $basePort, int $exitCode): void
 {
     echo "\nStarting " . count($slugs) . " Playground server(s)…\n\n";
 
@@ -484,7 +620,8 @@ function serve_all(array $slugs, int $basePort, int $exitCode): void
         }
         if (!$announced && $allReady) {
             $announced = true;
-            echo "\n── all sites up — Ctrl-C stops everything ─────────────────\n";
+            echo "\n── all sites up ─────────────────\n";
+            echo "  Ctrl-C stops everything\n";
             foreach ($servers as $s) {
                 printf("  %-32s %s\n", $s['slug'], $s['url']);
                 echo "      ↳ admin: {$s['url']}wp-admin/ (auto-logged in)\n";

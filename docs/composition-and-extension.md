@@ -16,6 +16,8 @@ Different hosts legitimately want different steps. That divergence is a feature,
 | **Authoring** | first-party (e.g. future Studio Web) | write new steps in the host's own tree |
 | **Injection** | third parties (agencies, via harness surfaces) | drive a build and interleave their own steps |
 
+"Studio" in these documents means the first-party pipeline **host**; the local desktop app that runs preview sites is `StudioAppRunner`.
+
 Concrete divergences:
 - **WPCom** — meant to stay lean: base site creation, first-party only.
 - **Studio** — *could* go richer; it might, for example, add WordPress-plugin install/config steps (hypothetical — not built).

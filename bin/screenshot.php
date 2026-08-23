@@ -2,30 +2,34 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\Env;
+use Automattic\SiteBuild\PlaygroundRunner;
 use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\RunnerResolver;
+use Automattic\SiteBuild\StudioCli;
 
 /**
- * Boot a built project in WordPress Playground (headless), capture a full-page
- * screenshot of its home page, and save it under the project's logs/ directory.
+ * Boot a built project on the resolved site runner (Studio by default,
+ * Playground as failover), capture a full-page screenshot of its home page,
+ * and save it under the project's logs/ directory.
  *
- *   php bin/screenshot.php <slug> [--port=9400] [--out=<path>] [--timeout=240] [--workers=N] [--keep-alive]
+ *   php bin/screenshot.php <slug> [--runner=studio|playground] [--port=9400] [--out=<path>] [--timeout=240] [--workers=N] [--keep-alive]
  *
- * Reuses bin/playground.php to start the server (so the same blueprint, theme
- * mount and site options apply), waits until it reports ready, screenshots `/`
- * via the lazy-load-aware Playwright helper, then shuts the server down. The
+ * Starts the site via the runner, screenshots `/` via the lazy-load-aware
+ * Playwright helper, then shuts the site down unless --keep-alive. The
  * image is written to projects/<slug>/logs/home.png by default, serving as
  * visual testing evidence alongside the per-step logs.
  *
  * Options:
- *   --port=<n>     port to boot Playground on (default 9400; auto-bumped if busy).
+ *   --port=<n>     Playground only: port to boot on (default 9400; auto-bumped if busy).
  *   --out=<path>   screenshot destination (default projects/<slug>/logs/home.png).
- *   --timeout=<s>  seconds to wait for the server to come up (default 240; the
- *                  first run downloads WordPress, which is slow).
- *   --workers=<n>  Playground worker threads, forwarded to playground.php
- *                  (default 2 there; each worker holds a PHP wasm runtime).
- *   --keep-alive   after the screenshot, leave Playground running in the
- *                  foreground (don't tear it down) so the site can be inspected
- *                  in a browser. Ctrl-C to stop the server.
+ *   --timeout=<s>  Playground only: seconds to wait for the server to come up
+ *                  (default 240; the first Playground run downloads WordPress,
+ *                  which is slow. Studio does not).
+ *   --workers=<n>  Playground only: worker threads, forwarded to Playground
+ *                  (default 2; each worker holds a PHP wasm runtime).
+ *   --keep-alive   after the screenshot, leave the site running so it can be
+ *                  inspected in a browser. Ctrl-C to stop (Playground); Studio
+ *                  stays up until `php bin/serve.php <slug> --stop`.
  *
  * Requires Node.js, the lockfile-pinned Playground CLI, and a Chrome/Chromium binary. Override
  * the browser with CHROME_BIN; width with SHOT_WIDTH.
@@ -34,6 +38,7 @@ use Automattic\SiteBuild\ProjectStore;
 require_once __DIR__ . '/../src/bootstrap.php';
 
 $args = parse_cli_args($argv, [
+    '--runner'     => 'value',
     '--port'       => 'value',
     '--out'        => 'value',
     '--timeout'    => 'value',
@@ -51,9 +56,8 @@ $port = (int) ($flags['--port'] ?? 9400);
 $out = $flags['--out'] ?? null;
 $timeout = (int) ($flags['--timeout'] ?? 240);
 $keepAlive = $flags['--keep-alive'] ?? false;
-$workers = $flags['--workers'] ?? null;
 // Normalize the route to a single leading slash so it appends cleanly to the
-// Playground base URL (which already ends in "/"). Default "/" captures home.
+// site base URL (which already ends in "/"). Default "/" captures home.
 $route = '/' . ltrim($flags['--route'] ?? '/', '/');
 
 if ($slug === null) {
@@ -80,92 +84,90 @@ if ($chrome === null) {
 }
 
 $out ??= $project->logPath('home.png');
-$serverLog = $project->logPath('playground-screenshot.log');
 
-// Start Playground in the background, routing its output to a log we tail for
-// the "Ready!" line (which carries the actual port — playground.php auto-bumps
-// if the requested one is busy). `exec` makes proc_open's pid the php process
-// itself, so teardown can walk and kill its Playground/node subtree. The shared child
-// command also pins PHP_BINARY and sys_temp_dir, keeping our independently
-// derived blueprint paths identical.
-@unlink($serverLog);
-$playgroundArgs = [$slug, '--port=' . (int) $port];
-if ($workers !== null) {
-    $playgroundArgs[] = '--workers=' . $workers;
-}
-$cmd = php_child_command(repo_path('bin/playground.php'), $playgroundArgs);
-$proc = proc_open(
-    $cmd,
-    [0 => ['file', '/dev/null', 'r'], 1 => ['file', $serverLog, 'w'], 2 => ['file', $serverLog, 'a']],
-    $pipes,
-    repo_path()
-);
-if (!is_resource($proc)) {
-    fwrite(STDERR, "Could not start Playground.\n");
+$runnerFlag = isset($flags['--runner']) ? (string) $flags['--runner'] : null;
+$cli = new StudioCli();
+try {
+    $runner = RunnerResolver::resolve(
+        $runnerFlag,
+        $cli,
+        static function (string $message): void {
+            fwrite(STDERR, $message . "\n");
+        }
+    );
+} catch (RuntimeException $e) {
+    fwrite(STDERR, $e->getMessage() . "\n");
     exit(1);
 }
 
-$baseUrl = null;
+$workers = $flags['--workers'] ?? '2';
+if ($workers !== 'auto' && (int) $workers < 1) {
+    fwrite(STDERR, "--workers must be a positive integer or \"auto\".\n");
+    exit(1);
+}
+
+if ($runner->name() === 'playground') {
+    $runner = new PlaygroundRunner($port, (string) $workers);
+} elseif (isset($flags['--port']) || isset($flags['--workers']) || isset($flags['--timeout'])) {
+    echo "--port, --workers, and --timeout apply to Playground only; ignored for Studio.\n";
+}
+
+$site = null;
 $exit = 1;
-$wrapperPid = proc_get_status($proc)['pid'] ?? 0;
-// Pid-stamped, instance-unique path (see playground_blueprint_path): thanks to
-// `exec` above, the wrapper pid IS playground.php's pid, so this is the path
-// it minted — and no sibling server's.
-$blueprintPath = playground_blueprint_path($slug, $wrapperPid);
-register_shutdown_function(static function () use ($proc, $wrapperPid, $blueprintPath) {
-    teardown_playground($proc, $wrapperPid, $blueprintPath);
-});
-
-echo "Booting Playground for '{$slug}' (first run downloads WordPress)…\n";
-$deadline = time() + $timeout;
-while (time() < $deadline) {
-    // Did playground.php die before serving? (bad theme, CLI error, …)
-    if (!proc_get_status($proc)['running']) {
-        fwrite(STDERR, "Playground exited before it was ready. See {$serverLog}\n");
-        echo @file_get_contents($serverLog);
-        exit(1);
+try {
+    echo "Booting '{$slug}' via {$runner->name()}…\n";
+    try {
+        $site = $runner->name() === 'playground'
+            ? $runner->start($project, $timeout)
+            : $runner->start($project);
+    } catch (RuntimeException $studioFailure) {
+        // Same rule as serve/build: our own choice of Studio degrades, a
+        // caller's --runner=studio does not.
+        if ($runner->name() !== 'studio' || RunnerResolver::requestedName($runnerFlag) !== null) {
+            throw $studioFailure;
+        }
+        fwrite(STDERR, "Studio failed: {$studioFailure->getMessage()}\nFalling back to Playground…\n");
+        $runner = new PlaygroundRunner($port, (string) $workers);
+        $site = $runner->start($project, $timeout);
     }
-    $log = is_file($serverLog) ? (string) file_get_contents($serverLog) : '';
-    $baseUrl = playground_ready_url($log);
-    if ($baseUrl !== null) {
-        // playground_ready_url returns a URL with a trailing slash; append the
-        // requested route (default "/") without doubling the slash so inner
-        // pages can be captured, not just the homepage.
-        $baseUrl = rtrim($baseUrl, '/') . $route;
-        break;
+    $baseUrl = rtrim($site->url, '/') . $route;
+    echo "Capturing {$baseUrl} → {$out}\n";
+    $shot = 'node ' . escapeshellarg(repo_path('bin/screenshot/screenshot.js'))
+        . ' ' . escapeshellarg($baseUrl) . ' ' . escapeshellarg($out)
+        . ' ' . escapeshellarg('--chrome=' . $chrome);
+    passthru($shot, $exit);
+    if ($exit === 0 && is_file($out)) {
+        echo "Saved screenshot: {$out}\n";
+    } else {
+        fwrite(STDERR, "Screenshot failed (exit {$exit}).\n");
     }
-    usleep(500_000);
-    echo '.';
-}
-echo "\n";
-
-if ($baseUrl === null) {
-    fwrite(STDERR, "Playground was not ready within {$timeout}s. See {$serverLog}\n");
-    exit(1);
-}
-
-echo "Capturing {$baseUrl} → {$out}\n";
-$shot = 'node ' . escapeshellarg(repo_path('bin/screenshot/screenshot.js'))
-    . ' ' . escapeshellarg($baseUrl) . ' ' . escapeshellarg($out)
-    . ' ' . escapeshellarg('--chrome=' . $chrome);
-passthru($shot, $exit);
-
-if ($exit === 0 && is_file($out)) {
-    echo "Saved screenshot: {$out}\n";
-} else {
-    fwrite(STDERR, "Screenshot failed (exit {$exit}).\n");
-}
-
-// --keep-alive: hold the (already-running) Playground server open in the
-// foreground so the freshly built site can be inspected in a browser, instead
-// of tearing it down the instant the screenshot lands. The server keeps serving
-// for as long as this process lives; block here until the user interrupts with
-// Ctrl-C, which fires the registered shutdown handler and stops the server.
-if ($keepAlive && is_resource($proc) && $baseUrl !== null) {
-    echo "\nKeeping Playground alive — open {$baseUrl} (Ctrl-C to stop)\n";
-    echo "  admin: {$baseUrl}wp-admin/ (auto-logged in)\n";
-    while (proc_get_status($proc)['running'] ?? false) {
-        sleep(1);
+    if ($keepAlive) {
+        echo "\nKeeping site alive — open {$baseUrl} (Ctrl-C to stop)\n";
+        echo "  admin: {$site->adminUrl}\n";
+        if ($site->persistent) {
+            echo "  still running — stop it with: php bin/serve.php {$slug} --stop\n";
+        } else {
+            register_shutdown_function($site->stop);
+            if (function_exists('pcntl_async_signals') && function_exists('pcntl_signal')) {
+                pcntl_async_signals(true);
+                $halt = static function () use ($site): never {
+                    ($site->stop)();
+                    exit(0);
+                };
+                pcntl_signal(SIGINT, $halt);
+                pcntl_signal(SIGTERM, $halt);
+            }
+            while (true) {
+                sleep(1);
+            }
+        }
+    }
+} catch (RuntimeException $e) {
+    fwrite(STDERR, $e->getMessage() . "\n");
+    $exit = 1;
+} finally {
+    if ($site !== null && !$keepAlive) {
+        ($site->stop)();
     }
 }
 
@@ -174,7 +176,7 @@ exit($exit);
 /** The one invocation summary, shared by every path that rejects the line. */
 function usage(): never
 {
-    fwrite(STDERR, "Usage: php bin/screenshot.php <slug> [--port=9400] [--out=<path>] [--timeout=240] [--workers=N] [--keep-alive]\n");
+    fwrite(STDERR, "Usage: php bin/screenshot.php <slug> [--runner=studio|playground] [--port=9400] [--out=<path>] [--timeout=240] [--workers=N] [--keep-alive]\n");
     exit(1);
 }
 

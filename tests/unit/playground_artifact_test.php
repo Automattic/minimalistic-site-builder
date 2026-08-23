@@ -91,7 +91,13 @@ test('offline guard step fails outbound HTTP fast for local CLI previews', funct
     assert_eq('/wordpress/wp-content/mu-plugins/0-preview-offline.php', $step['path']);
     assert_contains('pre_oembed_result', $step['data']);
     assert_contains('pre_http_request', $step['data']);
-    assert_contains('local Playground preview', $step['data']);
+    assert_contains('local preview', $step['data']);
+    // Blocking the request is not enough: the update checks read a WP_Error as an
+    // SSL failure and raise E_USER_WARNING mid-page, which breaks wp-admin headers.
+    foreach (['pre_site_transient_update_core', 'pre_site_transient_update_plugins',
+              'pre_site_transient_update_themes'] as $filter) {
+        assert_contains($filter, $step['data']);
+    }
 });
 
 test('playground artifact URLs point a raw branch asset at Playground blueprint-url', function () {

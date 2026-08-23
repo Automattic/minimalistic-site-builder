@@ -103,7 +103,7 @@ final class FinalizeThemeStep implements Step
     public function run(Project $project): void
     {
         // Every read that can fail happens before the first write. A corrupt
-        // theme.json is fatal (AGENTS.md:53 puts a corrupt required artifact in
+        // theme.json is fatal (AGENTS.md "fix, degrade, warn" puts a corrupt required artifact in
         // the fatal list), and discovering that halfway through would leave the
         // theme half-written — a pruned kit with no functions.php naming it.
         $shape = DesignDirectionStep::shapeFor($project);
