@@ -69,7 +69,7 @@ final class StudioAppRunner implements SiteRunner
     }
 
     /**
-     * Walk <root>/*/.sb-site.json on disk and remove sites whose marker
+     * Walk each child of the Studio root for a .sb-site.json marker and remove sites whose marker
      * belongs to this checkout. Also deregister registry rows whose path
      * no longer exists. Directories without a valid marker are left alone.
      *
@@ -77,7 +77,67 @@ final class StudioAppRunner implements SiteRunner
      */
     public function pruneSites(): array
     {
-        return ['removed' => 0, 'bytes' => 0];
+        if (!is_dir($this->root)) {
+            return ['removed' => 0, 'bytes' => 0];
+        }
+
+        $removed = 0;
+        $bytes = 0;
+        foreach (scandir($this->root) ?: [] as $name) {
+            if ($name === '.' || $name === '..') {
+                continue;
+            }
+            $dir = $this->root . '/' . $name;
+            if (is_link($dir) || !is_dir($dir)) {
+                continue;
+            }
+            $slug = basename($dir);
+            if (StudioSiteGuard::decide($dir, $slug) !== 'recreate') {
+                continue;
+            }
+            // Guard matches slug; repo ownership is this class's check.
+            $decoded = json_decode((string) file_get_contents($dir . '/' . StudioSiteGuard::MARKER), true);
+            $repo = is_array($decoded) ? ($decoded['repo'] ?? null) : null;
+            if (!is_string($repo) || $repo !== $this->repoPath) {
+                continue;
+            }
+
+            try {
+                $lock = $this->acquireLock($slug);
+            } catch (\RuntimeException) {
+                continue;
+            }
+            try {
+                $this->stopSite($slug);
+                $size = $this->directoryBytes($dir);
+                $this->destroy($dir, $slug);
+                $removed++;
+                $bytes += $size;
+            } finally {
+                $this->releaseLock($lock);
+            }
+        }
+
+        // list prints a JSON array; json() requires object keys.
+        $listed = $this->cli->run(['list', '--format', 'json']);
+        $rows = json_decode(trim($listed['stdout']), true);
+        if (is_array($rows) && array_is_list($rows)) {
+            foreach ($rows as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $path = $row['path'] ?? null;
+                if (!is_string($path) || $path === '') {
+                    continue;
+                }
+                if (file_exists($path) || is_dir($path)) {
+                    continue;
+                }
+                $this->cli->run(['delete', '--path', $path, '--no-files']);
+            }
+        }
+
+        return ['removed' => $removed, 'bytes' => $bytes];
     }
 
     private function ensureSite(Project $project, string $slug, string $dir): void
@@ -374,6 +434,31 @@ PHP;
         if (!copy($from, $to)) {
             throw new \RuntimeException("Failed to copy {$from} to {$to}");
         }
+    }
+
+    /** File sizes in $path; symlinks count as 0 and are not followed. */
+    private function directoryBytes(string $path): int
+    {
+        if (is_link($path) || !is_dir($path)) {
+            return 0;
+        }
+        $bytes = 0;
+        foreach (scandir($path) ?: [] as $name) {
+            if ($name === '.' || $name === '..') {
+                continue;
+            }
+            $child = $path . '/' . $name;
+            if (is_link($child)) {
+                continue;
+            }
+            if (is_file($child)) {
+                $size = @filesize($child);
+                $bytes += $size === false ? 0 : $size;
+            } elseif (is_dir($child)) {
+                $bytes += $this->directoryBytes($child);
+            }
+        }
+        return $bytes;
     }
 
     private function removeTree(string $path): void

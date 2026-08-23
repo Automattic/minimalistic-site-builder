@@ -18,6 +18,33 @@ final class RunnerResolver
      */
     public static function resolve(?string $flag, StudioCli $cli, \Closure $warn): SiteRunner
     {
-        throw new \RuntimeException('RunnerResolver::resolve is not implemented');
+        $name = null;
+        if ($flag !== null && $flag !== '') {
+            $name = $flag;
+        } else {
+            $fromEnv = Env::get('SITE_BUILD_RUNNER');
+            if ($fromEnv !== null && $fromEnv !== '') {
+                $name = $fromEnv;
+            }
+        }
+
+        if ($name === 'studio') {
+            if ($cli->available()) {
+                return new StudioAppRunner($cli, StudioAppRunner::defaultRoot(), repo_path());
+            }
+            throw new \RuntimeException('Studio is not available');
+        }
+        if ($name === 'playground') {
+            return new PlaygroundRunner();
+        }
+        if ($name !== null) {
+            throw new \RuntimeException("Unknown runner: {$name}");
+        }
+
+        if ($cli->available()) {
+            return new StudioAppRunner($cli, StudioAppRunner::defaultRoot(), repo_path());
+        }
+        $warn('Studio is not available; falling back to Playground.');
+        return new PlaygroundRunner();
     }
 }
