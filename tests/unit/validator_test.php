@@ -534,6 +534,140 @@ test('validator judges block-JSON url destinations (navigation links)', function
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('validator judges block-JSON href destinations on pattern files', function () {
+    [$project, $tmp] = validator_linked_project();
+    $project->writeText(
+        'theme/patterns/hero-image.php',
+        "<?php\n?>\n"
+        . '<!-- wp:image {"href":"\/missing\/"} --><figure class="wp-block-image"></figure><!-- /wp:image -->'
+        . '<!-- wp:file {"href":"javascript:alert(1)"} --><div class="wp-block-file"></div><!-- /wp:file -->'
+    );
+
+    $joined = implode(' ', ThemeValidator::validate($project));
+    assert_contains('theme/patterns/hero-image.php', $joined);
+    assert_contains('no page has path /missing/', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('validator flags encoded javascript in JSON href and textLinkHref', function () {
+    [$project, $tmp] = validator_linked_project();
+    $project->writeText(
+        'theme/patterns/encoded-js.php',
+        '<!-- wp:image {"href":"\u006Aavascript:alert(1)"} /-->'
+        . '<!-- wp:file {"textLinkHref":"javascript&colon;alert(2)"} /-->',
+    );
+    $joined = implode(' ', ThemeValidator::validate($project));
+    assert_contains('theme/patterns/encoded-js.php', $joined);
+    assert_contains('dangerous scheme', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('validator flags javascript with tab inside the scheme', function () {
+    [$project, $tmp] = validator_linked_project();
+    $project->writeText(
+        'theme/patterns/tab-js.php',
+        "<!-- wp:image {\"href\":\"java\tscript:alert(1)\"} /-->",
+    );
+    $joined = implode(' ', ThemeValidator::validate($project));
+    assert_contains('theme/patterns/tab-js.php', $joined);
+    assert_contains('dangerous scheme', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('validator flags unterminated colon entities in javascript hrefs', function () {
+    [$project, $tmp] = validator_linked_project();
+    $project->writeText(
+        'theme/patterns/entity-js.php',
+        '<!-- wp:image {"href":"javascript&#58alert(1)"} /-->',
+    );
+    $joined = implode(' ', ThemeValidator::validate($project));
+    assert_contains('theme/patterns/entity-js.php', $joined);
+    assert_contains('dangerous scheme', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('validator flags unterminated tab entities in javascript hrefs', function () {
+    [$project, $tmp] = validator_linked_project();
+    $project->writeText(
+        'theme/patterns/tab-entity-js.php',
+        '<!-- wp:image {"href":"java&#9script:alert(1)"} /-->',
+    );
+    $joined = implode(' ', ThemeValidator::validate($project));
+    assert_contains('theme/patterns/tab-entity-js.php', $joined);
+    assert_contains('dangerous scheme', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('validator flags unterminated numeric letter entities in javascript hrefs', function () {
+    [$project, $tmp] = validator_linked_project();
+    $project->writeText(
+        'theme/patterns/letter-entity-js.php',
+        '<!-- wp:image {"href":"java&#115cript:alert(1)"} /-->'
+        . '<!-- wp:file {"textLinkHref":"&#x6aavascript:alert(2)"} /-->',
+    );
+    $joined = implode(' ', ThemeValidator::validate($project));
+    assert_contains('theme/patterns/letter-entity-js.php', $joined);
+    assert_contains('dangerous scheme', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('validator flags CR numeric entities in javascript hrefs', function () {
+    [$project, $tmp] = validator_linked_project();
+    $project->writeText(
+        'theme/patterns/cr-entity-js.php',
+        '<!-- wp:image {"href":"java&#13;script:alert(1)"} /-->'
+        . '<!-- wp:file {"textLinkHref":"java&#x0dscript:alert(2)"} /-->',
+    );
+    $joined = implode(' ', ThemeValidator::validate($project));
+    assert_contains('theme/patterns/cr-entity-js.php', $joined);
+    assert_contains('dangerous scheme', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('validator flags DEL padded hex and unicode JSON keys', function () {
+    [$project, $tmp] = validator_linked_project();
+    $project->writeText(
+        'theme/patterns/scheme-smuggle.php',
+        '<!-- wp:image {"href":"java&#x7fscript:alert(1)"} /-->'
+        . '<!-- wp:file {"textLinkHref":"java&#x0073cript:alert(2)"} /-->'
+        . '<!-- wp:image {"\u0068ref":"javascript:alert(3)"} /-->',
+    );
+    $joined = implode(' ', ThemeValidator::validate($project));
+    assert_contains('theme/patterns/scheme-smuggle.php', $joined);
+    assert_contains('dangerous scheme', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('validator flags javascript in JSON src and poster', function () {
+    [$project, $tmp] = validator_linked_project();
+    $project->writeText(
+        'theme/patterns/video-js.php',
+        '<!-- wp:video {"src":"javascript:alert(1)","poster":"javascript:alert(2)"} /-->',
+    );
+    $joined = implode(' ', ThemeValidator::validate($project));
+    assert_contains('theme/patterns/video-js.php', $joined);
+    assert_contains('dangerous scheme', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('validator judges block-JSON href destinations on image file and media-text', function () {
+    [$project, $tmp] = validator_linked_project();
+    $project->writeText(
+        'theme/patterns/linked-media.php',
+        '<!-- wp:image {"href":"/nope/"} /-->'
+        . '<!-- wp:file {"href":"/gone/","textLinkHref":"/gone-text/"} /-->'
+        . '<!-- wp:media-text {"href":"/missing/"} /-->',
+    );
+
+    $joined = implode(' ', ThemeValidator::validate($project));
+    assert_contains('theme/patterns/linked-media.php', $joined);
+    assert_contains('href="/nope/"', $joined);
+    assert_contains('href="/gone/"', $joined);
+    assert_contains('href="/gone-text/"', $joined);
+    assert_contains('href="/missing/"', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('validator ignores rewritten theme asset urls from generate-images', function () {
     [$project, $tmp] = validator_linked_project();
     // Cover "url" after GenerateImagesStep rewrite — root-relative but not a page.
@@ -572,6 +706,32 @@ test('validator flags button links without an href', function () {
 
     $joined = implode(' ', ThemeValidator::validate($project));
     assert_contains('button link has no href', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('validator scans theme pattern files for placeholder links and unresolved images', function () {
+    [$project, $tmp] = validator_project();
+    $project->writeText(
+        'theme/patterns/hero-cover.php',
+        "<?php\n?>\n"
+        . '<!-- wp:cover {"url":"AI_IMAGE:fog over the dunes"} -->'
+        . '<div class="wp-block-cover"><img class="wp-block-cover__image-background" '
+        . 'src="AI_IMAGE:fog over the dunes" alt=""/></div><!-- /wp:cover -->'
+        . '<!-- wp:paragraph --><p><a href="#">dead</a></p><!-- /wp:paragraph -->'
+        . '<!-- wp:paragraph --><p>{{TITLE}}</p><!-- /wp:paragraph -->'
+    );
+
+    $joined = implode(' ', ThemeValidator::validate($project));
+    assert_contains('theme/patterns/hero-cover.php', $joined);
+    assert_contains('AI_IMAGE', $joined);
+    assert_contains('placeholder', $joined);
+
+    $links = implode(' ', ThemeValidator::placeholderLinkProblems($project));
+    assert_contains('theme/patterns/hero-cover.php', $links);
+    assert_contains('authored href="#"', $links);
+
+    $images = implode(' ', ThemeValidator::unresolvedImageSourceProblems($project));
+    assert_contains('theme/patterns/hero-cover.php', $images);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

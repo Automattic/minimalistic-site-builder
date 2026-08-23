@@ -13,6 +13,7 @@ use Automattic\SiteBuild\Steps\CoverContrastStep;
 use Automattic\SiteBuild\Steps\CustomMotionStep;
 use Automattic\SiteBuild\Steps\DesignDirectionStep;
 use Automattic\SiteBuild\Steps\DesignPreviewStep;
+use Automattic\SiteBuild\Steps\ExtractPatternsStep;
 use Automattic\SiteBuild\Steps\FinalizeThemeStep;
 use Automattic\SiteBuild\Steps\FixBlocksStep;
 use Automattic\SiteBuild\Steps\FixPagesStep;
@@ -260,6 +261,7 @@ final class StepComposition
             // exact fallback stack it rendered instead of adding webfonts only
             // to the transformed theme and changing text geometry.
             new FontsPhpStep(htmlFirst: true),
+            new ExtractPatternsStep(),
             new FinalizeThemeStep(),
             // The theme's preview card. In-pipeline it composes a palette
             // poster; a host that goes on to generate images re-runs this step
@@ -385,6 +387,7 @@ final class StepComposition
             // plus final theme/markup usage — usage may add variants, never remove
             // direction-selected ones. It takes no model — see BIGR-750.
             new FontsPhpStep(),
+            new ExtractPatternsStep(),
             // Sole owner of functions.php: the deterministic loader that enqueues
             // style.css and require_once's the generated fonts.php.
             new FinalizeThemeStep(),
@@ -437,10 +440,18 @@ final class StepComposition
      * The caller builds the image step, because choosing an image client means
      * reading the environment and this package leaves that to its hosts.
      *
+     * @param ?bool $htmlFirst which graph built the project being finished.
+     *        Null asks the env selection, which is only the truth for a host
+     *        that just ran that graph in this process: an entry point resuming
+     *        a project it did not build reads the record and passes it, or the
+     *        re-validation applies the other path's width rules.
      * @return Step[]
      */
-    public static function postImages(Step $generateImages, ?BlockFixer $blockFixer = null): array
-    {
+    public static function postImages(
+        Step $generateImages,
+        ?BlockFixer $blockFixer = null,
+        ?bool $htmlFirst = null,
+    ): array {
         return [
             $generateImages,
             // The pipeline drew a palette poster because no photo existed.
@@ -452,6 +463,12 @@ final class StepComposition
             // Cover text was picked against an image that did not exist yet;
             // re-check it against the real, dimmed pixels.
             new CoverContrastStep($blockFixer ?? BlockFixers::default()),
+            // Cover contrast can rewrite assembled page markup after the graph.
+            // Refresh pattern winners from those final bytes, then re-validate
+            // the delivered theme (the in-graph ValidateThemeStep ran before
+            // this phase rewrote covers and re-extracted patterns).
+            new ExtractPatternsStep(),
+            new ValidateThemeStep(htmlFirst: $htmlFirst ?? self::htmlFirstSelected()),
         ];
     }
 

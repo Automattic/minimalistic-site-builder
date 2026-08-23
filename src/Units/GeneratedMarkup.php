@@ -15,6 +15,7 @@ use Automattic\SiteBuild\HtmlBlockContext;
 use Automattic\SiteBuild\MarkupSalvage;
 use Automattic\SiteBuild\MarkupSanitizer;
 use Automattic\SiteBuild\Narrator;
+use Automattic\SiteBuild\PlainText;
 use Automattic\SiteBuild\Warnings;
 
 /** Project-free normalization shared by every generated markup unit. */
@@ -3777,7 +3778,7 @@ final class GeneratedMarkup
     private static function visibleText(string $innerHtml): string
     {
         $text = (string) preg_replace('/<!--.*?-->/s', '', $innerHtml);
-        $text = html_entity_decode(strip_tags($text), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $text = PlainText::fromMarkup($text);
         $text = (string) preg_replace('/\s+/u', ' ', $text);
         return trim($text);
     }

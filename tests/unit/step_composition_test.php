@@ -46,8 +46,52 @@ test('postImages names the phase every image entry point has to run', function (
     // cannot be added to one and forgotten in the other — and a host that
     // generates images mirrors one name instead of inferring the set.
     assert_eq(
-        ['generate-images', 'theme-screenshot', 'cover-contrast'],
+        ['generate-images', 'theme-screenshot', 'cover-contrast', 'extract-patterns', 'validate-theme'],
         array_map(static fn (Step $s) => $s->id(), StepComposition::postImages($images)),
+    );
+});
+
+test('postImages validates against the graph it is handed, not the env selector', function () {
+    $images = new class implements Step {
+        public function id(): string { return 'generate-images'; }
+        public function label(): string { return 'Generate images'; }
+        public function declaration(): StepDeclaration
+        {
+            return new StepDeclaration(id: $this->id(), label: $this->label(), reads: [], writes: []);
+        }
+        public function run(Project $project): void {}
+    };
+    $validateReads = static function (array $steps): array {
+        foreach ($steps as $step) {
+            if ($step->id() === 'validate-theme') {
+                return $step->declaration()->reads;
+            }
+        }
+        throw new RuntimeException('postImages lost its closing validate-theme');
+    };
+
+    // bin/images.php finishes projects it did not build, so the env key says
+    // nothing about which graph did. The closing re-validation dry-runs the
+    // build's width normalization: handed the wrong graph it reports the very
+    // rules that path deliberately skips, and only the HTML-first path has a
+    // design stylesheet to consult.
+    assert_true(
+        in_array('design/site.css', $validateReads(StepComposition::postImages($images, htmlFirst: true)), true),
+        'an HTML-first project is re-validated with the HTML-first width rules',
+    );
+    assert_true(
+        !in_array('design/site.css', $validateReads(StepComposition::postImages($images, htmlFirst: false)), true),
+        'a blocks project is not',
+    );
+});
+
+test('images CLI reads the graph off the project instead of the env selector', function () {
+    $source = (string) file_get_contents(dirname(__DIR__, 2) . '/bin/images.php');
+    assert_contains('StepComposition::resumeHtmlFirst(', $source);
+    assert_contains('htmlFirst: $htmlFirst', $source);
+    assert_true(
+        !str_contains($source, 'htmlFirstSelected'),
+        'the entry point that did not build the project never asks the env selector',
     );
 });
 
@@ -63,7 +107,7 @@ test('StepComposition htmlFirst matches the HTML-first step order and validates'
         'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
         'design-preview', 'theme-json', 'inner-pages-design', 'splice-home-design', 'assign-image-sources', 'transform-site', 'resolve-nav-links', 'section-rhythm', 'section-layout',
         'collect-images', 'normalize-layout', 'header-hero', 'contrast-fix', 'motion-sanity', 'fix-blocks',
-        'assemble-pages', 'fix-pages', 'page-styles', 'custom-motion', 'fonts-php', 'finalize-theme', 'theme-screenshot', 'validate-theme',
+        'assemble-pages', 'fix-pages', 'page-styles', 'custom-motion', 'fonts-php', 'extract-patterns', 'finalize-theme', 'theme-screenshot', 'validate-theme',
     ], array_map(static fn (Step $s) => $s->id(), $steps));
     StepGraph::validate($steps, $c->seeds());
 
@@ -110,7 +154,7 @@ test('StepComposition default is the full blocks graph byte-for-byte', function 
             'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
             'theme-json+page-plan', 'reconcile-palette', 'sections', 'section-rhythm', 'copy-dedupe',
             'collect-images', 'normalize-layout', 'header-hero', 'contrast-fix', 'motion-sanity', 'fix-blocks',
-            'assemble-pages', 'page-styles', 'custom-motion', 'bundle-fonts', 'fonts-php', 'finalize-theme', 'theme-screenshot', 'validate-theme',
+            'assemble-pages', 'page-styles', 'custom-motion', 'bundle-fonts', 'fonts-php', 'extract-patterns', 'finalize-theme', 'theme-screenshot', 'validate-theme',
         ], $ids);
         assert_true(!in_array('homepage-design', $ids, true));
         assert_true(!in_array('transform-site', $ids, true));

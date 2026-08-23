@@ -107,6 +107,7 @@ test('validate-theme declaration rejects an incomplete theme graph', function ()
         'theme/parts/footer.html',
         'theme/parts/*',
         'theme/templates/*',
+        'theme/patterns/*',
         'plugin/pages/*',
         // The direction fidelity walk reads the promises and the pages it
         // measures them against.
@@ -145,6 +146,30 @@ test('validate-theme passes and logs a completed contract-valid theme', function
     }
 });
 
+test('the postImages validate-theme pass owns its rows instead of merging the in-graph run', function () {
+    [$project, $tmp] = final_validation_project();
+    // What the in-graph run recorded, before cover-contrast and
+    // extract-patterns rewrote the very bytes it judged.
+    $project->addWarnings('validate-theme', [
+        'theme/parts/footer.html: residual the in-graph pass saw before covers were rewritten',
+    ]);
+    $project->addWarnings('cover-contrast', ['a different step keeps its own rows']);
+
+    try {
+        (new ValidateThemeStep())->run($project);
+
+        $warnings = $project->readJson('warnings.json');
+        assert_true(
+            !isset($warnings['validate-theme']),
+            'a clean second pass clears the rows its own "passed" log says are gone',
+        );
+        assert_eq(['a different step keeps its own rows'], $warnings['cover-contrast']);
+        assert_contains('passed', $project->readText('logs/validate-theme.log'));
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
 test('validate-theme records problems as warnings and still delivers the theme', function () {
     [$project, $tmp] = final_validation_project();
     $project->writeText(
@@ -164,6 +189,29 @@ test('validate-theme records problems as warnings and still delivers the theme',
         $warnings = $project->readJson('warnings.json');
         assert_true(isset($warnings['validate-theme']), 'warnings.json groups problems by step id');
         assert_contains('var:preset|spacing--xl', implode("\n", $warnings['validate-theme']));
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('validate-theme reports broken pattern structure and presets without throwing', function () {
+    [$project, $tmp] = final_validation_project();
+    $broken = "<?php\n?>\n<!-- wp:group --><div class=\"wp-block-group\">Broken\n";
+    $badPreset = "<?php\n?>\n"
+        . '<!-- wp:group {"backgroundColor":"missing-pattern-color"} -->'
+        . '<div class="wp-block-group"></div><!-- /wp:group -->';
+    $project->writeText('theme/patterns/broken.php', $broken);
+    $project->writeText('theme/patterns/bad-preset.php', $badPreset);
+
+    try {
+        (new ValidateThemeStep())->run($project);
+
+        assert_eq($broken, $project->readText('theme/patterns/broken.php'));
+        assert_eq($badPreset, $project->readText('theme/patterns/bad-preset.php'));
+        $joined = implode("\n", $project->readJson('warnings.json')['validate-theme'] ?? []);
+        assert_contains('theme/patterns/broken.php: unbalanced block comments', $joined);
+        assert_contains('patterns/bad-preset.php: preset color slug "missing-pattern-color"', $joined);
+        assert_contains('theme delivered anyway', $project->readText('logs/validate-theme.log'));
     } finally {
         exec('rm -rf ' . escapeshellarg($tmp));
     }

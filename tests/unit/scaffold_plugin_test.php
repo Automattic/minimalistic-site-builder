@@ -6,6 +6,10 @@ use Automattic\SiteBuild\MarkupSanitizer;
 use Automattic\SiteBuild\Steps\ApplyIdentityStep;
 use Automattic\SiteBuild\Steps\ScaffoldPluginStep;
 use Automattic\SiteBuild\Steps\ScaffoldThemeStep;
+use Automattic\BlocksEngine\PhpTransformer\HtmlToBlocks\AuthoredInputBlockGenerator;
+use Automattic\BlocksEngine\PhpTransformer\HtmlToBlocks\AuthoredSelectBlockGenerator;
+use Automattic\BlocksEngine\PhpTransformer\HtmlToBlocks\AuthorLayoutBlockGenerator;
+use Automattic\BlocksEngine\PhpTransformer\HtmlToBlocks\DescriptionListBlockGenerator;
 
 require_once __DIR__ . '/../wp-html-api.php';
 
@@ -78,6 +82,11 @@ function wp_stub_reset(): void
     $GLOBALS['wp_attachments'] = [];
     $GLOBALS['wp_next_id'] = 100;
     $GLOBALS['wp_kses_calls'] = [];
+    $GLOBALS['wp_actions'] = [];
+    $GLOBALS['wp_registered_block_paths'] = [];
+    if (method_exists(WP_Block_Type_Registry::get_instance(), 'reset')) {
+        WP_Block_Type_Registry::get_instance()->reset();
+    }
     // Simulate the unprivileged context (WP-CLI, Playground blueprint):
     // the kses post-content filter is active.
     $GLOBALS['wp_filters'] = ['content_save_pre' => ['wp_filter_post_kses' => 10]];
@@ -85,6 +94,36 @@ function wp_stub_reset(): void
 
 if (!defined('OBJECT')) {
     define('OBJECT', 'OBJECT');
+}
+
+if (!class_exists('WP_Block_Type_Registry')) {
+    final class WP_Block_Type_Registry
+    {
+        /** @var array<string, true> */
+        private array $registered = [];
+
+        private static ?self $instance = null;
+
+        public static function get_instance(): self
+        {
+            return self::$instance ??= new self();
+        }
+
+        public function is_registered(string $name): bool
+        {
+            return isset($this->registered[$name]);
+        }
+
+        public function register(string $name): void
+        {
+            $this->registered[$name] = true;
+        }
+
+        public function reset(): void
+        {
+            $this->registered = [];
+        }
+    }
 }
 
 if (!function_exists('get_option')) {
@@ -172,6 +211,20 @@ if (!function_exists('get_option')) {
     function register_deactivation_hook(string $file, callable $cb): void
     {
     }
+    function add_action(string $hook, callable $callback): void
+    {
+        $GLOBALS['wp_actions'][$hook][] = $callback;
+    }
+    function register_block_type(string $directory): bool
+    {
+        $metadata = json_decode((string) file_get_contents($directory . '/block.json'), true);
+        if (!is_array($metadata) || !isset($metadata['name'])) {
+            return false;
+        }
+        WP_Block_Type_Registry::get_instance()->register((string) $metadata['name']);
+        $GLOBALS['wp_registered_block_paths'][] = $directory;
+        return true;
+    }
     function wp_upload_bits(string $name, $deprecated, string $bits): array
     {
         $dir = sys_get_temp_dir() . '/wp-stub-uploads';
@@ -235,6 +288,62 @@ function scaffold_plugin_fixture(string $slug = 'hearth-crumb'): array
     (new ApplyIdentityStep())->run($project);
     return [$project, $tmp];
 }
+
+test('scaffold-plugin materializes and registers every fixed transformer companion block', function () {
+    $slug = 'companion-blocks';
+    [$project, $tmp] = scaffold_plugin_fixture($slug);
+    $generators = [
+        new AuthoredInputBlockGenerator(),
+        new AuthoredSelectBlockGenerator(),
+        new AuthorLayoutBlockGenerator(),
+        new DescriptionListBlockGenerator(),
+    ];
+
+    assert_true(
+        in_array('plugin/blocks/*', (new ScaffoldPluginStep())->declaration()->writes, true),
+        'the step declares its generated block metadata and assets',
+    );
+
+    $php = $project->readText(ScaffoldPluginStep::MAIN_FILE);
+    $expectedDirectories = [];
+    foreach ($generators as $generator) {
+        $definition = $generator->definition();
+        $directory = 'plugin/blocks/' . $definition['name'];
+        $expectedDirectories[] = realpath($project->path($directory));
+
+        assert_eq(
+            $definition['block_json'],
+            $project->readJson($directory . '/block.json'),
+            $definition['name'] . ' metadata comes from the transformer generator',
+        );
+        foreach ($definition['assets'] as $filename => $contents) {
+            assert_eq(
+                $contents,
+                $project->readText($directory . '/' . $filename),
+                $definition['name'] . '/' . $filename . ' comes from the transformer generator',
+            );
+        }
+
+        assert_contains($definition['block_json']['name'], $php, 'plugin names every fixed companion block');
+        assert_contains("__DIR__ . '/blocks/{$definition['name']}'", $php, 'plugin registers the metadata directory');
+    }
+    assert_contains("function_exists('register_block_type')", $php);
+    assert_contains("class_exists('WP_Block_Type_Registry')", $php);
+    assert_contains('WP_Block_Type_Registry::get_instance()', $php);
+    assert_contains('register_block_type($directory)', $php);
+
+    wp_stub_reset();
+    require_once $project->pluginPath('site-content.php');
+    $register = content_fn($slug, 'register_companion_blocks');
+    $register();
+    $register();
+    assert_eq($expectedDirectories, $GLOBALS['wp_registered_block_paths'], 'second registration is inert');
+
+    exec(PHP_BINARY . ' -l ' . escapeshellarg($project->pluginPath('site-content.php')) . ' 2>&1', $out, $rc);
+    assert_eq(0, $rc, 'identity-filled php -l: ' . implode("\n", $out));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
 
 test('scaffold-plugin writes the static seeder with identity placeholders', function () {
     $tmp = sys_get_temp_dir() . '/builder_plugscaf_' . uniqid();

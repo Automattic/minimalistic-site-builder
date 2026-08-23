@@ -425,7 +425,7 @@ final class DeterministicNavLinkResolver implements NavLinkResolver
 
     private function label(string $childBytes): string
     {
-        $text = html_entity_decode(strip_tags($childBytes), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $text = PlainText::fromMarkup($childBytes);
         $collapsed = preg_replace('/\s+/u', ' ', trim($text));
         return $collapsed === null ? trim($text) : $collapsed;
     }

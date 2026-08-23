@@ -87,6 +87,38 @@ use Automattic\SiteBuild\StudioCli;
 
 require_once __DIR__ . '/../src/bootstrap.php';
 
+/**
+ * Count pattern manifest entries by their rendered kind.
+ *
+ * Version 1 manifests have no kind field and contain only sections. Explicit
+ * version 2 kinds keep their current meaning; malformed and unknown entries
+ * count as neither kind.
+ *
+ * @param list<mixed> $patternEntries
+ * @return array{sections:int,components:int}
+ */
+function build_pattern_kind_counts(array $patternEntries): array
+{
+    return [
+        'sections' => count(array_filter(
+            $patternEntries,
+            static fn (mixed $pattern): bool => is_array($pattern)
+                && (!array_key_exists('kind', $pattern) || $pattern['kind'] === 'section'),
+        )),
+        'components' => count(array_filter(
+            $patternEntries,
+            static fn (mixed $pattern): bool => is_array($pattern)
+                && ($pattern['kind'] ?? null) === 'component',
+        )),
+    ];
+}
+
+// Keep the pure counter directly testable without executing the CLI.
+$scriptFilename = $_SERVER['SCRIPT_FILENAME'] ?? null;
+if (!is_string($scriptFilename) || realpath($scriptFilename) !== __FILE__) {
+    return;
+}
+
 $args = parse_cli_args($argv, [
     '--slug'                     => 'value',
     '--provider'                 => 'value',
@@ -373,6 +405,17 @@ if ($withImages && $until === null) {
         };
     }
     $report->setImages($generated, $failed, count($specs));
+}
+
+if ($project->exists('patterns.json')) {
+    $patternManifest = $project->readJson('patterns.json');
+    $patternEntries = $patternManifest['patterns'] ?? [];
+    $patternCounts = build_pattern_kind_counts($patternEntries);
+    $report->setPatterns(
+        $patternCounts['sections'],
+        $patternCounts['components'],
+        count($patternManifest['dropped'] ?? []),
+    );
 }
 
 $usage = $llm->usageTotals();
