@@ -122,8 +122,11 @@ final class TransportResolver
      *
      * @param null|callable(string):Llm $apiFactory
      */
-    public static function build(TransportChoice $choice, ?callable $apiFactory = null): Llm
-    {
+    public static function build(
+        TransportChoice $choice,
+        ?callable $apiFactory = null,
+        ?string $harnessModel = null,
+    ): Llm {
         if ($choice->kind === TransportChoice::KIND_API) {
             if ($apiFactory === null) {
                 throw new TransportUnavailable(
@@ -167,6 +170,13 @@ final class TransportResolver
                 . 'Set SITE_BUILD_LLM=api with the configured provider key.'
             ),
         };
+    }
+
+    /** Canonical environment variable carrying one provider's API credential. */
+    public static function credentialVariableFor(string $provider): ?string
+    {
+        $provider = self::normalizeProvider($provider, 'API provider');
+        return self::PROVIDER_KEYS[$provider][0] ?? null;
     }
 
     /**

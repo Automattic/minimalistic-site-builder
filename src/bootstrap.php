@@ -126,7 +126,7 @@ function openrouter_api_key(): string
  * overridable per step via LLM_MODEL_* — so `--provider=openai` swaps the whole
  * model set without extra flags.
  */
-function make_llm(): Llm
+function make_llm(?string $provider = null): Llm
 {
     $provider = strtolower((string) Env::get('LLM_PROVIDER', ModelConfig::defaultProvider()));
 
