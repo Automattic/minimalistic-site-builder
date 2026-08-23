@@ -185,3 +185,74 @@ test('--html-first and --blocks-first together are refused', function () {
         implode("\n", $output)
     );
 });
+
+test('a --from resume runs the graph meta.json recorded, not the ambient one', function () {
+    // The rule itself is unit-tested on StepComposition; this covers the wiring,
+    // which is where deleting one putenv would leave every other gate green.
+    $slug = 'zz-resume-graph-' . getmypid() . '-' . uniqid();
+    $dir = repo_path('projects/' . $slug);
+    mkdir($dir, 0777, true);
+    file_put_contents($dir . '/meta.json', (string) json_encode([
+        'prompt'           => 'a cozy neighborhood bakery',
+        'provisional_slug' => $slug,
+        'multi_page'       => false,
+        'graph'            => 'html-first',
+    ]));
+
+    try {
+        // No flag, and the env explicitly names the OTHER graph: the record wins.
+        $ids = build_cli_graph_ids(
+            ['--slug=' . $slug, '--from=transform-site'],
+            ['SITE_BUILD_HTML_FIRST' => '0']
+        );
+        $seen = implode(',', $ids);
+        assert_true(in_array('transform-site', $ids, true), $seen);
+        assert_true(!in_array('sections', $ids, true), $seen);
+
+        // A flag contradicting the record is refused, not honored: section-rhythm
+        // exists in both graphs, so nothing else would catch the crossed resume.
+        $command = 'ANTHROPIC_API_KEY=' . escapeshellarg('test-key') . ' '
+            . php_child_command(repo_path('bin/build.php'), [
+                'demo',
+                '--provider=anthropic',
+                '--no-serve',
+                '--slug=' . $slug,
+                '--from=section-rhythm',
+                '--blocks-first',
+            ]);
+        $output = [];
+        $exit = 0;
+        exec($command . ' 2>&1', $output, $exit);
+        $text = implode("\n", $output);
+
+        assert_eq(1, $exit, $text);
+        assert_true(str_contains($text, 'built on the html-first graph'), $text);
+        assert_true(str_contains($text, 'blocks-first was passed'), $text);
+    } finally {
+        exec('rm -rf ' . escapeshellarg($dir));
+    }
+});
+
+test('a --from resume on a project with no recorded graph still honors the flag', function () {
+    // Projects created before builds recorded the graph must keep resuming.
+    $slug = 'zz-resume-unrecorded-' . getmypid() . '-' . uniqid();
+    $dir = repo_path('projects/' . $slug);
+    mkdir($dir, 0777, true);
+    file_put_contents($dir . '/meta.json', (string) json_encode([
+        'prompt'           => 'a cozy neighborhood bakery',
+        'provisional_slug' => $slug,
+        'multi_page'       => false,
+    ]));
+
+    try {
+        $ids = build_cli_graph_ids(
+            ['--slug=' . $slug, '--from=transform-site', '--html-first'],
+            ['SITE_BUILD_HTML_FIRST' => '0']
+        );
+        $seen = implode(',', $ids);
+        assert_true(in_array('transform-site', $ids, true), $seen);
+        assert_true(!in_array('sections', $ids, true), $seen);
+    } finally {
+        exec('rm -rf ' . escapeshellarg($dir));
+    }
+});

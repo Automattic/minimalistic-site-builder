@@ -21,6 +21,10 @@ use Automattic\SiteBuild\StepComposition;
  * SITE_BUILD_HTML_FIRST from the shell or .env. With neither, that env var
  * decides, and unset still means blocks-first.
  *
+ * The graph is recorded in meta.json, so --from resumes on whatever built the
+ * project without being told again. A flag contradicting that record is refused
+ * rather than honored: the other graph never wrote the artifacts a resume reads.
+ *
  * Seeds projects/<slug>/meta.json with the prompt, then runs the pipeline,
  * printing per-step timing, token spend and configured model(s) as each step
  * lands, then a consolidated report at the end. The same overview is written to
@@ -38,7 +42,8 @@ use Automattic\SiteBuild\StepComposition;
  * artifacts (design/*.html, site.css, designDirection.json, meta.json, …) as
  * inputs. It requires --slug (the existing project), ignores the prompt (the
  * design already exists), and leaves the reused directory otherwise untouched.
- * Same id list as --until, group members included.
+ * Same id list as --until, group members included, and on a resume that list
+ * comes from the graph the project was built on.
  *
  * Deterministic-tail recipe for the default blocks graph — re-run the passes
  * that require NO LLM and NO image generation, in seconds:
@@ -189,6 +194,36 @@ if ($htmlFirst || $blocksFirst) {
 
 $llm = make_llm();
 $builder = make_site_builder($llm);
+
+// A resume has to run the graph that built the project, so its record is read
+// BEFORE the pipeline is assembled. That also makes --from's "valid steps" list
+// come from the right graph instead of whichever one the flags happened to pick.
+$project = null;
+$meta = [];
+if ($from !== null) {
+    try {
+        $project = $builder->store()->open($slug);
+    } catch (RuntimeException $e) {
+        Narrator::write("--from: {$e->getMessage()}\n");
+        exit(1);
+    }
+    $meta = $project->exists('meta.json') ? $project->readJson('meta.json') : [];
+    $recordedGraph = $meta['graph'] ?? null;
+    try {
+        $resumeHtmlFirst = StepComposition::resumeHtmlFirst(
+            is_string($recordedGraph) ? $recordedGraph : null,
+            $htmlFirst || $blocksFirst ? $htmlFirst : null,
+        );
+    } catch (InvalidArgumentException $e) {
+        Narrator::write("--from: {$e->getMessage()}\n");
+        exit(1);
+    }
+    // Null means nothing was recorded to honor, so the flag/env choice stands.
+    if ($resumeHtmlFirst !== null) {
+        putenv(StepComposition::HTML_FIRST_ENV . '=' . ($resumeHtmlFirst ? '1' : '0'));
+    }
+}
+
 $pipeline = $builder->pipeline();
 
 // step id => model, for the model column (see BuildReport::modelLabel).
@@ -212,20 +247,12 @@ if ($from !== null && !in_array($from, $pipeline->stopIds(), true)) {
 }
 
 if ($from !== null) {
-    // Resume: open the existing project untouched (no createProject, which would
-    // re-seed meta.json and could clobber multi_page/design_constraints from the
-    // original build). Its design/*.html, site.css, meta.json etc. are the inputs
-    // the deterministic tail reads, so leave every artifact on disk as-is.
-    try {
-        $project = $builder->store()->open($slug);
-    } catch (RuntimeException $e) {
-        Narrator::write("--from: {$e->getMessage()}\n");
-        exit(1);
-    }
+    // Resume: the project was opened untouched above (no createProject, which
+    // would re-seed meta.json and could clobber multi_page/design_constraints
+    // from the original build). Its design/*.html, site.css, meta.json etc. are
+    // the inputs the deterministic tail reads, so every artifact stays as-is.
     // The prompt argument is ignored on resume; the report reuses the recorded one.
-    $prompt = $project->exists('meta.json')
-        ? (string) ($project->readJson('meta.json')['prompt'] ?? '')
-        : '';
+    $prompt = (string) ($meta['prompt'] ?? '');
 } else {
     // Without an explicit --slug, createProject picks a free random adjective-noun
     // name. Explicit --slug reuses that directory across re-runs. meta.json is

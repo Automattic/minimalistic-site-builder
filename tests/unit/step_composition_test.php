@@ -260,3 +260,56 @@ test('StepComposition configures new seeds before inserting a step that reads th
     // Without the extra seed the same list is rightly rejected.
     assert_throws(fn () => new Pipeline($c->steps()));
 });
+
+test('graphName maps the two graphs to the names meta.json records', function () {
+    assert_eq('html-first', StepComposition::graphName(true));
+    assert_eq('blocks', StepComposition::graphName(false));
+    assert_eq(StepComposition::GRAPH_HTML_FIRST, StepComposition::graphName(true));
+    assert_eq(StepComposition::GRAPH_BLOCKS, StepComposition::graphName(false));
+});
+
+test('graphName with no argument reports the currently selected graph', function () {
+    $previous = getenv('SITE_BUILD_HTML_FIRST');
+    try {
+        putenv('SITE_BUILD_HTML_FIRST=1');
+        assert_eq('html-first', StepComposition::graphName());
+        putenv('SITE_BUILD_HTML_FIRST=0');
+        assert_eq('blocks', StepComposition::graphName());
+    } finally {
+        $previous === false
+            ? putenv('SITE_BUILD_HTML_FIRST')
+            : putenv('SITE_BUILD_HTML_FIRST=' . $previous);
+    }
+});
+
+test('a resume with no flag runs whatever graph the record names', function () {
+    assert_eq(true, StepComposition::resumeHtmlFirst('html-first', null));
+    assert_eq(false, StepComposition::resumeHtmlFirst('blocks', null));
+});
+
+test('a resume flag that agrees with the record is accepted', function () {
+    assert_eq(true, StepComposition::resumeHtmlFirst('html-first', true));
+    assert_eq(false, StepComposition::resumeHtmlFirst('blocks', false));
+});
+
+test('a resume flag contradicting the record is refused, not honored', function () {
+    $e = assert_throws(static fn () => StepComposition::resumeHtmlFirst('html-first', false));
+    assert_true($e instanceof InvalidArgumentException, get_class($e));
+    // The CLI prints this verbatim behind a "--from: " prefix.
+    assert_true(str_contains($e->getMessage(), 'built on the html-first graph'), $e->getMessage());
+    assert_true(str_contains($e->getMessage(), 'blocks-first was passed'), $e->getMessage());
+
+    $e = assert_throws(static fn () => StepComposition::resumeHtmlFirst('blocks', true));
+    assert_true(str_contains($e->getMessage(), 'built on the blocks graph'), $e->getMessage());
+    assert_true(str_contains($e->getMessage(), 'html-first was passed'), $e->getMessage());
+});
+
+test('an absent or unreadable record leaves the resume selection to the caller', function () {
+    // Projects built before builds recorded the graph, and anything this
+    // version does not recognize: degrade to the flag/env choice rather than
+    // silently treating an unknown name as the blocks graph.
+    assert_eq(null, StepComposition::resumeHtmlFirst(null, null));
+    assert_eq(null, StepComposition::resumeHtmlFirst(null, true));
+    assert_eq(null, StepComposition::resumeHtmlFirst('', true));
+    assert_eq(null, StepComposition::resumeHtmlFirst('some-future-graph', false));
+});

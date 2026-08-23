@@ -52,6 +52,10 @@ final class StepComposition
     /** The env key that selects the HTML-first graph. Written by the CLI's --html-first / --blocks-first. */
     public const HTML_FIRST_ENV = 'SITE_BUILD_HTML_FIRST';
 
+    /** Graph names recorded in meta.json, so a --from resume can run the graph that built the project. */
+    public const GRAPH_HTML_FIRST = 'html-first';
+    public const GRAPH_BLOCKS = 'blocks';
+
     /** Artifacts produced before the runtime fallback enters the blocks tail. */
     private const BLOCKS_TAIL_SEEDS = [
         'meta.json',
@@ -106,6 +110,41 @@ final class StepComposition
     public static function htmlFirstSelected(): bool
     {
         return Env::get(self::HTML_FIRST_ENV) === '1';
+    }
+
+    /** The meta.json name for a graph. Null asks the current selection. */
+    public static function graphName(?bool $htmlFirst = null): string
+    {
+        $htmlFirst ??= self::htmlFirstSelected();
+        return $htmlFirst ? self::GRAPH_HTML_FIRST : self::GRAPH_BLOCKS;
+    }
+
+    /**
+     * The graph a --from resume must run: whatever built the project. A flag
+     * contradicting the record is a mistake, not an override, because the
+     * other graph's artifacts were never written. Null means there is nothing
+     * to honor — no record, or one this version doesn't recognize — so the
+     * caller's own selection stands.
+     *
+     * @throws \InvalidArgumentException when the request contradicts the record
+     */
+    public static function resumeHtmlFirst(?string $recordedGraph, ?bool $requested): ?bool
+    {
+        if ($recordedGraph !== self::GRAPH_HTML_FIRST && $recordedGraph !== self::GRAPH_BLOCKS) {
+            return null;
+        }
+        $recorded = $recordedGraph === self::GRAPH_HTML_FIRST;
+        if ($requested !== null && $requested !== $recorded) {
+            throw new \InvalidArgumentException(sprintf(
+                "project was built on the %s graph, but --%s was passed. Resuming on a "
+                . "different graph reads artifacts that graph never wrote.\n"
+                . "Drop the flag to resume on %s.",
+                $recordedGraph,
+                $requested ? 'html-first' : 'blocks-first',
+                $recordedGraph,
+            ));
+        }
+        return $recorded;
     }
 
     /**
