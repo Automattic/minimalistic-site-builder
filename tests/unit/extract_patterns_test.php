@@ -95,6 +95,70 @@ function extract_patterns_backgrounds(string $markup): array
     return $values;
 }
 
+/** One saved core/buttons block with stable copy for survival/removal assertions. */
+function extract_patterns_buttons(string $copy): string
+{
+    return '<!-- wp:buttons --><div class="wp-block-buttons">'
+        . '<!-- wp:button --><div class="wp-block-button">'
+        . '<a class="wp-block-button__link wp-element-button" href="/contact/">' . $copy . '</a>'
+        . '</div><!-- /wp:button -->'
+        . '</div><!-- /wp:buttons -->';
+}
+
+/** @param list<string> $columns */
+function extract_patterns_columns(array $columns): string
+{
+    $markup = '';
+    foreach ($columns as $column) {
+        $markup .= '<!-- wp:column --><div class="wp-block-column">'
+            . $column
+            . '</div><!-- /wp:column -->';
+    }
+    return '<!-- wp:columns --><div class="wp-block-columns">'
+        . $markup
+        . '</div><!-- /wp:columns -->';
+}
+
+/** One section wrapper with caller-authored content blocks. */
+function extract_patterns_group(string $content): string
+{
+    return '<!-- wp:group --><div class="wp-block-group">'
+        . $content
+        . '</div><!-- /wp:group -->';
+}
+
+/** Read the emitted section pattern selected for one normalized label. */
+function extract_patterns_for_label(Project $project, string $label): string
+{
+    foreach ($project->readJson('patterns.json')['patterns'] as $pattern) {
+        if (($pattern['label'] ?? null) === $label) {
+            return $project->readText('theme/patterns/' . $pattern['slug'] . '.php');
+        }
+    }
+    throw new RuntimeException("No emitted pattern for label '{$label}'");
+}
+
+/** @return array{band:int,in_card:int} core/buttons counts by column ancestry */
+function extract_patterns_button_levels(string $markup): array
+{
+    $doc = BlockMarkup::parse($markup);
+    $counts = ['band' => 0, 'in_card' => 0];
+    foreach ($doc->indices() as $index) {
+        if (!in_array($doc->name($index), ['buttons', 'core/buttons'], true)) {
+            continue;
+        }
+        $insideColumn = false;
+        for ($parent = $doc->parent($index); $parent !== null; $parent = $doc->parent($parent)) {
+            if (in_array($doc->name($parent), ['column', 'core/column'], true)) {
+                $insideColumn = true;
+                break;
+            }
+        }
+        $counts[$insideColumn ? 'in_card' : 'band']++;
+    }
+    return $counts;
+}
+
 test('extract-patterns freezes its step declaration contract', function (): void {
     $step = new ExtractPatternsStep();
     $declaration = $step->declaration();
@@ -248,13 +312,14 @@ test('patterns.json matches its frozen contract', function (): void {
         (new ExtractPatternsStep())->run($project);
         $manifest = $project->readJson('patterns.json');
 
-        assert_eq(1, $manifest['version']);
+        assert_eq(2, $manifest['version']);
         assert_eq(['version', 'patterns', 'starter', 'dropped'], array_keys($manifest));
         assert_true($manifest['patterns'] !== []);
         $pattern = $manifest['patterns'][0];
         assert_eq([
-            'slug', 'label', 'shape', 'title', 'categories', 'source', 'score', 'contains', 'alternates',
+            'slug', 'kind', 'label', 'shape', 'title', 'categories', 'source', 'score', 'contains', 'alternates',
         ], array_keys($pattern));
+        assert_eq('section', $pattern['kind']);
         assert_eq(['page', 'section', 'index'], array_keys($pattern['source']));
         assert_eq([
             'total', 'completeness', 'repetition', 'copy_fit', 'fidelity', 'self_containment',
@@ -286,6 +351,230 @@ test('same-key candidates emit one winner and record the loser as an alternate',
         assert_eq(1, count($services));
         assert_eq(1, count($services[0]['alternates']));
         assert_eq(['page', 'section', 'total'], array_keys($services[0]['alternates'][0]));
+    });
+});
+
+test('band CTA removal preserves buttons nested inside a column and leaves page markup unchanged', function (): void {
+    with_project('builder_extract_cta_level_', function (Project $project): void {
+        $service = extract_patterns_group(
+            '<!-- wp:heading --><h2>Services</h2><!-- /wp:heading -->'
+            . extract_patterns_buttons('BAND ACTION')
+            . extract_patterns_columns([
+                '<!-- wp:paragraph --><p>Card copy</p><!-- /wp:paragraph -->'
+                . extract_patterns_buttons('CARD ACTION'),
+            ]),
+        );
+        extract_patterns_seed($project, [
+            ['slug' => 'hero', 'markup' => sp_columns(1)],
+            ['slug' => 'service', 'markup' => $service],
+        ]);
+        $pageBefore = $project->readText('plugin/pages/home.html');
+
+        (new ExtractPatternsStep())->run($project);
+
+        $pattern = extract_patterns_for_label($project, 'service');
+        assert_eq(['band' => 0, 'in_card' => 1], extract_patterns_button_levels($pattern));
+        assert_true(!str_contains($pattern, 'BAND ACTION'));
+        assert_contains('CARD ACTION', $pattern);
+        assert_eq($pageBefore, $project->readText('plugin/pages/home.html'));
+    });
+});
+
+test('band CTA nested in media-text is removed without deleting sibling content', function (): void {
+    with_project('builder_extract_cta_media_', function (Project $project): void {
+        $process = extract_patterns_group(
+            '<!-- wp:media-text --><div class="wp-block-media-text">'
+            . '<!-- wp:heading --><h2>PROCESS HEADING</h2><!-- /wp:heading -->'
+            . '<!-- wp:paragraph --><p>PROCESS PARAGRAPH</p><!-- /wp:paragraph -->'
+            . '<!-- wp:list --><ul><li>PROCESS LIST</li></ul><!-- /wp:list -->'
+            . extract_patterns_buttons('PROCESS ACTION')
+            . '</div><!-- /wp:media-text -->',
+        );
+        extract_patterns_seed($project, [
+            ['slug' => 'hero', 'markup' => sp_columns(1)],
+            ['slug' => 'process', 'markup' => $process],
+        ]);
+
+        (new ExtractPatternsStep())->run($project);
+
+        $pattern = extract_patterns_for_label($project, 'process');
+        assert_eq(['band' => 0, 'in_card' => 0], extract_patterns_button_levels($pattern));
+        assert_contains('PROCESS HEADING', $pattern);
+        assert_contains('PROCESS PARAGRAPH', $pattern);
+        assert_contains('PROCESS LIST', $pattern);
+        assert_true(!str_contains($pattern, 'PROCESS ACTION'));
+    });
+});
+
+test('band CTA removal prunes its empty container chain but keeps the section wrapper and sibling bytes', function (): void {
+    with_project('builder_extract_cta_empty_chain_', function (Project $project): void {
+        $sibling = '<!-- wp:paragraph --><p>SURVIVING SIBLING BYTE SENTINEL</p><!-- /wp:paragraph -->';
+        $ctaOnlyChain = extract_patterns_group(
+            extract_patterns_group(extract_patterns_buttons('NESTED BAND ACTION')),
+        );
+        extract_patterns_seed($project, [
+            ['slug' => 'hero', 'markup' => sp_columns(1)],
+            ['slug' => 'testimonial', 'markup' => extract_patterns_group($sibling . $ctaOnlyChain)],
+        ]);
+        $pageBefore = $project->readText('plugin/pages/home.html');
+
+        (new ExtractPatternsStep())->run($project);
+
+        $pattern = extract_patterns_for_label($project, 'testimonial');
+        assert_true(!str_contains($pattern, 'NESTED BAND ACTION'));
+        assert_contains($sibling, $pattern, 'surviving sibling bytes remain exact');
+        $document = BlockMarkup::parse($pattern);
+        $groups = array_values(array_filter(
+            $document->indices(),
+            static fn (int $index): bool => in_array($document->name($index), ['group', 'core/group'], true),
+        ));
+        assert_eq(1, count($groups), 'only top-level section group remains after upward pruning');
+        assert_eq(null, $document->parent($groups[0]), 'section wrapper remains top-level');
+        assert_true(!str_contains($pattern, '<div class="wp-block-group"></div>'), 'no empty group remains');
+        assert_eq($pageBefore, $project->readText('plugin/pages/home.html'));
+    });
+});
+
+test('only cta closing and contact labels retain band-level buttons', function (): void {
+    with_project('builder_extract_cta_exempt_', function (Project $project): void {
+        $sections = [];
+        foreach (['hero', 'cta', 'closing', 'contact', 'service'] as $label) {
+            $sections[] = [
+                'slug' => $label,
+                'markup' => extract_patterns_group(
+                    '<!-- wp:paragraph --><p>' . strtoupper($label) . ' COPY</p><!-- /wp:paragraph -->'
+                    . extract_patterns_buttons(strtoupper($label) . ' ACTION'),
+                ),
+            ];
+        }
+        extract_patterns_seed($project, $sections);
+
+        (new ExtractPatternsStep())->run($project);
+
+        $expected = ['cta' => 1, 'closing' => 1, 'contact' => 1, 'hero' => 0, 'service' => 0];
+        foreach ($expected as $label => $bandButtons) {
+            $counts = extract_patterns_button_levels(extract_patterns_for_label($project, $label));
+            assert_eq($bandButtons, $counts['band'], $label);
+        }
+        assert_eq(['cta', 'closing', 'contact'], array_keys(array_filter(
+            $expected,
+            static fn (int $count): bool => $count === 1,
+        )));
+    });
+});
+
+test('buttons-only non-exempt pattern keeps its CTA and records actionable warning context', function (): void {
+    with_project('builder_extract_cta_nonempty_', function (Project $project): void {
+        extract_patterns_seed($project, [
+            ['slug' => 'hero', 'markup' => sp_columns(1)],
+            ['slug' => 'service', 'markup' => extract_patterns_group(extract_patterns_buttons('ONLY ACTION'))],
+        ]);
+
+        (new ExtractPatternsStep())->run($project);
+
+        $pattern = extract_patterns_for_label($project, 'service');
+        assert_eq(['band' => 1, 'in_card' => 0], extract_patterns_button_levels($pattern));
+        assert_contains('ONLY ACTION', $pattern);
+        $warnings = strtolower($project->readText('warnings.json'));
+        foreach ([
+            'theme/patterns/service-stack.php',
+            'block path',
+            'authored value',
+            'core/buttons',
+            'delivered value',
+            'retained',
+            'disposition',
+        ] as $context) {
+            assert_contains($context, $warnings, $context);
+        }
+    });
+});
+
+test('NBSP-only wrapper content cannot turn CTA removal into a blank pattern', function (): void {
+    with_project('builder_extract_cta_nbsp_nonempty_', function (Project $project): void {
+        extract_patterns_seed($project, [
+            ['slug' => 'hero', 'markup' => sp_columns(1)],
+            [
+                'slug' => 'service',
+                'markup' => extract_patterns_group(
+                    "&nbsp;\u{00A0}" . extract_patterns_buttons('NBSP ONLY ACTION'),
+                ),
+            ],
+        ]);
+        $pageBefore = $project->readText('plugin/pages/home.html');
+
+        (new ExtractPatternsStep())->run($project);
+
+        $pattern = extract_patterns_for_label($project, 'service');
+        assert_eq(['band' => 1, 'in_card' => 0], extract_patterns_button_levels($pattern));
+        assert_contains('NBSP ONLY ACTION', $pattern, 'CTA retained instead of shipping blank wrapper');
+        $warnings = strtolower($project->readText('warnings.json'));
+        foreach ([
+            'theme/patterns/service-stack.php',
+            'block path',
+            'authored value',
+            'core/buttons',
+            'delivered value',
+            'retained',
+            'disposition',
+        ] as $context) {
+            assert_contains($context, $warnings, $context);
+        }
+        assert_eq($pageBefore, $project->readText('plugin/pages/home.html'));
+    });
+});
+
+test('page starter applies shared CTA stripping and keeps exact band and in-card counts', function (): void {
+    with_project('builder_extract_cta_starter_', function (Project $project): void {
+        $paragraph = '<!-- wp:paragraph --><p>Useful copy</p><!-- /wp:paragraph -->';
+        extract_patterns_seed($project, [
+            [
+                'slug' => 'hero',
+                'markup' => extract_patterns_group(extract_patterns_columns([
+                    $paragraph . extract_patterns_buttons('HERO CARD ACTION'),
+                    $paragraph,
+                ])),
+            ],
+            [
+                'slug' => 'service',
+                'markup' => extract_patterns_group(
+                    extract_patterns_columns([
+                        $paragraph . extract_patterns_buttons('SERVICE CARD ACTION'),
+                        $paragraph,
+                    ])
+                    . extract_patterns_buttons('SERVICE BAND ACTION'),
+                ),
+            ],
+            [
+                'slug' => 'testimonial',
+                'markup' => extract_patterns_group(
+                    extract_patterns_columns([$paragraph, $paragraph, $paragraph])
+                    . extract_patterns_buttons('TESTIMONIAL BAND ACTION'),
+                ),
+            ],
+            [
+                'slug' => 'process',
+                'markup' => extract_patterns_group(
+                    extract_patterns_columns([$paragraph, $paragraph, $paragraph])
+                    . extract_patterns_buttons('PROCESS BAND ACTION'),
+                ),
+            ],
+            [
+                'slug' => 'cta',
+                'markup' => extract_patterns_group($paragraph . extract_patterns_buttons('CTA BAND ACTION')),
+            ],
+        ]);
+
+        (new ExtractPatternsStep())->run($project);
+
+        $starter = $project->readText('theme/patterns/page-starter.php');
+        assert_eq(['band' => 1, 'in_card' => 2], extract_patterns_button_levels($starter));
+        assert_contains('HERO CARD ACTION', $starter);
+        assert_contains('SERVICE CARD ACTION', $starter);
+        assert_contains('CTA BAND ACTION', $starter);
+        assert_true(!str_contains($starter, 'SERVICE BAND ACTION'));
+        assert_true(!str_contains($starter, 'TESTIMONIAL BAND ACTION'));
+        assert_true(!str_contains($starter, 'PROCESS BAND ACTION'));
     });
 });
 
@@ -407,7 +696,7 @@ test('a page with malformed delimiters is skipped with a warning and completes',
     });
 });
 
-test('cap overflow emits twelve patterns and records every dropped key', function (): void {
+test('section cap emits ten sections while component cap emits six source pairs', function (): void {
     with_project('builder_extract_cap_', function (Project $project): void {
         $slugs = [
             'alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf',
@@ -421,9 +710,16 @@ test('cap overflow emits twelve patterns and records every dropped key', functio
         (new ExtractPatternsStep())->run($project);
 
         $manifest = $project->readJson('patterns.json');
-        assert_eq(12, count($manifest['patterns']));
-        assert_eq(1, count($manifest['dropped']));
-        assert_eq(['key', 'reason', 'total'], array_keys($manifest['dropped'][0]));
+        assert_eq(10, count(array_filter(
+            $manifest['patterns'],
+            static fn (array $pattern): bool => $pattern['kind'] === 'section',
+        )));
+        assert_eq(12, count(array_filter(
+            $manifest['patterns'],
+            static fn (array $pattern): bool => $pattern['kind'] === 'component',
+        )));
+        assert_eq(10, count($manifest['dropped']));
+        assert_eq(['kind', 'key', 'reason', 'total'], array_keys($manifest['dropped'][0]));
         assert_eq('cap', $manifest['dropped'][0]['reason']);
         $warnings = $project->readText('warnings.json');
         assert_contains($manifest['dropped'][0]['key'], $warnings);
@@ -504,10 +800,10 @@ test('cap reserves hero and call-to-action coverage before higher-scoring grid v
 
         $manifest = $project->readJson('patterns.json');
         $slugs = array_column($manifest['patterns'], 'slug');
-        assert_eq(12, count($slugs));
+        assert_eq(22, count($slugs));
         assert_true(in_array('hero-stack', $slugs, true), 'hero coverage survives the cap');
         assert_true(in_array('cta-stack', $slugs, true), 'call-to-action coverage survives the cap');
-        assert_eq(2, count($manifest['dropped']));
+        assert_eq(10, count($manifest['dropped']));
     });
 });
 

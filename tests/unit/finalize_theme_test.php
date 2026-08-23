@@ -37,6 +37,7 @@ test('finalize-theme writes the deterministic functions.php loader', function ()
     assert_contains("require_once __DIR__ . '/fonts.php'", $php);
     assert_contains('is_readable', $php);
     assert_contains("register_block_pattern_category('forno-vero-sections'", $php);
+    assert_contains("register_block_pattern_category('forno-vero-components'", $php);
     assert_contains("'label' => 'Forno Vero'", $php);
     // No model output belongs here — no font URLs, ever.
     assert_true(!str_contains($php, 'googleapis'), 'fonts stay in fonts.php');
