@@ -554,7 +554,7 @@ test('validator judges block-JSON href destinations on image file and media-text
     $project->writeText(
         'theme/patterns/linked-media.php',
         '<!-- wp:image {"href":"/nope/"} /-->'
-        . '<!-- wp:file {"href":"/gone/"} /-->'
+        . '<!-- wp:file {"href":"/gone/","textLinkHref":"/gone-text/"} /-->'
         . '<!-- wp:media-text {"href":"/missing/"} /-->',
     );
 
@@ -562,6 +562,7 @@ test('validator judges block-JSON href destinations on image file and media-text
     assert_contains('theme/patterns/linked-media.php', $joined);
     assert_contains('href="/nope/"', $joined);
     assert_contains('href="/gone/"', $joined);
+    assert_contains('href="/gone-text/"', $joined);
     assert_contains('href="/missing/"', $joined);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
