@@ -1107,11 +1107,17 @@ test('V5 make_llm explicit provider wins over ambient LLM_PROVIDER', function ()
         . 'putenv("OPENROUTER_API_KEY=test-openrouter"); '
         . 'require ' . var_export($bootstrap, true) . '; '
         . '$llm = make_llm("openrouter"); '
-        . 'echo get_class($llm) . " | " . (method_exists($llm, "endpoint") ? $llm->endpoint() : "NO_ENDPOINT");';
+        . '$r = new ReflectionClass($llm); $model = $r->getProperty("model")->getValue($llm); '
+        . 'echo get_class($llm) . " | " . (method_exists($llm, "endpoint") ? $llm->endpoint() : "NO_ENDPOINT") '
+        . '. " | " . $model;';
 
     [$output, $status] = tr_php($code);
     assert_eq(0, $status, $output);
-    assert_eq('Automattic\\SiteBuild\\OpenAiCompatibleClient | https://openrouter.ai/api/v1/chat/completions', $output);
+    assert_eq(
+        'Automattic\\SiteBuild\\OpenAiCompatibleClient | https://openrouter.ai/api/v1/chat/completions '
+        . '| moonshotai/kimi-k3',
+        $output,
+    );
 });
 
 test('V5 make_llm without provider preserves ambient behavior', function (): void {
