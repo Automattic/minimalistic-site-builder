@@ -105,12 +105,25 @@ final class LinkTargets
             $trimmed = $fromJson;
         }
         $decoded = html_entity_decode($trimmed, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $decoded = self::decodeUnterminatedEntities($decoded);
         $colon = strpos($decoded, ':');
         if ($colon === false) {
             return $decoded;
         }
         $scheme = preg_replace('/[\x00-\x20]+/', '', substr($decoded, 0, $colon)) ?? '';
         return $scheme . substr($decoded, $colon);
+    }
+
+    /**
+     * PHP html_entity_decode leaves numeric and some named entities without a
+     * semicolon. Gutenberg still decodes &#58 / &#x3a / &colon.
+     */
+    private static function decodeUnterminatedEntities(string $value): string
+    {
+        $value = preg_replace('/&colon(?!;)/i', ':', $value) ?? $value;
+        $value = preg_replace('/&#x0*3a(?!;)/i', ':', $value) ?? $value;
+        $value = preg_replace('/&#0*58(?![0-9])/', ':', $value) ?? $value;
+        return $value;
     }
 
     /** javascript:/data:/vbscript: — rewrite these destinations to `#`. */

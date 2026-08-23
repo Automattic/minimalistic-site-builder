@@ -415,6 +415,24 @@ test('link rewrite hashes javascript with tab or space inside the scheme', funct
     }
 });
 
+test('link rewrite hashes unterminated colon entities in javascript', function (): void {
+    $cases = [
+        'dec' => '<!-- wp:image {"href":"javascript&#58alert(1)"} /-->',
+        'hex' => '<!-- wp:file {"textLinkHref":"javascript&#x3aalert(2)"} /-->',
+        'named' => '<!-- wp:navigation-link {"url":"javascript&colonalert(3)"} /-->',
+    ];
+    foreach ($cases as $name => $markup) {
+        assert_true(LinkTargets::isDangerousScheme(LinkTargets::allTargets($markup)[0] ?? ''), $name);
+        $output = ExtractPatternsStep::rewriteLinks($markup, []);
+        foreach (LinkTargets::allTargets($output) as $target) {
+            assert_eq('#', $target, $name);
+        }
+        assert_true(!str_contains($output, '&#58'), $name);
+        assert_true(!str_contains(strtolower($output), '&#x3a'), $name);
+        assert_true(!str_contains(strtolower($output), '&colon'), $name);
+    }
+});
+
 test('a stale pattern file from a prior run is gone after a re-run', function (): void {
     with_project('builder_extract_patterns_', function (Project $project): void {
         extract_patterns_seed($project);

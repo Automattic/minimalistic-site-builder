@@ -84,3 +84,12 @@ test('LinkTargets::normalizeTarget strips tab or C0 inside the scheme', function
     assert_true(LinkTargets::isDangerousScheme('java script:alert(1)'));
 });
 
+test('LinkTargets::normalizeTarget decodes unterminated colon entities', function (): void {
+    assert_eq('javascript:alert(1)', LinkTargets::normalizeTarget('javascript&#58alert(1)'));
+    assert_eq('javascript:alert(1)', LinkTargets::normalizeTarget('javascript&#x3aalert(1)'));
+    assert_eq('javascript:alert(1)', LinkTargets::normalizeTarget('javascript&#X3Aalert(1)'));
+    assert_eq('javascript:alert(1)', LinkTargets::normalizeTarget('javascript&colonalert(1)'));
+    assert_true(LinkTargets::isDangerousScheme('javascript&#58alert(1)'));
+    assert_true(LinkTargets::isDangerousScheme('javascript&#x3aalert(1)'));
+});
+

@@ -574,6 +574,18 @@ test('validator flags javascript with tab inside the scheme', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('validator flags unterminated colon entities in javascript hrefs', function () {
+    [$project, $tmp] = validator_linked_project();
+    $project->writeText(
+        'theme/patterns/entity-js.php',
+        '<!-- wp:image {"href":"javascript&#58alert(1)"} /-->',
+    );
+    $joined = implode(' ', ThemeValidator::validate($project));
+    assert_contains('theme/patterns/entity-js.php', $joined);
+    assert_contains('dangerous scheme', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('validator judges block-JSON href destinations on image file and media-text', function () {
     [$project, $tmp] = validator_linked_project();
     $project->writeText(
