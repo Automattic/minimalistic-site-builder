@@ -30,6 +30,7 @@ use Automattic\SiteBuild\Units\HeaderUnit;
 use Automattic\SiteBuild\Units\HeroUnit;
 use Automattic\SiteBuild\Units\MarkupUnit;
 use Automattic\SiteBuild\Units\SectionUnit;
+use Automattic\SiteBuild\FormPlaceholder;
 use Automattic\SiteBuild\Warnings;
 
 /**
@@ -317,6 +318,9 @@ final class SectionsStep implements Step
             }
         }
         $pages = self::synchronizePrimaryAction($pages, $initialContract, $delivery, $warnings);
+        if (self::formPlaceholders($project)) {
+            $files = self::ensureContactFormPlaceholders($pages, $files, $warnings);
+        }
         array_push($warnings, ...AboveFoldContract::warningRows($delivery));
         $plan['pages'] = $pages;
         foreach ($files as $rel => $markup) {
@@ -1110,6 +1114,80 @@ final class SectionsStep implements Step
         }
 
         return ['jobs' => $jobs, 'contract' => $contract];
+    }
+
+    /**
+     * A contact page with a form backend must carry one JP_FORM placeholder.
+     * When every generated section omitted it, splice the default spec into
+     * the best remaining part so the host still has something to substitute
+     * (BIGR-858).
+     *
+     * @param array<int,array<string,mixed>> $pages
+     * @param array<string,string> $files relative theme path => markup
+     * @param list<string> $warnings
+     * @return array<string,string>
+     */
+    public static function ensureContactFormPlaceholders(
+        array $pages,
+        array $files,
+        array &$warnings = [],
+    ): array {
+        foreach ($pages as $page) {
+            if (!is_array($page) || !PagePlanStep::isContactLikePage($page)) {
+                continue;
+            }
+            $pageSlug = (string) ($page['slug'] ?? '');
+            $rels = [];
+            foreach ((array) ($page['sections'] ?? []) as $section) {
+                if (!is_array($section)) {
+                    continue;
+                }
+                $rel = 'parts/' . self::partSlug($pageSlug, (string) ($section['slug'] ?? '')) . '.html';
+                if (isset($files[$rel])) {
+                    $rels[] = ['rel' => $rel, 'section' => $section];
+                }
+            }
+            if ($rels === []) {
+                continue;
+            }
+            $hasForm = false;
+            foreach ($rels as $row) {
+                if (FormPlaceholder::find($files[$row['rel']]) !== []) {
+                    $hasForm = true;
+                    break;
+                }
+            }
+            if ($hasForm) {
+                continue;
+            }
+            $target = $rels[0];
+            $best = -1;
+            foreach ($rels as $row) {
+                $score = 0;
+                $blob = strtolower(implode(' ', [
+                    (string) ($row['section']['slug'] ?? ''),
+                    (string) ($row['section']['type'] ?? ''),
+                    (string) ($row['section']['purpose'] ?? ''),
+                ]));
+                if (str_contains($blob, 'contact') || str_contains($blob, 'form')) {
+                    $score += 2;
+                }
+                $role = (string) ($row['section']['role'] ?? '');
+                if ($role === SectionRole::CONTENT) {
+                    $score += 1;
+                }
+                if ($score > $best) {
+                    $best = $score;
+                    $target = $row;
+                }
+            }
+            $files[$target['rel']] = rtrim($files[$target['rel']]) . "\n"
+                . FormPlaceholder::defaultContactMarkup() . "\n";
+            $warnings[] = "file='theme/{$target['rel']}'; block='jetpack-form-placeholder'; "
+                . 'authored=missing JP_FORM on contact page; delivered=default contact placeholder; '
+                . 'disposition=injected so the host can substitute a real form';
+        }
+        return $files;
     }
 
     /**

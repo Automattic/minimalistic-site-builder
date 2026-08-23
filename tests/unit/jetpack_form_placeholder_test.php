@@ -93,6 +93,57 @@ test('the placeholder capability travels from createProject to the sections step
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('defaultContactMarkup is a parseable contact placeholder', function () {
+    $markup = Automattic\SiteBuild\FormPlaceholder::defaultContactMarkup();
+    $found = Automattic\SiteBuild\FormPlaceholder::find($markup);
+    assert_eq(1, count($found));
+    $parsed = Automattic\SiteBuild\FormPlaceholder::parse($found[0]['spec']);
+    assert_true(is_array($parsed));
+    assert_eq('contact', $parsed['purpose']);
+});
+
+test('a contact page missing JP_FORM gets a default placeholder injected', function () {
+    $files = [
+        'parts/page-contact--hero.html' => '<!-- wp:paragraph --><p>Reach us</p><!-- /wp:paragraph -->',
+        'parts/page-contact--form.html' => '<!-- wp:heading --><h2>Write</h2><!-- /wp:heading -->',
+        'parts/header.html' => '<!-- wp:site-title /-->',
+    ];
+    $pages = [[
+        'slug' => 'contact',
+        'title' => 'Contact',
+        'purpose' => 'Let visitors reach the team.',
+        'sections' => [
+            ['slug' => 'hero', 'type' => 'hero', 'role' => 'hero'],
+            ['slug' => 'form', 'type' => 'contact', 'role' => 'content'],
+        ],
+    ]];
+    $warnings = [];
+    $out = Automattic\SiteBuild\Steps\SectionsStep::ensureContactFormPlaceholders($pages, $files, $warnings);
+
+    assert_eq(1, Automattic\SiteBuild\FormPlaceholder::markerCount($out['parts/page-contact--form.html']));
+    assert_eq(0, Automattic\SiteBuild\FormPlaceholder::markerCount($out['parts/page-contact--hero.html']));
+    assert_contains('injected', implode(' ', $warnings));
+});
+
+test('a contact page that already has JP_FORM is left alone', function () {
+    $form = Automattic\SiteBuild\FormPlaceholder::defaultContactMarkup();
+    $files = [
+        'parts/page-contact--form.html' => $form,
+    ];
+    $pages = [[
+        'slug' => 'contact',
+        'title' => 'Contact',
+        'purpose' => 'Reach us',
+        'sections' => [
+            ['slug' => 'form', 'type' => 'contact', 'role' => 'content'],
+        ],
+    ]];
+    $warnings = [];
+    $out = Automattic\SiteBuild\Steps\SectionsStep::ensureContactFormPlaceholders($pages, $files, $warnings);
+    assert_eq($files, $out);
+    assert_eq([], $warnings);
+});
+
 test('a project that never went through createProject defaults to no placeholders', function () {
     $tmp = sys_get_temp_dir() . '/builder_jpform_' . uniqid();
     $project = make_test_builder(new Automattic\SiteBuild\Tests\FakeLlm(), $tmp)
