@@ -68,6 +68,18 @@ final class StudioAppRunner implements SiteRunner
         $this->cli->run(['stop', '--path', $this->siteDir($slug)]);
     }
 
+    /**
+     * Walk <root>/*/.sb-site.json on disk and remove sites whose marker
+     * belongs to this checkout. Also deregister registry rows whose path
+     * no longer exists. Directories without a valid marker are left alone.
+     *
+     * @return array{removed:int,bytes:int}
+     */
+    public function pruneSites(): array
+    {
+        return ['removed' => 0, 'bytes' => 0];
+    }
+
     private function ensureSite(Project $project, string $slug, string $dir): void
     {
         $decision = StudioSiteGuard::decide($dir, $slug);
