@@ -193,7 +193,7 @@ final class PlaygroundRunner implements SiteRunner
      */
     public static function waitUntilReady($proc, string $logPath, int $timeoutSeconds = 240): string
     {
-        $deadline = time() + $timeoutSeconds;
+        $deadline = microtime(true) + $timeoutSeconds;
         $offset = 0;
         while (true) {
             $log = is_file($logPath) ? (string) file_get_contents($logPath) : '';
@@ -217,7 +217,7 @@ final class PlaygroundRunner implements SiteRunner
             if (!proc_get_status($proc)['running']) {
                 throw new \RuntimeException("Playground exited before it was ready.\n" . $log);
             }
-            if (time() >= $deadline) {
+            if (microtime(true) >= $deadline) {
                 throw new \RuntimeException("Playground did not become ready within {$timeoutSeconds}s");
             }
             usleep(300_000);

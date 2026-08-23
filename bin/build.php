@@ -3,13 +3,16 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\BuildReport;
 use Automattic\SiteBuild\Narrator;
+use Automattic\SiteBuild\PlaygroundRunner;
+use Automattic\SiteBuild\RunnerResolver;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepComposition;
+use Automattic\SiteBuild\StudioCli;
 
 /**
  * Build a site from a prompt.
  *
- *   php bin/build.php "A cozy neighborhood bakery" [--provider=openai] [--slug=my-slug] [--from=step-id] [--until=step-id] [--html-first|--blocks-first] [--multi-page] [--pages="Home, Menu, About"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=foreground-image] [--max-hero-images=1] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--use-jetpack-placeholders] [--port=9400] [--no-serve]
+ *   php bin/build.php "A cozy neighborhood bakery" [--provider=openai] [--slug=my-slug] [--from=step-id] [--until=step-id] [--html-first|--blocks-first] [--multi-page] [--pages="Home, Menu, About"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=foreground-image] [--max-hero-images=1] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--use-jetpack-placeholders] [--runner=studio|playground] [--port=9400] [--no-serve]
  *
  * --provider=<anthropic|openai|xai|openrouter> picks the model set (config/models.json):
  * each step runs on that provider's large/small tier. Per-step LLM_MODEL_<STEP>
@@ -89,6 +92,7 @@ $args = parse_cli_args($argv, [
     '--from'                     => 'value',
     '--pages'                    => 'value',
     '--port'                     => 'value',
+    '--runner'                   => 'value',
     '--writing-direction'        => 'value',
     '--hero-canvas'              => 'value',
     '--hero-media-modes'         => 'value',
@@ -246,6 +250,22 @@ if ($from !== null && !in_array($from, $pipeline->stopIds(), true)) {
     exit(1);
 }
 
+$runnerFlag = isset($flags['--runner']) ? (string) $flags['--runner'] : null;
+$runnerFallback = false;
+try {
+    $runner = RunnerResolver::resolve(
+        $runnerFlag,
+        new StudioCli(),
+        static function (string $message) use (&$runnerFallback): void {
+            $runnerFallback = true;
+            Narrator::write($message . "\n");
+        }
+    );
+} catch (RuntimeException $e) {
+    Narrator::write($e->getMessage() . "\n");
+    exit(1);
+}
+
 if ($from !== null) {
     // Resume: the project was opened untouched above (no createProject, which
     // would re-seed meta.json and could clobber multi_page/design_constraints
@@ -375,7 +395,10 @@ $project->writeText('logs/project.log', $overview);
 
 // The same run as a machine-readable record, for comparing cost and model mix
 // across builds after the fact.
-$project->writeJson('build-stats.json', $report->stats(default_llm_model(), $models));
+$stats = $report->stats(default_llm_model(), $models);
+$stats['runner'] = $runner->name();
+$stats['runner_fallback'] = $runnerFallback;
+$project->writeJson('build-stats.json', $stats);
 
 echo "Output: {$project->path()}\n";
 
@@ -383,17 +406,43 @@ echo "Output: {$project->path()}\n";
 // build stopped early (--until) or the user opted out (--no-serve).
 if ($serve && $until === null) {
     echo "\nStarting preview…\n";
-    $cmd = 'php ' . escapeshellarg(repo_path('bin/playground.php')) . ' ' . escapeshellarg($project->slug());
-    if ($port !== null) {
-        $cmd .= ' --port=' . $port;
+    $serveRunner = $runner;
+    if ($serveRunner->name() === 'playground') {
+        $serveRunner = new PlaygroundRunner($port ?? 9400);
+    } elseif ($port !== null) {
+        echo "--port applies to Playground only; ignored for Studio.\n";
     }
-    passthru($cmd, $exit);
-    exit($exit);
+    try {
+        $site = $serveRunner->start($project);
+    } catch (RuntimeException $e) {
+        Narrator::write($e->getMessage() . "\n");
+        exit(1);
+    }
+    echo "  url:    {$site->url}\n";
+    echo "  admin:  {$site->adminUrl}\n";
+    if ($site->persistent) {
+        echo "  still running — stop it with: php bin/serve.php {$project->slug()} --stop\n";
+        exit(0);
+    }
+    echo "  (first run downloads WordPress; Ctrl-C to stop)\n\n";
+    register_shutdown_function($site->stop);
+    if (function_exists('pcntl_async_signals') && function_exists('pcntl_signal')) {
+        pcntl_async_signals(true);
+        $halt = static function () use ($site): never {
+            ($site->stop)();
+            exit(0);
+        };
+        pcntl_signal(SIGINT, $halt);
+        pcntl_signal(SIGTERM, $halt);
+    }
+    while (true) {
+        sleep(1);
+    }
 }
 
 /** The one invocation summary, shared by every path that rejects the line. */
 function usage(): never
 {
-    Narrator::write("Usage: php bin/build.php \"<prompt>\" [--provider=anthropic|openai|xai|openrouter] [--slug=...] [--from=step-id] [--until=step-id] [--html-first|--blocks-first] [--multi-page] [--pages=\"Home, Menu, About\"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=cover-image,foreground-image] [--max-hero-images=1..2] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--use-jetpack-placeholders] [--port=9400] [--no-serve]\n");
+    Narrator::write("Usage: php bin/build.php \"<prompt>\" [--provider=anthropic|openai|xai|openrouter] [--slug=...] [--from=step-id] [--until=step-id] [--html-first|--blocks-first] [--multi-page] [--pages=\"Home, Menu, About\"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=cover-image,foreground-image] [--max-hero-images=1..2] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--use-jetpack-placeholders] [--runner=studio|playground] [--port=9400] [--no-serve]\n");
     exit(1);
 }

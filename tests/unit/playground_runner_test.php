@@ -42,7 +42,7 @@ test('waitUntilReady throws when the deadline expires and the process is still a
     @unlink($log);
     assert_contains('Playground did not become ready within 2s', $e->getMessage());
     assert_true($elapsed < 5, "elapsed {$elapsed}s, want < 5");
-    assert_true($elapsed >= 1.5, "elapsed {$elapsed}s, want the 2s deadline to actually wait");
+    assert_true($elapsed >= 1.8, "elapsed {$elapsed}s, want the 2s deadline to actually wait");
 });
 
 test('a Playground site is not persistent, so the caller owns stopping it', function () {
