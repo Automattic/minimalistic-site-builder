@@ -1,111 +1,155 @@
 # Composition & extension — the step library, per-host graphs, and extending a build
 
-> Design note (2026-07-02), from a DX/extensibility review. **Supersedes** the "the host workflow encodes the *same* DAG as the library's default composition" framing in `site-build-portable-pipeline.md`: hosts compose *different* graphs on purpose.
+> Design note (updated 2026-08-23). This supersedes the "the host workflow encodes the same DAG as the library's default composition" framing in `site-build-portable-pipeline.md`: hosts compose different graphs on purpose.
 
 ## The shift: a library, not a fixed pipeline
 
-The shared surface of the toolset is **not a fixed graph**. It is a **library of reusable site-creation steps and units** — the deterministic operations, the prompts, the fan-out units, the `Llm` interface. Each host **composes its own graph** over that library. `SiteBuilder::pipeline()` is the **default / CLI composition**, one among several — not "the pipeline." Host workflows and harness flows are each their own composition of the same library.
+The shared surface of the toolset is not a fixed graph. It is a library of reusable site-creation steps and units: deterministic operations, prompts, fan-out units, and the `Llm` interface. Each host composes its own graph over that library. `SiteBuilder::pipeline()` is the default CLI composition, one among several, rather than the only pipeline.
 
 Different hosts legitimately want different steps. That divergence is a feature, not drift to be prevented.
 
 ## Three tiers of extension
 
 | Tier | Who | How |
-|------|-----|-----|
-| **Selection** | first-party hosts (WPCom, Studio) | compose a subset of library steps |
-| **Authoring** | first-party (e.g. future Studio Web) | write new steps in the host's own tree |
-| **Injection** | third parties (agencies, via harness surfaces) | drive a build and interleave their own steps |
+| --- | --- | --- |
+| Selection | First-party hosts such as WordPress.com and Studio | Compose a subset of library steps. |
+| Authoring | First-party hosts, including a future Studio Web | Write new steps in the host's own tree. |
+| Injection | Third parties such as agencies using a harness | Drive a build and interleave their own work at file checkpoints. |
 
-Concrete divergences:
-- **WPCom** — meant to stay lean: base site creation, first-party only.
-- **Studio** — *could* go richer; it might, for example, add WordPress-plugin install/config steps (hypothetical — not built).
-- **Harness users (agencies)** — drive a build and splice in their own steps to tailor it.
+Concrete divergences include:
 
-## Files are the interface (why extension works across codebases)
+- WordPress.com can keep a lean first-party site-creation composition.
+- Studio can use a richer composition, potentially including WordPress plugin installation or configuration steps. That example is a possible extension, not a feature implemented here.
+- Harness users can stop the repository build at a named step, modify the project, and resume at another named step.
 
-The property that makes all of this possible is already in the core, and it is the part that can look primitive: **the `Project` is state on disk, and every step is individually runnable and resumable.**
+## Files are the interface
 
-Because the boundary between steps is **files, not in-memory objects**, anything — another codebase, another language, an agent — can drive a build and do its own work between steps without linking into the PHP. **Do not trade this for in-memory state to look cleaner; it is what makes extension work across processes, languages, and agents.**
+The property that makes cross-host extension possible is deliberately simple: `Project` state lives on disk, and every step is individually addressable and resumable.
 
-`warnings.json` is part of that portable disk-state contract. It is the
-project-root, machine-readable record of non-fatal defects in output a step
-still delivered. Warning-producing steps must use `Project::addWarnings()` and
-declare `warnings.json` in `writes[]`, so hosts and later repair steps can
-discover the artifact without parsing console output or human-oriented logs.
-Mutating repair steps may deliver through only an explicitly reviewed,
-deterministic safe degradation; advisory final validators may report residual
-problems without rewriting the artifact. Generated-content failures fix,
-degrade, warn, and continue at the smallest safe unit; missing/corrupt required
-artifacts and programming invariants remain fatal.
+Because the boundary between steps is files rather than in-memory objects, another codebase, another language, or an agent can drive a build and do its own work between steps without linking into the PHP package. Do not replace this boundary with process-local state merely to make the implementation look cleaner; files are what make extension portable across processes and hosts.
 
-## Two building-block decisions (resolved)
+`warnings.json` is part of that portable disk-state contract. It is the project-root, machine-readable record of non-fatal defects in output a step still delivered. Warning-producing steps must use `Project::addWarnings()` and declare `warnings.json` in `writes[]`, so hosts and later repair steps can discover the artifact without parsing console output or human-oriented logs.
 
-1. **Declarative steps.** Each step declares `id` + `reads[]` + `writes[]` + concurrency. The ordered array becomes *derived* data. Any host's composition is then **validated** — a step whose inputs aren't yet produced is a construction-time error, not a runtime one. The graph is data, not hand-assembled code.
+Mutating repair steps may deliver through only an explicitly reviewed, deterministic safe degradation. Advisory final validators may report residual problems without rewriting the artifact. Generated-content failures are fixed, degraded, warned about, and allowed to continue at the smallest safe unit; missing or corrupt required artifacts and programming invariants remain fatal.
 
-   As of BIGR-645, steps implement `declaration(): StepDeclaration`, lists are validated by `StepGraph` at assembly time (default seed `meta.json`), the CLI default graph lives in `StepComposition::default()`, and hosts can export order via `StepGraph::describe()` (portable data only — no host tool names). See `docs/superpowers/specs/2026-07-16-bigr-645-declarative-steps-design.md`.
+## Two building-block decisions
 
-2. **Portable `Unit` type.** Fan-out units are `generate(array $input): output` with **no `Project`**. `ConcurrentStep` becomes a thin `Project`-adapter over units. Statelessness is *structural* (the type can't touch disk), units are reusable across a lean composition and a richer one, and the wpcom ability body *is* `Unit::generate($input)`.
+### Declarative steps
 
-   The markup family now has four units: `HeroUnit`, `SectionUnit`,
-   `HeaderUnit`, and `FooterUnit`. Routing is structural: only the front page's
-   first section uses `HeroUnit`; interior openings remain ordinary sections
-   with a recipe-free header-contract subset. Each unit returns the same
-   JSON-serializable `MarkupResult` envelope (`markup`, successful `repairs`,
-   durable `warnings`). A host must preserve the whole envelope, including on
-   its Project-free hero/header/page-opening fallback path, so transport
-   boundaries cannot silently discard a delivered-value loss.
+Each step declares an id, `reads[]`, `writes[]`, and its concurrency behavior. The ordered array is derived data. Any host composition is validated so a step whose inputs have not yet been produced is a construction-time error rather than a failure halfway through a build.
 
-   Hero topology is a code-owned extension surface, not global prompt prose.
-   `designDirection.json` persists one normalized structured blueprint and
-   `aboveFold.json` persists the shared header/hero/opening/seam relation. The
-   sections composition writes its delivery phase; the deterministic
-   post-rhythm header/hero pass writes its final phase. Consumers declare the
-   artifact and reject the wrong phase. General section and footer inputs stay
-   free of recipe topology, which keeps footer behavior independently
-   extensible.
+Steps implement `declaration(): StepDeclaration`; `StepGraph` validates lists at assembly time using `meta.json` as the default seed. The CLI's standard graphs live in `StepComposition`, and hosts can export portable ordering data through `StepGraph::describe()` without exposing host tool names.
 
-Together these make host composition safe and step reuse provable.
+### Portable units
 
-## Extending a build: drive its steps
+Fan-out units expose `generate(array $input): output` and receive no `Project`. `ConcurrentStep` is a thin adapter between project files and those stateless units. The type prevents a unit from reaching into build state, so the same unit can run under a lean graph or a richer host composition.
 
-There is **no plugin API to register against, and no hook system.** The pipeline is **step-addressable** — stop after a step, resume from a step — and customization is just an **orchestrator** that runs the steps and does its own work between them:
+The markup family has four units: `HeroUnit`, `SectionUnit`, `HeaderUnit`, and `FooterUnit`. Routing is structural: only the front page's first section uses `HeroUnit`; interior openings remain ordinary sections with a recipe-free header-contract subset. Each unit returns the same JSON-serializable `MarkupResult` envelope containing markup, successful repairs, and durable warnings. A host must preserve that whole envelope, including on Project-free fallback paths.
 
-- **In-process host (PHP: WPCom, Studio)** — compose the graph in code.
-- **Harness (Claude / Codex)** — a **Skill** orchestrates. The Skill runs steps and edits the project directory between them; it never imports the builder. An agency ships their customization *as a Skill* — that is the harness-native "plugin."
-- **Headless / CI** — a shell script does the same, driving the step commands.
+Hero topology is a code-owned extension surface rather than global prompt prose. `designDirection.json` persists one normalized structured blueprint, and `aboveFold.json` persists the shared header, hero, opening, and seam relationship. Consumers declare the artifact and reject the wrong delivery phase. General section and footer inputs remain free of recipe topology, which keeps them independently extensible.
 
-> A formal hook/manifest system was considered and **dropped** — unnecessary machinery. Step-addressability plus an orchestrator covers every case, and the disk-state design already provides the checkpoints.
+Together, declarative steps and stateless units make host composition safe and step reuse testable.
 
-Illustrative (a Skill adding a WooCommerce shop):
+## Supplying a host transport
 
-```
-site-build create "a bakery" --until scaffold-theme   # build to a checkpoint
-# the Skill's own step: the agent writes plugins.json + drops a shop pattern into the project dir
-site-build resume --slug a-bakery                     # resume; later steps pick up the pattern
+An embedding host loads `autoload.php`, constructs an object that implements `Llm`, and passes it to `SiteBuilder`. It does not need `src/bootstrap.php`, CLI environment loading, or the repository's resolver:
+
+```php
+require_once $packageRoot . '/autoload.php';
+
+$llm = new HostLlm(/* the host owns authentication and endpoints */);
+
+$builder = new SiteBuilder(
+    llm: $llm,
+    promptsDir: Package::promptsDir(),
+    outputRoot: $hostOutputRoot,
+    blockFixer: BlockFixers::default(),
+    models: $hostModels,
+    temperatures: $hostTemperatures,
+);
 ```
 
-**What this asks of the design:** clean, step-addressable CLI commands (`create --until <step>`, `resume --from <step>`). The declarative graph supplies the step ids to target.
+The host can pass its own model and temperature maps, or use `StepDefaults::models()` and `StepDefaults::temperatures()` when the process environment follows this package's conventions. The same `Llm` object is then shared by all steps and concurrent groups in that builder.
+
+An embedding host that wants the repository's transport ladder can call `TransportResolver::decide()` and `TransportResolver::build()` directly. It must inject an API factory into `build()` because shared `src/` code cannot call the CLI-only `make_llm()` global. Harness choices also require a non-blank default model. See [Transport resolution](transport-resolution.md#resolution-disclosure-and-construction) for that seam and for the distinction between CLI, embedding, and Skill hosts.
+
+## Conformance for a host-supplied `Llm`
+
+Implementing the four method signatures is not enough. The pipeline depends on the behavioral contract in `src/Llm.php`:
+
+- `complete()` returns assistant text; `completeJson()` returns a decoded JSON value.
+- `completeBatch()` and `completeJsonBatch()` preserve the input keys. The text batch returns `TextBatchResult`, including keyed degradation notes.
+- `cached_prefixes` must be a list of strings with no more than three non-blank layers. Blank layers are ignored. The remaining layers are prepended in order on single and batch paths; none may be silently dropped.
+- A malformed or oversized `cached_prefixes` request is rejected locally with `LlmRequestRejected`, before any transport call.
+- The one-token cache-warm request used by the pipeline must honor `tolerate_empty` on the text path.
+- Any supported option must be honored. An adapter that cannot honor an otherwise valid option must refuse it or disclose a documented degradation; it must not silently swallow it.
+
+Implementing `UsageReporting` is strongly recommended and is required for the conformance suite's strongest cached-prefix proof. `usageTotals()['input_tokens']` means total billed input, including cache reads and cache creation. It is not necessarily the provider's raw field of the same name. The totals also include requests, output tokens, total tokens, and, when available, separate cache read and creation figures.
+
+Run `LlmConformance` against the actual adapter before wiring it into a host:
+
+```php
+$structural = LlmConformance::structural($llm);
+$live = LlmConformance::live($llm);
+$report = LlmConformance::report([...$structural, ...$live]);
+```
+
+The structural tier checks malformed prefix shapes and the three-layer limit. A conforming implementation rejects those requests before transport, so this tier makes zero model calls and belongs in ordinary CI. An implementation that fails to validate may send four small probes, which is why "zero spend" is a property to prove rather than assume.
+
+The live tier first checks reachability, then reports five behavioral findings. It spends six completions before any adapter retries, including one request carrying about 7,500 tokens of cached layers and another carrying about 2,500. It verifies billed input, prefix delivery and order through `completeBatch`, blank-layer handling, the cache-warm path, and batch key round-tripping.
+
+`LlmConformance::report()` returns a non-zero exit code for failures, for a wholly inconclusive run, and when every live finding was skipped. `LlmConformance::passed()` is stricter: any skipped finding makes it return false. A host should preserve those distinctions instead of treating "could not tell" as proof of conformance.
+
+The repository command below resolves its configured transport and runs the same suite. An embedding host normally calls the PHP API above from its own tests so it exercises its own injected adapter:
+
+```bash
+php bin/llm-conformance.php --structural
+php bin/llm-conformance.php
+```
+
+The second command makes live model calls and should use an explicit, intended billing configuration.
+
+## Extending a build through the CLI
+
+There is no plugin registration API and no hook system. The build is step-addressable: stop after a step with `--until`, perform external work against the project directory, then resume from a step with `--from` and the same `--slug`.
+
+- An in-process PHP host composes the graph in code.
+- The Claude, Codex, or Grok harness uses the repository Skill, which declares its subscription transport and drives the CLI.
+- A headless host or CI job can drive the same flags from a shell script.
+
+A formal hook or manifest system was considered and dropped. Step addressability plus an orchestrator covers this extension shape, and project files provide the checkpoints.
+
+For example, an orchestrator can create a fixed project through `scaffold-theme`, add its own files, and resume from the next step:
+
+```bash
+SITE_BUILD_LLM=codex-cli php bin/build.php "a bakery" \
+  --slug=a-bakery --until=scaffold-theme
+
+# The orchestrator performs its own work under projects/a-bakery/ here.
+
+SITE_BUILD_LLM=codex-cli php bin/build.php \
+  --slug=a-bakery --from=scaffold-plugin
+```
+
+Keep the same explicit transport declaration on both commands. The first command stops without starting a preview because `--until` leaves the build incomplete. The second command does not require or use a prompt; `--from` reopens the named project's recorded artifacts and composition.
 
 ## The CLI surface
 
-- **`site-build` as a Composer `bin`** (a shebang'd `bin/site-build`, `"bin"` in `composer.json`) — not `php bin/build.php`. In-repo: `./bin/site-build`; installed: `site-build`. Users are developers who already have Composer/PHP.
-- **Subcommands** as the tool grows: `site-build create`, `site-build resume` (rather than more flags on one script).
-- **No `.phar`.** The production pipeline and block fixer are pure PHP, but a
-  phar still is not the chosen distribution format. Playground previews and
-  screenshot tooling remain separate Node-based development conveniences;
-  packaging those helpers is deferred.
+`php bin/build.php` remains the single repository CLI front door. Creation is the prompt form, resume is `--slug` with `--from`, and bounded execution uses `--from` and `--until`. Other flags select the provider, graph, page scope, images, preview behavior, and related build options.
 
-## What stays invariant (the core)
+There is no `bin/site-build`, Composer binary entry, or `create` / `resume` / `steps` subcommand family. That proposed second entry point was cancelled because `bin/build.php` already had the richer create, resume, and step-range surface. Duplicating it would create two front doors that drift.
 
-The core is the base site-creation steps + the units + the prompts + the `Llm` interface + the composition/validation machinery. **The graph is a host concern.** The core is WordPress-*aware* (it builds WP sites) but host-*agnostic* — it offers steps; the host decides which to run.
+The one transport-specific addition is `--transport`. It resolves and prints the transport audit line, then exits without creating a project or making a model call. The repository Skill uses it to confirm the intended subscription before invoking the ordinary build command.
 
-## Open questions (deferred, not precluded)
+A `.phar` is not the selected distribution format. Playground previews and screenshot tooling remain separate Node-based development conveniences.
 
-- **The step-addressable CLI shape** — the exact `create` / `resume` / `--until` / `--from` surface.
-- **A reference Skill** — one that demonstrates the harness orchestration pattern end-to-end.
-- **Composition ergonomics** — does a host hand `SiteBuilder` a step list, or extend a base sequence? ("Base + host extensions" is the likely shape.)
+## What stays invariant
 
-## Consequences for the roadmap
+The core consists of the base site-creation steps, units, prompts, `Llm` contract, and composition and validation machinery. The graph is a host concern. The core is WordPress-aware because it builds WordPress sites, but host-agnostic because it offers steps and accepts injected dependencies.
 
-- **Nail declarative steps + the `Unit` type before Step 3 (wpcom) hardens a surface.** Steps 2 (Telex parity — *site* creation) and 3 (wpcom) run in parallel; site-creation may add or reshape steps, and the wpcom surface shouldn't harden around a theme-only shape.
-- **The extension model is mostly free** — no hook subsystem to build. The only new surface it needs is the step-addressable CLI (`create`/`resume`).
+## Open questions
+
+- What composition API is most ergonomic for an embedding host: a complete step list, a base composition plus host extensions, or another explicit builder?
+- How should the repository-local Skill be distributed when a Composer consumer needs the same harness workflow outside this checkout?
+
+Neither question requires a second CLI entry point or a hook subsystem.
