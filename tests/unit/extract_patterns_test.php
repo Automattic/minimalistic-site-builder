@@ -766,14 +766,14 @@ test('a failed rollback keeps staging so the previous tree is not deleted', func
     });
 });
 
-test('leftover staging is promoted so the next run does not delete the old tree', function (): void {
-    with_project('builder_extract_promote_staging_', function (Project $project): void {
+test('leftover staging is parked and live is backed up on its own', function (): void {
+    with_project('builder_extract_park_staging_', function (Project $project): void {
         putenv('MSB_FORCE_PATTERN_INPLACE=1');
         try {
-            $project->writeText('theme/patterns/hero.php', '<?php // new from the failed run');
+            $project->writeText('theme/patterns/hero.php', '<?php // live at start');
             $staging = $project->themePath('.patterns-next');
             mkdir($staging, 0775, true);
-            file_put_contents($staging . '/ghost.php', '<?php // stale');
+            file_put_contents($staging . '/ghost.php', '<?php // leftover old');
 
             $blocker = $project->path('patterns.json');
             if (is_file($blocker)) {
@@ -793,13 +793,82 @@ test('leftover staging is promoted so the next run does not delete the old tree'
                 'dropped' => [],
             ]));
 
-            assert_true($project->exists('theme/patterns/ghost.php'), 'leftover staging was the old tree and must come back');
-            assert_eq('<?php // stale', $project->readText('theme/patterns/ghost.php'));
+            assert_eq('<?php // live at start', $project->readText('theme/patterns/hero.php'));
             assert_true(!$project->exists('theme/patterns/other.php'));
-            assert_true(!$project->exists('theme/patterns/hero.php'));
+            assert_true(is_file($project->themePath('.patterns-held/ghost.php')), 'leftover old stays held');
+            assert_eq('<?php // leftover old', file_get_contents($project->themePath('.patterns-held/ghost.php')));
+            assert_true(is_file($project->themePath('.patterns-prev/hero.php')), 'live backup stays on the error path');
         } finally {
             putenv('MSB_FORCE_PATTERN_INPLACE');
         }
+    });
+});
+
+test('leftover new staging is not restored over live', function (): void {
+    with_project('builder_extract_held_is_new_', function (Project $project): void {
+        putenv('MSB_FORCE_PATTERN_INPLACE=1');
+        try {
+            $project->writeText('theme/patterns/ghost.php', '<?php // stale');
+            $staging = $project->themePath('.patterns-next');
+            mkdir($staging, 0775, true);
+            file_put_contents($staging . '/hero.php', '<?php // crash-before-swap new');
+
+            $blocker = $project->path('patterns.json');
+            if (is_file($blocker)) {
+                unlink($blocker);
+            }
+            mkdir($blocker);
+            file_put_contents($blocker . '/keep', 'old');
+
+            $method = new \ReflectionMethod(ExtractPatternsStep::class, 'replacePatternOutputs');
+            $method->setAccessible(true);
+            assert_throws(static fn () => $method->invoke(new ExtractPatternsStep(), $project, [
+                'other.php' => "<?php\n// next\n",
+            ], [
+                'version' => 2,
+                'patterns' => [['slug' => 'other', 'kind' => 'section']],
+                'starter' => null,
+                'dropped' => [],
+            ]));
+
+            assert_eq('<?php // stale', $project->readText('theme/patterns/ghost.php'));
+            assert_true(!$project->exists('theme/patterns/hero.php'), 'parked leftover new must not become live');
+            assert_true(is_file($project->themePath('.patterns-held/hero.php')));
+        } finally {
+            putenv('MSB_FORCE_PATTERN_INPLACE');
+        }
+    });
+});
+
+test('exchange error keeps held leftover and the live backup', function (): void {
+    with_project('builder_extract_exchange_keeps_prev_', function (Project $project): void {
+        $project->writeText('theme/patterns/hero.php', '<?php // live at start');
+        $staging = $project->themePath('.patterns-next');
+        mkdir($staging, 0775, true);
+        file_put_contents($staging . '/ghost.php', '<?php // leftover old');
+
+        $blocker = $project->path('patterns.json');
+        if (is_file($blocker)) {
+            unlink($blocker);
+        }
+        mkdir($blocker);
+        file_put_contents($blocker . '/keep', 'old');
+
+        $method = new \ReflectionMethod(ExtractPatternsStep::class, 'replacePatternOutputs');
+        $method->setAccessible(true);
+        assert_throws(static fn () => $method->invoke(new ExtractPatternsStep(), $project, [
+            'other.php' => "<?php\n// next\n",
+        ], [
+            'version' => 2,
+            'patterns' => [['slug' => 'other', 'kind' => 'section']],
+            'starter' => null,
+            'dropped' => [],
+        ]));
+
+        assert_eq('<?php // live at start', $project->readText('theme/patterns/hero.php'));
+        assert_true(is_file($project->themePath('.patterns-held/ghost.php')), 'held leftover survives an exchange error');
+        assert_true(is_file($project->themePath('.patterns-prev/hero.php')), 'live backup is not deleted after exchange error');
+        assert_true(!$project->exists('theme/patterns/ghost.php'));
     });
 });
 

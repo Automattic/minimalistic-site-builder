@@ -852,6 +852,7 @@ final class ExtractPatternsStep implements Step
     {
         $liveDir = $project->themePath('patterns');
         $stagingDir = $project->themePath('.patterns-next');
+        $heldDir = $project->themePath('.patterns-held');
         $liveManifest = $project->path('patterns.json');
         $backupDir = $project->themePath('.patterns-prev');
         $backupWip = $backupDir . '.wip';
@@ -862,8 +863,12 @@ final class ExtractPatternsStep implements Step
         $exchanged = false;
         $backupReady = false;
         self::$exchangeAttempts = 0;
-        self::promoteLeftoverStaging($stagingDir, $backupDir, $backupWip);
+        self::parkLeftoverStaging($stagingDir, $heldDir);
         try {
+            if (is_dir($liveDir)) {
+                self::copyDirectory($liveDir, $backupDir);
+                $backupReady = is_dir($backupDir);
+            }
             if (!@mkdir($stagingDir, 0775, true) && !is_dir($stagingDir)) {
                 throw new \RuntimeException("Could not create staged pattern directory: {$stagingDir}");
             }
@@ -879,10 +884,6 @@ final class ExtractPatternsStep implements Step
             if (self::exchangePaths($liveDir, $stagingDir)) {
                 $exchanged = true;
             } else {
-                if (!is_dir($backupDir)) {
-                    self::copyDirectory($liveDir, $backupDir);
-                }
-                $backupReady = is_dir($backupDir);
                 self::installDirectoryInPlace($liveDir, $files);
             }
 
@@ -906,15 +907,13 @@ final class ExtractPatternsStep implements Step
             if (!($exchanged && !$previousRestored)) {
                 self::removePath($stagingDir);
             }
-            if (!($backupReady && !$previousRestored && !$exchanged)) {
-                self::removePath($backupDir);
-            }
             self::removePath($backupWip);
             throw $error;
         }
 
         self::removePath($stagingDir);
         self::removePath($backupDir);
+        self::removePath($heldDir);
         self::removePath($backupWip);
         if ($files === []) {
             self::removePath($liveDir);
@@ -926,24 +925,23 @@ final class ExtractPatternsStep implements Step
      * Returns false so the caller can install in place (mac, Alpine, NFS, no FFI).
      */
     /**
-     * A failed rollback can leave the previous tree only in .patterns-next.
-     * Park it as .patterns-prev before this run writes a new staging dir.
+     * Leftover .patterns-next may be the old tree or a crash-before-swap new tree.
+     * Park it under a third name. Live always gets its own backup.
      */
-    private static function promoteLeftoverStaging(string $stagingDir, string $backupDir, string $backupWip): void
+    private static function parkLeftoverStaging(string $stagingDir, string $heldDir): void
     {
-        self::removePath($backupWip);
         if (!is_dir($stagingDir)) {
             return;
         }
-        if (is_dir($backupDir)) {
-            self::removePath($backupDir);
+        if (is_dir($heldDir)) {
+            self::removePath($heldDir);
         }
-        if (@rename($stagingDir, $backupDir)) {
+        if (@rename($stagingDir, $heldDir)) {
             return;
         }
-        self::copyDirectory($stagingDir, $backupDir);
-        if (!is_dir($backupDir)) {
-            throw new \RuntimeException("Could not preserve leftover pattern staging: {$stagingDir}");
+        self::copyDirectory($stagingDir, $heldDir);
+        if (!is_dir($heldDir)) {
+            throw new \RuntimeException("Could not park leftover pattern staging: {$stagingDir}");
         }
         self::removePath($stagingDir);
     }
