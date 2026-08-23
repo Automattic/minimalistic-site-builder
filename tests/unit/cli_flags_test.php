@@ -456,6 +456,54 @@ function stage5_run_build(array $args): array
     });
 }
 
+/** @return array{exit:int,output:string,model_calls:int,step_count:int} */
+function stage6_run_build_without_image_token(array $args): array
+{
+    return with_temp_dir('stage6-no-image-token-', function (string $dir) use ($args): array {
+        $binary = $dir . '/claude';
+        assert_true(copy(dirname(__DIR__) . '/fixtures/fake-harness/spawn-counter.sh', $binary));
+        assert_true(chmod($binary, 0755));
+
+        // bootstrap.php loads the repository .env. Run through a tiny child
+        // wrapper that removes only the image token from both environment
+        // sources, so this test remains valid on provisioned checkouts.
+        $wrapper = $dir . '/without-image-token.php';
+        $bootstrap = var_export(repo_path('src/bootstrap.php'), true);
+        $build = var_export(repo_path('bin/build.php'), true);
+        file_put_contents($wrapper, <<<PHP
+<?php
+require_once {$bootstrap};
+putenv('GOOGLE_VERTEX_API_TOKEN');
+\$env = new ReflectionClass(Automattic\\SiteBuild\\Env::class);
+\$vars = \$env->getProperty('vars');
+\$vars->setAccessible(true);
+\$loaded = \$vars->getValue();
+unset(\$loaded['GOOGLE_VERTEX_API_TOKEN']);
+\$vars->setValue(null, \$loaded);
+require {$build};
+PHP);
+
+        $path = $dir . PATH_SEPARATOR . (string) getenv('PATH');
+        $command = 'SITE_BUILD_LLM=claude-cli LLM_PROVIDER=anthropic PATH=' . escapeshellarg($path) . ' '
+            . php_child_command($wrapper, $args);
+        $output = [];
+        $exit = 0;
+        exec($command . ' 2>&1', $output, $exit);
+        $text = implode("\n", $output);
+        $counter = $binary . '.count';
+        $modelCalls = is_file($counter)
+            ? count(file($counter, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [])
+            : 0;
+
+        return [
+            'exit' => $exit,
+            'output' => $text,
+            'model_calls' => $modelCalls,
+            'step_count' => substr_count($text, '  → '),
+        ];
+    });
+}
+
 /** @return array<string,string> relative path => bytes */
 function stage5_tree_snapshot(string $root): array
 {
@@ -594,5 +642,79 @@ test('O-G8b --step refuses combination with --from or --until', function () {
         assert_contains('--step', $result['output']);
         assert_contains(strtok($conflict, '='), $result['output']);
         assert_contains('mutually exclusive', $result['output']);
+    }
+});
+
+test('I-G7 --with-images without its credential fails before any model call or step', function () {
+    $slug = 'zz-stage6-missing-image-token-' . getmypid() . '-' . uniqid();
+    $projectDir = repo_path('projects/' . $slug);
+    try {
+        $result = stage6_run_build_without_image_token([
+            'a test site',
+            '--slug=' . $slug,
+            '--with-images',
+            '--blocks-first',
+            '--no-serve',
+        ]);
+
+        assert_true($result['exit'] !== 0, $result['output']);
+        assert_contains('Missing required env var: GOOGLE_VERTEX_API_TOKEN', $result['output']);
+        assert_eq(0, $result['model_calls'], 'no harness model call ran');
+        assert_eq(0, $result['step_count'], 'no pipeline or post-image step started');
+        assert_true(!is_dir($projectDir), 'preflight did not create a project');
+    } finally {
+        remove_tree($projectDir);
+    }
+});
+
+test('I-G8 --with-images refuses both bounded build forms', function () {
+    $slug = 'zz-stage6-image-conflict-' . getmypid() . '-' . uniqid();
+    $projectDir = repo_path('projects/' . $slug);
+    try {
+        foreach (['--step=scaffold-theme', '--until=scaffold-theme'] as $bounded) {
+            $args = [
+                'a test site',
+                '--slug=' . $slug,
+                '--with-images',
+                $bounded,
+                '--blocks-first',
+                '--no-serve',
+            ];
+            $result = stage5_run_build($args);
+            assert_true($result['exit'] !== 0, $result['output']);
+            assert_contains('--with-images', $result['output']);
+            assert_contains(strtok($bounded, '='), $result['output']);
+            assert_contains('mutually exclusive', $result['output']);
+        }
+    } finally {
+        remove_tree($projectDir);
+    }
+});
+
+test('I-G10 multi-page metadata survives a later --step call', function () {
+    $slug = 'zz-stage6-multi-page-resume-' . getmypid() . '-' . uniqid();
+    $projectDir = repo_path('projects/' . $slug);
+    try {
+        $create = stage5_run_build([
+            'a test site',
+            '--slug=' . $slug,
+            '--multi-page',
+            '--until=scaffold-theme',
+            '--blocks-first',
+            '--no-serve',
+        ]);
+        assert_eq(0, $create['exit'], $create['output']);
+        assert_eq(true, json_decode((string) file_get_contents($projectDir . '/meta.json'), true)['multi_page'] ?? null);
+
+        $resume = stage5_run_build([
+            '--slug=' . $slug,
+            '--step=scaffold-plugin',
+            '--blocks-first',
+            '--no-serve',
+        ]);
+        assert_eq(0, $resume['exit'], $resume['output']);
+        assert_eq(true, json_decode((string) file_get_contents($projectDir . '/meta.json'), true)['multi_page'] ?? null);
+    } finally {
+        remove_tree($projectDir);
     }
 });

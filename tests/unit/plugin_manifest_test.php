@@ -114,3 +114,34 @@ test('site-builder symlink resolves to the repository root and build CLI', funct
     assert_eq(realpath($root), realpath($link), 'plugins/site-builder resolves to repository root');
     assert_true(is_readable($link . '/bin/build.php'), 'build CLI is readable through plugin symlink');
 });
+
+test('I-G5 site-build Skill creates multi-page projects only at creation time', function () {
+    $bytes = file_get_contents(plugin_manifest_root() . '/skills/site-build/SKILL.md');
+    assert_true(is_string($bytes));
+
+    preg_match_all('/^SITE_BUILD_LLM=.*php .*bin\/build\.php.*$/m', $bytes, $matches);
+    $commands = $matches[0];
+    $creates = array_values(array_filter($commands, static fn (string $line): bool => str_contains($line, '"<site prompt>"')));
+    $steps = array_values(array_filter($commands, static fn (string $line): bool => str_contains($line, '--step=STEP_ID')));
+
+    assert_true($creates !== [], 'Skill includes a prompt-bearing create command');
+    foreach ($creates as $create) {
+        assert_contains('--multi-page', $create, 'every Skill create form is multi-page');
+        assert_true(!str_contains($create, '--pages='), 'the Skill does not choose pages');
+    }
+    assert_eq(1, count($steps), 'Skill includes one per-step command template');
+    assert_true(!str_contains($steps[0], '--multi-page'), 'per-step calls inherit the recorded mode');
+});
+
+test('I-G6 site-build Skill states the provisioned image limitation without denying authentication', function () {
+    $bytes = file_get_contents(plugin_manifest_root() . '/skills/site-build/SKILL.md');
+    assert_true(is_string($bytes));
+
+    assert_contains('image placeholders', $bytes);
+    assert_contains('Harness and plugin transports do not provide WPCOM proxy credentials', $bytes);
+    assert_contains('GOOGLE_VERTEX_API_TOKEN', $bytes);
+    assert_contains('this Skill never passes `--with-images`', $bytes);
+    assert_contains('Neither the Codex nor the Grok CLI exposes image generation', $bytes);
+    assert_contains('current limitation, not a defect', $bytes);
+    assert_true(!str_contains(strtolower($bytes), 'cannot authenticate'), 'provisioning is not a harness identity claim');
+});
