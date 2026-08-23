@@ -66,6 +66,12 @@ SITE_BUILD_LLM=grok-cli php "$SITE_BUILD_HOME/bin/build.php" --transport
 
 Use only the command for the current launcher. Confirm that it exits successfully and that its audit line names the intended `*-cli` transport as a subscription. If it exits non-zero or reports a different transport or billing mode, stop before spending and report the mismatch.
 
+## Image behavior in harness builds
+
+Harness and plugin transports do not provide WPCOM proxy credentials. Absent an independently provisioned `GOOGLE_VERTEX_API_TOKEN`, harness builds ship image placeholders, and this Skill never passes `--with-images`. The Skill cannot assume that a checkout has been provisioned with that token.
+
+Neither the Codex nor the Grok CLI exposes image generation, so there is no subscription-billed alternative today. This is a current limitation, not a defect.
+
 ## Orchestrate a build step by step
 
 Keep the same matching `SITE_BUILD_LLM` declaration on every command. The examples below use Codex; replace only that declaration with the exact Claude Code or Grok mapping above when that is the current launcher.
@@ -89,8 +95,10 @@ A concurrent group is one top-level step. Its composite `id` is the value to run
 Take the first object in `steps`. Run the create command as one tool call, using its `id` as the inclusive stop:
 
 ```bash
-SITE_BUILD_LLM=codex-cli php "$SITE_BUILD_HOME/bin/build.php" "<site prompt>" --slug=PROJECT_SLUG --blocks-first --until=FIRST_STEP_ID
+SITE_BUILD_LLM=codex-cli php "$SITE_BUILD_HOME/bin/build.php" "<site prompt>" --slug=PROJECT_SLUG --blocks-first --multi-page --until=FIRST_STEP_ID
 ```
+
+`--multi-page` is a creation setting. The create call records it in `meta.json`, and every later `--step` call opens that project and inherits the recorded value. Do not repeat `--multi-page` on per-step calls, and do not add `--pages`; page selection remains the caller's choice.
 
 `--from` and `--until` are inclusive. Matching values therefore run exactly one ordinary step or one complete concurrent group.
 
@@ -133,7 +141,7 @@ For a progress-visible resume, enumerate the recorded project again, find `FAILE
 Use the single-shot form only when the caller does not need progress between steps:
 
 ```bash
-SITE_BUILD_LLM=codex-cli php "$SITE_BUILD_HOME/bin/build.php" "<site prompt>" --slug=PROJECT_SLUG --blocks-first
+SITE_BUILD_LLM=codex-cli php "$SITE_BUILD_HOME/bin/build.php" "<site prompt>" --slug=PROJECT_SLUG --blocks-first --multi-page
 ```
 
 The ordinary resume and bounded-range forms remain available for non-interactive use:
