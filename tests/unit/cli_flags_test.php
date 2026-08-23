@@ -102,9 +102,9 @@ test('build CLI preserves design-constraint error precedence over provider valid
  * @param array<string, string> $env
  * @return list<string>
  */
-function build_cli_graph_ids(array $args, array $env = []): array
+function build_cli_graph_output(array $args, array $env = []): array
 {
-    // A stub key keeps make_llm() from exiting before the validator is reached.
+    // A stub key keeps resolve_llm() from exiting before the validator is reached.
     // The run stops on the unknown --until id, so nothing is ever sent.
     $env += ['ANTHROPIC_API_KEY' => 'test-key'];
     $prefix = '';
@@ -121,10 +121,84 @@ function build_cli_graph_ids(array $args, array $env = []): array
     exec($command . ' 2>&1', $output, $exit);
 
     assert_eq(1, $exit, implode("\n", $output));
-    assert_eq("Unknown --until step '__no-such-step__'. Valid steps:", $output[0] ?? '');
-
-    return array_values(array_map('trim', array_slice($output, 1)));
+    return $output;
 }
+
+function build_cli_graph_ids(array $args, array $env = []): array
+{
+    $output = build_cli_graph_output($args, $env);
+    $header = "Unknown --until step '__no-such-step__'. Valid steps:";
+    $headerIndex = array_search($header, $output, true);
+    assert_true($headerIndex !== false, implode("\n", $output));
+
+    return array_values(array_map('trim', array_slice($output, $headerIndex + 1)));
+}
+
+test('X-G18 transport audit appears exactly once before step validation output', function () {
+    $output = build_cli_graph_output(['--html-first']);
+    $header = "Unknown --until step '__no-such-step__'. Valid steps:";
+    $headerIndex = array_search($header, $output, true);
+    assert_true($headerIndex !== false, implode("\n", $output));
+
+    $auditIndexes = [];
+    foreach ($output as $index => $line) {
+        if (str_starts_with($line, 'Transport: ')) {
+            $auditIndexes[] = $index;
+        }
+    }
+    assert_eq(1, count($auditIndexes), implode("\n", $output));
+    assert_true($auditIndexes[0] < $headerIndex, implode("\n", $output));
+});
+
+test('X-G5 --transport resolves a fake harness without a prompt or subprocess spawn', function () {
+    with_temp_dir('transport-flag-', function (string $dir): void {
+        $binary = $dir . '/claude';
+        assert_true(copy(dirname(__DIR__) . '/fixtures/fake-harness/spawn-counter.sh', $binary));
+        assert_true(chmod($binary, 0755));
+        $path = $dir . PATH_SEPARATOR . (string) getenv('PATH');
+        $command = 'SITE_BUILD_LLM=claude-cli LLM_PROVIDER=anthropic PATH=' . escapeshellarg($path) . ' '
+            . php_child_command(repo_path('bin/build.php'), ['--transport']);
+
+        $output = [];
+        $exit = 0;
+        exec($command . ' 2>&1', $output, $exit);
+        $text = implode("\n", $output);
+
+        assert_eq(0, $exit, $text);
+        assert_eq(1, count(array_filter($output, static fn (string $line): bool => str_starts_with(
+            $line,
+            'Transport: claude-cli (subscription)',
+        ))), $text);
+        assert_true(!file_exists($binary . '.count'), 'the fake harness must never be spawned');
+    });
+});
+
+test('X-G6 --transport reports an unavailable transport and exits non-zero', function () {
+    with_temp_dir('transport-unavailable-', function (string $dir): void {
+        $command = 'SITE_BUILD_LLM=codex-cli LLM_PROVIDER=openai PATH=' . escapeshellarg($dir) . ' '
+            . php_child_command(repo_path('bin/build.php'), ['--transport']);
+
+        $output = [];
+        $exit = 0;
+        exec($command . ' 2>&1', $output, $exit);
+        $text = implode("\n", $output);
+
+        assert_true($exit !== 0, $text);
+        assert_contains("SITE_BUILD_LLM=codex-cli but 'codex' is not on PATH.", $text);
+    });
+});
+
+test('X-G13 build CLI usage lists the transport and graph-selection flags', function () {
+    $output = [];
+    $exit = 0;
+    exec(php_child_command(repo_path('bin/build.php')) . ' 2>&1', $output, $exit);
+    $text = implode("\n", $output);
+
+    assert_eq(1, $exit, $text);
+    assert_contains('Usage: php bin/build.php', $text);
+    assert_contains('[--transport]', $text);
+    assert_contains('[--html-first|--blocks-first]', $text);
+});
 
 test('--html-first runs the build on the HTML-first graph', function () {
     $ids = build_cli_graph_ids(['--html-first']);
