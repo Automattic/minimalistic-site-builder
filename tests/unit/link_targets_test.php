@@ -151,3 +151,10 @@ test('LinkTargets::allTargets includes JSON src and poster', function (): void {
     assert_true(LinkTargets::isDangerousScheme($targets[array_search('javascript:alert(1)', $targets, true)]));
 });
 
+test('LinkTargets::postersIn reads rendered poster attributes', function (): void {
+    $markup = '<!-- wp:video {"poster":"javascript:from-json"} /-->'
+            . '<video poster="javascript:alert(1)"></video>';
+    assert_eq(['javascript:alert(1)'], LinkTargets::postersIn($markup));
+    assert_true(in_array('javascript:alert(1)', LinkTargets::allTargets($markup), true));
+});
+

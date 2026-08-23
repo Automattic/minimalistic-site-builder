@@ -499,6 +499,16 @@ test('link rewrite hashes JSON src and poster', function (): void {
     }
 });
 
+test('link rewrite hashes HTML poster the same as href', function (): void {
+    $markup = '<video poster="javascript:alert(1)"></video><a href="javascript:alert(2)">x</a>';
+    assert_true(LinkTargets::isDangerousScheme(LinkTargets::postersIn($markup)[0] ?? ''));
+    $output = ExtractPatternsStep::rewriteLinks($markup, []);
+    foreach (LinkTargets::allTargets($output) as $target) {
+        assert_eq('#', $target);
+    }
+    assert_contains('poster="#"', $output);
+});
+
 test('a stale pattern file from a prior run is gone after a re-run', function (): void {
     with_project('builder_extract_patterns_', function (Project $project): void {
         extract_patterns_seed($project);

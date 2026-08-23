@@ -816,7 +816,7 @@ final class ExtractPatternsStep implements Step
         }
 
         $markup = preg_replace_callback(
-            '/(\bhref\s*=\s*)(["\'])(.*?)\2/is',
+            '/(\\b(?:href|poster)\\s*=\\s*)(["\'])(.*?)\\2/is',
             static function (array $match) use ($outside): string {
                 $decoded = LinkTargets::normalizeTarget($match[3]);
                 return isset($outside[$decoded]) ? $match[1] . $match[2] . '#' . $match[2] : $match[0];
@@ -824,7 +824,7 @@ final class ExtractPatternsStep implements Step
             $markup,
         ) ?? $markup;
         $markup = preg_replace_callback(
-            '/(\bhref\s*=\s*)(?!["\'])([^\s"\'=<>`]+)/is',
+            '/(\\b(?:href|poster)\\s*=\\s*)(?!["\'])([^\\s"\'=<>`]+)/is',
             static function (array $match) use ($outside): string {
                 $decoded = LinkTargets::normalizeTarget($match[2]);
                 return isset($outside[$decoded]) ? $match[1] . '#' : $match[0];

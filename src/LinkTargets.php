@@ -9,10 +9,20 @@ final class LinkTargets
     private const HTML_HREF_PATTERN =
         '/\bhref\s*=\s*(?:(["\'])(.*?)\1|([^\s"\'=<>`]+))/is';
 
+    private const HTML_POSTER_PATTERN =
+        '/\bposter\s*=\s*(?:(["\'])(.*?)\1|([^\s"\'=<>`]+))/is';
+
     /** @return list<string> */
     public static function hrefsIn(string $markup): array
     {
         return self::htmlAttributeValues(self::HTML_HREF_PATTERN, $markup);
+    }
+
+    /** Rendered video poster attributes. Distinct from JSON "poster". */
+    /** @return list<string> */
+    public static function postersIn(string $markup): array
+    {
+        return self::htmlAttributeValues(self::HTML_POSTER_PATTERN, $markup);
     }
 
     /** @return list<string> */
@@ -69,6 +79,7 @@ final class LinkTargets
     {
         return array_merge(
             self::hrefsIn($markup),
+            self::postersIn($markup),
             self::urlAttrsIn($markup),
             self::hrefAttrsIn($markup),
             self::textLinkHrefAttrsIn($markup),
