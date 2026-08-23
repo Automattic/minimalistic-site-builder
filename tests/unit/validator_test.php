@@ -624,6 +624,20 @@ test('validator flags CR numeric entities in javascript hrefs', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('validator flags DEL padded hex and unicode JSON keys', function () {
+    [$project, $tmp] = validator_linked_project();
+    $project->writeText(
+        'theme/patterns/scheme-smuggle.php',
+        '<!-- wp:image {"href":"java&#x7fscript:alert(1)"} /-->'
+        . '<!-- wp:file {"textLinkHref":"java&#x0073cript:alert(2)"} /-->'
+        . '<!-- wp:image {"\u0068ref":"javascript:alert(3)"} /-->',
+    );
+    $joined = implode(' ', ThemeValidator::validate($project));
+    assert_contains('theme/patterns/scheme-smuggle.php', $joined);
+    assert_contains('dangerous scheme', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('validator judges block-JSON href destinations on image file and media-text', function () {
     [$project, $tmp] = validator_linked_project();
     $project->writeText(

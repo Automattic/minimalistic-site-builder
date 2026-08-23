@@ -832,8 +832,15 @@ final class ExtractPatternsStep implements Step
             $markup,
         ) ?? $markup;
         return preg_replace_callback(
-            '/("(?:textLinkHref|href|url)"\s*:\s*")([^"]*)(")/i',
+            '/("(?:\\\\.|[^"\\\\])*"\s*:\s*")((?:\\\\.|[^"\\\\])*)(")/',
             static function (array $match) use ($outside): string {
+                if (!preg_match('/^"((?:\\\\.|[^"\\\\])*)"\s*:\s*"$/', $match[1], $keyMatch)) {
+                    return $match[0];
+                }
+                $decodedKey = json_decode('"' . $keyMatch[1] . '"');
+                if (!is_string($decodedKey) || !in_array(strtolower($decodedKey), ['href', 'url', 'textlinkhref'], true)) {
+                    return $match[0];
+                }
                 $decoded = LinkTargets::normalizeTarget($match[2]);
                 return isset($outside[$decoded]) ? $match[1] . '#' . $match[3] : $match[0];
             },

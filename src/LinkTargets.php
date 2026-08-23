@@ -111,38 +111,62 @@ final class LinkTargets
         if ($colon === false) {
             return $decoded;
         }
-        $scheme = preg_replace('/[\x00-\x20]+/', '', substr($decoded, 0, $colon)) ?? '';
+        $scheme = preg_replace('/[\x00-\x20\x7F]+/', '', substr($decoded, 0, $colon)) ?? '';
         return $scheme . substr($decoded, $colon);
     }
 
     /**
      * PHP html_entity_decode(ENT_HTML5) refuses CR and other C0 controls.
-     * Decode ASCII numerics with chr() the same way MarkupSanitizer does,
-     * including an optional semicolon so &#13; is not eaten as &#1.
-     * Hex stays at 1-2 digits so &#x73cript: does not swallow the next letter.
+     * Walk numerics with chr() like MarkupSanitizer. Take the longest
+     * prefix of leading zeros plus 1-2 hex / 1-3 decimal digits so
+     * &#x0073cript: becomes javascript: and the next scheme letter stays.
      */
     private static function decodeNumericEntities(string $value): string
     {
-        $decoded = preg_replace_callback(
-            '/&#(?:(?:x|X)([0-9a-fA-F]{1,2})|([0-9]+));?/',
-            static function (array $match): string {
-                $hex = ($match[1] ?? '') !== '';
-                $digits = $hex ? $match[1] : $match[2];
-                $significant = ltrim($digits, '0');
-                if ($significant === '') {
-                    return "\u{FFFD}";
+        $out = '';
+        $length = strlen($value);
+        $i = 0;
+        while ($i < $length) {
+            if ($value[$i] === '&' && $i + 2 < $length && $value[$i + 1] === '#') {
+                $hex = $value[$i + 2] === 'x' || $value[$i + 2] === 'X';
+                $digitStart = $i + ($hex ? 3 : 2);
+                $digits = '';
+                $j = $digitStart;
+                while ($j < $length && ($hex ? ctype_xdigit($value[$j]) : ctype_digit($value[$j]))) {
+                    $digits .= $value[$j];
+                    $j++;
                 }
-                if (strlen($significant) > ($hex ? 2 : 3)) {
-                    return $match[0];
+                $codepoint = null;
+                $used = 0;
+                $maxSignificant = $hex ? 2 : 3;
+                for ($n = 1, $digitCount = strlen($digits); $n <= $digitCount; $n++) {
+                    $prefix = substr($digits, 0, $n);
+                    $significant = ltrim($prefix, '0');
+                    if ($significant === '') {
+                        continue;
+                    }
+                    if (strlen($significant) > $maxSignificant) {
+                        break;
+                    }
+                    $candidate = $hex ? hexdec($significant) : (int) $significant;
+                    if ($candidate > 0 && $candidate <= 0x7f) {
+                        $codepoint = $candidate;
+                        $used = $n;
+                    }
                 }
-                $codepoint = $hex ? hexdec($significant) : (int) $significant;
-                return $codepoint > 0 && $codepoint <= 0x7f
-                    ? chr($codepoint)
-                    : $match[0];
-            },
-            $value,
-        );
-        return $decoded ?? $value;
+                if ($codepoint !== null) {
+                    $out .= chr($codepoint);
+                    $i = $digitStart + $used;
+                    if ($i < $length && $value[$i] === ';') {
+                        $i++;
+                    }
+                    continue;
+                }
+            }
+            $out .= $value[$i];
+            $i++;
+        }
+        return $out;
     }
 
     private static function decodeUnterminatedNamedEntities(string $value): string
@@ -162,11 +186,29 @@ final class LinkTargets
     private static function jsonStringAttrs(string $key, string $markup): array
     {
         $out = [];
-        $pattern = '/"' . preg_quote($key, '/') . '"\s*:\s*"([^"]*)"/';
-        foreach (preg_match_all($pattern, $markup, $m) ? $m[1] : [] as $value) {
-            $out[] = self::normalizeTarget($value);
+        $wanted = strtolower($key);
+        foreach (self::jsonStringPairs($markup) as [$rawKey, $rawValue]) {
+            $decodedKey = json_decode('"' . $rawKey . '"');
+            if (!is_string($decodedKey) || strtolower($decodedKey) !== $wanted) {
+                continue;
+            }
+            $out[] = self::normalizeTarget($rawValue);
         }
         return $out;
+    }
+
+    /** @return list<array{0:string,1:string}> */
+    private static function jsonStringPairs(string $markup): array
+    {
+        $pairs = [];
+        $pattern = '/"((?:\\\\.|[^"\\\\])*)"\s*:\s*"((?:\\\\.|[^"\\\\])*)"/';
+        if (!preg_match_all($pattern, $markup, $m)) {
+            return $pairs;
+        }
+        foreach ($m[1] as $i => $rawKey) {
+            $pairs[] = [$rawKey, $m[2][$i]];
+        }
+        return $pairs;
     }
 
     /** @return list<string> */

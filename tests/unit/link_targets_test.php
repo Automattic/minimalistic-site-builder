@@ -119,3 +119,25 @@ test('LinkTargets::normalizeTarget decodes CR numeric entities with chr', functi
     assert_true(!str_contains(LinkTargets::normalizeTarget('java&#13;script:alert(1)'), '&#1;'));
 });
 
+test('LinkTargets::normalizeTarget strips DEL inside the scheme', function (): void {
+    assert_eq('javascript:alert(1)', LinkTargets::normalizeTarget("java\x7fscript:alert(1)"));
+    assert_eq('javascript:alert(1)', LinkTargets::normalizeTarget('java&#127script:alert(1)'));
+    assert_eq('javascript:alert(1)', LinkTargets::normalizeTarget('java&#x7fscript:alert(1)'));
+    assert_true(LinkTargets::isDangerousScheme("java\x7fscript:alert(1)"));
+    assert_true(LinkTargets::isDangerousScheme('java&#x7f;script:alert(1)'));
+});
+
+test('LinkTargets::normalizeTarget decodes padded hex letter entities', function (): void {
+    assert_eq('javascript:alert(1)', LinkTargets::normalizeTarget('java&#x0073cript:alert(1)'));
+    assert_eq('javascript:alert(1)', LinkTargets::normalizeTarget('java&#x000073cript:alert(1)'));
+    assert_eq('javascript:alert(1)', LinkTargets::normalizeTarget('java&#x073cript:alert(1)'));
+    assert_true(LinkTargets::isDangerousScheme('java&#x0073cript:alert(1)'));
+});
+
+test('LinkTargets::allTargets reads unicode-escaped JSON keys', function (): void {
+    $full = LinkTargets::allTargets('<!-- wp:image {"\u0068ref":"javascript:alert(1)"} /-->');
+    $split = LinkTargets::allTargets('<!-- wp:file {"textLinkHr\u0065f":"javascript:alert(2)"} /-->');
+    assert_true(LinkTargets::isDangerousScheme($full[0] ?? ''));
+    assert_true(LinkTargets::isDangerousScheme($split[0] ?? ''));
+});
+

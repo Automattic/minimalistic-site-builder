@@ -474,6 +474,21 @@ test('link rewrite hashes CR numeric entities in javascript', function (): void 
     }
 });
 
+test('link rewrite hashes DEL padded hex and unicode JSON keys', function (): void {
+    $cases = [
+        'del' => '<!-- wp:image {"href":"java&#127script:alert(1)"} /-->',
+        'pad' => '<!-- wp:file {"textLinkHref":"java&#x0073cript:alert(2)"} /-->',
+        'ukey' => '<!-- wp:image {"\u0068ref":"javascript:alert(3)"} /-->',
+    ];
+    foreach ($cases as $name => $markup) {
+        assert_true(LinkTargets::isDangerousScheme(LinkTargets::allTargets($markup)[0] ?? ''), $name);
+        $output = ExtractPatternsStep::rewriteLinks($markup, []);
+        foreach (LinkTargets::allTargets($output) as $target) {
+            assert_eq('#', $target, $name);
+        }
+    }
+});
+
 test('a stale pattern file from a prior run is gone after a re-run', function (): void {
     with_project('builder_extract_patterns_', function (Project $project): void {
         extract_patterns_seed($project);
