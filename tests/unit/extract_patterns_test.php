@@ -766,14 +766,14 @@ test('every emitted pattern file is valid PHP', function (): void {
     });
 });
 
-test('BuildReport exposes and renders the frozen pattern counter', function (): void {
+test('BuildReport exposes and renders the pattern kind counters', function (): void {
     $report = new BuildReport('p', 'slug', '/tmp/slug', '2026-08-22T00:00:00+00:00');
     assert_eq(null, $report->patternsLine());
 
-    $report->setPatterns(4, 1);
+    $report->setPatterns(4, 6, 1);
 
-    assert_eq('Patterns: 4 written, 1 dropped', $report->patternsLine());
-    assert_contains('Patterns: 4 written, 1 dropped', $report->render());
+    assert_eq('Patterns: 4 sections, 6 components, 1 dropped', $report->patternsLine());
+    assert_contains('Patterns: 4 sections, 6 components, 1 dropped', $report->render());
 });
 
 test('build CLI populates the pattern counter from patterns.json', function (): void {

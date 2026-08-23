@@ -65,11 +65,13 @@ test('non-empty unparseable companion registration warns and continues', functio
 
         (new ExtractPatternsStep())->run($project);
 
-        assert_contains(
+        $warnings = $project->readJson('warnings.json')['extract-patterns'] ?? [];
+        assert_true(in_array(
             'plugin/site-content.php: block path "registration array"; authored value "non-empty plugin file"; '
                 . 'delivered value "no registered companion blocks"; disposition: continued with companion blocks '
                 . 'treated as unregistered',
-            $project->readText('warnings.json'),
-        );
+            $warnings,
+            true,
+        ));
     });
 });

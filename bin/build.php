@@ -306,8 +306,16 @@ if ($withImages && $until === null) {
 
 if ($project->exists('patterns.json')) {
     $patternManifest = $project->readJson('patterns.json');
+    $patternEntries = $patternManifest['patterns'] ?? [];
     $report->setPatterns(
-        count($patternManifest['patterns'] ?? []),
+        count(array_filter(
+            $patternEntries,
+            static fn (mixed $pattern): bool => is_array($pattern) && ($pattern['kind'] ?? null) === 'section',
+        )),
+        count(array_filter(
+            $patternEntries,
+            static fn (mixed $pattern): bool => is_array($pattern) && ($pattern['kind'] ?? null) === 'component',
+        )),
         count($patternManifest['dropped'] ?? []),
     );
 }
