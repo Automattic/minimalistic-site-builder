@@ -86,6 +86,16 @@ final class ExtractPatternsStep implements Step
         $manifestPages = is_array($pageManifest['pages'] ?? null) ? $pageManifest['pages'] : [];
         $routes = $this->routeSet($manifestPages, $planPages);
         $registeredBlocks = $this->registeredPluginBlocks($project);
+        $warnings = [];
+        if (
+            $registeredBlocks === []
+            && $project->exists(ScaffoldPluginStep::MAIN_FILE)
+            && $project->readText(ScaffoldPluginStep::MAIN_FILE) !== ''
+        ) {
+            $warnings[] = 'plugin/site-content.php: block path "registration array"; authored value "non-empty plugin '
+                . 'file"; delivered value "no registered companion blocks"; disposition: continued with companion '
+                . 'blocks treated as unregistered';
+        }
         $cssIds = self::idSelectorsIn($css);
 
         /** @var array<string,list<array<mixed>>> $sectionCandidatesByKey */
@@ -96,7 +106,6 @@ final class ExtractPatternsStep implements Step
         $componentCandidatesByKey = [];
         /** @var array<string,int> $componentIneligibleByKey */
         $componentIneligibleByKey = [];
-        $warnings = [];
         $log = [];
 
         foreach ($manifestPages as $manifestPage) {

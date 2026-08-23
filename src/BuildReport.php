@@ -45,7 +45,8 @@ final class BuildReport
     private int $imagesTotal = 0;
 
     private bool $hasPatterns = false;
-    private int $patternsWritten = 0;
+    private int $sectionPatternsWritten = 0;
+    private int $componentPatternsWritten = 0;
     private int $patternsDropped = 0;
 
     private int $requests = 0;
@@ -116,10 +117,11 @@ final class BuildReport
     }
 
     /** Record the reusable-pattern tally (only when patterns.json exists). */
-    public function setPatterns(int $written, int $dropped): void
+    public function setPatterns(int $sections, int $components, int $dropped): void
     {
         $this->hasPatterns = true;
-        $this->patternsWritten = $written;
+        $this->sectionPatternsWritten = $sections;
+        $this->componentPatternsWritten = $components;
         $this->patternsDropped = $dropped;
     }
 
@@ -312,8 +314,9 @@ final class BuildReport
             return null;
         }
         return sprintf(
-            'Patterns: %d written, %d dropped',
-            $this->patternsWritten,
+            'Patterns: %d sections, %d components, %d dropped',
+            $this->sectionPatternsWritten,
+            $this->componentPatternsWritten,
             $this->patternsDropped
         );
     }
