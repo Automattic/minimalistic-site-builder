@@ -108,6 +108,69 @@ test('ProcessPool redirects no-stdin jobs from dev null', function (): void {
     assert_eq('character-device', $out['null']['stdout']);
 });
 
+test('ProcessPool grandchild-held stdout preserves the direct child exit without timeout', function (): void {
+    $started = microtime(true);
+    $out = ProcessPool::run(
+        ['direct' => ['argv' => ['/bin/sh', '-c', 'sleep 5 & exit 3']]],
+        1,
+        2,
+    );
+    $elapsed = microtime(true) - $started;
+
+    assert_eq(3, $out['direct']['exit'], 'direct child exit code was lost');
+    assert_true(!$out['direct']['timedOut'], 'exited direct child was falsely timed out');
+    assert_true($elapsed < 1.5, "pool waited {$elapsed}s for grandchild-held stdout");
+});
+
+test('ProcessPool missing binary failure names the requested executable', function (): void {
+    $binary = 'totally-not-on-path-xyz';
+    $out = ProcessPool::run(['missing' => ['argv' => [$binary]]], 1, 2);
+
+    assert_true($out['missing']['exit'] !== 0, 'missing binary must fail');
+    assert_contains($binary, $out['missing']['stderr']);
+});
+
+test('ProcessPool bounded capture truncates a flood under a constrained memory limit', function (): void {
+    $root = dirname(__DIR__, 2);
+    $driver = <<<'PHP'
+require $argv[1] . '/autoload.php';
+
+$producer = <<<'CHILD'
+$chunk = str_repeat('x', 1024 * 1024);
+for ($i = 0; $i < 80; $i++) {
+    fwrite(STDOUT, $chunk);
+}
+CHILD;
+
+$result = Automattic\SiteBuild\ProcessPool::run(
+    [['argv' => [PHP_BINARY, '-r', $producer]]],
+    1,
+    10,
+)[0];
+$ok = $result['exit'] === 0
+    && !$result['timedOut']
+    && ($result['truncated'] ?? false) === true
+    && strlen($result['stdout']) === 64 * 1024 * 1024;
+printf(
+    "exit=%d timedOut=%s bytes=%d truncated=%s\n",
+    $result['exit'],
+    $result['timedOut'] ? 'true' : 'false',
+    strlen($result['stdout']),
+    ($result['truncated'] ?? false) ? 'true' : 'false',
+);
+exit($ok ? 0 : 1);
+PHP;
+
+    $out = ProcessPool::run(
+        ['flood' => ['argv' => [PHP_BINARY, '-d', 'memory_limit=192M', '-r', $driver, $root]]],
+        1,
+        15,
+    );
+
+    assert_eq(0, $out['flood']['exit'], $out['flood']['stderr'] . $out['flood']['stdout']);
+    assert_contains('bytes=67108864 truncated=true', $out['flood']['stdout']);
+});
+
 test('ProcessPool and build-demos job spawn keep argv arrays', function (): void {
     $pool = pp_compact_php(dirname(__DIR__, 2) . '/src/ProcessPool.php');
     assert_contains("proc_open(\$job['argv'],", $pool, 'ProcessPool must pass the argv array directly');
