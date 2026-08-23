@@ -365,3 +365,12 @@ test('full classification and scoring path is deterministic and input-order inde
         SectionPattern::score(sp_columns(3), ['/contact', '/about'])
     );
 });
+
+test('an over-long model-authored label degrades instead of reaching a filename', function (): void {
+    $long = str_repeat('servicesoverview', 20);
+    assert_eq('', SectionPattern::normalizeLabel($long));
+    assert_eq('service', SectionPattern::normalizeLabel('services'));
+    assert_eq('cta', SectionPattern::normalizeLabel('call-to-action'));
+    assert_eq(str_repeat('a', 64), SectionPattern::normalizeLabel(str_repeat('a', 64)));
+    assert_eq('', SectionPattern::normalizeLabel(str_repeat('a', 65)));
+});

@@ -34,6 +34,9 @@ final class SectionPattern
     /** Nouns whose trailing s/ies is not an English plural. */
     private const UNCOUNTABLE_HEADS = ['news', 'series', 'species'];
 
+    /** Past this, a model-authored type/slug is not a label any more. */
+    private const MAX_LABEL_LENGTH = 64;
+
     /**
      * @param list<array<mixed>> $plannedSections
      * @return array{
@@ -171,7 +174,14 @@ final class SectionPattern
             }
         }
 
-        return self::SYNONYMS[$phrase] ?? self::SYNONYMS[$head] ?? $head;
+        $synonym = self::SYNONYMS[$phrase] ?? self::SYNONYMS[$head] ?? null;
+        if ($synonym !== null) {
+            return $synonym;
+        }
+        // type and slug are model-authored and unbounded, and the label
+        // becomes the pattern filename. Degrade to the next rung of the
+        // ladder rather than failing the write on an over-long name.
+        return strlen($head) > self::MAX_LABEL_LENGTH ? '' : $head;
     }
 
     public static function isGenericSlug(string $slug): bool
