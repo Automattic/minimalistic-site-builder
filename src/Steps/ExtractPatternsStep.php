@@ -870,12 +870,11 @@ final class ExtractPatternsStep implements Step
                     throw new \RuntimeException("Could not write staged pattern: {$path}");
                 }
             }
-            if (is_dir($liveDir)) {
-                self::exchangePaths($liveDir, $stagingDir);
-                $exchanged = true;
-            } elseif (!@rename($stagingDir, $liveDir)) {
-                throw new \RuntimeException("Could not install staged pattern directory: {$liveDir}");
+            if (!is_dir($liveDir) && !@mkdir($liveDir, 0775, true) && !is_dir($liveDir)) {
+                throw new \RuntimeException("Could not create live pattern directory: {$liveDir}");
             }
+            self::exchangePaths($liveDir, $stagingDir);
+            $exchanged = true;
 
             $writer->replace($stagedManifest, $liveManifest);
         } catch (\Throwable $error) {

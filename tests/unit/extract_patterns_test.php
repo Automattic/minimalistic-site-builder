@@ -468,6 +468,35 @@ test('a failed pattern swap leaves the previous directory and manifest', functio
     });
 });
 
+test('first-run manifest failure does not leave new pattern files', function (): void {
+    with_project('builder_extract_first_run_fail_', function (Project $project): void {
+        $live = $project->themePath('patterns');
+        assert_true(!is_dir($live), 'first run has no live pattern dir');
+        $blocker = $project->path('patterns.json');
+        if (is_file($blocker)) {
+            unlink($blocker);
+        }
+        mkdir($blocker);
+        file_put_contents($blocker . '/keep', 'old');
+
+        $method = new \ReflectionMethod(ExtractPatternsStep::class, 'replacePatternOutputs');
+        $method->setAccessible(true);
+        $step = new ExtractPatternsStep();
+        assert_throws(static fn () => $method->invoke($step, $project, [
+            'hero.php' => "<?php\n// new\n",
+        ], [
+            'version' => 2,
+            'patterns' => [['slug' => 'hero', 'kind' => 'section']],
+            'starter' => null,
+            'dropped' => [],
+        ]));
+
+        assert_true(!$project->exists('theme/patterns/hero.php'), 'new files do not stay when the manifest cannot land');
+        assert_true(is_dir($blocker), 'old manifest path is untouched');
+        assert_true(!is_dir($project->themePath('.patterns-next')));
+    });
+});
+
 test('pattern headers use only the closed label and shape vocabulary', function (): void {
     with_project('builder_extract_header_', function (Project $project): void {
         extract_patterns_seed($project, [[
