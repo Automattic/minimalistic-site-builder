@@ -422,7 +422,7 @@ if ($serve && $until === null) {
     } catch (RuntimeException $e) {
         // A Studio we chose ourselves is a preference, not a requirement: the
         // build is already paid for, so drop to Playground rather than throw
-        // it away (AGENTS.md:56). A runner the caller named still fails hard.
+        // it away (AGENTS.md "fix, degrade, warn"). A runner the caller named still fails hard.
         if ($serveRunner->name() !== 'studio' || RunnerResolver::requestedName($runnerFlag) !== null) {
             Narrator::write($e->getMessage() . "\n");
             exit(1);
@@ -442,7 +442,7 @@ if ($serve && $until === null) {
         }
     }
     // Post-build WP checks. Not a pipeline step: wpcom/Linux CI cannot boot
-    // Studio. Findings warn and the build still exits 0 (AGENTS.md:56).
+    // Studio. Findings warn and the build still exits 0 (AGENTS.md "fix, degrade, warn").
     if ($serveRunner->name() === 'studio' && $serveRunner instanceof StudioAppRunner) {
         $findings = SiteVerifier::check(new StudioCli(), $serveRunner->siteDir($project->slug()));
         $project->addWarnings('site-verifier', $findings);

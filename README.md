@@ -190,8 +190,8 @@ then env, then Studio if available, else Playground with a warning. A Studio
 we picked ourselves also falls back when it fails to boot, so a finished build
 still gets a preview; the downgrade is recorded under `site-runner` in
 `warnings.json` and in `build-stats.json`. Naming a runner turns both cases
-into errors: `--runner=studio` never silently serves something else. `--port` and `--workers` apply to Playground only; on Studio one
-note is printed. Override the Studio workspace with `SITE_BUILD_STUDIO_ROOT`.
+into errors: `--runner=studio` never silently serves something else. `--port`
+and `--workers` apply to Playground only; on Studio one note is printed. Override the Studio workspace with `SITE_BUILD_STUDIO_ROOT`.
 `--prune` removes sites this checkout created (the ones whose marker records
 this repo path), not hand-made directories under `~/Studio`.
 

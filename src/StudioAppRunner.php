@@ -161,11 +161,18 @@ final class StudioAppRunner implements SiteRunner
     private function createSite(Project $project, string $slug, string $dir): void
     {
         $blueprint = SitePreset::wrapBlueprint(SitePreset::sharedSteps($project));
-        $blueprintPath = sys_get_temp_dir() . '/sb-bp-' . bin2hex(random_bytes(8)) . '.json';
-        $json = json_encode(
-            $blueprint,
-            JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR
-        );
+        try {
+            // JsonException and a random_bytes failure are not RuntimeExceptions.
+            // Callers catch RuntimeException to decide whether to fall back, so an
+            // unwrapped one escapes the failover and kills an already-paid-for build.
+            $blueprintPath = sys_get_temp_dir() . '/sb-bp-' . bin2hex(random_bytes(8)) . '.json';
+            $json = json_encode(
+                $blueprint,
+                JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR
+            );
+        } catch (\Throwable $e) {
+            throw new \RuntimeException('Could not prepare the Studio blueprint: ' . $e->getMessage(), 0, $e);
+        }
         if (file_put_contents($blueprintPath, $json) === false) {
             throw new \RuntimeException("Failed to write blueprint to {$blueprintPath}");
         }
@@ -201,11 +208,14 @@ final class StudioAppRunner implements SiteRunner
             if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
                 throw new \RuntimeException("studio create did not produce {$dir}");
             }
+            // Log, never display: WP_DEBUG_DISPLAY writes PHP warnings into the
+            // response body, which corrupts wp-admin headers and would put a
+            // notice inside any screenshot we take of the theme.
             $configured = $this->cli->run([
                 'config', 'set',
                 '--path', $dir,
                 '--debug-log',
-                '--debug-display',
+                '--no-debug-display',
             ]);
             if ($configured['exitCode'] !== 0) {
                 throw new \RuntimeException(

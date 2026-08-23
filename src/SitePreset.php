@@ -102,7 +102,7 @@ final class SitePreset
         return <<<'PHP'
                 <?php
                 /**
-                 * The local Playground CLI cannot complete outbound requests.
+                 * A local preview site cannot complete outbound requests.
                  * Resolve oEmbeds to a plain link and fail any other WordPress
                  * HTTP request fast so a render never pins a worker.
                  */
@@ -110,8 +110,27 @@ final class SitePreset
                     return '<a href="' . esc_url( $url ) . '">' . esc_html( $url ) . '</a>';
                 }, 10, 2 );
                 add_filter( 'pre_http_request', function () {
-                    return new WP_Error( 'http_request_failed', 'Outbound HTTP is disabled in the local Playground preview.' );
+                    return new WP_Error( 'http_request_failed', 'Outbound HTTP is disabled in this local preview.' );
                 } );
+
+                /**
+                 * The three update checks read a blocked request as an SSL failure and
+                 * raise E_USER_WARNING, which lands mid-page in wp-admin and then breaks
+                 * every later header() call. Answer their transients as already-fresh so
+                 * _maybe_update_core/plugins/themes return before asking at all.
+                 */
+                $sb_up_to_date = function () {
+                    return (object) array(
+                        'last_checked'    => time(),
+                        'version_checked' => get_bloginfo( 'version' ),
+                        'updates'         => array(),
+                        'response'        => array(),
+                        'translations'    => array(),
+                    );
+                };
+                add_filter( 'pre_site_transient_update_core', $sb_up_to_date );
+                add_filter( 'pre_site_transient_update_plugins', $sb_up_to_date );
+                add_filter( 'pre_site_transient_update_themes', $sb_up_to_date );
                 PHP;
     }
 }
