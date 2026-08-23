@@ -643,6 +643,47 @@ PHP,
                 implode(' ', $job['argv']),
 PHP,
     ],
+    [
+        '26 no-stdin job gets a closed empty pipe',
+        'src/ProcessPool.php',
+        <<<'PHP'
+            $hasStdin = array_key_exists('stdin', $job);
+PHP,
+        <<<'PHP'
+            $hasStdin = true;
+PHP,
+    ],
+    [
+        '27 terminal status is re-polled instead of cached',
+        'src/ProcessPool.php',
+        <<<'PHP'
+                    $status = $slot['terminalStatus'];
+PHP,
+        <<<'PHP'
+                    $status = proc_get_status($slot['proc']);
+PHP,
+    ],
+    [
+        '28 pre-spawn executable check is dropped',
+        'src/ProcessPool.php',
+        <<<'PHP'
+            $resolvedBinary = self::resolveExecutable(
+                $requestedBinary,
+                $job['env'] ?? null,
+                $job['cwd'] ?? null,
+            );
+            if ($resolvedBinary === null) {
+                $name = $requestedBinary === '' ? '(empty argv[0])' : $requestedBinary;
+                $live[$key] = [
+                    'failed' => "executable not found or not executable: {$name}",
+                    'start' => $started,
+                ];
+                return;
+            }
+            $job['argv'][0] = $resolvedBinary;
+PHP,
+        '',
+    ],
 ];
 
 $args = array_slice($argv, 1);
@@ -742,7 +783,7 @@ try {
             echo "{$classification['verdict']} {$label} {$classification['detail']}\n";
         }
         echo "RESULT {$counts['KILLED']} KILLED, {$counts['SURVIVED']} SURVIVED, {$counts['HARD ERROR']} HARD ERROR\n";
-        $failed = $counts['KILLED'] < 25 || $counts['SURVIVED'] !== 0 || $counts['HARD ERROR'] !== 0;
+        $failed = $counts['KILLED'] < 28 || $counts['SURVIVED'] !== 0 || $counts['HARD ERROR'] !== 0;
     }
 } catch (Throwable $e) {
     echo 'MUTATION ERROR: ' . $e->getMessage() . "\n";

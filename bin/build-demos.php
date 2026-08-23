@@ -206,10 +206,10 @@ echo "\nBuilding " . count($jobs) . ' demo(s), up to ' . $cap . " in parallel…
 $results = ProcessPool::run($jobs, $cap, 3600);
 foreach ($results as $idx => $result) {
     if ($result['stdout'] !== '') {
-        Narrator::write("[{$jobs[$idx]['slug']}] " . $result['stdout']);
+        print(prefix_child_lines($jobs[$idx]['slug'], $result['stdout']));
     }
     if ($result['stderr'] !== '') {
-        Narrator::write("[{$jobs[$idx]['slug']}] " . $result['stderr']);
+        Narrator::write(prefix_child_lines($jobs[$idx]['slug'], $result['stderr']));
     }
 }
 
@@ -217,7 +217,11 @@ $built = [];
 foreach ($jobs as $i => $job) {
     $r = $results[$i];
     if ($r['exit'] !== 0) {
-        fwrite(STDERR, "  ✗ FAILED: {$job['slug']} (exit {$r['exit']}) — see {$job['path']}/logs/\n");
+        if ($r['timedOut']) {
+            Narrator::write("  ✗ TIMED OUT: {$job['slug']} — see {$job['path']}/logs/\n");
+        } else {
+            Narrator::write("  ✗ FAILED: {$job['slug']} (exit {$r['exit']}) — see {$job['path']}/logs/\n");
+        }
         $failures++;
         continue;
     }
@@ -264,18 +268,20 @@ if ($screenshot && $built !== []) {
     $shotResults = ProcessPool::run($shotJobs, $shotCap, 3600);
     foreach ($shotResults as $idx => $result) {
         if ($result['stdout'] !== '') {
-            Narrator::write("[{$shotJobs[$idx]['slug']}] " . $result['stdout']);
+            print(prefix_child_lines($shotJobs[$idx]['slug'], $result['stdout']));
         }
         if ($result['stderr'] !== '') {
-            Narrator::write("[{$shotJobs[$idx]['slug']}] " . $result['stderr']);
+            Narrator::write(prefix_child_lines($shotJobs[$idx]['slug'], $result['stderr']));
         }
     }
     foreach ($built as $i => &$b) {
         $shot = $b['path'] . '/logs/home.png';
         if ($shotResults[$i]['exit'] === 0 && is_file($shot)) {
             $b['screenshot'] = $shot;
+        } elseif ($shotResults[$i]['timedOut']) {
+            Narrator::write("  ({$b['slug']}: screenshot timed out — continuing)\n");
         } else {
-            fwrite(STDERR, "  ({$b['slug']}: screenshot failed — continuing)\n");
+            Narrator::write("  ({$b['slug']}: screenshot failed — continuing)\n");
         }
     }
     unset($b);
@@ -302,6 +308,20 @@ if ($serve && $built !== []) {
 }
 
 exit($exitCode);
+
+/** Prefix every non-terminal line without inventing output after a trailing newline. */
+function prefix_child_lines(string $slug, string $output): string
+{
+    if ($output === '') {
+        return '';
+    }
+    $prefix = "[{$slug}] ";
+    return preg_replace_callback(
+        '/\A|(?<=\n)(?!\z)/',
+        static fn (): string => $prefix,
+        $output,
+    ) ?? $prefix . $output;
+}
 
 /**
  * One multiplexing pass over long-lived Playground servers: wait briefly for

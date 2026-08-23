@@ -32,8 +32,9 @@ test('ProcessPool key ordering follows input jobs', function (): void {
     assert_eq('alpha-payload', trim($out['alpha']['stdout']));
     assert_eq('beta-payload', trim($out['beta']['stdout']));
     assert_eq(0, $out['alpha']['exit']);
-    assert_eq(['exit', 'stdout', 'stderr', 'secs', 'timedOut'], array_keys($out['alpha']));
+    assert_eq(['exit', 'stdout', 'stderr', 'secs', 'timedOut', 'truncated'], array_keys($out['alpha']));
     assert_true(is_float($out['alpha']['secs']), 'secs must be a float');
+    assert_true(!$out['alpha']['truncated'], 'ordinary output was marked truncated');
 });
 
 test('ProcessPool argv canary passes one literal argument', function (): void {
@@ -108,6 +109,85 @@ test('ProcessPool redirects no-stdin jobs from dev null', function (): void {
     assert_eq('character-device', $out['null']['stdout']);
 });
 
+test('ProcessPool non-positive timeout means no deadline', function (): void {
+    $out = ProcessPool::run(
+        ['none' => ['argv' => [PHP_BINARY, '-r', 'usleep(300000); echo "finished";']]],
+        1,
+        0,
+    );
+
+    assert_eq(0, $out['none']['exit']);
+    assert_true(!$out['none']['timedOut'], 'zero timeout created a deadline');
+    assert_eq('finished', $out['none']['stdout']);
+});
+
+test('ProcessPool job env replaces the complete child environment', function (): void {
+    $probe = <<<'PHP'
+echo json_encode([
+    'path' => getenv('PATH'),
+    'home' => getenv('HOME'),
+    'only' => getenv('PP_ONLY'),
+]);
+PHP;
+    $out = ProcessPool::run(
+        ['env' => ['argv' => [PHP_BINARY, '-r', $probe], 'env' => ['PP_ONLY' => 'kept']]],
+        1,
+        2,
+    );
+
+    assert_eq('{"path":false,"home":false,"only":"kept"}', $out['env']['stdout']);
+});
+
+test('ProcessPool resolves a bare executable from the replacement env PATH', function (): void {
+    $out = ProcessPool::run(
+        [
+            'path' => [
+                'argv' => [basename(PHP_BINARY), '-r', 'echo "resolved";'],
+                'env' => ['PATH' => dirname(PHP_BINARY)],
+            ],
+        ],
+        1,
+        2,
+    );
+
+    assert_eq(0, $out['path']['exit'], $out['path']['stderr']);
+    assert_eq('resolved', $out['path']['stdout']);
+});
+
+test('ProcessPool resolves an explicit relative executable from the child cwd', function (): void {
+    $out = ProcessPool::run(
+        [
+            'relative' => [
+                'argv' => ['./echo-stdin.sh'],
+                'stdin' => 'relative-ok',
+                'cwd' => dirname(pp_fixture('echo-stdin.sh')),
+            ],
+        ],
+        1,
+        2,
+    );
+
+    assert_eq(0, $out['relative']['exit'], $out['relative']['stderr']);
+    assert_eq('relative-ok', trim($out['relative']['stdout']));
+});
+
+test('ProcessPool proc_open failure includes its underlying diagnostic', function (): void {
+    $missingCwd = sys_get_temp_dir() . '/process-pool-missing-cwd-' . bin2hex(random_bytes(8));
+    $out = ProcessPool::run(
+        ['cwd' => ['argv' => [PHP_BINARY, '-r', 'echo "unreachable";'], 'cwd' => $missingCwd]],
+        1,
+        2,
+    );
+
+    assert_true($out['cwd']['exit'] !== 0, 'bad cwd must fail');
+    assert_contains(PHP_BINARY, $out['cwd']['stderr']);
+    assert_true(
+        str_contains(strtolower($out['cwd']['stderr']), 'no such file')
+            || str_contains(strtolower($out['cwd']['stderr']), 'chdir'),
+        'proc_open diagnostic was discarded',
+    );
+});
+
 test('ProcessPool grandchild-held stdout preserves the direct child exit without timeout', function (): void {
     $started = microtime(true);
     $out = ProcessPool::run(
@@ -122,11 +202,19 @@ test('ProcessPool grandchild-held stdout preserves the direct child exit without
     assert_true($elapsed < 1.5, "pool waited {$elapsed}s for grandchild-held stdout");
 });
 
+test('ProcessPool reaps from its cached first terminal status', function (): void {
+    $pool = pp_compact_php(dirname(__DIR__, 2) . '/src/ProcessPool.php');
+
+    assert_contains("\$slot['terminalStatus']=\$status", $pool, 'first terminal status is not cached');
+    assert_contains("\$status=\$slot['terminalStatus']", $pool, 'reap path re-polls terminal status');
+});
+
 test('ProcessPool missing binary failure names the requested executable', function (): void {
     $binary = 'totally-not-on-path-xyz';
     $out = ProcessPool::run(['missing' => ['argv' => [$binary]]], 1, 2);
 
     assert_true($out['missing']['exit'] !== 0, 'missing binary must fail');
+    assert_contains('executable not found or not executable', $out['missing']['stderr']);
     assert_contains($binary, $out['missing']['stderr']);
 });
 
@@ -188,4 +276,15 @@ test('build-demos replaces only run_jobs with ProcessPool', function (): void {
     assert_true(str_contains($src, 'function pump_children'), 'serve_all still needs its long-lived pump helper');
     assert_true(str_contains($src, 'pump_children($servers'), 'serve_all must keep using its pump helper');
     assert_true(str_contains($src, 'ProcessPool::run'), 'build-demos job batches must drive ProcessPool');
+});
+
+test('build-demos replays prefixed stdout and diagnoses both timeout paths', function (): void {
+    $src = (string) @file_get_contents(dirname(__DIR__, 2) . '/bin/build-demos.php');
+    $compact = pp_compact_php(dirname(__DIR__, 2) . '/bin/build-demos.php');
+
+    assert_true(substr_count($compact, "print(prefix_child_lines(") === 2, 'child stdout must use stdout');
+    assert_true(substr_count($compact, 'Narrator::write(prefix_child_lines(') === 2, 'child stderr must use narration');
+    assert_contains("'/\\A|(?<=\\n)(?!\\z)/'", $src, 'every non-terminal output line needs a prefix');
+    assert_contains("if(\$r['timedOut'])", $compact, 'build timeout result is ignored');
+    assert_contains("elseif(\$shotResults[\$i]['timedOut'])", $compact, 'screenshot timeout result is ignored');
 });
