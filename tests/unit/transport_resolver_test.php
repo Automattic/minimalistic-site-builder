@@ -703,12 +703,14 @@ test('billing R1g: build invokes the subprocess availability guard for harness c
 
 test('billing C5a: build has no ignored model parameter', function (): void {
     $method = new ReflectionMethod(TransportResolver::class, 'build');
-    assert_eq(3, $method->getNumberOfParameters());
+    assert_eq(4, $method->getNumberOfParameters());
     assert_eq('choice', $method->getParameters()[0]->getName());
     assert_eq('apiFactory', $method->getParameters()[1]->getName());
     assert_true($method->getParameters()[1]->isOptional());
     assert_eq('harnessModel', $method->getParameters()[2]->getName());
     assert_true($method->getParameters()[2]->isOptional());
+    assert_eq('harnessConcurrency', $method->getParameters()[3]->getName());
+    assert_true($method->getParameters()[3]->isOptional());
 });
 
 test('billing C5b: API build without a factory tells the host to supply one', function (): void {
@@ -1278,6 +1280,8 @@ PHP;
             . 'putenv("SITE_BUILD_HARNESS_CONCURRENCY=7"); '
             . 'putenv("LLM_PROVIDER"); '
             . 'require ' . var_export($bootstrap, true) . '; '
+            . '$narration = fopen("php://memory", "w+"); '
+            . '\\Automattic\\SiteBuild\\Narrator::setStream($narration); '
             . '$llm = resolve_llm(); $requests = []; '
             . 'for ($i = 0; $i < 8; $i++) { $requests[$i] = ["prompt" => "job-{$i}"]; } '
             . '$result = $llm->completeBatch($requests); '

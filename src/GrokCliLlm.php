@@ -14,7 +14,7 @@ final class GrokCliLlm extends HarnessCliLlm
     public function __construct(
         string $model,
         string $binary = 'grok',
-        int $cap = 4,
+        int $cap = self::DEFAULT_CONCURRENCY,
         int $timeoutSeconds = 300,
     ) {
         parent::__construct($binary, $model, $cap, $timeoutSeconds);

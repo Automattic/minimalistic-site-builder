@@ -11,6 +11,8 @@ namespace Automattic\SiteBuild;
  */
 abstract class HarnessCliLlm implements Llm, UsageReporting
 {
+    public const DEFAULT_CONCURRENCY = 10;
+
     /** Child environment is replacement, not inherited; provider keys never enter it. */
     private const ENV_ALLOWLIST = [
         'PATH',
@@ -36,7 +38,7 @@ abstract class HarnessCliLlm implements Llm, UsageReporting
     public function __construct(
         protected readonly string $binary,
         protected readonly string $model,
-        protected readonly int $cap = 4,
+        protected readonly int $cap = self::DEFAULT_CONCURRENCY,
         protected readonly int $timeoutSeconds = 300,
     ) {
         if (trim($this->binary) === '') {
@@ -337,7 +339,12 @@ abstract class HarnessCliLlm implements Llm, UsageReporting
             );
         }
         if ($result['exit'] !== 0) {
-            throw $this->harnessFailure('subprocess exited non-zero', $result['exit'], $result['stderr']);
+            throw $this->harnessFailure(
+                'subprocess exited non-zero',
+                $result['exit'],
+                $result['stderr'],
+                $result['stdout'],
+            );
         }
 
         try {
@@ -412,11 +419,21 @@ abstract class HarnessCliLlm implements Llm, UsageReporting
         $this->cacheReadInputTokens += (int) $response['cache_read_input_tokens'];
     }
 
-    final protected function harnessFailure(string $reason, int $exit, string $stderr): HarnessCallFailed
+    final protected function harnessFailure(
+        string $reason,
+        int $exit,
+        string $stderr,
+        string $stdout = '',
+    ): HarnessCallFailed
     {
         $diagnostic = trim($stderr);
+        $channel = 'stderr';
+        if ($diagnostic === '' && trim($stdout) !== '') {
+            $diagnostic = trim($stdout);
+            $channel = 'stdout';
+        }
         return new HarnessCallFailed(
-            "Harness '{$this->binary}' failed with exit {$exit}: {$reason}; stderr: "
+            "Harness '{$this->binary}' failed with exit {$exit}: {$reason}; {$channel}: "
                 . ($diagnostic === '' ? '(empty)' : $diagnostic)
         );
     }

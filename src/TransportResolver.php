@@ -126,6 +126,7 @@ final class TransportResolver
         TransportChoice $choice,
         ?callable $apiFactory = null,
         ?string $harnessModel = null,
+        int $harnessConcurrency = HarnessCliLlm::DEFAULT_CONCURRENCY,
     ): Llm {
         if ($choice->kind === TransportChoice::KIND_API) {
             if ($apiFactory === null) {
@@ -158,19 +159,19 @@ final class TransportResolver
                     'Transport claude-cli cannot be built because its harness model is missing. '
                     . 'Pass a non-blank model as the third argument to TransportResolver::build().'
                 )
-                : new ClaudeCliLlm($harnessModel, $binary),
+                : new ClaudeCliLlm($harnessModel, $binary, $harnessConcurrency),
             TransportChoice::KIND_CODEX_CLI => $harnessModel === null || trim($harnessModel) === ''
                 ? throw new TransportUnavailable(
                     'Transport codex-cli cannot be built because its harness model is missing. '
                     . 'Pass a non-blank model as the third argument to TransportResolver::build().'
                 )
-                : new CodexCliLlm($harnessModel, $binary),
+                : new CodexCliLlm($harnessModel, $binary, $harnessConcurrency),
             TransportChoice::KIND_GROK_CLI => $harnessModel === null || trim($harnessModel) === ''
                 ? throw new TransportUnavailable(
                     'Transport grok-cli cannot be built because its harness model is missing. '
                     . 'Pass a non-blank model as the third argument to TransportResolver::build().'
                 )
-                : new GrokCliLlm($harnessModel, $binary),
+                : new GrokCliLlm($harnessModel, $binary, $harnessConcurrency),
             default => throw new TransportUnavailable(
                 "Transport {$choice->kind} is resolved but not implemented. "
                 . 'Set SITE_BUILD_LLM=api with the configured provider key.'

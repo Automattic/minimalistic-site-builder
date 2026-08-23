@@ -9,6 +9,7 @@ declare(strict_types=1);
 use Automattic\SiteBuild\AnthropicClient;
 use Automattic\SiteBuild\BlockFixers;
 use Automattic\SiteBuild\Env;
+use Automattic\SiteBuild\HarnessCliLlm;
 use Automattic\SiteBuild\ImageClient;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\ModelConfig;
@@ -252,6 +253,9 @@ function resolve_llm(): Llm
         }
         putenv("LLM_PROVIDER={$harnessProvider}");
     }
+    $harnessConcurrency = $harnessProvider === null
+        ? HarnessCliLlm::DEFAULT_CONCURRENCY
+        : harness_concurrency_cap();
     Narrator::write(TransportResolver::describe($choice) . "\n");
 
     return TransportResolver::build(
@@ -270,7 +274,26 @@ function resolve_llm(): Llm
             return make_llm($provider);
         },
         default_llm_model(),
+        $harnessConcurrency,
     );
+}
+
+/** Positive subprocess cap for subscription-backed harness transports. */
+function harness_concurrency_cap(): int
+{
+    $variable = 'SITE_BUILD_HARNESS_CONCURRENCY';
+    $raw = Env::get($variable);
+    if ($raw === null || trim($raw) === '') {
+        return HarnessCliLlm::DEFAULT_CONCURRENCY;
+    }
+
+    $value = filter_var(trim($raw), FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+    if ($value === false) {
+        throw new TransportUnavailable(
+            "{$variable} must be a positive integer; received " . var_export($raw, true) . '.'
+        );
+    }
+    return $value;
 }
 
 /**

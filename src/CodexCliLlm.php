@@ -14,7 +14,7 @@ final class CodexCliLlm extends HarnessCliLlm
     public function __construct(
         string $model,
         string $binary = 'codex',
-        int $cap = 4,
+        int $cap = self::DEFAULT_CONCURRENCY,
         int $timeoutSeconds = 300,
     ) {
         parent::__construct($binary, $model, $cap, $timeoutSeconds);
