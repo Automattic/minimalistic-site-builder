@@ -51,10 +51,15 @@ abstract class HarnessCliLlm implements Llm, UsageReporting
     }
 
     /**
-     * @param array<string,mixed> $request
-     * @return list<string>
+     * @param array{
+     *     prompt:string,
+     *     model:string,
+     *     request:array<string,mixed>,
+     *     degradation_notes:list<string>
+     * } $prepared
+     * @return array{argv:list<string>,stdin?:string}
      */
-    abstract protected function argvFor(array $request, string $model): array;
+    abstract protected function jobFor(array $prepared, string $scratchDir): array;
 
     /**
      * @return array{
@@ -67,7 +72,12 @@ abstract class HarnessCliLlm implements Llm, UsageReporting
      *     usage?:array<string,mixed>
      * }
      */
-    abstract protected function parseResponse(string $stdout, string $stderr, int $exit): array;
+    abstract protected function parseResponse(
+        string $stdout,
+        string $stderr,
+        int $exit,
+        string $scratchDir,
+    ): array;
 
     final public function usageTotals(): array
     {
@@ -155,41 +165,54 @@ abstract class HarnessCliLlm implements Llm, UsageReporting
 
         $prepared = [];
         $jobs = [];
-        foreach ($requests as $key => $request) {
-            $prepared[$key] = $this->prepareRequest($request);
-            $jobs[$key] = [
-                'argv' => $this->argvFor($request, $prepared[$key]['model']),
-                'stdin' => $prepared[$key]['prompt'],
-                'env' => $this->childEnv(),
-            ];
-        }
+        $scratchDirs = [];
+        try {
+            foreach ($requests as $key => $request) {
+                $prepared[$key] = $this->prepareRequest($request);
+                $scratchDirs[$key] = $this->createScratchDir();
+                $jobs[$key] = $this->jobFor($prepared[$key], $scratchDirs[$key]);
+                $jobs[$key]['env'] = $this->childEnv();
+            }
 
-        $raw = ProcessPool::run($jobs, $this->cap, $this->timeoutSeconds);
-        $out = [];
-        foreach ($raw as $key => $result) {
-            try {
-                $out[$key] = $this->interpret($result, $prepared[$key]);
-            } catch (HarnessCallFailed $e) {
-                if (!$isolateFailures) {
-                    throw $e;
+            $raw = ProcessPool::run($jobs, $this->cap, $this->timeoutSeconds);
+            $out = [];
+            foreach ($raw as $key => $result) {
+                try {
+                    $out[$key] = $this->interpret($result, $prepared[$key], $scratchDirs[$key]);
+                } catch (HarnessCallFailed $e) {
+                    if (!$isolateFailures) {
+                        throw $e;
+                    }
+                    $out[$key] = [
+                        'text' => '',
+                        'stop_reason' => null,
+                        'input' => 0,
+                        'output' => 0,
+                        'cache_creation_input_tokens' => 0,
+                        'cache_read_input_tokens' => 0,
+                        'model' => $prepared[$key]['model'],
+                        'transport_failure' => $e,
+                        'degradation_notes' => array_merge(
+                            $prepared[$key]['degradation_notes'],
+                            [$e->getMessage()],
+                        ),
+                    ];
                 }
-                $out[$key] = [
-                    'text' => '',
-                    'stop_reason' => null,
-                    'input' => 0,
-                    'output' => 0,
-                    'cache_creation_input_tokens' => 0,
-                    'cache_read_input_tokens' => 0,
-                    'model' => $prepared[$key]['model'],
-                    'transport_failure' => $e,
-                    'degradation_notes' => array_merge(
-                        $prepared[$key]['degradation_notes'],
-                        [$e->getMessage()],
-                    ),
-                ];
+            }
+            return $out;
+        } finally {
+            $cleanupFailure = null;
+            foreach (array_reverse($scratchDirs, true) as $scratchDir) {
+                try {
+                    $this->removeScratchPath($scratchDir);
+                } catch (\Throwable $e) {
+                    $cleanupFailure ??= $e;
+                }
+            }
+            if ($cleanupFailure !== null) {
+                throw $cleanupFailure;
             }
         }
-        return $out;
     }
 
     /**
@@ -284,7 +307,7 @@ abstract class HarnessCliLlm implements Llm, UsageReporting
      * @param array{prompt:string,model:string,request:array<string,mixed>,degradation_notes:list<string>} $prepared
      * @return array<string,mixed>
      */
-    private function interpret(array $result, array $prepared): array
+    private function interpret(array $result, array $prepared, string $scratchDir): array
     {
         if ($result['timedOut']) {
             throw $this->harnessFailure(
@@ -305,7 +328,12 @@ abstract class HarnessCliLlm implements Llm, UsageReporting
         }
 
         try {
-            $parsed = $this->parseResponse($result['stdout'], $result['stderr'], $result['exit']);
+            $parsed = $this->parseResponse(
+                $result['stdout'],
+                $result['stderr'],
+                $result['exit'],
+                $scratchDir,
+            );
         } catch (HarnessCallFailed $e) {
             throw $e;
         } catch (\Throwable $e) {
@@ -378,5 +406,54 @@ abstract class HarnessCliLlm implements Llm, UsageReporting
             "Harness '{$this->binary}' failed with exit {$exit}: {$reason}; stderr: "
                 . ($diagnostic === '' ? '(empty)' : $diagnostic)
         );
+    }
+
+    private function createScratchDir(): string
+    {
+        $base = getenv('TMPDIR');
+        if (!is_string($base) || trim($base) === '') {
+            $base = sys_get_temp_dir();
+        }
+        $base = rtrim($base, DIRECTORY_SEPARATOR);
+        if ($base === '' || !is_dir($base) || !is_writable($base)) {
+            throw new \RuntimeException("Harness scratch root is not a writable directory: {$base}");
+        }
+
+        for ($attempt = 0; $attempt < 10; $attempt++) {
+            $path = $base . DIRECTORY_SEPARATOR . 'site-build-harness-' . bin2hex(random_bytes(16));
+            if (@mkdir($path, 0700)) {
+                return $path;
+            }
+        }
+        throw new \RuntimeException("Could not create a unique harness scratch directory under {$base}");
+    }
+
+    private function removeScratchPath(string $path): void
+    {
+        if (is_link($path) || is_file($path)) {
+            if (!@unlink($path)) {
+                throw new \RuntimeException("Could not remove harness scratch file: {$path}");
+            }
+            return;
+        }
+        if (!file_exists($path)) {
+            return;
+        }
+        if (!is_dir($path)) {
+            throw new \RuntimeException("Harness scratch path has an unsupported type: {$path}");
+        }
+        $entries = scandir($path);
+        if ($entries === false) {
+            throw new \RuntimeException("Could not read harness scratch directory: {$path}");
+        }
+        foreach ($entries as $entry) {
+            if ($entry === '.' || $entry === '..') {
+                continue;
+            }
+            $this->removeScratchPath($path . DIRECTORY_SEPARATOR . $entry);
+        }
+        if (!@rmdir($path)) {
+            throw new \RuntimeException("Could not remove harness scratch directory: {$path}");
+        }
     }
 }

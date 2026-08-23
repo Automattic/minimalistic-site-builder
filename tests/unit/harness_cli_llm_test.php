@@ -77,12 +77,20 @@ test('batch process failure degrades one member and preserves its sibling', func
             parent::__construct($binary, $model, 2, 10);
         }
 
-        protected function argvFor(array $request, string $model): array
+        protected function jobFor(array $prepared, string $scratchDir): array
         {
-            return [(string) ($request['binary_override'] ?? $this->binary)];
+            return [
+                'argv' => [(string) ($prepared['request']['binary_override'] ?? $this->binary)],
+                'stdin' => $prepared['prompt'],
+            ];
         }
 
-        protected function parseResponse(string $stdout, string $stderr, int $exit): array
+        protected function parseResponse(
+            string $stdout,
+            string $stderr,
+            int $exit,
+            string $scratchDir,
+        ): array
         {
             $envelope = json_decode($stdout, true, 512, JSON_THROW_ON_ERROR);
             return [

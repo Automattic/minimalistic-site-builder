@@ -15,8 +15,10 @@ final class ClaudeCliLlm extends HarnessCliLlm
         parent::__construct($binary, $model, $cap, $timeoutSeconds);
     }
 
-    protected function argvFor(array $request, string $model): array
+    protected function jobFor(array $prepared, string $scratchDir): array
     {
+        $request = $prepared['request'];
+        $model = $prepared['model'];
         $argv = [
             $this->binary,
             '-p',
@@ -49,10 +51,15 @@ final class ClaudeCliLlm extends HarnessCliLlm
             $argv[] = '--json-schema';
             $argv[] = $schema;
         }
-        return $argv;
+        return ['argv' => $argv, 'stdin' => $prepared['prompt']];
     }
 
-    protected function parseResponse(string $stdout, string $stderr, int $exit): array
+    protected function parseResponse(
+        string $stdout,
+        string $stderr,
+        int $exit,
+        string $scratchDir,
+    ): array
     {
         try {
             $envelope = json_decode(trim($stdout), true, 512, JSON_THROW_ON_ERROR);
