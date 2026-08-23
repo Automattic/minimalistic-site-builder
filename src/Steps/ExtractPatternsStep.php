@@ -185,8 +185,10 @@ final class ExtractPatternsStep implements Step
                 }
 
                 $key = $classification['key'];
-                $componentKey = is_string($classification['label']) && $classification['label'] !== ''
-                    ? $classification['label']
+                $componentKey = in_array($classification['shape'], ['grid', 'quotes'], true)
+                    ? (is_string($classification['label']) && $classification['label'] !== ''
+                        ? $classification['label']
+                        : $key)
                     : null;
                 $components = null;
                 if ($componentKey !== null) {
@@ -1392,7 +1394,9 @@ final class ExtractPatternsStep implements Step
     private static function patternDescription(?string $label, string $shape, ?string $component = null): string
     {
         if ($component !== null) {
-            return 'A ' . strtolower(self::displayName((string) $label)) . ' ' . $component . ' component.';
+            return $label === null
+                ? 'A ' . $component . ' component.'
+                : 'A ' . strtolower(self::displayName($label)) . ' ' . $component . ' component.';
         }
         return $label === null
             ? 'A ' . self::displayName($shape) . ' section layout.'
