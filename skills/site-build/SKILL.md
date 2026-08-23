@@ -76,6 +76,8 @@ Neither the Codex nor the Grok CLI exposes image generation, so there is no subs
 
 Keep the same matching `SITE_BUILD_LLM` declaration on every command. The examples below use Codex; replace only that declaration with the exact Claude Code or Grok mapping above when that is the current launcher.
 
+Harness batches run up to 10 CLI processes concurrently by default. Set `SITE_BUILD_HARNESS_CONCURRENCY` to a positive integer to override the cap; lower values trade speed for fewer simultaneous processes.
+
 Choose the project slug and graph before enumeration. Use `--blocks-first` unless the request explicitly calls for the HTML-first graph. Keep the same graph flag on the enumeration and create commands.
 
 ### 1. Enumerate the selected graph

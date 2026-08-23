@@ -89,11 +89,11 @@ All three subscription transports extend `HarnessCliLlm`. The base validates req
 
 | Transport | Invocation shape | Prompt delivery | Answer and usage |
 | --- | --- | --- | --- |
-| Claude | `claude -p --safe-mode --output-format json --model <model> --max-turns 1` | Standard input | `.result` and `.usage` from one JSON object |
+| Claude | `claude -p --safe-mode --output-format json --model <model> --max-turns 2 --tools ""` | Standard input | `.result` and `.usage` from one JSON object |
 | Codex | `codex exec --ignore-user-config --skip-git-repo-check --json -o <file> -m <model>` | Standard input | Final text from the `-o` file; usage from the `turn.completed` JSONL event |
 | Grok | `grok --prompt-file <file> --output-format json -m <model>` | A private per-request prompt file | `.text` and `.usage` from one JSON object |
 
-Claude adds a non-blank `system` value through `--system-prompt` and an optional JSON schema inline through `--json-schema`. Codex has no supported private system channel; it writes an optional JSON schema to a private per-request file and passes that file with `--output-schema`. Grok also has no supported private system channel; it passes an optional JSON schema inline with `--json-schema`.
+Claude adds a non-blank `system` value through `--system-prompt` and an optional JSON schema inline through `--json-schema`. Two turns let the model think before producing structured output, while `--tools ""` prevents those additional turns from using coding-agent tools. Codex has no supported private system channel; it writes an optional JSON schema to a private per-request file and passes that file with `--output-schema`. Grok also has no supported private system channel; it passes an optional JSON schema inline with `--json-schema`.
 
 The varying prompt body never appears in argv. Claude and Codex receive it on standard input. Grok receives only a path in argv, and the prompt file lives in a mode-0700 unique scratch directory. Scratch files and directories are removed after success, non-zero exit, parsing failure, or another exception.
 
@@ -105,7 +105,7 @@ Each request accepts at most three non-blank `cached_prefixes`. `CachedPrefixes:
 
 No accepted harness CLI can honor `temperature` or `max_tokens`. The adapter does not reject those otherwise valid requests, because normal pipeline steps use both options. Instead it writes one `Narrator` disclosure per option per PHP process and attaches a degradation note to each affected result. Codex and Grok handle a non-blank `system` option the same way. Claude honors `system` directly.
 
-Harness failures are surfaced as `HarnessCallFailed` with the binary, exit code, and captured stderr. A raw text batch isolates a failed member and records a keyed degradation when another member remains usable; if every member fails, the batch throws the first harness failure. JSON calls and single calls fail rather than inventing an answer.
+Harness failures are surfaced as `HarnessCallFailed` with the binary, exit code, and the captured diagnostic channel. Stderr is preferred when it contains text; otherwise stdout is included because some harnesses emit their non-zero error envelope there. A raw text batch isolates a failed member and records a keyed degradation when another member remains usable; if every member fails, the batch throws the first harness failure. JSON calls and single calls fail rather than inventing an answer.
 
 ## Usage accounting
 
@@ -127,6 +127,8 @@ The accepted command shapes were re-measured on 2026-08-23 against Claude Code, 
 | Grok | about 24,073 tokens | 5.7 seconds |
 
 Claude's overhead remained about 18,680 tokens from an empty working directory and with dynamic system-prompt sections excluded, so repository instruction files were not the cause. Concurrent Claude calls reused the cache, but every invocation still pays the latency and usage shape of a full coding-agent client.
+
+Harness batches run up to 10 CLI processes concurrently by default. Set `SITE_BUILD_HARNESS_CONCURRENCY` to a positive integer to override that cap; absent and empty values use 10. Lower values reduce the number of simultaneous full CLI processes at the cost of additional sequential waves. The CLI host reads this setting through the repository environment loader, so a value in `.env` is honored.
 
 Model pinning is a billing invariant, not an optimization. In the same measurement, an unpinned Claude call inherited the interactive Opus model and cost about 62 times the same small answer pinned to Haiku. That is why all four `Llm` methods resolve and pass a model on every harness call.
 
