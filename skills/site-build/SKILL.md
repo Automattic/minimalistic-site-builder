@@ -1,6 +1,6 @@
 ---
 name: site-build
-description: Build or resume generated WordPress sites through the current coding-agent subscription using the repository build CLI. Use when an agent needs to create a site, resume an existing project, run a bounded range of build steps, or confirm the subscription-backed LLM transport before spending.
+description: Orchestrate generated WordPress site builds step by step through the current coding-agent subscription. Use when an agent needs to create or resume a site, show build progress between tool calls, run a bounded range of steps, or confirm the subscription-backed LLM transport before spending.
 ---
 
 # Build a site through the current harness
@@ -66,24 +66,87 @@ SITE_BUILD_LLM=grok-cli php "$SITE_BUILD_HOME/bin/build.php" --transport
 
 Use only the command for the current launcher. Confirm that it exits successfully and that its audit line names the intended `*-cli` transport as a subscription. If it exits non-zero or reports a different transport or billing mode, stop before spending and report the mismatch.
 
-## Run the ordinary build CLI
+## Orchestrate a build step by step
 
-Keep the same matching `SITE_BUILD_LLM` declaration on every build command. The examples below use Codex; replace only the declaration with the exact Claude Code or Grok mapping above when that is the current launcher.
+Keep the same matching `SITE_BUILD_LLM` declaration on every command. The examples below use Codex; replace only that declaration with the exact Claude Code or Grok mapping above when that is the current launcher.
+
+Choose the project slug and graph before enumeration. Use `--blocks-first` unless the request explicitly calls for the HTML-first graph. Keep the same graph flag on the enumeration and create commands.
+
+### 1. Enumerate the selected graph
+
+Run enumeration as its own tool call. It requires no prompt, makes no model call, and returns JSON on stdout:
 
 ```bash
-# Create a project from a prompt.
-SITE_BUILD_LLM=codex-cli php "$SITE_BUILD_HOME/bin/build.php" "<site prompt>"
+SITE_BUILD_LLM=codex-cli php "$SITE_BUILD_HOME/bin/build.php" --list-steps --slug=PROJECT_SLUG --blocks-first
+```
 
-# Resume an existing project from a selected step.
+Parse the JSON object. Its `graph` field identifies the selected graph. Its ordered `steps` array contains objects with `id`, `label`, and `members` fields. Let `M` be the number of entries.
+
+A concurrent group is one top-level step. Its composite `id` is the value to run. Its `members` array is informational only; never turn those members into separate calls. Calling `--step` once per member runs the whole group once per member, repeats the complete batched model spend, and overwrites the first run's artifacts.
+
+### 2. Create the project through the first step
+
+Take the first object in `steps`. Run the create command as one tool call, using its `id` as the inclusive stop:
+
+```bash
+SITE_BUILD_LLM=codex-cli php "$SITE_BUILD_HOME/bin/build.php" "<site prompt>" --slug=PROJECT_SLUG --blocks-first --until=FIRST_STEP_ID
+```
+
+`--from` and `--until` are inclusive. Matching values therefore run exactly one ordinary step or one complete concurrent group.
+
+After the command exits successfully, report:
+
+```text
+step 1 of M: <first step label> — succeeded
+```
+
+### 3. Run every remaining top-level step
+
+For each remaining object in the ordered `steps` array, run one new tool call. Do not put these commands inside one shell loop; separate calls are what make progress visible.
+
+```bash
+SITE_BUILD_LLM=codex-cli php "$SITE_BUILD_HOME/bin/build.php" --slug=PROJECT_SLUG --step=STEP_ID
+```
+
+After each successful call, report its position and label:
+
+```text
+step N of M: <step label> — succeeded
+```
+
+The transport audit line appears once per CLI invocation. That repetition is intentional: every step call states its transport and billing mode before it spends. After the step completes, its result row reports timing, token use, and the configured model.
+
+### 4. Stop on the first failure
+
+If any create or step command exits non-zero, do not run later steps. Report `step N of M: <label> — failed`, include the failed command's output, and preserve the project for resumption.
+
+The project can resume from the failed top-level ID because `--from` is inclusive:
+
+```bash
+SITE_BUILD_LLM=codex-cli php "$SITE_BUILD_HOME/bin/build.php" --slug=PROJECT_SLUG --from=FAILED_STEP_ID
+```
+
+For a progress-visible resume, enumerate the recorded project again, find `FAILED_STEP_ID`, and restart the separate `--step` calls at that entry. Never silently continue after a failure or switch transports.
+
+## Run the whole build in one call
+
+Use the single-shot form only when the caller does not need progress between steps:
+
+```bash
+SITE_BUILD_LLM=codex-cli php "$SITE_BUILD_HOME/bin/build.php" "<site prompt>" --slug=PROJECT_SLUG --blocks-first
+```
+
+The ordinary resume and bounded-range forms remain available for non-interactive use:
+
+```bash
+# Resume an existing project from a selected step through the end.
 SITE_BUILD_LLM=codex-cli php "$SITE_BUILD_HOME/bin/build.php" --slug=PROJECT_SLUG --from=STEP_ID
 
-# Resume only a bounded step range.
+# Resume only an inclusive bounded range.
 SITE_BUILD_LLM=codex-cli php "$SITE_BUILD_HOME/bin/build.php" --slug=PROJECT_SLUG --from=START_STEP_ID --until=STOP_STEP_ID
 ```
 
-Replace the uppercase placeholders with the project slug and step IDs for the requested build.
-
-Combine the ordinary create, resume, `--from`, and `--until` forms with other documented `bin/build.php` flags as needed. Keep invoking the CLI through `"$SITE_BUILD_HOME/bin/build.php"`. Stop and report any non-zero build exit; do not silently switch transports.
+Replace every uppercase placeholder with the chosen slug or an exact ID from `--list-steps`. Combine these forms with other documented `bin/build.php` flags as needed. Keep invoking the CLI through `"$SITE_BUILD_HOME/bin/build.php"`.
 
 ## Respect harness capabilities
 
