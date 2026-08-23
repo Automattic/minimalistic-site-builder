@@ -914,6 +914,43 @@ test('park does not delete held old when leftover next is new', function (): voi
     });
 });
 
+test('a backup throw does not delete leftover old staging', function (): void {
+    with_project('builder_extract_park_before_try_', function (Project $project): void {
+        putenv('MSB_FORCE_PATTERN_INPLACE=1');
+        $live = $project->themePath('patterns');
+        $project->writeText('theme/patterns/hero.php', '<?php // live');
+        $staging = $project->themePath('.patterns-next');
+        mkdir($staging, 0775, true);
+        file_put_contents($staging . '/ghost.php', '<?php // leftover old');
+        $mode = fileperms($live) & 0777;
+        try {
+            if (!chmod($live, 0000) || @scandir($live) !== false) {
+                skip_test('cannot force the live backup to throw on this platform');
+            }
+
+            $method = new \ReflectionMethod(ExtractPatternsStep::class, 'replacePatternOutputs');
+            $method->setAccessible(true);
+            assert_throws(static fn () => $method->invoke(new ExtractPatternsStep(), $project, [
+                'other.php' => "<?php\n// next\n",
+            ], [
+                'version' => 2,
+                'patterns' => [['slug' => 'other', 'kind' => 'section']],
+                'starter' => null,
+                'dropped' => [],
+            ]));
+        } finally {
+            chmod($live, $mode !== 0 ? $mode : 0775);
+            putenv('MSB_FORCE_PATTERN_INPLACE');
+        }
+
+        $ghost = is_file($project->themePath('.patterns-held/ghost.php'))
+            ? file_get_contents($project->themePath('.patterns-held/ghost.php'))
+            : (is_file($staging . '/ghost.php') ? file_get_contents($staging . '/ghost.php') : null);
+        assert_eq('<?php // leftover old', $ghost);
+        assert_eq('<?php // live', $project->readText('theme/patterns/hero.php'));
+    });
+});
+
 test('pattern headers use only the closed label and shape vocabulary', function (): void {
     with_project('builder_extract_header_', function (Project $project): void {
         extract_patterns_seed($project, [[

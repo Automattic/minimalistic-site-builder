@@ -862,13 +862,14 @@ final class ExtractPatternsStep implements Step
         $stagedManifest = $writer->stage($liveManifest, $content);
         $exchanged = false;
         $backupReady = false;
+        $wroteStaging = false;
         self::$exchangeAttempts = 0;
+        self::parkLeftoverStaging($stagingDir, $heldDir, $liveDir, $backupDir);
         try {
             if (is_dir($liveDir)) {
                 self::copyDirectory($liveDir, $backupDir);
                 $backupReady = is_dir($backupDir);
             }
-            self::parkLeftoverStaging($stagingDir, $heldDir, $liveDir, $backupDir);
             if (!@mkdir($stagingDir, 0775, true) && !is_dir($stagingDir)) {
                 throw new \RuntimeException("Could not create staged pattern directory: {$stagingDir}");
             }
@@ -878,6 +879,7 @@ final class ExtractPatternsStep implements Step
                     throw new \RuntimeException("Could not write staged pattern: {$path}");
                 }
             }
+            $wroteStaging = true;
             if (!is_dir($liveDir) && !@mkdir($liveDir, 0775, true) && !is_dir($liveDir)) {
                 throw new \RuntimeException("Could not create live pattern directory: {$liveDir}");
             }
@@ -904,7 +906,7 @@ final class ExtractPatternsStep implements Step
             } catch (\Throwable) {
                 $previousRestored = false;
             }
-            if (!($exchanged && !$previousRestored)) {
+            if ($wroteStaging && !($exchanged && !$previousRestored)) {
                 self::removePath($stagingDir);
             }
             self::removePath($backupWip);
@@ -986,7 +988,11 @@ final class ExtractPatternsStep implements Step
         if (!is_dir($left) || !is_dir($right)) {
             return false;
         }
-        return self::filesIn($left) === self::filesIn($right);
+        try {
+            return self::filesIn($left) === self::filesIn($right);
+        } catch (\Throwable) {
+            return false;
+        }
     }
 
     private static int $exchangeAttempts = 0;
