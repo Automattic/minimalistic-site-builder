@@ -84,7 +84,7 @@ test('completeBatch pins each per-request model override', function (): void {
     assert_eq('override-text-batch', claude_cli_pinned_model($record));
 });
 
-test('Claude argv uses the measured safe one-turn JSON invocation and optional inputs', function (): void {
+test('C-G15/C-G17 Claude allows two turns with all tools disabled and keeps optional inputs', function (): void {
     $record = claude_cli_record(claude_cli_llm()->complete('prompt', [
         'system' => 'system text',
         'json_schema' => ['name' => 'record', 'schema' => ['type' => 'object']],
@@ -92,9 +92,14 @@ test('Claude argv uses the measured safe one-turn JSON invocation and optional i
     assert_true(in_array('-p', $record['argv'], true));
     assert_true(in_array('--safe-mode', $record['argv'], true));
     assert_true(in_array('--output-format', $record['argv'], true));
-    assert_true(in_array('--max-turns', $record['argv'], true));
     assert_true(!in_array('--bare', $record['argv'], true));
-    assert_true(!in_array('--tools', $record['argv'], true));
+    $turns = array_search('--max-turns', $record['argv'], true);
+    assert_true($turns !== false);
+    assert_eq('2', $record['argv'][$turns + 1] ?? null);
+    $tools = array_search('--tools', $record['argv'], true);
+    assert_true($tools !== false);
+    assert_true(array_key_exists($tools + 1, $record['argv']));
+    assert_eq('', $record['argv'][$tools + 1]);
     $system = array_search('--system-prompt', $record['argv'], true);
     assert_true($system !== false);
     assert_eq('system text', $record['argv'][$system + 1]);
@@ -159,6 +164,24 @@ test('Claude non-zero exit carries binary exit code and captured stderr', functi
     assert_contains($binary, $error->getMessage());
     assert_contains('exit 7', $error->getMessage());
     assert_contains('diagnostic detail', $error->getMessage());
+});
+
+test('C-G16 non-zero exit carries a diagnostic written only to stdout', function (): void {
+    with_temp_dir('claude-stdout-error-', function (string $dir): void {
+        $binary = $dir . '/claude';
+        $script = '#!' . PHP_BINARY . "\n" . <<<'PHP'
+<?php
+fwrite(STDOUT, '{"subtype":"error_max_turns","marker":"STDOUT_ONLY_DIAGNOSTIC"}');
+exit(9);
+PHP;
+        assert_true(file_put_contents($binary, $script) !== false);
+        assert_true(chmod($binary, 0755));
+
+        $error = assert_throws(fn () => (new ClaudeCliLlm('m', $binary))->complete('prompt'));
+        assert_true($error instanceof HarnessCallFailed);
+        assert_contains('STDOUT_ONLY_DIAGNOSTIC', $error->getMessage());
+        assert_contains('error_max_turns', $error->getMessage());
+    });
 });
 
 test('Claude is_error envelope raises HarnessCallFailed with stderr', function (): void {

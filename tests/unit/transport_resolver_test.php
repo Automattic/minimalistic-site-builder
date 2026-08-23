@@ -36,22 +36,34 @@ function tr_harness_probe(
     string $kind,
     ?string $provider,
     ?string $envMapProvider = null,
+    ?string $concurrency = null,
+    ?string $envMapConcurrency = null,
 ): array
 {
     $bootstrap = dirname(__DIR__, 2) . '/src/bootstrap.php';
     $providerSetup = $provider === null
         ? 'putenv("LLM_PROVIDER"); '
         : 'putenv("LLM_PROVIDER=' . addslashes($provider) . '"); ';
-    $envMapSetup = $envMapProvider === null
+    $concurrencySetup = $concurrency === null
+        ? 'putenv("SITE_BUILD_HARNESS_CONCURRENCY"); '
+        : 'putenv("SITE_BUILD_HARNESS_CONCURRENCY=' . addslashes($concurrency) . '"); ';
+    $envMapSetup = $envMapProvider === null && $envMapConcurrency === null
         ? ''
         : '$envReflection = new ReflectionClass(\\Automattic\\SiteBuild\\Env::class); '
             . '$envProperty = $envReflection->getProperty("vars"); '
             . '$envVars = $envProperty->getValue(); '
-            . '$envVars["LLM_PROVIDER"] = ' . var_export($envMapProvider, true) . '; '
+            . ($envMapProvider === null
+                ? ''
+                : '$envVars["LLM_PROVIDER"] = ' . var_export($envMapProvider, true) . '; ')
+            . ($envMapConcurrency === null
+                ? ''
+                : '$envVars["SITE_BUILD_HARNESS_CONCURRENCY"] = '
+                    . var_export($envMapConcurrency, true) . '; ')
             . '$envProperty->setValue(null, $envVars); ';
     $code = 'putenv("PATH=' . addslashes($dir) . '"); '
         . 'putenv("SITE_BUILD_LLM=' . addslashes($kind) . '"); '
         . $providerSetup
+        . $concurrencySetup
         . 'putenv("LLM_MODEL"); putenv("LLM_MODEL_SMALL"); '
         . 'require ' . var_export($bootstrap, true) . '; '
         . $envMapSetup
@@ -60,7 +72,9 @@ function tr_harness_probe(
         . 'try { $llm = resolve_llm(); '
         . '$r = new ReflectionClass(\\Automattic\\SiteBuild\\HarnessCliLlm::class); '
         . '$model = $r->getProperty("model")->getValue($llm); '
+        . '$cap = $r->getProperty("cap")->getValue($llm); '
         . 'echo json_encode(["class" => get_class($llm), "model" => $model, '
+        . '"cap" => $cap, '
         . '"provider" => getenv("LLM_PROVIDER"), "default" => default_llm_model(), '
         . '"steps" => step_models()], JSON_THROW_ON_ERROR); } '
         . 'catch (Throwable $e) { echo "ERROR|" . get_class($e) . "|" . $e->getMessage(); }';
@@ -1203,6 +1217,126 @@ test('V7 claude-cli build returns the real ClaudeCliLlm transport', function ():
     $choice = new TransportChoice(TransportChoice::KIND_CLAUDE_CLI, 'unit', PHP_BINARY);
     $llm = TransportResolver::build($choice, harnessModel: 'claude-haiku-4-5');
     assert_true($llm instanceof \Automattic\SiteBuild\ClaudeCliLlm);
+});
+
+test('C-G5 harness concurrency defaults to one named constant with value 10', function (): void {
+    with_temp_dir('harness-default-cap-', function (string $dir): void {
+        $binary = $dir . '/claude';
+        assert_true(copy(dirname(__DIR__) . '/fixtures/fake-harness/spawn-counter.sh', $binary));
+        assert_true(chmod($binary, 0755));
+        [$output, $status, $details] = tr_harness_probe($dir, 'claude-cli', null);
+        assert_eq(0, $status, $output);
+        assert_true(is_array($details), $output);
+        $constant = (new ReflectionClass(\Automattic\SiteBuild\HarnessCliLlm::class))
+            ->getConstant('DEFAULT_CONCURRENCY');
+        assert_eq(10, $constant);
+        assert_eq($constant, $details['cap']);
+    });
+});
+
+test('C-G6 SITE_BUILD_HARNESS_CONCURRENCY reaches ProcessPool point of use', function (): void {
+    with_temp_dir('harness-runtime-cap-', function (string $dir): void {
+        $binary = $dir . '/claude';
+        $script = '#!' . PHP_BINARY . "\n" . <<<'PHP'
+<?php
+$statePath = $argv[0] . '.state';
+$update = static function (int $delta) use ($statePath): array {
+    $stream = fopen($statePath, 'c+');
+    if (!is_resource($stream) || !flock($stream, LOCK_EX)) {
+        exit(91);
+    }
+    $raw = stream_get_contents($stream);
+    $state = is_string($raw) && trim($raw) !== '' ? json_decode($raw, true) : [];
+    $active = (int) ($state['active'] ?? 0) + $delta;
+    $max = max((int) ($state['max'] ?? 0), $active);
+    rewind($stream);
+    ftruncate($stream, 0);
+    fwrite($stream, json_encode(['active' => $active, 'max' => $max], JSON_THROW_ON_ERROR));
+    fflush($stream);
+    flock($stream, LOCK_UN);
+    fclose($stream);
+    return ['active' => $active, 'max' => $max];
+};
+stream_get_contents(STDIN);
+$update(1);
+usleep(250000);
+$update(-1);
+echo json_encode([
+    'is_error' => false,
+    'stop_reason' => 'end_turn',
+    'terminal_reason' => 'completed',
+    'result' => 'ok',
+    'usage' => ['input_tokens' => 1, 'output_tokens' => 1],
+], JSON_THROW_ON_ERROR);
+PHP;
+        assert_true(file_put_contents($binary, $script) !== false);
+        assert_true(chmod($binary, 0755));
+
+        $bootstrap = dirname(__DIR__, 2) . '/src/bootstrap.php';
+        $code = 'putenv("PATH=' . addslashes($dir) . '"); '
+            . 'putenv("SITE_BUILD_LLM=claude-cli"); '
+            . 'putenv("SITE_BUILD_HARNESS_CONCURRENCY=7"); '
+            . 'putenv("LLM_PROVIDER"); '
+            . 'require ' . var_export($bootstrap, true) . '; '
+            . '$llm = resolve_llm(); $requests = []; '
+            . 'for ($i = 0; $i < 8; $i++) { $requests[$i] = ["prompt" => "job-{$i}"]; } '
+            . '$result = $llm->completeBatch($requests); '
+            . '$state = json_decode((string) file_get_contents('
+                . var_export($binary . '.state', true) . '), true); '
+            . 'echo json_encode(["max" => $state["max"] ?? null, '
+                . '"texts" => array_values($result->texts)], JSON_THROW_ON_ERROR);';
+        [$output, $status] = tr_php($code);
+        assert_eq(0, $status, $output);
+        $details = json_decode($output, true);
+        assert_true(is_array($details), $output);
+        assert_eq(7, $details['max']);
+        assert_eq(array_fill(0, 8, 'ok'), $details['texts']);
+    });
+});
+
+foreach (['0', '-1', 'abc', '3.5'] as $invalidConcurrency) {
+    test("C-G7 rejects present invalid concurrency {$invalidConcurrency} by variable name", function () use ($invalidConcurrency): void {
+        with_temp_dir('harness-invalid-cap-', function (string $dir) use ($invalidConcurrency): void {
+            $binary = $dir . '/claude';
+            assert_true(copy(dirname(__DIR__) . '/fixtures/fake-harness/spawn-counter.sh', $binary));
+            assert_true(chmod($binary, 0755));
+            [$output, $status, $details] = tr_harness_probe(
+                $dir,
+                'claude-cli',
+                null,
+                null,
+                $invalidConcurrency,
+            );
+            assert_eq(0, $status, $output);
+            assert_eq(null, $details);
+            assert_contains('SITE_BUILD_HARNESS_CONCURRENCY', $output);
+            assert_contains($invalidConcurrency, $output);
+        });
+    });
+}
+
+test('D-C7 explicitly empty harness concurrency follows Env convention and uses default', function (): void {
+    with_temp_dir('harness-empty-cap-', function (string $dir): void {
+        $binary = $dir . '/claude';
+        assert_true(copy(dirname(__DIR__) . '/fixtures/fake-harness/spawn-counter.sh', $binary));
+        assert_true(chmod($binary, 0755));
+        [$output, $status, $details] = tr_harness_probe($dir, 'claude-cli', null, null, '');
+        assert_eq(0, $status, $output);
+        assert_true(is_array($details), $output);
+        assert_eq(10, $details['cap']);
+    });
+});
+
+test('C-G9 SITE_BUILD_HARNESS_CONCURRENCY loaded only from dotenv reaches transport', function (): void {
+    with_temp_dir('harness-dotenv-cap-', function (string $dir): void {
+        $binary = $dir . '/claude';
+        assert_true(copy(dirname(__DIR__) . '/fixtures/fake-harness/spawn-counter.sh', $binary));
+        assert_true(chmod($binary, 0755));
+        [$output, $status, $details] = tr_harness_probe($dir, 'claude-cli', null, null, null, '7');
+        assert_eq(0, $status, $output);
+        assert_true(is_array($details), $output);
+        assert_eq(7, $details['cap']);
+    });
 });
 
 test('V8 resolve_llm narrates exactly one audit line naming the built kind', function (): void {
