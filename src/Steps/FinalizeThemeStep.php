@@ -456,7 +456,8 @@ final class FinalizeThemeStep implements Step
     ): string {
         $slug = ProjectStore::slugify($slug);
         $scopePrefix = PageScope::CLASS_PREFIX;
-        $patternCategoryLabel = var_export($patternCategoryLabel, true);
+        $patternSectionsLabel = var_export($patternCategoryLabel . ' sections', true);
+        $patternComponentsLabel = var_export($patternCategoryLabel . ' components', true);
 
         $motionEnqueues = '';
         $styleDeps = 'array()';
@@ -525,10 +526,10 @@ final class FinalizeThemeStep implements Step
             });
 
             register_block_pattern_category('{$slug}-sections', array(
-                'label' => {$patternCategoryLabel},
+                'label' => {$patternSectionsLabel},
             ));
             register_block_pattern_category('{$slug}-components', array(
-                'label' => {$patternCategoryLabel},
+                'label' => {$patternComponentsLabel},
             ));
 
             // Carried design CSS is authored one page at a time; page-styles scopes

@@ -31,6 +31,9 @@ final class SectionPattern
         'hero', 'cta', 'gallery', 'contact', 'testimonial', 'faq', 'pricing', 'team',
     ];
 
+    /** Nouns whose trailing s/ies is not an English plural. */
+    private const UNCOUNTABLE_HEADS = ['news', 'series', 'species'];
+
     /**
      * @param list<array<mixed>> $plannedSections
      * @return array{
@@ -151,19 +154,21 @@ final class SectionPattern
         $head = in_array($last, self::TRAILING_HEAD_NOUNS, true)
             ? $last
             : ($tokens[0] ?? '');
-        if (str_ends_with($head, 'ies') && strlen($head) >= 5) {
-            $head = substr($head, 0, -3) . 'y';
-        } elseif (
-            preg_match('/(?:sses|xes|zes|ches|shes)$/', $head) === 1
-            && strlen($head) - 2 >= 3
-        ) {
-            $head = substr($head, 0, -2);
-        } elseif (
-            str_ends_with($head, 's')
-            && preg_match('/(?:ss|us|is|xs)$/', $head) !== 1
-            && strlen($head) - 1 >= 3
-        ) {
-            $head = substr($head, 0, -1);
+        if (!in_array($head, self::UNCOUNTABLE_HEADS, true)) {
+            if (str_ends_with($head, 'ies') && strlen($head) >= 5) {
+                $head = substr($head, 0, -3) . 'y';
+            } elseif (
+                preg_match('/(?:sses|xes|zes|ches|shes)$/', $head) === 1
+                && strlen($head) - 2 >= 3
+            ) {
+                $head = substr($head, 0, -2);
+            } elseif (
+                str_ends_with($head, 's')
+                && preg_match('/(?:ss|us|is|xs)$/', $head) !== 1
+                && strlen($head) - 1 >= 3
+            ) {
+                $head = substr($head, 0, -1);
+            }
         }
 
         return self::SYNONYMS[$phrase] ?? self::SYNONYMS[$head] ?? $head;
@@ -577,12 +582,14 @@ final class SectionPattern
         if ($target === '' || $target === '#') {
             return true;
         }
+        if (LinkTargets::isDangerousScheme($target)) {
+            return false;
+        }
         if (str_starts_with($target, '#')) {
             return isset($anchors[rawurldecode(substr($target, 1))]);
         }
         if (
-            str_starts_with($target, '//')
-            || preg_match('/^[a-z][a-z0-9+.-]*:/i', $target) === 1
+            LinkTargets::isSafeAbsoluteTarget($target)
             || str_starts_with($target, 'theme:./assets/')
             || LinkTargets::isThemeAssetPath($target)
         ) {

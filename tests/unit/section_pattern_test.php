@@ -134,6 +134,9 @@ test('normalizeLabel does not strip a false plural', function (): void {
     assert_eq('process', SectionPattern::normalizeLabel('process'));     // 13x; NOT "proces"
     assert_eq('status',  SectionPattern::normalizeLabel('status'));
     assert_eq('analysis', SectionPattern::normalizeLabel('analysis'));
+    assert_eq('news', SectionPattern::normalizeLabel('news'));
+    assert_eq('series', SectionPattern::normalizeLabel('series'));
+    assert_eq('species', SectionPattern::normalizeLabel('species'));
     // real plurals still collapse
     assert_eq('service', SectionPattern::normalizeLabel('services'));
     assert_eq('testimonial', SectionPattern::normalizeLabel('testimonials'));
@@ -155,6 +158,9 @@ test('normalizeLabel singularizes ies and preserves other plural rules', functio
         'class' => 'class',
         'status' => 'status',
         'analysis' => 'analysis',
+        'news' => 'news',
+        'series' => 'series',
+        'species' => 'species',
     ] as $authored => $expected) {
         assert_eq($expected, SectionPattern::normalizeLabel($authored), $authored);
     }

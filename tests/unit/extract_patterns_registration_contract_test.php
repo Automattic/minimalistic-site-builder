@@ -5,11 +5,14 @@ use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Steps\ExtractPatternsStep;
 use Automattic\SiteBuild\Steps\ScaffoldPluginStep;
 
-/** @return array<string,true> */
-function extract_patterns_registered_plugin_blocks(ExtractPatternsStep $step, Project $project): array
-{
+/** @param list<string> $warnings @return array<string,true> */
+function extract_patterns_registered_plugin_blocks(
+    ExtractPatternsStep $step,
+    Project $project,
+    array &$warnings = [],
+): array {
     $method = new ReflectionMethod($step, 'registeredPluginBlocks');
-    return $method->invoke($step, $project);
+    return $method->invokeArgs($step, [$project, &$warnings]);
 }
 
 function extract_patterns_registration_seed(Project $project): void
@@ -55,6 +58,29 @@ test('registration parser consumes real ScaffoldPluginStep output', function ():
             'blocks-engine/author-layout' => true,
             'blocks-engine/description-list' => true,
         ], extract_patterns_registered_plugin_blocks(new ExtractPatternsStep(), $project));
+    });
+});
+
+test('one unreadable companion block.json skips that block and keeps the rest', function (): void {
+    with_project('builder_pattern_registration_one_bad_', function (Project $project): void {
+        $project->writeText(
+            ScaffoldPluginStep::MAIN_FILE,
+            "<?php\n\$blocks = array(\n"
+            . "    'blocks-engine/description-list' => __DIR__ . '/blocks/description-list',\n"
+            . "    'blocks-engine/authored-input' => __DIR__ . '/blocks/authored-input',\n"
+            . ");\n",
+        );
+        $project->writeJson('plugin/blocks/description-list/block.json', [
+            'name' => 'blocks-engine/description-list',
+        ]);
+        $project->writeText('plugin/blocks/authored-input/block.json', '{not json');
+
+        $warnings = [];
+        $registered = extract_patterns_registered_plugin_blocks(new ExtractPatternsStep(), $project, $warnings);
+
+        assert_eq(['blocks-engine/description-list' => true], $registered);
+        assert_contains('plugin/blocks/authored-input/block.json', implode("\n", $warnings));
+        assert_true(!isset($registered['blocks-engine/authored-input']));
     });
 });
 

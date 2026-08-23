@@ -64,6 +64,18 @@ final class LinkTargets
         return (bool) preg_match('/\.(?:jpe?g|png|gif|webp|svg|css|js|woff2?|ttf|eot|ico)(?:$|\?)/i', $path);
     }
 
+    /** http/https/mailto/tel/sms — the schemes a generated pattern may keep. */
+    public static function isSafeAbsoluteTarget(string $target): bool
+    {
+        return preg_match('/^(?:https?:|mailto:|tel:|sms:)/i', $target) === 1;
+    }
+
+    /** javascript:/data:/vbscript: — rewrite these destinations to `#`. */
+    public static function isDangerousScheme(string $target): bool
+    {
+        return preg_match('/^(?:javascript|data|vbscript):/i', $target) === 1;
+    }
+
     /** @return list<string> */
     private static function htmlAttributeValues(string $pattern, string $markup): array
     {

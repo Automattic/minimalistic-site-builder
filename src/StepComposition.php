@@ -456,8 +456,11 @@ final class StepComposition
             // re-check it against the real, dimmed pixels.
             new CoverContrastStep($blockFixer ?? BlockFixers::default()),
             // Cover contrast can rewrite assembled page markup after the graph.
-            // Refresh pattern winners from those final bytes.
+            // Refresh pattern winners from those final bytes, then re-validate
+            // the delivered theme (the in-graph ValidateThemeStep ran before
+            // this phase rewrote covers and re-extracted patterns).
             new ExtractPatternsStep(),
+            new ValidateThemeStep(htmlFirst: self::htmlFirstSelected()),
         ];
     }
 

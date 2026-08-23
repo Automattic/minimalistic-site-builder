@@ -58,11 +58,11 @@ final class ThemeValidator
         foreach (glob($project->pluginPath('pages') . '/*.html') ?: [] as $abs) {
             $checked[] = 'plugin/pages/' . basename($abs);
         }
+        foreach (glob($project->themePath('patterns') . '/*.php') ?: [] as $abs) {
+            $checked[] = 'theme/patterns/' . basename($abs);
+        }
 
         $blockChecked = $checked;
-        foreach (glob($project->themePath('patterns') . '/*.php') ?: [] as $abs) {
-            $blockChecked[] = 'theme/patterns/' . basename($abs);
-        }
 
         foreach ($blockChecked as $rel) {
             if (!$project->exists($rel)) {
@@ -431,7 +431,7 @@ final class ThemeValidator
         $root = rtrim($project->root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
         $known = self::recordedImageSources($project);
 
-        foreach ($project->markupFiles() as $file) {
+        foreach (self::interactionMarkupFiles($project) as $file) {
             $markup = (string) file_get_contents($file);
             $contexts = [];
             if (preg_match('/"(?:url|src)"\s*:\s*"\s*AI_IMAGE:/i', $markup)) {
@@ -608,6 +608,11 @@ final class ThemeValidator
                 $scan["plugin/pages/{$slug}.html"] = (string) $slug;
             }
         }
+        foreach (glob($project->themePath('patterns') . '/*.php') ?: [] as $abs) {
+            $rel = 'theme/patterns/' . basename($abs);
+            $scan[$rel] = $rel;
+            $anchors[$rel] = self::anchorsIn($project->readText($rel));
+        }
 
         $problems = [];
         foreach ($scan as $rel => $pageSlug) {
@@ -727,7 +732,7 @@ final class ThemeValidator
         $problems = [];
         $root = rtrim($project->root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
 
-        foreach ($project->markupFiles() as $file) {
+        foreach (self::interactionMarkupFiles($project) as $file) {
             $markup = (string) file_get_contents($file);
             $hrefs = self::hrefsIn($markup);
 
@@ -776,6 +781,21 @@ final class ThemeValidator
     }
 
     /**
+     * Page, chrome, and generated pattern files. Link/image/placeholder scans
+     * share this set so a defect that only exists in theme/patterns/*.php is
+     * not invisible to the advisory validator.
+     *
+     * @return list<string> absolute paths
+     */
+    private static function interactionMarkupFiles(Project $project): array
+    {
+        return array_merge(
+            $project->markupFiles(),
+            glob($project->themePath('patterns') . '/*.php') ?: [],
+        );
+    }
+
+    /**
      * Bare media placeholders render a broken image rather than a dead link.
      * Keep their warning context separate so a repair pass changes the source
      * (or removes the media block) instead of trying to invent navigation.
@@ -787,7 +807,7 @@ final class ThemeValidator
         $problems = [];
         $root = rtrim($project->root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
 
-        foreach ($project->markupFiles() as $file) {
+        foreach (self::interactionMarkupFiles($project) as $file) {
             $markup = (string) file_get_contents($file);
             $rel = str_starts_with($file, $root) ? substr($file, strlen($root)) : $file;
             $rel = str_replace(DIRECTORY_SEPARATOR, '/', $rel);

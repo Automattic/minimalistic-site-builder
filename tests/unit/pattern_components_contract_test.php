@@ -159,6 +159,7 @@ test('grid multi-child first card keeps its core column wrapper', function (): v
         assert_contains('FIRST A', $card);
         assert_contains('FIRST B', $card);
         assert_true(!str_contains($card, 'SECOND'));
+        assert_contains('Title: Service card', pattern_components_file($project, 'service-card'));
     });
 });
 

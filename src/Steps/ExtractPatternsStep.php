@@ -73,7 +73,7 @@ final class ExtractPatternsStep implements Step
 
     public function run(Project $project): void
     {
-        $this->deletePatternDirectory($project);
+        $this->deletePatternOutputs($project);
 
         $plan = $project->readJson('pages.json');
         $pageManifest = $project->readJson('plugin/pages.json');
@@ -85,8 +85,8 @@ final class ExtractPatternsStep implements Step
         $planPages = $this->pagesBySlug($plan['pages'] ?? []);
         $manifestPages = is_array($pageManifest['pages'] ?? null) ? $pageManifest['pages'] : [];
         $routes = $this->routeSet($manifestPages, $planPages);
-        $registeredBlocks = $this->registeredPluginBlocks($project);
         $warnings = [];
+        $registeredBlocks = $this->registeredPluginBlocks($project, $warnings);
         if (
             $registeredBlocks === []
             && $project->exists(ScaffoldPluginStep::MAIN_FILE)
@@ -263,9 +263,7 @@ final class ExtractPatternsStep implements Step
                     $warnings[] = "{$relative}: block path /{$index}, section '{$sectionSlug}'; authored value "
                         . Warnings::value($eligibilityFailure['value'])
                         . '; delivered value "removed"; disposition: rejected section because '
-                        . ($eligibilityFailure['kind'] === 'raw_php'
-                            ? 'raw PHP open tag would execute from included pattern PHP'
-                            : 'non-core block is absent from generated plugin registration list');
+                        . self::eligibilityDisposition($eligibilityFailure);
                     $log[] = "candidate {$pageSlug}/{$sectionSlug} key {$key}: ineligible "
                         . $eligibilityFailure['kind'] . ' ' . Warnings::value($eligibilityFailure['value']);
                 }
@@ -296,9 +294,7 @@ final class ExtractPatternsStep implements Step
                         $warnings[] = "{$relative}: block path /{$index}, section '{$sectionSlug}'; component source "
                             . 'authored value ' . Warnings::value($componentEligibilityFailure['value'])
                             . '; delivered value "removed"; disposition: rejected component pair because '
-                            . ($componentEligibilityFailure['kind'] === 'raw_php'
-                                ? 'raw PHP open tag would execute from included pattern PHP'
-                                : 'non-core block is absent from generated plugin registration list');
+                            . self::eligibilityDisposition($componentEligibilityFailure);
                         $log[] = "component candidate {$pageSlug}/{$sectionSlug} key {$componentKey}: ineligible "
                             . $componentEligibilityFailure['kind'] . ' '
                             . Warnings::value($componentEligibilityFailure['value']);
@@ -375,7 +371,7 @@ final class ExtractPatternsStep implements Step
         $deliveredSections = [];
         foreach ($winners as &$winner) {
             $deliveredMarkup = self::rewriteLinks(
-                self::rewriteAnchors(self::rewriteAssets($winner['markup']), $cssIds),
+                self::rewriteAssets(self::rewriteAnchors($winner['markup'], $cssIds)),
                 $routes,
             );
             $patternFile = 'theme/patterns/' . $winner['key'] . '.php';
@@ -651,7 +647,7 @@ final class ExtractPatternsStep implements Step
 
     /**
      * @param array<string,true> $registeredBlocks
-     * @return array{kind:'raw_php'|'unregistered_block',value:string}|null
+     * @return array{kind:'raw_php'|'forbidden_block'|'unregistered_block',value:string}|null
      */
     private static function eligibilityFailure(string $markup, array $registeredBlocks): ?array
     {
@@ -661,11 +657,14 @@ final class ExtractPatternsStep implements Step
         $doc = BlockMarkup::parse($markup);
         foreach ($doc->indices() as $index) {
             $name = $doc->name($index);
-            if (!str_contains($name, '/')) {
-                continue;
-            }
             $canonical = str_starts_with($name, 'core/') ? substr($name, 5) : $name;
-            if ($canonical !== $name) {
+            if (in_array($canonical, ['html', 'embed', 'shortcode'], true)) {
+                return [
+                    'kind' => 'forbidden_block',
+                    'value' => str_contains($name, '/') ? $name : 'core/' . $name,
+                ];
+            }
+            if (!str_contains($name, '/') || $canonical !== $name) {
                 continue;
             }
             if (!isset($registeredBlocks[$name])) {
@@ -673,6 +672,16 @@ final class ExtractPatternsStep implements Step
             }
         }
         return null;
+    }
+
+    /** @param array{kind:string,value:string} $failure */
+    private static function eligibilityDisposition(array $failure): string
+    {
+        return match ($failure['kind']) {
+            'raw_php' => 'raw PHP open tag would execute from included pattern PHP',
+            'forbidden_block' => 'core/html, core/embed, and core/shortcode cannot ship in generated patterns',
+            default => 'non-core block is absent from generated plugin registration list',
+        };
     }
 
     public static function rewriteAssets(string $markup): string
@@ -794,7 +803,10 @@ final class ExtractPatternsStep implements Step
         $outside = [];
         foreach (LinkTargets::allTargets($markup) as $target) {
             $decoded = html_entity_decode(trim($target), ENT_QUOTES | ENT_HTML5, 'UTF-8');
-            if (!self::targetResolves($decoded, $resolvableRoutes, $anchors) && str_starts_with($decoded, '#')) {
+            if (
+                LinkTargets::isDangerousScheme($decoded)
+                || (!self::targetResolves($decoded, $resolvableRoutes, $anchors) && str_starts_with($decoded, '#'))
+            ) {
                 $outside[$decoded] = true;
             }
         }
@@ -828,24 +840,29 @@ final class ExtractPatternsStep implements Step
         ) ?? $markup;
     }
 
-    private function deletePatternDirectory(Project $project): void
+    private function deletePatternOutputs(Project $project): void
     {
         $directory = $project->themePath('patterns');
-        if (!is_dir($directory)) {
-            return;
-        }
-        $iterator = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($directory, \FilesystemIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::CHILD_FIRST,
-        );
-        foreach ($iterator as $entry) {
-            $removed = $entry->isDir() ? rmdir($entry->getPathname()) : unlink($entry->getPathname());
-            if (!$removed) {
-                throw new \RuntimeException("Could not remove stale pattern path: {$entry->getPathname()}");
+        if (is_dir($directory)) {
+            $iterator = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($directory, \FilesystemIterator::SKIP_DOTS),
+                \RecursiveIteratorIterator::CHILD_FIRST,
+            );
+            foreach ($iterator as $entry) {
+                $removed = $entry->isDir() ? rmdir($entry->getPathname()) : unlink($entry->getPathname());
+                if (!$removed) {
+                    throw new \RuntimeException("Could not remove stale pattern path: {$entry->getPathname()}");
+                }
+            }
+            if (!rmdir($directory)) {
+                throw new \RuntimeException("Could not remove stale pattern directory: {$directory}");
             }
         }
-        if (!rmdir($directory)) {
-            throw new \RuntimeException("Could not remove stale pattern directory: {$directory}");
+        if ($project->exists('patterns.json')) {
+            $manifest = $project->path('patterns.json');
+            if (!unlink($manifest)) {
+                throw new \RuntimeException("Could not remove stale pattern manifest: {$manifest}");
+            }
         }
     }
 
@@ -868,8 +885,11 @@ final class ExtractPatternsStep implements Step
         return $out;
     }
 
-    /** @return array<string,true> */
-    private function registeredPluginBlocks(Project $project): array
+    /**
+     * @param list<string> $warnings
+     * @return array<string,true>
+     */
+    private function registeredPluginBlocks(Project $project, array &$warnings): array
     {
         if (!$project->exists(ScaffoldPluginStep::MAIN_FILE)) {
             return [];
@@ -890,7 +910,10 @@ final class ExtractPatternsStep implements Step
             try {
                 $definition = $project->readJson($relative);
             } catch (\Throwable) {
-                return [];
+                $warnings[] = "{$relative}: block path \"block.json\"; authored value \"malformed JSON\"; "
+                    . 'delivered value "unregistered"; disposition: skipped this companion block and continued '
+                    . 'with the remaining registrations';
+                continue;
             }
             if (($definition['name'] ?? null) === $name) {
                 $registered[$name] = true;
@@ -1392,7 +1415,9 @@ final class ExtractPatternsStep implements Step
     private static function patternTitle(?string $label, string $shape, ?string $component = null): string
     {
         if ($component !== null) {
-            return 'Testimonial ' . $component;
+            return $label === null
+                ? ucfirst($component)
+                : self::displayName($label) . ' ' . $component;
         }
         $shapeTitle = self::displayName($shape);
         return $label === null
@@ -1606,12 +1631,14 @@ final class ExtractPatternsStep implements Step
         if ($target === '' || $target === '#') {
             return true;
         }
+        if (LinkTargets::isDangerousScheme($target)) {
+            return false;
+        }
         if (str_starts_with($target, '#')) {
             return isset($anchors[rawurldecode(substr($target, 1))]);
         }
         if (
-            str_starts_with($target, '//')
-            || preg_match('/^[a-z][a-z0-9+.-]*:/i', $target) === 1
+            LinkTargets::isSafeAbsoluteTarget($target)
             || str_starts_with($target, 'theme:./assets/')
             || LinkTargets::isThemeAssetPath($target)
         ) {

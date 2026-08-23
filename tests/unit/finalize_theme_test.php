@@ -38,7 +38,8 @@ test('finalize-theme writes the deterministic functions.php loader', function ()
     assert_contains('is_readable', $php);
     assert_contains("register_block_pattern_category('forno-vero-sections'", $php);
     assert_contains("register_block_pattern_category('forno-vero-components'", $php);
-    assert_contains("'label' => 'Forno Vero'", $php);
+    assert_contains("'label' => 'Forno Vero sections'", $php);
+    assert_contains("'label' => 'Forno Vero components'", $php);
     // No model output belongs here — no font URLs, ever.
     assert_true(!str_contains($php, 'googleapis'), 'fonts stay in fonts.php');
     // PHP must be syntactically valid.
@@ -59,7 +60,8 @@ test('finalize-theme keeps a hostile pattern category label inert', function () 
     quietly(fn () => (new FinalizeThemeStep())->run($project));
 
     $php = $project->readText('theme/functions.php');
-    assert_contains("'label' => 'O\\'Brien); phpinfo(); //'", $php);
+    assert_contains("'label' => 'O\\'Brien); phpinfo(); // sections'", $php);
+    assert_contains("'label' => 'O\\'Brien); phpinfo(); // components'", $php);
     $out = [];
     $rc = 0;
     exec('php -l ' . escapeshellarg($project->themePath('functions.php')) . ' 2>&1', $out, $rc);

@@ -46,7 +46,7 @@ test('postImages names the phase every image entry point has to run', function (
     // cannot be added to one and forgotten in the other — and a host that
     // generates images mirrors one name instead of inferring the set.
     assert_eq(
-        ['generate-images', 'theme-screenshot', 'cover-contrast', 'extract-patterns'],
+        ['generate-images', 'theme-screenshot', 'cover-contrast', 'extract-patterns', 'validate-theme'],
         array_map(static fn (Step $s) => $s->id(), StepComposition::postImages($images)),
     );
 });

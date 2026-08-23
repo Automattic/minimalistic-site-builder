@@ -194,6 +194,13 @@ test('eligibility accepts core and registered plugin blocks but rejects unregist
     assert_true(!ExtractPatternsStep::isEligible($unknown, ['blocks-engine/description-list' => true]));
 });
 
+test('eligibility rejects core html embed and shortcode under both names', function (): void {
+    foreach (['html', 'embed', 'shortcode', 'core/html', 'core/embed', 'core/shortcode'] as $name) {
+        $markup = "<!-- wp:{$name} --><div>payload</div><!-- /wp:{$name} -->";
+        assert_true(!ExtractPatternsStep::isEligible($markup, []), $name);
+    }
+});
+
 test('a key whose only candidate is ineligible is dropped without reaching an empty winner list', function (): void {
     with_project('builder_extract_inelig_', function (Project $project): void {
         extract_patterns_seed($project, [
@@ -256,6 +263,29 @@ test('an anchor targeted by style.css survives and an untargeted anchor is strip
     assert_true(!str_contains($stripped, 'id="hero"'));
 });
 
+test('same-node unused cover anchor keeps a PHP theme-asset url unescaped', function (): void {
+    with_project('builder_extract_same_node_php_', function (Project $project): void {
+        $asset = 'hero-1234abcd.jpg';
+        $php = "<?php echo esc_url( get_theme_file_uri( 'assets/{$asset}' ) ); ?>";
+        $markup = '<!-- wp:cover {"url":"theme:./assets/' . $asset . '","anchor":"hero"} -->'
+            . '<div class="wp-block-cover" id="hero">'
+            . '<img class="wp-block-cover__image-background" src="theme:./assets/' . $asset . '" alt=""/>'
+            . '</div><!-- /wp:cover -->';
+        extract_patterns_seed($project, [
+            ['slug' => 'hero', 'markup' => $markup],
+            ['slug' => 'cta', 'markup' => sp_columns(1)],
+        ]);
+
+        (new ExtractPatternsStep())->run($project);
+
+        $pattern = extract_patterns_for_label($project, 'hero');
+        assert_contains($php, $pattern);
+        assert_true(!str_contains($pattern, '\\u003C'), 'JSON_HEX_TAG must not escape the PHP url');
+        assert_true(!str_contains($pattern, '"anchor":"hero"'));
+        assert_true(!str_contains($pattern, 'id="hero"'));
+    });
+});
+
 test('link rewrite keeps self-contained targets and neutralizes outside fragments in HTML and block JSON', function (): void {
     $markup = '<!-- wp:group {"anchor":"book"} --><section id="book">'
         . '<a href="#book">stay</a><a href="#pricing">leave</a>'
@@ -271,14 +301,41 @@ test('link rewrite keeps self-contained targets and neutralizes outside fragment
     assert_contains('"url":"#"', $output, 'block-JSON targets use the shared allTargets domain');
 });
 
+test('link rewrite neutralizes javascript data and vbscript destinations', function (): void {
+    $markup = '<!-- wp:group --><div>'
+        . '<a href="javascript:alert(1)">js</a>'
+        . '<a href="DATA:text/html,hi">data</a>'
+        . '<a href="vbscript:msgbox(1)">vb</a>'
+        . '<a href="https://example.com">ok</a>'
+        . '<a href="tel:+15551212">call</a>'
+        . '<!-- wp:navigation-link {"url":"javascript:alert(2)"} /-->'
+        . '</div><!-- /wp:group -->';
+    $output = ExtractPatternsStep::rewriteLinks($markup, []);
+
+    assert_true(!str_contains(strtolower($output), 'javascript:'));
+    assert_true(!str_contains(strtolower($output), 'data:'));
+    assert_true(!str_contains(strtolower($output), 'vbscript:'));
+    assert_contains('href="https://example.com"', $output);
+    assert_contains('href="tel:+15551212"', $output);
+    assert_contains('"url":"#"', $output);
+});
+
 test('a stale pattern file from a prior run is gone after a re-run', function (): void {
     with_project('builder_extract_patterns_', function (Project $project): void {
         extract_patterns_seed($project);
         $project->writeText('theme/patterns/ghost.php', '<?php // stale');
+        $project->writeJson('patterns.json', [
+            'version' => 2,
+            'patterns' => [['slug' => 'ghost', 'kind' => 'section']],
+            'starter' => null,
+            'dropped' => [],
+        ]);
 
         (new ExtractPatternsStep())->run($project);
 
         assert_true(!$project->exists('theme/patterns/ghost.php'));
+        $slugs = array_column($project->readJson('patterns.json')['patterns'], 'slug');
+        assert_true(!in_array('ghost', $slugs, true));
     });
 });
 
@@ -821,4 +878,8 @@ test('label normalization distinguishes special es plurals from ordinary s plura
     assert_eq('class', \Automattic\SiteBuild\SectionPattern::normalizeLabel('class'));
     assert_eq('status', \Automattic\SiteBuild\SectionPattern::normalizeLabel('status'));
     assert_eq('analysis', \Automattic\SiteBuild\SectionPattern::normalizeLabel('analysis'));
+
+    assert_eq('news', \Automattic\SiteBuild\SectionPattern::normalizeLabel('news'));
+    assert_eq('series', \Automattic\SiteBuild\SectionPattern::normalizeLabel('series'));
+    assert_eq('species', \Automattic\SiteBuild\SectionPattern::normalizeLabel('species'));
 });

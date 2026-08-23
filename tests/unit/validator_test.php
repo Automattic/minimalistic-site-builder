@@ -575,6 +575,32 @@ test('validator flags button links without an href', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('validator scans theme pattern files for placeholder links and unresolved images', function () {
+    [$project, $tmp] = validator_project();
+    $project->writeText(
+        'theme/patterns/hero-cover.php',
+        "<?php\n?>\n"
+        . '<!-- wp:cover {"url":"AI_IMAGE:fog over the dunes"} -->'
+        . '<div class="wp-block-cover"><img class="wp-block-cover__image-background" '
+        . 'src="AI_IMAGE:fog over the dunes" alt=""/></div><!-- /wp:cover -->'
+        . '<!-- wp:paragraph --><p><a href="#">dead</a></p><!-- /wp:paragraph -->'
+        . '<!-- wp:paragraph --><p>{{TITLE}}</p><!-- /wp:paragraph -->'
+    );
+
+    $joined = implode(' ', ThemeValidator::validate($project));
+    assert_contains('theme/patterns/hero-cover.php', $joined);
+    assert_contains('AI_IMAGE', $joined);
+    assert_contains('placeholder', $joined);
+
+    $links = implode(' ', ThemeValidator::placeholderLinkProblems($project));
+    assert_contains('theme/patterns/hero-cover.php', $links);
+    assert_contains('authored href="#"', $links);
+
+    $images = implode(' ', ThemeValidator::unresolvedImageSourceProblems($project));
+    assert_contains('theme/patterns/hero-cover.php', $images);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('validator reports placeholder links with actionable delivery context', function () {
     [$project, $tmp] = validator_linked_project();
     $project->writeText(
