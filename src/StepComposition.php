@@ -49,6 +49,9 @@ use Automattic\SiteBuild\Steps\ValidateThemeStep;
  */
 final class StepComposition
 {
+    /** The env key that selects the HTML-first graph. Written by the CLI's --html-first / --blocks-first. */
+    public const HTML_FIRST_ENV = 'SITE_BUILD_HTML_FIRST';
+
     /** Artifacts produced before the runtime fallback enters the blocks tail. */
     private const BLOCKS_TAIL_SEEDS = [
         'meta.json',
@@ -75,8 +78,8 @@ final class StepComposition
 
     /**
      * The package default / CLI composition: the blocks graph, where the model
-     * authors block markup directly. The explicit SITE_BUILD_HTML_FIRST=1
-     * escape hatch selects the HTML-first graph instead.
+     * authors block markup directly. The CLI's --html-first flag, or a
+     * SITE_BUILD_HTML_FIRST=1 env, selects the HTML-first graph instead.
      *
      * @param array<string, string> $models       step id => model id overrides
      * @param array<string, ?float> $temperatures step id => temperature overrides
@@ -97,18 +100,20 @@ final class StepComposition
     /**
      * Whether the caller opted into the HTML-first graph. Single owner of the
      * env key so the facade's fallback wiring can't disagree with default().
+     * The CLI's --html-first / --blocks-first flags set that key, which is what
+     * makes an explicit flag beat a shell export or an .env line.
      */
     public static function htmlFirstSelected(): bool
     {
-        return Env::get('SITE_BUILD_HTML_FIRST') === '1';
+        return Env::get(self::HTML_FIRST_ENV) === '1';
     }
 
     /**
      * The HTML-first graph: the model authors an HTML+CSS design, and
      * transform-site converts it to block markup deterministically. Opt-in via
-     * SITE_BUILD_HTML_FIRST=1. SiteBuilder wraps this graph with the currently
-     * dormant whole-build fallback; mixed-page degradation is handled inside
-     * TransformSiteStep.
+     * --html-first or SITE_BUILD_HTML_FIRST=1. SiteBuilder wraps this graph
+     * with the currently dormant whole-build fallback; mixed-page degradation
+     * is handled inside TransformSiteStep.
      *
      * @param array<string, string> $models       step id => model id overrides
      * @param array<string, ?float> $temperatures step id => temperature overrides

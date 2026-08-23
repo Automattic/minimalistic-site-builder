@@ -91,3 +91,97 @@ test('build CLI preserves design-constraint error precedence over provider valid
     assert_eq(1, $exit);
     assert_eq('--max-hero-images must be an integer from 1 through 2.', implode("\n", $output));
 });
+
+/**
+ * The step ids the build CLI would have run, read back from --until's
+ * validator. That list IS the selected graph, so it distinguishes the two
+ * paths instead of merely proving a flag parsed. $env prefixes the child,
+ * which is how a flag gets tested against a hostile SITE_BUILD_HTML_FIRST.
+ *
+ * @param list<string>          $args
+ * @param array<string, string> $env
+ * @return list<string>
+ */
+function build_cli_graph_ids(array $args, array $env = []): array
+{
+    // A stub key keeps make_llm() from exiting before the validator is reached.
+    // The run stops on the unknown --until id, so nothing is ever sent.
+    $env += ['ANTHROPIC_API_KEY' => 'test-key'];
+    $prefix = '';
+    foreach ($env as $key => $value) {
+        $prefix .= $key . '=' . escapeshellarg($value) . ' ';
+    }
+    $command = $prefix . php_child_command(repo_path('bin/build.php'), array_merge(
+        ['demo', '--provider=anthropic', '--no-serve', '--until=__no-such-step__'],
+        $args,
+    ));
+
+    $output = [];
+    $exit = 0;
+    exec($command . ' 2>&1', $output, $exit);
+
+    assert_eq(1, $exit, implode("\n", $output));
+    assert_eq("Unknown --until step '__no-such-step__'. Valid steps:", $output[0] ?? '');
+
+    return array_values(array_map('trim', array_slice($output, 1)));
+}
+
+test('--html-first runs the build on the HTML-first graph', function () {
+    $ids = build_cli_graph_ids(['--html-first']);
+    $seen = implode(',', $ids);
+
+    assert_true(in_array('design-preview', $ids, true), $seen);
+    assert_true(in_array('transform-site', $ids, true), $seen);
+    assert_true(!in_array('sections', $ids, true), $seen);
+});
+
+test('--blocks-first runs the build on the blocks graph', function () {
+    $ids = build_cli_graph_ids(['--blocks-first']);
+    $seen = implode(',', $ids);
+
+    assert_true(in_array('sections', $ids, true), $seen);
+    assert_true(!in_array('design-preview', $ids, true), $seen);
+    assert_true(!in_array('transform-site', $ids, true), $seen);
+});
+
+test('--blocks-first overrides SITE_BUILD_HTML_FIRST=1', function () {
+    $ids = build_cli_graph_ids(['--blocks-first'], ['SITE_BUILD_HTML_FIRST' => '1']);
+    $seen = implode(',', $ids);
+
+    assert_true(in_array('sections', $ids, true), $seen);
+    assert_true(!in_array('transform-site', $ids, true), $seen);
+});
+
+test('--html-first overrides SITE_BUILD_HTML_FIRST=0', function () {
+    $ids = build_cli_graph_ids(['--html-first'], ['SITE_BUILD_HTML_FIRST' => '0']);
+    $seen = implode(',', $ids);
+
+    assert_true(in_array('transform-site', $ids, true), $seen);
+    assert_true(!in_array('sections', $ids, true), $seen);
+});
+
+test('without either flag SITE_BUILD_HTML_FIRST still picks the graph', function () {
+    $on = build_cli_graph_ids([], ['SITE_BUILD_HTML_FIRST' => '1']);
+    assert_true(in_array('transform-site', $on, true), implode(',', $on));
+
+    $off = build_cli_graph_ids([], ['SITE_BUILD_HTML_FIRST' => '0']);
+    assert_true(in_array('sections', $off, true), implode(',', $off));
+});
+
+test('--html-first and --blocks-first together are refused', function () {
+    $command = php_child_command(repo_path('bin/build.php'), [
+        'demo',
+        '--html-first',
+        '--blocks-first',
+        '--no-serve',
+    ]);
+    $output = [];
+    $exit = 0;
+    exec($command . ' 2>&1', $output, $exit);
+
+    assert_eq(1, $exit);
+    assert_eq(
+        '--html-first and --blocks-first are mutually exclusive; pass one.',
+        implode("\n", $output)
+    );
+});
