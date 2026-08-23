@@ -1446,3 +1446,18 @@ test('W18 coherent explicit provider and harness pairing proceeds', function ():
         assert_true(!file_exists($binary . '.count'));
     });
 });
+
+test('W18 coherent grok provider alias and grok harness pairing proceeds', function (): void {
+    with_temp_dir('provider-grok-alias-', function (string $dir): void {
+        $binary = $dir . '/grok';
+        assert_true(copy(dirname(__DIR__) . '/fixtures/fake-harness/spawn-counter.sh', $binary));
+        assert_true(chmod($binary, 0755));
+        [$output, $status, $details] = tr_harness_probe($dir, 'grok-cli', 'grok');
+        assert_eq(0, $status, $output);
+        assert_true(is_array($details), $output);
+        assert_eq('Automattic\\SiteBuild\\GrokCliLlm', $details['class']);
+        assert_eq('xai', $details['provider']);
+        assert_eq('grok-4.5', $details['model']);
+        assert_true(!file_exists($binary . '.count'));
+    });
+});
