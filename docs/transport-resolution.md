@@ -97,6 +97,8 @@ Claude adds a non-blank `system` value through `--system-prompt` and an optional
 
 The varying prompt body never appears in argv. Claude and Codex receive it on standard input. Grok receives only a path in argv, and the prompt file lives in a mode-0700 unique scratch directory. Scratch files and directories are removed after success, non-zero exit, parsing failure, or another exception.
 
+> **Why Grok uses `--prompt-file`:** [xAI's headless-scripting documentation](https://docs.x.ai/build/cli/headless-scripting) describes `-p` / `--single`, which places the prompt in an argv element; it documents no standard-input path and does not mention `--prompt-file`. The shipped `grok --help` does include `--prompt-file`, and we deliberately use it because argv is world-readable through tools such as `ps` while prompts can contain user and site content. The human confirmed this choice. Both `--prompt-file` and `-p` were measured returning exit 0, text, and the same ten-key JSON envelope, so `-p` remains a verified fallback; if `--prompt-file` is removed, Grok fails loudly with a non-zero exit and an unknown-flag message on stderr rather than silently changing prompt delivery.
+
 `ProcessPool` receives argv as an array, not a shell command. The child process gets a replacement allowlist environment rather than inheriting the parent environment; provider API keys are not in that allowlist. This prevents a subscription transport from silently crossing into metered API billing.
 
 Each request accepts at most three non-blank `cached_prefixes`. `CachedPrefixes::normalize()` validates the shape and removes blank layers, then the base concatenates all remaining layers in order ahead of the prompt. Callers remain responsible for separators inside their prefix strings.

@@ -16,7 +16,7 @@ We don't need to plan for backwards compatibility. This is a green field project
 
 ## Site builds from agent harnesses
 
-When an agent needs to create or resume a generated site, follow [the site-build skill](.claude/skills/site-build/SKILL.md), the source of truth for selecting and confirming its subscription-backed transport.
+When an agent needs to create or resume a generated site, follow [the site-build skill](skills/site-build/SKILL.md), the source of truth for selecting and confirming its subscription-backed transport.
 
 ## Generation step maps
 
