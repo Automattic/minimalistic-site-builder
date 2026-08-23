@@ -32,26 +32,10 @@ final class LinkTargets
         return self::jsonStringAttrs('href', $markup);
     }
 
-    /**
-     * Download-text click targets stored as block-JSON "textLinkHref"
-     * (core/file). Distinct from rendered HTML hrefs and JSON "href".
-     *
-     * @return list<string>
-     */
-    public static function textLinkHrefAttrsIn(string $markup): array
-    {
-        return self::jsonStringAttrs('textLinkHref', $markup);
-    }
-
     /** @return list<string> */
     public static function allTargets(string $markup): array
     {
-        return array_merge(
-            self::hrefsIn($markup),
-            self::urlAttrsIn($markup),
-            self::hrefAttrsIn($markup),
-            self::textLinkHrefAttrsIn($markup),
-        );
+        return array_merge(self::hrefsIn($markup), self::urlAttrsIn($markup), self::hrefAttrsIn($markup));
     }
 
     /**

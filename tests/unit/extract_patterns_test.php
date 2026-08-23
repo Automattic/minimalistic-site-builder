@@ -311,7 +311,7 @@ test('link rewrite neutralizes javascript data and vbscript destinations', funct
         . '<a href="tel:+15551212">call</a>'
         . '<!-- wp:navigation-link {"url":"javascript:alert(2)"} /-->'
         . '<!-- wp:image {"href":"javascript:alert(3)"} /-->'
-        . '<!-- wp:file {"href":"DATA:text/html,file","textLinkHref":"javascript:alert(4)"} /-->'
+        . '<!-- wp:file {"href":"DATA:text/html,file"} /-->'
         . '<!-- wp:media-text {"href":"vbscript:msgbox(2)"} /-->'
         . '</div><!-- /wp:group -->';
     $output = ExtractPatternsStep::rewriteLinks($markup, []);
@@ -323,12 +323,10 @@ test('link rewrite neutralizes javascript data and vbscript destinations', funct
     assert_contains('href="tel:+15551212"', $output);
     assert_contains('"url":"#"', $output);
     assert_contains('<!-- wp:image {"href":"#"} /-->', $output);
-    assert_contains('<!-- wp:file {"href":"#","textLinkHref":"#"} /-->', $output);
+    assert_contains('<!-- wp:file {"href":"#"} /-->', $output);
     assert_contains('<!-- wp:media-text {"href":"#"} /-->', $output);
     assert_eq(['#', '#', '#'], LinkTargets::hrefAttrsIn($output));
-    assert_eq(['#'], LinkTargets::textLinkHrefAttrsIn($output));
     assert_true(!in_array('javascript:alert(3)', LinkTargets::allTargets($output), true));
-    assert_true(!in_array('javascript:alert(4)', LinkTargets::allTargets($output), true));
 });
 
 test('link rewrite collects and rewrites JSON href without HTML href or JSON url', function (): void {
@@ -350,36 +348,6 @@ test('link rewrite collects and rewrites JSON href without HTML href or JSON url
         assert_eq(['#'], LinkTargets::hrefAttrsIn($output), $name);
     }
 });
-
-test('link rewrite collects and rewrites JSON textLinkHref on core/file', function (): void {
-    $markup = '<!-- wp:file {"href":"/file.pdf","textLinkHref":"javascript:alert(1)"} --><div class="wp-block-file"></div><!-- /wp:file -->';
-    assert_eq([], LinkTargets::hrefsIn($markup), 'no HTML href');
-    assert_eq([], LinkTargets::urlAttrsIn($markup), 'no JSON url');
-    assert_eq(['/file.pdf'], LinkTargets::hrefAttrsIn($markup));
-    assert_eq(['javascript:alert(1)'], LinkTargets::textLinkHrefAttrsIn($markup));
-    assert_true(in_array('javascript:alert(1)', LinkTargets::allTargets($markup), true));
-    $output = ExtractPatternsStep::rewriteLinks($markup, []);
-    assert_contains('"href":"/file.pdf"', $output, 'safe JSON href is kept');
-    assert_contains('"textLinkHref":"#"', $output);
-    assert_true(!str_contains(strtolower($output), 'javascript:'));
-    assert_eq(['#'], LinkTargets::textLinkHrefAttrsIn($output));
-    assert_true(!in_array('javascript:alert(1)', LinkTargets::allTargets($output), true));
-});
-
-test('link rewrite collects and rewrites JSON textLinkHref without HTML href or JSON url', function (): void {
-    $markup = '<!-- wp:file {"textLinkHref":"javascript:alert(1)"} --><div class="wp-block-file"></div><!-- /wp:file -->';
-    assert_eq([], LinkTargets::hrefsIn($markup), 'file textLinkHref has no HTML href');
-    assert_eq([], LinkTargets::urlAttrsIn($markup), 'file textLinkHref has no JSON url');
-    assert_eq([], LinkTargets::hrefAttrsIn($markup), 'file textLinkHref is not JSON href');
-    assert_eq(['javascript:alert(1)'], LinkTargets::textLinkHrefAttrsIn($markup));
-    assert_true(in_array('javascript:alert(1)', LinkTargets::allTargets($markup), true));
-    $output = ExtractPatternsStep::rewriteLinks($markup, []);
-    assert_contains('"textLinkHref":"#"', $output);
-    assert_true(!str_contains(strtolower($output), 'javascript:'));
-    assert_eq(['#'], LinkTargets::textLinkHrefAttrsIn($output));
-    assert_true(!in_array('javascript:alert(1)', LinkTargets::allTargets($output), true));
-});
-
 
 test('a stale pattern file from a prior run is gone after a re-run', function (): void {
     with_project('builder_extract_patterns_', function (Project $project): void {

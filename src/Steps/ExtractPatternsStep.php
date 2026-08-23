@@ -831,8 +831,16 @@ final class ExtractPatternsStep implements Step
             },
             $markup,
         ) ?? $markup;
+        $markup = preg_replace_callback(
+            '/("url"\s*:\s*")([^"]*)(")/i',
+            static function (array $match) use ($outside): string {
+                $decoded = str_replace('\\/', '/', $match[2]);
+                return isset($outside[$decoded]) ? $match[1] . '#' . $match[3] : $match[0];
+            },
+            $markup,
+        ) ?? $markup;
         return preg_replace_callback(
-            '/("(?:textLinkHref|href|url)"\s*:\s*")([^"]*)(")/i',
+            '/("href"\s*:\s*")([^"]*)(")/i',
             static function (array $match) use ($outside): string {
                 $decoded = str_replace('\\/', '/', $match[2]);
                 return isset($outside[$decoded]) ? $match[1] . '#' . $match[3] : $match[0];
@@ -863,25 +871,27 @@ final class ExtractPatternsStep implements Step
         $stagedManifest = $writer->stage($liveManifest, $content);
         $dirSwapped = false;
         try {
-            if (!@mkdir($stagingDir, 0775, true) && !is_dir($stagingDir)) {
-                throw new \RuntimeException("Could not create staged pattern directory: {$stagingDir}");
-            }
-            foreach ($files as $basename => $file) {
-                $path = $stagingDir . '/' . $basename;
-                if (file_put_contents($path, $file) === false) {
-                    throw new \RuntimeException("Could not write staged pattern: {$path}");
+            if ($files !== []) {
+                if (!@mkdir($stagingDir, 0775, true) && !is_dir($stagingDir)) {
+                    throw new \RuntimeException("Could not create staged pattern directory: {$stagingDir}");
                 }
-            }
-            if (is_dir($liveDir) && !@rename($liveDir, $backupDir)) {
-                throw new \RuntimeException("Could not move live pattern directory aside: {$liveDir}");
-            }
-            if (!@rename($stagingDir, $liveDir)) {
-                if (is_dir($backupDir) && !is_dir($liveDir)) {
-                    @rename($backupDir, $liveDir);
+                foreach ($files as $basename => $file) {
+                    $path = $stagingDir . '/' . $basename;
+                    if (file_put_contents($path, $file) === false) {
+                        throw new \RuntimeException("Could not write staged pattern: {$path}");
+                    }
                 }
-                throw new \RuntimeException("Could not install staged pattern directory: {$liveDir}");
+                if (is_dir($liveDir) && !@rename($liveDir, $backupDir)) {
+                    throw new \RuntimeException("Could not move live pattern directory aside: {$liveDir}");
+                }
+                if (!@rename($stagingDir, $liveDir)) {
+                    if (is_dir($backupDir) && !is_dir($liveDir)) {
+                        @rename($backupDir, $liveDir);
+                    }
+                    throw new \RuntimeException("Could not install staged pattern directory: {$liveDir}");
+                }
+                $dirSwapped = true;
             }
-            $dirSwapped = true;
 
             $writer->replace($stagedManifest, $liveManifest);
         } catch (\Throwable $error) {
@@ -899,9 +909,10 @@ final class ExtractPatternsStep implements Step
             throw $error;
         }
 
-        self::removePath($backupDir);
         if ($files === []) {
             self::removePath($liveDir);
+        } else {
+            self::removePath($backupDir);
         }
     }
 
