@@ -41,19 +41,22 @@ final class StudioCli
         }
         $decoded = json_decode(trim($r['stdout']), true);
         if (!is_array($decoded)) {
-            throw new \RuntimeException('studio returned output that is not JSON: ' . substr($r['stdout'], 0, 200));
+            throw new \RuntimeException('studio returned output that is not JSON: ' . substr(self::redact($r['stdout']), 0, 200));
         }
         foreach ($requiredKeys as $key) {
             if (!array_key_exists($key, $decoded)) {
                 throw new \RuntimeException("studio JSON is missing '{$key}' — the CLI contract changed");
             }
         }
+        if (array_key_exists('adminPassword', $decoded)) {
+            $decoded['adminPassword'] = '';
+        }
         return $decoded;
     }
 
     public function available(): bool
     {
-        return command_exists('studio') && $this->run(['list', '--format', 'json'])['exitCode'] === 0;
+        return $this->run(['list', '--format', 'json'])['exitCode'] === 0;
     }
 
     public static function stripAnsi(string $s): string

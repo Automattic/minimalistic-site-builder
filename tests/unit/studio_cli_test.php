@@ -46,3 +46,27 @@ test('json rejects a non-zero exit and reports the stderr reason', function () {
     $e = assert_throws(fn () => $cli->json(['status'], []));
     assert_contains('not added to Studio', $e->getMessage());
 });
+
+test('json never puts adminPassword into an exception message', function () {
+    $payload = "Warning: studio upgrade available\n{\"siteUrl\":\"http://localhost:8881/\",\"adminPassword\":\"hunter2SECRET\"}";
+    $cli = new StudioCli(fake_exec(0, $payload));
+    $e = assert_throws(fn () => $cli->json(['status', '--format', 'json'], []));
+    assert_true(!str_contains($e->getMessage(), 'hunter2SECRET'), 'plaintext password must not reach the exception');
+});
+
+test('json blanks adminPassword before returning to callers', function () {
+    $payload = '{"siteUrl":"http://localhost:8881/","autoLoginUrl":"http://localhost:8881/wp-login.php","isOnline":true,"adminPassword":"hunter2SECRET"}';
+    $cli = new StudioCli(fake_exec(0, $payload));
+    $out = $cli->json(['status', '--format', 'json'], ['siteUrl', 'autoLoginUrl', 'isOnline', 'adminPassword']);
+    assert_true(array_key_exists('adminPassword', $out), 'key stays so a required-key check cannot silently pass');
+    assert_true($out['adminPassword'] !== 'hunter2SECRET', 'plaintext password must not leave StudioCli');
+    assert_eq('', $out['adminPassword']);
+    assert_eq('http://localhost:8881/', $out['siteUrl']);
+});
+
+test('available() follows the injected exec, not the real PATH', function () {
+    $ok = new StudioCli(fake_exec(0, '[]'));
+    assert_true($ok->available() === true, 'fake exitCode 0 must make available() true even when studio is absent from PATH');
+    $no = new StudioCli(fake_exec(1, '', 'nope'));
+    assert_true($no->available() === false, 'fake exitCode 1 must make available() false');
+});
