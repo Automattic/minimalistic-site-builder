@@ -17,6 +17,45 @@ final class DebugLogReader
      */
     public static function summarize(string $logContents, int $maxBytes = 262144): array
     {
-        return [];
+        if ($maxBytes <= 0 || $logContents === '') {
+            return [];
+        }
+        $slice = substr($logContents, 0, $maxBytes);
+        $groups = [];
+        $order = [];
+        foreach (preg_split("/\r\n|\n|\r/", $slice) as $line) {
+            if ($line === '') {
+                continue;
+            }
+            if (!preg_match(
+                '/PHP (Notice|Warning|Error|Deprecated|Parse error|Fatal error):\s*(.+?) in (.+) on line (\d+)\s*$/',
+                $line,
+                $m
+            )) {
+                continue;
+            }
+            $level = $m[1];
+            $message = rtrim($m[2]);
+            $file = $m[3];
+            $lineNo = $m[4];
+            $key = $file . "\0" . $lineNo . "\0" . $message;
+            if (!isset($groups[$key])) {
+                $groups[$key] = [
+                    'level'   => $level,
+                    'message' => $message,
+                    'file'    => $file,
+                    'line'    => $lineNo,
+                    'count'   => 0,
+                ];
+                $order[] = $key;
+            }
+            $groups[$key]['count']++;
+        }
+        $rows = [];
+        foreach ($order as $key) {
+            $g = $groups[$key];
+            $rows[] = "{$g['level']} {$g['message']} — {$g['file']}:{$g['line']} (x{$g['count']})";
+        }
+        return $rows;
     }
 }

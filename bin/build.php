@@ -5,8 +5,10 @@ use Automattic\SiteBuild\BuildReport;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\PlaygroundRunner;
 use Automattic\SiteBuild\RunnerResolver;
+use Automattic\SiteBuild\SiteVerifier;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepComposition;
+use Automattic\SiteBuild\StudioAppRunner;
 use Automattic\SiteBuild\StudioCli;
 
 /**
@@ -417,6 +419,12 @@ if ($serve && $until === null) {
     } catch (RuntimeException $e) {
         Narrator::write($e->getMessage() . "\n");
         exit(1);
+    }
+    // Post-build WP checks. Not a pipeline step: wpcom/Linux CI cannot boot
+    // Studio. Findings warn and the build still exits 0 (AGENTS.md:56).
+    if ($serveRunner->name() === 'studio' && $serveRunner instanceof StudioAppRunner) {
+        $findings = SiteVerifier::check(new StudioCli(), $serveRunner->siteDir($project->slug()));
+        $project->addWarnings('site-verifier', $findings);
     }
     echo "  url:    {$site->url}\n";
     echo "  admin:  {$site->adminUrl}\n";

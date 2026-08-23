@@ -54,7 +54,9 @@ final class StudioAppRunner implements SiteRunner
             $this->ensureSite($project, $slug, $dir);
             $this->installTheme($project, $slug, $dir);
             $this->configure($project, $slug, $dir);
-            return $this->readUrl($slug, $dir);
+            $site = $this->readUrl($slug, $dir);
+            $this->captureDebugLog($project, $dir);
+            return $site;
         } catch (\Throwable $e) {
             $this->destroy($dir, $slug);
             throw $e;
@@ -275,6 +277,25 @@ PHP;
                 "studio wp eval failed at {$op}: " . trim($r['stderr'] . "\n" . $r['stdout'])
             );
         }
+    }
+
+    /**
+     * Surface PHP notices from the generated theme after configure() and the
+     * HTTP probe (the probe is what actually renders the theme). Missing log
+     * is a no-op: addWarnings drops an empty list.
+     */
+    private function captureDebugLog(Project $project, string $dir): void
+    {
+        $path = $dir . '/wp-content/debug.log';
+        $log = '';
+        if (is_file($path)) {
+            $fh = fopen($path, 'rb');
+            if ($fh !== false) {
+                $log = (string) stream_get_contents($fh, 262144);
+                fclose($fh);
+            }
+        }
+        $project->addWarnings('studio-runner', DebugLogReader::summarize($log));
     }
 
     private function readUrl(string $slug, string $dir): RunningSite
