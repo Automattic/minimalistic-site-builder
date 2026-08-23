@@ -103,6 +103,29 @@ test('Claude argv uses the measured safe one-turn JSON invocation and optional i
     assert_eq(['type' => 'object'], json_decode($record['argv'][$schema + 1], true, 512, JSON_THROW_ON_ERROR));
 });
 
+test('W20 Claude honours system exactly without an unsupported-option disclosure', function (): void {
+    $stream = fopen('php://memory', 'w+');
+    assert_true(is_resource($stream));
+    Narrator::setStream($stream);
+    try {
+        $system = 'CLAUDE_SYSTEM_EXACT_20';
+        $result = claude_cli_llm()->completeBatch([
+            'job' => ['prompt' => 'claude-system-prompt', 'system' => $system],
+        ]);
+        $record = claude_cli_record($result->texts['job']);
+        $indexes = array_keys($record['argv'], '--system-prompt', true);
+        assert_eq(1, count($indexes));
+        assert_eq($system, $record['argv'][$indexes[0] + 1] ?? null);
+        assert_eq('claude-system-prompt', $record['stdin']);
+        assert_eq([], $result->notesFor('job'));
+        rewind($stream);
+        assert_true(!str_contains((string) stream_get_contents($stream), 'system'));
+    } finally {
+        Narrator::reset();
+        fclose($stream);
+    }
+});
+
 test('Claude usage includes cache creation and reads in billed input', function (): void {
     $llm = claude_cli_llm();
     $llm->complete('one');

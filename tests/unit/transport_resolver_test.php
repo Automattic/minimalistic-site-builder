@@ -31,17 +31,30 @@ function tr_php(string $code, array $ini = []): array
 }
 
 /** Resolve one explicit harness in a child and return [output, status, decoded details]. */
-function tr_harness_probe(string $dir, string $kind, ?string $provider): array
+function tr_harness_probe(
+    string $dir,
+    string $kind,
+    ?string $provider,
+    ?string $envMapProvider = null,
+): array
 {
     $bootstrap = dirname(__DIR__, 2) . '/src/bootstrap.php';
     $providerSetup = $provider === null
         ? 'putenv("LLM_PROVIDER"); '
         : 'putenv("LLM_PROVIDER=' . addslashes($provider) . '"); ';
+    $envMapSetup = $envMapProvider === null
+        ? ''
+        : '$envReflection = new ReflectionClass(\\Automattic\\SiteBuild\\Env::class); '
+            . '$envProperty = $envReflection->getProperty("vars"); '
+            . '$envVars = $envProperty->getValue(); '
+            . '$envVars["LLM_PROVIDER"] = ' . var_export($envMapProvider, true) . '; '
+            . '$envProperty->setValue(null, $envVars); ';
     $code = 'putenv("PATH=' . addslashes($dir) . '"); '
         . 'putenv("SITE_BUILD_LLM=' . addslashes($kind) . '"); '
         . $providerSetup
         . 'putenv("LLM_MODEL"); putenv("LLM_MODEL_SMALL"); '
         . 'require ' . var_export($bootstrap, true) . '; '
+        . $envMapSetup
         . '$stream = fopen("php://memory", "w+"); '
         . '\\Automattic\\SiteBuild\\Narrator::setStream($stream); '
         . 'try { $llm = resolve_llm(); '
@@ -1393,6 +1406,22 @@ test('W18 incoherent explicit provider and harness pairing is refused', function
         assert_true(copy(dirname(__DIR__) . '/fixtures/fake-harness/spawn-counter.sh', $binary));
         assert_true(chmod($binary, 0755));
         [$output, $status, $details] = tr_harness_probe($dir, 'codex-cli', 'anthropic');
+        assert_eq(0, $status, $output);
+        assert_eq(null, $details);
+        assert_contains(TransportUnavailable::class, $output);
+        assert_contains('anthropic', $output);
+        assert_contains('codex-cli', $output);
+        assert_contains('openai', $output);
+        assert_true(!file_exists($binary . '.count'));
+    });
+});
+
+test('W18 incoherent provider from .env and harness pairing is refused', function (): void {
+    with_temp_dir('provider-dotenv-refusal-', function (string $dir): void {
+        $binary = $dir . '/codex';
+        assert_true(copy(dirname(__DIR__) . '/fixtures/fake-harness/spawn-counter.sh', $binary));
+        assert_true(chmod($binary, 0755));
+        [$output, $status, $details] = tr_harness_probe($dir, 'codex-cli', null, 'anthropic');
         assert_eq(0, $status, $output);
         assert_eq(null, $details);
         assert_contains(TransportUnavailable::class, $output);

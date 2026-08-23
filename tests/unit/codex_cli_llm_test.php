@@ -3,7 +3,9 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\CodexCliLlm;
 use Automattic\SiteBuild\HarnessCallFailed;
+use Automattic\SiteBuild\HarnessCliLlm;
 use Automattic\SiteBuild\LlmConformance;
+use Automattic\SiteBuild\Narrator;
 
 function codex_cli_fixture(string $name = 'codex-harness.sh'): string
 {
@@ -96,6 +98,83 @@ function codex_cli_schema(): array
         ],
     ];
 }
+
+/** Run one assertion with this option absent from process-wide disclosure history. */
+function codex_cli_with_fresh_disclosure(string $option, callable $callback): mixed
+{
+    $reflection = new ReflectionClass(HarnessCliLlm::class);
+    $property = $reflection->getProperty('disclosedUnsupportedOptions');
+    $property->setAccessible(true);
+    $original = $property->getValue();
+    assert_true(is_array($original));
+    $fresh = $original;
+    unset($fresh[$option]);
+    $property->setValue(null, $fresh);
+    try {
+        return $callback();
+    } finally {
+        $property->setValue(null, $original);
+    }
+}
+
+test('W19 Codex discloses non-blank system once and never transports its bytes', function (): void {
+    codex_cli_with_fresh_disclosure('system', function (): void {
+        codex_cli_environment(function (string $binary): void {
+            $stream = fopen('php://memory', 'w+');
+            assert_true(is_resource($stream));
+            Narrator::setStream($stream);
+            try {
+                $system = 'CODEX_SYSTEM_SECRET_47';
+                for ($index = 1; $index <= 5; $index++) {
+                    $prompt = "codex-system-prompt-{$index}";
+                    $result = (new CodexCliLlm('m', $binary))->completeBatch([
+                        'job' => ['prompt' => $prompt, 'system' => $system],
+                    ]);
+                    assert_eq($prompt, $result->texts['job']);
+                    assert_contains('system', implode("\n", $result->notesFor('job')));
+                }
+
+                $calls = codex_cli_calls($binary);
+                assert_eq(5, count($calls));
+                foreach ($calls as $call) {
+                    assert_true(!str_contains(implode("\0", $call['argv']), $system));
+                    assert_true(!str_contains($call['stdin'], $system));
+                }
+                rewind($stream);
+                $narration = stream_get_contents($stream);
+                assert_true(is_string($narration));
+                assert_eq(1, substr_count($narration, 'system'));
+                assert_true(!str_contains($narration, $system));
+            } finally {
+                Narrator::reset();
+                fclose($stream);
+            }
+        });
+    });
+});
+
+test('W19 Codex leaves blank system undisclosed and out of transport bytes', function (): void {
+    codex_cli_with_fresh_disclosure('system', function (): void {
+        codex_cli_environment(function (string $binary): void {
+            $stream = fopen('php://memory', 'w+');
+            assert_true(is_resource($stream));
+            Narrator::setStream($stream);
+            try {
+                $result = (new CodexCliLlm('m', $binary))->completeBatch([
+                    'job' => ['prompt' => 'codex-blank-system', 'system' => " \t\n"],
+                ]);
+                assert_eq([], $result->notesFor('job'));
+                $call = codex_cli_calls($binary)[0];
+                assert_eq('codex-blank-system', $call['stdin']);
+                rewind($stream);
+                assert_true(!str_contains((string) stream_get_contents($stream), 'system'));
+            } finally {
+                Narrator::reset();
+                fclose($stream);
+            }
+        });
+    });
+});
 
 test('Codex complete pins exactly one default or overridden model', function (): void {
     codex_cli_environment(function (string $binary): void {

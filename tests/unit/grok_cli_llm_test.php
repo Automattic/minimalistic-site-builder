@@ -3,7 +3,9 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\GrokCliLlm;
 use Automattic\SiteBuild\HarnessCallFailed;
+use Automattic\SiteBuild\HarnessCliLlm;
 use Automattic\SiteBuild\LlmConformance;
+use Automattic\SiteBuild\Narrator;
 
 function grok_cli_fixture(string $name): string
 {
@@ -92,6 +94,85 @@ function grok_cli_scratch_entries(string $scratchRoot): array
         static fn (string $entry): bool => $entry !== '.' && $entry !== '..',
     ));
 }
+
+/** Run one assertion with this option absent from process-wide disclosure history. */
+function grok_cli_with_fresh_disclosure(string $option, callable $callback): mixed
+{
+    $reflection = new ReflectionClass(HarnessCliLlm::class);
+    $property = $reflection->getProperty('disclosedUnsupportedOptions');
+    $property->setAccessible(true);
+    $original = $property->getValue();
+    assert_true(is_array($original));
+    $fresh = $original;
+    unset($fresh[$option]);
+    $property->setValue(null, $fresh);
+    try {
+        return $callback();
+    } finally {
+        $property->setValue(null, $original);
+    }
+}
+
+test('W19 Grok discloses non-blank system once and never transports its bytes', function (): void {
+    grok_cli_with_fresh_disclosure('system', function (): void {
+        with_grok_cli_fixture('grok-envelope.sh', function (string $binary): void {
+            $stream = fopen('php://memory', 'w+');
+            assert_true(is_resource($stream));
+            Narrator::setStream($stream);
+            try {
+                $system = 'GROK_SYSTEM_SECRET_48';
+                for ($index = 1; $index <= 5; $index++) {
+                    $prompt = "grok-system-prompt-{$index}";
+                    $result = (new GrokCliLlm('grok-4.5', $binary))->completeBatch([
+                        'job' => ['prompt' => $prompt, 'system' => $system],
+                    ]);
+                    assert_eq($prompt, $result->texts['job']);
+                    assert_contains('system', implode("\n", $result->notesFor('job')));
+                }
+
+                $records = grok_cli_records($binary);
+                assert_eq(5, count($records));
+                foreach ($records as $record) {
+                    assert_true(!str_contains(implode("\0", $record['argv']), $system));
+                    assert_true(!str_contains($record['prompt'], $system));
+                    assert_eq('', $record['stdin']);
+                }
+                rewind($stream);
+                $narration = stream_get_contents($stream);
+                assert_true(is_string($narration));
+                assert_eq(1, substr_count($narration, 'system'));
+                assert_true(!str_contains($narration, $system));
+            } finally {
+                Narrator::reset();
+                fclose($stream);
+            }
+        });
+    });
+});
+
+test('W19 Grok leaves blank system undisclosed and out of transport bytes', function (): void {
+    grok_cli_with_fresh_disclosure('system', function (): void {
+        with_grok_cli_fixture('grok-envelope.sh', function (string $binary): void {
+            $stream = fopen('php://memory', 'w+');
+            assert_true(is_resource($stream));
+            Narrator::setStream($stream);
+            try {
+                $result = (new GrokCliLlm('grok-4.5', $binary))->completeBatch([
+                    'job' => ['prompt' => 'grok-blank-system', 'system' => " \t\n"],
+                ]);
+                assert_eq([], $result->notesFor('job'));
+                $record = grok_cli_records($binary)[0];
+                assert_eq('grok-blank-system', $record['prompt']);
+                assert_eq('', $record['stdin']);
+                rewind($stream);
+                assert_true(!str_contains((string) stream_get_contents($stream), 'system'));
+            } finally {
+                Narrator::reset();
+                fclose($stream);
+            }
+        });
+    });
+});
 
 test('W5 Grok complete pins exactly one default and override model', function (): void {
     with_grok_cli_fixture('grok-envelope.sh', function (string $binary): void {
