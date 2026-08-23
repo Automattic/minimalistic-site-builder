@@ -18,7 +18,14 @@ final class PlaygroundRunner implements SiteRunner
         return 'playground';
     }
 
-    public function start(Project $project): RunningSite
+    /**
+     * Boot Playground and return the running site.
+     *
+     * $timeoutSeconds is the wait-for-ready budget (default 240, matching the
+     * old bin/screenshot.php wrapper). A CLI that stays alive but never prints
+     * Ready! throws RuntimeException("Playground did not become ready within Ns").
+     */
+    public function start(Project $project, int $timeoutSeconds = 240): RunningSite
     {
         if (!command_exists('node')) {
             throw new \RuntimeException('Node.js is required to run WordPress Playground.');
@@ -83,12 +90,12 @@ final class PlaygroundRunner implements SiteRunner
             escapeshellarg($blueprintPath)
         );
 
-        // Stream CLI output to STDOUT so spawners (bin/screenshot.php) still see
-        // the Ready! line they poll for. Do not passthru — we have to return
-        // RunningSite. Merge stderr with 2>&1 onto ONE file descriptor: two
-        // fds on the same path (w + a) overwrite each other and the poll loop
-        // can see Ready! in the full log while the echo offset has already
-        // walked past the clobbered bytes.
+        // Stream CLI output to STDOUT so a human watching the boot still sees
+        // the Ready! line. Do not passthru — we have to return RunningSite.
+        // Merge stderr with 2>&1 onto ONE file descriptor: two fds on the same
+        // path (w + a) overwrite each other and the poll loop can see Ready!
+        // in the full log while the echo offset has already walked past the
+        // clobbered bytes.
         $logPath = sys_get_temp_dir() . "/playground-{$slug}." . getmypid() . ".log";
         $proc = proc_open(
             $cmd,
@@ -103,7 +110,7 @@ final class PlaygroundRunner implements SiteRunner
 
         $childPid = (int) (proc_get_status($proc)['pid'] ?? 0);
         try {
-            $url = self::waitUntilReady($proc, $logPath);
+            $url = self::waitUntilReady($proc, $logPath, $timeoutSeconds);
         } catch (\Throwable $e) {
             self::teardown($proc, $childPid, $blueprintPath);
             @unlink($logPath);
@@ -178,10 +185,15 @@ final class PlaygroundRunner implements SiteRunner
     }
 
     /**
+     * Block until Playground prints its readiness line, the process dies, or
+     * $timeoutSeconds elapses. Public so tests can fire the deadline against a
+     * process that stays alive without ever becoming ready.
+     *
      * @param resource $proc
      */
-    private static function waitUntilReady($proc, string $logPath): string
+    public static function waitUntilReady($proc, string $logPath, int $timeoutSeconds = 240): string
     {
+        $deadline = time() + $timeoutSeconds;
         $offset = 0;
         while (true) {
             $log = is_file($logPath) ? (string) file_get_contents($logPath) : '';
@@ -204,6 +216,9 @@ final class PlaygroundRunner implements SiteRunner
             }
             if (!proc_get_status($proc)['running']) {
                 throw new \RuntimeException("Playground exited before it was ready.\n" . $log);
+            }
+            if (time() >= $deadline) {
+                throw new \RuntimeException("Playground did not become ready within {$timeoutSeconds}s");
             }
             usleep(300_000);
         }

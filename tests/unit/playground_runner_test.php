@@ -18,6 +18,33 @@ test('readyUrl returns null until the line appears', function () {
     assert_eq(null, PlaygroundRunner::readyUrl("booting…\n"));
 });
 
+test('start() takes a timeout that defaults to 240 seconds', function () {
+    $params = (new ReflectionMethod(PlaygroundRunner::class, 'start'))->getParameters();
+    assert_eq(2, count($params));
+    assert_eq('timeoutSeconds', $params[1]->getName());
+    assert_eq(240, $params[1]->getDefaultValue());
+});
+
+test('waitUntilReady throws when the deadline expires and the process is still alive', function () {
+    $log = sys_get_temp_dir() . '/pg-timeout-' . getmypid() . '.log';
+    file_put_contents($log, "booting…\n");
+    $proc = proc_open(
+        'sleep 30',
+        [0 => ['file', '/dev/null', 'r'], 1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']],
+        $pipes
+    );
+    assert_true(is_resource($proc), 'sleep child started');
+    $t0 = microtime(true);
+    $e = assert_throws(fn () => PlaygroundRunner::waitUntilReady($proc, $log, 2));
+    $elapsed = microtime(true) - $t0;
+    proc_terminate($proc);
+    proc_close($proc);
+    @unlink($log);
+    assert_contains('Playground did not become ready within 2s', $e->getMessage());
+    assert_true($elapsed < 5, "elapsed {$elapsed}s, want < 5");
+    assert_true($elapsed >= 1.5, "elapsed {$elapsed}s, want the 2s deadline to actually wait");
+});
+
 test('a Playground site is not persistent, so the caller owns stopping it', function () {
     $stopped = false;
     $site = new RunningSite(
