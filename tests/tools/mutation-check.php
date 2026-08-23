@@ -745,6 +745,16 @@ PHP,
         );
 PHP,
     ],
+    [
+        '34 total transport failure floor is removed',
+        'src/HarnessCliLlm.php',
+        <<<'PHP'
+                if ($responses !== [] && $usableResponses === 0 && $firstFailure !== null) {
+                    throw $firstFailure;
+                }
+PHP,
+        '',
+    ],
 ];
 
 $args = array_slice($argv, 1);
@@ -844,7 +854,7 @@ try {
             echo "{$classification['verdict']} {$label} {$classification['detail']}\n";
         }
         echo "RESULT {$counts['KILLED']} KILLED, {$counts['SURVIVED']} SURVIVED, {$counts['HARD ERROR']} HARD ERROR\n";
-        $failed = $counts['KILLED'] < 33 || $counts['SURVIVED'] !== 0 || $counts['HARD ERROR'] !== 0;
+        $failed = $counts['KILLED'] < 34 || $counts['SURVIVED'] !== 0 || $counts['HARD ERROR'] !== 0;
     }
 } catch (Throwable $e) {
     echo 'MUTATION ERROR: ' . $e->getMessage() . "\n";

@@ -109,10 +109,24 @@ abstract class HarnessCliLlm implements Llm, UsageReporting
             $requests,
             function (array $subset) use (&$notes): array {
                 $responses = $this->responseBatch($subset, isolateFailures: true);
+                $usableResponses = 0;
+                $firstFailure = null;
                 foreach ($responses as $key => $response) {
+                    $failure = $response['transport_failure'] ?? null;
+                    if ($failure instanceof HarnessCallFailed) {
+                        if ($firstFailure === null) {
+                            $firstFailure = $failure;
+                        }
+                    } else {
+                        $usableResponses++;
+                    }
+                    unset($responses[$key]['transport_failure']);
                     foreach ($response['degradation_notes'] as $note) {
                         $notes[$key][] = $note;
                     }
+                }
+                if ($responses !== [] && $usableResponses === 0 && $firstFailure !== null) {
+                    throw $firstFailure;
                 }
                 return $responses;
             },
@@ -167,6 +181,7 @@ abstract class HarnessCliLlm implements Llm, UsageReporting
                     'cache_creation_input_tokens' => 0,
                     'cache_read_input_tokens' => 0,
                     'model' => $prepared[$key]['model'],
+                    'transport_failure' => $e,
                     'degradation_notes' => array_merge(
                         $prepared[$key]['degradation_notes'],
                         [$e->getMessage()],
