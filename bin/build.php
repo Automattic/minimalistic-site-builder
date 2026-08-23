@@ -2,16 +2,22 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\BuildReport;
+use Automattic\SiteBuild\BlockFixers;
+use Automattic\SiteBuild\ConcurrentGroup;
 use Automattic\SiteBuild\Narrator;
+use Automattic\SiteBuild\Package;
+use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepComposition;
+use Automattic\SiteBuild\StepGraph;
 use Automattic\SiteBuild\TransportUnavailable;
 
 /**
  * Build a site from a prompt.
  *
- *   php bin/build.php "A cozy neighborhood bakery" [--provider=openai] [--slug=my-slug] [--from=step-id] [--until=step-id] [--html-first|--blocks-first] [--multi-page] [--pages="Home, Menu, About"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=foreground-image] [--max-hero-images=1] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--use-jetpack-placeholders] [--port=9400] [--no-serve]
+ *   php bin/build.php "A cozy neighborhood bakery" [--provider=openai] [--slug=my-slug] [--step=step-id] [--from=step-id] [--until=step-id] [--html-first|--blocks-first] [--multi-page] [--pages="Home, Menu, About"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=foreground-image] [--max-hero-images=1] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--use-jetpack-placeholders] [--port=9400] [--no-serve]
  *   php bin/build.php --transport
+ *   php bin/build.php --list-steps [--html-first|--blocks-first] [--slug=my-slug]
  *
  * --provider=<anthropic|openai|xai|openrouter> picks the model set (config/models.json):
  * each step runs on that provider's large/small tier. Per-step LLM_MODEL_<STEP>
@@ -25,6 +31,10 @@ use Automattic\SiteBuild\TransportUnavailable;
  *
  * --transport resolves and prints the transport audit line, then exits without
  * assembling or running a build. It needs no prompt and makes no model call.
+ *
+ * --list-steps prints the selected graph's ordered top-level steps as JSON and
+ * exits without creating a project or running a step. Concurrent groups stay a
+ * single top-level entry; their member ids are informational metadata.
  *
  * The graph is recorded in meta.json, so --from resumes on whatever built the
  * project without being told again. A flag contradicting that record is refused
@@ -47,8 +57,11 @@ use Automattic\SiteBuild\TransportUnavailable;
  * artifacts (design/*.html, site.css, designDirection.json, meta.json, …) as
  * inputs. It requires --slug (the existing project), ignores the prompt (the
  * design already exists), and leaves the reused directory otherwise untouched.
- * Same id list as --until, group members included, and on a resume that list
- * comes from the graph the project was built on.
+ * Same id list as --until, top-level group ids and group members included, and
+ * on a resume that list comes from the graph the project was built on.
+ *
+ * --step=<step-id> is exact shorthand for matching --from and --until values.
+ * It cannot be combined with either range flag.
  *
  * Deterministic-tail recipe for the default blocks graph — re-run the passes
  * that require NO LLM and NO image generation, in seconds:
@@ -90,6 +103,7 @@ require_once __DIR__ . '/../src/bootstrap.php';
 $args = parse_cli_args($argv, [
     '--slug'                     => 'value',
     '--provider'                 => 'value',
+    '--step'                     => 'value',
     '--until'                    => 'value',
     '--from'                     => 'value',
     '--pages'                    => 'value',
@@ -102,6 +116,7 @@ $args = parse_cli_args($argv, [
     '--html-first'               => 'bool',
     '--blocks-first'             => 'bool',
     '--transport'                => 'bool',
+    '--list-steps'               => 'bool',
     '--with-images'              => 'bool',
     '--use-jetpack-placeholders' => 'bool',
     '--multi-page'               => 'bool',
@@ -114,11 +129,13 @@ if ($args['unknown'] !== null) {
 $flags = $args['flags'];
 $prompt = $args['positionals'][0] ?? null;
 $slug = $flags['--slug'] ?? null;
+$step = $flags['--step'] ?? null;
 $until = $flags['--until'] ?? null;
 $from = $flags['--from'] ?? null;
 $htmlFirst = $flags['--html-first'] ?? false;
 $blocksFirst = $flags['--blocks-first'] ?? false;
 $transportOnly = $flags['--transport'] ?? false;
+$listSteps = $flags['--list-steps'] ?? false;
 $withImages = $flags['--with-images'] ?? false;
 $formPlaceholders = $flags['--use-jetpack-placeholders'] ?? false;
 $multiPage = $flags['--multi-page'] ?? false;
@@ -132,18 +149,33 @@ $heroMediaModesArg = $flags['--hero-media-modes'] ?? null;
 $maxHeroImagesArg = $flags['--max-hero-images'] ?? null;
 $heroCopyCapacity = $flags['--hero-copy-capacity'] ?? null;
 
+if ($step !== null && ($from !== null || $until !== null)) {
+    $conflicts = [];
+    if ($from !== null) {
+        $conflicts[] = '--from';
+    }
+    if ($until !== null) {
+        $conflicts[] = '--until';
+    }
+    Narrator::write('--step is mutually exclusive with ' . implode(' and ', $conflicts) . "; pass one form.\n");
+    exit(1);
+}
+
+$resumeRequested = $from !== null || $step !== null;
+
 // --from resumes an existing build's deterministic tail against on-disk
 // artifacts, so the prompt is optional (the design already exists); every
 // other invocation still requires it.
-if (!$transportOnly && $from === null && ($prompt === null || trim($prompt) === '')) {
+if (!$transportOnly && !$listSteps && !$resumeRequested && ($prompt === null || trim($prompt) === '')) {
     usage();
 }
 
 // --from resumes a materialized project in place, so it needs the existing
 // slug to locate that directory (createProject would otherwise pick a random
 // one, and there would be no design/*.html to resume from).
-if ($from !== null && ($slug === null || trim($slug) === '')) {
-    Narrator::write("--from requires --slug=<existing project> to resume its on-disk artifacts.\n");
+if ($resumeRequested && ($slug === null || trim($slug) === '')) {
+    $resumeFlag = $step !== null ? '--step' : '--from';
+    Narrator::write("{$resumeFlag} requires --slug=<existing project> to resume its on-disk artifacts.\n");
     exit(1);
 }
 
@@ -214,18 +246,21 @@ if ($transportOnly) {
 $builder = make_site_builder($llm);
 
 // A resume has to run the graph that built the project, so its record is read
-// BEFORE the pipeline is assembled. That also makes --from's "valid steps" list
-// come from the right graph instead of whichever one the flags happened to pick.
+// BEFORE the pipeline is assembled. --list-steps does the same when --slug names
+// an existing project; a new slug simply enumerates the flag/env-selected graph.
 $project = null;
 $meta = [];
-if ($from !== null) {
+if ($resumeRequested || ($listSteps && $slug !== null && trim($slug) !== '')) {
     try {
         $project = $builder->store()->open($slug);
     } catch (RuntimeException $e) {
-        Narrator::write("--from: {$e->getMessage()}\n");
-        exit(1);
+        if ($resumeRequested) {
+            $resumeFlag = $step !== null ? '--step' : '--from';
+            Narrator::write("{$resumeFlag}: {$e->getMessage()}\n");
+            exit(1);
+        }
     }
-    $meta = $project->exists('meta.json') ? $project->readJson('meta.json') : [];
+    $meta = $project !== null && $project->exists('meta.json') ? $project->readJson('meta.json') : [];
     $recordedGraph = $meta['graph'] ?? null;
     try {
         $resumeHtmlFirst = StepComposition::resumeHtmlFirst(
@@ -233,7 +268,8 @@ if ($from !== null) {
             $htmlFirst || $blocksFirst ? $htmlFirst : null,
         );
     } catch (InvalidArgumentException $e) {
-        Narrator::write("--from: {$e->getMessage()}\n");
+        $graphFlag = $step !== null ? '--step' : ($from !== null ? '--from' : '--list-steps');
+        Narrator::write("{$graphFlag}: {$e->getMessage()}\n");
         exit(1);
     }
     // Null means nothing was recorded to honor, so the flag/env choice stands.
@@ -247,22 +283,77 @@ $pipeline = $builder->pipeline();
 // step id => model, for the model column (see BuildReport::modelLabel).
 $models = step_models();
 
+if ($listSteps) {
+    // SiteBuilder intentionally exposes the execution contract, not its Step
+    // objects. Build the same selected composition without running it so the
+    // portable graph exporter can supply authoritative labels and group members.
+    $composition = StepComposition::default(
+        llm: $llm,
+        renderer: new PromptRenderer(Package::promptsDir()),
+        models: $models,
+        blockFixer: BlockFixers::default(),
+    );
+    $steps = array_map(
+        static fn (array $row): array => [
+            'id'      => $row['id'],
+            'label'   => $row['label'],
+            'members' => $row['members'] ?? [],
+        ],
+        StepGraph::describe($composition->steps()),
+    );
+    if (array_column($steps, 'id') !== $pipeline->stepIds()) {
+        throw new LogicException('--list-steps composition drifted from the executable pipeline');
+    }
+    echo json_encode([
+        'graph' => StepComposition::graphName(),
+        'steps' => $steps,
+    ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES), "\n";
+    exit(0);
+}
+
+// Top-level concurrent-group ids are orchestration units, while stopIds keeps
+// accepting every historical member target. Validation admits the union.
+$selectableIds = array_values(array_unique(array_merge(
+    $pipeline->stepIds(),
+    $pipeline->stopIds(),
+)));
+
+if ($step !== null && !in_array($step, $selectableIds, true)) {
+    Narrator::write("Unknown --step step '{$step}'. Valid steps:\n  "
+        . implode("\n  ", $selectableIds) . "\n");
+    exit(1);
+}
+
 // Validate --until BEFORE creating the project, so an unknown id fails loud
 // (instead of silently running the whole build) without leaving a stray project
 // directory behind. Group members are valid stops too (see Pipeline::stopIds).
-if ($until !== null && !in_array($until, $pipeline->stopIds(), true)) {
+if ($until !== null && !in_array($until, $selectableIds, true)) {
     Narrator::write("Unknown --until step '{$until}'. Valid steps:\n  "
-        . implode("\n  ", $pipeline->stopIds()) . "\n");
+        . implode("\n  ", $selectableIds) . "\n");
     exit(1);
 }
 
 // Validate --from the same way (same id list, group members included), so an
 // unknown resume point fails loud instead of silently running everything.
-if ($from !== null && !in_array($from, $pipeline->stopIds(), true)) {
+if ($from !== null && !in_array($from, $selectableIds, true)) {
     Narrator::write("Unknown --from step '{$from}'. Valid steps:\n  "
-        . implode("\n  ", $pipeline->stopIds()) . "\n");
+        . implode("\n  ", $selectableIds) . "\n");
     exit(1);
 }
+
+if ($step !== null) {
+    $from = $step;
+    $until = $step;
+}
+$requestedFrom = $from;
+$normalizeStepId = static function (?string $id): ?string {
+    if ($id === null) {
+        return null;
+    }
+    return ConcurrentGroup::memberIds($id)[0];
+};
+$from = $normalizeStepId($from);
+$until = $normalizeStepId($until);
 
 if ($from !== null) {
     // Resume: the project was opened untouched above (no createProject, which
@@ -291,7 +382,7 @@ if ($from !== null) {
     }
 }
 
-echo ($from !== null ? "Resuming '{$project->slug()}' from {$from}\n" : "Building '{$project->slug()}'\n");
+echo ($from !== null ? "Resuming '{$project->slug()}' from {$requestedFrom}\n" : "Building '{$project->slug()}'\n");
 echo "  prompt: {$prompt}\n\n";
 
 $report = new BuildReport($prompt, $project->slug(), $project->path(), gmdate('c'));
@@ -412,6 +503,6 @@ if ($serve && $until === null) {
 /** The one invocation summary, shared by every path that rejects the line. */
 function usage(): never
 {
-    Narrator::write("Usage: php bin/build.php \"<prompt>\" [--transport] [--provider=anthropic|openai|xai|openrouter] [--slug=...] [--from=step-id] [--until=step-id] [--html-first|--blocks-first] [--multi-page] [--pages=\"Home, Menu, About\"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=cover-image,foreground-image] [--max-hero-images=1..2] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--use-jetpack-placeholders] [--port=9400] [--no-serve]\n");
+    Narrator::write("Usage: php bin/build.php \"<prompt>\" [--transport] [--list-steps] [--provider=anthropic|openai|xai|openrouter] [--slug=...] [--step=step-id] [--from=step-id] [--until=step-id] [--html-first|--blocks-first] [--multi-page] [--pages=\"Home, Menu, About\"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=cover-image,foreground-image] [--max-hero-images=1..2] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--use-jetpack-placeholders] [--port=9400] [--no-serve]\n");
     exit(1);
 }
