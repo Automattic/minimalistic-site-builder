@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\BuildReport;
+use Automattic\SiteBuild\LinkTargets;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\SectionRole;
 use Automattic\SiteBuild\Steps\ExtractPatternsStep;
@@ -309,6 +310,9 @@ test('link rewrite neutralizes javascript data and vbscript destinations', funct
         . '<a href="https://example.com">ok</a>'
         . '<a href="tel:+15551212">call</a>'
         . '<!-- wp:navigation-link {"url":"javascript:alert(2)"} /-->'
+        . '<!-- wp:image {"href":"javascript:alert(3)"} /-->'
+        . '<!-- wp:file {"href":"DATA:text/html,file"} /-->'
+        . '<!-- wp:media-text {"href":"vbscript:msgbox(2)"} /-->'
         . '</div><!-- /wp:group -->';
     $output = ExtractPatternsStep::rewriteLinks($markup, []);
 
@@ -318,6 +322,31 @@ test('link rewrite neutralizes javascript data and vbscript destinations', funct
     assert_contains('href="https://example.com"', $output);
     assert_contains('href="tel:+15551212"', $output);
     assert_contains('"url":"#"', $output);
+    assert_contains('<!-- wp:image {"href":"#"} /-->', $output);
+    assert_contains('<!-- wp:file {"href":"#"} /-->', $output);
+    assert_contains('<!-- wp:media-text {"href":"#"} /-->', $output);
+    assert_eq(['#', '#', '#'], LinkTargets::hrefAttrsIn($output));
+    assert_true(!in_array('javascript:alert(3)', LinkTargets::allTargets($output), true));
+});
+
+test('link rewrite collects and rewrites JSON href without HTML href or JSON url', function (): void {
+    $cases = [
+        'image' => '<!-- wp:image {"href":"javascript:alert(1)"} --><figure class="wp-block-image"></figure><!-- /wp:image -->',
+        'file' => '<!-- wp:file {"href":"DATA:text/html,hi"} --><div class="wp-block-file"></div><!-- /wp:file -->',
+        'media-text' => '<!-- wp:media-text {"href":"vbscript:msgbox(1)"} --><div class="wp-block-media-text"></div><!-- /wp:media-text -->',
+    ];
+    foreach ($cases as $name => $markup) {
+        assert_eq([], LinkTargets::hrefsIn($markup), $name . ' has no HTML href');
+        assert_eq([], LinkTargets::urlAttrsIn($markup), $name . ' has no JSON url');
+        $targets = LinkTargets::allTargets($markup);
+        assert_true($targets !== [], $name . ' JSON href is visible to collectors');
+        $output = ExtractPatternsStep::rewriteLinks($markup, []);
+        assert_contains('"href":"#"', $output, $name);
+        assert_true(!str_contains(strtolower($output), 'javascript:'), $name);
+        assert_true(!str_contains(strtolower($output), 'data:'), $name);
+        assert_true(!str_contains(strtolower($output), 'vbscript:'), $name);
+        assert_eq(['#'], LinkTargets::hrefAttrsIn($output), $name);
+    }
 });
 
 test('a stale pattern file from a prior run is gone after a re-run', function (): void {
@@ -336,6 +365,54 @@ test('a stale pattern file from a prior run is gone after a re-run', function ()
         assert_true(!$project->exists('theme/patterns/ghost.php'));
         $slugs = array_column($project->readJson('patterns.json')['patterns'], 'slug');
         assert_true(!in_array('ghost', $slugs, true));
+        assert_true(!is_dir($project->themePath('.patterns-next')));
+        assert_true(!is_dir($project->themePath('.patterns-prev')));
+    });
+});
+
+test('a throw before the pattern swap leaves the previous directory and manifest', function (): void {
+    with_project('builder_extract_swap_pre_', function (Project $project): void {
+        extract_patterns_seed($project);
+        $project->writeText('theme/patterns/ghost.php', '<?php // stale');
+        $project->writeJson('patterns.json', [
+            'version' => 2,
+            'patterns' => [['slug' => 'ghost', 'kind' => 'section']],
+            'starter' => null,
+            'dropped' => [],
+        ]);
+
+        $project->writeText('theme/theme.json', '{');
+        assert_throws(static fn () => (new ExtractPatternsStep())->run($project));
+
+        assert_true($project->exists('theme/patterns/ghost.php'), 'wipe is not delete-then-write');
+        assert_eq('<?php // stale', $project->readText('theme/patterns/ghost.php'));
+        assert_eq('ghost', $project->readJson('patterns.json')['patterns'][0]['slug']);
+    });
+});
+
+test('a failed pattern swap leaves the previous directory and manifest', function (): void {
+    with_project('builder_extract_swap_fail_', function (Project $project): void {
+        extract_patterns_seed($project);
+        $project->writeText('theme/patterns/ghost.php', '<?php // stale');
+        $project->writeJson('patterns.json', [
+            'version' => 2,
+            'patterns' => [['slug' => 'ghost', 'kind' => 'section']],
+            'starter' => null,
+            'dropped' => [],
+        ]);
+        $theme = $project->themePath();
+        $mode = fileperms($theme) & 0777;
+        if (!chmod($theme, 0555) || is_writable($theme)) {
+            skip_test('cannot make the theme directory read-only on this platform');
+        }
+        try {
+            assert_throws(static fn () => (new ExtractPatternsStep())->run($project));
+        } finally {
+            chmod($theme, $mode !== 0 ? $mode : 0775);
+        }
+        assert_true($project->exists('theme/patterns/ghost.php'), 'live pattern dir survives a failed swap');
+        assert_eq('<?php // stale', $project->readText('theme/patterns/ghost.php'));
+        assert_eq('ghost', $project->readJson('patterns.json')['patterns'][0]['slug']);
     });
 });
 

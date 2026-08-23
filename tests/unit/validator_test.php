@@ -534,6 +534,38 @@ test('validator judges block-JSON url destinations (navigation links)', function
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('validator judges block-JSON href destinations on pattern files', function () {
+    [$project, $tmp] = validator_linked_project();
+    $project->writeText(
+        'theme/patterns/hero-image.php',
+        "<?php\n?>\n"
+        . '<!-- wp:image {"href":"\/missing\/"} --><figure class="wp-block-image"></figure><!-- /wp:image -->'
+        . '<!-- wp:file {"href":"javascript:alert(1)"} --><div class="wp-block-file"></div><!-- /wp:file -->'
+    );
+
+    $joined = implode(' ', ThemeValidator::validate($project));
+    assert_contains('theme/patterns/hero-image.php', $joined);
+    assert_contains('no page has path /missing/', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('validator judges block-JSON href destinations on image file and media-text', function () {
+    [$project, $tmp] = validator_linked_project();
+    $project->writeText(
+        'theme/patterns/linked-media.php',
+        '<!-- wp:image {"href":"/nope/"} /-->'
+        . '<!-- wp:file {"href":"/gone/"} /-->'
+        . '<!-- wp:media-text {"href":"/missing/"} /-->',
+    );
+
+    $joined = implode(' ', ThemeValidator::validate($project));
+    assert_contains('theme/patterns/linked-media.php', $joined);
+    assert_contains('href="/nope/"', $joined);
+    assert_contains('href="/gone/"', $joined);
+    assert_contains('href="/missing/"', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('validator ignores rewritten theme asset urls from generate-images', function () {
     [$project, $tmp] = validator_linked_project();
     // Cover "url" after GenerateImagesStep rewrite — root-relative but not a page.

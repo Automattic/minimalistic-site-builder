@@ -18,17 +18,24 @@ final class LinkTargets
     /** @return list<string> */
     public static function urlAttrsIn(string $markup): array
     {
-        $out = [];
-        foreach (preg_match_all('/"url"\s*:\s*"([^"]*)"/', $markup, $m) ? $m[1] : [] as $url) {
-            $out[] = str_replace('\\/', '/', $url);
-        }
-        return $out;
+        return self::jsonStringAttrs('url', $markup);
+    }
+
+    /**
+     * Click targets stored as block-JSON "href" (core/image, core/file,
+     * core/media-text). Distinct from rendered HTML hrefs.
+     *
+     * @return list<string>
+     */
+    public static function hrefAttrsIn(string $markup): array
+    {
+        return self::jsonStringAttrs('href', $markup);
     }
 
     /** @return list<string> */
     public static function allTargets(string $markup): array
     {
-        return array_merge(self::hrefsIn($markup), self::urlAttrsIn($markup));
+        return array_merge(self::hrefsIn($markup), self::urlAttrsIn($markup), self::hrefAttrsIn($markup));
     }
 
     /**
@@ -74,6 +81,17 @@ final class LinkTargets
     public static function isDangerousScheme(string $target): bool
     {
         return preg_match('/^(?:javascript|data|vbscript):/i', $target) === 1;
+    }
+
+    /** @return list<string> */
+    private static function jsonStringAttrs(string $key, string $markup): array
+    {
+        $out = [];
+        $pattern = '/"' . preg_quote($key, '/') . '"\s*:\s*"([^"]*)"/';
+        foreach (preg_match_all($pattern, $markup, $m) ? $m[1] : [] as $value) {
+            $out[] = str_replace('\\/', '/', $value);
+        }
+        return $out;
     }
 
     /** @return list<string> */

@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\BlockSerializer\NativeStagedFileWriter;
 use Automattic\SiteBuild\LinkTargets;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Project;
@@ -73,8 +74,6 @@ final class ExtractPatternsStep implements Step
 
     public function run(Project $project): void
     {
-        $this->deletePatternOutputs($project);
-
         $plan = $project->readJson('pages.json');
         $pageManifest = $project->readJson('plugin/pages.json');
         $css = $project->readText('theme/style.css');
@@ -369,6 +368,7 @@ final class ExtractPatternsStep implements Step
         usort($winners, static fn (array $left, array $right): int => strcmp($left['key'], $right['key']));
         $manifestPatterns = [];
         $deliveredSections = [];
+        $stagedFiles = [];
         foreach ($winners as &$winner) {
             $deliveredMarkup = self::rewriteLinks(
                 self::rewriteAssets(self::rewriteAnchors($winner['markup'], $cssIds)),
@@ -395,10 +395,7 @@ final class ExtractPatternsStep implements Step
                 }
             }
             $winner['delivered_markup'] = $deliveredMarkup;
-            $project->writeText(
-                $patternFile,
-                $this->patternFile($project, $winner),
-            );
+            $stagedFiles[$winner['key'] . '.php'] = $this->patternFile($project, $winner);
             $manifestPatterns[] = $this->manifestPattern($project, $winner);
             if (($winner['kind'] ?? null) === 'section') {
                 $deliveredSections[] = $winner;
@@ -406,8 +403,12 @@ final class ExtractPatternsStep implements Step
         }
         unset($winner);
 
-        $starter = $this->writeStarter($project, $deliveredSections, $warnings, $log);
-        $project->writeJson('patterns.json', [
+        $starter = $this->composeStarter($project, $deliveredSections, $warnings, $log);
+        if (is_array($starter) && isset($starter['file'])) {
+            $stagedFiles['page-starter.php'] = (string) $starter['file'];
+            unset($starter['file']);
+        }
+        $this->replacePatternOutputs($project, $stagedFiles, [
             'version' => 2,
             'patterns' => $manifestPatterns,
             'starter' => $starter,
@@ -830,8 +831,16 @@ final class ExtractPatternsStep implements Step
             },
             $markup,
         ) ?? $markup;
-        return preg_replace_callback(
+        $markup = preg_replace_callback(
             '/("url"\s*:\s*")([^"]*)(")/i',
+            static function (array $match) use ($outside): string {
+                $decoded = str_replace('\\/', '/', $match[2]);
+                return isset($outside[$decoded]) ? $match[1] . '#' . $match[3] : $match[0];
+            },
+            $markup,
+        ) ?? $markup;
+        return preg_replace_callback(
+            '/("href"\s*:\s*")([^"]*)(")/i',
             static function (array $match) use ($outside): string {
                 $decoded = str_replace('\\/', '/', $match[2]);
                 return isset($outside[$decoded]) ? $match[1] . '#' . $match[3] : $match[0];
@@ -840,29 +849,96 @@ final class ExtractPatternsStep implements Step
         ) ?? $markup;
     }
 
-    private function deletePatternOutputs(Project $project): void
+    /**
+     * Stage the complete new pattern directory and patterns.json, then replace
+     * the live pair. A throw before this commit leaves the previous outputs.
+     *
+     * @param array<string,string> $files basename => contents
+     * @param array<mixed> $manifest
+     */
+    private function replacePatternOutputs(Project $project, array $files, array $manifest): void
     {
-        $directory = $project->themePath('patterns');
-        if (is_dir($directory)) {
-            $iterator = new \RecursiveIteratorIterator(
-                new \RecursiveDirectoryIterator($directory, \FilesystemIterator::SKIP_DOTS),
-                \RecursiveIteratorIterator::CHILD_FIRST,
-            );
-            foreach ($iterator as $entry) {
-                $removed = $entry->isDir() ? rmdir($entry->getPathname()) : unlink($entry->getPathname());
-                if (!$removed) {
-                    throw new \RuntimeException("Could not remove stale pattern path: {$entry->getPathname()}");
+        $liveDir = $project->themePath('patterns');
+        $stagingDir = $project->themePath('.patterns-next');
+        $backupDir = $project->themePath('.patterns-prev');
+        $liveManifest = $project->path('patterns.json');
+
+        self::removePath($stagingDir);
+        self::removePath($backupDir);
+
+        $content = json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n";
+        $writer = new NativeStagedFileWriter();
+        $stagedManifest = $writer->stage($liveManifest, $content);
+        $dirSwapped = false;
+        try {
+            if ($files !== []) {
+                if (!@mkdir($stagingDir, 0775, true) && !is_dir($stagingDir)) {
+                    throw new \RuntimeException("Could not create staged pattern directory: {$stagingDir}");
                 }
+                foreach ($files as $basename => $file) {
+                    $path = $stagingDir . '/' . $basename;
+                    if (file_put_contents($path, $file) === false) {
+                        throw new \RuntimeException("Could not write staged pattern: {$path}");
+                    }
+                }
+                if (is_dir($liveDir) && !@rename($liveDir, $backupDir)) {
+                    throw new \RuntimeException("Could not move live pattern directory aside: {$liveDir}");
+                }
+                if (!@rename($stagingDir, $liveDir)) {
+                    if (is_dir($backupDir) && !is_dir($liveDir)) {
+                        @rename($backupDir, $liveDir);
+                    }
+                    throw new \RuntimeException("Could not install staged pattern directory: {$liveDir}");
+                }
+                $dirSwapped = true;
             }
-            if (!rmdir($directory)) {
-                throw new \RuntimeException("Could not remove stale pattern directory: {$directory}");
+
+            $writer->replace($stagedManifest, $liveManifest);
+        } catch (\Throwable $error) {
+            $writer->discard($stagedManifest);
+            if ($dirSwapped && is_dir($backupDir)) {
+                $failed = $project->themePath('.patterns-failed');
+                self::removePath($failed);
+                if (is_dir($liveDir)) {
+                    @rename($liveDir, $failed);
+                }
+                @rename($backupDir, $liveDir);
+                self::removePath($failed);
+            }
+            self::removePath($stagingDir);
+            throw $error;
+        }
+
+        if ($files === []) {
+            self::removePath($liveDir);
+        } else {
+            self::removePath($backupDir);
+        }
+    }
+
+    private static function removePath(string $path): void
+    {
+        if (is_link($path) || is_file($path)) {
+            if (!unlink($path)) {
+                throw new \RuntimeException("Could not remove path: {$path}");
+            }
+            return;
+        }
+        if (!is_dir($path)) {
+            return;
+        }
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($path, \FilesystemIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::CHILD_FIRST,
+        );
+        foreach ($iterator as $entry) {
+            $removed = $entry->isDir() ? rmdir($entry->getPathname()) : unlink($entry->getPathname());
+            if (!$removed) {
+                throw new \RuntimeException("Could not remove path: {$entry->getPathname()}");
             }
         }
-        if ($project->exists('patterns.json')) {
-            $manifest = $project->path('patterns.json');
-            if (!unlink($manifest)) {
-                throw new \RuntimeException("Could not remove stale pattern manifest: {$manifest}");
-            }
+        if (!rmdir($path)) {
+            throw new \RuntimeException("Could not remove directory: {$path}");
         }
     }
 
@@ -1452,9 +1528,9 @@ final class ExtractPatternsStep implements Step
      * @param list<array<mixed>> $winners
      * @param list<string> $warnings
      * @param list<string> $log
-     * @return array{slug:string,sections:list<string>}|null
+     * @return array{slug:string,sections:list<string>,file:string}|null
      */
-    private function writeStarter(Project $project, array $winners, array &$warnings, array &$log): ?array
+    private function composeStarter(Project $project, array $winners, array &$warnings, array &$log): ?array
     {
         $byRole = [SectionRole::HERO => [], SectionRole::CONTENT => [], SectionRole::CLOSING => []];
         foreach ($winners as $winner) {
@@ -1494,13 +1570,13 @@ final class ExtractPatternsStep implements Step
             'shape' => 'starter',
             'delivered_markup' => $markup,
         ];
-        $project->writeText(
-            'theme/patterns/page-starter.php',
-            $this->patternFile($project, $starterWinner, true),
-        );
         $slugs = array_values(array_map(static fn (array $winner): string => $winner['key'], $sections));
         $log[] = 'winner page-starter: ' . implode(', ', $slugs);
-        return ['slug' => 'page-starter', 'sections' => $slugs];
+        return [
+            'slug' => 'page-starter',
+            'sections' => $slugs,
+            'file' => $this->patternFile($project, $starterWinner, true),
+        ];
     }
 
     /** @param array<mixed> $left @param array<mixed> $right */
