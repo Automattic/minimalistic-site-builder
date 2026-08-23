@@ -2,6 +2,11 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\ModelConfig;
+use Automattic\SiteBuild\Package;
+use Automattic\SiteBuild\Pipeline;
+use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\StepComposition;
+use Automattic\SiteBuild\Tests\FakeLlm;
 
 test('split_csv_flag keeps a single value', function () {
     assert_eq(['Home'], split_csv_flag('Home'));
@@ -200,6 +205,8 @@ test('X-G13 build CLI usage lists the transport and graph-selection flags', func
     assert_eq(1, $exit, $text);
     assert_contains('Usage: php bin/build.php', $text);
     assert_contains('[--transport]', $text);
+    assert_contains('[--list-steps]', $text);
+    assert_contains('[--step=step-id]', $text);
     assert_contains('[--html-first|--blocks-first]', $text);
 });
 
@@ -331,5 +338,261 @@ test('a --from resume on a project with no recorded graph still honors the flag'
         assert_true(!in_array('sections', $ids, true), $seen);
     } finally {
         exec('rm -rf ' . escapeshellarg($dir));
+    }
+});
+
+/** @return array{graph:string,steps:list<array{id:string,label:string,members:list<string>}>} */
+function stage5_list_steps(array $args): array
+{
+    return with_temp_dir('list-steps-harness-', function (string $dir) use ($args): array {
+        $binary = $dir . '/claude';
+        assert_true(copy(dirname(__DIR__) . '/fixtures/fake-harness/spawn-counter.sh', $binary));
+        assert_true(chmod($binary, 0755));
+        $stderr = $dir . '/stderr.log';
+        $path = $dir . PATH_SEPARATOR . (string) getenv('PATH');
+        $command = 'SITE_BUILD_LLM=claude-cli LLM_PROVIDER=anthropic PATH=' . escapeshellarg($path) . ' '
+            . php_child_command(repo_path('bin/build.php'), array_merge(['--list-steps'], $args))
+            . ' 2>' . escapeshellarg($stderr);
+
+        $stdout = [];
+        $exit = 0;
+        exec($command, $stdout, $exit);
+        $raw = implode("\n", $stdout);
+        $errors = is_file($stderr) ? (string) file_get_contents($stderr) : '';
+
+        assert_eq(0, $exit, $errors . $raw);
+        assert_true(!file_exists($binary . '.count'), 'step enumeration must not spawn the harness');
+        $decoded = json_decode($raw, true);
+        assert_true(is_array($decoded), 'stdout must contain only valid JSON: ' . $raw);
+        assert_true(isset($decoded['graph']) && is_string($decoded['graph']), $raw);
+        assert_true(isset($decoded['steps']) && is_array($decoded['steps']), $raw);
+        return $decoded;
+    });
+}
+
+/** @return list<string> */
+function stage5_expected_step_ids(bool $htmlFirst): array
+{
+    $llm = new FakeLlm();
+    $renderer = new PromptRenderer(Package::promptsDir());
+    $composition = $htmlFirst
+        ? StepComposition::htmlFirst($llm, $renderer)
+        : StepComposition::blocks($llm, $renderer);
+    return (new Pipeline($composition->steps(), $composition->seeds()))->stepIds();
+}
+
+/** @return list<string> */
+function stage5_expected_stop_ids(bool $htmlFirst): array
+{
+    $llm = new FakeLlm();
+    $renderer = new PromptRenderer(Package::promptsDir());
+    $composition = $htmlFirst
+        ? StepComposition::htmlFirst($llm, $renderer)
+        : StepComposition::blocks($llm, $renderer);
+    return (new Pipeline($composition->steps(), $composition->seeds()))->stopIds();
+}
+
+/** @return list<string> */
+function stage5_valid_ids_for(string $flag): array
+{
+    $unknown = '__stage5_unknown_step__';
+    $slug = 'zz-stage5-valid-' . $flag . '-' . getmypid() . '-' . uniqid();
+    $projectDir = repo_path('projects/' . $slug);
+    if ($flag !== 'until') {
+        mkdir($projectDir, 0775, true);
+        file_put_contents($projectDir . '/meta.json', (string) json_encode([
+            'prompt'           => 'a test site',
+            'provisional_slug' => $slug,
+            'multi_page'       => false,
+            'graph'            => 'blocks',
+        ]));
+    }
+
+    try {
+        return with_temp_dir('valid-steps-harness-', function (string $dir) use ($flag, $unknown, $slug): array {
+            $binary = $dir . '/claude';
+            assert_true(copy(dirname(__DIR__) . '/fixtures/fake-harness/spawn-counter.sh', $binary));
+            assert_true(chmod($binary, 0755));
+            $path = $dir . PATH_SEPARATOR . (string) getenv('PATH');
+            $args = ['a test site', '--provider=anthropic', '--blocks-first', '--no-serve'];
+            if ($flag !== 'until') {
+                $args[] = '--slug=' . $slug;
+            }
+            $args[] = '--' . $flag . '=' . $unknown;
+            $command = 'SITE_BUILD_LLM=claude-cli LLM_PROVIDER=anthropic PATH=' . escapeshellarg($path) . ' '
+                . php_child_command(repo_path('bin/build.php'), $args);
+
+            $output = [];
+            $exit = 0;
+            exec($command . ' 2>&1', $output, $exit);
+            $header = "Unknown --{$flag} step '{$unknown}'. Valid steps:";
+            $headerIndex = array_search($header, $output, true);
+
+            assert_eq(1, $exit, implode("\n", $output));
+            assert_true($headerIndex !== false, implode("\n", $output));
+            assert_true(!file_exists($binary . '.count'), 'validation must happen before step execution');
+            return array_values(array_map('trim', array_slice($output, $headerIndex + 1)));
+        });
+    } finally {
+        remove_tree($projectDir);
+    }
+}
+
+/** @return array{exit:int,output:string} */
+function stage5_run_build(array $args): array
+{
+    return with_temp_dir('stage5-build-harness-', function (string $dir) use ($args): array {
+        $binary = $dir . '/claude';
+        assert_true(copy(dirname(__DIR__) . '/fixtures/fake-harness/spawn-counter.sh', $binary));
+        assert_true(chmod($binary, 0755));
+        $path = $dir . PATH_SEPARATOR . (string) getenv('PATH');
+        $command = 'SITE_BUILD_LLM=claude-cli LLM_PROVIDER=anthropic PATH=' . escapeshellarg($path) . ' '
+            . php_child_command(repo_path('bin/build.php'), $args);
+        $output = [];
+        $exit = 0;
+        exec($command . ' 2>&1', $output, $exit);
+        assert_true(!file_exists($binary . '.count'), 'deterministic test steps must not spawn the harness');
+        return ['exit' => $exit, 'output' => implode("\n", $output)];
+    });
+}
+
+/** @return array<string,string> relative path => bytes */
+function stage5_tree_snapshot(string $root): array
+{
+    $files = [];
+    $iterator = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS),
+    );
+    foreach ($iterator as $file) {
+        if ($file->isFile()) {
+            $relative = substr($file->getPathname(), strlen($root) + 1);
+            $files[$relative] = (string) file_get_contents($file->getPathname());
+        }
+    }
+    ksort($files);
+    return $files;
+}
+
+test('O-G5 --list-steps emits JSON without a prompt, model call, or subprocess spawn', function () {
+    $manifest = stage5_list_steps(['--blocks-first']);
+    assert_eq('blocks', $manifest['graph']);
+    assert_true($manifest['steps'] !== []);
+});
+
+test('O-G6 --list-steps emits the blocks graph top-level ids and one concurrent group', function () {
+    $manifest = stage5_list_steps(['--blocks-first']);
+    $ids = array_column($manifest['steps'], 'id');
+
+    assert_eq(25, count($ids));
+    assert_eq(stage5_expected_step_ids(false), $ids);
+    assert_eq(1, count(array_keys($ids, 'theme-json+page-plan', true)));
+    $group = $manifest['steps'][array_search('theme-json+page-plan', $ids, true)];
+    assert_eq(['theme-json', 'page-plan'], $group['members']);
+    assert_true(is_string($group['label']) && $group['label'] !== '');
+    assert_true(!in_array('theme-json', $ids, true));
+    assert_true(!in_array('page-plan', $ids, true));
+});
+
+test('O-G7 --list-steps honors both graph flags and matches each graph stepIds', function () {
+    $html = stage5_list_steps(['--html-first']);
+    $blocks = stage5_list_steps(['--blocks-first']);
+    $htmlIds = array_column($html['steps'], 'id');
+    $blocksIds = array_column($blocks['steps'], 'id');
+
+    assert_eq('html-first', $html['graph']);
+    assert_eq('blocks', $blocks['graph']);
+    assert_eq(29, count($htmlIds));
+    assert_eq(25, count($blocksIds));
+    assert_eq(stage5_expected_step_ids(true), $htmlIds);
+    assert_eq(stage5_expected_step_ids(false), $blocksIds);
+    assert_true($htmlIds !== $blocksIds);
+});
+
+test('--list-steps uses an existing slug recorded graph without requiring a prompt', function () {
+    $slug = 'zz-stage5-list-recorded-' . getmypid() . '-' . uniqid();
+    $dir = repo_path('projects/' . $slug);
+    mkdir($dir, 0775, true);
+    file_put_contents($dir . '/meta.json', (string) json_encode([
+        'prompt'           => 'a recorded project',
+        'provisional_slug' => $slug,
+        'multi_page'       => false,
+        'graph'            => 'html-first',
+    ]));
+    try {
+        $manifest = stage5_list_steps(['--slug=' . $slug]);
+        assert_eq('html-first', $manifest['graph']);
+        assert_eq(stage5_expected_step_ids(true), array_column($manifest['steps'], 'id'));
+    } finally {
+        remove_tree($dir);
+    }
+});
+
+test('O-G8 every listed id is accepted by --step, --from, and --until validation', function () {
+    $listed = array_column(stage5_list_steps(['--blocks-first'])['steps'], 'id');
+    foreach (['step', 'from', 'until'] as $flag) {
+        $valid = stage5_valid_ids_for($flag);
+        foreach ($listed as $id) {
+            assert_true(in_array($id, $valid, true), "--{$flag} rejected listed id {$id}");
+        }
+    }
+});
+
+test('O-G8c widening preserves every old stopIds target for --from and --until', function () {
+    $oldTargets = stage5_expected_stop_ids(false);
+    foreach (['from', 'until'] as $flag) {
+        $valid = stage5_valid_ids_for($flag);
+        foreach ($oldTargets as $id) {
+            assert_true(in_array($id, $valid, true), "--{$flag} lost old target {$id}");
+        }
+    }
+});
+
+test('O-G8b --step has the same deterministic outcome as matching --from and --until', function () {
+    $slug = 'zz-stage5-step-sugar-' . getmypid() . '-' . uniqid();
+    $dir = repo_path('projects/' . $slug);
+    $seed = static function () use ($slug, $dir): void {
+        mkdir($dir, 0775, true);
+        file_put_contents($dir . '/meta.json', (string) json_encode([
+            'prompt'           => 'a test site',
+            'provisional_slug' => $slug,
+            'multi_page'       => false,
+            'graph'            => 'blocks',
+        ]));
+    };
+
+    try {
+        $seed();
+        $range = stage5_run_build([
+            '--slug=' . $slug,
+            '--from=scaffold-theme',
+            '--until=scaffold-theme',
+            '--blocks-first',
+            '--no-serve',
+        ]);
+        assert_eq(0, $range['exit'], $range['output']);
+        $rangeTheme = stage5_tree_snapshot($dir . '/theme');
+
+        remove_tree($dir);
+        $seed();
+        $step = stage5_run_build([
+            '--slug=' . $slug,
+            '--step=scaffold-theme',
+            '--blocks-first',
+            '--no-serve',
+        ]);
+        assert_eq(0, $step['exit'], $step['output']);
+        assert_eq($rangeTheme, stage5_tree_snapshot($dir . '/theme'));
+    } finally {
+        remove_tree($dir);
+    }
+});
+
+test('O-G8b --step refuses combination with --from or --until', function () {
+    foreach (['--from=scaffold-theme', '--until=scaffold-theme'] as $conflict) {
+        $result = stage5_run_build(['--step=scaffold-theme', $conflict]);
+        assert_true($result['exit'] !== 0, $result['output']);
+        assert_contains('--step', $result['output']);
+        assert_contains(strtok($conflict, '='), $result['output']);
+        assert_contains('mutually exclusive', $result['output']);
     }
 });
