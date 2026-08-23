@@ -41,6 +41,24 @@ test('LinkTargets::allTargets includes JSON href on image file and media-text', 
     assert_eq([], LinkTargets::urlAttrsIn($markup), 'JSON href is not a JSON url');
 });
 
+test('LinkTargets::textLinkHrefAttrsIn reads block-JSON textLinkHref and unescapes them', function (): void {
+    $hrefs = LinkTargets::textLinkHrefAttrsIn('<!-- wp:file {"textLinkHref":"javascript:alert(1)"} /-->');
+    assert_eq(['javascript:alert(1)'], $hrefs);
+    $escaped = LinkTargets::textLinkHrefAttrsIn('<!-- wp:file {"textLinkHref":"\/download\/"} /-->');
+    assert_eq(['/download/'], $escaped);
+});
+
+test('LinkTargets::allTargets includes JSON textLinkHref', function (): void {
+    $markup = '<!-- wp:file {"href":"/file.pdf","textLinkHref":"javascript:alert(1)"} /-->';
+    $targets = LinkTargets::allTargets($markup);
+    assert_true(in_array('/file.pdf', $targets, true), 'JSON href is visible');
+    assert_true(in_array('javascript:alert(1)', $targets, true), 'JSON textLinkHref javascript: is visible');
+    assert_eq([], LinkTargets::hrefsIn($markup), 'JSON textLinkHref is not an HTML href');
+    assert_eq([], LinkTargets::urlAttrsIn($markup), 'JSON textLinkHref is not a JSON url');
+    assert_eq(['/file.pdf'], LinkTargets::hrefAttrsIn($markup));
+    assert_eq(['javascript:alert(1)'], LinkTargets::textLinkHrefAttrsIn($markup));
+});
+
 test('LinkTargets::isThemeAssetPath recognizes media, not routes', function (): void {
     assert_true(LinkTargets::isThemeAssetPath('/wp-content/themes/demo/assets/a.jpg'));
     assert_true(LinkTargets::isThemeAssetPath('/whatever/photo.png'));
