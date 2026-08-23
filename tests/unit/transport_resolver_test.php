@@ -650,10 +650,12 @@ test('billing R1g: build invokes the subprocess availability guard for harness c
 
 test('billing C5a: build has no ignored model parameter', function (): void {
     $method = new ReflectionMethod(TransportResolver::class, 'build');
-    assert_eq(2, $method->getNumberOfParameters());
+    assert_eq(3, $method->getNumberOfParameters());
     assert_eq('choice', $method->getParameters()[0]->getName());
     assert_eq('apiFactory', $method->getParameters()[1]->getName());
     assert_true($method->getParameters()[1]->isOptional());
+    assert_eq('harnessModel', $method->getParameters()[2]->getName());
+    assert_true($method->getParameters()[2]->isOptional());
 });
 
 test('billing C5b: API build without a factory tells the host to supply one', function (): void {
@@ -1088,4 +1090,185 @@ test('billing R1g: injected ancestry walker stops on a self-parent cycle', funct
     [$output, $status] = tr_php($code);
     assert_eq(0, $status, $output);
     assert_eq('cycle | 1', $output);
+});
+
+test('credentialVariableFor canonicalizes each API provider and the grok alias', function (): void {
+    assert_eq('ANTHROPIC_API_KEY', TransportResolver::credentialVariableFor('anthropic'));
+    assert_eq('OPENAI_API_KEY', TransportResolver::credentialVariableFor('openai'));
+    assert_eq('XAI_API_KEY', TransportResolver::credentialVariableFor('xai'));
+    assert_eq('XAI_API_KEY', TransportResolver::credentialVariableFor('grok'));
+    assert_eq('OPENROUTER_API_KEY', TransportResolver::credentialVariableFor('openrouter'));
+});
+
+test('V5 make_llm explicit provider wins over ambient LLM_PROVIDER', function (): void {
+    $bootstrap = dirname(__DIR__, 2) . '/src/bootstrap.php';
+    $code = 'putenv("LLM_PROVIDER=anthropic"); '
+        . 'putenv("ANTHROPIC_API_KEY=test-anthropic"); '
+        . 'putenv("OPENROUTER_API_KEY=test-openrouter"); '
+        . 'require ' . var_export($bootstrap, true) . '; '
+        . '$llm = make_llm("openrouter"); '
+        . 'echo get_class($llm) . " | " . (method_exists($llm, "endpoint") ? $llm->endpoint() : "NO_ENDPOINT");';
+
+    [$output, $status] = tr_php($code);
+    assert_eq(0, $status, $output);
+    assert_eq('Automattic\\SiteBuild\\OpenAiCompatibleClient | https://openrouter.ai/api/v1/chat/completions', $output);
+});
+
+test('V5 make_llm without provider preserves ambient behavior', function (): void {
+    $bootstrap = dirname(__DIR__, 2) . '/src/bootstrap.php';
+    $code = 'putenv("LLM_PROVIDER=anthropic"); '
+        . 'putenv("ANTHROPIC_API_KEY=test-anthropic"); '
+        . 'require ' . var_export($bootstrap, true) . '; '
+        . 'echo get_class(make_llm());';
+
+    [$output, $status] = tr_php($code);
+    assert_eq(0, $status, $output);
+    assert_eq('Automattic\\SiteBuild\\AnthropicClient', $output);
+});
+
+test('V6 resolve_llm missing credential throws catchable TransportUnavailable', function (): void {
+    $bootstrap = dirname(__DIR__, 2) . '/src/bootstrap.php';
+    $code = 'require ' . var_export($bootstrap, true) . '; '
+        . 'foreach (["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "XAI_API_KEY", '
+        . '"OPENROUTER_API_KEY", "OPEN_ROUTER_API_KEY"] as $key) { putenv($key); } '
+        . 'putenv("SITE_BUILD_LLM=api"); putenv("LLM_PROVIDER=anthropic"); '
+        . '$r = new ReflectionClass(\\Automattic\\SiteBuild\\Env::class); '
+        . '$p = $r->getProperty("vars"); $p->setValue(null, []); '
+        . 'try { resolve_llm(); echo "NO_ERROR"; } '
+        . 'catch (Throwable $e) { echo get_class($e) . " | " . $e->getMessage(); }';
+
+    [$output, $status] = tr_php($code);
+    assert_eq(0, $status, $output);
+    assert_contains(TransportUnavailable::class, $output);
+    assert_contains('anthropic', $output);
+    assert_contains('ANTHROPIC_API_KEY', $output);
+    assert_true(!str_contains($output, 'Missing required env var'));
+    assert_true(!str_contains($output, 'NO_ERROR'));
+});
+
+test('V7 claude-cli build without a harness model fails by name', function (): void {
+    $choice = new TransportChoice(TransportChoice::KIND_CLAUDE_CLI, 'unit', PHP_BINARY);
+    $error = assert_throws(fn () => TransportResolver::build($choice));
+    assert_true($error instanceof TransportUnavailable);
+    assert_contains('claude-cli', $error->getMessage());
+    assert_contains('harness model', $error->getMessage());
+});
+
+test('V7 claude-cli build returns the real ClaudeCliLlm transport', function (): void {
+    $choice = new TransportChoice(TransportChoice::KIND_CLAUDE_CLI, 'unit', PHP_BINARY);
+    $llm = TransportResolver::build($choice, harnessModel: 'claude-haiku-4-5');
+    assert_true($llm instanceof \Automattic\SiteBuild\ClaudeCliLlm);
+});
+
+test('V8 resolve_llm narrates exactly one audit line naming the built kind', function (): void {
+    $bootstrap = dirname(__DIR__, 2) . '/src/bootstrap.php';
+    $code = 'putenv("SITE_BUILD_LLM=api"); putenv("LLM_PROVIDER=anthropic"); '
+        . 'putenv("ANTHROPIC_API_KEY=test-anthropic"); '
+        . 'require ' . var_export($bootstrap, true) . '; '
+        . '$stream = fopen("php://memory", "w+"); '
+        . '\\Automattic\\SiteBuild\\Narrator::setStream($stream); '
+        . '$llm = resolve_llm(); rewind($stream); $audit = stream_get_contents($stream); '
+        . 'echo get_class($llm) . " | " . substr_count($audit, "Transport:") . " | " . trim($audit);';
+
+    [$output, $status] = tr_php($code);
+    assert_eq(0, $status, $output);
+    assert_contains('Automattic\\SiteBuild\\AnthropicClient | 1 | Transport: api', $output);
+});
+
+test('V10 all four bin entry points call resolve_llm and none call make_llm', function (): void {
+    $root = dirname(__DIR__, 2);
+    $counts = ['make_llm' => 0, 'resolve_llm' => 0];
+    foreach (['build.php', 'eval.php', 'images.php', 'llm-conformance.php'] as $name) {
+        $tokens = token_get_all((string) file_get_contents($root . '/bin/' . $name));
+        foreach ($tokens as $index => $token) {
+            if (!is_array($token) || $token[0] !== T_STRING || !array_key_exists($token[1], $counts)) {
+                continue;
+            }
+            for ($next = $index + 1; isset($tokens[$next]); $next++) {
+                if (is_array($tokens[$next]) && $tokens[$next][0] === T_WHITESPACE) {
+                    continue;
+                }
+                if ($tokens[$next] === '(') {
+                    $counts[$token[1]]++;
+                }
+                break;
+            }
+        }
+    }
+    assert_eq(['make_llm' => 0, 'resolve_llm' => 4], $counts);
+});
+
+test('resolve_llm factory passes its resolved provider to make_llm', function (): void {
+    $source = (string) file_get_contents(dirname(__DIR__, 2) . '/src/bootstrap.php');
+    assert_true(
+        preg_match('/\\bmake_llm\\(\\$provider\\)/', $source) === 1,
+        'resolve_llm must not discard the provider passed to its API factory',
+    );
+});
+
+test('V14 resolve_llm sees Env-loaded credentials before inherited Codex markers', function (): void {
+    with_temp_dir('resolve-env-', function (string $dir): void {
+        $codex = $dir . '/codex';
+        file_put_contents($codex, "#!/bin/sh\nexit 0\n");
+        chmod($codex, 0755);
+        $bootstrap = dirname(__DIR__, 2) . '/src/bootstrap.php';
+        $code = 'putenv("SITE_BUILD_LLM"); putenv("LLM_PROVIDER"); putenv("ANTHROPIC_API_KEY"); '
+            . 'putenv("CODEX_THREAD_ID=unit-codex"); putenv("PATH=' . addslashes($dir) . '"); '
+            . 'require ' . var_export($bootstrap, true) . '; '
+            . '$r = new ReflectionClass(\\Automattic\\SiteBuild\\Env::class); '
+            . '$p = $r->getProperty("vars"); $p->setValue(null, ["ANTHROPIC_API_KEY" => "from-dotenv"]); '
+            . '$stream = fopen("php://memory", "w+"); '
+            . '\\Automattic\\SiteBuild\\Narrator::setStream($stream); '
+            . 'try { $llm = resolve_llm(); rewind($stream); '
+            . 'echo get_class($llm) . " | " . trim((string) stream_get_contents($stream)); } '
+            . 'catch (Throwable $e) { echo "ERROR | " . get_class($e) . " | " . $e->getMessage(); }';
+
+        [$output, $status] = tr_php($code);
+        assert_eq(0, $status, $output);
+        assert_contains('Automattic\\SiteBuild\\AnthropicClient | Transport: api', $output);
+        assert_true(!str_contains($output, 'codex-cli'), $output);
+        assert_true(!str_contains($output, 'ERROR'), $output);
+    });
+});
+
+test('V15 explicit codex-cli and grok-cli overrides keep actionable deferred stubs', function (): void {
+    with_temp_dir('deferred-harness-', function (string $dir): void {
+        foreach (['codex', 'grok'] as $name) {
+            file_put_contents($dir . '/' . $name, "#!/bin/sh\nexit 0\n");
+            chmod($dir . '/' . $name, 0755);
+        }
+        $bootstrap = dirname(__DIR__, 2) . '/src/bootstrap.php';
+        $code = 'putenv("PATH=' . addslashes($dir) . '"); require ' . var_export($bootstrap, true) . '; '
+            . 'foreach (["codex-cli", "grok-cli"] as $kind) { putenv("SITE_BUILD_LLM={$kind}"); '
+            . 'try { resolve_llm(); echo "{$kind}|NO_ERROR\n"; } '
+            . 'catch (Throwable $e) { echo "{$kind}|" . get_class($e) . "|" . $e->getMessage() . "\n"; } }';
+
+        [$output, $status] = tr_php($code);
+        assert_eq(0, $status, $output);
+        foreach (['codex-cli', 'grok-cli'] as $kind) {
+            assert_contains("{$kind}|" . TransportUnavailable::class, $output);
+            assert_contains("Transport {$kind} is resolved but not yet implemented", $output);
+        }
+        assert_eq(2, substr_count($output, 'SITE_BUILD_LLM=api'));
+        assert_true(!str_contains($output, 'NO_ERROR'));
+    });
+});
+
+test('V15 explicit claude-cli override builds without spending', function (): void {
+    with_temp_dir('resolved-claude-', function (string $dir): void {
+        $claude = $dir . '/claude';
+        file_put_contents($claude, "#!/bin/sh\nexit 0\n");
+        chmod($claude, 0755);
+        $bootstrap = dirname(__DIR__, 2) . '/src/bootstrap.php';
+        $code = 'putenv("PATH=' . addslashes($dir) . '"); putenv("SITE_BUILD_LLM=claude-cli"); '
+            . 'require ' . var_export($bootstrap, true) . '; '
+            . 'try { echo get_class(resolve_llm()); } '
+            . 'catch (Throwable $e) { echo "ERROR | " . get_class($e) . " | " . $e->getMessage(); }';
+
+        [$output, $status] = tr_php($code);
+        assert_eq(0, $status, $output);
+        assert_contains('Automattic\\SiteBuild\\ClaudeCliLlm', $output);
+        assert_true(!str_contains($output, 'not yet implemented'));
+        assert_true(!str_contains($output, 'ERROR'));
+    });
 });
