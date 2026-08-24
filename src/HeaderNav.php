@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild;
 
 /**
  * Header and footer chrome must not include a Home item on either graph.
+ * Header chrome must also list every inner site page (BIGR-872).
  *
  * `wp:site-title` and `wp:site-logo` already link to the front page. A Home
  * entry — `wp:home-link`, a `wp:navigation-link` whose label is the front
@@ -52,6 +53,137 @@ final class HeaderNav
             'markup' => $markup,
             'notes' => $notes,
             'warnings' => $warnings,
+        ];
+    }
+
+    /**
+     * Every inner site page must appear in the header nav (BIGR-872).
+     *
+     * Footer chrome is out of scope: it is often already the more complete
+     * list, and this pass exists to bring the header up to that bar. A
+     * one-page site has nothing to add. Idempotent.
+     *
+     * @param list<array<string,mixed>> $pages
+     * @param 'header'|'footer' $part
+     * @return array{markup:string,notes:list<string>,warnings:list<string>}
+     */
+    public static function withCompleteInnerPages(
+        string $markup,
+        array $pages,
+        string $part = 'header',
+        string $siteName = '',
+    ): array {
+        if ($part !== 'header') {
+            return ['markup' => $markup, 'notes' => [], 'warnings' => []];
+        }
+
+        $front = self::frontPage($pages);
+        $needed = [];
+        foreach ($pages as $page) {
+            if (!empty($page['front']) || self::pagePath($page) === '/') {
+                continue;
+            }
+            $title = trim((string) ($page['title'] ?? $page['label'] ?? ''));
+            $path = trim((string) ($page['path'] ?? ''));
+            if ($title === '' || $path === '' || self::labelsMatch($title, $front['title'])) {
+                continue;
+            }
+            $key = self::destinationKey($path);
+            if ($key === '' || $key === '/') {
+                continue;
+            }
+            $needed[$key] = ['title' => $title, 'path' => $path];
+        }
+        if ($needed === []) {
+            return ['markup' => $markup, 'notes' => [], 'warnings' => []];
+        }
+
+        $document = BlockMarkup::parse($markup);
+        $navIndices = [];
+        foreach ($document->indices() as $index) {
+            if (self::canonicalName($document->name($index)) !== 'navigation') {
+                continue;
+            }
+            if (!$document->isStructurallySafe($index)) {
+                continue;
+            }
+            $navIndices[] = $index;
+        }
+
+        $present = $navIndices === []
+            ? self::htmlNavDestinations($markup)
+            : self::blockNavDestinations($document);
+        $missing = [];
+        foreach ($needed as $key => $page) {
+            $label = self::normalizedLabel($page['title']);
+            if (isset($present['urls'][$key]) || ($label !== '' && isset($present['labels'][$label]))) {
+                continue;
+            }
+            $missing[] = $page;
+        }
+        if ($missing === []) {
+            return ['markup' => $markup, 'notes' => [], 'warnings' => []];
+        }
+
+        $titles = array_map(static fn (array $page): string => $page['title'], $missing);
+        $labelList = implode(', ', $titles);
+
+        if ($navIndices !== []) {
+            $target = null;
+            foreach (array_reverse($navIndices) as $index) {
+                if (!$document->isVoid($index)) {
+                    $target = $index;
+                    break;
+                }
+            }
+            $target ??= $navIndices[0];
+            $edit = self::blockSpan($document, $target, $markup);
+            if ($edit === null) {
+                return [
+                    'markup' => $markup,
+                    'notes' => [],
+                    'warnings' => [self::unprovenWarning($part, 'wp:navigation', $document->openingComment($target))],
+                ];
+            }
+            $attrs = $document->attrs($target) ?? [];
+            $opening = $document->isVoid($target)
+                ? BlockMarkup::serializeComment('navigation', $attrs, false)
+                : $document->openingComment($target);
+            $inner = $document->isVoid($target) ? '' : $document->innerHtml($target);
+            $replacement = $opening . $inner . self::linkComments($missing) . '<!-- /wp:navigation -->';
+            $markup = substr_replace(
+                $markup,
+                $replacement,
+                $edit['start'],
+                $edit['end'] - $edit['start'],
+            );
+            return [
+                'markup' => $markup,
+                'notes' => ["added missing inner-page links to header navigation ({$labelList})"],
+                'warnings' => [],
+            ];
+        }
+
+        $htmlNavs = self::navElements($markup);
+        if ($htmlNavs !== []) {
+            $target = $htmlNavs[count($htmlNavs) - 1];
+            $markup = substr_replace($markup, self::htmlAnchors($missing), $target['innerEnd'], 0);
+            return [
+                'markup' => $markup,
+                'notes' => ["added missing inner-page links to header navigation ({$labelList})"],
+                'warnings' => [],
+            ];
+        }
+
+        $insertAt = self::afterIdentityOffset($document);
+        $navMarkup = '<!-- wp:navigation -->' . self::linkComments($missing) . '<!-- /wp:navigation -->';
+        $markup = $insertAt === null
+            ? $markup . $navMarkup
+            : substr_replace($markup, $navMarkup, $insertAt, 0);
+        return [
+            'markup' => $markup,
+            'notes' => ["inserted header navigation with inner-page links ({$labelList})"],
+            'warnings' => [],
         ];
     }
 
@@ -212,6 +344,159 @@ final class HeaderNav
             );
         }
         return $links;
+    }
+
+    /**
+     * @param list<array{title:string,path:string}> $pages
+     */
+    private static function linkComments(array $pages): string
+    {
+        $links = [];
+        foreach ($pages as $page) {
+            $links[] = BlockMarkup::serializeComment(
+                'navigation-link',
+                ['label' => $page['title'], 'url' => $page['path'], 'kind' => 'custom'],
+                true,
+            );
+        }
+        return implode('', $links);
+    }
+
+    /**
+     * @param list<array{title:string,path:string}> $pages
+     */
+    private static function htmlAnchors(array $pages): string
+    {
+        $html = '';
+        foreach ($pages as $page) {
+            $html .= '<a href="' . htmlspecialchars($page['path'], ENT_QUOTES | ENT_HTML5, 'UTF-8') . '">'
+                . htmlspecialchars($page['title'], ENT_QUOTES | ENT_HTML5, 'UTF-8') . '</a>';
+        }
+        return $html;
+    }
+
+    /** @return array{urls:array<string,true>,labels:array<string,true>} */
+    private static function blockNavDestinations(BlockMarkup $document): array
+    {
+        $urls = [];
+        $labels = [];
+        foreach ($document->indices() as $index) {
+            $name = self::canonicalName($document->name($index));
+            if ($name === 'navigation-link' || $name === 'navigation-submenu') {
+                $attrs = $document->attrs($index) ?? [];
+                $url = is_string($attrs['url'] ?? null) ? self::destinationKey((string) $attrs['url']) : '';
+                if ($url !== '' && $url !== '/') {
+                    $urls[$url] = true;
+                }
+                $label = is_string($attrs['label'] ?? null) ? self::normalizedLabel((string) $attrs['label']) : '';
+                if ($label !== '') {
+                    $labels[$label] = true;
+                }
+            }
+            if ($name !== 'navigation' || $document->isVoid($index)) {
+                continue;
+            }
+            $inner = $document->innerHtml($index);
+            foreach (self::anchorsIn($inner, 0, strlen($inner)) as $anchor) {
+                $url = self::destinationKey($anchor['href']);
+                if ($url !== '' && $url !== '/') {
+                    $urls[$url] = true;
+                }
+                $label = self::normalizedLabel(self::visibleLabel(substr(
+                    $inner,
+                    $anchor['innerStart'],
+                    $anchor['innerEnd'] - $anchor['innerStart'],
+                )));
+                if ($label !== '') {
+                    $labels[$label] = true;
+                }
+            }
+        }
+        return ['urls' => $urls, 'labels' => $labels];
+    }
+
+    /** @return array{urls:array<string,true>,labels:array<string,true>} */
+    private static function htmlNavDestinations(string $markup): array
+    {
+        $urls = [];
+        $labels = [];
+        foreach (self::navElements($markup) as $nav) {
+            foreach (self::anchorsIn($markup, $nav['innerStart'], $nav['innerEnd']) as $anchor) {
+                $url = self::destinationKey($anchor['href']);
+                if ($url !== '' && $url !== '/') {
+                    $urls[$url] = true;
+                }
+                $label = self::normalizedLabel(self::visibleLabel(substr(
+                    $markup,
+                    $anchor['innerStart'],
+                    $anchor['innerEnd'] - $anchor['innerStart'],
+                )));
+                if ($label !== '') {
+                    $labels[$label] = true;
+                }
+            }
+        }
+        return ['urls' => $urls, 'labels' => $labels];
+    }
+
+    /**
+     * @return list<array{start:int,end:int,innerStart:int,innerEnd:int}>
+     */
+    private static function navElements(string $markup): array
+    {
+        if (preg_match_all('/<nav\b[^>]*>/i', $markup, $opens, PREG_OFFSET_CAPTURE) === false) {
+            return [];
+        }
+        $navs = [];
+        foreach ($opens[0] as [$open, $start]) {
+            $innerStart = $start + strlen($open);
+            $close = self::matchingClose($markup, $innerStart, 'nav');
+            if ($close === null) {
+                continue;
+            }
+            $closeEnd = strpos($markup, '>', $close);
+            if ($closeEnd === false) {
+                continue;
+            }
+            $navs[] = [
+                'start' => $start,
+                'end' => $closeEnd + 1,
+                'innerStart' => $innerStart,
+                'innerEnd' => $close,
+            ];
+        }
+        return $navs;
+    }
+
+    private static function destinationKey(string $url): string
+    {
+        $url = trim($url);
+        if ($url === '' || $url === '#') {
+            return '';
+        }
+        $path = parse_url($url, PHP_URL_PATH);
+        $path = is_string($path) ? $path : strtok($url, '?#');
+        $normalized = trim((string) $path);
+        if ($normalized === '' || $normalized === '/') {
+            return '/';
+        }
+        return rtrim($normalized, '/');
+    }
+
+    private static function afterIdentityOffset(BlockMarkup $document): ?int
+    {
+        $last = null;
+        foreach ($document->indices() as $index) {
+            $name = self::canonicalName($document->name($index));
+            if (!in_array($name, ['site-title', 'site-logo', 'site-tagline'], true)) {
+                continue;
+            }
+            if (!$document->isStructurallySafe($index)) {
+                continue;
+            }
+            $last = $index;
+        }
+        return $last === null ? null : $document->endOffset($last);
     }
 
     /**

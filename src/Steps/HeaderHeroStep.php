@@ -665,6 +665,13 @@ final class HeaderHeroStep implements Step
         $notes = $home['notes'];
         $warnings = $home['warnings'];
 
+        // After the Home strip so a filled nav never reintroduces Home, and
+        // before consolidation copies items into the mobile overlay (BIGR-872).
+        $complete = HeaderNav::withCompleteInnerPages($markup, $pages, 'header', $siteName);
+        $markup = $complete['markup'];
+        array_push($notes, ...$complete['notes']);
+        array_push($warnings, ...$complete['warnings']);
+
         // Strictly after the Home strip: consolidation COPIES nav items, and a
         // copy taken first would carry a Home item — or a whole page-list the
         // strip is about to replace with inner-page links — into the collapsed

@@ -1095,6 +1095,11 @@ test('chrome nav rules follow the page count: anchors for one page, inner pages 
     assert_contains('NEVER include the homepage in `wp:navigation`', $reqs['header']['prompt']);
     assert_contains('Do NOT use `<!-- wp:page-list /-->`', $reqs['header']['prompt']);
     assert_contains('SITE PAGES except the front page', $reqs['header']['prompt']);
+    assert_contains('EVERY SITE PAGES entry except the front page', $reqs['header']['prompt']);
+    assert_contains('omitting any inner page is forbidden', $reqs['header']['prompt']);
+    assert_contains('one horizontal row (identity start, nav end)', $reqs['header']['prompt']);
+    assert_contains('NEVER split links onto both sides of the wordmark', $reqs['header']['prompt']);
+    assert_contains('NEVER stack the wordmark above the nav', $reqs['header']['prompt']);
     assert_contains('SITE PAGES except the front page', $reqs['footer']['prompt']);
     assert_contains('NEVER include Home', $reqs['footer']['prompt']);
     assert_contains('never a bare `wp:page-list`', $reqs['footer']['prompt']);

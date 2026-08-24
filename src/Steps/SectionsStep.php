@@ -82,8 +82,9 @@ final class SectionsStep implements Step
     private const NAV_RULE_MULTI = '- Navigation: NEVER include the homepage in `wp:navigation`. `wp:site-title` and'
         . ' `wp:site-logo` already link home — a Home item is redundant. Do NOT use `<!-- wp:page-list /-->`'
         . ' (it lists every page, including Home) and do NOT emit `wp:home-link`. Hand-author'
-        . ' `wp:navigation-link` entries for SITE PAGES except the front page (split-nav splits those'
-        . ' same inner pages across the two navs).';
+        . ' `wp:navigation-link` entries for EVERY SITE PAGES entry except the front page — omitting any inner page'
+        . ' is forbidden. Keep identity and navigation on one horizontal row (identity start, nav end). NEVER split'
+        . ' links onto both sides of the wordmark. NEVER stack the wordmark above the nav.';
 
     /** {{nav_rule}} when the site is the homepage alone — a page-list would render one self-referential "Home" link. */
     private const NAV_RULE_SINGLE = '- Navigation: this site is ONE page, so a page-list would render a single'

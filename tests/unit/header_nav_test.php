@@ -356,3 +356,145 @@ test('HeaderNav footer warnings point at the footer part', function () {
     assert_contains('wp:home-link', $result['markup']);
     assert_contains("file='theme/parts/footer.html'", $result['warnings'][0]);
 });
+
+test('HeaderNav fills an empty header navigation with every inner page (BIGR-872)', function () {
+    $markup = '<!-- wp:site-title /-->'
+        . '<!-- wp:navigation -->'
+        . '<!-- /wp:navigation -->';
+
+    $result = HeaderNav::withCompleteInnerPages($markup, header_nav_pages());
+
+    assert_contains('{"label":"Menu","url":"/menu/","kind":"custom"}', $result['markup']);
+    assert_contains('{"label":"Visit","url":"/visit/","kind":"custom"}', $result['markup']);
+    assert_true(!str_contains($result['markup'], '"label":"Home"'), 'Home stays out of the filled nav');
+    assert_true($result['notes'] !== [], 'the fill is a recorded repair');
+    assert_eq(
+        HeaderNav::withCompleteInnerPages($result['markup'], header_nav_pages())['markup'],
+        $result['markup'],
+        'a second pass is a fixed point',
+    );
+});
+
+test('HeaderNav fills a void header navigation with inner-page links', function () {
+    $markup = '<!-- wp:site-title /--><!-- wp:navigation /-->';
+
+    $result = HeaderNav::withCompleteInnerPages($markup, header_nav_pages());
+
+    assert_true(!str_contains($result['markup'], '<!-- wp:navigation /-->'), 'the void nav is opened');
+    assert_contains('"url":"/menu/"', $result['markup']);
+    assert_contains('"url":"/visit/"', $result['markup']);
+    assert_contains('<!-- /wp:navigation -->', $result['markup']);
+});
+
+test('HeaderNav only adds the inner pages a partial header nav is missing', function () {
+    $markup = '<!-- wp:navigation -->'
+        . '<!-- wp:navigation-link {"label":"Menu","url":"/menu/","kind":"custom"} /-->'
+        . '<!-- /wp:navigation -->';
+
+    $result = HeaderNav::withCompleteInnerPages($markup, header_nav_pages());
+
+    assert_eq(1, substr_count($result['markup'], '"url":"/menu/"'), 'existing Menu is not duplicated');
+    assert_contains('"url":"/visit/"', $result['markup']);
+    assert_contains('"label":"Visit"', $result['markup']);
+});
+
+test('HeaderNav inserts a header navigation after the site title when the bar has none', function () {
+    $markup = '<!-- wp:group {"layout":{"type":"flex","justifyContent":"space-between"}} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:site-title /-->'
+        . '</div><!-- /wp:group -->';
+
+    $result = HeaderNav::withCompleteInnerPages($markup, header_nav_pages());
+
+    $titleAt = strpos($result['markup'], 'wp:site-title');
+    $navAt = strpos($result['markup'], 'wp:navigation');
+    assert_true($titleAt !== false && $navAt !== false && $titleAt < $navAt, 'nav follows the wordmark');
+    assert_contains('"url":"/menu/"', $result['markup']);
+    assert_contains('"url":"/visit/"', $result['markup']);
+    assert_contains('inserted header navigation', implode("\n", $result['notes']));
+});
+
+test('HeaderNav fills an empty HTML header nav with inner-page anchors', function () {
+    $markup = '<a class="brand" href="/">Atelier</a><nav aria-label="Primary"></nav>';
+
+    $result = HeaderNav::withCompleteInnerPages($markup, header_nav_pages(), 'header', 'Atelier');
+
+    assert_contains('<a href="/menu/">Menu</a>', $result['markup']);
+    assert_contains('<a href="/visit/">Visit</a>', $result['markup']);
+    assert_contains('<a class="brand" href="/">Atelier</a>', $result['markup']);
+});
+
+test('HeaderNav does not invent header links on a one-page site', function () {
+    $pages = [
+        ['title' => 'Home', 'slug' => 'home', 'path' => '/', 'front' => true],
+    ];
+    $markup = '<!-- wp:site-title /--><!-- wp:navigation --><!-- /wp:navigation -->';
+
+    $result = HeaderNav::withCompleteInnerPages($markup, $pages);
+
+    assert_eq($markup, $result['markup']);
+    assert_eq([], $result['notes']);
+});
+
+test('HeaderNav does not fill footer navigation (BIGR-872 is header-only)', function () {
+    $markup = '<!-- wp:navigation --><!-- /wp:navigation -->';
+
+    $result = HeaderNav::withCompleteInnerPages($markup, header_nav_pages(), 'footer');
+
+    assert_eq($markup, $result['markup']);
+    assert_eq([], $result['notes']);
+});
+
+test('HeaderNav does not duplicate an inner page already present as an HTML nav anchor', function () {
+    $markup = '<!-- wp:navigation -->'
+        . '<nav><ul><li><a href="#hero">About</a></li></ul></nav>'
+        . '<!-- /wp:navigation -->';
+    $pages = [
+        ['title' => 'Home', 'slug' => 'home', 'path' => '/', 'front' => true],
+        ['title' => 'About', 'slug' => 'about', 'path' => '/about/', 'front' => false],
+    ];
+
+    $result = HeaderNav::withCompleteInnerPages($markup, $pages);
+
+    assert_eq($markup, $result['markup']);
+    assert_eq([], $result['notes']);
+});
+
+test('HeaderNav adds a missing inner page to split-nav once, not in both halves', function () {
+    $markup = '<!-- wp:navigation -->'
+        . '<!-- wp:navigation-link {"label":"Menu","url":"/menu/","kind":"custom"} /-->'
+        . '<!-- /wp:navigation -->'
+        . '<!-- wp:site-title /-->'
+        . '<!-- wp:navigation -->'
+        . '<!-- /wp:navigation -->';
+
+    $result = HeaderNav::withCompleteInnerPages($markup, header_nav_pages());
+
+    assert_eq(1, substr_count($result['markup'], '"url":"/menu/"'));
+    assert_eq(1, substr_count($result['markup'], '"url":"/visit/"'));
+});
+
+test('header-hero fills a header that shipped with no inner-page links (BIGR-872)', function () {
+    $pages = header_nav_pages();
+    $markup = '<!-- wp:group {"backgroundColor":"base","layout":{"type":"constrained"}} -->' . "\n"
+        . '<div class="wp-block-group"><!-- wp:site-title /--></div>' . "\n"
+        . '<!-- /wp:group -->';
+
+    $result = HeaderHeroStep::fixHeader(
+        $markup,
+        AboveFoldContract::MODE_STACKED,
+        'Demo',
+        array_map(static fn (array $p): string => (string) $p['title'], $pages),
+        false,
+        '',
+        '',
+        '',
+        null,
+        [],
+        $pages,
+    );
+
+    assert_contains('"url":"/menu/"', $result['markup']);
+    assert_contains('"url":"/visit/"', $result['markup']);
+    assert_true(!str_contains($result['markup'], '"label":"Home"'));
+});

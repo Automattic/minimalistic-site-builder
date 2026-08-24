@@ -275,6 +275,12 @@ test('G4 design-preview renders a labelled SITE PAGES list and shared-header lin
     assert_contains('page links use the SITE PAGES paths verbatim', $prompt);
     assert_contains('do NOT put a Home item', $prompt);
     assert_contains('Nav lists SITE PAGES except the front page', $prompt);
+    assert_contains('exactly one `<a>` for every SITE PAGES entry except the front page', $prompt);
+    assert_contains('flex-direction:row', $prompt);
+    assert_contains('NEVER `flex-direction:column`', $prompt);
+    assert_contains('NEVER nav links on both sides of the identity', $prompt);
+    assert_contains('NEVER identity stacked above the nav', $prompt);
+    assert_contains('An empty `<nav>` is forbidden', $prompt);
     assert_contains('href="/#anchor"', $prompt);
     assert_contains('NEVER a bare `href="#anchor"`', $prompt);
     assert_contains('No `href="#"` placeholders', $prompt);
