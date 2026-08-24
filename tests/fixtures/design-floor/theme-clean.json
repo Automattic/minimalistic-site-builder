@@ -1,0 +1,22 @@
+{
+  "version": 3,
+  "settings": {
+    "typography": {
+      "fontSizes": [
+        {"slug": "caption", "name": "Caption", "size": "0.875rem"},
+        {"slug": "body", "name": "Body", "size": "1.125rem"},
+        {"slug": "lead", "name": "Lead", "size": "1.375rem"},
+        {"slug": "heading", "name": "Heading", "size": "1.75rem"},
+        {"slug": "section-title", "name": "Section Title", "size": "clamp(2.25rem, 3vw, 3rem)"},
+        {"slug": "display", "name": "Display", "size": "clamp(3rem, 7vw, 6rem)"}
+      ]
+    }
+  },
+  "styles": {
+    "typography": {
+      "fontFamily": "var:preset|font-family|body",
+      "fontSize": "var:preset|font-size|body",
+      "lineHeight": "1.6"
+    }
+  }
+}
