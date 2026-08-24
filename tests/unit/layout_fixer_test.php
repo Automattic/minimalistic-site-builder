@@ -500,6 +500,21 @@ test('a wrapper holding more than copy keeps its measure', function () {
     assert_contains('"contentSize":"760px"', $r['markup']);
 });
 
+test('a wide derived contentSize leaves section measures alone (BIGR-870)', function () {
+    // theme-json asks for 800-900px, but a viewport-fluid design preview
+    // derives contentSize from its carrier instead and can land at the 1366px
+    // reference viewport. Stripping the wrapper there would run body copy the
+    // full width of the band, which is the case this rule exists to prevent.
+    $markup = '<!-- wp:group {"align":"full","layout":{"type":"constrained"}} --><div class="wp-block-group alignfull">'
+        . '<!-- wp:group {"layout":{"type":"constrained","contentSize":"720px"}} --><div class="wp-block-group">'
+        . '<!-- wp:heading --><h2 class="wp-block-heading">What we do</h2><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>Five core services.</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->';
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 1366.0);
+    assert_contains('"contentSize":"720px"', $r['markup'], 'the section keeps its readable measure');
+});
+
 test('layout fixer frees a grid boxed inside a narrow contentSize wrapper', function () {
     $markup = '<!-- wp:group {"align":"wide","layout":{"type":"constrained"}} --><div class="wp-block-group alignwide">'
         . '<!-- wp:group {"layout":{"type":"constrained","contentSize":"800px"}} --><div class="wp-block-group">'
