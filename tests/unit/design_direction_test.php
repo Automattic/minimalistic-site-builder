@@ -40,7 +40,7 @@ function designdir_type(): array
 {
     return [
         'heading' => [
-            'family' => 'Fraunces',
+            'family' => 'Spectral',
             'weights' => [700, 900],
             'italic' => false,
             'axes' => ['opsz' => ['min' => 9, 'max' => 144]],
@@ -94,7 +94,7 @@ test('design-direction expands a picked seed into structured designDirection.jso
     $written = $project->readJson('designDirection.json');
     assert_eq('Hearth & Grain', $written['title']);
     assert_eq('#FDF6EC', $written['palette']['base']);
-    assert_eq('Fraunces', $written['type']['heading']['family']);
+    assert_eq('Spectral', $written['type']['heading']['family']);
     assert_eq([700, 900], $written['type']['heading']['weights']);
     assert_eq('warm kodachrome color, soft golden light', $written['image_grade']);
     assert_eq('framed', $written['card_style']);
@@ -489,7 +489,7 @@ test('normalize keeps valid palette hexes, drops invalid ones, and requires a de
         ],
         'type'        => [
             'heading' => [
-                'family' => 'Fraunces',
+                'family' => 'Spectral',
                 'weights' => [900],
                 'italic' => false,
                 'axes' => [],
@@ -499,7 +499,7 @@ test('normalize keeps valid palette hexes, drops invalid ones, and requires a de
     ], 'cinematic-safe-zone');
     assert_eq('Forge & Flame', $direction['title']);
     assert_eq(['base' => '#FDF6EC', 'primary' => '#8A5A2B'], $direction['palette']);
-    assert_eq('Fraunces', $direction['type']['heading']['family']);
+    assert_eq('Spectral', $direction['type']['heading']['family']);
     assert_eq([900], $direction['type']['heading']['weights']);
     assert_eq('', $direction['type']['body']['family']);
     assert_eq('', $direction['image_grade']);
@@ -676,7 +676,7 @@ test('design-direction persists structured typography and warns when an axis is 
     $direction = designdir_direction();
     $direction['type'] = [
         'heading' => [
-            'family' => 'Fraunces',
+            'family' => 'Spectral',
             'weights' => [700, 900],
             'italic' => false,
             'axes' => ['opsz' => ['min' => 9, 'max' => 144]],
@@ -695,7 +695,7 @@ test('design-direction persists structured typography and warns when an axis is 
     (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
 
     $written = $project->readJson('designDirection.json');
-    assert_eq('Fraunces', $written['type']['heading']['family']);
+    assert_eq('Spectral', $written['type']['heading']['family']);
     assert_eq([700, 900], $written['type']['heading']['weights']);
     assert_eq(['opsz' => ['min' => 9, 'max' => 144]], $written['type']['heading']['axes']);
     assert_eq(true, $written['type']['body']['italic']);
@@ -743,7 +743,7 @@ test('format renders the narrative plus the structured fact list', function () {
         'palette'          => ['base' => '#F4F1EA', 'accent' => '#C33F2E'],
         'type'             => [
             'heading' => [
-                'family' => 'Fraunces',
+                'family' => 'Spectral',
                 'weights' => [900],
                 'italic' => false,
                 'axes' => [],
@@ -763,7 +763,7 @@ test('format renders the narrative plus the structured fact list', function () {
     ]);
     assert_contains('# Archivo Silencioso', $text);
     assert_contains('base #F4F1EA', $text);
-    assert_contains('heading — Fraunces; weights 900; body — Source Sans 3; weights 400', $text);
+    assert_contains('heading — Spectral; weights 900; body — Source Sans 3; weights 400', $text);
     assert_contains('monochrome documentary', $text);
     assert_true(!str_contains($text, 'editorial-split'), 'general format excludes hero recipe');
     assert_true(!str_contains($text, 'must stay hidden'), 'general format excludes concept seed');
@@ -777,7 +777,7 @@ test('format renders structured typography without losing its design character',
         'description' => 'Print-led warmth.',
         'type' => [
             'heading' => [
-                'family' => 'Fraunces',
+                'family' => 'Spectral',
                 'weights' => [700, 900],
                 'italic' => false,
                 'axes' => ['opsz' => ['min' => 9.0, 'max' => 144.0]],
@@ -793,7 +793,7 @@ test('format renders structured typography without losing its design character',
         ],
     ]);
 
-    assert_contains('heading — Fraunces; weights 700/900; opsz 9..144; swaggering display serif', $text);
+    assert_contains('heading — Spectral; weights 700/900; opsz 9..144; swaggering display serif', $text);
     assert_contains('body — Source Serif 4; weights 400/600; true italics; warm editorial text', $text);
 });
 
@@ -1267,7 +1267,7 @@ test('theme-json injects the design direction into its prompt', function () {
         'palette'     => ['base' => '#FDF6EC'],
         'type'        => [
             'heading' => [
-                'family' => 'Fraunces',
+                'family' => 'Spectral',
                 'weights' => [900],
                 'italic' => false,
                 'axes' => [],
@@ -1293,7 +1293,7 @@ test('theme-json injects the design direction into its prompt', function () {
     assert_contains('Editorial-magazine', $llm->calls[0]['prompt']);
     assert_contains('base #FDF6EC', $llm->calls[0]['prompt'], 'structured palette reaches the theme prompt');
     assert_contains(
-        'heading — Fraunces; weights 900',
+        'heading — Spectral; weights 900',
         $llm->calls[0]['prompt'],
         'structured type reaches the theme prompt',
     );

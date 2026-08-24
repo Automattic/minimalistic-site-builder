@@ -18,6 +18,12 @@ The seed also committed two traditions. They are binding in the same way its sen
 - **Design tradition**: {{register}} — the visual language the whole direction speaks in. Every later choice (palette, spatial rhythm, ornament, imagery) must be one a designer working in this tradition would make.
 - **Letterform tradition**: {{type_register}} — the class of type this site is set in. Choose `type.heading` and `type.body` from inside it. This is a separate commitment from the design tradition: do not collapse it back onto the mood, and do not quietly substitute a neutral face because it feels safer.
 
+## The Use Scene — decide light or dark from it, not from the category
+
+Before you choose a ground, write one sentence to yourself naming the physical scene: WHO uses this site, WHERE, and under WHAT ambient light. A late-night ordering page, a gallery viewed on a phone in daylight, a workshop screen under fluorescents, a reference read at a desk for an hour — each of those forces a different answer. Let that sentence decide light or dark.
+
+Light and dark are never category defaults. "Restaurants are dark", "blogs are light", "portfolios are cream" are the associations this instruction exists to break. A ground you can justify from the scene is a decision; a ground that matches what the category usually ships is a reflex.
+
 ## Design Grounding
 Think like a specialist designer hired for this exact brief. Ground the direction in real-world visual traditions connected to the site's topic — the materials, spaces, cultural references, and design conventions of its industry. A Georgian restaurant evokes Caucasus earth tones and ornate patterns; a photojournalist portfolio evokes high-contrast editorial layouts and documentary rawness. The direction should feel researched, not generated from a generic style menu.
 
@@ -38,6 +44,18 @@ Do NOT produce a direction that feels like generic AI output:
 - **Generic fonts**: Inter, Roboto, Arial, Open Sans, system fonts — never mention these
 - **Reflex fonts**: Archivo, Archivo Black, Playfair Display, Cormorant Garamond and Fraunces are not banned, but they are the five this brief will pull you toward hardest — across audited builds those five set more than half of all generated sites, on every kind of topic. Reach for one only when the committed letterform tradition genuinely lands there and you can say what makes it right for THIS site. Google Fonts ships hundreds of families in every tradition; a face chosen because it is familiar is the typographic version of a reflexive warm cream ground.
 - **Topic-agnostic styles**: If you could swap the site topic and the direction still works unchanged, it's too generic
+
+## Calibration — the three looks every model lands on
+
+Generated interfaces cluster on a few looks regardless of subject:
+
+1. Warm cream ground, high-contrast serif display, terracotta or signal-red accent.
+2. Near-black ground, one neon accent, glowing edges.
+3. Broadsheet-editorial hairlines, italic display serif, small tracked mono labels.
+
+All three are legitimate when the brief asks for them. Where the brief leaves the aesthetic free, landing in one means the self-check failed. Two tests: if someone could guess your direction from the site's CATEGORY alone, rework it — and if they could guess it from the category plus the obvious avoidance ("not cream, so near-black"), rework it too.
+
+A warm, bookish, or hand-made subject does not soften this. Book cloth, thread, jackets, endpapers and shelf ephemera span the whole saturated spectrum; cream paper is the smallest corner of that world. Landing on cream-plus-serif for a bakery or a bookshop is the default wearing the subject's clothes.
 
 ## Output Format
 

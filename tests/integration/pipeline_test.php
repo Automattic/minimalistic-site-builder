@@ -80,7 +80,7 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
         'palette' => ['base' => '#FDF6EC', 'contrast' => '#2B2118', 'primary' => '#8A5A2B', 'secondary' => '#CC9988', 'accent' => '#E08A3C'],
         'type' => [
             'heading' => [
-                'family' => 'Fraunces',
+                'family' => 'Literata',
                 'weights' => [700, 900],
                 'italic' => false,
                 'axes' => [],
@@ -111,7 +111,7 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
                 ['slug' => 'accent', 'color' => '#e08a3c', 'name' => 'Accent'],
             ]],
             'typography' => ['fontFamilies' => [
-                ['slug' => 'heading', 'fontFamily' => 'Fraunces, serif', 'name' => 'Heading'],
+                ['slug' => 'heading', 'fontFamily' => 'Literata, serif', 'name' => 'Heading'],
                 ['slug' => 'body', 'fontFamily' => 'Source Sans 3, sans-serif', 'name' => 'Body'],
             ]],
         ],
@@ -452,7 +452,7 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     // in no markup, only in designDirection.json, yet their faces must ship.
     $bundledSrcs = implode(' ', $bundledFaces);
     assert_contains(
-        'fraunces-900',
+        'literata-900',
         $bundledSrcs,
         'direction-selected heading weight is bundled without explicit markup usage',
     );

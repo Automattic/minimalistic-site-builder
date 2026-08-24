@@ -8,6 +8,8 @@ use Automattic\SiteBuild\CardStyle;
 use Automattic\SiteBuild\ConceptSeeds;
 use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\Env;
+use Automattic\SiteBuild\FontCatalog;
+use Automattic\SiteBuild\FontMonoculture;
 use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\GroundTint;
@@ -272,6 +274,17 @@ final class DesignDirectionStep implements Step
             Narrator::write('  [design-direction] warning: delivered through ' . count($warnings)
                 . " generated-content degradation(s) (recorded in warnings.json)\n");
         }
+
+        // Naming the reflex faces in the prompt moved us off them and straight
+        // onto the next tier — prose is a suggestion the model may decline.
+        // This is the floor under it, and it runs here rather than in
+        // normalize() because it needs the shipped catalog off disk.
+        $direction = self::substituteMonocultureFonts(
+            $direction,
+            (string) ($specData['slug'] ?? $project->slug()),
+            FontCatalog::load(),
+            $warnings,
+        );
 
         $report = [
             "Assigned hero recipe: {$recipe}",
@@ -812,6 +825,45 @@ final class DesignDirectionStep implements Step
             $warnings,
             'unsupported generated card treatment replaced by default',
         );
+    }
+
+    /**
+     * Move any type slot off a monoculture face, keeping its category.
+     *
+     * `axes` is cleared alongside the swap: an `opsz` range was committed for
+     * the family the model named, and carrying it onto a different face would
+     * promise an optical-size axis the replacement may not have. Weights need
+     * no such care — FontCatalog::faces() already resolves to the nearest
+     * weight the delivered family actually ships.
+     *
+     * Pure given the catalog — unit-testable.
+     *
+     * @param array<string,mixed> $direction
+     * @param list<string> $warnings
+     * @return array<string,mixed>
+     */
+    public static function substituteMonocultureFonts(
+        array $direction,
+        string $seed,
+        FontCatalog $catalog,
+        array &$warnings = [],
+    ): array {
+        foreach (['heading', 'body', 'accent'] as $slot) {
+            $family = $direction['type'][$slot]['family'] ?? null;
+            if (!is_string($family) || trim($family) === '') {
+                continue;
+            }
+            $replacement = FontMonoculture::substitute(trim($family), $seed, $catalog, $slot);
+            if ($replacement === null) {
+                continue;
+            }
+            $direction['type'][$slot]['family'] = $replacement;
+            $direction['type'][$slot]['axes'] = [];
+            $warnings[] = 'designDirection.json: type.' . $slot . '.family authored value '
+                . Warnings::value($family) . '; delivered ' . Warnings::value($replacement)
+                . '; disposition substituted a monoculture face for one outside it, category preserved';
+        }
+        return $direction;
     }
 
     /**
