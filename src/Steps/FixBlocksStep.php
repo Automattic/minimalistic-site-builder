@@ -10,6 +10,7 @@ use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\BlockSerializer\AlignmentClassLoss;
 use Automattic\SiteBuild\BlockSerializer\AlignmentClassLossDetector;
 use Automattic\SiteBuild\BlockSerializer\Repair;
+use Automattic\SiteBuild\ImageCaptions;
 use Automattic\SiteBuild\LayoutFixer;
 use Automattic\SiteBuild\PhotographySite;
 use Automattic\SiteBuild\PhpBlockFixer;
@@ -97,6 +98,9 @@ final class FixBlocksStep implements Step
             $listNotes = $listReport['notes'];
             $listWarnings = $listReport['warnings'];
             $listBlocked = $listReport['blocked'];
+            $captionReport = self::stripImageCaptions($project, self::failurePaths($failedFiles));
+            $captionNotes = $captionReport['notes'];
+            $captionWarnings = $captionReport['warnings'];
             $layoutNotes = self::normalizeLayouts(
                 $project,
                 [],
@@ -128,6 +132,8 @@ final class FixBlocksStep implements Step
             $layoutNotes = self::withoutFailedLayoutNotes($layoutNotes, self::failurePaths($failedFiles));
             $listNotes = self::withoutFailedLayoutNotes($listNotes, self::failurePaths($failedFiles));
             $listWarnings = self::withoutFailedLayoutNotes($listWarnings, self::failurePaths($failedFiles));
+            $captionNotes = self::withoutFailedLayoutNotes($captionNotes, self::failurePaths($failedFiles));
+            $captionWarnings = self::withoutFailedLayoutNotes($captionWarnings, self::failurePaths($failedFiles));
         } catch (\RuntimeException $e) {
             self::restoreThemeFiles($project, $beforeInitialPass);
             $project->writeText('logs/' . self::LOG_FILE, $e->getMessage() . "\n");
@@ -166,6 +172,8 @@ final class FixBlocksStep implements Step
                 $layoutNotes = self::withoutFailedLayoutNotes($layoutNotes, self::failurePaths($failedFiles));
                 $listNotes = self::withoutFailedLayoutNotes($listNotes, self::failurePaths($failedFiles));
                 $listWarnings = self::withoutFailedLayoutNotes($listWarnings, self::failurePaths($failedFiles));
+                $captionNotes = self::withoutFailedLayoutNotes($captionNotes, self::failurePaths($failedFiles));
+                $captionWarnings = self::withoutFailedLayoutNotes($captionWarnings, self::failurePaths($failedFiles));
             }
         } catch (\RuntimeException $e) {
             // The public step is one transaction even though structural
@@ -188,6 +196,11 @@ final class FixBlocksStep implements Step
             $summary .= "\n[list] WARNING: " . count($listWarnings)
                 . " empty bare list item(s) removed (recorded in warnings.json):\n  "
                 . implode("\n  ", $listWarnings);
+        }
+        if ($captionNotes !== []) {
+            $summary .= "\n[captions] " . count($captionNotes)
+                . " image caption(s) removed outside galleries (recorded in warnings.json):\n  "
+                . implode("\n  ", $captionNotes);
         }
         if ($layoutNotes !== []) {
             $summary .= "\n[layout] " . count($layoutNotes) . " width/rhythm fix(es):\n  " . implode("\n  ", $layoutNotes);
@@ -275,6 +288,7 @@ final class FixBlocksStep implements Step
         $paragraphStyleWarnings = self::degradedParagraphStyles($deliveredSummary);
         $warnings = array_merge(
             $listWarnings,
+            $captionWarnings,
             $paragraphStyleWarnings,
             $shapeDeliveryWarnings,
             $shapeRollbackWarnings,
@@ -423,6 +437,42 @@ final class FixBlocksStep implements Step
             }
         }
         return ['notes' => $notes, 'warnings' => $warnings, 'blocked' => $blocked];
+    }
+
+    /**
+     * Strip image captions outside galleries from every part/template.
+     *
+     * Mirrors liftBareListItems(): the removed caption is authored
+     * visitor-facing text, so it earns a durable warnings.json row rather than
+     * a log line (AGENTS.md rung 3 -> 4). Runs before the block fixer, which
+     * round-trips a core/image caption between its element and its attribute.
+     *
+     * @param list<string> $excluded fixer-relative paths whose step
+     *        transaction has already been abandoned
+     * @return array{notes:list<string>, warnings:list<string>}
+     */
+    public static function stripImageCaptions(Project $project, array $excluded = []): array
+    {
+        $notes = [];
+        $warnings = [];
+        $excluded = array_fill_keys($excluded, true);
+        foreach ($project->themeFiles() as $rel) {
+            if (isset($excluded[$rel])) {
+                continue;
+            }
+            $markup = $project->readText('theme/' . $rel);
+            $result = ImageCaptions::stripOutsideGalleries($markup);
+            if ($result['markup'] !== $markup) {
+                $project->writeText('theme/' . $rel, $result['markup']);
+            }
+            foreach ($result['notes'] as $note) {
+                $notes[] = "{$rel}: {$note}";
+            }
+            foreach ($result['warnings'] as $warning) {
+                $warnings[] = "{$rel}: {$warning}";
+            }
+        }
+        return ['notes' => $notes, 'warnings' => $warnings];
     }
 
     /**
