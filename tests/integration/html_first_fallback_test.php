@@ -23,7 +23,20 @@ test('one failed inner design uses blocks-path sections while sibling pages stay
             ['title' => 'About', 'slug' => 'about', 'purpose' => 'Explain the bakery', 'children' => []],
             ['title' => 'Contact', 'slug' => 'contact', 'purpose' => 'Help visitors plan a trip', 'children' => []],
         ];
-        html_first_queue_success($llm, html_first_site_spec($pages), html_first_home_body());
+        $preview = str_replace(
+            '<nav aria-label="Primary"></nav>',
+            '<nav aria-label="Primary">'
+                . '<a href="/about/">About</a>'
+                . '<a href="/contact/">Contact</a>'
+                . '</nav>',
+            html_first_preview_document(),
+        );
+        html_first_queue_success(
+            $llm,
+            html_first_site_spec($pages),
+            html_first_home_body(),
+            $preview,
+        );
         $llm->queueText(
             '<main><section id="about-intro"><h1>About</h1><p>HTML-FIRST-ABOUT</p></section></main>',
         );
