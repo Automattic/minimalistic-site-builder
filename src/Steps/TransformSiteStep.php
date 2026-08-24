@@ -1182,7 +1182,7 @@ final class TransformSiteStep implements Step
             if ($area === 'header') {
                 $input += [
                     'hero_brief' => 'HTML-first homepage',
-                    'nav_rule' => SectionsStep::navRuleFor(count($pages), 'standard-row'),
+                    'nav_rule' => SectionsStep::navRuleFor(count($pages)),
                     'archetype_assignment' => 'standard-row',
                 ];
                 $inputs[$area] = $input;
