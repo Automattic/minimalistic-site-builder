@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\HeaderNav;
+use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\Steps\HeaderHeroStep;
 use Automattic\SiteBuild\AboveFoldContract;
 
@@ -642,4 +643,90 @@ test('HeaderNav inserts navigation into a row, never stacked under the wordmark 
         'the row wraps the wordmark and the new nav',
     );
     assert_contains('"url":"/menu/"', $result['markup']);
+});
+
+test('HeaderNav inserts navigation beside the whole nested identity lockup', function () {
+    // This is the mode-aware fallback shape when the header displays a
+    // tagline: the title and tagline form one identity unit inside the wide
+    // header row. Navigation belongs beside that unit, not inside it.
+    $markup = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:group {"align":"wide","layout":{"type":"flex","flexWrap":"nowrap","justifyContent":"space-between","verticalAlignment":"center"}} -->'
+        . '<div class="wp-block-group alignwide">'
+        . '<!-- wp:group {"style":{"spacing":{"blockGap":"0"}},"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group"><!-- wp:site-title /--><!-- wp:site-tagline /--></div>'
+        . '<!-- /wp:group -->'
+        . '</div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->';
+
+    $result = HeaderNav::withCompleteInnerPages($markup, header_nav_pages());
+    $document = BlockMarkup::parse($result['markup']);
+    $wideRow = null;
+    foreach ($document->indices() as $index) {
+        if ($document->name($index) === 'group' && (($document->attrs($index) ?? [])['align'] ?? '') === 'wide') {
+            $wideRow = $index;
+            break;
+        }
+    }
+
+    assert_true($wideRow !== null, 'the existing wide header row survives');
+    $rowChildren = array_map(
+        static fn (int $index): string => $document->name($index),
+        $document->children($wideRow),
+    );
+    assert_eq(['group', 'navigation'], $rowChildren, 'identity unit and navigation are row siblings');
+
+    $identity = $document->children($wideRow)[0];
+    $identityChildren = array_map(
+        static fn (int $index): string => $document->name($index),
+        $document->children($identity),
+    );
+    assert_eq(['site-title', 'site-tagline'], $identityChildren, 'the title/tagline lockup stays intact');
+});
+
+test('HeaderNav keeps a nested logo and title unit together when inserting navigation', function () {
+    $markup = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:group {"align":"wide","layout":{"type":"flex","justifyContent":"space-between"}} -->'
+        . '<div class="wp-block-group alignwide">'
+        . '<!-- wp:group {"layout":{"type":"flex"}} --><div class="wp-block-group">'
+        . '<!-- wp:site-logo /-->'
+        . '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">'
+        . '<!-- wp:site-title /--><!-- wp:site-tagline /-->'
+        . '</div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->';
+
+    $result = HeaderNav::withCompleteInnerPages($markup, header_nav_pages());
+    $document = BlockMarkup::parse($result['markup']);
+    $wideRow = null;
+    foreach ($document->indices() as $index) {
+        if ($document->name($index) === 'group' && (($document->attrs($index) ?? [])['align'] ?? '') === 'wide') {
+            $wideRow = $index;
+            break;
+        }
+    }
+
+    assert_true($wideRow !== null);
+    assert_eq(
+        ['group', 'navigation'],
+        array_map(
+            static fn (int $index): string => $document->name($index),
+            $document->children($wideRow),
+        ),
+        'navigation is outside the complete logo/title/tagline lockup',
+    );
+    $identity = $document->children($wideRow)[0];
+    $identityEnd = $document->endOffset($identity);
+    assert_true($identityEnd !== null, 'identity lockup has a provable end');
+    $identityMarkup = substr(
+        $result['markup'],
+        $document->openingOffset($identity),
+        $identityEnd - $document->openingOffset($identity),
+    );
+    assert_contains('wp:site-logo', $identityMarkup);
+    assert_contains('wp:site-title', $identityMarkup);
+    assert_contains('wp:site-tagline', $identityMarkup);
+    assert_true(!str_contains($identityMarkup, 'wp:navigation'), 'navigation did not split the lockup');
 });

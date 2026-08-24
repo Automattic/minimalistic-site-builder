@@ -237,7 +237,8 @@ final class HeaderNav
             ];
         }
 
-        $insertAt = $document->endOffset($identity);
+        $identityUnit = self::identityUnitIndex($document, $identity);
+        $insertAt = $document->endOffset($identityUnit);
         if ($insertAt === null) {
             return [
                 'markup' => $markup . $navMarkup,
@@ -250,9 +251,9 @@ final class HeaderNav
         // would ship the wordmark-above-nav masthead this pass exists to
         // remove — wrap the pair in a flex row instead.
         $note = "inserted header navigation with inner-page links ({$labelList})";
-        if (!self::laysOutAsRow($document, $identity)) {
+        if (!self::laysOutAsRow($document, $identityUnit)) {
             $markup = substr_replace($markup, $navMarkup . '</div><!-- /wp:group -->', $insertAt, 0);
-            $markup = substr_replace($markup, self::ROW_OPEN, $document->openingOffset($identity), 0);
+            $markup = substr_replace($markup, self::ROW_OPEN, $document->openingOffset($identityUnit), 0);
             $note .= ' in a single row with the identity';
         } else {
             $markup = substr_replace($markup, $navMarkup, $insertAt, 0);
@@ -587,6 +588,67 @@ final class HeaderNav
             $last = $index;
         }
         return $last;
+    }
+
+    /**
+     * Promote the last identity leaf to its complete lockup. A fallback header
+     * may nest title and tagline in a constrained Group, or nest that pair
+     * beside a logo. Navigation belongs beside the whole unit in the header
+     * row, never between those identity pieces.
+     */
+    private static function identityUnitIndex(BlockMarkup $document, int $identity): int
+    {
+        $unit = $identity;
+        while (($parent = $document->parent($unit)) !== null) {
+            if (self::isHeaderRowContainer($document, $parent)) {
+                break;
+            }
+            // Keep the root containment intact. If no row exists, the caller
+            // wraps this highest nested identity unit and the nav inside it.
+            if ($document->parent($parent) === null || !self::containsOnlyIdentity($document, $parent)) {
+                break;
+            }
+            $unit = $parent;
+        }
+        return $unit;
+    }
+
+    private static function isHeaderRowContainer(BlockMarkup $document, int $index): bool
+    {
+        if (self::canonicalName($document->name($index)) !== 'group') {
+            return false;
+        }
+        $attrs = $document->attrs($index) ?? [];
+        $layout = $attrs['layout'] ?? null;
+        if (!is_array($layout) || ($layout['type'] ?? '') !== 'flex') {
+            return false;
+        }
+        if (($layout['orientation'] ?? 'horizontal') === 'vertical') {
+            return false;
+        }
+        return ($attrs['align'] ?? '') === 'wide'
+            || ($layout['justifyContent'] ?? '') === 'space-between';
+    }
+
+    private static function containsOnlyIdentity(BlockMarkup $document, int $index): bool
+    {
+        if (self::canonicalName($document->name($index)) !== 'group') {
+            return false;
+        }
+        $children = $document->children($index);
+        if ($children === []) {
+            return false;
+        }
+        foreach ($children as $child) {
+            $name = self::canonicalName($document->name($child));
+            if (in_array($name, ['site-title', 'site-logo', 'site-tagline'], true)) {
+                continue;
+            }
+            if ($name !== 'group' || !self::containsOnlyIdentity($document, $child)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
