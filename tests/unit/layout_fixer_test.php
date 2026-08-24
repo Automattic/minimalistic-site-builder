@@ -458,6 +458,48 @@ test('layout fixer widens grid rows sitting at content width inside a wide band'
     assert_contains('"contentSize":"860px"', $r['markup']);
 });
 
+test('a section text stack loses a measure that differs from the theme (BIGR-870)', function () {
+    // The demo generation shipped 620px, 680px, 720px, 760px and the theme's
+    // own 840px across five pages, so the text column moved every time a
+    // section changed.
+    $markup = '<!-- wp:group {"align":"full","layout":{"type":"constrained"}} --><div class="wp-block-group alignfull">'
+        . '<!-- wp:group {"layout":{"type":"constrained","contentSize":"720px"}} --><div class="wp-block-group">'
+        . '<!-- wp:heading --><h2 class="wp-block-heading">What we do</h2><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>Five core services.</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->';
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 840.0);
+    assert_true(!str_contains($r['markup'], 'contentSize'), 'the section reads at the theme measure');
+    assert_contains('720px', implode(' ', $r['notes']));
+});
+
+test('hero copy keeps its own measure because HeroHeadlineFit reads it', function () {
+    // normalize-layout runs before header-hero, so stripping this would hand
+    // HeroHeadlineFit a different number than the generation chose. 700px is
+    // above restoreCoverMeasure's squeeze floor, so that rule leaves it too.
+    $markup = '<!-- wp:cover {"url":"/x.jpg"} --><div class="wp-block-cover">'
+        . '<!-- wp:group {"layout":{"type":"constrained","contentSize":"700px"}} --><div class="wp-block-group">'
+        . '<!-- wp:heading --><h1 class="wp-block-heading">Demolition</h1><!-- /wp:heading -->'
+        . '</div><!-- /wp:group -->'
+        . '</div><!-- /wp:cover -->';
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 840.0);
+    assert_contains('"contentSize":"700px"', $r['markup'], 'hero copy measure survives');
+});
+
+test('a wrapper holding more than copy keeps its measure', function () {
+    // The narrowed wrapper is for copy. Once something else shares it the
+    // number is a component decision, not the section's reading column. A
+    // grid there is freeGridsFromNarrowWrappers' case, so use an image.
+    $markup = '<!-- wp:group {"align":"full","layout":{"type":"constrained"}} --><div class="wp-block-group alignfull">'
+        . '<!-- wp:group {"layout":{"type":"constrained","contentSize":"760px"}} --><div class="wp-block-group">'
+        . '<!-- wp:heading --><h2 class="wp-block-heading">Services</h2><!-- /wp:heading -->'
+        . '<!-- wp:image --><figure class="wp-block-image"><img src="/a.jpg" alt="a"/></figure><!-- /wp:image -->'
+        . '</div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->';
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 840.0);
+    assert_contains('"contentSize":"760px"', $r['markup']);
+});
+
 test('layout fixer frees a grid boxed inside a narrow contentSize wrapper', function () {
     $markup = '<!-- wp:group {"align":"wide","layout":{"type":"constrained"}} --><div class="wp-block-group alignwide">'
         . '<!-- wp:group {"layout":{"type":"constrained","contentSize":"800px"}} --><div class="wp-block-group">'
