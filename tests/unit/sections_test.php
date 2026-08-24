@@ -2,8 +2,10 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\AboveFoldContract;
+use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\FooterComposition;
 use Automattic\SiteBuild\HeroBlueprint;
+use Automattic\SiteBuild\HeaderNav;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Steps\SectionsStep;
@@ -1095,6 +1097,11 @@ test('chrome nav rules follow the page count: anchors for one page, inner pages 
     assert_contains('NEVER include the homepage in `wp:navigation`', $reqs['header']['prompt']);
     assert_contains('Do NOT use `<!-- wp:page-list /-->`', $reqs['header']['prompt']);
     assert_contains('SITE PAGES except the front page', $reqs['header']['prompt']);
+    assert_contains('EVERY SITE PAGES entry except the front page', $reqs['header']['prompt']);
+    assert_contains('omitting any inner page is forbidden', $reqs['header']['prompt']);
+    assert_contains('one horizontal row (identity start, nav end)', $reqs['header']['prompt']);
+    assert_contains('NEVER split links onto both sides of the wordmark', $reqs['header']['prompt']);
+    assert_contains('NEVER stack the wordmark above the nav', $reqs['header']['prompt']);
     assert_contains('SITE PAGES except the front page', $reqs['footer']['prompt']);
     assert_contains('NEVER include Home', $reqs['footer']['prompt']);
     assert_contains('never a bare `wp:page-list`', $reqs['footer']['prompt']);
@@ -1358,4 +1365,77 @@ test('every page-plan request is told which surface its closing section must avo
         assert_contains($rule, sections_request_text($request), "page '{$slug}' carries the footer surface rule");
     }
     exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('the deterministic header fallback is one horizontal row, not a stack (BIGR-872)', function () {
+    $header = SectionsStep::fallbackChrome('header');
+    $document = BlockMarkup::parse($header);
+    $roots = array_values(array_filter(
+        $document->indices(),
+        static fn (int $index): bool => $document->parent($index) === null,
+    ));
+    assert_eq(1, count($roots), 'fallback has one root');
+    $root = $roots[0];
+    assert_eq('constrained', ($document->attrs($root) ?? [])['layout']['type'] ?? null);
+
+    $rootChildren = $document->children($root);
+    assert_eq(1, count($rootChildren), 'the constrained root carries one header row');
+    $row = $rootChildren[0];
+    $rowAttrs = $document->attrs($row) ?? [];
+    assert_eq('wide', $rowAttrs['align'] ?? null, 'the header row uses the wide content band');
+    assert_eq('flex', $rowAttrs['layout']['type'] ?? null, 'identity and nav share a row');
+    assert_eq('nowrap', $rowAttrs['layout']['flexWrap'] ?? null, 'the desktop row does not wrap');
+    assert_eq('space-between', $rowAttrs['layout']['justifyContent'] ?? null);
+
+    $completed = HeaderNav::withCompleteInnerPages($header, [
+        ['title' => 'Home', 'slug' => 'home', 'path' => '/', 'front' => true],
+        ['title' => 'About', 'slug' => 'about', 'path' => '/about/', 'front' => false],
+    ])['markup'];
+    $completedDocument = BlockMarkup::parse($completed);
+    $completedRoots = array_values(array_filter(
+        $completedDocument->indices(),
+        static fn (int $index): bool => $completedDocument->parent($index) === null,
+    ));
+    $completedRow = $completedDocument->children($completedRoots[0])[0];
+    assert_eq(
+        ['site-title', 'navigation'],
+        array_map(
+            static fn (int $index): string => $completedDocument->name($index),
+            $completedDocument->children($completedRow),
+        ),
+        'completion keeps identity and navigation inside the wide row',
+    );
+
+    // The footer keeps its stacked constrained shape.
+    assert_contains('"type":"constrained"', SectionsStep::fallbackChrome('footer'));
+});
+
+test('the header nav rule keeps its row shape out of the stacked archetypes (BIGR-872)', function () {
+    $row = SectionsStep::navRuleFor(4, 'standard-row');
+    assert_contains('EVERY SITE PAGES entry except the front page', $row);
+    assert_contains('one horizontal row (identity start, nav end)', $row);
+
+    foreach (['centered-masthead', 'split-nav'] as $archetype) {
+        $rule = SectionsStep::navRuleFor(4, $archetype);
+        assert_contains(
+            'EVERY SITE PAGES entry except the front page',
+            $rule,
+            "{$archetype} still owes every inner page",
+        );
+        assert_true(
+            !str_contains($rule, 'one horizontal row'),
+            "{$archetype} must not be told to use one row: its catalog form is not one",
+        );
+        assert_true(
+            !str_contains($rule, 'NEVER stack the wordmark above the nav'),
+            "{$archetype} must not be told never to stack",
+        );
+        assert_true(
+            !str_contains($rule, 'NEVER split links onto both sides of the wordmark'),
+            "{$archetype} must not be told never to split",
+        );
+    }
+
+    // One page still overrides everything: no page-list, no self link.
+    assert_contains('this site is ONE page', SectionsStep::navRuleFor(1, 'split-nav'));
 });
