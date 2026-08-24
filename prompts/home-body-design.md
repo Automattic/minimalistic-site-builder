@@ -48,6 +48,7 @@ There are no forms or form controls, no SVG, no custom elements, and no JavaScri
 Use `<button>` only for a real non-scripted action. Prefer an `<a>` link styled as a button for navigation or a CTA.
 
 Every image needs meaningful `alt` text written as a usable image generation prompt: name subject, setting, composition, lighting, palette or grade, and framing. Keep readable words and brand names out of generated images; render them as HTML text.
+- Never put a `<figcaption>` on an image. Captions belong only to a genuine gallery of photographs, and even there they are optional — the surrounding copy carries the detail.
 
 ## Responsive contract
 
