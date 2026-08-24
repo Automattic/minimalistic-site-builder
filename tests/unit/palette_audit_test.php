@@ -82,6 +82,7 @@ test('palette-audit with no args prints usage on stderr and exits 1', function (
     assert_eq(1, $run['exit'], $run['stdout'] . $run['stderr']);
     assert_contains('Usage: php bin/palette-audit.php --fixtures', $run['stderr']);
     assert_contains('Usage: php bin/palette-audit.php --projects [dir]', $run['stderr']);
+    assert_contains('Usage: php bin/palette-audit.php --corpus [dir]', $run['stderr']);
     assert_contains('Usage: php bin/palette-audit.php <slug>', $run['stderr']);
 });
 

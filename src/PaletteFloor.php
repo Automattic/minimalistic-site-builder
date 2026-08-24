@@ -141,12 +141,15 @@ final class PaletteFloor
      */
     public static function repair(array $palette, array &$warnings): array
     {
-        $out = $palette;
-        $out = self::repairContrast($out, $warnings);
-        $out = self::repairHue($out, $warnings);
-        $out = self::repairChroma($out, $warnings);
-        $out = self::repairContrast($out, $warnings);
-        self::warnResiduals($out, $warnings);
+        $authored = $palette;
+        /** @var array<string, list<array{kind:string,text:string}>> $notes */
+        $notes = [];
+        $out = self::repairContrast($palette, $notes);
+        $out = self::repairHue($out, $notes);
+        $out = self::repairChroma($out, $notes);
+        $out = self::repairContrast($out, $notes);
+        self::warnResiduals($out, $notes);
+        self::emitNotes($authored, $out, $notes, $warnings);
         return $out;
     }
 
@@ -213,10 +216,10 @@ final class PaletteFloor
 
     /**
      * @param array<string,string> $palette
-     * @param list<string>         $warnings
+     * @param array<string, list<array{kind:string,text:string}>> $notes
      * @return array<string,string>
      */
-    private static function repairContrast(array $palette, array &$warnings): array
+    private static function repairContrast(array $palette, array &$notes): array
     {
         $base = self::hexOf($palette, 'base');
         if ($base === null) {
@@ -240,12 +243,12 @@ final class PaletteFloor
                     continue;
                 }
                 $palette[$role] = $fixed;
-                $warnings[] = self::warning(
+                self::note(
+                    $notes,
                     $role,
-                    $hex,
-                    $fixed,
+                    'repaired',
                     sprintf(
-                        'repaired — contrast floor %s:1 on base, lightness moved at fixed hue',
+                        'contrast floor %s:1 on base, lightness moved at fixed hue',
                         self::floorLabel($floor),
                     ),
                 );
@@ -255,29 +258,26 @@ final class PaletteFloor
             // "repaired" warning on a hex that still fails is how
             // azure-island's lime became white at 1.66:1.
             $achieved = self::bestAchievedRatio($hex, $base, $fixed);
-            $row = self::warning(
+            self::note(
+                $notes,
                 $role,
-                $hex,
-                $hex,
+                'unrepaired',
                 sprintf(
                     'unrepaired — contrast floor %s:1 on base unreachable, best achieved %s:1',
                     self::floorLabel($floor),
                     self::ratioLabel($achieved),
                 ),
             );
-            if (!in_array($row, $warnings, true)) {
-                $warnings[] = $row;
-            }
         }
         return $palette;
     }
 
     /**
      * @param array<string,string> $palette
-     * @param list<string>         $warnings
+     * @param array<string, list<array{kind:string,text:string}>> $notes
      * @return array<string,string>
      */
-    private static function repairHue(array $palette, array &$warnings): array
+    private static function repairHue(array $palette, array &$notes): array
     {
         $primary = self::hexOf($palette, 'primary');
         $accent = self::hexOf($palette, 'accent');
@@ -316,12 +316,12 @@ final class PaletteFloor
             return $palette;
         }
         $palette['accent'] = $fixed;
-        $warnings[] = self::warning(
+        self::note(
+            $notes,
             'accent',
-            $accent,
-            $fixed,
+            'repaired',
             sprintf(
-                'repaired — hue separation, accent rotated to %.0f degrees from primary; lightness and chroma held',
+                'hue separation, accent rotated to %.0f degrees from primary; lightness and chroma held',
                 self::HUE_SEPARATION,
             ),
         );
@@ -330,10 +330,10 @@ final class PaletteFloor
 
     /**
      * @param array<string,string> $palette
-     * @param list<string>         $warnings
+     * @param array<string, list<array{kind:string,text:string}>> $notes
      * @return array<string,string>
      */
-    private static function repairChroma(array $palette, array &$warnings): array
+    private static function repairChroma(array $palette, array &$notes): array
     {
         foreach (['primary', 'secondary', 'accent'] as $role) {
             $hex = self::hexOf($palette, $role);
@@ -354,11 +354,11 @@ final class PaletteFloor
                 continue;
             }
             $palette[$role] = $fixed;
-            $warnings[] = self::warning(
+            self::note(
+                $notes,
                 $role,
-                $hex,
-                $fixed,
-                'repaired — chroma ceiling, chroma reduced at extreme luminance; hue and luminance held',
+                'repaired',
+                'chroma ceiling, chroma reduced at extreme luminance; hue and luminance held',
             );
         }
         return $palette;
@@ -491,31 +491,87 @@ final class PaletteFloor
      * @param array<string,string> $palette
      * @param list<string>         $warnings
      */
-    private static function warnResiduals(array $palette, array &$warnings): void
+    /**
+     * @param array<string, list<array{kind:string,text:string}>> $notes
+     */
+    private static function note(array &$notes, string $role, string $kind, string $text): void
     {
-        $covered = [];
-        foreach ($warnings as $row) {
-            if (preg_match('/path="palette\\.([^"]+)".*disposition=unrepaired/s', $row, $match) !== 1) {
+        foreach ($notes[$role] ?? [] as $item) {
+            if ($item['kind'] === $kind && $item['text'] === $text) {
+                return;
+            }
+        }
+        $notes[$role][] = ['kind' => $kind, 'text' => $text];
+    }
+
+    /**
+     * One warning per role: authored = hex entering repair(), delivered =
+     * hex leaving it. Pass reasons accumulate into one disposition.
+     *
+     * @param array<string,string> $authored
+     * @param array<string,string> $out
+     * @param array<string, list<array{kind:string,text:string}>> $notes
+     * @param list<string> $warnings
+     */
+    private static function emitNotes(array $authored, array $out, array $notes, array &$warnings): void
+    {
+        foreach ($notes as $role => $items) {
+            $from = self::hexOf($authored, (string) $role)
+                ?? (is_string($authored[$role] ?? null) ? $authored[$role] : '');
+            $to = self::hexOf($out, (string) $role) ?? $from;
+            $repairedTexts = [];
+            $unrepairedTexts = [];
+            foreach ($items as $item) {
+                if ($item['kind'] === 'unrepaired') {
+                    $unrepairedTexts[] = $item['text'];
+                } else {
+                    $repairedTexts[] = $item['text'];
+                }
+            }
+            if (!self::sameHex($from, $to)) {
+                $warnings[] = self::warning(
+                    (string) $role,
+                    $from,
+                    $to,
+                    'repaired — ' . implode('; ', $repairedTexts !== [] ? $repairedTexts : $unrepairedTexts),
+                );
                 continue;
             }
-            $class = str_contains($row, 'hue separation')
-                ? 'hue-separation'
-                : (str_contains($row, 'chroma ceiling') ? 'chroma-ceiling' : 'contrast');
-            $covered[$class . ':' . $match[1]] = true;
+            if ($unrepairedTexts !== []) {
+                $warnings[] = self::warning(
+                    (string) $role,
+                    $from,
+                    $from,
+                    implode('; ', $unrepairedTexts),
+                );
+            }
+        }
+    }
+
+    /**
+     * @param array<string,string> $palette
+     * @param array<string, list<array{kind:string,text:string}>> $notes
+     */
+    private static function warnResiduals(array $palette, array &$notes): void
+    {
+        $covered = [];
+        foreach ($notes as $role => $items) {
+            foreach ($items as $item) {
+                if ($item['kind'] !== 'unrepaired') {
+                    continue;
+                }
+                $class = str_contains($item['text'], 'hue separation')
+                    ? 'hue-separation'
+                    : (str_contains($item['text'], 'chroma ceiling') ? 'chroma-ceiling' : 'contrast');
+                $covered[$class . ':' . $role] = true;
+            }
         }
         foreach (self::check($palette) as $finding) {
             $key = $finding['class'] . ':' . $finding['role'];
             if (isset($covered[$key])) {
                 continue;
             }
-            $authored = $finding['authored'];
-            $delivered = self::hexOf($palette, $finding['role']) ?? $authored;
-            $warnings[] = self::warning(
-                $finding['role'],
-                $authored,
-                $delivered,
-                self::residualDisposition($finding),
-            );
+            self::note($notes, $finding['role'], 'unrepaired', self::residualDisposition($finding));
             $covered[$key] = true;
         }
     }
@@ -658,10 +714,24 @@ final class PaletteFloor
             default => [$chroma, 0.0, $second],
         };
         return [
-            (int) round(max(0.0, min(1.0, $r + $base)) * 255.0),
-            (int) round(max(0.0, min(1.0, $g + $base)) * 255.0),
-            (int) round(max(0.0, min(1.0, $b + $base)) * 255.0),
+            self::quantiseChannel($r + $base),
+            self::quantiseChannel($g + $base),
+            self::quantiseChannel($b + $base),
         ];
+    }
+
+    /**
+     * Map a 0-1 channel onto 0-255 identically on every supported PHP.
+     *
+     * PHP 8.1 round(78.49999999999997) === 79; PHP 8.4 round() of that
+     * same float is 78 because 8.4 uses the actual value (just below
+     * 78.5) instead of treating it as a .5 tie. floor(x+0.5) follows
+     * the float and is the same on 8.1-8.4. RGB is non-negative.
+     */
+    private static function quantiseChannel(float $unit): int
+    {
+        $x = max(0.0, min(1.0, $unit)) * 255.0;
+        return (int) floor($x + 0.5);
     }
 
     /**

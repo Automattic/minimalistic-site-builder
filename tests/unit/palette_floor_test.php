@@ -440,6 +440,33 @@ test('repair() keeps the authored hex when the contrast floor is unreachable', f
     assert_true($residual !== null);
 });
 
+test('repair() emits one warning per role naming the hex that entered and the hex that shipped', function () {
+    $palette = [
+        'base' => '#F5EDE1',
+        'contrast' => '#1A1A1A',
+        'primary' => '#8B6421',
+        'secondary' => '#8A6F1E',
+        'accent' => '#C9A227',
+    ];
+    $warnings = [];
+    $out = PaletteFloor::repair($palette, $warnings);
+    $byRole = [];
+    foreach ($warnings as $row) {
+        assert_true(
+            preg_match('/path="palette\\.([^"]+)"/', $row, $match) === 1,
+            $row,
+        );
+        $role = $match[1];
+        assert_true(!isset($byRole[$role]), "{$role} emitted more than one warning");
+        $byRole[$role] = $row;
+        assert_contains('authored=' . Warnings::value($palette[$role]), $row, $role . ' authored is the input hex');
+        assert_contains('delivered=' . Warnings::value($out[$role]), $row, $role . ' delivered is the shipped hex');
+    }
+    assert_true(isset($byRole['accent']), 'accent was repaired');
+    assert_true($out['accent'] !== $palette['accent']);
+    assert_eq(1, substr_count($byRole['accent'], 'delivered='));
+});
+
 test('repair() never claims repaired while check() still reports that role and class', function () {
     $palettes = [
         palette_floor_fixture('v1')['palette'],

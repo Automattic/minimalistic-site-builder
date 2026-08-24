@@ -5,6 +5,7 @@ use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\PaletteFloor;
 use Automattic\SiteBuild\PaletteReconciliation;
 use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\Warnings;
 
 /**
  * Palette-floor audit. No LLM, no network.
@@ -31,9 +32,14 @@ if ($arg === '--projects' && ($extra === null || !str_starts_with($extra, '-')))
     exit(audit_projects($extra ?? repo_path('projects')));
 }
 
+if ($arg === '--corpus' && ($extra === null || !str_starts_with($extra, '-'))) {
+    exit(audit_corpus($extra ?? repo_path('projects')));
+}
+
 if ($arg === null || $arg === '' || str_starts_with($arg, '-') || $extra !== null) {
     fwrite(STDERR, "Usage: php bin/palette-audit.php --fixtures\n");
     fwrite(STDERR, "Usage: php bin/palette-audit.php --projects [dir]\n");
+    fwrite(STDERR, "Usage: php bin/palette-audit.php --corpus [dir]\n");
     fwrite(STDERR, "Usage: php bin/palette-audit.php <slug>\n");
     exit(1);
 }
@@ -173,6 +179,145 @@ function audit_projects(string $root): int
     }
 
     return $residualWithoutUnrepaired === 0 ? 0 : 1;
+}
+
+function audit_corpus(string $projectsRoot): int
+{
+    $delivered = [];
+    $multiWarnRoles = 0;
+    $deliveredMismatch = 0;
+    $residualPalettes = 0;
+    $residualWithoutUnrepaired = 0;
+    $repairedBlackWhite = [];
+
+    $fixtureDir = repo_path('tests/fixtures/palette-floor');
+    foreach (glob($fixtureDir . '/*.json') ?: [] as $path) {
+        $data = json_decode((string) file_get_contents($path), true);
+        if (!is_array($data) || !isset($data['palette']) || !is_array($data['palette'])) {
+            continue;
+        }
+        $id = is_string($data['id'] ?? null) ? $data['id'] : basename($path, '.json');
+        score_corpus_palette(
+            'fixture:' . $id,
+            $data['palette'],
+            $delivered,
+            $multiWarnRoles,
+            $deliveredMismatch,
+            $residualPalettes,
+            $residualWithoutUnrepaired,
+            $repairedBlackWhite,
+        );
+    }
+
+    foreach (glob(rtrim($projectsRoot, '/') . '/*/theme/theme.json') ?: [] as $path) {
+        $theme = json_decode((string) file_get_contents($path), true);
+        if (!is_array($theme)) {
+            continue;
+        }
+        $slug = basename(dirname(dirname($path)));
+        score_corpus_palette(
+            'project:' . $slug,
+            PaletteReconciliation::themePalette($theme),
+            $delivered,
+            $multiWarnRoles,
+            $deliveredMismatch,
+            $residualPalettes,
+            $residualWithoutUnrepaired,
+            $repairedBlackWhite,
+        );
+    }
+
+    ksort($delivered);
+    $hash = hash('sha256', json_encode($delivered, JSON_UNESCAPED_SLASHES));
+
+    echo 'corpus palettes: ' . count($delivered) . "\n";
+    echo 'delivered hash: ' . $hash . "\n";
+    echo 'php: ' . PHP_VERSION . "\n";
+    echo "roles with more than one warning: {$multiWarnRoles}\n";
+    echo "warnings whose delivered differs from returned hex: {$deliveredMismatch}\n";
+    echo "residual palettes: {$residualPalettes}\n";
+    echo "residuals missing unrepaired warning: {$residualWithoutUnrepaired}\n";
+    echo 'repaired #000000/#FFFFFF: ' . count($repairedBlackWhite) . "\n";
+    foreach ($repairedBlackWhite as $row) {
+        echo "  {$row}\n";
+    }
+
+    return ($multiWarnRoles === 0 && $deliveredMismatch === 0 && $residualWithoutUnrepaired === 0) ? 0 : 1;
+}
+
+/**
+ * @param array<string,string> $palette
+ * @param array<string,array<string,string>> $delivered
+ * @param list<string> $repairedBlackWhite
+ */
+function score_corpus_palette(
+    string $name,
+    array $palette,
+    array &$delivered,
+    int &$multiWarnRoles,
+    int &$deliveredMismatch,
+    int &$residualPalettes,
+    int &$residualWithoutUnrepaired,
+    array &$repairedBlackWhite,
+): void {
+    if ($palette === []) {
+        return;
+    }
+    $warnings = [];
+    $out = PaletteFloor::repair($palette, $warnings);
+    $delivered[$name] = $out;
+    $byRole = [];
+    foreach ($warnings as $row) {
+        if (preg_match('/path="palette\\.([^"]+)".*delivered=("[^"]*"|[^;]+)/s', $row, $match) !== 1) {
+            continue;
+        }
+        $role = $match[1];
+        $byRole[$role][] = $row;
+        $shipped = $out[$role] ?? '';
+        $need = 'delivered=' . Warnings::value($shipped);
+        if (!str_contains($row, $need)) {
+            $deliveredMismatch++;
+        }
+    }
+    foreach ($byRole as $rows) {
+        if (count($rows) > 1) {
+            $multiWarnRoles++;
+        }
+    }
+    $findings = PaletteFloor::check($out);
+    if ($findings !== []) {
+        $residualPalettes++;
+    }
+    foreach ($findings as $finding) {
+        $ok = false;
+        foreach ($warnings as $row) {
+            if (
+                str_contains($row, 'path="palette.' . $finding['role'] . '"')
+                && str_contains($row, 'disposition=unrepaired')
+            ) {
+                $ok = true;
+                break;
+            }
+        }
+        if (!$ok) {
+            $residualWithoutUnrepaired++;
+        }
+    }
+    foreach ($out as $role => $hex) {
+        $authored = $palette[$role] ?? null;
+        if (!is_string($authored)) {
+            continue;
+        }
+        $from = ContrastMath::hexToRgb($authored);
+        $to = ContrastMath::hexToRgb($hex);
+        $norm = strtoupper($hex);
+        if (
+            $from !== null && $to !== null && $from !== $to
+            && ($norm === '#000000' || $norm === '#FFFFFF')
+        ) {
+            $repairedBlackWhite[] = "{$name}.{$role}={$norm}";
+        }
+    }
 }
 
 function audit_slug(string $slug): int
