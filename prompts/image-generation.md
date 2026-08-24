@@ -72,6 +72,7 @@ Decoration, when a section needs any at all, comes from theme primitives — the
 
 **Cover backgrounds:**
 For `wp:cover` backgrounds, set the same `theme:./assets/<name>.jpg` path on BOTH the block's `url` attribute and the inner `<img>` src, and put the `AI_IMAGE` spec in that img's alt. The `url` and `src` are asset PATHS only — never write the `AI_IMAGE:` spec into a `url` or `src`; it belongs solely in the `alt`. A cover whose `url` is an `AI_IMAGE:` string ships the raw prompt text as the image and renders no picture.
+- NO CAPTIONS — never write a `<figcaption>` on a `wp:image`, and never set a `caption` attribute on one. A caption under a card image or a standalone image reads as clutter; the orienting detail belongs in the surrounding copy, or nowhere. Images inside a `wp:gallery` MAY carry a caption where the collection genuinely needs one, but a gallery does not need captions and is complete without them — never add one just because the block allows it. A deterministic finish pass removes captions from images outside a gallery.
 
 ### Example Image Block
 

@@ -10,6 +10,7 @@ use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\BlockSerializer\AlignmentClassLoss;
 use Automattic\SiteBuild\BlockSerializer\AlignmentClassLossDetector;
 use Automattic\SiteBuild\BlockSerializer\Repair;
+use Automattic\SiteBuild\ImageCaptions;
 use Automattic\SiteBuild\LayoutFixer;
 use Automattic\SiteBuild\PhotographySite;
 use Automattic\SiteBuild\PhpBlockFixer;
@@ -23,7 +24,7 @@ use Automattic\SiteBuild\Units\GeneratedMarkup;
 /**
  * Step 8 (deterministic): repair block-validation issues in generated markup.
  *
- * Input:  theme/templates/*.html + theme/parts/*.html
+ * Input:  theme/templates/*.html + theme/parts/*.html + pre-existing theme/pages/*.html
  * Output: the same files, re-serialized to match WordPress save() exactly.
  *
  * Runs the LayoutFixer width/rhythm and design-direction shape normalization
@@ -97,6 +98,11 @@ final class FixBlocksStep implements Step
             $listNotes = $listReport['notes'];
             $listWarnings = $listReport['warnings'];
             $listBlocked = $listReport['blocked'];
+            $captionReport = self::stripImageCaptionsDetailed($project, self::failurePaths($failedFiles));
+            $captionNotes = $captionReport['notes'];
+            $captionRemovals = $captionReport['removals'];
+            $captionDeferred = $captionReport['deferred'];
+            $captionImages = $captionReport['images'];
             $layoutNotes = self::normalizeLayouts(
                 $project,
                 [],
@@ -128,6 +134,16 @@ final class FixBlocksStep implements Step
             $layoutNotes = self::withoutFailedLayoutNotes($layoutNotes, self::failurePaths($failedFiles));
             $listNotes = self::withoutFailedLayoutNotes($listNotes, self::failurePaths($failedFiles));
             $listWarnings = self::withoutFailedLayoutNotes($listWarnings, self::failurePaths($failedFiles));
+            $captionNotes = self::withoutFailedLayoutNotes($captionNotes, self::failurePaths($failedFiles));
+            $captionDeferred = self::withFailedMalformedCaptionDeferred(
+                $captionDeferred,
+                $captionRemovals,
+                self::failurePaths($failedFiles),
+            );
+            $captionRemovals = self::withoutFailedCaptionRemovals(
+                $captionRemovals,
+                self::failurePaths($failedFiles),
+            );
         } catch (\RuntimeException $e) {
             self::restoreThemeFiles($project, $beforeInitialPass);
             $project->writeText('logs/' . self::LOG_FILE, $e->getMessage() . "\n");
@@ -166,6 +182,16 @@ final class FixBlocksStep implements Step
                 $layoutNotes = self::withoutFailedLayoutNotes($layoutNotes, self::failurePaths($failedFiles));
                 $listNotes = self::withoutFailedLayoutNotes($listNotes, self::failurePaths($failedFiles));
                 $listWarnings = self::withoutFailedLayoutNotes($listWarnings, self::failurePaths($failedFiles));
+                $captionNotes = self::withoutFailedLayoutNotes($captionNotes, self::failurePaths($failedFiles));
+                $captionDeferred = self::withFailedMalformedCaptionDeferred(
+                    $captionDeferred,
+                    $captionRemovals,
+                    self::failurePaths($failedFiles),
+                );
+                $captionRemovals = self::withoutFailedCaptionRemovals(
+                    $captionRemovals,
+                    self::failurePaths($failedFiles),
+                );
             }
         } catch (\RuntimeException $e) {
             // The public step is one transaction even though structural
@@ -181,6 +207,45 @@ final class FixBlocksStep implements Step
             $project->writeText('logs/' . self::LOG_FILE, $summary . "\n");
             throw $e;
         }
+
+        // Structural repair can turn an unsafe image into a complete block or
+        // move a caption that followed an invalid child into the image's owned
+        // save HTML. Re-run the policy against the final fixer output so those
+        // captions cannot bypass the pre-fixer pass. Both HTML and comment
+        // channels are removed directly, so no third serialization is needed.
+        try {
+            $finalCaptionReport = self::stripImageCaptionsDetailed(
+                $project,
+                self::failurePaths($failedFiles),
+            );
+            $captionNotes = array_merge($captionNotes, $finalCaptionReport['notes']);
+            $captionRemovals = self::reconcileCaptionRemovals(
+                $captionRemovals,
+                $captionImages,
+                $finalCaptionReport['removals'],
+                $finalCaptionReport['images'],
+            );
+            $captionEvidence = self::reconcileCaptionDeferred(
+                $captionDeferred,
+                $captionImages,
+                $finalCaptionReport['deferred'],
+                $finalCaptionReport['removals'],
+                $finalCaptionReport['images'],
+                self::failurePaths($failedFiles),
+            );
+            $captionRemovals = self::mergeCaptionRemovals(
+                $captionRemovals,
+                $captionEvidence['removals'],
+            );
+            $captionDeferred = $captionEvidence['deferred'];
+        } catch (\RuntimeException $e) {
+            self::restoreThemeFiles($project, $beforeInitialPass);
+            $summary .= "\n[captions] final image-caption pass failed; restored step-entry bytes:\n  "
+                . str_replace("\n", "\n  ", $e->getMessage());
+            $project->writeText('logs/' . self::LOG_FILE, $summary . "\n");
+            throw $e;
+        }
+
         if ($listNotes !== []) {
             $summary .= "\n[list] " . count($listNotes) . " bare list-item lift(s):\n  " . implode("\n  ", $listNotes);
         }
@@ -188,6 +253,11 @@ final class FixBlocksStep implements Step
             $summary .= "\n[list] WARNING: " . count($listWarnings)
                 . " empty bare list item(s) removed (recorded in warnings.json):\n  "
                 . implode("\n  ", $listWarnings);
+        }
+        if ($captionNotes !== []) {
+            $summary .= "\n[captions] " . count($captionNotes)
+                . " image-caption pass note(s):\n  "
+                . implode("\n  ", $captionNotes);
         }
         if ($layoutNotes !== []) {
             $summary .= "\n[layout] " . count($layoutNotes) . " width/rhythm fix(es):\n  " . implode("\n  ", $layoutNotes);
@@ -275,6 +345,8 @@ final class FixBlocksStep implements Step
         $paragraphStyleWarnings = self::degradedParagraphStyles($deliveredSummary);
         $warnings = array_merge(
             $listWarnings,
+            self::captionWarnings($captionRemovals),
+            self::captionDeferredWarnings($captionDeferred),
             $paragraphStyleWarnings,
             $shapeDeliveryWarnings,
             $shapeRollbackWarnings,
@@ -423,6 +495,78 @@ final class FixBlocksStep implements Step
             }
         }
         return ['notes' => $notes, 'warnings' => $warnings, 'blocked' => $blocked];
+    }
+
+    /**
+     * Strip image captions outside galleries from every fixer-owned theme
+     * markup file: parts, templates, and pre-existing pages.
+     *
+     * Mirrors liftBareListItems(): the removed caption is authored
+     * visitor-facing text, so it earns a durable warnings.json row rather than
+     * a log line (AGENTS.md rung 3 -> 4). The initial call runs before the
+     * block fixer, which round-trips a core/image caption between its element
+     * and its attribute; a final call covers captions exposed by that repair.
+     *
+     * @param list<string> $excluded fixer-relative paths whose step
+     *        transaction has already been abandoned
+     * @return array{notes:list<string>, warnings:list<string>}
+     */
+    public static function stripImageCaptions(Project $project, array $excluded = []): array
+    {
+        $result = self::stripImageCaptionsDetailed($project, $excluded);
+        return [
+            'notes' => $result['notes'],
+            'warnings' => array_merge(
+                self::captionWarnings($result['removals']),
+                self::captionDeferredWarnings($result['deferred']),
+            ),
+        ];
+    }
+
+    /**
+     * @param list<string> $excluded
+     * @return array{
+     *     notes:list<string>,
+     *     removals:list<array{file:string, block:string, identity:string, values:list<mixed>, disposition:string}>,
+     *     deferred:list<array{file:string, block:string, identity:string, values:list<mixed>, disposition:string}>,
+     *     images:list<array{file:string, block:string, identity:string}>
+     * }
+     */
+    private static function stripImageCaptionsDetailed(Project $project, array $excluded = []): array
+    {
+        $notes = [];
+        $removals = [];
+        $deferred = [];
+        $images = [];
+        $excluded = array_fill_keys($excluded, true);
+        foreach (self::fixerThemeFiles($project) as $rel) {
+            if (isset($excluded[$rel])) {
+                continue;
+            }
+            $markup = $project->readText('theme/' . $rel);
+            $result = ImageCaptions::stripOutsideGalleriesDetailed($markup);
+            if ($result['markup'] !== $markup) {
+                $project->writeText('theme/' . $rel, $result['markup']);
+            }
+            foreach ($result['notes'] as $note) {
+                $notes[] = "{$rel}: {$note}";
+            }
+            foreach ($result['removals'] as $removal) {
+                $removals[] = ['file' => $rel, ...$removal];
+            }
+            foreach ($result['deferred'] as $entry) {
+                $deferred[] = ['file' => $rel, ...$entry];
+            }
+            foreach ($result['images'] as $image) {
+                $images[] = ['file' => $rel, ...$image];
+            }
+        }
+        return [
+            'notes' => $notes,
+            'removals' => $removals,
+            'deferred' => $deferred,
+            'images' => $images,
+        ];
     }
 
     /**
@@ -1202,14 +1346,344 @@ final class FixBlocksStep implements Step
     private static function snapshotThemeFiles(Project $project): array
     {
         $snapshot = [];
+        foreach (self::fixerThemeFiles($project) as $relative) {
+            $snapshot[$relative] = $project->readText('theme/' . $relative);
+        }
+        return $snapshot;
+    }
+
+    /** @return list<string> fixer-relative theme markup paths */
+    private static function fixerThemeFiles(Project $project): array
+    {
         $files = $project->themeFiles();
         foreach (glob($project->themePath('pages/*.html')) ?: [] as $absolute) {
             $files[] = 'pages/' . basename($absolute);
         }
-        foreach (array_values(array_unique($files)) as $relative) {
-            $snapshot[$relative] = $project->readText('theme/' . $relative);
+        $files = array_values(array_unique($files));
+        sort($files, SORT_STRING);
+        return $files;
+    }
+
+    /**
+     * One image can lose its comment attribute before repair and an HTML
+     * figcaption exposed by repair afterwards. Merge raw values before the
+     * bounded warning formatter runs, so overlap and long-prefix collisions
+     * cannot duplicate or erase authored evidence.
+     *
+     * @param list<array{file:string, block:string, identity:string, values:list<mixed>, disposition:string}> $initial
+     * @param list<array{file:string, block:string, identity:string}> $initialImages
+     * @param list<array{file:string, block:string, identity:string, values:list<mixed>, disposition:string}> $final
+     * @return list<array{file:string, block:string, identity:string, values:list<mixed>, disposition:string}>
+     */
+    private static function mergeCaptionRemovals(array $initial, array $final): array
+    {
+        $merged = [];
+        $positions = [];
+        foreach (array_merge($initial, $final) as $removal) {
+            $key = $removal['file'] . "\0" . $removal['block'] . "\0" . $removal['identity'];
+            if (!isset($positions[$key])) {
+                $positions[$key] = count($merged);
+                $removal['values'] = self::uniqueCaptionValues($removal['values']);
+                $merged[] = $removal;
+                continue;
+            }
+            $position = $positions[$key];
+            $merged[$position]['values'] = self::uniqueCaptionValues(array_merge(
+                $merged[$position]['values'],
+                $removal['values'],
+            ));
+            if ($removal['disposition'] === 'removed an image caption outside a gallery') {
+                $merged[$position]['disposition'] = $removal['disposition'];
+            }
         }
-        return $snapshot;
+        return $merged;
+    }
+
+    /**
+     * Rebase pre-fixer removal evidence onto final image paths before merging
+     * it with removals exposed by repair. A distinct image inserted at an old
+     * ordinal must never inherit the previous image's authored values.
+     *
+     * Equal fingerprint counts are paired deterministically by occurrence, so
+     * exact clone sets retain one row per final image. A changed count is
+     * ambiguous (whole-image insertion/removal) and keeps only explicit final-
+     * pass evidence rather than assigning old values to arbitrary survivors.
+     *
+     * @param list<array{file:string, block:string, identity:string, values:list<mixed>, disposition:string}> $initial
+     * @param list<array{file:string, block:string, identity:string}> $initialImages
+     * @param list<array{file:string, block:string, identity:string, values:list<mixed>, disposition:string}> $final
+     * @param list<array{file:string, block:string, identity:string}> $finalImages
+     * @return list<array{file:string, block:string, identity:string, values:list<mixed>, disposition:string}>
+     */
+    private static function reconcileCaptionRemovals(
+        array $initial,
+        array $initialImages,
+        array $final,
+        array $finalImages,
+    ): array {
+        $occurrences = self::captionOccurrenceMap($initialImages, $finalImages);
+        $rebased = [];
+        foreach ($initial as $removal) {
+            $match = $occurrences[self::captionInventoryEntryKey($removal)] ?? null;
+            if ($match === null) {
+                continue;
+            }
+            $removal['block'] = $match['block'];
+            $removal['identity'] = $match['identity'];
+            $rebased[] = $removal;
+        }
+        return self::mergeCaptionRemovals($rebased, $final);
+    }
+
+    /**
+     * Resolve malformed caption values observed in a delimiter-damaged file
+     * before repair against the bytes the step will actually deliver.
+     *
+     * A successful fixer can discard the malformed attribute while balancing
+     * the document, in which case the authored value still needs removal
+     * evidence. If the file remains mismatched, or its transaction is rolled
+     * back to the step-entry snapshot, retain the value as an actionable
+     * delivered-unchanged warning instead.
+     *
+     * @param list<array{file:string, block:string, identity:string, values:list<mixed>, disposition:string}> $initial
+     * @param list<array{file:string, block:string, identity:string, values:list<mixed>, disposition:string}> $final
+     * @param list<array{file:string, block:string, identity:string, values:list<mixed>, disposition:string}> $finalRemovals
+     * @param list<array{file:string, block:string, identity:string}> $finalImages
+     * @param list<string> $failedPaths
+     * @return array{
+     *     removals:list<array{file:string, block:string, identity:string, values:list<mixed>, disposition:string}>,
+     *     deferred:list<array{file:string, block:string, identity:string, values:list<mixed>, disposition:string}>
+     * }
+     */
+    private static function reconcileCaptionDeferred(
+        array $initial,
+        array $initialImages,
+        array $final,
+        array $finalRemovals,
+        array $finalImages,
+        array $failedPaths,
+    ): array {
+        $failed = array_fill_keys($failedPaths, true);
+        $rolledBack = array_values(array_filter(
+            $initial,
+            static fn (array $entry): bool => isset($failed[$entry['file']]),
+        ));
+        $deliveredDeferred = self::mergeCaptionDeferred($final, $rolledBack);
+        // A fixer may insert, remove, or reorder images while repairing the
+        // file, so wp:image[N] is not stable across passes. Match the caption-
+        // independent image fingerprint and use the FINAL inventory's block
+        // path for inferred removals. Images absent from that inventory were
+        // removed as whole units, so assigning their caption loss to an old
+        // ordinal would be false evidence.
+        $finalEvidence = array_merge($deliveredDeferred, $finalRemovals);
+        $finalEvidenceBlocks = [];
+        foreach ($finalEvidence as $entry) {
+            foreach ($entry['values'] as $value) {
+                $key = self::captionIdentityValueKey($entry, $value);
+                $finalEvidenceBlocks[$key][$entry['block']] = true;
+            }
+        }
+        $occurrences = self::captionOccurrenceMap($initialImages, $finalImages);
+        $removals = [];
+
+        foreach ($initial as $entry) {
+            if (isset($failed[$entry['file']])) {
+                continue;
+            }
+            $survivor = $occurrences[self::captionInventoryEntryKey($entry)] ?? null;
+            if ($survivor === null) {
+                continue;
+            }
+            foreach ($entry['values'] as $value) {
+                $identityKey = self::captionIdentityValueKey($survivor, $value);
+                $evidenceBlocks = $finalEvidenceBlocks[$identityKey] ?? [];
+                if (isset($evidenceBlocks[$survivor['block']])) {
+                    continue;
+                }
+                $removals[] = [
+                    'file' => $survivor['file'],
+                    'block' => $survivor['block'],
+                    'identity' => $survivor['identity'],
+                    'values' => [$value],
+                    'disposition' => 'removed a malformed image caption attribute during block repair',
+                ];
+            }
+        }
+
+        return [
+            'removals' => self::mergeCaptionRemovals([], $removals),
+            'deferred' => $deliveredDeferred,
+        ];
+    }
+
+    /**
+     * @param list<array{file:string, block:string, identity:string, values:list<mixed>, disposition:string}> $initial
+     * @param list<array{file:string, block:string, identity:string, values:list<mixed>, disposition:string}> $final
+     * @return list<array{file:string, block:string, identity:string, values:list<mixed>, disposition:string}>
+     */
+    private static function mergeCaptionDeferred(array $initial, array $final): array
+    {
+        $merged = [];
+        $positions = [];
+        foreach (array_merge($initial, $final) as $entry) {
+            $key = $entry['file'] . "\0" . $entry['block'];
+            if (!isset($positions[$key])) {
+                $positions[$key] = count($merged);
+                $entry['values'] = self::uniqueCaptionValues($entry['values']);
+                $merged[] = $entry;
+                continue;
+            }
+            $position = $positions[$key];
+            $merged[$position]['values'] = self::uniqueCaptionValues(array_merge(
+                $merged[$position]['values'],
+                $entry['values'],
+            ));
+        }
+        return $merged;
+    }
+
+    /**
+     * Pair complete pre/post image inventories by serializer-effective identity
+     * and occurrence. A changed clone count is intentionally left unmapped:
+     * insertion or whole-image removal makes instance provenance unprovable.
+     *
+     * @param list<array{file:string, block:string, identity:string}> $initial
+     * @param list<array{file:string, block:string, identity:string}> $final
+     * @return array<string,array{file:string, block:string, identity:string}>
+     */
+    private static function captionOccurrenceMap(array $initial, array $final): array
+    {
+        $initialByIdentity = [];
+        foreach ($initial as $image) {
+            $initialByIdentity[self::captionImageIdentityKey($image)][] = $image;
+        }
+        $finalByIdentity = [];
+        foreach ($final as $image) {
+            $finalByIdentity[self::captionImageIdentityKey($image)][] = $image;
+        }
+
+        $map = [];
+        foreach ($initialByIdentity as $identityKey => $initialImages) {
+            $finalImages = $finalByIdentity[$identityKey] ?? [];
+            if (count($initialImages) !== count($finalImages)) {
+                continue;
+            }
+            foreach ($initialImages as $index => $image) {
+                $map[self::captionInventoryEntryKey($image)] = $finalImages[$index];
+            }
+        }
+        return $map;
+    }
+
+    /** @param array{file:string, identity:string} $entry */
+    private static function captionIdentityValueKey(array $entry, mixed $value): string
+    {
+        return self::captionImageIdentityKey($entry) . "\0" . serialize($value);
+    }
+
+    /** @param array{file:string, identity:string} $entry */
+    private static function captionImageIdentityKey(array $entry): string
+    {
+        return $entry['file'] . "\0" . $entry['identity'];
+    }
+
+    /** @param array{file:string, block:string, identity:string} $entry */
+    private static function captionInventoryEntryKey(array $entry): string
+    {
+        return self::captionImageIdentityKey($entry) . "\0" . $entry['block'];
+    }
+
+    /** @param list<mixed> $values @return list<mixed> */
+    private static function uniqueCaptionValues(array $values): array
+    {
+        $unique = [];
+        $seen = [];
+        foreach ($values as $value) {
+            $key = serialize($value);
+            if (isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+            $unique[] = $value;
+        }
+        return $unique;
+    }
+
+    /**
+     * @param list<array{file:string, block:string, identity:string, values:list<mixed>, disposition:string}> $removals
+     * @return list<string>
+     */
+    private static function captionWarnings(array $removals): array
+    {
+        return array_map(
+            static fn (array $removal): string => $removal['file'] . ': '
+                . ImageCaptions::formatRemoval($removal),
+            $removals,
+        );
+    }
+
+    /**
+     * @param list<array{file:string, block:string, identity:string, values:list<mixed>, disposition:string}> $deferred
+     * @return list<string>
+     */
+    private static function captionDeferredWarnings(array $deferred): array
+    {
+        return array_map(
+            static fn (array $entry): string => $entry['file'] . ': '
+                . ImageCaptions::formatDeferred($entry),
+            $deferred,
+        );
+    }
+
+    /**
+     * @param list<array{file:string, block:string, identity:string, values:list<mixed>, disposition:string}> $removals
+     * @param list<string> $failedPaths
+     * @return list<array{file:string, block:string, identity:string, values:list<mixed>, disposition:string}>
+     */
+    private static function withoutFailedCaptionRemovals(array $removals, array $failedPaths): array
+    {
+        return array_values(array_filter(
+            $removals,
+            static fn (array $removal): bool => !in_array($removal['file'], $failedPaths, true),
+        ));
+    }
+
+    /**
+     * Preserve actionable evidence for malformed values restored by a later
+     * file-level rollback. Ordinary string captions remain covered by the
+     * file-failure warning; only non-string values cross the renderer trust
+     * boundary and need their exact authored shape recorded separately.
+     *
+     * @param list<array{file:string, block:string, identity:string, values:list<mixed>, disposition:string}> $deferred
+     * @param list<array{file:string, block:string, identity:string, values:list<mixed>, disposition:string}> $removals
+     * @param list<string> $failedPaths
+     * @return list<array{file:string, block:string, identity:string, values:list<mixed>, disposition:string}>
+     */
+    private static function withFailedMalformedCaptionDeferred(
+        array $deferred,
+        array $removals,
+        array $failedPaths,
+    ): array {
+        $failed = array_fill_keys($failedPaths, true);
+        $restored = [];
+        foreach ($removals as $removal) {
+            if (!isset($failed[$removal['file']])) {
+                continue;
+            }
+            $values = array_values(array_filter(
+                $removal['values'],
+                static fn (mixed $value): bool => !is_string($value),
+            ));
+            if ($values === []) {
+                continue;
+            }
+            $restored[] = [
+                ...$removal,
+                'values' => $values,
+                'disposition' => 'caption repair deferred because the file transaction was rolled back',
+            ];
+        }
+        return self::mergeCaptionDeferred($deferred, $restored);
     }
 
     /** @param array<string,string> $snapshot */

@@ -42,6 +42,7 @@ Emit exactly one `<img>` in whole document, inside `<section id="hero">`. Omit `
 - `page-context`: describe image role in homepage hero.
 - `style`: exactly one of `photorealistic`, `digital-art`, `illustration`, `minimalist`, `flat-design`, `3d-render`, `abstract`, `watercolor`.
 - `aspect-ratio`: exactly one of `square`, `landscape`, `portrait`; prefer `landscape` for wide hero treatment.
+- Never put a `<figcaption>` on an image. Captions belong only to a genuine gallery of photographs, and even there they are optional — the surrounding copy carries the detail.
 
 ## CSS and dependency contract
 
