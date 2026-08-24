@@ -22,9 +22,11 @@ function splice_void_valid_fold(string $imageClose = ''): string
         . '<meta name="viewport" content="width=device-width, initial-scale=1">'
         . '<style>:root { --content-size: 800px; --wide-size: 1280px; }'
         . 'body { margin: 0; font-family: system-ui, sans-serif; }'
+        . 'header { display: flex; flex-direction: row; align-items: center; justify-content: space-between; }'
         . 'main { max-width: var(--wide-size); margin-inline: auto; }</style>'
         . '</head><body>'
-        . '<header><nav aria-label="Primary"><a href="/menu">VOID-CLOSER-HEADER</a></nav></header>'
+        . '<header><a class="site-identity" href="/">VOID-CLOSER-HEADER</a>'
+        . '<nav aria-label="Primary"><a href="/menu">Menu</a></nav></header>'
         . '<main><section id="hero"><h1>VOID-CLOSER-HERO</h1>'
         . '<img alt="AI_IMAGE: A baker sliding a sourdough loaf into a stone oven, viewed from counter height | homepage hero beside the primary headline | photorealistic | landscape">'
         . $imageClose

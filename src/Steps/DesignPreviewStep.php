@@ -4,6 +4,9 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\BlocksEngine\PhpTransformer\HtmlToBlocks\Style\CssSyntaxScanner;
+use Automattic\BlocksEngine\PhpTransformer\HtmlToBlocks\Style\CssSelectorMatcher;
+use Automattic\BlocksEngine\PhpTransformer\HtmlToBlocks\Style\CssValueSplitter;
+use Automattic\SiteBuild\CssChecks;
 use Automattic\SiteBuild\DesignMarkupSanitizer;
 use Automattic\SiteBuild\Html;
 use Automattic\SiteBuild\Llm;
@@ -348,46 +351,165 @@ final class DesignPreviewStep implements Step
     }
 
     /**
-     * The header is one horizontal row (BIGR-872): identity at the start, nav
-     * at the end. A `header` rule that turns the bar into a column stacks the
-     * wordmark above the nav, which the prompt already forbids — this makes it
-     * a rejection instead of a hope.
-     *
-     * Only the `header` element itself is judged, and only unconditionally: a
-     * descendant may legitimately be a column, and so may the bar itself inside
-     * a narrow-viewport media query. The defect is the desktop masthead.
+     * Prove the browser winners for the four desktop header declarations the
+     * preview contract requires. A negative column regex is insufficient:
+     * grid, flex-flow, higher-specificity overrides and conditional rules can
+     * all stack the identity above the nav without spelling that exact token.
      */
-    private static function headerColumnIssue(string $css): ?string
+    private static function headerLayoutIssue(string $css, DOMElement $header): ?string
     {
-        $matched = preg_match_all(
-            '/(?:^|[};])\s*([^{};]+)\{([^{}]*)\}/',
-            $css,
-            $rules,
-            PREG_SET_ORDER,
-        );
-        if ($matched === false || $matched === 0) {
-            return null;
-        }
-        foreach ($rules as $rule) {
-            $declarations = strtolower((string) preg_replace('/\s+/', '', $rule[2]));
-            if (!str_contains($declarations, 'flex-direction:column')) {
+        $required = [
+            'display' => 'flex',
+            'flex-direction' => 'row',
+            'align-items' => 'center',
+            'justify-content' => 'space-between',
+        ];
+        /** @var array<string,array{value:string,important:bool,specificity:int,order:int}> $winners */
+        $winners = [];
+
+        foreach (CssChecks::scanDeclarations($css) as $declaration) {
+            if ($declaration['kind'] !== 'style' || !$declaration['structurallySafe']) {
                 continue;
             }
-            foreach (explode(',', $rule[1]) as $selector) {
-                $parts = preg_split('/[\s>+~]+/', trim($selector)) ?: [];
-                $last = strtolower(trim((string) end($parts)));
-                if (
-                    $last === 'header'
-                    || str_starts_with($last, 'header.')
-                    || str_starts_with($last, 'header#')
-                    || str_starts_with($last, 'header[')
-                    || str_starts_with($last, 'header:')
-                ) {
-                    return 'header must be one horizontal row, not a column';
+            $property = strtolower(trim($declaration['property']));
+            if (!in_array($property, ['display', 'flex-direction', 'flex-flow', 'align-items', 'justify-content', 'all'], true)) {
+                continue;
+            }
+            $scope = CssChecks::declarationScopeAtViewport($declaration['ancestors'], 1366.0);
+            if ($scope === 'inert') {
+                continue;
+            }
+
+            $specificity = null;
+            foreach (CssValueSplitter::splitTopLevel($declaration['context'], [',']) as $selector) {
+                $parsed = CssSelectorMatcher::parse($selector);
+                if (!($parsed['supported'] ?? false)) {
+                    if (self::selectorMayTargetHeader($selector, $declaration['ancestors'])) {
+                        return 'desktop header layout cannot be proven across the CSS cascade';
+                    }
+                    continue;
+                }
+                $match = CssSelectorMatcher::matches($header, $parsed, true);
+                if (!($match['supported'] ?? false)) {
+                    if (self::selectorMayTargetHeader($selector, $declaration['ancestors'])) {
+                        return 'desktop header layout cannot be proven across the CSS cascade';
+                    }
+                    continue;
+                }
+                if (!($match['matches'] ?? false)) {
+                    continue;
+                }
+                if ($scope === 'unprovable' || ($parsed['pseudo_state_suffix_span'] ?? null) !== null) {
+                    return 'desktop header layout cannot be proven across the CSS cascade';
+                }
+                $specificity = max($specificity ?? 0, self::selectorSpecificity($parsed));
+            }
+            if ($specificity === null) {
+                continue;
+            }
+
+            $priority = CssChecks::splitDeclarationPriority($declaration['value']);
+            $values = self::headerLayoutValues($property, $priority['value']);
+            foreach ($values as $resolvedProperty => $value) {
+                $candidate = [
+                    'value' => $value,
+                    'important' => $priority['important'],
+                    'specificity' => $specificity,
+                    'order' => $declaration['start'],
+                ];
+                if (self::cascadeCandidateWins($candidate, $winners[$resolvedProperty] ?? null)) {
+                    $winners[$resolvedProperty] = $candidate;
                 }
             }
         }
+
+        foreach ($required as $property => $value) {
+            if (($winners[$property]['value'] ?? null) !== $value) {
+                return 'header must use display:flex, flex-direction:row, align-items:center, '
+                    . 'and justify-content:space-between at desktop width';
+            }
+        }
         return null;
+    }
+
+    /** @return array<string,string> */
+    private static function headerLayoutValues(string $property, string $value): array
+    {
+        $value = strtolower(trim($value));
+        if ($property === 'all') {
+            return [
+                'display' => '<unproven>',
+                'flex-direction' => '<unproven>',
+                'align-items' => '<unproven>',
+                'justify-content' => '<unproven>',
+            ];
+        }
+        if ($property !== 'flex-flow') {
+            return [$property => $value];
+        }
+
+        $direction = 'row';
+        foreach (CssValueSplitter::splitTopLevelWhitespace($value) as $part) {
+            if (in_array($part, ['row', 'row-reverse', 'column', 'column-reverse'], true)) {
+                $direction = $part;
+                continue;
+            }
+            if (!in_array($part, ['nowrap', 'wrap', 'wrap-reverse'], true)) {
+                $direction = '<unproven>';
+            }
+        }
+        return ['flex-direction' => $direction];
+    }
+
+    /**
+     * @param array{value:string,important:bool,specificity:int,order:int} $candidate
+     * @param array{value:string,important:bool,specificity:int,order:int}|null $winner
+     */
+    private static function cascadeCandidateWins(array $candidate, ?array $winner): bool
+    {
+        if ($winner === null || $candidate['important'] !== $winner['important']) {
+            return $winner === null || $candidate['important'];
+        }
+        if ($candidate['specificity'] !== $winner['specificity']) {
+            return $candidate['specificity'] > $winner['specificity'];
+        }
+        return $candidate['order'] >= $winner['order'];
+    }
+
+    /** @param array<string,mixed> $parsed */
+    private static function selectorSpecificity(array $parsed): int
+    {
+        $specificity = 0;
+        $addCompound = static function (array $compound) use (&$addCompound, &$specificity): void {
+            $specificity += count($compound['ids'] ?? []) * 100;
+            $specificity += (count($compound['classes'] ?? []) + count($compound['attributes'] ?? [])) * 10;
+            if (($compound['nth_child'] ?? null) !== null
+                || ($compound['first_child'] ?? false)
+                || ($compound['last_child'] ?? false)
+            ) {
+                $specificity += 10;
+            }
+            if (($compound['type'] ?? null) !== null) {
+                $specificity++;
+            }
+            foreach ($compound['not'] ?? [] as $negated) {
+                $addCompound($negated);
+            }
+        };
+        foreach ($parsed['compounds'] ?? [] as $compound) {
+            $addCompound($compound);
+        }
+        return $specificity;
+    }
+
+    /** @param list<string> $ancestors */
+    private static function selectorMayTargetHeader(string $selector, array $ancestors): bool
+    {
+        $source = $selector . ' ' . implode(' ', array_filter(
+            $ancestors,
+            static fn (string $ancestor): bool => !str_starts_with(ltrim($ancestor), '@'),
+        ));
+        return preg_match('/(?<![-_a-z0-9])header(?![-_a-z0-9])/i', $source) === 1;
     }
 
     private static function designIssue(string $html): ?string
@@ -465,6 +587,9 @@ final class DesignPreviewStep implements Step
         if ($xpath->query('/html/body/header//nav//a')->length === 0) {
             return 'header navigation contains no links';
         }
+        if ($xpath->query('/html/body/header//a[not(ancestor::nav) and @href="/"]')->length !== 1) {
+            return 'header must contain one identity home link outside navigation';
+        }
 
         $main = $xpath->query('/html/body/main')->item(0);
         if (!$main instanceof DOMElement || $xpath->query('/html/body/main')->length !== 1) {
@@ -536,9 +661,13 @@ final class DesignPreviewStep implements Step
         if ($widthIssue !== null) {
             return $widthIssue;
         }
-        $columnIssue = self::headerColumnIssue($cssInspection['code']);
-        if ($columnIssue !== null) {
-            return $columnIssue;
+        $header = $xpath->query('/html/body/header')->item(0);
+        if (!$header instanceof DOMElement) {
+            return 'document must contain one direct body header';
+        }
+        $layoutIssue = self::headerLayoutIssue($cssInspection['code'], $header);
+        if ($layoutIssue !== null) {
+            return $layoutIssue;
         }
 
         foreach ($xpath->query('//*[@*]') as $element) {
@@ -756,11 +885,13 @@ final class DesignPreviewStep implements Step
             . '<style>:root { --content-size: 800px; --wide-size: 1280px; }'
             . 'body { margin: 0; font-family: system-ui, sans-serif; }'
             . 'header, main { width: min(100% - 2rem, var(--wide-size)); margin-inline: auto; }'
+            . 'header { display: flex; flex-direction: row; align-items: center; justify-content: space-between; }'
             . '#hero { min-height: 70vh; display: grid; align-content: center; gap: 1rem; }'
             . 'img { display: block; max-width: 100%; height: auto; }</style>'
-            . '</head><body><header><nav aria-label="Primary"><a href="/">'
+            . '</head><body><header><a class="site-identity" href="/">'
             . self::escape($name)
-            . '</a></nav></header><main><section id="hero"><h1>'
+            . '</a><nav aria-label="Primary"><a href="/#hero">Explore</a></nav></header>'
+            . '<main><section id="hero"><h1>'
             . self::escape($title)
             . '</h1><p>'
             . self::escape($description)

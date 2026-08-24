@@ -40,9 +40,11 @@ function design_preview_document(string $marker = 'DESIGN-PREVIEW'): string
         . '<meta name="viewport" content="width=device-width, initial-scale=1">'
         . '<style>:root { --content-size: 800px; --wide-size: 1280px; }'
         . 'body { margin: 0; font-family: system-ui, sans-serif; }'
+        . design_preview_header_css()
         . 'main { max-width: var(--wide-size); margin-inline: auto; }</style>'
         . '</head><body>'
-        . '<header><nav aria-label="Primary"><a href="/menu">Menu</a></nav></header>'
+        . '<header><a class="site-identity" href="/">Hearth &amp; Crumb</a>'
+        . '<nav aria-label="Primary"><a href="/menu">Menu</a></nav></header>'
         . '<main><section id="hero"><h1>' . $marker . '</h1>'
         . '<img alt="AI_IMAGE: A baker sliding a sourdough loaf into a stone oven, viewed from counter height | homepage hero beside the primary headline | photorealistic | landscape">'
         . '</section></main>'
@@ -53,7 +55,13 @@ function design_preview_css(): string
 {
     return ':root { --content-size: 800px; --wide-size: 1280px; }'
         . 'body { margin: 0; font-family: system-ui, sans-serif; }'
+        . design_preview_header_css()
         . 'main { max-width: var(--wide-size); margin-inline: auto; }';
+}
+
+function design_preview_header_css(): string
+{
+    return 'header { display: flex; flex-direction: row; align-items: center; justify-content: space-between; }';
 }
 
 function design_preview_run(
@@ -107,6 +115,7 @@ function design_preview_assert_shape(string $html): void
     assert_eq(1, $xpath->query('//nav')->length, 'one total nav');
     assert_eq(1, $xpath->query('/html/body/header')->length, 'one header');
     assert_eq(1, $xpath->query('/html/body/header//nav')->length, 'one header nav');
+    assert_eq(1, $xpath->query('/html/body/header//a[not(ancestor::nav) and @href="/"]')->length, 'identity home link sits outside nav');
     assert_eq(1, $xpath->query('/html/body/main')->length, 'one main');
     $main = $xpath->query('/html/body/main')->item(0);
     assert_true($main instanceof DOMElement, 'preview has one main element');
@@ -118,6 +127,10 @@ function design_preview_assert_shape(string $html): void
     assert_eq(1, $xpath->query('/html/body/main/*')->length, 'main contains only hero');
     assert_eq(1, $xpath->query('/html/body/main/section[@id="hero"]')->length, 'hero landmark');
     assert_eq(1, $xpath->query('//section')->length, 'no content sections below hero');
+
+    $style = $xpath->query('/html/head/style')->item(0);
+    assert_true($style instanceof DOMElement, 'preview has one head style');
+    assert_contains(design_preview_header_css(), $style->textContent, 'desktop header contract is explicit');
     assert_eq(0, $xpath->query('//footer')->length, 'no footer');
 
     $images = $xpath->query('//img');
@@ -414,6 +427,52 @@ test('design-preview repairs one malformed response once and warns', function ()
     assert_contains('authored_value', $warnings);
     assert_contains('delivered_value', $warnings);
     assert_contains('disposition repaired', $warnings);
+    design_preview_cleanup($tmp);
+});
+
+test('design-preview repairs desktop header CSS that cannot prove the required row', function () {
+    $valid = design_preview_document('VALID-HEADER-ROW');
+    $required = design_preview_header_css();
+    $invalidRules = [
+        'missing layout' => '',
+        'grid layout' => 'header { display: grid; align-items: center; justify-content: space-between; }',
+        'column direction' => 'header { display: flex; flex-direction: column; align-items: center; justify-content: space-between; }',
+        'column flex-flow' => 'header { display: flex; flex-flow: column nowrap; align-items: center; justify-content: space-between; }',
+        'higher specificity override' => $required . 'body > header { display: grid; }',
+        'important override' => $required . 'header { flex-direction: column !important; }',
+        'desktop media override' => $required . '@media (min-width: 800px) { header { flex-direction: column; } }',
+        'unprovable support override' => $required . '@supports (display: grid) { header { display: grid; } }',
+    ];
+
+    foreach ($invalidRules as $name => $rule) {
+        [$project, $llm, $tmp] = design_preview_fixture();
+        $defective = str_replace($required, $rule, $valid);
+        assert_true($defective !== $valid, "{$name} fixture carries its defect");
+        $llm->queueText($defective);
+        $llm->queueText($valid);
+
+        design_preview_run($project, $llm);
+
+        assert_eq(2, $llm->completeCalls, "{$name} triggers one repair");
+        assert_eq($valid, $project->readText('design/preview.html'), "{$name} delivers the repaired row");
+        design_preview_cleanup($tmp);
+    }
+});
+
+test('design-preview permits a column override that is provably narrow-screen only', function () {
+    [$project, $llm, $tmp] = design_preview_fixture();
+    $valid = design_preview_document('MOBILE-COLUMN');
+    $mobile = str_replace(
+        design_preview_header_css(),
+        design_preview_header_css() . '@media (max-width: 719px) { header { flex-direction: column; } }',
+        $valid,
+    );
+    $llm->queueText($mobile);
+
+    design_preview_run($project, $llm);
+
+    assert_eq(1, $llm->completeCalls, 'narrow-screen override does not trigger repair');
+    assert_eq($mobile, $project->readText('design/preview.html'));
     design_preview_cleanup($tmp);
 });
 
