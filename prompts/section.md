@@ -23,7 +23,7 @@ Rules:
 - ALL text sizing comes from the fontSizes presets via the "fontSize" attribute. NEVER hardcode a font size — no raw values or `clamp()` in `"style":{"typography":{"fontSize":...}}` and no hand-written `font-size:` inline styles. The scale (including the masthead-scale `display` step) already lives in theme.json; if no preset genuinely fits a rare case, reference a preset variable through the block attribute (`"style":{"typography":{"fontSize":"var:preset|font-size|<slug>"}}`) — never a raw value.
 - Paragraph scale discipline — each step of the scale has a role; use the right one:
     running copy (any paragraph, list, or card text that wraps past ~2 lines) = the `body` step. That's the theme default, so usually NO "fontSize" attribute at all. Never push multi-line reading copy up the scale for emphasis, and never shrink it to `caption`.
-    `caption` = genuine metadata only — labels, eyebrows, image captions, folio lines. Not sentences the visitor is meant to read.
+    `caption` = genuine metadata only — labels, eyebrows, gallery captions, folio lines. Not sentences the visitor is meant to read.
     `lead` = the ONE standout line a section gets (if it has one): a single-sentence intro under the section title. One per section, kept short.
   The upper steps belong to headings — the contrast between big headings and modest copy IS the hierarchy.
     Unbreakable contact tokens — email addresses, long URLs, and phone numbers that should remain intact — never take a display or heading scale, in a paragraph OR a heading: a long token either overflows its column or breaks inside the address, domain, or path, and both read as broken. A contact email is a `lead`-at-most mailto link or a button labeled with words, never the address as display type.
@@ -94,7 +94,7 @@ Combine them with the recipes when the direction calls for that structure.
 
 Motion classes (optional) — semantic hover, scroll, and ambient presets whose CSS ships statically with the theme; the chosen profile maps them to a distinct keyframe family as well as distinct timing. NEVER write animation CSS or `@keyframes` yourself. Add them via `"className"` exactly like the layout utilities. The DESIGN DIRECTION's **Motion** line is the contract: `none` → use NO motion class; `minimal` → use only the two hover classes below; otherwise pick from all of these:
 - `hover-lift` — on a card `wp:group` or an image: lifts with a profile-tuned shadow on hover.
-- `hover-reveal` — on a card `wp:group` with an image: the image dims/zooms on hover while captions and details remain visible at rest. Do not depend on hidden overlay text.
+- `hover-reveal` — on a card `wp:group` with an image: the image dims/zooms on hover while card text and details remain visible at rest. Do not depend on hidden overlay text.
 - `reveal` — on a group/image/heading: fades in with a small rise when scrolled into view. The default entrance.
 - `reveal-up` — like `reveal` but with a longer rise, for a band that should arrive with presence.
 - `reveal-fade` — pure fade, no movement; for quiet, editorial content.

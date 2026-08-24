@@ -223,3 +223,15 @@ test('an empty figcaption beside a non-empty caption attribute still warns', fun
     assert_eq(1, count($out['warnings']), 'non-empty attr text is never lost silently');
     assert_contains('Coburg site', $out['warnings'][0]);
 });
+
+test('every figcaption on one image is removed in a single pass', function () {
+    $markup = ic_image(ic_img() . ic_caption('One') . ic_caption('Two'));
+    $out = ImageCaptions::stripOutsideGalleries($markup);
+
+    assert_true(!str_contains($out['markup'], 'One'), 'first removed');
+    assert_true(!str_contains($out['markup'], 'Two'), 'second removed too');
+    assert_true(!str_contains($out['markup'], '<figcaption'), 'none survive');
+    assert_eq(1, count($out['warnings']), 'one warning per image, not per caption');
+    $again = ImageCaptions::stripOutsideGalleries($out['markup']);
+    assert_eq($out['markup'], $again['markup'], 'already a fixed point');
+});

@@ -39,8 +39,12 @@ final class ImageCaptions
     {
         try {
             return self::strip($markup);
-        } catch (\Throwable) {
-            return ['markup' => $markup, 'notes' => [], 'warnings' => []];
+        } catch (\Throwable $e) {
+            return [
+                'markup'   => $markup,
+                'notes'    => ['skipped image-caption removal: ' . $e->getMessage()],
+                'warnings' => [],
+            ];
         }
     }
 
@@ -114,18 +118,25 @@ final class ImageCaptions
     }
 
     /**
-     * Splice the <figcaption> element out. Returns its text ('' when the
-     * element was empty), or null when there was no element at all.
+     * Splice every <figcaption> out of this image. Returns the first
+     * non-empty caption text ('' when every element was empty), or null
+     * when there was no element at all.
      */
     private static function removeElement(BlockMarkup $document, int $i): ?string
     {
         $own = $document->ownHtml($i);
-        if (preg_match(self::FIGCAPTION, $own, $match, PREG_OFFSET_CAPTURE) !== 1) {
+        if (preg_match_all(self::FIGCAPTION, $own, $matches, PREG_OFFSET_CAPTURE) === 0) {
             return null;
         }
-        $element = $match[0][0];
-        $document->spliceOwnHtml($i, $match[0][1], strlen($element), '');
-        return trim(html_entity_decode(strip_tags($element), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+        $authored = '';
+        foreach ($matches[0] as [$element, $offset]) {
+            $document->spliceOwnHtml($i, $offset, strlen($element), '');
+            $text = trim(html_entity_decode(strip_tags($element), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+            if ($authored === '' && $text !== '') {
+                $authored = $text;
+            }
+        }
+        return $authored;
     }
 
     /**
