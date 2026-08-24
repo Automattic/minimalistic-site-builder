@@ -301,6 +301,7 @@ test('design-preview freezes the first-fold shape and prompt contract', function
         '--content-size: 800px',
         '--wide-size: 1280px',
         'Do not emit a <footer>',
+        'Do not author a hamburger-only header',
         'No JavaScript',
         'No HTML comments',
         'No CSS comments',

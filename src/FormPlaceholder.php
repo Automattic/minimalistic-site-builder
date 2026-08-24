@@ -65,6 +65,23 @@ final class FormPlaceholder
     }
 
     /**
+     * A host-substitutable contact form. Used when a contact page's generated
+     * sections omitted the placeholder the brief asked for (BIGR-858).
+     */
+    public static function defaultContactMarkup(string $submitLabel = 'Send message'): string
+    {
+        $submit = trim($submitLabel);
+        if ($submit === '' || str_contains($submit, '|')) {
+            $submit = 'Send message';
+        }
+        $spec = self::MARKER . ' contact | Name:name:required, Email:email:required, Message:textarea:required | '
+            . $submit;
+        return '<!-- wp:paragraph {"className":"' . self::CLASS_NAME . '"} -->' . "\n"
+            . '<p class="' . self::CLASS_NAME . '">' . $spec . '</p>' . "\n"
+            . '<!-- /wp:paragraph -->';
+    }
+
+    /**
      * A spec, decoded — or a sentence saying why it cannot be.
      *
      * @return array{purpose:string, submit:string, fields:list<array{label:string, type:string, required:bool, options:list<string>}>}|string
