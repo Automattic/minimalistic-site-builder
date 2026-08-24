@@ -15,6 +15,7 @@ use Automattic\SiteBuild\HeroCopyBudget;
 use Automattic\SiteBuild\HeroFallback;
 use Automattic\SiteBuild\HeroHeadlineFit;
 use Automattic\SiteBuild\Narrator;
+use Automattic\SiteBuild\PlainText;
 use Automattic\SiteBuild\PlaygroundArtifact;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
@@ -2224,7 +2225,7 @@ final class HeaderHeroStep implements Step
      */
     private static function textTokens(string $html): array
     {
-        $text = html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $text = PlainText::fromMarkup($html);
         $text = mb_strtolower($text, 'UTF-8');
         return array_values(array_filter(
             preg_split('/[^\p{L}\p{N}]+/u', $text) ?: [],
@@ -2585,7 +2586,7 @@ final class HeaderHeroStep implements Step
             }
             if ($name === 'navigation-link') {
                 $label = (string) ($attrs['label'] ?? '');
-                $labels[] = html_entity_decode(strip_tags($label), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                $labels[] = PlainText::fromMarkup($label);
             } elseif ($name === 'page-list') {
                 $hasPageList = true;
             } elseif ($name === 'site-title') {
