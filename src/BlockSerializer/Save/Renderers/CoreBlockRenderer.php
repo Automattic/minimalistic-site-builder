@@ -189,9 +189,10 @@ final class CoreBlockRenderer
         } else {
             $children[] = $image;
         }
-        if (!$this->richTextEmpty($attrs['caption'] ?? '')) {
+        $caption = $attrs['caption'] ?? '';
+        if (is_string($caption) && !$this->richTextEmpty($caption)) {
             $children[] = new ElementNode('figcaption', ['className' => 'wp-element-caption'], [
-                new RawNode((string) $attrs['caption']),
+                new RawNode($caption),
             ]);
         }
         return new ElementNode('figure', $this->props('core/image', $attrs, [

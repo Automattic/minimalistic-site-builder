@@ -20,7 +20,7 @@ seeder imports into the media library on activation). The homepage is a seeded p
 ```bash
 cp .env.example .env
 # Text/code LLM (default Anthropic): ANTHROPIC_API_KEY
-# Or xAI Grok: LLM_PROVIDER=xai, XAI_API_KEY, LLM_MODEL=grok-4.5 (and per-step models)
+# Or xAI Grok: LLM_PROVIDER=xai, XAI_API_KEY, LLM_MODEL=grok-4.6 (and per-step models)
 # Or OpenRouter: LLM_PROVIDER=openrouter, OPENROUTER_API_KEY (models come from config/models.json)
 # Images (optional): GOOGLE_VERTEX_API_TOKEN
 
@@ -124,7 +124,7 @@ tier there — so switching providers needs no per-step configuration. Defaults:
 |----------|-------|-------|
 | `anthropic` (default) | `claude-opus-5` | `claude-haiku-4-5` |
 | `openai` | `gpt-5.5` | `gpt-5.4-mini` |
-| `xai` | `grok-4.5` | `grok-4.5` |
+| `xai` | `grok-4.6` | `grok-4.6` |
 | `openrouter` | `moonshotai/kimi-k3` | `moonshotai/kimi-k2.5:nitro` |
 
 Edit `config/models.json` to change those model ids. To override just one run or

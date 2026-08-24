@@ -265,10 +265,43 @@ final class CssChecks
         ], true);
     }
 
+    /** Whether a declaration overrides the build-owned text-wrap policy. */
+    public static function isTextWrapProperty(string $property): bool
+    {
+        return in_array(strtolower($property), [
+            'text-wrap',
+            'text-wrap-style',
+            'text-wrap-mode',
+        ], true);
+    }
+
     /**
-     * Drop wrap/hyphen declarations whose selector subject is a heading.
-     * Body copy and non-heading siblings keep their authored wrap. Keyframe
-     * steps are left alone.
+     * Drop every generated text-wrap declaration. PageStylesStep supplies one
+     * deterministic policy after this repair, so direct paragraph selectors,
+     * broad selectors, longhands, priorities, and keyframes cannot take
+     * ownership back.
+     *
+     * @return array{0:string,1:list<string>} repaired CSS and dropped declarations
+     */
+    public static function dropTextWrapDeclarations(string $css): array
+    {
+        [$repaired, $dropped] = self::dropDeclarations(
+            $css,
+            static fn (array $declaration): bool => self::isTextWrapProperty(
+                $declaration['property'],
+            ),
+            self::looksLikeDeclarationList($css),
+        );
+        return [
+            $repaired,
+            array_map(static fn (array $declaration): string => trim($declaration['raw']), $dropped),
+        ];
+    }
+
+    /**
+     * Drop word-splitting declarations whose selector subject is a heading.
+     * Body copy and non-heading siblings keep their authored behavior.
+     * Keyframe steps are left alone.
      *
      * @return array{0:string,1:list<string>} repaired CSS and dropped declarations
      */

@@ -44,12 +44,14 @@ There are no forms or form controls, no SVG, no custom elements, and no JavaScri
 Use `<button>` only for a real non-scripted action. Prefer an `<a>` link styled as a button for navigation or a CTA.
 
 Every image needs meaningful `alt` text written as a usable image generation prompt: name subject, setting, composition, lighting, palette or grade, and framing. Keep readable words and brand names out of generated images; render them as HTML text.
+- Never put a `<figcaption>` on an image. Captions belong only to a genuine gallery of photographs, and even there they are optional — the surrounding copy carries the detail.
 
 ## Responsive CSS contract
 
 - Do not stagger a row of siblings (different top margins, translateY offsets, or nth-child even/odd vertical offsets) unless SITE SPEC is clearly a photography or gallery site (photographer, photography, photojournalism, or a gallery). Keep card and image rows level for every other site.
 - Write mobile-first responsive CSS, then add min-width media queries only where composition needs them.
 - Use fluid type with `clamp()` for display and section-heading scales while keeping body text readable.
+- Headings and paragraphs keep `text-wrap: pretty` as a browser best-effort hint that reduces dangling final words. It cannot guarantee a particular final line at every font, width, or browser. Never set `text-wrap: wrap` or `text-wrap: nowrap` on headings or paragraphs.
 - Use flexible grid and flex layouts, bounded content widths, responsive spacing, and images that cannot overflow.
 - Ensure navigation, tables, long words, and multi-column layouts remain usable on narrow screens.
 - Preserve clear focus states, readable contrast, and reduced-motion behavior for any CSS transitions.

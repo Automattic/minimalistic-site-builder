@@ -63,8 +63,23 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     /** Page-owned outer spacing roles — must match page-plan.md. */
     public const VERTICAL_DENSITIES = ['compact', 'standard', 'spacious'];
 
-    /** The most default-looking archetype is capped so it can't dominate a page. */
+    /** The card grid is capped tighter than the others — it reads as filler in bulk. */
     private const MAX_EQUAL_CARD_GRIDS = 2;
+
+    /**
+     * Every OTHER archetype is capped by archetypeCap(), which works out to a
+     * flat "at most twice" for every page length the planner actually produces
+     * (front pages aim 5-8 sections, interior 3-6) and only loosens beyond
+     * eight — this divisor is what makes it loosen.
+     *
+     * The adjacency rule cannot do this job: "no two ADJACENT sections share an
+     * archetype" is fully satisfied by A,B,A,B,A,B, which is half a page in one
+     * composition. Across 1,924 audited planned sections the planner spent 77%
+     * of its archetype budget on `mixed-width-editorial` while never once
+     * breaking adjacency — the rule held and the page was uniform anyway. Only
+     * a count over the whole page catches that.
+     */
+    private const ARCHETYPE_SHARE_DIVISOR = 3;
 
     /**
      * Level replacements for an ineligible offset-grid. Matches the page-plan
@@ -78,6 +93,22 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
 
     /** Whitespace-led pauses are accents, not a page's default cadence. */
     private const MAX_SPACIOUS_SECTIONS = 2;
+
+    /**
+     * A page of at least this many sections needs one band off the page
+     * background.
+     *
+     * This is a floor, not a cap: `base` SHOULD dominate, and the prompt asks
+     * for "mostly base with 1-2 contrast or image bands placed for pacing".
+     * Audited plans kept the "mostly" and dropped the rest — 271 of 371 pages
+     * (73%) came back with every single section on the page background, and the
+     * rate rose WITH length rather than falling: 59% of 5-section pages, 81% of
+     * 6-section, and 42 of 42 seven-section pages. Long pages are exactly where
+     * pacing bands earn their keep, so a minimum is the only thing that catches
+     * it. Short pages — every contact page is 2 to 4 sections (BIGR-858) — are
+     * left alone, where one uniform ground is a fine answer.
+     */
+    private const MIN_BANDED_SECTIONS = 5;
 
     /**
      * Content-dense section roles must not compound their height with the
@@ -2683,6 +2714,39 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             }
         }
 
+        // Dominance pass, last so it sees settled neighbors. Keeps the first
+        // $cap uses of an archetype and re-homes the rest onto the page's
+        // least-used eligible composition, which is what stops the excess
+        // simply piling onto one replacement. Excluding the over-used value and
+        // both neighbors means this cannot reintroduce an adjacent duplicate,
+        // so the adjacency pass above does not need re-running.
+        $cap = self::archetypeCap(count($archetypes));
+        $used = [];
+        foreach ($archetypes as $i => $archetype) {
+            if (!in_array($archetype, self::ARCHETYPES, true)) {
+                continue;
+            }
+            $used[$archetype] = ($used[$archetype] ?? 0) + 1;
+            // The card grid answers to MAX_EQUAL_CARD_GRIDS and its own pass.
+            if ($archetype === 'equal-card-grid' || $used[$archetype] <= $cap) {
+                continue;
+            }
+            $exclude = [$archetype];
+            if (!$front && $i === 0) {
+                $exclude[] = 'full-bleed-cover';
+            }
+            $replacement = self::pickLeastUsed($archetypes, (int) $i, $allowOffsetGrid, $used, ...$exclude);
+            if ($replacement === $archetype) {
+                // Nothing eligible left. normalize() still reports it, so the
+                // model repair loop gets the last word rather than the build
+                // shipping a page silently over cap.
+                continue;
+            }
+            $used[$archetype]--;
+            $used[$replacement] = ($used[$replacement] ?? 0) + 1;
+            $archetypes[$i] = $replacement;
+        }
+
         foreach ($archetypes as $i => $archetype) {
             $sections[$i]['layout_archetype'] = $archetype;
             if ($archetype !== ($authoredArchetypes[$i] ?? $archetype)) {
@@ -2707,6 +2771,8 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 }
             }
         }
+
+        $sections = self::withPacingBand($sections, $pageSlug, $warnings);
 
         // When the recipe-locked hero and its following section collided,
         // the following section—not the hero—moved. Replace only the now-stale
@@ -2923,12 +2989,191 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 . self::MAX_EQUAL_CARD_GRIDS . ' times per page and vary the other sections';
         }
 
+        // Dominance: the adjacency rule above permits one archetype every other
+        // section, so a page can satisfy it and still be carried by a single
+        // composition. equal-card-grid is excluded because its own tighter cap
+        // is reported just above; two errors for one section would only confuse
+        // the repair prompt.
+        $cap = self::archetypeCap(count($sections));
+        $counts = [];
+        foreach ($sections as $section) {
+            $archetype = $section['layout_archetype'];
+            if (in_array($archetype, self::ARCHETYPES, true) && $archetype !== 'equal-card-grid') {
+                $counts[$archetype] = ($counts[$archetype] ?? 0) + 1;
+            }
+        }
+        foreach ($counts as $archetype => $used) {
+            if ($used > $cap) {
+                $errors[] = "page-plan: layout_archetype '{$archetype}' is used {$used} times across "
+                    . count($sections) . " sections — no archetype may carry more than {$cap} of them; "
+                    . 'give the excess sections different compositions';
+            }
+        }
+
+        // Background floor — see MIN_BANDED_SECTIONS. Deliberately not a cap on
+        // 'base': base should dominate, and capping it would produce the
+        // alternating stripes the prompt rejects.
+        if (count($sections) >= self::MIN_BANDED_SECTIONS
+            && self::bandedCount($sections) === 0
+        ) {
+            $errors[] = 'page-plan: all ' . count($sections) . " sections use background 'base' — a page this "
+                . "long needs at least one 'contrast', 'tinted' or 'image' band to pace it; place one for "
+                . 'pacing (under the hero\'s fold, or before the closing next step)';
+        }
+
         $spacious = count(array_filter($sections, fn (array $s) => $s['vertical_density'] === 'spacious'));
         if ($spacious > self::MAX_SPACIOUS_SECTIONS) {
             $errors[] = "page-plan: vertical_density 'spacious' is used {$spacious} times — use it at most "
                 . self::MAX_SPACIOUS_SECTIONS . ' times per page and use standard/compact elsewhere';
         }
         return $errors;
+    }
+
+    /**
+     * How many of a page's sections sit on something other than the page
+     * background. Blank counts as base: an unstated background renders as one.
+     *
+     * @param array<int,array<string,mixed>> $sections
+     */
+    private static function bandedCount(array $sections): int
+    {
+        $banded = 0;
+        foreach ($sections as $section) {
+            $background = strtolower(trim((string) ($section['background'] ?? '')));
+            if ($background !== '' && $background !== 'base') {
+                $banded++;
+            }
+        }
+        return $banded;
+    }
+
+    /**
+     * Give a long all-base page one contrast band, so it is not one unbroken
+     * scroll of page background. See MIN_BANDED_SECTIONS for the audit.
+     *
+     * Promotes exactly ONE section, and never an end of the page. The first is
+     * off limits because the site header renders above — sometimes floating
+     * over — it, and on the front page the hero projection may lock its
+     * background outright. The last is off limits because
+     * withClosingBandOffFooterSurface() pins it against the footer's own
+     * surface later, and a promotion here would just be undone there.
+     *
+     * `contrast` rather than `tinted` because the point is to break the scroll
+     * and a subtle tint may not read at all; `image` is never chosen because it
+     * would demand an asset this plan never budgeted for.
+     *
+     * @param array<int,array<string,mixed>> $sections
+     * @param list<string> $warnings
+     * @return array<int,array<string,mixed>>
+     */
+    private static function withPacingBand(array $sections, string $pageSlug, array &$warnings): array
+    {
+        $count = count($sections);
+        if ($count < self::MIN_BANDED_SECTIONS || self::bandedCount($sections) > 0) {
+            return $sections;
+        }
+
+        // The midpoint, so the one band breaks the longest run. Placing it just
+        // under the hero would leave everything below it uniform, which is the
+        // shape the audit found in the first place.
+        $target = max(1, min($count - 2, intdiv($count, 2)));
+        $title = trim((string) ($sections[$target]['title'] ?? '')) ?: 'this section';
+
+        $sections[$target]['background'] = 'contrast';
+        $sections[$target]['handoff'] = self::withSeamCorrection(
+            $sections[$target]['handoff'] ?? '',
+            'this section\'s background is now "contrast" to pace a page that planned every band on the page '
+                . 'background; this supersedes any background named earlier in this line',
+        );
+
+        // Each neighbor's handoff names this section's background, and both the
+        // section author and its neighbors' authors read that line. Correcting
+        // it in place beats regenerating every seam and losing the planner's
+        // reasoning for each one.
+        foreach ([$target - 1, $target + 1] as $neighbor) {
+            if (!isset($sections[$neighbor]) || !is_array($sections[$neighbor])) {
+                continue;
+            }
+            $sections[$neighbor]['handoff'] = self::withSeamCorrection(
+                $sections[$neighbor]['handoff'] ?? '',
+                'the "' . $title . '" section beside it is now a contrast band; this supersedes the background '
+                    . 'named for it earlier in this line',
+            );
+        }
+
+        $warnings[] = self::valueLossWarning(
+            self::sectionPath($pageSlug, $target) . '.background',
+            'base',
+            'contrast',
+            'promoted one mid-page band because every section planned the page background',
+        );
+
+        return $sections;
+    }
+
+    /** Append one build correction to a seam line, preserving the planner's prose. */
+    private static function withSeamCorrection(mixed $handoff, string $correction): string
+    {
+        return trim(trim((string) $handoff) . ' Build correction: ' . $correction . '.');
+    }
+
+    /**
+     * The most times one archetype may appear on a page of `$sections`.
+     *
+     * Never below 2, so short pages (a 2-to-4-section contact page) are governed
+     * by the adjacency rule alone and are not handed an unsatisfiable cap.
+     */
+    public static function archetypeCap(int $sections): int
+    {
+        return max(2, intdiv($sections, self::ARCHETYPE_SHARE_DIVISOR));
+    }
+
+    /**
+     * The eligible archetype the page uses LEAST, for the dominance pass.
+     *
+     * pickArchetype() returns the first eligible value in catalog order, which
+     * is right for a one-off adjacency fix but wrong here: several reassignments
+     * in one pass would all land on the same replacement and simply move the
+     * dominance somewhere else. Ties break on catalog order, so this stays
+     * deterministic.
+     *
+     * @param list<string> $archetypes
+     * @param array<string,int> $used
+     */
+    private static function pickLeastUsed(
+        array $archetypes,
+        int $i,
+        bool $allowOffsetGrid,
+        array $used,
+        string ...$exclude,
+    ): string {
+        $best = null;
+        $bestCount = PHP_INT_MAX;
+        foreach (self::ARCHETYPES as $candidate) {
+            // The card grid has its own tighter cap and its own pass; letting
+            // this one hand out grids would fight it.
+            if ($candidate === 'equal-card-grid') {
+                continue;
+            }
+            if (!$allowOffsetGrid && $candidate === 'offset-grid') {
+                continue;
+            }
+            if (in_array($candidate, $exclude, true)) {
+                continue;
+            }
+            if ($candidate === ($archetypes[$i - 1] ?? null)) {
+                continue;
+            }
+            if ($candidate === ($archetypes[$i + 1] ?? null)) {
+                continue;
+            }
+            $count = $used[$candidate] ?? 0;
+            if ($count < $bestCount) {
+                $best = $candidate;
+                $bestCount = $count;
+            }
+        }
+        return $best ?? $archetypes[$i];
     }
 
     /** Word-token match against DENSE_SECTION_TYPES for free-form model types. */

@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\ContrastMath;
+use Automattic\SiteBuild\DesignFloor;
 use Automattic\SiteBuild\DirectionFidelity;
 use Automattic\SiteBuild\HeaderBehavior;
 use Automattic\SiteBuild\Narrator;
@@ -96,6 +97,7 @@ final class ValidateThemeStep implements Step
             PresetReferences::problems($project),
             self::styleElementProblems($project),
             self::headerBehaviorProblems($project),
+            self::designFloorProblems($project),
         );
         $problems = array_values(array_unique($problems));
 
@@ -119,6 +121,34 @@ final class ValidateThemeStep implements Step
 
         $project->writeText('logs/' . self::LOG_FILE, "Final theme validation passed.\n");
         Narrator::write("  final theme validation passed\n");
+    }
+
+    /**
+     * Advisory design-floor scan of assembled plugin pages and theme.json.
+     * Report only — never mutates generated markup. Findings are warnings,
+     * never build failures.
+     *
+     * @return list<string>
+     */
+    private static function designFloorProblems(Project $project): array
+    {
+        $theme = [];
+        if ($project->exists('theme/theme.json')) {
+            $decoded = json_decode($project->readText('theme/theme.json'), true);
+            $theme = is_array($decoded) ? $decoded : [];
+        }
+
+        $problems = [];
+        foreach (glob($project->pluginPath('pages') . '/*.html') ?: [] as $abs) {
+            $rel = 'plugin/pages/' . basename($abs);
+            foreach (DesignFloor::check($project->readText($rel), []) as $finding) {
+                $problems[] = DesignFloor::warningRow($rel, $finding);
+            }
+        }
+        foreach (DesignFloor::check('', $theme) as $finding) {
+            $problems[] = DesignFloor::warningRow('theme/theme.json', $finding);
+        }
+        return $problems;
     }
 
     /**
