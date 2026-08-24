@@ -99,8 +99,8 @@ final class PageStylesStep implements Step
      * hook. overflow-wrap:break-word is the last-resort escape hatch for body
      * copy only (p, li), where a single unbreakable token like a URL would
      * otherwise overflow its container. word-break:break-all is deliberately
-     * absent everywhere. text-wrap:pretty keeps the last line from being a
-     * single dangling word (BIGR-869).
+     * absent everywhere. text-wrap:pretty asks supporting browsers to reduce
+     * single-word final lines as a best-effort layout improvement (BIGR-869).
      */
     public const WORD_WRAP_CSS = <<<'CSS'
 /* Wrap at spaces only — never split a word mid-token. */
@@ -341,6 +341,7 @@ CSS;
         $used = self::usedClasses($project);
         if ($used === []) {
             echo "  no layout utility classes referenced; nothing to style\n";
+            self::writeWordWrapPolicy($project);
             return;
         }
 
@@ -352,6 +353,7 @@ CSS;
         $css = CodeFences::strip(
             $this->llm->complete($rendered, $this->withOptions(['log_label' => $this->id()]))
         );
+        [$css] = CssChecks::dropTextWrapDeclarations($css);
 
         $problems = self::validate($css);
         if ($problems !== []) {
@@ -385,6 +387,7 @@ CSS;
                     self::LOG_FILE,
                 )]);
                 self::addDropWarnings($project, $droppedRules, $droppedDeclarations);
+                self::writeWordWrapPolicy($project);
                 return;
             }
             file_put_contents(
@@ -406,10 +409,9 @@ CSS;
             self::addDropWarnings($project, $droppedRules, $droppedDeclarations);
             $css = $salvaged;
         }
-        $project->writeText(
-            'theme/style.css',
-            rtrim($project->readText('theme/style.css')) . "\n\n" . self::MARKER . "\n" . $css . "\n"
-        );
+        $style = rtrim(self::withoutDeterministicStyles($project->readText('theme/style.css')))
+            . "\n\n" . self::MARKER . "\n" . rtrim($css);
+        $project->writeText('theme/style.css', self::withWordWrapPolicy($style));
         echo '  styled: ' . implode(', ', $used) . "\n";
     }
 
@@ -533,10 +535,11 @@ CSS;
             $findings,
             $floor,
         );
-        // Wrap policy first as the default. Heading wrap/hyphen declarations
-        // are stripped from the design chunks above, so a generated
-        // `h1 { overflow-wrap: anywhere }` cannot re-enable a mid-word snap
-        // (BIGR-864). Body copy may still opt into hyphenation by ordering.
+        // Wrap policy first as the default. Generated text-wrap declarations
+        // are stripped from every design selector, while heading wrap/hyphen
+        // declarations are stripped from heading selectors. A generated rule
+        // therefore cannot take either build-owned behavior back (BIGR-864,
+        // BIGR-869). Body copy may still opt into hyphenation by ordering.
         // The nested-landmark reset joins the other foundation resets; the
         // heading baseline joins them rather than the design chunks, because
         // it declares no color and the contrast pass above has nothing to say
@@ -575,6 +578,21 @@ CSS;
             return $style;
         }
         return rtrim(substr($style, 0, $offset));
+    }
+
+    /** Replace the build-owned wrap policy without accumulating stale copies. */
+    private static function withWordWrapPolicy(string $style): string
+    {
+        $style = rtrim(self::withoutDeterministicStyles($style));
+        return ($style === '' ? '' : $style . "\n\n") . self::WORD_WRAP_CSS . "\n";
+    }
+
+    private static function writeWordWrapPolicy(Project $project): void
+    {
+        $project->writeText(
+            'theme/style.css',
+            self::withWordWrapPolicy($project->readText('theme/style.css')),
+        );
     }
 
     /**
@@ -618,6 +636,7 @@ CSS;
         array &$warnings,
     ): string {
         $css = self::scrubChunk($css, $source, $warnings);
+        [$css] = CssChecks::dropTextWrapDeclarations($css);
         [$css] = CssChecks::dropHeadingWordSplitDeclarations($css);
         if ($css === '' || $sectionRootIds['roots'] === []) {
             return $css;

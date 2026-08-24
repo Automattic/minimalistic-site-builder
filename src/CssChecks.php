@@ -247,10 +247,9 @@ final class CssChecks
     }
 
     /**
-     * Properties that split a word across lines or that override the
-     * build-owned wrap policy: hyphenation, overflow-wrap, word-break
-     * (including the legacy `word-wrap` alias and vendor hyphen prefixes),
-     * and text-wrap / its longhands (BIGR-869 owns `pretty`).
+     * Properties that split a word across lines: hyphenation, overflow-wrap,
+     * and word-break (including the legacy `word-wrap` alias and vendor
+     * hyphen prefixes).
      */
     public static function isWordSplitProperty(string $property): bool
     {
@@ -263,6 +262,13 @@ final class CssChecks
             '-webkit-hyphens',
             '-ms-hyphens',
             '-moz-hyphens',
+        ], true);
+    }
+
+    /** Whether a declaration overrides the build-owned text-wrap policy. */
+    public static function isTextWrapProperty(string $property): bool
+    {
+        return in_array(strtolower($property), [
             'text-wrap',
             'text-wrap-style',
             'text-wrap-mode',
@@ -270,9 +276,32 @@ final class CssChecks
     }
 
     /**
-     * Drop wrap/hyphen declarations whose selector subject is a heading.
-     * Body copy and non-heading siblings keep their authored wrap. Keyframe
-     * steps are left alone.
+     * Drop every generated text-wrap declaration. PageStylesStep supplies one
+     * deterministic policy after this repair, so direct paragraph selectors,
+     * broad selectors, longhands, priorities, and keyframes cannot take
+     * ownership back.
+     *
+     * @return array{0:string,1:list<string>} repaired CSS and dropped declarations
+     */
+    public static function dropTextWrapDeclarations(string $css): array
+    {
+        [$repaired, $dropped] = self::dropDeclarations(
+            $css,
+            static fn (array $declaration): bool => self::isTextWrapProperty(
+                $declaration['property'],
+            ),
+            self::looksLikeDeclarationList($css),
+        );
+        return [
+            $repaired,
+            array_map(static fn (array $declaration): string => trim($declaration['raw']), $dropped),
+        ];
+    }
+
+    /**
+     * Drop word-splitting declarations whose selector subject is a heading.
+     * Body copy and non-heading siblings keep their authored behavior.
+     * Keyframe steps are left alone.
      *
      * @return array{0:string,1:list<string>} repaired CSS and dropped declarations
      */

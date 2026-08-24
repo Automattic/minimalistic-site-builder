@@ -307,10 +307,11 @@ test('design-preview freezes the first-fold shape and prompt contract', function
         'No CSS comments',
         'Do not load external',
         'text-wrap: pretty',
-        'Never leave a dangling last word',
+        'best-effort',
     ] as $required) {
         assert_contains($required, $prompt);
     }
+    assert_true(!str_contains($prompt, 'Never leave a dangling last word'), 'prompt makes no absolute browser promise');
     design_preview_cleanup($tmp);
 
     $validRepair = design_preview_document('SAFE-REPAIR');

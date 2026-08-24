@@ -497,7 +497,7 @@ test('page-generation prompts freeze fold-seeded inner and below-fold home contr
         'reduced-motion',
         'design preview',
         'text-wrap: pretty',
-        'dangling word',
+        'best-effort',
     ] as $required) {
         assert_contains($required, $prompt);
     }
