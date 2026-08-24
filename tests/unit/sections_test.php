@@ -1364,3 +1364,47 @@ test('every page-plan request is told which surface its closing section must avo
     }
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('the deterministic header fallback is one horizontal row, not a stack (BIGR-872)', function () {
+    $header = SectionsStep::fallbackChrome('header');
+
+    assert_contains('"type":"flex"', $header, 'identity and nav share a row');
+    assert_contains('"justifyContent":"space-between"', $header);
+    assert_true(
+        !str_contains($header, '"layout":{"type":"constrained"}}') || str_contains($header, '"type":"flex"'),
+        'a bare constrained group would stack an inserted nav under the wordmark',
+    );
+
+    // The footer keeps its stacked constrained shape.
+    assert_contains('"type":"constrained"', SectionsStep::fallbackChrome('footer'));
+});
+
+test('the header nav rule keeps its row shape out of the stacked archetypes (BIGR-872)', function () {
+    $row = SectionsStep::navRuleFor(4, 'standard-row');
+    assert_contains('EVERY SITE PAGES entry except the front page', $row);
+    assert_contains('one horizontal row (identity start, nav end)', $row);
+
+    foreach (['centered-masthead', 'split-nav'] as $archetype) {
+        $rule = SectionsStep::navRuleFor(4, $archetype);
+        assert_contains(
+            'EVERY SITE PAGES entry except the front page',
+            $rule,
+            "{$archetype} still owes every inner page",
+        );
+        assert_true(
+            !str_contains($rule, 'one horizontal row'),
+            "{$archetype} must not be told to use one row: its catalog form is not one",
+        );
+        assert_true(
+            !str_contains($rule, 'NEVER stack the wordmark above the nav'),
+            "{$archetype} must not be told never to stack",
+        );
+        assert_true(
+            !str_contains($rule, 'NEVER split links onto both sides of the wordmark'),
+            "{$archetype} must not be told never to split",
+        );
+    }
+
+    // One page still overrides everything: no page-list, no self link.
+    assert_contains('this site is ONE page', SectionsStep::navRuleFor(1, 'split-nav'));
+});

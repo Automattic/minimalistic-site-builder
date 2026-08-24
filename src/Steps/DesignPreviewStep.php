@@ -347,6 +347,49 @@ final class DesignPreviewStep implements Step
             . "<malformed_preview>\n{$authored}\n</malformed_preview>";
     }
 
+    /**
+     * The header is one horizontal row (BIGR-872): identity at the start, nav
+     * at the end. A `header` rule that turns the bar into a column stacks the
+     * wordmark above the nav, which the prompt already forbids — this makes it
+     * a rejection instead of a hope.
+     *
+     * Only the `header` element itself is judged, and only unconditionally: a
+     * descendant may legitimately be a column, and so may the bar itself inside
+     * a narrow-viewport media query. The defect is the desktop masthead.
+     */
+    private static function headerColumnIssue(string $css): ?string
+    {
+        $matched = preg_match_all(
+            '/(?:^|[};])\s*([^{};]+)\{([^{}]*)\}/',
+            $css,
+            $rules,
+            PREG_SET_ORDER,
+        );
+        if ($matched === false || $matched === 0) {
+            return null;
+        }
+        foreach ($rules as $rule) {
+            $declarations = strtolower((string) preg_replace('/\s+/', '', $rule[2]));
+            if (!str_contains($declarations, 'flex-direction:column')) {
+                continue;
+            }
+            foreach (explode(',', $rule[1]) as $selector) {
+                $parts = preg_split('/[\s>+~]+/', trim($selector)) ?: [];
+                $last = strtolower(trim((string) end($parts)));
+                if (
+                    $last === 'header'
+                    || str_starts_with($last, 'header.')
+                    || str_starts_with($last, 'header#')
+                    || str_starts_with($last, 'header[')
+                    || str_starts_with($last, 'header:')
+                ) {
+                    return 'header must be one horizontal row, not a column';
+                }
+            }
+        }
+        return null;
+    }
+
     private static function designIssue(string $html): ?string
     {
         if (trim($html) === '') {
@@ -414,6 +457,13 @@ final class DesignPreviewStep implements Step
             || $xpath->query('/html/body/header//nav')->length !== 1
         ) {
             return 'header must contain the only navigation';
+        }
+        // The prompt calls a populated nav mandatory; without this the rule is
+        // model compliance only, and an empty header nav ships clean (BIGR-872).
+        // The page list is not final at design-preview time, so completeness
+        // against SITE PAGES is enforced later, on the block markup.
+        if ($xpath->query('/html/body/header//nav//a')->length === 0) {
+            return 'header navigation contains no links';
         }
 
         $main = $xpath->query('/html/body/main')->item(0);
@@ -485,6 +535,10 @@ final class DesignPreviewStep implements Step
         );
         if ($widthIssue !== null) {
             return $widthIssue;
+        }
+        $columnIssue = self::headerColumnIssue($cssInspection['code']);
+        if ($columnIssue !== null) {
+            return $columnIssue;
         }
 
         foreach ($xpath->query('//*[@*]') as $element) {

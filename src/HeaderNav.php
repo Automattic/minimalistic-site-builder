@@ -22,6 +22,14 @@ namespace Automattic\SiteBuild;
 final class HeaderNav
 {
     /**
+     * The row an inserted navigation shares with the identity it follows. Only
+     * used when the identity's own container stacks its children — a flex
+     * parent already puts them side by side.
+     */
+    private const ROW_OPEN = '<!-- wp:group {"layout":{"type":"flex","justifyContent":"space-between",'
+        . '"verticalAlignment":"center"}} --><div class="wp-block-group">';
+
+    /**
      * @param list<array<string,mixed>> $pages
      * @param 'header'|'footer' $part
      * @return array{markup:string,notes:list<string>,warnings:list<string>}
@@ -99,12 +107,26 @@ final class HeaderNav
         }
 
         $document = BlockMarkup::parse($markup);
+        // An unprovable navigation is left exactly as authored. Filling around
+        // it would splice a second wp:navigation beside the broken one — two
+        // navs, a duplicated destination, and one hamburger each on mobile.
+        foreach ($document->indices() as $index) {
+            if (self::canonicalName($document->name($index)) === 'navigation'
+                && !$document->isStructurallySafe($index)
+            ) {
+                return [
+                    'markup' => $markup,
+                    'notes' => [],
+                    'warnings' => [
+                        self::unprovenWarning($part, 'wp:navigation', $document->openingComment($index)),
+                    ],
+                ];
+            }
+        }
+
         $navIndices = [];
         foreach ($document->indices() as $index) {
             if (self::canonicalName($document->name($index)) !== 'navigation') {
-                continue;
-            }
-            if (!$document->isStructurallySafe($index)) {
                 continue;
             }
             $navIndices[] = $index;
@@ -129,34 +151,46 @@ final class HeaderNav
         $labelList = implode(', ', $titles);
 
         if ($navIndices !== []) {
-            $target = null;
-            foreach (array_reverse($navIndices) as $index) {
-                if (!$document->isVoid($index)) {
-                    $target = $index;
-                    break;
+            // Spread across every nav in document order. split-nav carries two,
+            // and dropping the whole remainder into the last one leaves the
+            // lopsided halves that archetype exists to avoid.
+            $chunks = self::partitionLinks(
+                array_map(static fn (array $page): string => self::linkComments([$page]), $missing),
+                count($navIndices),
+            );
+            $edits = [];
+            foreach ($navIndices as $slot => $index) {
+                $chunk = $chunks[$slot] ?? [];
+                if ($chunk === []) {
+                    continue;
                 }
-            }
-            $target ??= $navIndices[0];
-            $edit = self::blockSpan($document, $target, $markup);
-            if ($edit === null) {
-                return [
-                    'markup' => $markup,
-                    'notes' => [],
-                    'warnings' => [self::unprovenWarning($part, 'wp:navigation', $document->openingComment($target))],
+                $edit = self::blockSpan($document, $index, $markup);
+                if ($edit === null) {
+                    return [
+                        'markup' => $markup,
+                        'notes' => [],
+                        'warnings' => [
+                            self::unprovenWarning($part, 'wp:navigation', $document->openingComment($index)),
+                        ],
+                    ];
+                }
+                $opening = $document->isVoid($index)
+                    ? BlockMarkup::serializeComment('navigation', $document->attrs($index) ?? [], false)
+                    : $document->openingComment($index);
+                $inner = $document->isVoid($index) ? '' : $document->innerHtml($index);
+                $edits[] = $edit + [
+                    'replacement' => $opening . $inner . implode('', $chunk) . '<!-- /wp:navigation -->',
                 ];
             }
-            $attrs = $document->attrs($target) ?? [];
-            $opening = $document->isVoid($target)
-                ? BlockMarkup::serializeComment('navigation', $attrs, false)
-                : $document->openingComment($target);
-            $inner = $document->isVoid($target) ? '' : $document->innerHtml($target);
-            $replacement = $opening . $inner . self::linkComments($missing) . '<!-- /wp:navigation -->';
-            $markup = substr_replace(
-                $markup,
-                $replacement,
-                $edit['start'],
-                $edit['end'] - $edit['start'],
-            );
+            usort($edits, static fn (array $a, array $b): int => $b['start'] <=> $a['start']);
+            foreach ($edits as $edit) {
+                $markup = substr_replace(
+                    $markup,
+                    $edit['replacement'],
+                    $edit['start'],
+                    $edit['end'] - $edit['start'],
+                );
+            }
             return [
                 'markup' => $markup,
                 'notes' => ["added missing inner-page links to header navigation ({$labelList})"],
@@ -167,7 +201,20 @@ final class HeaderNav
         $htmlNavs = self::navElements($markup);
         if ($htmlNavs !== []) {
             $target = $htmlNavs[count($htmlNavs) - 1];
-            $markup = substr_replace($markup, self::htmlAnchors($missing), $target['innerEnd'], 0);
+            $inner = substr($markup, $target['innerStart'], $target['innerEnd'] - $target['innerStart']);
+            // When the nav delegates its items to a list, the new links are
+            // list items too: a bare anchor beside the `<ul>` escapes every
+            // `nav ul li a` rule the design authored.
+            if (preg_match('~</ul\s*>\s*\z~i', $inner, $close) === 1) {
+                $markup = substr_replace(
+                    $markup,
+                    self::htmlListItems($missing),
+                    $target['innerEnd'] - strlen($close[0]),
+                    0,
+                );
+            } else {
+                $markup = substr_replace($markup, self::htmlAnchors($missing), $target['innerEnd'], 0);
+            }
             return [
                 'markup' => $markup,
                 'notes' => ["added missing inner-page links to header navigation ({$labelList})"],
@@ -175,14 +222,39 @@ final class HeaderNav
             ];
         }
 
-        $insertAt = self::afterIdentityOffset($document);
+        $identity = self::lastIdentityIndex($document);
         $navMarkup = '<!-- wp:navigation -->' . self::linkComments($missing) . '<!-- /wp:navigation -->';
-        $markup = $insertAt === null
-            ? $markup . $navMarkup
-            : substr_replace($markup, $navMarkup, $insertAt, 0);
+        if ($identity === null) {
+            return [
+                'markup' => $markup . $navMarkup,
+                'notes' => ["inserted header navigation with inner-page links ({$labelList})"],
+                'warnings' => [],
+            ];
+        }
+
+        $insertAt = $document->endOffset($identity);
+        if ($insertAt === null) {
+            return [
+                'markup' => $markup . $navMarkup,
+                'notes' => ["inserted header navigation with inner-page links ({$labelList})"],
+                'warnings' => [],
+            ];
+        }
+        // Identity and navigation share one row. A constrained (or default)
+        // container stacks its children, so dropping the nav in as a sibling
+        // would ship the wordmark-above-nav masthead this pass exists to
+        // remove — wrap the pair in a flex row instead.
+        $note = "inserted header navigation with inner-page links ({$labelList})";
+        if (!self::laysOutAsRow($document, $identity)) {
+            $markup = substr_replace($markup, $navMarkup . '</div><!-- /wp:group -->', $insertAt, 0);
+            $markup = substr_replace($markup, self::ROW_OPEN, $document->openingOffset($identity), 0);
+            $note .= ' in a single row with the identity';
+        } else {
+            $markup = substr_replace($markup, $navMarkup, $insertAt, 0);
+        }
         return [
             'markup' => $markup,
-            'notes' => ["inserted header navigation with inner-page links ({$labelList})"],
+            'notes' => [$note],
             'warnings' => [],
         ];
     }
@@ -375,6 +447,21 @@ final class HeaderNav
         return $html;
     }
 
+    /**
+     * The same anchors wrapped as list items, for a nav that keeps its links
+     * in a `<ul>`.
+     *
+     * @param list<array{title:string,path:string}> $pages
+     */
+    private static function htmlListItems(array $pages): string
+    {
+        $html = '';
+        foreach ($pages as $page) {
+            $html .= '<li>' . self::htmlAnchors([$page]) . '</li>';
+        }
+        return $html;
+    }
+
     /** @return array{urls:array<string,true>,labels:array<string,true>} */
     private static function blockNavDestinations(BlockMarkup $document): array
     {
@@ -387,10 +474,12 @@ final class HeaderNav
                 $url = is_string($attrs['url'] ?? null) ? self::destinationKey((string) $attrs['url']) : '';
                 if ($url !== '' && $url !== '/') {
                     $urls[$url] = true;
-                }
-                $label = is_string($attrs['label'] ?? null) ? self::normalizedLabel((string) $attrs['label']) : '';
-                if ($label !== '') {
-                    $labels[$label] = true;
+                    $label = is_string($attrs['label'] ?? null)
+                        ? self::normalizedLabel((string) $attrs['label'])
+                        : '';
+                    if ($label !== '') {
+                        $labels[$label] = true;
+                    }
                 }
             }
             if ($name !== 'navigation' || $document->isVoid($index)) {
@@ -399,9 +488,10 @@ final class HeaderNav
             $inner = $document->innerHtml($index);
             foreach (self::anchorsIn($inner, 0, strlen($inner)) as $anchor) {
                 $url = self::destinationKey($anchor['href']);
-                if ($url !== '' && $url !== '/') {
-                    $urls[$url] = true;
+                if ($url === '' || $url === '/') {
+                    continue;
                 }
+                $urls[$url] = true;
                 $label = self::normalizedLabel(self::visibleLabel(substr(
                     $inner,
                     $anchor['innerStart'],
@@ -423,9 +513,10 @@ final class HeaderNav
         foreach (self::navElements($markup) as $nav) {
             foreach (self::anchorsIn($markup, $nav['innerStart'], $nav['innerEnd']) as $anchor) {
                 $url = self::destinationKey($anchor['href']);
-                if ($url !== '' && $url !== '/') {
-                    $urls[$url] = true;
+                if ($url === '' || $url === '/') {
+                    continue;
                 }
+                $urls[$url] = true;
                 $label = self::normalizedLabel(self::visibleLabel(substr(
                     $markup,
                     $anchor['innerStart'],
@@ -468,10 +559,15 @@ final class HeaderNav
         return $navs;
     }
 
+    /**
+     * The inner-page path a link resolves to, or '' when it resolves to none.
+     * A fragment-only href addresses the current document, never a page, so it
+     * must not read as one: `#hero` is not the About page.
+     */
     private static function destinationKey(string $url): string
     {
         $url = trim($url);
-        if ($url === '' || $url === '#') {
+        if ($url === '' || str_starts_with($url, '#')) {
             return '';
         }
         $path = parse_url($url, PHP_URL_PATH);
@@ -483,7 +579,8 @@ final class HeaderNav
         return rtrim($normalized, '/');
     }
 
-    private static function afterIdentityOffset(BlockMarkup $document): ?int
+    /** The last provable identity block: the nav is inserted after it. */
+    private static function lastIdentityIndex(BlockMarkup $document): ?int
     {
         $last = null;
         foreach ($document->indices() as $index) {
@@ -496,7 +593,26 @@ final class HeaderNav
             }
             $last = $index;
         }
-        return $last === null ? null : $document->endOffset($last);
+        return $last;
+    }
+
+    /**
+     * Does the identity block's own container already lay its children out as
+     * a horizontal row? Only a flex layout does; `constrained`, `default` and
+     * an absent layout all stack, which would put an inserted nav on its own
+     * line under the wordmark.
+     */
+    private static function laysOutAsRow(BlockMarkup $document, int $index): bool
+    {
+        $parent = $document->parent($index);
+        if ($parent === null) {
+            return false;
+        }
+        $layout = ($document->attrs($parent) ?? [])['layout'] ?? null;
+        if (!is_array($layout) || ($layout['type'] ?? '') !== 'flex') {
+            return false;
+        }
+        return ($layout['orientation'] ?? 'horizontal') !== 'vertical';
     }
 
     /**

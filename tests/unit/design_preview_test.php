@@ -344,6 +344,12 @@ test('design-preview freezes the first-fold shape and prompt contract', function
             '@font-face{font-family:Remote;src:url("https://cdn.example.test/font.woff2")}</style>',
             $validRepair,
         ),
+        'empty header nav' => str_replace('<a href="/menu">Menu</a>', '', $validRepair),
+        'column header' => str_replace(
+            'main { max-width:',
+            'header{display:flex;flex-direction:column}main { max-width:',
+            $validRepair,
+        ),
         'extra header' => str_replace('<main>', '<header><nav></nav></header><main>', $validRepair),
         'extra nav' => str_replace('</nav>', '</nav><nav aria-label="Secondary"></nav>', $validRepair),
         'footer' => str_replace('</body>', '<footer>Not allowed</footer></body>', $validRepair),

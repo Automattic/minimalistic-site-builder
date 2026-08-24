@@ -78,13 +78,29 @@ final class SectionsStep implements Step
         return SectionUnit::partKey($pageSlug, $sectionSlug);
     }
 
-    /** {{nav_rule}} for header.md when the site has inner pages to list. */
-    private const NAV_RULE_MULTI = '- Navigation: NEVER include the homepage in `wp:navigation`. `wp:site-title` and'
-        . ' `wp:site-logo` already link home — a Home item is redundant. Do NOT use `<!-- wp:page-list /-->`'
+    /**
+     * {{nav_rule}} for header.md when the site has inner pages to list.
+     *
+     * Completeness is owned by every archetype: a header that omits an inner
+     * page is the BIGR-872 defect regardless of shape. The row-shape half is
+     * NOT universal — centered-masthead stacks the wordmark over the nav and
+     * split-nav puts links on both sides by catalog definition, so those two
+     * take the completeness clause alone. Forbidding their own form in the
+     * same prompt that assigns it is a contradiction the model resolves at
+     * random.
+     */
+    private const NAV_RULE_COMPLETE = '- Navigation: NEVER include the homepage in `wp:navigation`. `wp:site-title`'
+        . ' and `wp:site-logo` already link home — a Home item is redundant. Do NOT use `<!-- wp:page-list /-->`'
         . ' (it lists every page, including Home) and do NOT emit `wp:home-link`. Hand-author'
         . ' `wp:navigation-link` entries for EVERY SITE PAGES entry except the front page — omitting any inner page'
-        . ' is forbidden. Keep identity and navigation on one horizontal row (identity start, nav end). NEVER split'
-        . ' links onto both sides of the wordmark. NEVER stack the wordmark above the nav.';
+        . ' is forbidden.';
+
+    /** Appended to {{nav_rule}} for the archetypes whose form is a single row. */
+    private const NAV_RULE_ROW = ' Keep identity and navigation on one horizontal row (identity start, nav end).'
+        . ' NEVER split links onto both sides of the wordmark. NEVER stack the wordmark above the nav.';
+
+    /** Archetypes whose catalog form is deliberately not a single row. */
+    private const NAV_SHAPE_EXEMPT = ['centered-masthead', 'split-nav'];
 
     /** {{nav_rule}} when the site is the homepage alone — a page-list would render one self-referential "Home" link. */
     private const NAV_RULE_SINGLE = '- Navigation: this site is ONE page, so a page-list would render a single'
@@ -100,9 +116,14 @@ final class SectionsStep implements Step
      * Public so host adapters (e.g. wpcom queue phase) share the same source of
      * truth as jobs() — do not re-mirror the private constants.
      */
-    public static function navRuleFor(int $pageCount): string
+    public static function navRuleFor(int $pageCount, string $archetype = ''): string
     {
-        return $pageCount > 1 ? self::NAV_RULE_MULTI : self::NAV_RULE_SINGLE;
+        if ($pageCount <= 1) {
+            return self::NAV_RULE_SINGLE;
+        }
+        return in_array($archetype, self::NAV_SHAPE_EXEMPT, true)
+            ? self::NAV_RULE_COMPLETE
+            : self::NAV_RULE_COMPLETE . self::NAV_RULE_ROW;
     }
 
     /** {{nav_rule}} text for footer generation given how many pages the plan has. */
@@ -527,7 +548,18 @@ final class SectionsStep implements Step
         }
 
         $attrs = [
-            'layout' => ['type' => 'constrained'],
+            // The header is one horizontal row: identity at the start, and the
+            // slot a later HeaderNav pass fills at the end (BIGR-872). A
+            // constrained group would stack that nav under the wordmark, which
+            // is the masthead defect this fallback used to ship. The footer
+            // keeps the stacked constrained shape.
+            'layout' => $key === 'header'
+                ? [
+                    'type' => 'flex',
+                    'justifyContent' => 'space-between',
+                    'verticalAlignment' => 'center',
+                ]
+                : ['type' => 'constrained'],
             'style' => [
                 'spacing' => [
                     'padding' => [
@@ -1053,7 +1085,7 @@ final class SectionsStep implements Step
                 'input' => $common + [
                     'outline'    => self::outline($frontSections),
                     'hero_brief' => self::heroBrief($frontSections),
-                    'nav_rule'   => self::navRuleFor(count($pages)),
+                    'nav_rule'   => self::navRuleFor(count($pages), (string) $contract['header']['archetype']),
                     'above_fold_contract' => $contract,
                     'header_behavior' => HeaderBehavior::promptContract($headerBehavior),
                 ],

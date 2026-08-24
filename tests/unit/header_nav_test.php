@@ -447,7 +447,7 @@ test('HeaderNav does not fill footer navigation (BIGR-872 is header-only)', func
 
 test('HeaderNav does not duplicate an inner page already present as an HTML nav anchor', function () {
     $markup = '<!-- wp:navigation -->'
-        . '<nav><ul><li><a href="#hero">About</a></li></ul></nav>'
+        . '<nav><ul><li><a href="/about/">About</a></li></ul></nav>'
         . '<!-- /wp:navigation -->';
     $pages = [
         ['title' => 'Home', 'slug' => 'home', 'path' => '/', 'front' => true],
@@ -497,4 +497,106 @@ test('header-hero fills a header that shipped with no inner-page links (BIGR-872
     assert_contains('"url":"/menu/"', $result['markup']);
     assert_contains('"url":"/visit/"', $result['markup']);
     assert_true(!str_contains($result['markup'], '"label":"Home"'));
+});
+
+test('HeaderNav leaves an unprovable navigation alone and warns (BIGR-872)', function () {
+    // A truncated wp:navigation: no closing delimiter, so its span cannot be
+    // proven. Filling next to it would ship two navs and one hamburger each.
+    $markup = '<!-- wp:group --><div class="wp-block-group">'
+        . '<!-- wp:site-title /-->'
+        . '<!-- wp:navigation -->'
+        . '<!-- wp:navigation-link {"label":"Menu","url":"/menu/","kind":"custom"} /-->'
+        . '</div><!-- /wp:group -->';
+
+    $result = HeaderNav::withCompleteInnerPages($markup, header_nav_pages());
+
+    assert_eq($markup, $result['markup'], 'the unprovable nav is left untouched');
+    assert_eq([], $result['notes']);
+    assert_true($result['warnings'] !== [], 'the skipped fill is a recorded warning');
+    assert_contains('wp:navigation', implode("\n", $result['warnings']));
+    assert_eq(1, substr_count($result['markup'], '<!-- wp:navigation -->'), 'no second navigation');
+});
+
+test('HeaderNav does not let a homepage-anchor link mask the inner page it shares a label with', function () {
+    $pages = [
+        ['title' => 'Home', 'slug' => 'home', 'path' => '/', 'front' => true],
+        ['title' => 'Visit', 'slug' => 'visit', 'path' => '/visit/', 'front' => false],
+    ];
+    // A "Visit" CTA aimed at a homepage section is not the Visit page.
+    $markup = '<!-- wp:site-title /--><!-- wp:navigation -->'
+        . '<!-- wp:navigation-link {"label":"Visit","url":"/#visit-us","kind":"custom"} /-->'
+        . '<!-- /wp:navigation -->';
+
+    $result = HeaderNav::withCompleteInnerPages($markup, $pages);
+
+    assert_contains('"url":"/visit/"', $result['markup'], 'the real Visit page is reachable');
+});
+
+test('HeaderNav keeps a renamed inner-page href from being linked twice', function () {
+    $pages = [
+        ['title' => 'Home', 'slug' => 'home', 'path' => '/', 'front' => true],
+        ['title' => 'Visit', 'slug' => 'visit', 'path' => '/visit/', 'front' => false],
+    ];
+    // Same page, different authored path: the label still proves the match.
+    $markup = '<!-- wp:site-title /--><!-- wp:navigation -->'
+        . '<!-- wp:navigation-link {"label":"Visit","url":"/visit-us/","kind":"custom"} /-->'
+        . '<!-- /wp:navigation -->';
+
+    $result = HeaderNav::withCompleteInnerPages($markup, $pages);
+
+    assert_eq($markup, $result['markup'], 'a renamed href is not a missing page');
+    assert_eq([], $result['notes']);
+});
+
+test('HeaderNav adds HTML anchors inside the existing nav list, not beside it', function () {
+    $markup = '<a class="brand" href="/">Atelier</a>'
+        . '<nav aria-label="Primary"><ul><li><a href="/menu/">Menu</a></li></ul></nav>';
+
+    $result = HeaderNav::withCompleteInnerPages($markup, header_nav_pages(), 'header', 'Atelier');
+
+    assert_contains('<li><a href="/visit/">Visit</a></li>', $result['markup']);
+    assert_true(
+        !str_contains($result['markup'], '</ul><a href="/visit/">'),
+        'a bare anchor beside the list escapes every `nav ul li a` rule',
+    );
+});
+
+test('HeaderNav spreads missing links across both split-nav halves', function () {
+    $pages = [
+        ['title' => 'Home', 'slug' => 'home', 'path' => '/', 'front' => true],
+        ['title' => 'Menu', 'slug' => 'menu', 'path' => '/menu/', 'front' => false],
+        ['title' => 'Visit', 'slug' => 'visit', 'path' => '/visit/', 'front' => false],
+        ['title' => 'Press', 'slug' => 'press', 'path' => '/press/', 'front' => false],
+        ['title' => 'Contact', 'slug' => 'contact', 'path' => '/contact/', 'front' => false],
+    ];
+    $markup = '<!-- wp:navigation --><!-- /wp:navigation -->'
+        . '<!-- wp:site-title /-->'
+        . '<!-- wp:navigation --><!-- /wp:navigation -->';
+
+    $result = HeaderNav::withCompleteInnerPages($markup, $pages);
+
+    [$left, $right] = explode('<!-- wp:site-title /-->', $result['markup']);
+    assert_true(substr_count($left, 'wp:navigation-link') > 0, 'the start half gets links');
+    assert_true(substr_count($right, 'wp:navigation-link') > 0, 'the end half gets links');
+    assert_eq(4, substr_count($result['markup'], 'wp:navigation-link'), 'every inner page exactly once');
+});
+
+test('HeaderNav inserts navigation into a row, never stacked under the wordmark (BIGR-872)', function () {
+    // A constrained group stacks its children, so an inserted nav would land
+    // on its own row: the maxwelldemo7 masthead this pass exists to remove.
+    $markup = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group"><!-- wp:site-title /--></div>'
+        . '<!-- /wp:group -->';
+
+    $result = HeaderNav::withCompleteInnerPages($markup, header_nav_pages());
+
+    assert_contains('"type":"flex"', $result['markup'], 'identity and nav share one row');
+    $rowAt = strpos($result['markup'], '"type":"flex"');
+    $titleAt = strpos($result['markup'], 'wp:site-title');
+    $navAt = strpos($result['markup'], '<!-- wp:navigation -->');
+    assert_true(
+        $rowAt !== false && $titleAt !== false && $navAt !== false && $rowAt < $titleAt && $titleAt < $navAt,
+        'the row wraps the wordmark and the new nav',
+    );
+    assert_contains('"url":"/menu/"', $result['markup']);
 });
