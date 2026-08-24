@@ -94,7 +94,12 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         . " sections so the page is richer and flows well. Let the design direction's mood"
         . " inform which sections you choose and how they're framed. Aim for 5 to 8 sections.";
 
-    private const INTERIOR_EMPHASIS = 'This is one interior page of a multi-page site. Aim for 3 to 6 sections.'
+    /**
+     * Interior default. Contact-like pages use a tighter brief via emphasisFor()
+     * so a "reach us" purpose is not padded to homepage length (BIGR-858).
+     */
+    private const INTERIOR_EMPHASIS = 'This is one interior page of a multi-page site. Aim for 3 to 6 sections'
+        . ' — fewer when THIS PAGE\'s purpose is narrow.'
         . ' Open with a COMPACT page hero that orients the visitor on this page (not a second homepage hero —'
         . ' never "full-bleed-cover" as the FIRST section; an image-led opening uses background "image" on a'
         . ' compact archetype instead),'
@@ -106,6 +111,18 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         . " design direction's mood inform the section choices here too, and remember the"
         . " site header renders above — sometimes floating over — this page's FIRST section: open with a"
         . ' background the site chrome can sit on.';
+
+    /** Contact/enquiry pages stay brief. Ticket BIGR-858. */
+    public const MAX_CONTACT_SECTIONS = 4;
+
+    /**
+     * Slug/title identities that belong to some other page even when the
+     * purpose mentions getting in touch. Purpose is only an extra signal for
+     * an odd slug like "reach" / "write".
+     */
+    private const NON_CONTACT_IDENTITIES =
+        'about|services|programs|visit|gallery|blog|news|team|story|work|'
+        . 'portfolio|shop|menu|events|faq|pricing|journal|press|careers|home|index|welcome';
 
     public function __construct(
         private Llm $llm,
@@ -298,7 +315,10 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                     'page_title'             => (string) $page['title'],
                     'page_slug'              => (string) $page['slug'],
                     'page_purpose'           => (string) $page['purpose'],
-                    'page_emphasis'          => $front ? self::FRONT_EMPHASIS : self::INTERIOR_EMPHASIS,
+                    'page_emphasis'          => self::emphasisFor(
+                        $page,
+                        (bool) ($meta['form_placeholders'] ?? false),
+                    ),
                     'front_hero_context'     => $front
                         ? self::frontHeroPromptContext($blueprint, $projection)
                         : '',
@@ -576,6 +596,11 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         // Pad below the delivered sections with reviewed generic briefs so
         // the sections step still writes a whole page, and record the loss.
         $out = self::padThinFrontPlan($out, $frontProjection, $actionContext, $warnings, $allowOffsetGrid);
+        foreach ($out as $i => $page) {
+            if (is_array($page)) {
+                $out[$i] = self::capContactPage($page, $warnings);
+            }
+        }
 
         // Anchors cannot be judged until every normal, repair, and fallback
         // path has produced its final page/section set. Recheck the sole
@@ -1618,7 +1643,295 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         return isset($paths[$path]) || in_array($path, $paths, true);
     }
 
-    /** @return array{0:string,1:string}|null */
+    /**
+     * Whether this spec page is a contact/enquiry destination. Slug and title
+     * match the storefront detector (contact / contact-us, not contact-sheet).
+     * Purpose is an extra signal so a "reach us" page with an odd slug still
+     * gets the brief plan; it cannot override a front page or a slug/title
+     * that already names some other page. BIGR-858.
+     *
+     * @param array<string,mixed> $page
+     */
+    public static function isContactLikePage(array $page): bool
+    {
+        if (!empty($page['front'])) {
+            return false;
+        }
+        $slug = strtolower(trim((string) ($page['slug'] ?? '')));
+        $title = strtolower(trim((string) ($page['title'] ?? '')));
+        $purpose = strtolower(trim((string) ($page['purpose'] ?? '')));
+        $blob = trim($slug . ' ' . $title . ' ' . $purpose);
+        if ($blob !== '' && preg_match('/contact[- ]sheet/u', $blob) === 1) {
+            return false;
+        }
+        $token = '(?:contact|contacto|contato|kontakt|contatti)';
+        if ($slug !== '' && preg_match('/^' . $token . '(?:-us)?$/u', $slug) === 1) {
+            return true;
+        }
+        if ($title !== '' && preg_match('/^' . $token . '(?:\s+us)?$/u', $title) === 1) {
+            return true;
+        }
+        if ($slug !== '' && preg_match('/^(?:get-in-touch|reach-us|enquire|enquiry|inquiry)$/u', $slug) === 1) {
+            return true;
+        }
+        if (self::identityPointsElsewhere($slug, $title)) {
+            return false;
+        }
+        return $purpose !== '' && preg_match(
+            '/\b(?:get in touch|contact form|reach us|send (?:a |an )?(?:message|enquiry|inquiry))\b/u',
+            $purpose,
+        ) === 1;
+    }
+
+    /** Slug or title already names a different interior page. */
+    private static function identityPointsElsewhere(string $slug, string $title): bool
+    {
+        $identities = self::NON_CONTACT_IDENTITIES;
+        if ($slug !== '' && preg_match('/^(?:our-)?(?:' . $identities . ')(?:-us)?$/u', $slug) === 1) {
+            return true;
+        }
+        if ($title !== '' && preg_match(
+            '/^(?:(?:our|the)\s+)?(?:' . $identities . ')(?:\s+us)?$/u',
+            $title,
+        ) === 1) {
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Per-page planning brief. The spec purpose is the contract; contact pages
+     * are 2–4 sections, not the 3–6 interior pad.
+     *
+     * @param array<string,mixed> $page
+     */
+    public static function emphasisFor(array $page, bool $formPlaceholders = false): string
+    {
+        if (!empty($page['front'])) {
+            return self::FRONT_EMPHASIS;
+        }
+        $purpose = trim((string) ($page['purpose'] ?? ''));
+        $purposeClause = $purpose !== '' ? ': "' . $purpose . '"' : '';
+        if (self::isContactLikePage($page)) {
+            $formLine = $formPlaceholders
+                ? ' This build has a form backend: exactly one section must be the contact form'
+                    . ' (type `contact`; content_notes say to reserve a JP_FORM contact placeholder).'
+                    . ' Never a fake HTML form.'
+                : ' There is no form backend: present the spec\'s contact facts and a mailto/tel CTA,'
+                    . ' never a fake form.';
+            return 'THIS PAGE\'s purpose is the contract' . $purposeClause
+                . '. Honor it. A contact page is brief — 2 to 4 sections total, never more. '
+                . 'Typical shape: a compact opener, the form or contact facts as the main act, '
+                . 'optional hours/address, a short close. Do NOT add story, programs, galleries, '
+                . 'testimonials, or homepage-style bands; those live on other SITE PAGES.'
+                . $formLine;
+        }
+        $lead = 'THIS PAGE\'s purpose is the contract' . $purposeClause . '. ';
+        return $lead . self::INTERIOR_EMPHASIS;
+    }
+
+    /**
+     * Drop extra bands from a contact page so it stays at most 4 sections.
+     * Keeps the opener, the closer, and the highest-scoring contact/form
+     * middles, in document order. Idempotent. BIGR-858.
+     *
+     * @param array<string,mixed> $page
+     * @param list<string> $warnings
+     * @return array<string,mixed>
+     */
+    public static function capContactPage(array $page, array &$warnings = []): array
+    {
+        if (!self::isContactLikePage($page)) {
+            return $page;
+        }
+        $sections = array_values(array_filter((array) ($page['sections'] ?? []), 'is_array'));
+        $authored = count($sections);
+        if ($authored <= self::MAX_CONTACT_SECTIONS) {
+            return $page;
+        }
+        $kept = self::selectContactSections($sections, self::MAX_CONTACT_SECTIONS);
+        $keptSlugs = array_map(
+            static fn (array $section): string => (string) ($section['slug'] ?? ''),
+            $kept,
+        );
+        $dropped = [];
+        foreach ($sections as $section) {
+            $slug = (string) ($section['slug'] ?? '');
+            if (!in_array($slug, $keptSlugs, true)) {
+                $dropped[] = $slug !== '' ? $slug : '(unnamed)';
+            }
+        }
+        $pageSlug = (string) ($page['slug'] ?? '');
+        $authoredArchetypes = array_map(
+            static fn (array $section): string => trim((string) ($section['layout_archetype'] ?? '')),
+            $kept,
+        );
+        $varietyWarnings = [];
+        $kept = self::repairVariety($kept, false, null, $varietyWarnings, $pageSlug);
+        $kept = self::demoteIntroducedCovers($kept, $authoredArchetypes, $varietyWarnings, $pageSlug);
+        array_push($warnings, ...$varietyWarnings);
+        // Last, so the seam prose names the archetypes that actually ship.
+        $kept = self::rewriteSeamHandoffs($kept);
+        $count = count($kept);
+        foreach ($kept as $index => $section) {
+            $kept[$index]['role'] = SectionRole::forPosition($index, $count);
+        }
+        $page['sections'] = $kept;
+        $warnings[] = self::valueLossWarning(
+            "pages[slug={$pageSlug}].sections",
+            $authored . ' sections (' . implode(', ', array_column($sections, 'slug')) . ')',
+            $count . ' sections (' . implode(', ', $keptSlugs) . ')',
+            'trimmed contact page to ' . self::MAX_CONTACT_SECTIONS
+                . ' sections; dropped ' . implode(', ', $dropped),
+            true,
+        );
+        return $page;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $sections
+     * @return list<array<string,mixed>>
+     */
+    private static function selectContactSections(array $sections, int $max): array
+    {
+        if (count($sections) <= $max) {
+            return $sections;
+        }
+        $first = $sections[0];
+        $last = $sections[count($sections) - 1];
+        $middle = array_slice($sections, 1, -1);
+        $scored = [];
+        foreach ($middle as $index => $section) {
+            $scored[] = [
+                'index' => $index,
+                'score' => self::contactSectionScore($section),
+                'section' => $section,
+            ];
+        }
+        usort($scored, static function (array $a, array $b): int {
+            return $b['score'] <=> $a['score'] ?: $a['index'] <=> $b['index'];
+        });
+        $need = max(0, $max - 2);
+        $picked = array_slice($scored, 0, $need);
+        usort($picked, static fn (array $a, array $b): int => $a['index'] <=> $b['index']);
+        $out = [$first];
+        foreach ($picked as $row) {
+            $out[] = $row['section'];
+        }
+        $out[] = $last;
+        return $out;
+    }
+
+    /**
+     * The adjacency repair returns the first archetype clearing both
+     * neighbors, and 'full-bleed-cover' leads that list — an image-led band
+     * is the wrong answer on the page this cap exists to keep brief. Only a
+     * cover the repair introduced is demoted; an authored one is the plan's
+     * own choice.
+     *
+     * @param list<array<string,mixed>> $sections
+     * @param list<string> $authoredArchetypes indexed alongside $sections
+     * @param list<string> $warnings the repair's own rows, superseded in place
+     * @return list<array<string,mixed>>
+     */
+    private static function demoteIntroducedCovers(
+        array $sections,
+        array $authoredArchetypes,
+        array &$warnings,
+        string $pageSlug,
+    ): array {
+        $archetypes = array_map(
+            static fn (array $section): string => trim((string) ($section['layout_archetype'] ?? '')),
+            $sections,
+        );
+        foreach ($archetypes as $i => $archetype) {
+            if ($archetype !== 'full-bleed-cover'
+                || ($authoredArchetypes[$i] ?? '') === 'full-bleed-cover'
+            ) {
+                continue;
+            }
+            // No offset-grid either: this runs without the photography gate
+            // the outer flow threads, so the safe set is the narrower one.
+            $replacement = self::pickArchetype($archetypes, (int) $i, false, 'full-bleed-cover');
+            if ($replacement === 'full-bleed-cover') {
+                continue;
+            }
+            $archetypes[$i] = $replacement;
+            $sections[$i]['layout_archetype'] = $replacement;
+            // The repair already logged authored -> cover. That cover never
+            // ships, so drop its row rather than leave a delivered value the
+            // build did not write.
+            $path = self::sectionPath($pageSlug, (int) $i) . '.layout_archetype';
+            $warnings = array_values(array_filter(
+                $warnings,
+                static fn (string $row): bool => !str_contains($row, "path=\"{$path}\""),
+            ));
+            $warnings[] = self::valueLossWarning(
+                $path,
+                $authoredArchetypes[$i] ?? $archetype,
+                $replacement,
+                'reassigned to clear an adjacent duplicate after the contact trim,'
+                    . ' avoiding an image-led band on a brief page',
+            );
+        }
+        return $sections;
+    }
+
+    /**
+     * Neighbor-derived seam prose for a list whose members just changed.
+     * The surviving handoffs still name dropped neighbors until this runs.
+     *
+     * @param list<array<string,mixed>> $sections
+     * @return list<array<string,mixed>>
+     */
+    private static function rewriteSeamHandoffs(array $sections): array
+    {
+        $count = count($sections);
+        foreach ($sections as $i => $_) {
+            $above = $i === 0 ? 'the site header' : self::seamNeighbor($sections[$i - 1]);
+            $below = $i === $count - 1 ? 'the site footer' : self::seamNeighbor($sections[$i + 1]);
+            $sections[$i]['handoff'] = "Sits below {$above} and above {$below}.";
+        }
+        return $sections;
+    }
+
+    /**
+     * One neighbor, named the way page-plan.md asks for: its delivered
+     * background and archetype, not just its title.
+     *
+     * @param array<string,mixed> $section
+     */
+    private static function seamNeighbor(array $section): string
+    {
+        $title = trim((string) ($section['title'] ?? '')) ?: 'the adjacent section';
+        $assignment = trim(
+            trim((string) ($section['background'] ?? ''))
+            . ' ' . trim((string) ($section['layout_archetype'] ?? '')),
+        );
+        return $assignment === ''
+            ? "\"{$title}\""
+            : "the {$assignment} section \"{$title}\"";
+    }
+
+    /** @param array<string,mixed> $section */
+    private static function contactSectionScore(array $section): int
+    {
+        $blob = strtolower(implode(' ', [
+            (string) ($section['slug'] ?? ''),
+            (string) ($section['type'] ?? ''),
+            (string) ($section['purpose'] ?? ''),
+            (string) ($section['content_notes'] ?? ''),
+        ]));
+        $score = 0;
+        if (preg_match('/\b(?:form|jp_form|enquiry|inquiry)\b/u', $blob) === 1) {
+            $score += 3;
+        }
+        if (preg_match('/\b(?:contact|hours|address|map|visit|reach)\b/u', $blob) === 1) {
+            $score += 2;
+        }
+        return $score;
+    }
+
     /**
      * Append reviewed generic section briefs below a front page whose
      * delivered plan has fewer than three sections. The appended briefs are
