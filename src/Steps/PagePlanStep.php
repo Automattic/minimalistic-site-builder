@@ -1762,7 +1762,15 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             }
         }
         $pageSlug = (string) ($page['slug'] ?? '');
-        $kept = self::repairVariety($kept, false, null, $warnings, $pageSlug);
+        $authoredArchetypes = array_map(
+            static fn (array $section): string => trim((string) ($section['layout_archetype'] ?? '')),
+            $kept,
+        );
+        $varietyWarnings = [];
+        $kept = self::repairVariety($kept, false, null, $varietyWarnings, $pageSlug);
+        $kept = self::demoteIntroducedCovers($kept, $authoredArchetypes, $varietyWarnings, $pageSlug);
+        array_push($warnings, ...$varietyWarnings);
+        // Last, so the seam prose names the archetypes that actually ship.
         $kept = self::rewriteSeamHandoffs($kept);
         $count = count($kept);
         foreach ($kept as $index => $section) {
@@ -1815,6 +1823,61 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     }
 
     /**
+     * The adjacency repair returns the first archetype clearing both
+     * neighbors, and 'full-bleed-cover' leads that list — an image-led band
+     * is the wrong answer on the page this cap exists to keep brief. Only a
+     * cover the repair introduced is demoted; an authored one is the plan's
+     * own choice.
+     *
+     * @param list<array<string,mixed>> $sections
+     * @param list<string> $authoredArchetypes indexed alongside $sections
+     * @param list<string> $warnings the repair's own rows, superseded in place
+     * @return list<array<string,mixed>>
+     */
+    private static function demoteIntroducedCovers(
+        array $sections,
+        array $authoredArchetypes,
+        array &$warnings,
+        string $pageSlug,
+    ): array {
+        $archetypes = array_map(
+            static fn (array $section): string => trim((string) ($section['layout_archetype'] ?? '')),
+            $sections,
+        );
+        foreach ($archetypes as $i => $archetype) {
+            if ($archetype !== 'full-bleed-cover'
+                || ($authoredArchetypes[$i] ?? '') === 'full-bleed-cover'
+            ) {
+                continue;
+            }
+            // No offset-grid either: this runs without the photography gate
+            // the outer flow threads, so the safe set is the narrower one.
+            $replacement = self::pickArchetype($archetypes, (int) $i, false, 'full-bleed-cover');
+            if ($replacement === 'full-bleed-cover') {
+                continue;
+            }
+            $archetypes[$i] = $replacement;
+            $sections[$i]['layout_archetype'] = $replacement;
+            // The repair already logged authored -> cover. That cover never
+            // ships, so drop its row rather than leave a delivered value the
+            // build did not write.
+            $path = self::sectionPath($pageSlug, (int) $i) . '.layout_archetype';
+            $warnings = array_values(array_filter(
+                $warnings,
+                static fn (string $row): bool => !str_contains($row, "path=\"{$path}\""),
+            ));
+            $warnings[] = self::valueLossWarning(
+                $path,
+                $authoredArchetypes[$i] ?? $archetype,
+                $replacement,
+                'reassigned to clear an adjacent duplicate after the contact trim,'
+                    . ' avoiding an image-led band on a brief page',
+            );
+        }
+        return $sections;
+    }
+
+    /**
      * Neighbor-derived seam prose for a list whose members just changed.
      * The surviving handoffs still name dropped neighbors until this runs.
      *
@@ -1825,15 +1888,29 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     {
         $count = count($sections);
         foreach ($sections as $i => $_) {
-            $above = $i === 0
-                ? 'the site header'
-                : '"' . trim((string) ($sections[$i - 1]['title'] ?? 'the previous section')) . '"';
-            $below = $i === $count - 1
-                ? 'the site footer'
-                : '"' . trim((string) ($sections[$i + 1]['title'] ?? 'the next section')) . '"';
+            $above = $i === 0 ? 'the site header' : self::seamNeighbor($sections[$i - 1]);
+            $below = $i === $count - 1 ? 'the site footer' : self::seamNeighbor($sections[$i + 1]);
             $sections[$i]['handoff'] = "Sits below {$above} and above {$below}.";
         }
         return $sections;
+    }
+
+    /**
+     * One neighbor, named the way page-plan.md asks for: its delivered
+     * background and archetype, not just its title.
+     *
+     * @param array<string,mixed> $section
+     */
+    private static function seamNeighbor(array $section): string
+    {
+        $title = trim((string) ($section['title'] ?? '')) ?: 'the adjacent section';
+        $assignment = trim(
+            trim((string) ($section['background'] ?? ''))
+            . ' ' . trim((string) ($section['layout_archetype'] ?? '')),
+        );
+        return $assignment === ''
+            ? "\"{$title}\""
+            : "the {$assignment} section \"{$title}\"";
     }
 
     /** @param array<string,mixed> $section */

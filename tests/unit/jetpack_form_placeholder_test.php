@@ -155,8 +155,10 @@ test('the injected placeholder sits inside the section group, not after it', fun
         }
     }
     assert_eq(['group'], $roots, 'the part must stay one top-level group');
+    // strrpos, not strpos: a nested block's </div> would let the weaker
+    // assertion pass while the placeholder sat outside the group's own div.
     assert_true(
-        strpos($markup, 'jetpack-form-placeholder') < strpos($markup, '</div>'),
+        strpos($markup, 'jetpack-form-placeholder') < strrpos($markup, '</div>'),
         'the placeholder sits inside the group wrapping div, so it inherits the band',
     );
     assert_true(

@@ -2140,3 +2140,111 @@ test('a contact page already at or under 4 sections is left alone', function () 
     assert_eq([], $warnings);
 });
 
+
+test('the contact trim never introduces a full-bleed cover band', function () {
+    // The adjacency repair returns ARCHETYPES' first clearing candidate, and
+    // 'full-bleed-cover' leads that list — so the trim used to hand a brief
+    // contact page an image-led band.
+    $page = [
+        'slug' => 'contact',
+        'title' => 'Contact',
+        'purpose' => 'Let visitors reach the team.',
+        'front' => false,
+        'sections' => [
+            plan_section(['slug' => 'hero', 'title' => 'Hello', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'role' => 'hero']),
+            plan_section(['slug' => 'story', 'title' => 'Story', 'layout_archetype' => 'asymmetric-split', 'background' => 'base', 'role' => 'content']),
+            plan_section(['slug' => 'programs', 'title' => 'Programs', 'layout_archetype' => 'equal-card-grid', 'background' => 'base', 'role' => 'content']),
+            plan_section(['slug' => 'form', 'title' => 'Write us', 'type' => 'contact', 'purpose' => 'The contact form', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'role' => 'content']),
+            plan_section(['slug' => 'gallery', 'title' => 'Gallery', 'layout_archetype' => 'offset-grid', 'background' => 'base', 'role' => 'content']),
+            plan_section(['slug' => 'close', 'title' => 'See you', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'role' => 'closing']),
+        ],
+    ];
+    $warnings = [];
+    $capped = PagePlanStep::capContactPage($page, $warnings);
+    $archetypes = array_column($capped['sections'], 'layout_archetype');
+
+    assert_true(
+        !in_array('full-bleed-cover', $archetypes, true),
+        'the trim must not promote a section to an image-led cover: ' . implode(', ', $archetypes),
+    );
+    assert_true(
+        !in_array('offset-grid', $archetypes, true),
+        'the trim runs without the photography gate, so it must not assign offset-grid either',
+    );
+    for ($i = 1, $n = count($archetypes); $i < $n; $i++) {
+        assert_true($archetypes[$i] !== $archetypes[$i - 1], 'and adjacency still holds');
+    }
+
+    // The repair's own row said delivered="full-bleed-cover". That band never
+    // ships, so warnings.json must not claim it did.
+    $trail = implode("\n", $warnings);
+    assert_true(
+        !str_contains($trail, 'delivered="full-bleed-cover"'),
+        'no warning may report a delivered value the build did not write: ' . $trail,
+    );
+});
+
+test('an authored full-bleed cover on a contact page survives the trim', function () {
+    // Only a cover the repair INTRODUCED is demoted; the plan's own choice stands.
+    $page = [
+        'slug' => 'contact',
+        'title' => 'Contact',
+        'purpose' => 'Let visitors reach the team.',
+        'front' => false,
+        'sections' => [
+            plan_section(['slug' => 'hero', 'title' => 'Hello', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'role' => 'hero']),
+            plan_section(['slug' => 'story', 'title' => 'Story', 'layout_archetype' => 'mixed-width-editorial', 'background' => 'base', 'role' => 'content']),
+            plan_section(['slug' => 'gallery', 'title' => 'Gallery', 'layout_archetype' => 'offset-grid', 'background' => 'base', 'role' => 'content']),
+            plan_section(['slug' => 'form', 'title' => 'Write us', 'type' => 'contact', 'purpose' => 'The contact form', 'layout_archetype' => 'asymmetric-split', 'background' => 'base', 'role' => 'content']),
+            plan_section(['slug' => 'hours', 'title' => 'Hours', 'purpose' => 'Harbor office hours and address', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'role' => 'content']),
+            // The closing band is always kept, so the authored cover reaches
+            // the assertion instead of being scored out of the page.
+            plan_section(['slug' => 'view', 'title' => 'The view', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'role' => 'closing']),
+        ],
+    ];
+    $warnings = [];
+    $capped = PagePlanStep::capContactPage($page, $warnings);
+    $bySlug = array_column($capped['sections'], 'layout_archetype', 'slug');
+
+    assert_true(
+        array_key_exists('view', $bySlug),
+        'the authored cover must survive the trim or this test asserts nothing',
+    );
+    assert_eq('full-bleed-cover', $bySlug['view'], 'an authored cover is the plan\'s own choice, not the trim\'s');
+});
+
+test('rewritten seam prose names each neighbor assignment, not just its title', function () {
+    // page-plan.md: "handoff" must name the actual neighbors' assignments.
+    $page = [
+        'slug' => 'contact',
+        'title' => 'Contact',
+        'purpose' => 'Let visitors reach the team.',
+        'front' => false,
+        'sections' => [
+            plan_section(['slug' => 'hero', 'title' => 'Hello', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'role' => 'hero']),
+            plan_section(['slug' => 'story', 'title' => 'Story', 'layout_archetype' => 'asymmetric-split', 'background' => 'contrast', 'role' => 'content']),
+            plan_section(['slug' => 'programs', 'title' => 'Programs', 'layout_archetype' => 'equal-card-grid', 'background' => 'base', 'role' => 'content']),
+            plan_section(['slug' => 'form', 'title' => 'Write us', 'type' => 'contact', 'purpose' => 'The contact form', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'role' => 'content']),
+            plan_section(['slug' => 'gallery', 'title' => 'Gallery', 'layout_archetype' => 'offset-grid', 'background' => 'base', 'role' => 'content']),
+            plan_section(['slug' => 'close', 'title' => 'See you', 'layout_archetype' => 'list-with-thumbnails', 'background' => 'base', 'role' => 'closing']),
+        ],
+    ];
+    $warnings = [];
+    $capped = PagePlanStep::capContactPage($page, $warnings);
+    $sections = $capped['sections'];
+    $count = count($sections);
+
+    assert_contains('the site header', $sections[0]['handoff']);
+    assert_contains('the site footer', $sections[$count - 1]['handoff']);
+    for ($i = 0; $i < $count; $i++) {
+        if ($i > 0) {
+            $prev = $sections[$i - 1];
+            assert_contains($prev['background'] . ' ' . $prev['layout_archetype'], $sections[$i]['handoff']);
+            assert_contains('"' . $prev['title'] . '"', $sections[$i]['handoff']);
+        }
+        if ($i < $count - 1) {
+            $next = $sections[$i + 1];
+            assert_contains($next['background'] . ' ' . $next['layout_archetype'], $sections[$i]['handoff']);
+        }
+    }
+});
