@@ -199,7 +199,7 @@ final class FixBlocksStep implements Step
         }
         if ($captionNotes !== []) {
             $summary .= "\n[captions] " . count($captionNotes)
-                . " image caption(s) removed outside galleries (recorded in warnings.json):\n  "
+                . " image-caption pass note(s):\n  "
                 . implode("\n  ", $captionNotes);
         }
         if ($layoutNotes !== []) {
