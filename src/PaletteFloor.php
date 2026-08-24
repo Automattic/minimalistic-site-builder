@@ -146,6 +146,7 @@ final class PaletteFloor
         $out = self::repairHue($out, $warnings);
         $out = self::repairChroma($out, $warnings);
         $out = self::repairContrast($out, $warnings);
+        self::warnResiduals($out, $warnings);
         return $out;
     }
 
@@ -228,20 +229,45 @@ final class PaletteFloor
             if ($hex === null) {
                 continue;
             }
-            $fixed = self::meetContrast($hex, $base, $floor);
-            if (self::sameHex($fixed, $hex)) {
+            $before = self::ratio($hex, $base);
+            if ($before !== null && $before >= $floor) {
                 continue;
             }
-            $palette[$role] = $fixed;
-            $warnings[] = self::warning(
+            $fixed = self::meetContrast($hex, $base, $floor);
+            $after = self::ratio($fixed, $base);
+            if ($after !== null && $after >= $floor) {
+                if (self::sameHex($fixed, $hex)) {
+                    continue;
+                }
+                $palette[$role] = $fixed;
+                $warnings[] = self::warning(
+                    $role,
+                    $hex,
+                    $fixed,
+                    sprintf(
+                        'repaired — contrast floor %s:1 on base, lightness moved at fixed hue',
+                        self::floorLabel($floor),
+                    ),
+                );
+                continue;
+            }
+            // Unreachable at this hue: keep the authored hex. A false
+            // "repaired" warning on a hex that still fails is how
+            // azure-island's lime became white at 1.66:1.
+            $achieved = self::bestAchievedRatio($hex, $base, $fixed);
+            $row = self::warning(
                 $role,
                 $hex,
-                $fixed,
+                $hex,
                 sprintf(
-                    'repaired — contrast floor %s:1 on base, lightness moved at fixed hue',
+                    'unrepaired — contrast floor %s:1 on base unreachable, best achieved %s:1',
                     self::floorLabel($floor),
+                    self::ratioLabel($achieved),
                 ),
             );
+            if (!in_array($row, $warnings, true)) {
+                $warnings[] = $row;
+            }
         }
         return $palette;
     }
@@ -340,13 +366,16 @@ final class PaletteFloor
 
     /**
      * Move LIGHTNESS at fixed hue/saturation until the pair meets $floor.
-     * Prefers the side of the other color the authored hex already sits on.
+     * Tries both directions (lighter and darker). When both pass, keeps
+     * the higher-chroma candidate, then the smaller luminance move.
+     * When neither passes, returns the authored hex — the caller must
+     * not record disposition=repaired.
      */
     private static function meetContrast(string $hex, string $other, float $floor): string
     {
         $ratio = self::ratio($hex, $other);
         if ($ratio !== null && $ratio >= $floor) {
-            return self::toHex(ContrastMath::hexToRgb($hex) ?? [0, 0, 0]);
+            return $hex;
         }
         $rgb = ContrastMath::hexToRgb($hex);
         $otherRgb = ContrastMath::hexToRgb($other);
@@ -361,35 +390,161 @@ final class PaletteFloor
         $margin = 0.004;
         $yHigh = min(1.0, $floor * ($yOther + 0.05) - 0.05 + $margin);
         $yLow = max(0.0, ($yOther + 0.05) / $floor - 0.05 - $margin);
-        $preferHigh = $y >= $yOther;
-        $targetY = $preferHigh ? $yHigh : $yLow;
-        $direction = $preferHigh ? 1.0 : -1.0;
 
-        $out = self::toHex(self::atLuminance($hue, $saturation, $targetY));
+        $passers = [];
+        foreach (
+            [
+                self::probeContrast($hue, $saturation, $yHigh, 1.0, $other, $floor),
+                self::probeContrast($hue, $saturation, $yLow, -1.0, $other, $floor),
+            ] as $candidate
+        ) {
+            if ($candidate !== null) {
+                $passers[] = $candidate;
+            }
+        }
+        if ($passers === []) {
+            return $hex;
+        }
+
+        usort($passers, static function (array $a, array $b) use ($y): int {
+            $chroma = $b['chroma'] <=> $a['chroma'];
+            if ($chroma !== 0) {
+                return $chroma;
+            }
+            return abs($a['y'] - $y) <=> abs($b['y'] - $y);
+        });
+        return $passers[0]['hex'];
+    }
+
+    /**
+     * Walk lightness from $startY toward white (direction +1) or black
+     * (direction -1) at fixed hue/saturation. Null when this side cannot
+     * meet $floor — including when the inversion clamps at 0 or 1.
+     *
+     * @return array{hex:string,ratio:float,chroma:float,y:float}|null
+     */
+    private static function probeContrast(
+        float $hue,
+        float $saturation,
+        float $startY,
+        float $direction,
+        string $other,
+        float $floor,
+    ): ?array {
+        $y = min(1.0, max(0.0, $startY));
+        $hex = self::toHex(self::atLuminance($hue, $saturation, $y));
         $guard = 0;
         while ($guard++ < 80) {
-            $now = self::ratio($out, $other);
-            if ($now !== null && $now >= $floor) {
+            $now = self::ratio($hex, $other);
+            $chroma = self::chroma($hex);
+            $yNow = self::luminance($hex);
+            if ($now !== null && $now >= $floor && $chroma !== null && $yNow !== null) {
+                return ['hex' => $hex, 'ratio' => $now, 'chroma' => $chroma, 'y' => $yNow];
+            }
+            $nextY = min(1.0, max(0.0, ($yNow ?? $y) + $direction * 0.012));
+            if ($yNow !== null && abs($nextY - $yNow) < 1e-9) {
                 break;
             }
-            $cur = ContrastMath::hexToRgb($out);
-            if ($cur === null) {
-                break;
-            }
-            $yNow = ContrastMath::luminance($cur);
-            $nextY = min(1.0, max(0.0, $yNow + $direction * 0.012));
-            if (abs($nextY - $yNow) < 1e-9) {
-                break;
-            }
-            // Hold the authored hue/saturation — re-extracting from the
-            // quantized candidate would walk the hue on each nudge.
             $next = self::toHex(self::atLuminance($hue, $saturation, $nextY));
-            if ($next === $out) {
+            if ($next === $hex) {
                 break;
             }
-            $out = $next;
+            $hex = $next;
         }
-        return $out;
+        $extreme = $direction > 0.0 ? 1.0 : 0.0;
+        $hex = self::toHex(self::atLuminance($hue, $saturation, $extreme));
+        $now = self::ratio($hex, $other);
+        $chroma = self::chroma($hex);
+        $yNow = self::luminance($hex);
+        if ($now !== null && $now >= $floor && $chroma !== null && $yNow !== null) {
+            return ['hex' => $hex, 'ratio' => $now, 'chroma' => $chroma, 'y' => $yNow];
+        }
+        return null;
+    }
+
+    /**
+     * Best contrast ratio we actually measured for an unreachable pair:
+     * the authored hex, the failed candidate (if different), and the
+     * black/white extremes at this hue.
+     */
+    private static function bestAchievedRatio(string $authored, string $other, string $candidate): float
+    {
+        $best = 1.0;
+        foreach ([$authored, $candidate, '#000000', '#FFFFFF'] as $hex) {
+            $ratio = self::ratio($hex, $other);
+            if ($ratio !== null && $ratio > $best) {
+                $best = $ratio;
+            }
+        }
+        return $best;
+    }
+
+    private static function ratioLabel(float $ratio): string
+    {
+        return number_format($ratio, 2);
+    }
+
+    /**
+     * Every finding that survived the repairs gets an unrepaired warning
+     * so a caller never has to re-run check() to learn the floor failed.
+     *
+     * @param array<string,string> $palette
+     * @param list<string>         $warnings
+     */
+    private static function warnResiduals(array $palette, array &$warnings): void
+    {
+        $covered = [];
+        foreach ($warnings as $row) {
+            if (preg_match('/path="palette\\.([^"]+)".*disposition=unrepaired/s', $row, $match) !== 1) {
+                continue;
+            }
+            $class = str_contains($row, 'hue separation')
+                ? 'hue-separation'
+                : (str_contains($row, 'chroma ceiling') ? 'chroma-ceiling' : 'contrast');
+            $covered[$class . ':' . $match[1]] = true;
+        }
+        foreach (self::check($palette) as $finding) {
+            $key = $finding['class'] . ':' . $finding['role'];
+            if (isset($covered[$key])) {
+                continue;
+            }
+            $authored = $finding['authored'];
+            $delivered = self::hexOf($palette, $finding['role']) ?? $authored;
+            $warnings[] = self::warning(
+                $finding['role'],
+                $authored,
+                $delivered,
+                self::residualDisposition($finding),
+            );
+            $covered[$key] = true;
+        }
+    }
+
+    /**
+     * @param array{
+     *     class:string,role:string,against:string,authored:string,metric:float,floor:float
+     * } $finding
+     */
+    private static function residualDisposition(array $finding): string
+    {
+        $metric = self::ratioLabel((float) $finding['metric']);
+        return match ($finding['class']) {
+            'contrast' => sprintf(
+                'unrepaired — contrast floor %s:1 on base unreachable, best achieved %s:1',
+                self::floorLabel((float) $finding['floor']),
+                $metric,
+            ),
+            'hue-separation' => sprintf(
+                'unrepaired — hue separation still %s degrees (floor %s)',
+                $metric,
+                self::ratioLabel((float) $finding['floor']),
+            ),
+            default => sprintf(
+                'unrepaired — chroma ceiling still %s (floor %s)',
+                $metric,
+                self::ratioLabel((float) $finding['floor']),
+            ),
+        };
     }
 
     /** Reduce chroma to the ceiling while holding hue and relative luminance. */

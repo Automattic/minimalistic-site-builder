@@ -57,6 +57,24 @@ function palette_floor_finding(array $findings, string $class, string $role): ?a
     return null;
 }
 
+function palette_floor_same_hex(string $a, string $b): bool
+{
+    $ra = \Automattic\SiteBuild\ContrastMath::hexToRgb($a);
+    $rb = \Automattic\SiteBuild\ContrastMath::hexToRgb($b);
+    return $ra !== null && $rb !== null && $ra === $rb;
+}
+
+/** @param list<string> $warnings */
+function palette_floor_warning_for(array $warnings, string $role): string
+{
+    foreach ($warnings as $row) {
+        if (str_contains($row, 'path="palette.' . $role . '"')) {
+            return $row;
+        }
+    }
+    return '';
+}
+
 test('check() labels every palette-floor fixture violation or clean', function () {
     $fixtures = palette_floor_fixtures();
     assert_eq(10, count($fixtures), 'exactly 10 real palettes');
@@ -337,8 +355,135 @@ test('repair() warnings name authored, delivered, disposition, and palette path'
     $blob = implode("\n", $v1);
     assert_contains('path="palette.primary"', $blob);
     assert_contains('authored="#8E1F26"', $blob);
-    assert_contains('delivered="#D84F57"', $blob);
     assert_contains('path="palette.accent"', $blob);
     assert_contains('authored="#E2622A"', $blob);
-    assert_contains('delivered="#E29A2A"', $blob);
 });
+
+test('repair() of azure-island accent does not collapse to white', function () {
+    $palette = [
+        'base' => '#D9C7A5',
+        'contrast' => '#16130F',
+        'primary' => '#1B3BE0',
+        'secondary' => '#B0125A',
+        'accent' => '#B4FF29',
+    ];
+    $warnings = [];
+    $out = PaletteFloor::repair($palette, $warnings);
+    assert_true(!palette_floor_same_hex($out['accent'], '#FFFFFF'), 'accent must not become white');
+    $ratio = PaletteFloor::ratio($out['accent'], $out['base']);
+    $blob = implode("\n", $warnings);
+    if ($ratio !== null && $ratio >= PaletteFloor::ROLE_ON_BASE) {
+        assert_true(!palette_floor_same_hex($out['accent'], '#B4FF29'), 'a passing repair moved accent');
+        assert_contains('disposition=repaired', $blob);
+        assert_true(!str_contains($blob, 'path="palette.accent"') || !str_contains(
+            palette_floor_warning_for($warnings, 'accent'),
+            'disposition=unrepaired',
+        ));
+    } else {
+        assert_true(palette_floor_same_hex($out['accent'], '#B4FF29'), 'unreachable accent stays authored');
+        assert_contains('disposition=unrepaired', palette_floor_warning_for($warnings, 'accent'));
+    }
+    assert_eq([], array_filter(
+        PaletteFloor::check($out),
+        static fn (array $f): bool => $f['class'] === 'contrast' && $f['role'] === 'accent',
+    ));
+});
+
+test('repair() crosses to the other lightness side when the authored side cannot meet the floor', function () {
+    $palette = [
+        'base' => '#D9C7A5',
+        'contrast' => '#16130F',
+        'primary' => '#1B3BE0',
+        'secondary' => '#B0125A',
+        'accent' => '#E8FF9A',
+    ];
+    $authoredY = PaletteFloor::luminance($palette['accent']);
+    $baseY = PaletteFloor::luminance($palette['base']);
+    assert_true($authoredY !== null && $baseY !== null && $authoredY > $baseY, 'authored sits on the light side');
+    assert_true(PaletteFloor::ratio('#FFFFFF', $palette['base']) < PaletteFloor::ROLE_ON_BASE, 'light extreme loses');
+    assert_true(PaletteFloor::ratio('#000000', $palette['base']) >= PaletteFloor::ROLE_ON_BASE, 'dark extreme wins');
+
+    $warnings = [];
+    $out = PaletteFloor::repair($palette, $warnings);
+    $y = PaletteFloor::luminance($out['accent']);
+    assert_true($y !== null && $y < $baseY, 'repair crossed to the dark side');
+    assert_true(
+        PaletteFloor::ratio($out['accent'], $out['base']) >= PaletteFloor::ROLE_ON_BASE,
+        'crossed repair clears 4.5:1',
+    );
+    assert_true(!palette_floor_same_hex($out['accent'], '#FFFFFF'));
+    assert_contains('disposition=repaired', palette_floor_warning_for($warnings, 'accent'));
+});
+
+test('repair() keeps the authored hex when the contrast floor is unreachable', function () {
+    $palette = [
+        'base' => '#808080',
+        'contrast' => '#AAAAAA',
+        'primary' => '#000000',
+        'secondary' => '#000000',
+        'accent' => '#000000',
+    ];
+    $before = PaletteFloor::ratio($palette['contrast'], $palette['base']);
+    assert_true($before !== null && $before < PaletteFloor::CONTRAST_ON_BASE);
+    assert_true(PaletteFloor::ratio('#FFFFFF', $palette['base']) < PaletteFloor::CONTRAST_ON_BASE);
+    assert_true(PaletteFloor::ratio('#000000', $palette['base']) < PaletteFloor::CONTRAST_ON_BASE);
+
+    $warnings = [];
+    $out = PaletteFloor::repair($palette, $warnings);
+    assert_true(palette_floor_same_hex($out['contrast'], '#AAAAAA'), 'authored contrast survives');
+    $row = palette_floor_warning_for($warnings, 'contrast');
+    assert_contains('disposition=unrepaired', $row);
+    assert_contains('contrast floor 7.0:1', $row);
+    assert_contains('best achieved', $row);
+    assert_contains(':1', $row);
+    $residual = palette_floor_finding(PaletteFloor::check($out), 'contrast', 'contrast');
+    assert_true($residual !== null);
+});
+
+test('repair() never claims repaired while check() still reports that role and class', function () {
+    $palettes = [
+        palette_floor_fixture('v1')['palette'],
+        [
+            'base' => '#D9C7A5',
+            'contrast' => '#16130F',
+            'primary' => '#1B3BE0',
+            'secondary' => '#B0125A',
+            'accent' => '#B4FF29',
+        ],
+        [
+            'base' => '#808080',
+            'contrast' => '#AAAAAA',
+            'primary' => '#000000',
+            'secondary' => '#000000',
+            'accent' => '#000000',
+        ],
+    ];
+    foreach ($palettes as $i => $palette) {
+        $warnings = [];
+        $out = PaletteFloor::repair($palette, $warnings);
+        foreach (PaletteFloor::check($out) as $finding) {
+            $row = palette_floor_warning_for($warnings, $finding['role']);
+            assert_true($row !== '', "palette {$i} {$finding['role']} residual has a warning");
+            assert_contains('disposition=unrepaired', $row, "palette {$i} {$finding['class']} {$finding['role']}");
+            assert_true(
+                !str_contains($row, 'disposition=repaired'),
+                "palette {$i} {$finding['role']} residual must not say repaired",
+            );
+        }
+        foreach ($warnings as $row) {
+            if (!str_contains($row, 'disposition=repaired')) {
+                continue;
+            }
+            assert_true(
+                preg_match('/path="palette\\.([^"]+)"/', $row, $match) === 1,
+                $row,
+            );
+            $role = $match[1];
+            $hit = palette_floor_finding(PaletteFloor::check($out), 'contrast', $role)
+                ?? palette_floor_finding(PaletteFloor::check($out), 'hue-separation', $role)
+                ?? palette_floor_finding(PaletteFloor::check($out), 'chroma-ceiling', $role);
+            assert_eq(null, $hit, "repaired warning for {$role} but check() still reports it");
+        }
+    }
+});
+

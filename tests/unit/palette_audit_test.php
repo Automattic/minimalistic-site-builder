@@ -81,7 +81,34 @@ test('palette-audit with no args prints usage on stderr and exits 1', function (
 
     assert_eq(1, $run['exit'], $run['stdout'] . $run['stderr']);
     assert_contains('Usage: php bin/palette-audit.php --fixtures', $run['stderr']);
+    assert_contains('Usage: php bin/palette-audit.php --projects [dir]', $run['stderr']);
     assert_contains('Usage: php bin/palette-audit.php <slug>', $run['stderr']);
+});
+
+test('palette-audit --projects reports residuals and black/white repairs', function () {
+    $dir = sys_get_temp_dir() . '/palette_audit_projects_' . getmypid() . '_' . str_replace('.', '', uniqid('', true));
+    assert_true(mkdir($dir . '/mid/theme', 0775, true));
+    file_put_contents($dir . '/mid/theme/theme.json', json_encode([
+        'version' => 3,
+        'settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#808080', 'name' => 'Base'],
+            ['slug' => 'contrast', 'color' => '#AAAAAA', 'name' => 'Contrast'],
+            ['slug' => 'primary', 'color' => '#000000', 'name' => 'Primary'],
+            ['slug' => 'secondary', 'color' => '#000000', 'name' => 'Secondary'],
+            ['slug' => 'accent', 'color' => '#000000', 'name' => 'Accent'],
+        ]]],
+    ]));
+    try {
+        $run = run_palette_audit(['--projects', $dir]);
+        $text = $run['stdout'] . $run['stderr'];
+        assert_eq(0, $run['exit'], $text);
+        assert_contains('projects palettes: 1', $run['stdout']);
+        assert_contains('residual palettes: 1', $run['stdout']);
+        assert_contains('residuals missing unrepaired warning: 0', $run['stdout']);
+        assert_contains('warning=unrepaired', $run['stdout']);
+    } finally {
+        remove_tree($dir);
+    }
 });
 
 test('palette-audit unknown slug errors on stderr and exits 1', function () {

@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\PaletteFloor;
 use Automattic\SiteBuild\PaletteReconciliation;
 use Automattic\SiteBuild\ProjectStore;
@@ -9,9 +10,11 @@ use Automattic\SiteBuild\ProjectStore;
  * Palette-floor audit. No LLM, no network.
  *
  *   php bin/palette-audit.php --fixtures
+ *   php bin/palette-audit.php --projects [dir]
  *   php bin/palette-audit.php <slug>
  *
  * --fixtures runs check → repair → check on tests/fixtures/palette-floor.
+ * --projects runs repair() then check() on every built project's theme.json.
  * <slug> audits the delivered theme.json palette of a built project.
  */
 
@@ -24,8 +27,13 @@ if ($arg === '--fixtures' && $extra === null) {
     exit(audit_fixtures());
 }
 
+if ($arg === '--projects' && ($extra === null || !str_starts_with($extra, '-'))) {
+    exit(audit_projects($extra ?? repo_path('projects')));
+}
+
 if ($arg === null || $arg === '' || str_starts_with($arg, '-') || $extra !== null) {
     fwrite(STDERR, "Usage: php bin/palette-audit.php --fixtures\n");
+    fwrite(STDERR, "Usage: php bin/palette-audit.php --projects [dir]\n");
     fwrite(STDERR, "Usage: php bin/palette-audit.php <slug>\n");
     exit(1);
 }
@@ -85,6 +93,86 @@ function audit_fixtures(): int
     echo "post-repair remaining: {$postRemaining}\n";
 
     return $postRemaining === 0 ? 0 : 1;
+}
+
+function audit_projects(string $root): int
+{
+    $files = glob(rtrim($root, '/') . '/*/theme/theme.json') ?: [];
+    sort($files);
+
+    $palettes = 0;
+    $residualPalettes = 0;
+    $residualWithoutUnrepaired = 0;
+    $repairedBlackWhite = [];
+
+    foreach ($files as $path) {
+        $theme = json_decode((string) file_get_contents($path), true);
+        if (!is_array($theme)) {
+            continue;
+        }
+        $palette = PaletteReconciliation::themePalette($theme);
+        if ($palette === []) {
+            continue;
+        }
+        $palettes++;
+        $slug = basename(dirname(dirname($path)));
+        $warnings = [];
+        $repaired = PaletteFloor::repair($palette, $warnings);
+        $findings = PaletteFloor::check($repaired);
+        if ($findings !== []) {
+            $residualPalettes++;
+        }
+        foreach ($findings as $finding) {
+            $role = $finding['role'];
+            $unrepaired = false;
+            foreach ($warnings as $row) {
+                if (
+                    str_contains($row, 'path="palette.' . $role . '"')
+                    && str_contains($row, 'disposition=unrepaired')
+                ) {
+                    $unrepaired = true;
+                    break;
+                }
+            }
+            if (!$unrepaired) {
+                $residualWithoutUnrepaired++;
+            }
+            $flag = $unrepaired ? 'unrepaired' : 'MISSING-unrepaired';
+            printf(
+                "%s residual class=%s role=%s metric=%s warning=%s\n",
+                $slug,
+                $finding['class'],
+                $role,
+                format_metric((float) $finding['metric']),
+                $flag,
+            );
+        }
+        foreach ($repaired as $role => $hex) {
+            $authored = $palette[$role] ?? null;
+            if (!is_string($authored)) {
+                continue;
+            }
+            $from = ContrastMath::hexToRgb($authored);
+            $to = ContrastMath::hexToRgb($hex);
+            $norm = strtoupper($hex);
+            if (
+                $from !== null && $to !== null && $from !== $to
+                && ($norm === '#000000' || $norm === '#FFFFFF')
+            ) {
+                $repairedBlackWhite[] = "{$slug}.{$role}={$norm}";
+            }
+        }
+    }
+
+    echo "projects palettes: {$palettes}\n";
+    echo "residual palettes: {$residualPalettes}\n";
+    echo "residuals missing unrepaired warning: {$residualWithoutUnrepaired}\n";
+    echo 'repaired #000000/#FFFFFF: ' . count($repairedBlackWhite) . "\n";
+    foreach ($repairedBlackWhite as $row) {
+        echo "  {$row}\n";
+    }
+
+    return $residualWithoutUnrepaired === 0 ? 0 : 1;
 }
 
 function audit_slug(string $slug): int

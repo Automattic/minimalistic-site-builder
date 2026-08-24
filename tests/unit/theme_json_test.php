@@ -2938,3 +2938,27 @@ test('applyPaletteFloor leaves a clean C1 palette unchanged', function () {
     assert_eq([], $warnings);
     assert_eq($before, $out, 'hexes unchanged');
 });
+
+test('applyPaletteFloor records unrepaired when a contrast floor cannot be met', function () {
+    $theme = [
+        'settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#808080', 'name' => 'Base'],
+            ['slug' => 'contrast', 'color' => '#AAAAAA', 'name' => 'Contrast'],
+            ['slug' => 'primary', 'color' => '#000000', 'name' => 'Primary'],
+            ['slug' => 'secondary', 'color' => '#000000', 'name' => 'Secondary'],
+            ['slug' => 'accent', 'color' => '#000000', 'name' => 'Accent'],
+        ]]],
+    ];
+
+    [$out, $warnings] = ThemeJsonStep::applyPaletteFloor($theme);
+    $bySlug = array_column($out['settings']['color']['palette'], 'color', 'slug');
+    assert_eq('#AAAAAA', $bySlug['contrast'], 'authored contrast kept');
+    $joined = implode(' ', $warnings);
+    assert_contains('path="palette.contrast"', $joined);
+    assert_contains('disposition=unrepaired', $joined);
+    assert_contains('best achieved', $joined);
+    assert_true(!str_contains($joined, 'path="palette.contrast"') || !preg_match(
+        '/path="palette\\.contrast"[^;]*;[^;]*; disposition=repaired/',
+        $joined,
+    ));
+});
