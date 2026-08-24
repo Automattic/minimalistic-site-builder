@@ -324,6 +324,7 @@ test('an over-wide nav row keeps the inline desktop nav instead of overlayMenu:a
         'an over-wide row must not become a hamburger at desktop widths',
     );
     assert_eq($markup, $result['markup']);
+    assert_contains('over-wide header row', implode(' ', $result['warnings']));
 
     // A short three-item nav fits the row and is untouched.
     $short = hh_header(
@@ -334,6 +335,7 @@ test('an over-wide nav row keeps the inline desktop nav instead of overlayMenu:a
     );
     $fits = HeaderHeroStep::fixHeader($short, AboveFoldContract::MODE_STACKED, 'Demo');
     assert_eq($short, $fits['markup']);
+    assert_true(!str_contains(implode(' ', $fits['warnings']), 'over-wide header row'));
 });
 
 test('a page-list nav is measured by the site page titles', function () {
@@ -353,12 +355,14 @@ test('a page-list nav is measured by the site page titles', function () {
         'measuring a wide page-list must not collapse desktop to a hamburger',
     );
     assert_eq($markup, $result['markup']);
+    assert_contains('over-wide header row', implode(' ', $result['warnings']));
 
     $fits = HeaderHeroStep::fixHeader($markup, AboveFoldContract::MODE_STACKED, 'Demo', ['Menu', 'Visit']);
     assert_eq($markup, $fits['markup']);
     assert_true(
         HeaderHeroStep::estimatedRowWidth($doc, 'Demo', ['Menu', 'Visit']) <= HeaderHeroStep::ROW_BUDGET_PX,
     );
+    assert_true(!str_contains(implode(' ', $fits['warnings']), 'over-wide header row'));
 });
 
 test('estimatedRowWidth charges a button its width plus the cluster gap', function () {

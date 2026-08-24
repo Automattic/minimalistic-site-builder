@@ -70,7 +70,8 @@ use Automattic\SiteBuild\Warnings;
  *     raised 720px breakpoint. `"always"` is a hamburger at every width,
  *     including a 1440px desktop, so it is lowered to mobile (BIGR-856).
  *     An over-wide row is not rewritten to always; keep labels short in
- *     the prompt instead.
+ *     the prompt instead. An estimate over ROW_BUDGET_PX is recorded as a
+ *     warning so the wrap is visible in the build report.
  *  8. Mobile menu — core renders NO hamburger at all for
  *     `"overlayMenu":"never"` (navigation.php returns the bare inner list
  *     instead of the responsive container), so a "never" header nav has no
@@ -110,8 +111,8 @@ final class HeaderHeroStep implements Step
 
     /**
      * The single-row width the header must fit (a ~1024px viewport minus
-     * gutters). The estimate still exists so overlay-only copies are not
-     * charged against a desktop row; it no longer rewrites overlayMenu.
+     * gutters). Above it the build records a warning; it no longer rewrites
+     * overlayMenu. Overlay-only copies are not charged against a desktop row.
      */
     public const ROW_BUDGET_PX = 1000;
 
@@ -721,6 +722,15 @@ final class HeaderHeroStep implements Step
                 $notes[] = "site-title fontSize '{$size}' lowered to 'heading' "
                     . "(a wordmark at section scale competes with the hero's display headline)";
             }
+        }
+
+        $width = self::estimatedRowWidth($doc, $siteName, $pageTitles);
+        if ($width > self::ROW_BUDGET_PX) {
+            $warnings[] = "file='theme/parts/header.html'; block='core/navigation'; "
+                . "authored=estimated row ~{$width}px; "
+                . 'delivered=inline overlayMenu:mobile; '
+                . 'disposition=over-wide header row left wrapping rather than collapsed to a desktop hamburger '
+                . '(budget ' . self::ROW_BUDGET_PX . 'px)';
         }
 
         $rendered = $doc->render();
