@@ -1,0 +1,21 @@
+{
+  "version": 3,
+  "settings": {
+    "typography": {
+      "fontSizes": [
+        {"slug": "caption", "name": "Caption", "size": "0.875rem"},
+        {"slug": "body", "name": "Body", "size": "0.65rem"},
+        {"slug": "heading", "name": "Heading", "size": "1rem"},
+        {"slug": "display", "name": "Display", "size": "1.2rem"}
+      ]
+    }
+  },
+  "styles": {
+    "typography": {
+      "fontFamily": "var:preset|font-family|body",
+      "fontSize": "var:preset|font-size|body",
+      "lineHeight": "1.15",
+      "letterSpacing": "0.12em"
+    }
+  }
+}
