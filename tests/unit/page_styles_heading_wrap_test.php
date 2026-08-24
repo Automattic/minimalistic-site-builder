@@ -41,6 +41,7 @@ test('WORD_WRAP_CSS keeps headings at normal wrap with no hyphens or word-break 
     assert_contains('overflow-wrap: normal', $body, 'headings keep overflow-wrap:normal');
     assert_contains('word-break: normal', $body, 'headings keep word-break:normal');
     assert_contains('hyphens: none', $body, 'headings forbid hyphenation');
+    assert_contains('text-wrap: pretty', $body, 'headings and copy get the best-effort final-line policy');
     assert_true(!str_contains($body, 'break-all'), 'headings never word-break:break-all');
 });
 

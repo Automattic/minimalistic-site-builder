@@ -1950,7 +1950,42 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         [$theme, $shadowWarnings] = self::repairTextTargetShadows($theme);
         $shapeWarnings = [];
         $theme = self::mergeScaffoldDefaultsAtPath(self::SCAFFOLD, $theme, '', $shapeWarnings);
+        $theme = self::removeUnsupportedTextWrapProperties($theme);
         return [$theme, array_merge($colorWarnings, $shadowWarnings, $shapeWarnings)];
+    }
+
+    /**
+     * theme.json v3 has no textWrap, textWrapStyle, or textWrapMode typography
+     * leaves. Remove generated copies at any style depth, including custom CSS
+     * strings; PageStylesStep owns the supported CSS policy for both generation
+     * graphs (BIGR-869).
+     *
+     * @param array<mixed> $theme
+     * @return array<mixed>
+     */
+    private static function removeUnsupportedTextWrapProperties(array $theme): array
+    {
+        if (!is_array($theme['styles'] ?? null)) {
+            return $theme;
+        }
+        $remove = static function (array $node) use (&$remove): array {
+            foreach ($node as $key => $value) {
+                if ($key === 'css' && is_string($value)) {
+                    [$node[$key]] = CssChecks::dropTextWrapDeclarations($value);
+                    continue;
+                }
+                if (in_array($key, ['textWrap', 'textWrapStyle', 'textWrapMode'], true)) {
+                    unset($node[$key]);
+                    continue;
+                }
+                if (is_array($value)) {
+                    $node[$key] = $remove($value);
+                }
+            }
+            return $node;
+        };
+        $theme['styles'] = $remove($theme['styles']);
+        return $theme;
     }
 
     /**

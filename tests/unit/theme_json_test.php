@@ -2102,6 +2102,54 @@ test('theme-json scaffold carries no decorative values', function () {
     }
 });
 
+test('theme-json scaffold removes unsupported text-wrap leaves and preserves typography siblings', function () {
+    $empty = ThemeJsonStep::applyScaffold([]);
+    assert_true(!array_key_exists('textWrap', $empty['styles']['typography']));
+
+    $overwritten = ThemeJsonStep::applyScaffold([
+        'styles' => [
+            'typography' => [
+                'fontFamily' => 'var:preset|font-family|body',
+                'textWrap' => 'balance',
+            ],
+            'elements' => ['h1' => [
+                'typography' => [
+                    'textWrapStyle' => 'balance',
+                    'fontWeight' => '700',
+                ],
+                'css' => 'text-wrap-mode: nowrap !important; font-style: italic;',
+            ]],
+            'css' => 'h1{text-wrap:nowrap!important;color:inherit}',
+            'blocks' => ['core/paragraph' => [
+                'css' => '&{text-wrap-style:balance;display:block}',
+            ]],
+        ],
+    ]);
+    assert_true(!array_key_exists('textWrap', $overwritten['styles']['typography']));
+    assert_true(!array_key_exists('textWrapStyle', $overwritten['styles']['elements']['h1']['typography']));
+    assert_eq(
+        'var:preset|font-family|body',
+        $overwritten['styles']['typography']['fontFamily'],
+        'unrelated typography siblings survive',
+    );
+    assert_eq('700', $overwritten['styles']['elements']['h1']['typography']['fontWeight']);
+    assert_eq('h1{color:inherit}', $overwritten['styles']['css']);
+    assert_eq(
+        '&{display:block}',
+        $overwritten['styles']['blocks']['core/paragraph']['css'],
+        'nested custom CSS keeps unrelated declarations',
+    );
+    assert_eq(
+        ' font-style: italic;',
+        $overwritten['styles']['elements']['h1']['css'],
+        'bare custom declaration lists are repaired too',
+    );
+
+    [$fixedPoint, $warnings] = ThemeJsonStep::repairScaffold($overwritten);
+    assert_eq($overwritten, $fixedPoint, 'unsupported-leaf repair reaches a fixed point');
+    assert_eq([], $warnings);
+});
+
 test('theme-json scaffold references only frozen preset slugs', function () {
     $json = json_encode(ThemeJsonStep::applyScaffold([]), JSON_THROW_ON_ERROR);
     preg_match_all('/var:preset\|([a-z-]+)\|([a-z0-9-]+)/', $json, $matches, PREG_SET_ORDER);
@@ -2155,6 +2203,7 @@ test('theme-json prompt carries authoritative tokens extracted from design CSS',
     assert_contains('#123456', $request['prompt']);
     assert_contains('"Source Sans 3", Arial, sans-serif', $request['prompt']);
     assert_contains('2rem', $request['prompt']);
+    assert_contains('or restate them in custom CSS', $request['prompt']);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
