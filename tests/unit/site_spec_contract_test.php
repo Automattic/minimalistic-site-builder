@@ -196,9 +196,10 @@ test('siteSpec schema invented enum matches the identities normalization can inv
     $allowed = $schema['properties']['invented']['items']['enum'];
 
     site_spec_contract_normalized(multiPage: false, siteSpec: [], fn: function ($project) use ($allowed) {
-        $invented = $project->readJson('siteSpec.json')['invented'];
-        assert_true($invented !== [], 'an empty spec must invent identity fields');
-        foreach ($invented as $key) {
+        $spec = $project->readJson('siteSpec.json');
+        assert_eq('', $spec['email_domain'], 'an empty spec must not invent a contact domain');
+        assert_true(!in_array('email_domain', $allowed, true), 'email_domain is a contact fact, not an inventable identity');
+        foreach ($spec['invented'] as $key) {
             assert_true(in_array($key, $allowed, true), "schema enum is missing invented key '{$key}'");
         }
     });
@@ -222,6 +223,7 @@ test('siteSpec schema email_domain pattern agrees with normalization', function 
     $pattern = '/' . str_replace('/', '\\/', $schema['properties']['email_domain']['pattern']) . '/';
 
     $samples = [
+        ''                   => true,
         'valid-domain.com'   => true,
         'sub.valid.org'      => true,
         'Bad_Domain!'        => false,

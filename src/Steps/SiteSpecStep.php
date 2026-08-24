@@ -27,9 +27,11 @@ use Automattic\SiteBuild\WritingDirection;
  *
  * The spec is also the single source of truth for voice and identity: it
  * records the `language` all site copy must be written in, and one committed
- * identity (name / persona_name / email_domain) that masthead, hero, contact
- * and footer copy must agree on. Identity values the model invented (because
- * the user stated none) are listed under `invented`.
+ * identity (name / persona_name) that masthead, hero, and footer copy must
+ * agree on. Identity values the model invented (because the user stated none)
+ * are listed under `invented`. Contact facts (email_domain, emails, phones,
+ * street addresses, URLs) are never invented — they stay empty unless the
+ * user stated them.
  *
  * The user prompt and this spec are the inputs the theme-json and landing-page
  * steps build the design from.
@@ -53,7 +55,10 @@ final class SiteSpecStep implements Step
     private const REQUIRED = ['name', 'title', 'description', 'site_type', 'topic', 'area', 'audience', 'visual_vibe', 'persona_name'];
 
     /** Identity keys the model may invent (and must then flag in `invented`). */
-    private const IDENTITY_KEYS = ['name', 'persona_name', 'email_domain'];
+    private const IDENTITY_KEYS = ['name', 'persona_name'];
+
+    /** A user-stated contact domain; empty is the no-contact-domain state. */
+    private const EMAIL_DOMAIN = '/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/';
 
     /** Internal artifact basenames that generated page slugs must not claim. */
     private const RESERVED_PAGE_SLUGS = ['preview'];
@@ -303,10 +308,11 @@ final class SiteSpecStep implements Step
 
         // `invented` lists which identity values the model made up; keep only
         // the identity keys so downstream features can trust its contents.
-        $invented = array_values(array_intersect(
-            array_map('strval', is_array($spec['invented'] ?? null) ? $spec['invented'] : []),
-            self::IDENTITY_KEYS,
-        ));
+        $rawInvented = array_map(
+            'strval',
+            is_array($spec['invented'] ?? null) ? $spec['invented'] : [],
+        );
+        $invented = array_values(array_intersect($rawInvented, self::IDENTITY_KEYS));
 
         // Every piece of site copy is written in this language. A missing or
         // implausible value degrades to '' — languageOf() then renders the
@@ -332,13 +338,17 @@ final class SiteSpecStep implements Step
         // the hero recipe pool, so absence must never change behavior.
         $spec['subject_is_visual_work'] = ($spec['subject_is_visual_work'] ?? null) === true;
 
-        // Contact emails are minted from this domain; when the model returned
-        // none (or something that is not a domain), derive it from the slug so
-        // the identity stays coherent — and flag it as invented.
+        // email_domain is a contact fact, not identity. Keep a user-stated
+        // domain; drop anything invented or implausible rather than minting
+        // hello@<slug>.com for a site that never gave an address.
         $domain = strtolower(trim((string) ($spec['email_domain'] ?? '')));
-        if (!preg_match('/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/', $domain)) {
-            $domain = str_replace('-', '', $slug) . '.com';
-            $invented[] = 'email_domain';
+        if (in_array('email_domain', $rawInvented, true) && $domain !== '') {
+            $warnings[] = 'site spec "email_domain" was invented rather than stated; dropped';
+            $domain = '';
+        } elseif ($domain !== '' && preg_match(self::EMAIL_DOMAIN, $domain) !== 1) {
+            $warnings[] = "site spec \"email_domain\" is not a usable domain: {$domain}; "
+                . 'dropped rather than inventing one';
+            $domain = '';
         }
         $spec['email_domain'] = $domain;
         $spec['invented'] = array_values(array_unique($invented));

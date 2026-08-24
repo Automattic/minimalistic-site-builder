@@ -53,7 +53,7 @@ function dp3_integration_site_spec(): array
         'language' => 'en',
         'persona_name' => '',
         'email_domain' => 'northstar.example',
-        'invented' => ['name', 'email_domain'],
+        'invented' => ['name'],
         'sections' => ['Hero', 'Selected work'],
         'pages' => [
             ['slug' => 'home', 'title' => 'Home', 'purpose' => 'Welcome clients', 'children' => []],

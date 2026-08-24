@@ -95,7 +95,7 @@ test('site-spec writes a factual, normalized siteSpec.json', function () {
         'language' => 'en',
         'persona_name' => '',
         'email_domain' => 'HearthAndCrumb.com',          // must be lowercased
-        'invented' => ['name', 'email_domain', 'colors'], // unknown key must be dropped
+        'invented' => ['name', 'colors'],                // unknown key must be dropped
         'visual_vibe' => 'warm and rustic',
         'sections' => ['Hero', 'Menu', 'About', 'Visit'],
         // An extra factual field the user stated — must pass through.
@@ -112,8 +112,8 @@ test('site-spec writes a factual, normalized siteSpec.json', function () {
     assert_eq('warm and rustic', $spec['visual_vibe']);
     assert_eq('en', $spec['language']);
     assert_eq('ltr', $spec['writing_direction']);
-    assert_eq('hearthandcrumb.com', $spec['email_domain']);       // lowercased
-    assert_eq(['name', 'email_domain'], $spec['invented']);       // non-identity key dropped
+    assert_eq('hearthandcrumb.com', $spec['email_domain']);       // lowercased stated domain
+    assert_eq(['name'], $spec['invented']);                       // non-identity key dropped
     assert_true(is_array($spec['sections']));
     assert_eq('Hero', $spec['sections'][0]);
     assert_eq('Tue–Sun 7am–3pm', $spec['hours']);        // arbitrary fact preserved
@@ -142,14 +142,14 @@ test('site-spec fills missing fixed properties with empty strings', function () 
         assert_true(array_key_exists($key, $spec), "{$key} key present");
     }
     assert_eq([], $spec['sections']);
-    // A missing email_domain is derived from the slug and flagged as invented.
-    assert_eq('solo.com', $spec['email_domain']);
-    assert_eq(['email_domain'], $spec['invented']);
+    // A missing email_domain stays empty — never derived from the slug.
+    assert_eq('', $spec['email_domain']);
+    assert_eq([], $spec['invented']);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('site-spec derives email_domain from multi-word slug when implausible', function () {
+test('site-spec drops an implausible email_domain instead of inventing one', function () {
     [$project, $llm, $tmp] = make_sitespec_fixture();
     $llm->queueJson(['name' => 'Hearth & Crumb', 'language' => 'en', 'email_domain' => 'not a domain!']);
     $renderer = new PromptRenderer(repo_path('prompts'));
@@ -157,8 +157,33 @@ test('site-spec derives email_domain from multi-word slug when implausible', fun
     (new SiteSpecStep($llm, $renderer))->run($project);
 
     $spec = $project->readJson('siteSpec.json');
-    assert_eq('hearthcrumb.com', $spec['email_domain']); // slug minus hyphens
-    assert_eq(['email_domain'], $spec['invented']);
+    assert_eq('', $spec['email_domain']);
+    assert_eq([], $spec['invented']);
+    $joined = implode(' ', $project->readJson('warnings.json')['site-spec'] ?? []);
+    assert_contains('not a usable domain', $joined);
+    assert_contains('dropped rather than inventing one', $joined);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec drops an invented email_domain even when it looks valid', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    $llm->queueJson([
+        'name' => 'Hearth & Crumb',
+        'language' => 'en',
+        'email_domain' => 'hearthandcrumb.com',
+        'invented' => ['name', 'email_domain'],
+    ]);
+    $renderer = new PromptRenderer(repo_path('prompts'));
+
+    (new SiteSpecStep($llm, $renderer))->run($project);
+
+    $spec = $project->readJson('siteSpec.json');
+    assert_eq('', $spec['email_domain'], 'an invented domain is not a contact fact');
+    assert_eq(['name'], $spec['invented']);
+    $joined = implode(' ', $project->readJson('warnings.json')['site-spec'] ?? []);
+    assert_contains('email_domain', $joined);
+    assert_contains('invented rather than stated', $joined);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -622,5 +647,34 @@ test('site-spec normalizes subject_is_visual_work to a strict boolean', function
         (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
         assert_eq($expected, $project->readJson('siteSpec.json')['subject_is_visual_work']);
         exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('copy prompts never mint or invent contact details', function () {
+    $files = [
+        'prompts/site-spec.md',
+        'prompts/refine-prompt.md',
+        'prompts/section.md',
+        'prompts/footer.md',
+        'prompts/page-plan.md',
+        'prompts/no-forms.md',
+        'prompts/hero.md',
+        'prompts/inner-page-design.md',
+        'prompts/homepage-design.md',
+        'prompts/home-body-design.md',
+        'prompts/inner-section-design.md',
+        'prompts/design-preview.md',
+    ];
+    foreach ($files as $file) {
+        $text = (string) file_get_contents(repo_path($file));
+        assert_contains(
+            'Never invent an email, street address, phone number, or URL',
+            $text,
+            $file,
+        );
+        assert_true(
+            !preg_match('/mint(?:ed| a short local part)/i', $text),
+            "{$file} must not tell the model to mint a contact address",
+        );
     }
 });

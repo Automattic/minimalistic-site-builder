@@ -61,7 +61,7 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
         'topic' => 'artisan bread and pastries', 'area' => 'bakery',
         'audience' => 'neighborhood locals', 'visual_vibe' => 'warm and rustic',
         'language' => 'en', 'persona_name' => '',
-        'email_domain' => 'hearthandcrumb.com', 'invented' => ['name', 'email_domain'],
+        'email_domain' => 'hearthandcrumb.com', 'invented' => ['name'],
         'sections' => ['Hero', 'Specials', 'About'],
         'pages' => [
             ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome visitors and set the tone', 'children' => []],

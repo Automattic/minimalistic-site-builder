@@ -1466,8 +1466,10 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     /**
      * Build the structured first-pass destination context. Page paths come
      * from the normalized spec tree; non-page destinations must occur in the
-     * factual spec itself, so the planner cannot invent an external/contact
-     * route merely because its syntax looks plausible.
+     * factual spec itself as exact emails, phones, or URLs, so the planner
+     * cannot invent a contact route merely because its syntax looks plausible.
+     * `email_domains` stays empty: a stated domain is not a license to
+     * construct a local-part.
      *
      * @param array<mixed> $siteSpec
      * @param array<int,array<string,mixed>> $pages
@@ -1529,16 +1531,10 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         };
         $walk($siteSpec);
 
-        $emailDomains = [];
-        $domain = strtolower(trim((string) ($siteSpec['email_domain'] ?? '')));
-        if (preg_match('/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/', $domain)) {
-            $emailDomains[$domain] = true;
-        }
-
         return [
             'page_paths' => $paths,
             'contact_destinations' => $contacts,
-            'email_domains' => $emailDomains,
+            'email_domains' => [],
             'planned_anchors' => [],
         ];
     }
@@ -1627,17 +1623,6 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             : [];
         if (isset($contacts[$destination]) || in_array($destination, $contacts, true)) {
             return true;
-        }
-
-        if (str_starts_with(strtolower($destination), 'mailto:')) {
-            $address = substr($destination, 7);
-            if (!filter_var($address, FILTER_VALIDATE_EMAIL)) {
-                return false;
-            }
-            $at = strrpos($address, '@');
-            $domain = $at === false ? '' : strtolower(substr($address, $at + 1));
-            $domains = is_array($context['email_domains'] ?? null) ? $context['email_domains'] : [];
-            return isset($domains[$domain]) || in_array($domain, $domains, true);
         }
 
         if (str_starts_with($destination, '#')) {

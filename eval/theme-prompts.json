@@ -56,7 +56,7 @@
         "language": "en",
         "persona_name": "",
         "email_domain": "hearthandcrumb.com",
-        "invented": ["name", "email_domain"],
+        "invented": ["name"],
         "visual_vibe": "warm and rustic",
         "animation_request": "",
         "sections": ["Hero", "Daily Selection", "Our Process", "Visit"],

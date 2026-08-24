@@ -65,7 +65,7 @@ function html_first_site_spec(array $pages): array
         'language' => 'en',
         'persona_name' => '',
         'email_domain' => 'hearthandcrumb.example',
-        'invented' => ['name', 'email_domain'],
+        'invented' => ['name'],
         'sections' => ['Hero', 'Story'],
         'pages' => $pages,
     ];

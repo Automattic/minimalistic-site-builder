@@ -263,12 +263,13 @@ test('PagePlanStep primary action validation preserves a valid exact visitor-fac
     assert_eq([], $mailWarnings);
 
     $domainMailWarnings = [];
-    assert_eq('mailto:reservations@example.com', PagePlanStep::normalizePrimaryAction([
+    assert_eq(null, PagePlanStep::normalizePrimaryAction([
         'label' => 'Reserve by email',
         'intent' => 'Open a reservation message at the committed site domain.',
         'destination' => 'mailto:reservations@example.com',
-    ], true, $context, $domainMailWarnings)['destination']);
-    assert_eq([], $domainMailWarnings);
+    ], true, $context, $domainMailWarnings), 'minting a local-part at email_domain is inventing an address');
+    assert_eq(1, count($domainMailWarnings));
+    assert_contains('spec-backed contact target', $domainMailWarnings[0]);
 });
 
 test('PagePlanStep primary action validation nulls the whole invalid action with actionable context', function () {
