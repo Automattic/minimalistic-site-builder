@@ -2005,6 +2005,27 @@ test('a contact page is recognized from slug, title, or purpose — not a contac
         'title' => 'Contact Sheet',
         'purpose' => 'A photography contact sheet of recent work',
     ]));
+    assert_true(!PagePlanStep::isContactLikePage([
+        'slug' => 'home',
+        'title' => 'Home',
+        'purpose' => 'Welcome visitors and let them get in touch.',
+        'front' => true,
+    ]), 'a front page is never a contact page, even when the purpose mentions getting in touch');
+    assert_true(!PagePlanStep::isContactLikePage([
+        'slug' => 'about',
+        'title' => 'About',
+        'purpose' => 'Tell the story and invite readers to get in touch.',
+    ]));
+    assert_true(!PagePlanStep::isContactLikePage([
+        'slug' => 'services',
+        'title' => 'Services',
+        'purpose' => 'List offerings and end with a link to send a message.',
+    ]));
+    assert_true(!PagePlanStep::isContactLikePage([
+        'slug' => 'visit',
+        'title' => 'Visit',
+        'purpose' => 'Explain how to reach us at the harbor.',
+    ]));
 });
 
 test('contact-page emphasis is brief and purpose-led, not the 3-to-6 interior pad', function () {
@@ -2063,6 +2084,42 @@ test('an oversized contact plan is trimmed to 4 sections, keeping form and close
     assert_eq('closing', $capped['sections'][count($capped['sections']) - 1]['role']);
     assert_contains('contact page', implode(' ', $warnings));
     assert_contains('gallery', implode(' ', $warnings));
+
+    $handoffs = array_column($capped['sections'], 'handoff');
+    foreach ($handoffs as $handoff) {
+        assert_true(!str_contains((string) $handoff, 'Programs'), 'dropped neighbor must leave the seam');
+        assert_true(!str_contains((string) $handoff, 'Gallery'), 'dropped neighbor must leave the seam');
+    }
+    $archetypes = array_column($capped['sections'], 'layout_archetype');
+    for ($i = 1, $n = count($archetypes); $i < $n; $i++) {
+        assert_true(
+            $archetypes[$i] !== $archetypes[$i - 1],
+            'trim must not leave adjacent duplicate archetypes',
+        );
+    }
+});
+
+test('capContactPage does not trim a front page whose purpose mentions contact', function () {
+    $sections = [];
+    foreach (['hero', 'programs', 'story', 'visit', 'gallery', 'cta', 'press', 'close'] as $i => $slug) {
+        $sections[] = plan_section([
+            'slug' => $slug,
+            'title' => ucfirst($slug),
+            'layout_archetype' => $i % 2 === 0 ? 'centered-stack' : 'asymmetric-split',
+            'role' => $i === 0 ? 'hero' : ($i === 7 ? 'closing' : 'content'),
+        ]);
+    }
+    $page = [
+        'slug' => 'home',
+        'title' => 'Home',
+        'purpose' => 'Welcome visitors and let them get in touch.',
+        'front' => true,
+        'sections' => $sections,
+    ];
+    $warnings = [];
+    $capped = PagePlanStep::capContactPage($page, $warnings);
+    assert_eq(8, count($capped['sections']));
+    assert_eq([], $warnings);
 });
 
 test('a contact page already at or under 4 sections is left alone', function () {

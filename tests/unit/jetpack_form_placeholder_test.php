@@ -125,6 +125,46 @@ test('a contact page missing JP_FORM gets a default placeholder injected', funct
     assert_contains('injected', implode(' ', $warnings));
 });
 
+test('the injected placeholder sits inside the section group, not after it', function () {
+    $group = '<!-- wp:group {"layout":{"type":"constrained"}} -->' . "\n"
+        . '<div class="wp-block-group">'
+        . '<!-- wp:heading --><h2>Write</h2><!-- /wp:heading -->'
+        . '</div>' . "\n"
+        . '<!-- /wp:group -->';
+    $files = [
+        'parts/page-contact--form.html' => $group,
+    ];
+    $pages = [[
+        'slug' => 'contact',
+        'title' => 'Contact',
+        'purpose' => 'Let visitors reach the team.',
+        'sections' => [
+            ['slug' => 'form', 'type' => 'contact', 'role' => 'content'],
+        ],
+    ]];
+    $warnings = [];
+    $out = Automattic\SiteBuild\Steps\SectionsStep::ensureContactFormPlaceholders($pages, $files, $warnings);
+    $markup = $out['parts/page-contact--form.html'];
+
+    assert_eq(1, Automattic\SiteBuild\FormPlaceholder::markerCount($markup));
+    $doc = Automattic\SiteBuild\BlockMarkup::parse($markup);
+    $roots = [];
+    foreach ($doc->indices() as $i) {
+        if ($doc->parent($i) === null) {
+            $roots[] = $doc->name($i);
+        }
+    }
+    assert_eq(['group'], $roots, 'the part must stay one top-level group');
+    assert_true(
+        strpos($markup, 'jetpack-form-placeholder') < strpos($markup, '</div>'),
+        'the placeholder sits inside the group wrapping div, so it inherits the band',
+    );
+    assert_true(
+        strpos($markup, '<!-- /wp:group -->') > strpos($markup, 'jetpack-form-placeholder'),
+        'the placeholder is before the group closer, not after it',
+    );
+});
+
 test('a contact page that already has JP_FORM is left alone', function () {
     $form = Automattic\SiteBuild\FormPlaceholder::defaultContactMarkup();
     $files = [

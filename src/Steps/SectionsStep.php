@@ -1181,13 +1181,46 @@ final class SectionsStep implements Step
                     $target = $row;
                 }
             }
-            $files[$target['rel']] = rtrim($files[$target['rel']]) . "\n"
-                . FormPlaceholder::defaultContactMarkup() . "\n";
+            $files[$target['rel']] = self::injectPlaceholderInsideSection(
+                $files[$target['rel']],
+                FormPlaceholder::defaultContactMarkup(),
+            );
             $warnings[] = "file='theme/{$target['rel']}'; block='jetpack-form-placeholder'; "
                 . 'authored=missing JP_FORM on contact page; delivered=default contact placeholder; '
                 . 'disposition=injected so the host can substitute a real form';
         }
         return $files;
+    }
+
+    /**
+     * Place a placeholder inside the section's top-level group, just before
+     * that group's wrapping closer, so it stays one root and inherits the
+     * band. Files that are not a single group get it appended instead.
+     */
+    private static function injectPlaceholderInsideSection(string $markup, string $block): string
+    {
+        $block = rtrim($block);
+        $doc = BlockMarkup::parse($markup);
+        $roots = [];
+        foreach ($doc->indices() as $i) {
+            if ($doc->parent($i) === null) {
+                $roots[] = $i;
+            }
+        }
+        if (count($roots) !== 1
+            || $doc->name($roots[0]) !== 'group'
+            || $doc->isVoid($roots[0])
+            || !$doc->isStructurallySafe($roots[0])
+        ) {
+            return rtrim($markup) . "\n" . $block . "\n";
+        }
+        $root = $roots[0];
+        $openEnd = $doc->openingOffset($root) + $doc->openingLength($root);
+        $closeStart = $doc->innerEndOffset($root);
+        $inner = substr($markup, $openEnd, $closeStart - $openEnd);
+        $divClose = strrpos($inner, '</div>');
+        $at = $divClose === false ? $closeStart : $openEnd + $divClose;
+        return substr($markup, 0, $at) . "\n" . $block . "\n" . substr($markup, $at);
     }
 
     /**

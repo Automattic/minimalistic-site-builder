@@ -115,6 +115,15 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     /** Contact/enquiry pages stay brief. Ticket BIGR-858. */
     public const MAX_CONTACT_SECTIONS = 4;
 
+    /**
+     * Slug/title identities that belong to some other page even when the
+     * purpose mentions getting in touch. Purpose is only an extra signal for
+     * an odd slug like "reach" / "write".
+     */
+    private const NON_CONTACT_IDENTITIES =
+        'about|services|programs|visit|gallery|blog|news|team|story|work|'
+        . 'portfolio|shop|menu|events|faq|pricing|journal|press|careers|home|index|welcome';
+
     public function __construct(
         private Llm $llm,
         private PromptRenderer $renderer,
@@ -1638,12 +1647,16 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      * Whether this spec page is a contact/enquiry destination. Slug and title
      * match the storefront detector (contact / contact-us, not contact-sheet).
      * Purpose is an extra signal so a "reach us" page with an odd slug still
-     * gets the brief plan. BIGR-858.
+     * gets the brief plan; it cannot override a front page or a slug/title
+     * that already names some other page. BIGR-858.
      *
      * @param array<string,mixed> $page
      */
     public static function isContactLikePage(array $page): bool
     {
+        if (!empty($page['front'])) {
+            return false;
+        }
         $slug = strtolower(trim((string) ($page['slug'] ?? '')));
         $title = strtolower(trim((string) ($page['title'] ?? '')));
         $purpose = strtolower(trim((string) ($page['purpose'] ?? '')));
@@ -1661,10 +1674,29 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         if ($slug !== '' && preg_match('/^(?:get-in-touch|reach-us|enquire|enquiry|inquiry)$/u', $slug) === 1) {
             return true;
         }
+        if (self::identityPointsElsewhere($slug, $title)) {
+            return false;
+        }
         return $purpose !== '' && preg_match(
             '/\b(?:get in touch|contact form|reach us|send (?:a |an )?(?:message|enquiry|inquiry))\b/u',
             $purpose,
         ) === 1;
+    }
+
+    /** Slug or title already names a different interior page. */
+    private static function identityPointsElsewhere(string $slug, string $title): bool
+    {
+        $identities = self::NON_CONTACT_IDENTITIES;
+        if ($slug !== '' && preg_match('/^(?:our-)?(?:' . $identities . ')(?:-us)?$/u', $slug) === 1) {
+            return true;
+        }
+        if ($title !== '' && preg_match(
+            '/^(?:(?:our|the)\s+)?(?:' . $identities . ')(?:\s+us)?$/u',
+            $title,
+        ) === 1) {
+            return true;
+        }
+        return false;
     }
 
     /**
@@ -1729,12 +1761,14 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 $dropped[] = $slug !== '' ? $slug : '(unnamed)';
             }
         }
+        $pageSlug = (string) ($page['slug'] ?? '');
+        $kept = self::repairVariety($kept, false, null, $warnings, $pageSlug);
+        $kept = self::rewriteSeamHandoffs($kept);
         $count = count($kept);
         foreach ($kept as $index => $section) {
             $kept[$index]['role'] = SectionRole::forPosition($index, $count);
         }
         $page['sections'] = $kept;
-        $pageSlug = (string) ($page['slug'] ?? '');
         $warnings[] = self::valueLossWarning(
             "pages[slug={$pageSlug}].sections",
             $authored . ' sections (' . implode(', ', array_column($sections, 'slug')) . ')',
@@ -1778,6 +1812,28 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         }
         $out[] = $last;
         return $out;
+    }
+
+    /**
+     * Neighbor-derived seam prose for a list whose members just changed.
+     * The surviving handoffs still name dropped neighbors until this runs.
+     *
+     * @param list<array<string,mixed>> $sections
+     * @return list<array<string,mixed>>
+     */
+    private static function rewriteSeamHandoffs(array $sections): array
+    {
+        $count = count($sections);
+        foreach ($sections as $i => $_) {
+            $above = $i === 0
+                ? 'the site header'
+                : '"' . trim((string) ($sections[$i - 1]['title'] ?? 'the previous section')) . '"';
+            $below = $i === $count - 1
+                ? 'the site footer'
+                : '"' . trim((string) ($sections[$i + 1]['title'] ?? 'the next section')) . '"';
+            $sections[$i]['handoff'] = "Sits below {$above} and above {$below}.";
+        }
+        return $sections;
     }
 
     /** @param array<string,mixed> $section */
