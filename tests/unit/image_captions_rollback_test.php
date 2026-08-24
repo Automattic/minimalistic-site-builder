@@ -38,3 +38,30 @@ test('a rolled-back file emits no caption-removed warning', function () {
         assert_contains('parts/failed.html', $warnings, 'the file-level rollback itself is still warned');
     });
 });
+
+test('a rolled-back malformed caption is warned as delivered unchanged', function () {
+    with_temp_dir('image-captions-malformed-rollback-', function (string $tmp): void {
+        $project = new Project($tmp);
+        $project->writeJson('designDirection.json', ['shape' => 'soft']);
+        $project->writeJson('theme/theme.json', ['version' => 3]);
+        $markup = '<!-- wp:image {"sizeSlug":"large","caption":["injected"]} -->'
+            . '<figure class="wp-block-image size-large"><img src="/x.jpg" alt="A yard"/></figure>'
+            . '<!-- /wp:image -->'
+            . '<!-- wp:heading --><h2 class="wp-block-heading has-text-align-center" '
+            . 'style="text-align:right">Conflicting title</h2><!-- /wp:heading -->';
+        $project->writeText('theme/parts/failed.html', $markup);
+
+        (new FixBlocksStep(new PhpBlockFixer()))->run($project);
+
+        assert_eq($markup, $project->readText('theme/parts/failed.html'), 'failed unit restores entry bytes');
+        $warnings = array_values(array_filter(
+            $project->readJson('warnings.json')['fix-blocks'] ?? [],
+            static fn (string $warning): bool => str_contains($warning, '["injected"]'),
+        ));
+        assert_eq(1, count($warnings), 'one caption warning retains the restored malformed value');
+        assert_contains('parts/failed.html: wp:image[1]', $warnings[0], 'file and block stay actionable');
+        assert_contains('delivered unchanged', $warnings[0], 'rollback delivery is reported truthfully');
+        assert_contains('transaction was rolled back', $warnings[0], 'disposition explains the deferral');
+        assert_true(!str_contains($warnings[0], 'delivered removed'), 'rollback is never reported as removal');
+    });
+});

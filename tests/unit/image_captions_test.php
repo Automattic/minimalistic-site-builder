@@ -145,6 +145,25 @@ test('a caption whose attribute value contains > is not over-spliced', function 
     assert_contains('<img', $out['markup'], 'the image was not swallowed');
 });
 
+test('tag-like caption text inside a quoted image attribute is not an element', function () {
+    $markup = ic_image(
+        '<img src="theme:./assets/x.jpg" alt="Literal <figcaption>syntax</figcaption> sample"/>',
+    );
+    $out = ImageCaptions::stripOutsideGalleries($markup);
+
+    assert_eq($markup, $out['markup'], 'quoted attribute text stays byte-identical');
+    assert_eq(0, count($out['warnings']), 'no caption element was removed');
+});
+
+test('a recoverable closing-tag spelling is still removed', function () {
+    $markup = ic_image(ic_img() . '<figcaption class="wp-element-caption">Before</figcaption >');
+    $out = ImageCaptions::stripOutsideGalleries($markup);
+
+    assert_true(!str_contains($out['markup'], 'Before'), 'caption text removed');
+    assert_true(!str_contains($out['markup'], '<figcaption'), 'caption element removed');
+    assert_eq(1, count($out['warnings']));
+});
+
 test('the pass is idempotent', function () {
     $markup = ic_image(ic_img() . ic_caption('Removed once.'));
     $first = ImageCaptions::stripOutsideGalleries($markup);
@@ -214,6 +233,42 @@ test('an image with only a caption attribute and no element is still cleaned', f
     assert_eq(1, count($out['warnings']));
 });
 
+test('a malformed non-string caption attribute is removed and recorded', function () {
+    $markup = ic_image(ic_img(), '{"sizeSlug":"large","caption":["injected"]}');
+    $out = ImageCaptions::stripOutsideGalleries($markup);
+
+    assert_true(!str_contains($out['markup'], 'caption'), 'malformed caption attr removed');
+    assert_contains('"sizeSlug":"large"', $out['markup'], 'sibling attrs survive');
+    assert_eq(1, count($out['warnings']));
+    assert_contains('["injected"]', $out['warnings'][0], 'authored array value stays encoded');
+});
+
+test('a malformed caption attribute is removed before an unsafe image is deferred', function () {
+    $markup = '<!-- wp:image {"sizeSlug":"large","caption":["injected"]} -->'
+        . '<figure class="wp-block-image size-large"><img src="/x.jpg" alt="A yard"/></figure>';
+    $out = ImageCaptions::stripOutsideGalleries($markup);
+
+    assert_true(!str_contains($out['markup'], 'caption'), 'unsafe image comment attr is sanitized');
+    assert_contains('<img', $out['markup'], 'unsafe image bytes otherwise survive');
+    assert_eq(1, count($out['warnings']));
+    assert_contains('["injected"]', $out['warnings'][0], 'original array evidence is retained');
+    assert_contains('not structurally safe', implode("\n", $out['notes']), 'other repairs stay deferred');
+});
+
+test('a malformed gallery caption attribute is removed without dropping its element caption', function () {
+    $image = ic_image(ic_img() . ic_caption('Allowed gallery caption.'),
+        '{"sizeSlug":"large","caption":["injected"]}');
+    $markup = '<!-- wp:gallery --><figure class="wp-block-gallery">'
+        . $image
+        . '</figure><!-- /wp:gallery -->';
+    $out = ImageCaptions::stripOutsideGalleries($markup);
+
+    assert_contains('Allowed gallery caption.', $out['markup'], 'valid gallery element caption survives');
+    assert_true(!str_contains($out['markup'], '"caption":["injected"]'), 'malformed comment attr removed');
+    assert_eq(1, count($out['warnings']));
+    assert_contains('["injected"]', $out['warnings'][0], 'malformed value is recorded');
+});
+
 test('an empty figcaption beside a non-empty caption attribute still warns', function () {
     $markup = ic_image(ic_img() . '<figcaption class="wp-element-caption"></figcaption>',
         '{"sizeSlug":"large","caption":"Coburg site"}');
@@ -232,6 +287,39 @@ test('every figcaption on one image is removed in a single pass', function () {
     assert_true(!str_contains($out['markup'], 'Two'), 'second removed too');
     assert_true(!str_contains($out['markup'], '<figcaption'), 'none survive');
     assert_eq(1, count($out['warnings']), 'one warning per image, not per caption');
+    assert_contains('One', $out['warnings'][0], 'warning retains the first authored value');
+    assert_contains('Two', $out['warnings'][0], 'warning retains the second authored value');
     $again = ImageCaptions::stripOutsideGalleries($out['markup']);
     assert_eq($out['markup'], $again['markup'], 'already a fixed point');
+});
+
+test('one warning retains divergent element and comment attribute values', function () {
+    $markup = ic_image(ic_img() . ic_caption('Element value'), '{"caption":"Attribute value"}');
+    $out = ImageCaptions::stripOutsideGalleries($markup);
+
+    assert_true(!str_contains($out['markup'], 'Element value'));
+    assert_true(!str_contains($out['markup'], 'Attribute value'));
+    assert_eq(1, count($out['warnings']), 'one warning row per image');
+    assert_contains('Element value', $out['warnings'][0]);
+    assert_contains('Attribute value', $out['warnings'][0]);
+});
+
+test('one warning retains every long distinct caption value', function () {
+    $first = str_repeat('A', 200);
+    $second = str_repeat('B', 200);
+    $markup = ic_image(ic_img() . ic_caption($first) . ic_caption($second));
+    $out = ImageCaptions::stripOutsideGalleries($markup);
+
+    assert_eq(1, count($out['warnings']), 'one warning row per image');
+    assert_contains(str_repeat('A', 40), $out['warnings'][0], 'first value is represented');
+    assert_contains(str_repeat('B', 40), $out['warnings'][0], 'later values survive per-value truncation');
+});
+
+test('truncated warning collisions retain distinct fingerprints', function () {
+    $prefix = str_repeat('Same prefix ', 20);
+    $markup = ic_image(ic_img() . ic_caption($prefix . 'first') . ic_caption($prefix . 'second'));
+    $out = ImageCaptions::stripOutsideGalleries($markup);
+
+    assert_eq(1, count($out['warnings']), 'one warning row per image');
+    assert_eq(2, substr_count($out['warnings'][0], 'fingerprint:'), 'both raw values remain distinguishable');
 });
