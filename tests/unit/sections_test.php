@@ -2,8 +2,10 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\AboveFoldContract;
+use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\FooterComposition;
 use Automattic\SiteBuild\HeroBlueprint;
+use Automattic\SiteBuild\HeaderNav;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Steps\SectionsStep;
@@ -1367,12 +1369,41 @@ test('every page-plan request is told which surface its closing section must avo
 
 test('the deterministic header fallback is one horizontal row, not a stack (BIGR-872)', function () {
     $header = SectionsStep::fallbackChrome('header');
+    $document = BlockMarkup::parse($header);
+    $roots = array_values(array_filter(
+        $document->indices(),
+        static fn (int $index): bool => $document->parent($index) === null,
+    ));
+    assert_eq(1, count($roots), 'fallback has one root');
+    $root = $roots[0];
+    assert_eq('constrained', ($document->attrs($root) ?? [])['layout']['type'] ?? null);
 
-    assert_contains('"type":"flex"', $header, 'identity and nav share a row');
-    assert_contains('"justifyContent":"space-between"', $header);
-    assert_true(
-        !str_contains($header, '"layout":{"type":"constrained"}}') || str_contains($header, '"type":"flex"'),
-        'a bare constrained group would stack an inserted nav under the wordmark',
+    $rootChildren = $document->children($root);
+    assert_eq(1, count($rootChildren), 'the constrained root carries one header row');
+    $row = $rootChildren[0];
+    $rowAttrs = $document->attrs($row) ?? [];
+    assert_eq('wide', $rowAttrs['align'] ?? null, 'the header row uses the wide content band');
+    assert_eq('flex', $rowAttrs['layout']['type'] ?? null, 'identity and nav share a row');
+    assert_eq('nowrap', $rowAttrs['layout']['flexWrap'] ?? null, 'the desktop row does not wrap');
+    assert_eq('space-between', $rowAttrs['layout']['justifyContent'] ?? null);
+
+    $completed = HeaderNav::withCompleteInnerPages($header, [
+        ['title' => 'Home', 'slug' => 'home', 'path' => '/', 'front' => true],
+        ['title' => 'About', 'slug' => 'about', 'path' => '/about/', 'front' => false],
+    ])['markup'];
+    $completedDocument = BlockMarkup::parse($completed);
+    $completedRoots = array_values(array_filter(
+        $completedDocument->indices(),
+        static fn (int $index): bool => $completedDocument->parent($index) === null,
+    ));
+    $completedRow = $completedDocument->children($completedRoots[0])[0];
+    assert_eq(
+        ['site-title', 'navigation'],
+        array_map(
+            static fn (int $index): string => $completedDocument->name($index),
+            $completedDocument->children($completedRow),
+        ),
+        'completion keeps identity and navigation inside the wide row',
     );
 
     // The footer keeps its stacked constrained shape.

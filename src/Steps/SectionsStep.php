@@ -535,7 +535,8 @@ final class SectionsStep implements Step
     /**
      * A deterministic minimal chrome part delivered when the generated
      * header/footer markup is unusable: a constrained group carrying the site
-     * title, so templates referencing the part render something coherent.
+     * title, so templates referencing the part render something coherent. The
+     * header keeps its identity in a wide flex row that HeaderNav can complete.
      */
     public static function fallbackChrome(
         string $key,
@@ -548,18 +549,7 @@ final class SectionsStep implements Step
         }
 
         $attrs = [
-            // The header is one horizontal row: identity at the start, and the
-            // slot a later HeaderNav pass fills at the end (BIGR-872). A
-            // constrained group would stack that nav under the wordmark, which
-            // is the masthead defect this fallback used to ship. The footer
-            // keeps the stacked constrained shape.
-            'layout' => $key === 'header'
-                ? [
-                    'type' => 'flex',
-                    'justifyContent' => 'space-between',
-                    'verticalAlignment' => 'center',
-                ]
-                : ['type' => 'constrained'],
+            'layout' => ['type' => 'constrained'],
             'style' => [
                 'spacing' => [
                     'padding' => [
@@ -600,11 +590,31 @@ final class SectionsStep implements Step
         $siteTitleJson = $siteTitleAttrs === []
             ? ''
             : ' ' . json_encode($siteTitleAttrs, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        $siteTitle = '<!-- wp:site-title' . $siteTitleJson . ' /-->';
+        $content = $siteTitle;
+        if ($key === 'header') {
+            // Keep the viewport-wide surface constrained, then give identity
+            // and the navigation inserted later one non-wrapping wide row.
+            $rowAttrs = json_encode([
+                'align' => 'wide',
+                'layout' => [
+                    'type' => 'flex',
+                    'flexWrap' => 'nowrap',
+                    'justifyContent' => 'space-between',
+                    'verticalAlignment' => 'center',
+                ],
+            ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            if (!is_string($rowAttrs)) {
+                throw new \RuntimeException('could not encode deterministic header fallback row');
+            }
+            $content = '<!-- wp:group ' . $rowAttrs . ' -->' . "\n"
+                . '<div class="wp-block-group alignwide">' . $siteTitle . '</div>' . "\n"
+                . '<!-- /wp:group -->';
+        }
 
         return '<!-- wp:group ' . $json . ' -->' . "\n"
             . '<div class="' . implode(' ', $classes) . '" style="padding-top:var(--wp--preset--spacing--md);'
-            . 'padding-bottom:var(--wp--preset--spacing--md)"><!-- wp:site-title'
-            . $siteTitleJson . ' /--></div>' . "\n"
+            . 'padding-bottom:var(--wp--preset--spacing--md)">' . $content . '</div>' . "\n"
             . '<!-- /wp:group -->';
     }
 

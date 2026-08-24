@@ -137,8 +137,10 @@ final class HeaderNav
             : self::blockNavDestinations($document);
         $missing = [];
         foreach ($needed as $key => $page) {
-            $label = self::normalizedLabel($page['title']);
-            if (isset($present['urls'][$key]) || ($label !== '' && isset($present['labels'][$label]))) {
+            // A matching label does not prove reachability: the authored link
+            // may point at a different page. Prefer a duplicate label over an
+            // omitted required destination.
+            if (isset($present[$key])) {
                 continue;
             }
             $missing[] = $page;
@@ -154,9 +156,12 @@ final class HeaderNav
             // Spread across every nav in document order. split-nav carries two,
             // and dropping the whole remainder into the last one leaves the
             // lopsided halves that archetype exists to avoid.
-            $chunks = self::partitionLinks(
+            $chunks = self::partitionLinksByLoad(
                 array_map(static fn (array $page): string => self::linkComments([$page]), $missing),
-                count($navIndices),
+                array_map(
+                    static fn (int $index): int => self::navigationItemCount($document, $index),
+                    $navIndices,
+                ),
             );
             $edits = [];
             foreach ($navIndices as $slot => $index) {
@@ -462,24 +467,17 @@ final class HeaderNav
         return $html;
     }
 
-    /** @return array{urls:array<string,true>,labels:array<string,true>} */
+    /** @return array<string,true> */
     private static function blockNavDestinations(BlockMarkup $document): array
     {
-        $urls = [];
-        $labels = [];
+        $destinations = [];
         foreach ($document->indices() as $index) {
             $name = self::canonicalName($document->name($index));
             if ($name === 'navigation-link' || $name === 'navigation-submenu') {
                 $attrs = $document->attrs($index) ?? [];
                 $url = is_string($attrs['url'] ?? null) ? self::destinationKey((string) $attrs['url']) : '';
                 if ($url !== '' && $url !== '/') {
-                    $urls[$url] = true;
-                    $label = is_string($attrs['label'] ?? null)
-                        ? self::normalizedLabel((string) $attrs['label'])
-                        : '';
-                    if ($label !== '') {
-                        $labels[$label] = true;
-                    }
+                    $destinations[$url] = true;
                 }
             }
             if ($name !== 'navigation' || $document->isVoid($index)) {
@@ -491,43 +489,26 @@ final class HeaderNav
                 if ($url === '' || $url === '/') {
                     continue;
                 }
-                $urls[$url] = true;
-                $label = self::normalizedLabel(self::visibleLabel(substr(
-                    $inner,
-                    $anchor['innerStart'],
-                    $anchor['innerEnd'] - $anchor['innerStart'],
-                )));
-                if ($label !== '') {
-                    $labels[$label] = true;
-                }
+                $destinations[$url] = true;
             }
         }
-        return ['urls' => $urls, 'labels' => $labels];
+        return $destinations;
     }
 
-    /** @return array{urls:array<string,true>,labels:array<string,true>} */
+    /** @return array<string,true> */
     private static function htmlNavDestinations(string $markup): array
     {
-        $urls = [];
-        $labels = [];
+        $destinations = [];
         foreach (self::navElements($markup) as $nav) {
             foreach (self::anchorsIn($markup, $nav['innerStart'], $nav['innerEnd']) as $anchor) {
                 $url = self::destinationKey($anchor['href']);
                 if ($url === '' || $url === '/') {
                     continue;
                 }
-                $urls[$url] = true;
-                $label = self::normalizedLabel(self::visibleLabel(substr(
-                    $markup,
-                    $anchor['innerStart'],
-                    $anchor['innerEnd'] - $anchor['innerStart'],
-                )));
-                if ($label !== '') {
-                    $labels[$label] = true;
-                }
+                $destinations[$url] = true;
             }
         }
-        return ['urls' => $urls, 'labels' => $labels];
+        return $destinations;
     }
 
     /**
@@ -560,7 +541,11 @@ final class HeaderNav
     }
 
     /**
-     * The inner-page path a link resolves to, or '' when it resolves to none.
+     * The provably internal page path a link resolves to, or '' when it
+     * resolves to none. An absolute or protocol-relative URL may share an
+     * internal path while leading to another site, so it never proves that
+     * the local page is reachable.
+     *
      * A fragment-only href addresses the current document, never a page, so it
      * must not read as one: `#hero` is not the About page.
      */
@@ -570,8 +555,16 @@ final class HeaderNav
         if ($url === '' || str_starts_with($url, '#')) {
             return '';
         }
-        $path = parse_url($url, PHP_URL_PATH);
-        $path = is_string($path) ? $path : strtok($url, '?#');
+        $parts = parse_url($url);
+        if (!is_array($parts)
+            || isset($parts['scheme'])
+            || isset($parts['host'])
+            || isset($parts['user'])
+            || isset($parts['port'])
+        ) {
+            return '';
+        }
+        $path = is_string($parts['path'] ?? null) ? $parts['path'] : strtok($url, '?#');
         $normalized = trim((string) $path);
         if ($normalized === '' || $normalized === '/') {
             return '/';
@@ -613,6 +606,53 @@ final class HeaderNav
             return false;
         }
         return ($layout['orientation'] ?? 'horizontal') !== 'vertical';
+    }
+
+    /** Number of visible items already occupying one navigation row. */
+    private static function navigationItemCount(BlockMarkup $document, int $navigation): int
+    {
+        $count = 0;
+        foreach ($document->children($navigation) as $child) {
+            if (in_array(
+                self::canonicalName($document->name($child)),
+                ['navigation-link', 'navigation-submenu'],
+                true,
+            )) {
+                $count++;
+            }
+        }
+        if ($count > 0 || $document->isVoid($navigation)) {
+            return $count;
+        }
+
+        $inner = $document->innerHtml($navigation);
+        return count(self::anchorsIn($inner, 0, strlen($inner)));
+    }
+
+    /**
+     * Add links to the least-populated navigation in stable document order.
+     *
+     * @param list<string> $links
+     * @param list<int> $loads
+     * @return list<list<string>>
+     */
+    private static function partitionLinksByLoad(array $links, array $loads): array
+    {
+        if ($loads === []) {
+            return [];
+        }
+        $chunks = array_fill(0, count($loads), []);
+        foreach ($links as $link) {
+            $slot = 0;
+            foreach ($loads as $candidate => $load) {
+                if ($load < $loads[$slot]) {
+                    $slot = $candidate;
+                }
+            }
+            $chunks[$slot][] = $link;
+            $loads[$slot]++;
+        }
+        return $chunks;
     }
 
     /**

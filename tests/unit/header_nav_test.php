@@ -532,20 +532,39 @@ test('HeaderNav does not let a homepage-anchor link mask the inner page it share
     assert_contains('"url":"/visit/"', $result['markup'], 'the real Visit page is reachable');
 });
 
-test('HeaderNav keeps a renamed inner-page href from being linked twice', function () {
+test('HeaderNav does not let a matching label mask a different inner-page destination', function () {
     $pages = [
         ['title' => 'Home', 'slug' => 'home', 'path' => '/', 'front' => true],
         ['title' => 'Visit', 'slug' => 'visit', 'path' => '/visit/', 'front' => false],
     ];
-    // Same page, different authored path: the label still proves the match.
+    // A matching label cannot prove that a different path reaches this page.
     $markup = '<!-- wp:site-title /--><!-- wp:navigation -->'
         . '<!-- wp:navigation-link {"label":"Visit","url":"/visit-us/","kind":"custom"} /-->'
         . '<!-- /wp:navigation -->';
 
     $result = HeaderNav::withCompleteInnerPages($markup, $pages);
 
-    assert_eq($markup, $result['markup'], 'a renamed href is not a missing page');
-    assert_eq([], $result['notes']);
+    assert_contains('"url":"/visit-us/"', $result['markup'], 'the authored destination is retained');
+    assert_contains('"url":"/visit/"', $result['markup'], 'the required page is independently reachable');
+    assert_true($result['notes'] !== [], 'the reachability repair is recorded');
+});
+
+test('HeaderNav does not let an external URL mask an inner page with the same path', function () {
+    $pages = [
+        ['title' => 'Home', 'slug' => 'home', 'path' => '/', 'front' => true],
+        ['title' => 'Visit', 'slug' => 'visit', 'path' => '/visit/', 'front' => false],
+    ];
+
+    foreach (['https://elsewhere.example/visit/', '//elsewhere.example/visit/'] as $url) {
+        $markup = '<!-- wp:navigation -->'
+            . '<!-- wp:navigation-link {"label":"Visit","url":"' . $url . '","kind":"custom"} /-->'
+            . '<!-- /wp:navigation -->';
+
+        $result = HeaderNav::withCompleteInnerPages($markup, $pages);
+
+        assert_contains('"url":"' . $url . '"', $result['markup'], 'the external link is retained');
+        assert_contains('"url":"/visit/"', $result['markup'], 'the internal Visit page is also reachable');
+    }
 });
 
 test('HeaderNav adds HTML anchors inside the existing nav list, not beside it', function () {
@@ -579,6 +598,30 @@ test('HeaderNav spreads missing links across both split-nav halves', function ()
     assert_true(substr_count($left, 'wp:navigation-link') > 0, 'the start half gets links');
     assert_true(substr_count($right, 'wp:navigation-link') > 0, 'the end half gets links');
     assert_eq(4, substr_count($result['markup'], 'wp:navigation-link'), 'every inner page exactly once');
+});
+
+test('HeaderNav balances missing split-nav links against the links already present', function () {
+    $pages = [
+        ['title' => 'Home', 'slug' => 'home', 'path' => '/', 'front' => true],
+        ['title' => 'Menu', 'slug' => 'menu', 'path' => '/menu/', 'front' => false],
+        ['title' => 'Visit', 'slug' => 'visit', 'path' => '/visit/', 'front' => false],
+        ['title' => 'Press', 'slug' => 'press', 'path' => '/press/', 'front' => false],
+        ['title' => 'Contact', 'slug' => 'contact', 'path' => '/contact/', 'front' => false],
+    ];
+    $markup = '<!-- wp:navigation -->'
+        . '<!-- wp:navigation-link {"label":"Menu","url":"/menu/","kind":"custom"} /-->'
+        . '<!-- wp:navigation-link {"label":"Visit","url":"/visit/","kind":"custom"} /-->'
+        . '<!-- wp:navigation-link {"label":"Press","url":"/press/","kind":"custom"} /-->'
+        . '<!-- /wp:navigation -->'
+        . '<!-- wp:site-title /-->'
+        . '<!-- wp:navigation --><!-- /wp:navigation -->';
+
+    $result = HeaderNav::withCompleteInnerPages($markup, $pages);
+
+    [$left, $right] = explode('<!-- wp:site-title /-->', $result['markup']);
+    assert_eq(3, substr_count($left, 'wp:navigation-link'), 'the loaded half receives nothing');
+    assert_eq(1, substr_count($right, 'wp:navigation-link'), 'the missing link goes to the empty half');
+    assert_contains('"url":"/contact/"', $right);
 });
 
 test('HeaderNav inserts navigation into a row, never stacked under the wordmark (BIGR-872)', function () {
