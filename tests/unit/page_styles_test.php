@@ -438,7 +438,11 @@ test('every rule unscoped leaves the appendix empty and warns', function () {
 
     (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
 
-    assert_eq($before, $project->readText('theme/style.css'), 'empty salvage appends no marker or CSS');
+    assert_eq(
+        $before . "\n" . ps_wrap(),
+        $project->readText('theme/style.css'),
+        'empty salvage appends only the deterministic policy',
+    );
     assert_contains(
         'model CSS appendix rejected',
         implode("\n", $project->readJson('warnings.json')['page-styles'] ?? []),
@@ -458,7 +462,11 @@ test('unbalanced braces still reject the whole appendix', function () {
 
     (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
 
-    assert_eq($before, $project->readText('theme/style.css'), 'unbalanced document appends nothing');
+    assert_eq(
+        $before . "\n" . ps_wrap(),
+        $project->readText('theme/style.css'),
+        'unbalanced appendix cannot suppress the deterministic policy',
+    );
     assert_contains(
         'unbalanced braces',
         implode("\n", $project->readJson('warnings.json')['page-styles'] ?? []),
@@ -485,7 +493,11 @@ test('run skips without an LLM call when no utility class is used', function () 
     (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
 
     assert_eq([], $llm->calls, 'no LLM call made');
-    assert_eq($before, $project->readText('theme/style.css'), 'style.css untouched');
+    assert_eq(
+        $before . "\n" . ps_wrap(),
+        $project->readText('theme/style.css'),
+        'no utility appendix is needed, but the deterministic policy still ships',
+    );
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -537,7 +549,8 @@ test('legacy mode ignores stale site CSS and keeps the recorded call trace and s
         . "    margin-top: -4rem;\n"
         . "    position: relative;\n"
         . "    z-index: 2;\n"
-        . "}\n",
+        . "}\n\n"
+        . ps_wrap(),
         $project->readText('theme/style.css'),
         'legacy style.css bytes'
     );
@@ -1983,6 +1996,7 @@ test('site CSS path always merges a wrap policy that never splits words', functi
     assert_contains('-webkit-hyphens: none;', $style);
     assert_contains('word-break: normal;', $style);
     assert_contains('overflow-wrap: normal;', $style);
+    assert_contains('text-wrap: pretty;', $style);
     assert_true(!str_contains($style, 'break-all'), 'break-all is never introduced');
     assert_true(!str_contains($style, 'hyphens: auto'), 'no automatic hyphenation');
 
@@ -1997,7 +2011,7 @@ test('site CSS path strips heading wrap overrides so words never split mid-token
     [$project, $tmp] = ps_project('builder_ps_word_wrap_heading_lock_');
     $project->writeText(
         TransformArtifacts::SITE_CSS,
-        '.hero h1{overflow-wrap:anywhere;word-break:break-all;hyphens:auto;font-size:5rem;}'
+        '.hero h1{overflow-wrap:anywhere;word-break:break-all;hyphens:auto;text-wrap:wrap;font-size:5rem;}'
     );
     $project->writeJson('pages.json', ['pages' => [['slug' => 'home', 'front' => true]]]);
     $project->writeText('design/home.html', '<main>Home</main>');
@@ -2012,7 +2026,30 @@ test('site CSS path strips heading wrap overrides so words never split mid-token
     assert_true(!str_contains($body, 'overflow-wrap'), 'heading overflow-wrap is stripped');
     assert_true(!str_contains($body, 'word-break'), 'heading word-break is stripped');
     assert_true(!str_contains($body, 'hyphens'), 'heading hyphens are stripped');
+    assert_true(!str_contains($body, 'text-wrap'), 'heading text-wrap is stripped so pretty stays owned');
     assert_contains('overflow-wrap: normal;', $style, 'wrap policy still ships');
+    assert_contains('text-wrap: pretty;', $style, 'pretty wrap policy still ships');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site CSS path strips text-wrap overrides from direct and broad body-copy selectors', function () {
+    [$project, $tmp] = ps_project('builder_ps_word_wrap_global_lock_');
+    $project->writeText(
+        TransformArtifacts::SITE_CSS,
+        'p{text-wrap:nowrap!important;color:inherit}'
+        . '.hero>*{text-wrap-style:balance!important;display:block}'
+        . 'body{text-wrap-mode:nowrap;hyphens:auto}'
+    );
+    $project->writeJson('pages.json', ['pages' => [['slug' => 'home', 'front' => true]]]);
+    $project->writeText('design/home.html', '<main>Home</main>');
+
+    ps_html_first_step(new FakeLlm())->run($project);
+
+    $style = $project->readText('theme/style.css');
+    assert_eq(1, substr_count($style, 'text-wrap'), 'only the deterministic pretty policy ships');
+    assert_contains('color:inherit', $style, 'paragraph sibling survives');
+    assert_contains('display:block', $style, 'broad-selector sibling survives');
+    assert_contains('hyphens:auto', $style, 'unrelated body wrap behavior survives');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -2645,7 +2682,13 @@ test('run appends validated CSS to style.css and passes the configured model', f
         . '</div><!-- /wp:group -->'
     );
     $llm = new FakeLlm();
-    $llm->queueText(PS_VALID_CSS);
+    $llm->queueText(
+        str_replace(
+            'margin-top: -4rem;',
+            "margin-top: -4rem;\n        text-wrap: nowrap !important;",
+            PS_VALID_CSS,
+        ),
+    );
 
     (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts')), 'claude-haiku-4-5'))->run($project);
 
@@ -2654,6 +2697,8 @@ test('run appends validated CSS to style.css and passes the configured model', f
     assert_contains('.overlap-up', $style, 'appendix appended');
     assert_contains('.masonry-3', $style, 'appendix appended');
     assert_contains('page-styles step', $style, 'marker comment present');
+    assert_eq(1, substr_count($style, 'text-wrap'), 'model override is removed and one owned policy ships');
+    assert_contains('text-wrap: pretty;', $style, 'default graph delivers the supported CSS policy');
     // The prompt asked only for the classes actually used, in vocabulary order.
     assert_contains('- .overlap-up', $llm->calls[0]['prompt']);
     assert_contains('- .masonry-3', $llm->calls[0]['prompt']);
@@ -2666,7 +2711,7 @@ test('run appends validated CSS to style.css and passes the configured model', f
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('run rejects invalid CSS, leaves style.css untouched, and logs the problems', function () {
+test('run rejects invalid CSS, ships only the deterministic policy, and logs the problems', function () {
     [$project, $tmp] = ps_project('builder_ps_bad_');
     $project->writeText(
         'theme/parts/section-work.html',
@@ -2678,7 +2723,11 @@ test('run rejects invalid CSS, leaves style.css untouched, and logs the problems
 
     (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
 
-    assert_eq($before, $project->readText('theme/style.css'), 'style.css untouched');
+    assert_eq(
+        $before . "\n" . ps_wrap(),
+        $project->readText('theme/style.css'),
+        'rejected appendix cannot suppress the deterministic policy',
+    );
     assert_contains('not scoped', $project->readText('logs/page-styles.log'));
     // The skipped appendix costs every used utility its CSS — durable record.
     $joined = implode(' ', $project->readJson('warnings.json')['page-styles'] ?? []);
@@ -2711,7 +2760,11 @@ test('run skips when markup contains only static hover classes', function () {
     (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
 
     assert_eq([], $llm->calls, 'no LLM call for static hover classes');
-    assert_eq($before, $project->readText('theme/style.css'), 'style.css untouched');
+    assert_eq(
+        $before . "\n" . ps_wrap(),
+        $project->readText('theme/style.css'),
+        'static policy ships without an LLM appendix',
+    );
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
