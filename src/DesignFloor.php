@@ -9,6 +9,8 @@ namespace Automattic\SiteBuild;
  * Frozen contract: check() takes block markup plus a decoded theme.json array
  * and returns structured findings `{rule, detail, path}`. Callers format those
  * into warnings.json strings via warningRow(); nothing here rewrites markup.
+ * A swallowed throw becomes a `scan-failed` finding naming the rule (or parse)
+ * and the exception — never an empty "clean" result.
  *
  * @phpstan-type Finding array{rule: string, detail: string, path: string}
  */
@@ -25,6 +27,7 @@ final class DesignFloor
     public const RULE_WIDE_TRACKING = 'wide-tracking';
     public const RULE_TIGHT_LEADING = 'tight-leading';
     public const RULE_FLAT_TYPE_HIERARCHY = 'flat-type-hierarchy';
+    public const RULE_SCAN_FAILED = 'scan-failed';
 
     /** @var list<string> */
     public const MARKUP_RULES = [
@@ -66,36 +69,51 @@ final class DesignFloor
 
     /**
      * @param array<string, mixed> $themeJson decoded theme.json
+     * @param null|callable(string):BlockMarkup $parser test seam; production omits it
+     * @param string|null $faultRule test seam: throw inside that markup rule before it runs
      * @return list<Finding>
      */
-    public static function check(string $markup, array $themeJson): array
-    {
+    public static function check(
+        string $markup,
+        array $themeJson,
+        ?callable $parser = null,
+        ?string $faultRule = null,
+    ): array {
         $findings = [];
         if (trim($markup) !== '') {
+            $document = null;
             try {
-                $document = BlockMarkup::parse($markup);
-                $findings = array_merge(
-                    $findings,
-                    self::nestedCards($document),
-                    self::gradientText($document),
-                    self::justifiedText($document),
-                    self::sideTab($document),
-                    self::allCapsBody($document),
-                    self::skippedHeading($document),
-                    self::kickerAboveHeading($document),
-                );
-            } catch (\Throwable) {
-                // Generated markup must never abort a reporting pass.
+                $parsed = $parser === null ? BlockMarkup::parse($markup) : $parser($markup);
+                if (!$parsed instanceof BlockMarkup) {
+                    throw new \RuntimeException('parser returned no block document');
+                }
+                $document = $parsed;
+            } catch (\Throwable $error) {
+                $findings[] = self::scanFailed('parse', $error);
+            }
+            if ($document instanceof BlockMarkup) {
+                foreach (self::markupRunners() as $rule => $runner) {
+                    try {
+                        if ($faultRule === $rule) {
+                            throw new \RuntimeException('injected DesignFloor fault for ' . $rule);
+                        }
+                        array_push($findings, ...$runner($document));
+                    } catch (\Throwable $error) {
+                        $findings[] = self::scanFailed($rule, $error);
+                    }
+                }
             }
         }
 
-        return array_merge(
-            $findings,
-            self::tinyText($themeJson),
-            self::wideTracking($themeJson),
-            self::tightLeading($themeJson),
-            self::flatTypeHierarchy($themeJson),
-        );
+        foreach (self::themeRunners() as $rule => $runner) {
+            try {
+                array_push($findings, ...$runner($themeJson));
+            } catch (\Throwable $error) {
+                $findings[] = self::scanFailed($rule, $error);
+            }
+        }
+
+        return $findings;
     }
 
     /**
@@ -111,6 +129,46 @@ final class DesignFloor
             . '; authored=' . Warnings::value($finding['detail'])
             . '; delivered=unchanged'
             . '; disposition=reported, not repaired';
+    }
+
+    /**
+     * @return array<string, callable(BlockMarkup):list<Finding>>
+     */
+    private static function markupRunners(): array
+    {
+        return [
+            self::RULE_NESTED_CARDS => static fn (BlockMarkup $document): array => self::nestedCards($document),
+            self::RULE_GRADIENT_TEXT => static fn (BlockMarkup $document): array => self::gradientText($document),
+            self::RULE_JUSTIFIED_TEXT => static fn (BlockMarkup $document): array => self::justifiedText($document),
+            self::RULE_SIDE_TAB => static fn (BlockMarkup $document): array => self::sideTab($document),
+            self::RULE_ALL_CAPS_BODY => static fn (BlockMarkup $document): array => self::allCapsBody($document),
+            self::RULE_SKIPPED_HEADING => static fn (BlockMarkup $document): array => self::skippedHeading($document),
+            self::RULE_KICKER_ABOVE_HEADING => static fn (BlockMarkup $document): array => self::kickerAboveHeading($document),
+        ];
+    }
+
+    /**
+     * @return array<string, callable(array<string, mixed>):list<Finding>>
+     */
+    private static function themeRunners(): array
+    {
+        return [
+            self::RULE_TINY_TEXT => static fn (array $themeJson): array => self::tinyText($themeJson),
+            self::RULE_WIDE_TRACKING => static fn (array $themeJson): array => self::wideTracking($themeJson),
+            self::RULE_TIGHT_LEADING => static fn (array $themeJson): array => self::tightLeading($themeJson),
+            self::RULE_FLAT_TYPE_HIERARCHY => static fn (array $themeJson): array => self::flatTypeHierarchy($themeJson),
+        ];
+    }
+
+    /** @return Finding */
+    private static function scanFailed(string $target, \Throwable $error): array
+    {
+        $message = str_replace(["\r", "\n"], ' ', $error->getMessage());
+        return self::finding(
+            self::RULE_SCAN_FAILED,
+            $target . ' threw ' . $error::class . ': ' . $message,
+            $target,
+        );
     }
 
     /** @return list<Finding> */

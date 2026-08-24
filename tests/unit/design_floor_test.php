@@ -238,3 +238,60 @@ test('side-tab skips an unnamed group with a thick left border', function () {
         . '<div class="wp-block-group" style="border-left:8px solid #c00"></div><!-- /wp:group -->';
     assert_true(!design_floor_has_rule(DesignFloor::check($group, []), DesignFloor::RULE_SIDE_TAB));
 });
+
+test('a throwing markup rule emits scan-failed and the other six still report', function () {
+    $findings = DesignFloor::check(
+        design_floor_markup('all-defects.html'),
+        [],
+        null,
+        DesignFloor::RULE_NESTED_CARDS,
+    );
+    assert_true(design_floor_has_rule($findings, DesignFloor::RULE_SCAN_FAILED));
+    $scan = array_values(array_filter(
+        $findings,
+        static fn (array $row): bool => $row['rule'] === DesignFloor::RULE_SCAN_FAILED,
+    ));
+    assert_eq(1, count($scan), 'exactly one scan-failed');
+    assert_eq('nested-cards', $scan[0]['path']);
+    assert_contains('injected DesignFloor fault for nested-cards', $scan[0]['detail']);
+    assert_true(!design_floor_has_rule($findings, DesignFloor::RULE_NESTED_CARDS));
+    $survivors = array_values(array_diff(DesignFloor::MARKUP_RULES, [DesignFloor::RULE_NESTED_CARDS]));
+    foreach ($survivors as $rule) {
+        assert_true(design_floor_has_rule($findings, $rule), $rule . ' survived the sibling throw');
+    }
+});
+
+test('unparseable markup emits exactly one scan-failed and theme.json rules still run', function () {
+    $findings = DesignFloor::check(
+        '<!-- wp:paragraph --><p>Unparseable on purpose.</p><!-- /wp:paragraph -->',
+        design_floor_theme('theme-defects.json'),
+        static function (string $markup): never {
+            throw new RuntimeException('parse boom');
+        },
+    );
+    $scan = array_values(array_filter(
+        $findings,
+        static fn (array $row): bool => $row['rule'] === DesignFloor::RULE_SCAN_FAILED,
+    ));
+    assert_eq(1, count($scan));
+    assert_eq('parse', $scan[0]['path']);
+    assert_contains('parse boom', $scan[0]['detail']);
+    foreach (DesignFloor::MARKUP_RULES as $rule) {
+        assert_true(!design_floor_has_rule($findings, $rule), $rule . ' cannot run after parse failure');
+    }
+    foreach (DesignFloor::THEME_RULES as $rule) {
+        assert_true(design_floor_has_rule($findings, $rule), $rule . ' still runs after parse failure');
+    }
+});
+
+test('non-empty unparseable markup never returns an empty finding list', function () {
+    $findings = DesignFloor::check(
+        '<!-- wp:heading --><h2>Present</h2><!-- /wp:heading -->',
+        [],
+        static function (string $markup): never {
+            throw new RuntimeException('parse boom');
+        },
+    );
+    assert_true($findings !== [], 'a failed scan is not a clean page');
+    assert_true(design_floor_has_rule($findings, DesignFloor::RULE_SCAN_FAILED));
+});
