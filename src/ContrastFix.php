@@ -459,7 +459,7 @@ final class ContrastFix
         }
         $ratio = $this->minRatio($linkRgb, $row['bg']);
         if ($ratio >= $this->normalText) {
-            $this->checkHoverOnly($row, $repair);
+            $this->checkHoverOnly($row, $key, $repair);
             return;
         }
 
@@ -552,8 +552,9 @@ final class ContrastFix
      * @param array{bg: list<array{0:int,1:int,2:int}>, bgLabel: string,
      *              link: array{label: string}|null,
      *              hover: array{rgb: array{0:int,1:int,2:int}, label: string, fromNode: ?int}|null} $row
+     * @param int $key background-provider node index, -1 for the root region
      */
-    private function checkHoverOnly(array $row, bool $repair): void
+    private function checkHoverOnly(array $row, int $key, bool $repair): void
     {
         $hover = $row['hover'] ?? null;
         if ($hover === null || $hover['fromNode'] === null) {
@@ -582,9 +583,18 @@ final class ContrastFix
             return;
         }
 
-        $slug = $this->repairHover($hover['fromNode'], $fallback, $row['bg']);
+        // The hover may be declared on an ancestor that also governs regions
+        // this row does not speak for. Repair inside the region — on its own
+        // background provider — rather than rewriting the ancestor's colour
+        // out from under a sibling band it already reads on.
+        $target = $key === -1 || $this->isSelfOrDescendant($hover['fromNode'], $key)
+            ? $hover['fromNode'] : $key;
+        $slug = $this->repairHover($target, $fallback, $row['bg']);
+        if ($slug === null) {
+            return; // already readable here — an earlier region repaired it
+        }
         $this->findings[] = [
-            'kind' => 'link', 'block' => $this->doc->name($hover['fromNode']),
+            'kind' => 'link', 'block' => $this->doc->name($target),
             'detail' => $detail . " → elements.link:hover={$slug}",
             'repaired' => true,
         ];

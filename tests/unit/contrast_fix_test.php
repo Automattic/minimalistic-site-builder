@@ -238,6 +238,36 @@ test('a reading hover is left alone when the resting link color reads too', func
     assert_eq([], $res['findings']);
 });
 
+test('a hover repair for a dark band leaves the ancestor that authored it alone', function () {
+    // The outer group declares the hover for the whole page; only the nested
+    // dark band fails on it. Repairing at the outer group would fix the band
+    // by making the hover invisible everywhere above it (accent reads at 5.08
+    // on base but only 3.01 on contrast), so the band is pinned instead.
+    $fix = new ContrastFix(maxwell_demo_palette(), [], 'var(--wp--preset--color--primary)');
+    $src = '<!-- wp:group {"style":{"elements":{"link":{"color":{"text":"var:preset|color|contrast"},":hover":{"color":{"text":"var:preset|color|accent"}}}}}} -->' . "\n"
+        . '<div class="wp-block-group has-link-color">'
+        . '<!-- wp:paragraph --><p><a href="#">on the light page</a></p><!-- /wp:paragraph -->' . "\n"
+        . '<!-- wp:group {"backgroundColor":"contrast","style":{"elements":{"link":{"color":{"text":"var:preset|color|base"}}}}} -->' . "\n"
+        . '<div class="wp-block-group has-contrast-background-color has-background has-link-color">'
+        . '<!-- wp:paragraph {"textColor":"base"} --><p><a href="#">on the dark band</a></p><!-- /wp:paragraph --></div>' . "\n"
+        . '<!-- /wp:group --></div>' . "\n"
+        . '<!-- /wp:group -->';
+    $res = $fix->process($src);
+    assert_eq(true, $res['changed']);
+    assert_contains(
+        '"link":{"color":{"text":"var:preset|color|contrast"},":hover":{"color":{"text":"var:preset|color|accent"}}}',
+        $res['markup'],
+        "the outer group's readable hover survives"
+    );
+    assert_contains(
+        '"link":{"color":{"text":"var:preset|color|base"},":hover":{"color":{"text":"var:preset|color|base"}}}',
+        $res['markup'],
+        'the dark band carries its own hover'
+    );
+    assert_eq(1, count($res['findings']));
+    assert_contains('link hover accent on contrast', $res['findings'][0]['detail']);
+});
+
 test('a quote cite is checked even when paragraphs carry the quote body', function () {
     // The paragraph is explicitly readable; the <cite> inherits the default
     // (dark) text and dies on the dark band. Old behavior recorded no row at
