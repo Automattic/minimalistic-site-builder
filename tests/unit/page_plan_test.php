@@ -1596,7 +1596,6 @@ test('PagePlanStep::recoverSections preserves the page when generated repair rep
         actionContext: [
             'page_paths' => ['/' => true, '/menu/' => true],
             'contact_destinations' => [],
-            'email_domains' => [],
             'planned_anchors' => [
                 '/menu/' => ['menu-hero' => true, 'menu-closing' => true],
             ],
@@ -1854,7 +1853,6 @@ test('normalize rejects every CTA fragment form that names no planned section (B
             actionContext: [
                 'page_paths' => ['/' => true],
                 'contact_destinations' => [],
-                'email_domains' => [],
                 'planned_anchors' => [],
             ],
             pageSlug: 'home',
@@ -1873,7 +1871,6 @@ test('normalize rejects every CTA fragment form that names no planned section (B
     $actionContext = [
         'page_paths' => ['/' => true, '/menu/' => true],
         'contact_destinations' => [],
-        'email_domains' => [],
         'planned_anchors' => ['/menu/' => ['menu-hero' => true, 'closing' => true]],
     ];
     $sections[0]['primary_action']['destination'] = '/menu/#signature';
@@ -2044,7 +2041,7 @@ test('contact-page emphasis is brief and purpose-led, not the 3-to-6 interior pa
 
     $noForm = PagePlanStep::emphasisFor($page, false);
     assert_true(!str_contains($noForm, 'JP_FORM'));
-    assert_contains('mailto', $noForm);
+    assert_contains('omit mailto/tel when none exist', $noForm);
 
     $programs = PagePlanStep::emphasisFor([
         'slug' => 'programs',

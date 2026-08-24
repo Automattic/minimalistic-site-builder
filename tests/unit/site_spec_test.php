@@ -85,6 +85,9 @@ function site_spec_tree_slugs(array $pages): array
 
 test('site-spec writes a factual, normalized siteSpec.json', function () {
     [$project, $llm, $tmp] = make_sitespec_fixture();
+    $meta = $project->readJson('meta.json');
+    $meta['prompt'] = 'A cozy neighborhood bakery at hearthandcrumb.com, open Tue–Sun 7am–3pm';
+    $project->writeJson('meta.json', $meta);
     $llm->queueJson([
         'name' => 'Hearth & Crumb',
         // slug intentionally omitted -> derived from name
@@ -124,7 +127,7 @@ test('site-spec writes a factual, normalized siteSpec.json', function () {
     assert_true(!isset($spec['layout']), 'no layout in factual spec');
 
     // The rendered prompt must carry the user's words.
-    assert_contains('cozy neighborhood bakery', $llm->calls[0]['prompt']);
+    assert_contains('hearthandcrumb.com', $llm->calls[0]['prompt']);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -166,6 +169,64 @@ test('site-spec drops an implausible email_domain instead of inventing one', fun
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('site-spec drops an unflagged email_domain the prompt never stated', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    $llm->queueJson([
+        'name' => 'Hearth & Crumb',
+        'language' => 'en',
+        'email_domain' => 'hearthandcrumb.com',
+        'invented' => ['name'],
+        'email' => 'hello@hearthandcrumb.com',
+        'phone' => '+1 207 555 0100',
+        'website' => 'https://hearthandcrumb.com',
+        'location' => ['street' => '24 Market Street', 'city' => 'Portland'],
+    ]);
+    $renderer = new PromptRenderer(repo_path('prompts'));
+
+    (new SiteSpecStep($llm, $renderer))->run($project);
+
+    $spec = $project->readJson('siteSpec.json');
+    assert_eq('', $spec['email_domain'], 'a plausible domain still needs to appear in the prompt');
+    assert_true(!isset($spec['email']));
+    assert_true(!isset($spec['phone']));
+    assert_true(!isset($spec['website']));
+    assert_true(!isset($spec['location']['street']));
+    $joined = implode(' ', $project->readJson('warnings.json')['site-spec'] ?? []);
+    assert_contains('email_domain', $joined);
+    assert_contains('not stated in the prompt', $joined);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec keeps generated contact facts that the prompt stated', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    $meta = $project->readJson('meta.json');
+    $meta['prompt'] = 'A bakery. Email hello@hearthandcrumb.com or call +1 207 555 0100. '
+        . 'Site https://hearthandcrumb.com. 24 Market Street, Portland.';
+    $project->writeJson('meta.json', $meta);
+    $llm->queueJson([
+        'name' => 'Hearth & Crumb',
+        'language' => 'en',
+        'email_domain' => 'hearthandcrumb.com',
+        'invented' => ['name'],
+        'email' => 'hello@hearthandcrumb.com',
+        'phone' => '+1 207 555 0100',
+        'website' => 'https://hearthandcrumb.com',
+        'location' => ['street' => '24 Market Street', 'city' => 'Portland'],
+    ]);
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $spec = $project->readJson('siteSpec.json');
+    assert_eq('hearthandcrumb.com', $spec['email_domain']);
+    assert_eq('hello@hearthandcrumb.com', $spec['email']);
+    assert_eq('+1 207 555 0100', $spec['phone']);
+    assert_eq('https://hearthandcrumb.com', $spec['website']);
+    assert_eq('24 Market Street', $spec['location']['street']);
+    assert_eq('Portland', $spec['location']['city']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('site-spec drops an invented email_domain even when it looks valid', function () {
     [$project, $llm, $tmp] = make_sitespec_fixture();
     $llm->queueJson([
@@ -183,7 +244,7 @@ test('site-spec drops an invented email_domain even when it looks valid', functi
     assert_eq(['name'], $spec['invented']);
     $joined = implode(' ', $project->readJson('warnings.json')['site-spec'] ?? []);
     assert_contains('email_domain', $joined);
-    assert_contains('invented rather than stated', $joined);
+    assert_contains('not stated in the prompt', $joined);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

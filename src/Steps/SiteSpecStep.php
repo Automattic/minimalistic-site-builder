@@ -60,6 +60,9 @@ final class SiteSpecStep implements Step
     /** A user-stated contact domain; empty is the no-contact-domain state. */
     private const EMAIL_DOMAIN = '/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/';
 
+    /** Extra keys whose values are contact facts, not identity or copy. */
+    private const CONTACT_KEY = '/(?:e-?mails?|phones?|telephones?|mobiles?|tels?|whatsapp|fax|address(?:es)?|streets?|urls?|websites?|instagram|twitter|facebook|linkedin|social)/i';
+
     /** Internal artifact basenames that generated page slugs must not claim. */
     private const RESERVED_PAGE_SLUGS = ['preview'];
 
@@ -163,7 +166,15 @@ final class SiteSpecStep implements Step
             }
         }
 
-        $spec = self::normalize($spec, $multiPage, $requested, $warnings, self::nameFromPrompt($prompt));
+        $spec = self::normalize(
+            $spec,
+            $multiPage,
+            $requested,
+            $warnings,
+            self::nameFromPrompt($prompt),
+            $prompt,
+            array_key_exists('site_spec', $meta),
+        );
         $spec['writing_direction'] = $callerWritingDirection
             ?? WritingDirection::fromLanguage((string) ($spec['language'] ?? ''));
         if ($warnings !== []) {
@@ -242,8 +253,9 @@ final class SiteSpecStep implements Step
 
     /**
      * Require the fixed factual properties and normalize name/slug/sections.
-     * Any extra factual keys the model returned pass through untouched — the
-     * spec has no fixed/exhaustive schema beyond the required properties. No
+     * Extra factual keys the user stated pass through — the spec has no
+     * exhaustive schema beyond the required properties. On the generated
+     * path, contact-shaped extras must also appear in the user prompt. No
      * design fields are filled in: design is decided later by the theme-json
      * and landing-page steps.
      *
@@ -259,6 +271,8 @@ final class SiteSpecStep implements Step
         array $requested = [],
         array &$warnings = [],
         string $fallbackName = 'New Site',
+        string $prompt = '',
+        bool $hostSupplied = false,
     ): array {
         $name = trim((string) ($spec['name'] ?? ''));
         if ($name === '') {
@@ -338,22 +352,142 @@ final class SiteSpecStep implements Step
         // the hero recipe pool, so absence must never change behavior.
         $spec['subject_is_visual_work'] = ($spec['subject_is_visual_work'] ?? null) === true;
 
-        // email_domain is a contact fact, not identity. Keep a user-stated
-        // domain; drop anything invented or implausible rather than minting
-        // hello@<slug>.com for a site that never gave an address.
+        // Empty email_domain is the no-contact-domain state; do not fill it from the slug.
         $domain = strtolower(trim((string) ($spec['email_domain'] ?? '')));
-        if (in_array('email_domain', $rawInvented, true) && $domain !== '') {
-            $warnings[] = 'site spec "email_domain" was invented rather than stated; dropped';
-            $domain = '';
-        } elseif ($domain !== '' && preg_match(self::EMAIL_DOMAIN, $domain) !== 1) {
+        if ($domain !== '' && preg_match(self::EMAIL_DOMAIN, $domain) !== 1) {
             $warnings[] = "site spec \"email_domain\" is not a usable domain: {$domain}; "
                 . 'dropped rather than inventing one';
+            $domain = '';
+        } elseif ($domain !== '' && !$hostSupplied && !self::promptStatesDomain($prompt, $domain)) {
+            $warnings[] = 'site spec "email_domain" was not stated in the prompt; dropped';
+            $domain = '';
+        } elseif ($domain !== '' && $hostSupplied && in_array('email_domain', $rawInvented, true)) {
+            $warnings[] = 'site spec "email_domain" was invented rather than stated; dropped';
             $domain = '';
         }
         $spec['email_domain'] = $domain;
         $spec['invented'] = array_values(array_unique($invented));
 
+        if (!$hostSupplied) {
+            $spec = self::scrubUngroundedContact($spec, $prompt, $warnings);
+        }
+
         return $spec;
+    }
+
+    /**
+     * Drop generated emails, phones, streets, and URLs that do not appear in
+     * the user prompt. Host-supplied specs skip this: the host already stated
+     * those facts by handing them over.
+     *
+     * @param array<mixed> $spec
+     * @param list<string> $warnings
+     * @return array<mixed>
+     */
+    private static function scrubUngroundedContact(array $spec, string $prompt, array &$warnings): array
+    {
+        $reserved = [
+            'name' => true,
+            'slug' => true,
+            'title' => true,
+            'description' => true,
+            'site_type' => true,
+            'topic' => true,
+            'area' => true,
+            'audience' => true,
+            'language' => true,
+            'writing_direction' => true,
+            'persona_name' => true,
+            'email_domain' => true,
+            'invented' => true,
+            'visual_vibe' => true,
+            'subject_is_visual_work' => true,
+            'animation_request' => true,
+            'sections' => true,
+            'pages' => true,
+        ];
+        foreach ($spec as $key => $value) {
+            if (isset($reserved[(string) $key])) {
+                continue;
+            }
+            $cleaned = self::scrubContactNode($value, (string) $key, $prompt, (string) $key, $warnings);
+            if ($cleaned === null) {
+                unset($spec[$key]);
+            } else {
+                $spec[$key] = $cleaned;
+            }
+        }
+        return $spec;
+    }
+
+    /**
+     * @param list<string> $warnings
+     */
+    private static function scrubContactNode(
+        mixed $value,
+        string $key,
+        string $prompt,
+        string $path,
+        array &$warnings,
+    ): mixed {
+        if (is_array($value)) {
+            foreach ($value as $childKey => $child) {
+                $childPath = is_int($childKey) ? $path . '[]' : $path . '.' . $childKey;
+                $cleaned = self::scrubContactNode($child, (string) $childKey, $prompt, $childPath, $warnings);
+                if ($cleaned === null) {
+                    unset($value[$childKey]);
+                } else {
+                    $value[$childKey] = $cleaned;
+                }
+            }
+            return $value === [] ? null : $value;
+        }
+        if (!is_string($value)) {
+            return $value;
+        }
+        $text = trim($value);
+        if ($text === '' || !self::isContactShaped($key, $text)) {
+            return $value;
+        }
+        if (self::promptContains($prompt, $text)) {
+            return $value;
+        }
+        $warnings[] = "site spec \"{$path}\" was not stated in the prompt; dropped";
+        return null;
+    }
+
+    private static function isContactShaped(string $key, string $value): bool
+    {
+        if (preg_match(self::CONTACT_KEY, $key) === 1) {
+            return true;
+        }
+        if (filter_var($value, FILTER_VALIDATE_EMAIL)) {
+            return true;
+        }
+        if (preg_match('#^https?://#i', $value) === 1) {
+            return true;
+        }
+        if (str_starts_with(strtolower($value), 'mailto:')
+            || str_starts_with(strtolower($value), 'tel:')
+        ) {
+            return true;
+        }
+        return preg_match('/^\+?[0-9][0-9(). -]{6,}$/', $value) === 1;
+    }
+
+    private static function promptStatesDomain(string $prompt, string $domain): bool
+    {
+        return self::promptContains($prompt, $domain)
+            || self::promptContains($prompt, '@' . $domain);
+    }
+
+    private static function promptContains(string $prompt, string $needle): bool
+    {
+        $needle = trim($needle);
+        if ($needle === '' || trim($prompt) === '') {
+            return false;
+        }
+        return mb_stripos($prompt, $needle) !== false;
     }
 
     /**

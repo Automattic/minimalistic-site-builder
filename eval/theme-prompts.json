@@ -55,7 +55,7 @@
         "audience": "neighborhood residents and visitors",
         "language": "en",
         "persona_name": "",
-        "email_domain": "hearthandcrumb.com",
+        "email_domain": "",
         "invented": ["name"],
         "visual_vibe": "warm and rustic",
         "animation_request": "",
@@ -94,7 +94,6 @@
           }
         ],
         "location": {
-          "street": "24 Market Street",
           "city": "Portland",
           "region": "Maine"
         },
