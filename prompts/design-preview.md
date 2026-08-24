@@ -49,6 +49,7 @@ Emit exactly one `<img>` in whole document, inside `<section id="hero">`. Omit `
 - Put all CSS in exactly one inline `<style>` inside `<head>`. Do not use style elements elsewhere.
 - Define these exact WordPress-layout width variables: `--content-size: 800px;` and `--wide-size: 1280px;`.
 - Use mobile-first responsive CSS, fluid typography, bounded widths, accessible contrast, visible focus states, and images that cannot overflow.
+- TEXT WRAP (mandatory). Headings (`h1`–`h6`) and paragraphs (`p`) MUST set `text-wrap: pretty`. This is a browser best-effort hint that reduces dangling final words; it cannot guarantee a particular final line at every font, width, or browser. Never use `text-wrap: wrap`, `text-wrap: nowrap`, or `text-wrap: balance` on headings or paragraphs. Prefer copy and widths that avoid conspicuously short final lines.
 - Use system font stacks only. Do not emit `@font-face`, `@import`, or any `url()` in CSS.
 - Do not load external stylesheets, fonts, scripts, images, CDN resources, or other dependencies. Do not emit `<link>` or `<iframe>`.
 - No JavaScript. Do not emit `<script>`, inline event-handler attributes, `javascript:` URLs, or behavior-bearing markup.

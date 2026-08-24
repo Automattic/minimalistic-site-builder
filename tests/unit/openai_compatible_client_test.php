@@ -15,7 +15,7 @@ use Automattic\SiteBuild\TransientApiException;
  */
 
 test('OpenAiCompatibleClient endpoint joins baseUrl and /chat/completions', function () {
-    $c = new OpenAiCompatibleClient('key', 'grok-4.5', 'https://api.x.ai/v1/');
+    $c = new OpenAiCompatibleClient('key', 'grok-4.6', 'https://api.x.ai/v1/');
     assert_eq('https://api.x.ai/v1/chat/completions', $c->endpoint());
 
     $c = new OpenAiCompatibleClient('key', 'gpt-4o', 'https://api.openai.com/v1');
@@ -580,7 +580,7 @@ test('maxTokensParam picks the right token key per provider and model', function
     assert_eq(['max_tokens' => 100], OpenAiCompatibleClient::maxTokensParam('openai', 'gpt-4.1', 100));
     assert_eq(['max_tokens' => 100], OpenAiCompatibleClient::maxTokensParam('openai', 'gpt-3.5-turbo', 100));
     // xAI (Grok) → always max_completion_tokens.
-    assert_eq(['max_completion_tokens' => 100], OpenAiCompatibleClient::maxTokensParam('xai', 'grok-4.5', 100));
+    assert_eq(['max_completion_tokens' => 100], OpenAiCompatibleClient::maxTokensParam('xai', 'grok-4.6', 100));
 });
 
 test('bodyFor uses max_completion_tokens and drops temperature for GPT-5 reasoning models', function () {
@@ -599,7 +599,7 @@ test('bodyFor uses max_completion_tokens and drops temperature for GPT-5 reasoni
 test('bodyFor keeps a custom temperature for xAI Grok (uses max_completion_tokens)', function () {
     $body = OpenAiCompatibleClient::bodyFor(
         ['prompt' => 'Hi', 'temperature' => 0.9],
-        'grok-4.5',
+        'grok-4.6',
         16000,
         'xai',
     );
@@ -770,7 +770,7 @@ test('restrictsTemperature flags OpenAI reasoning models and OpenRouter K3', fun
     assert_true(OpenAiCompatibleClient::restrictsTemperature('openai', 'gpt-5.5'), 'gpt-5.5 restricted');
     assert_true(OpenAiCompatibleClient::restrictsTemperature('openai', 'o3'), 'o3 restricted');
     assert_true(!OpenAiCompatibleClient::restrictsTemperature('openai', 'gpt-4o'), 'gpt-4o free');
-    assert_true(!OpenAiCompatibleClient::restrictsTemperature('xai', 'grok-4.5'), 'grok free');
+    assert_true(!OpenAiCompatibleClient::restrictsTemperature('xai', 'grok-4.6'), 'grok free');
     assert_true(OpenAiCompatibleClient::restrictsTemperature('openrouter', 'moonshotai/kimi-k3'), 'K3 restricted');
     assert_true(!OpenAiCompatibleClient::restrictsTemperature('openrouter', 'moonshotai/kimi-k2.5'), 'K2.5 free');
 });
@@ -939,7 +939,7 @@ test('bodyFor uses JSON-object response_format only for generic JSON calls', fun
     );
     assert_true(!array_key_exists('response_format', $textBody), 'ordinary text does not request JSON mode');
 
-    foreach (['openai' => 'gpt-4o', 'xai' => 'grok-4.5'] as $provider => $model) {
+    foreach (['openai' => 'gpt-4o', 'xai' => 'grok-4.6'] as $provider => $model) {
         $existingProviderBody = OpenAiCompatibleClient::bodyFor(
             ['prompt' => 'Return an object.'],
             $model,
@@ -989,7 +989,7 @@ test('bodyFor maps json_schema to the same strict xAI response_format', function
             'prompt' => 'Plan a page.',
             'json_schema' => ['name' => 'page_plan', 'schema' => $schema],
         ],
-        'grok-4.5',
+        'grok-4.6',
         16000,
         'xai',
     );

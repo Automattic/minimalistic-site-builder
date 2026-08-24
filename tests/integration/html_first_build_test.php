@@ -42,7 +42,7 @@ function html_first_theme_payload(): array
                 ['slug' => 'accent', 'color' => '#e08a3c', 'name' => 'Accent'],
             ]],
             'typography' => ['fontFamilies' => [
-                ['slug' => 'heading', 'fontFamily' => 'Fraunces, serif', 'name' => 'Heading'],
+                ['slug' => 'heading', 'fontFamily' => 'Literata, serif', 'name' => 'Heading'],
                 ['slug' => 'body', 'fontFamily' => 'Source Sans 3, sans-serif', 'name' => 'Body'],
             ]],
         ],
@@ -85,7 +85,7 @@ function html_first_direction(): array
             'accent' => '#E08A3C',
         ],
         'type' => [
-            'heading' => 'Fraunces 700',
+            'heading' => 'Literata 700',
             'body' => 'Source Sans 3 400/700',
         ],
         'image_grade' => 'warm documentary light',

@@ -478,17 +478,33 @@ test('selectorTargetsHeading matches heading subjects and ignores descendant com
 });
 
 test('dropHeadingWordSplitDeclarations removes wrap/hyphen properties only from heading subjects', function () {
-    $css = '.hero h1 { overflow-wrap: anywhere; word-break: break-all; hyphens: auto; font-size: 5rem; } '
+    $css = '.hero h1 { overflow-wrap: anywhere; word-break: break-all; hyphens: auto; text-wrap: wrap; font-size: 5rem; } '
         . 'h1 + p { overflow-wrap: break-word; color: inherit; } '
-        . 'p { -webkit-hyphens: auto; }';
+        . 'p { -webkit-hyphens: auto; text-wrap: pretty; }';
     [$repaired, $dropped] = CssChecks::dropHeadingWordSplitDeclarations($css);
-    assert_eq(3, count($dropped), 'three heading wrap declarations dropped');
+    assert_eq(3, count($dropped), 'three heading word-splitting declarations dropped');
     assert_contains('font-size: 5rem', $repaired);
     assert_contains('h1 + p { overflow-wrap: break-word; color: inherit; }', $repaired);
-    assert_contains('p { -webkit-hyphens: auto; }', $repaired);
+    assert_contains('p { -webkit-hyphens: auto; text-wrap: pretty; }', $repaired);
     assert_true(!str_contains($repaired, 'anywhere'));
     assert_true(!str_contains($repaired, 'break-all'));
     assert_true(!str_contains($repaired, 'hyphens: auto; font-size'));
+    assert_contains('text-wrap: wrap', $repaired, 'text-wrap ownership is a separate global repair');
+});
+
+test('dropTextWrapDeclarations removes build-owned wrap properties from every style selector', function () {
+    $css = 'p { text-wrap: nowrap !important; color: inherit; } '
+        . '.hero > * { text-wrap-style: balance; display: block; } '
+        . 'body { text-wrap-mode: nowrap; hyphens: auto; } '
+        . '@keyframes settle { from { text-wrap-mode: nowrap; opacity: 0; } }';
+
+    [$repaired, $dropped] = CssChecks::dropTextWrapDeclarations($css);
+
+    assert_eq(4, count($dropped), 'all authored text-wrap declarations are dropped');
+    assert_true(!str_contains($repaired, 'p { text-wrap'), 'direct paragraph override removed');
+    assert_true(!str_contains($repaired, 'text-wrap-style'), 'shorthand companion removed');
+    assert_contains('body {  hyphens: auto; }', $repaired, 'unrelated body wrap behavior survives');
+    assert_contains('from {  opacity: 0; }', $repaired, 'unrelated keyframe declarations survive');
 });
 
 test('declarationScopeAtViewport refuses to decide anything a width comparison cannot settle', function () {
