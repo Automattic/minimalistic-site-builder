@@ -172,11 +172,16 @@ test('ConceptSeeds::lockedFromBrief picks up a look the user named, not the topi
     $pastel = ConceptSeeds::lockedFromBrief('pastel neon signage for a night cafe');
     assert_eq(['pastel', 'neon'], $pastel['accents']);
 
-    $brutalism = ConceptSeeds::lockedFromBrief('Brutalism, please — a concrete studio.');
-    assert_eq(['brutalist'], $brutalism['registers']);
+    $playful = ConceptSeeds::lockedFromBrief('Whimsical, please — a toy studio.');
+    assert_eq(['playful'], $playful['registers']);
 
-    $deco = ConceptSeeds::lockedFromBrief('an art-deco hotel bar');
-    assert_eq(['art-deco'], $deco['registers']);
+    $plain = ConceptSeeds::lockedFromBrief('a no-frills parts depot');
+    assert_eq(['utilitarian'], $plain['registers']);
+
+    // brutalist and art-deco are universal registers now (BIGR-871), so naming
+    // them locks nothing extra — the seed model could already reach for them.
+    assert_eq([], ConceptSeeds::lockedFromBrief('Brutalism, please — a concrete studio.')['registers']);
+    assert_eq([], ConceptSeeds::lockedFromBrief('an art-deco hotel bar')['registers']);
 });
 
 test('ConceptSeeds::lockedFromBrief does not treat food-organic as a design look', function () {
@@ -186,18 +191,18 @@ test('ConceptSeeds::lockedFromBrief does not treat food-organic as a design look
 });
 
 test('ConceptSeeds::normalize accepts a locked extra label and still drops one the brief did not name', function () {
-    $locked = ['registers' => ['brutalist'], 'accents' => ['pastel']];
+    $locked = ['registers' => ['utilitarian'], 'accents' => ['pastel']];
     $kept = ConceptSeeds::normalize(
-        ['seed' => 'Concrete Loaf', 'ground' => 'dark', 'register' => 'Brutalist', 'accent' => 'Pastel'],
+        ['seed' => 'Concrete Loaf', 'ground' => 'dark', 'register' => 'Utilitarian', 'accent' => 'Pastel'],
         $locked,
     );
-    assert_eq('brutalist', $kept['register']);
+    assert_eq('utilitarian', $kept['register']);
     assert_eq('pastel', $kept['accent']);
 
     $foreign = ConceptSeeds::normalize(
-        ['seed' => 'Concrete Loaf', 'register' => 'brutalist', 'accent' => 'pastel'],
+        ['seed' => 'Concrete Loaf', 'register' => 'utilitarian', 'accent' => 'pastel'],
     );
-    assert_eq(null, $foreign['register'], 'brutalist is not on the universal list');
+    assert_eq(null, $foreign['register'], 'utilitarian is not on the universal list');
     assert_eq(null, $foreign['accent']);
 });
 

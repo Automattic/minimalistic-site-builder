@@ -8,6 +8,8 @@ use Automattic\SiteBuild\CardStyle;
 use Automattic\SiteBuild\ConceptSeeds;
 use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\Env;
+use Automattic\SiteBuild\FontCatalog;
+use Automattic\SiteBuild\FontMonoculture;
 use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\GroundTint;
@@ -104,6 +106,25 @@ final class DesignDirectionStep implements Step
      * the dated inset-media card only appears when a direction opts into it.
      */
     public const CARD_STYLES = CardStyle::ALL;
+
+    /**
+     * How the page's bands follow one another. The page plan already assigns a
+     * layout archetype and background per section, but with no site-level
+     * intent to assign them against: across 1,924 audited planned sections it
+     * spent 77% of its archetype budget on one value and 87% of its background
+     * budget on another, which is the uniform band stack you can see on a
+     * finished page. This is the commitment those per-section picks answer to.
+     */
+    public const RHYTHMS = ['stacked', 'alternating', 'offset', 'interrupted', 'banded', 'gallery'];
+
+    /**
+     * How tightly the page packs vertically. Sections already carry a
+     * `vertical_density`, chosen per section with nothing to be consistent
+     * with — 85% of audited sections came back `standard`. One site-level
+     * commitment gives that per-section choice something to express.
+     */
+    public const DENSITIES = ['airy', 'measured', 'dense'];
+
     public function __construct(
         private Llm $llm,
         private PromptRenderer $renderer,
@@ -157,7 +178,12 @@ final class DesignDirectionStep implements Step
         $specData = $project->readJson('siteSpec.json');
 
         $warnings = [];
-        ['text' => $seed, 'tint' => $seedTint] = $this->chooseSeed($prompt, $spec, $warnings);
+        [
+            'text'          => $seed,
+            'tint'          => $seedTint,
+            'register'      => $seedRegister,
+            'type_register' => $seedTypeRegister,
+        ] = $this->chooseSeed($prompt, $spec, $warnings);
         $recipe = self::selectHeroRecipe(
             $meta,
             (string) ($specData['slug'] ?? $project->slug()),
@@ -185,6 +211,14 @@ final class DesignDirectionStep implements Step
             // prompt then asks for the field without naming a family, and
             // normalize() enforces the direction's own answer instead.
             'ground_tint' => $seedTint === '' ? 'not committed by the seed — choose one and say which' : $seedTint,
+            // Same degradation as the ground: a seed that named no tradition
+            // asks the expansion to pick one rather than pretending it did.
+            'register' => $seedRegister === ''
+                ? 'not committed by the seed — read the tradition off the seed sentence'
+                : $seedRegister,
+            'type_register' => $seedTypeRegister === ''
+                ? 'not committed by the seed — read the letterform tradition off the seed sentence'
+                : $seedTypeRegister,
             'hero_composition' => $heroComposition,
         ]);
         try {
@@ -240,6 +274,17 @@ final class DesignDirectionStep implements Step
             Narrator::write('  [design-direction] warning: delivered through ' . count($warnings)
                 . " generated-content degradation(s) (recorded in warnings.json)\n");
         }
+
+        // Naming the reflex faces in the prompt moved us off them and straight
+        // onto the next tier — prose is a suggestion the model may decline.
+        // This is the floor under it, and it runs here rather than in
+        // normalize() because it needs the shipped catalog off disk.
+        $direction = self::substituteMonocultureFonts(
+            $direction,
+            (string) ($specData['slug'] ?? $project->slug()),
+            FontCatalog::load(),
+            $warnings,
+        );
 
         $report = [
             "Assigned hero recipe: {$recipe}",
@@ -300,6 +345,8 @@ final class DesignDirectionStep implements Step
             'shape'            => 'sharp',
             'surface'          => Surface::DEFAULT,
             'device'           => Device::DEFAULT,
+            'rhythm'           => 'alternating',
+            'density'          => 'measured',
             'motion'           => Motion::DEFAULT_PROFILE,
             'motion_note'      => [],
             'concept_seed'     => $seed,
@@ -322,6 +369,9 @@ final class DesignDirectionStep implements Step
      * The step's hot temperature is applied here too: the seed spread is now
      * the pipeline's variety source, and the small models still support
      * sampling.
+     *
+     * @param list<string> $warnings
+     * @return array{text:string,tint:string,register:string,type_register:string}
      */
     private function chooseSeed(string $brief, string $spec, array &$warnings = []): array
     {
@@ -370,7 +420,7 @@ final class DesignDirectionStep implements Step
         }
 
         if ($seeds === []) {
-            return ['text' => self::SEED_FALLBACK, 'tint' => ''];
+            return ['text' => self::SEED_FALLBACK, 'tint' => '', 'register' => '', 'type_register' => ''];
         }
         $pool = ConceptSeeds::distinct($seeds, $warnings);
         $sharedGround = ConceptSeeds::sharedGround($pool);
@@ -394,15 +444,27 @@ final class DesignDirectionStep implements Step
     }
 
     /**
-     * The chosen seed as the pair the expansion needs: the sentence the
-     * prompts consume, and the ground family the palette check enforces.
+     * The chosen seed as the facts the expansion needs: the sentence the
+     * prompts consume, the ground family the palette check enforces, and the
+     * two traditions the expansion must stay inside.
      *
-     * @param array{text:string,ground:?string,register:?string,accent:?string,tint:?string} $seed
-     * @return array{text:string,tint:string}
+     * `register` and `type_register` used to stop here — they were dedup
+     * coordinates only, so a seed labelled `brutalist` reached the expansion as
+     * a sentence and nothing more, and the expansion re-decided the world from
+     * prose. Passing them through is what makes the vocabularies levers rather
+     * than bookkeeping.
+     *
+     * @param array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string} $seed
+     * @return array{text:string,tint:string,register:string,type_register:string}
      */
     private static function chosen(array $seed): array
     {
-        return ['text' => $seed['text'], 'tint' => $seed['tint'] ?? ''];
+        return [
+            'text'          => $seed['text'],
+            'tint'          => $seed['tint'] ?? '',
+            'register'      => $seed['register'] ?? '',
+            'type_register' => $seed['type_register'] ?? '',
+        ];
     }
 
     /**
@@ -643,6 +705,8 @@ final class DesignDirectionStep implements Step
         $cardStyle = self::normalizeCardStyle($raw['card_style'] ?? null, $warnings);
         $surface = self::normalizeSurface($raw['surface'] ?? null, $warnings);
         $device = self::normalizeDevice($raw['device'] ?? null, $warnings);
+        $rhythm = self::normalizeRhythm($raw['rhythm'] ?? null, $warnings);
+        $density = self::normalizeDensity($raw['density'] ?? null, $warnings);
 
         $motion = self::motionProfile($raw['motion'] ?? null);
         $rawMotion = is_string($raw['motion'] ?? null)
@@ -729,6 +793,10 @@ final class DesignDirectionStep implements Step
             'shape'            => $shape,
             'surface'          => $surface,
             'device'           => $device,
+            // The page-level commitments the per-section plan answers to. See
+            // RHYTHMS / DENSITIES for why the rhythm default is not `stacked`.
+            'rhythm'           => $rhythm,
+            'density'          => $density,
             // The motion profile is a fixed list (the kit ships exactly these);
             // anything unrecognized falls back to the default so every build
             // commits to ONE profile the downstream steps can gate on.
@@ -756,6 +824,82 @@ final class DesignDirectionStep implements Step
             'card_style',
             $warnings,
             'unsupported generated card treatment replaced by default',
+        );
+    }
+
+    /**
+     * Move any type slot off a monoculture face, keeping its category.
+     *
+     * `axes` is cleared alongside the swap: an `opsz` range was committed for
+     * the family the model named, and carrying it onto a different face would
+     * promise an optical-size axis the replacement may not have. Weights need
+     * no such care — FontCatalog::faces() already resolves to the nearest
+     * weight the delivered family actually ships.
+     *
+     * Pure given the catalog — unit-testable.
+     *
+     * @param array<string,mixed> $direction
+     * @param list<string> $warnings
+     * @return array<string,mixed>
+     */
+    public static function substituteMonocultureFonts(
+        array $direction,
+        string $seed,
+        FontCatalog $catalog,
+        array &$warnings = [],
+    ): array {
+        foreach (['heading', 'body', 'accent'] as $slot) {
+            $family = $direction['type'][$slot]['family'] ?? null;
+            if (!is_string($family) || trim($family) === '') {
+                continue;
+            }
+            $replacement = FontMonoculture::substitute(trim($family), $seed, $catalog, $slot);
+            if ($replacement === null) {
+                continue;
+            }
+            $direction['type'][$slot]['family'] = $replacement;
+            $direction['type'][$slot]['axes'] = [];
+            $warnings[] = 'designDirection.json: type.' . $slot . '.family authored value '
+                . Warnings::value($family) . '; delivered ' . Warnings::value($replacement)
+                . '; disposition substituted a monoculture face for one outside it, category preserved';
+        }
+        return $direction;
+    }
+
+    /**
+     * The band rhythm, defaulting to `alternating`.
+     *
+     * The default is deliberately not `stacked`. `stacked` describes what the
+     * page plan already does unprompted; making it the fallback would mean a
+     * direction that forgot the field silently re-elects the uniform stack this
+     * commitment exists to break.
+     *
+     * @param list<string> $warnings
+     */
+    public static function normalizeRhythm(mixed $authored, array &$warnings = []): string
+    {
+        return BoundedChoice::normalize(
+            $authored,
+            self::RHYTHMS,
+            'alternating',
+            'rhythm',
+            $warnings,
+            'unsupported generated band rhythm replaced by default',
+        );
+    }
+
+    /**
+     * @param list<string> $warnings
+     */
+    public static function normalizeDensity(mixed $authored, array &$warnings = []): string
+    {
+        return BoundedChoice::normalize(
+            $authored,
+            self::DENSITIES,
+            'measured',
+            'density',
+            $warnings,
+            'unsupported generated page density replaced by default',
         );
     }
 
@@ -1031,6 +1175,41 @@ final class DesignDirectionStep implements Step
                 'borderless' => 'cards have no box at all; media above a plain text stack — use the `borderless` construction from the card anatomy',
             };
             $facts[] = "- **Card treatment**: {$cardStyle} — {$meaning}.";
+        }
+
+        // The page plan reads these two and assigns its per-section archetype,
+        // background and density against them. Stated as executable meaning
+        // rather than a bare keyword for the same reason as canvas: a keyword
+        // alone gets re-interpreted, and the audited result was one archetype
+        // on one background for three-quarters of every page.
+        $rhythm = BoundedChoice::explicit($direction['rhythm'] ?? null, self::RHYTHMS);
+        if ($rhythm !== null) {
+            $facts[] = '- **Rhythm**: ' . $rhythm . ' — ' . match ($rhythm) {
+                'stacked'     => 'bands follow one another in one steady column; carry the page on type scale and spacing, not on changes of shape',
+                // Deliberately says nothing about backgrounds. Alternating the
+                // page's surfaces is the "stripes" pattern the page plan already
+                // rejects, and this is the DEFAULT rhythm — a background clause
+                // here would contradict that rule on every build.
+                'alternating' => 'consecutive bands carry visibly different compositions; vary the layout archetype down the page rather than repeating one and varying only its contents',
+                'offset'      => 'bands break the centre line: unequal splits and staggered starts, so the eye never settles on one axis',
+                'interrupted' => 'a mostly steady stack broken by full-bleed bands at deliberate intervals — plan at least one edge-to-edge image or colour band per page',
+                'banded'      => 'the page is paced by its surfaces: spend the page\'s contrast and tinted bands here rather than carrying it on layout change',
+                'gallery'     => 'imagery leads and text supports; favour grids and image bands over text-led sections',
+                default       => 'the committed band rhythm',
+            } . '.';
+        }
+
+        $density = BoundedChoice::explicit($direction['density'] ?? null, self::DENSITIES);
+        if ($density !== null) {
+            // A bias, not an override: spacious pauses stay accents under every
+            // density, so these clauses must not read as "spacious everywhere"
+            // — the page plan caps them and would demote the excess anyway.
+            $facts[] = '- **Density**: ' . $density . ' — ' . match ($density) {
+                'airy'     => 'generous vertical breathing room; spend the page\'s spacious pauses and prefer standard over compact elsewhere',
+                'measured' => 'an even, unhurried rhythm; standard throughout, with a spacious pause only where the composition needs one',
+                'dense'    => 'tightly packed; prefer compact wherever the content supports it and let content carry the page',
+                default    => 'the committed page density',
+            } . '.';
         }
 
         // Render the shape commitment with its executable meaning. The build

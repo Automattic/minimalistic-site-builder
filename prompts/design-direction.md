@@ -13,6 +13,17 @@ The concept seed below was already chosen for this site. It is the creative core
 
 {{seed}}
 
+The seed also committed two traditions. They are binding in the same way its sentence is — you are expanding this concept, not re-choosing it:
+
+- **Design tradition**: {{register}} — the visual language the whole direction speaks in. Every later choice (palette, spatial rhythm, ornament, imagery) must be one a designer working in this tradition would make.
+- **Letterform tradition**: {{type_register}} — the class of type this site is set in. Choose `type.heading` and `type.body` from inside it. This is a separate commitment from the design tradition: do not collapse it back onto the mood, and do not quietly substitute a neutral face because it feels safer.
+
+## The Use Scene — decide light or dark from it, not from the category
+
+Before you choose a ground, write one sentence to yourself naming the physical scene: WHO uses this site, WHERE, and under WHAT ambient light. A late-night ordering page, a gallery viewed on a phone in daylight, a workshop screen under fluorescents, a reference read at a desk for an hour — each of those forces a different answer. Let that sentence decide light or dark.
+
+Light and dark are never category defaults. "Restaurants are dark", "blogs are light", "portfolios are cream" are the associations this instruction exists to break. A ground you can justify from the scene is a decision; a ground that matches what the category usually ships is a reflex.
+
 ## Design Grounding
 Think like a specialist designer hired for this exact brief. Ground the direction in real-world visual traditions connected to the site's topic — the materials, spaces, cultural references, and design conventions of its industry. A Georgian restaurant evokes Caucasus earth tones and ornate patterns; a photojournalist portfolio evokes high-contrast editorial layouts and documentary rawness. The direction should feel researched, not generated from a generic style menu.
 
@@ -31,7 +42,20 @@ Examples of good grades: "monochrome documentary, visible 35mm grain, charcoal m
 Do NOT produce a direction that feels like generic AI output:
 - **Generic palettes**: an unmotivated gradient behind a headline, a mid-tone hue on white with grey supporting text and nothing else committed, arbitrary rainbow accents. This is about the TREATMENT, not the hue: no color is off-limits here. A deep aubergine ground with bone text, ink blue with brass, Klein blue as a flat field — all specific, all welcome. What reads as generic is a color chosen with nothing behind it, and reflexive warm cream is the most common version of that, not the exception to it.
 - **Generic fonts**: Inter, Roboto, Arial, Open Sans, system fonts — never mention these
+- **Reflex fonts**: Archivo, Archivo Black, Playfair Display, Cormorant Garamond and Fraunces are not banned, but they are the five this brief will pull you toward hardest — across audited builds those five set more than half of all generated sites, on every kind of topic. Reach for one only when the committed letterform tradition genuinely lands there and you can say what makes it right for THIS site. Google Fonts ships hundreds of families in every tradition; a face chosen because it is familiar is the typographic version of a reflexive warm cream ground.
 - **Topic-agnostic styles**: If you could swap the site topic and the direction still works unchanged, it's too generic
+
+## Calibration — the three looks every model lands on
+
+Generated interfaces cluster on a few looks regardless of subject:
+
+1. Warm cream ground, high-contrast serif display, terracotta or signal-red accent.
+2. Near-black ground, one neon accent, glowing edges.
+3. Broadsheet-editorial hairlines, italic display serif, small tracked mono labels.
+
+All three are legitimate when the brief asks for them. Where the brief leaves the aesthetic free, landing in one means the self-check failed. Two tests: if someone could guess your direction from the site's CATEGORY alone, rework it — and if they could guess it from the category plus the obvious avoidance ("not cream, so near-black"), rework it too.
+
+A warm, bookish, or hand-made subject does not soften this. Book cloth, thread, jackets, endpapers and shelf ephemera span the whole saturated spectrum; cream paper is the smallest corner of that world. Landing on cream-plus-serif for a bakery or a bookshop is the default wearing the subject's clothes.
 
 ## Output Format
 
@@ -50,6 +74,8 @@ Besides the vivid narrative, the direction commits to explicit structured fields
 - `canvas`: `"full-bleed"` or `"framed"` — how the page meets the viewport edge. `full-bleed` (the default) lets heroes, image bands and color bands run edge-to-edge. Commit to `framed` ONLY when the concept genuinely calls for a contained, gallery-mat presentation (an art-book portfolio, a print-inspired editorial) — the page then keeps a visible mat of page background around every band below the fold, and the header can never float over the hero. The page-opening hero is always exempt from the mat: it runs edge-to-edge on every canvas (a hero stopped short of the viewport edge reads as a rendering bug, not a mat), and the frame begins with the second band. Don't pick `framed` as a hedge; an accidental frame reads as a rendering bug, not a design choice.
 - `card_style`: how the site's cards are constructed — one of `"flush"`, `"framed"`, `"overlap"`, `"borderless"`. `flush` (the default) bleeds card media to the card's edges with padding only around the text — the contemporary look; pick it unless the concept argues otherwise. `framed` insets the media behind padding on all sides — commit to it ONLY when the concept genuinely calls for that framing (a polaroid/print/scrapbook mood, an archival editorial); as an accidental default it reads dated. `overlap` rides the text panel up over the media's bottom edge — for layered, energetic, poster-like concepts. `borderless` drops the card box entirely — media above a plain text stack, whitespace as the only separator — for austere or gallery-minimal concepts.
 - `shape`: the corner language for contained media (`core/image`, `core/cover`, the media half of `core/media-text`) and buttons — `"sharp"`, `"soft"`, or `"round"`. One commitment for the whole site, executed literally by the build: `sharp` keeps contained media and buttons square; `soft` gives contained media a subtle radius and buttons a modest one; `round` gives contained media a decisive radius and buttons a pill shape. Full-bleed media always meets its edges square, whatever the shape. Generic card wrappers are outside this deterministic commitment, so do not promise their geometry from this field. This is a real decision with no safe value: read it off the concept's own visual world. A world of crisp, printed, or architectural geometry commits to `sharp`; a world of warm, organic, tactile, or playful geometry commits to `soft` or `round`. Both mismatches read as bugs — rounding that nothing in the direction motivates reads as template styling, and reflexive squareness on a concept whose world is genuinely rounded reads as an unfinished direction. Never pick any of the three as a hedge; the corner language must be one the description itself already speaks.
+- `rhythm`: how the page's bands follow one another — one of `"stacked"`, `"alternating"`, `"offset"`, `"interrupted"`, `"banded"`, `"gallery"`. The page planner assigns every section a layout archetype and a background, and it needs a site-level intent to assign them against; without one it reaches for the same archetype on the same background band after band, which is the single most common reason a finished page reads as flat. `stacked` = one steady column carried by type scale and spacing; `alternating` = consecutive bands never repeat an archetype and the background alternates; `offset` = unequal splits and staggered starts that break the centre line; `interrupted` = a steady stack broken by full-bleed bands at deliberate intervals; `banded` = a sequence of distinct colour fields carried by contrast; `gallery` = imagery leads and text supports. This is a real decision with no safe value — `stacked` is the honest answer only for a page whose content genuinely wants one quiet column, never as a hedge.
+- `density`: how tightly the page packs vertically — one of `"airy"`, `"measured"`, `"dense"`. Sections carry their own spacing, but with nothing site-wide to express they default to the middle everywhere. `airy` suits gallery and luxury concepts, `dense` suits catalogs, archives and editorial concepts with a lot to say.
 - `hero_blueprint`: fill the bounded front-page-only object from the one assigned recipe below. The assigned `recipe` is authoritative. Do not mention that recipe, its topology, its media placement, or any hero-specific spatial arrangement in `description`; downstream general prompts receive the narrative but must not learn the front-page structure through prose.
 
 ## Front-page hero assignment (front page only)
@@ -107,6 +133,8 @@ Respond with ONLY a JSON object. No explanation, no commentary, no text before o
     "canvas": "One bounded canvas value chosen per the canvas field above.",
     "card_style": "One bounded card construction — flush, framed, overlap, or borderless — chosen per the card_style field above.",
     "shape": "One bounded corner commitment — sharp, soft, or round — read off the concept per the shape field above.",
+    "rhythm": "One bounded band rhythm — stacked, alternating, offset, interrupted, banded, or gallery — chosen per the rhythm field above.",
+    "density": "One bounded page density — airy, measured, or dense — chosen per the density field above.",
     "hero_blueprint": {
       "version": 1,
       "recipe": "Copy the exact assigned recipe id",

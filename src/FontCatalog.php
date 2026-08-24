@@ -52,6 +52,18 @@ final class FontCatalog
     }
 
     /**
+     * Every family, in catalog order. Callers that pick a family rather than
+     * look one up need the whole shelf; keep it ordered so a deterministic
+     * pick over it stays stable between runs.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function families(): array
+    {
+        return array_values($this->byName);
+    }
+
+    /**
      * Resolve a family reference the way it appears in generated themes: a bare
      * name ("Inter"), a slug ("inter"), or a CSS stack ("'Inter', sans-serif" —
      * the first segment names the family, quoted or not).
