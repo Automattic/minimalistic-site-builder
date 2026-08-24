@@ -540,6 +540,7 @@ test('the seed and expansion prompts ask for the ground tint, and ban treatments
     $direction = $renderer->render('design-direction.md', [
         'user_prompt' => 'a bakery', 'site_spec' => '{}', 'seed' => 'Seed',
         'hero_composition' => '', 'ground_tint' => 'violet',
+        'register' => 'editorial', 'type_register' => 'didone',
     ]);
     assert_contains('ground_tint', $direction, 'the expansion commits the field the build enforces');
     assert_contains('violet', $direction, 'and is told which family the seed chose');
