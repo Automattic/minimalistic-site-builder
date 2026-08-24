@@ -99,7 +99,8 @@ final class PageStylesStep implements Step
      * hook. overflow-wrap:break-word is the last-resort escape hatch for body
      * copy only (p, li), where a single unbreakable token like a URL would
      * otherwise overflow its container. word-break:break-all is deliberately
-     * absent everywhere.
+     * absent everywhere. text-wrap:pretty keeps the last line from being a
+     * single dangling word (BIGR-869).
      */
     public const WORD_WRAP_CSS = <<<'CSS'
 /* Wrap at spaces only — never split a word mid-token. */
@@ -115,6 +116,7 @@ p, li, dt, dd, blockquote, figcaption, caption, th, td,
   -webkit-hyphens: none;
   word-break: normal;
   overflow-wrap: normal;
+  text-wrap: pretty;
 }
 
 /* Body copy may break a lone overlong token (a URL); headings never do. */

@@ -247,9 +247,10 @@ final class CssChecks
     }
 
     /**
-     * Properties that split a word across lines: hyphenation, overflow-wrap,
-     * and word-break (including the legacy `word-wrap` alias and vendor
-     * hyphen prefixes).
+     * Properties that split a word across lines or that override the
+     * build-owned wrap policy: hyphenation, overflow-wrap, word-break
+     * (including the legacy `word-wrap` alias and vendor hyphen prefixes),
+     * and text-wrap / its longhands (BIGR-869 owns `pretty`).
      */
     public static function isWordSplitProperty(string $property): bool
     {
@@ -262,6 +263,9 @@ final class CssChecks
             '-webkit-hyphens',
             '-ms-hyphens',
             '-moz-hyphens',
+            'text-wrap',
+            'text-wrap-style',
+            'text-wrap-mode',
         ], true);
     }
 

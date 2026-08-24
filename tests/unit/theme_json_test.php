@@ -2096,10 +2096,33 @@ test('theme-json scaffold carries no decorative values', function () {
     foreach ($values as $value) {
         assert_true(
             $value === '1.6'
+                || $value === 'pretty'
                 || (is_string($value) && preg_match('/^var:preset\|(color|font-family|font-size)\|[a-z0-9-]+$/', $value) === 1),
-            'every scaffold leaf is a preset reference or the frozen unitless line-height',
+            'every scaffold leaf is a preset reference, the frozen unitless line-height, or text-wrap pretty',
         );
     }
+});
+
+test('theme-json scaffold always ships text-wrap pretty, even over a model wrap leaf', function () {
+    $empty = ThemeJsonStep::applyScaffold([]);
+    assert_eq('pretty', $empty['styles']['typography']['textWrap']);
+
+    $overwritten = ThemeJsonStep::applyScaffold([
+        'styles' => ['typography' => [
+            'fontFamily' => 'var:preset|font-family|body',
+            'textWrap' => 'balance',
+        ]],
+    ]);
+    assert_eq('pretty', $overwritten['styles']['typography']['textWrap'], 'pretty is not a model choice');
+    assert_eq(
+        'var:preset|font-family|body',
+        $overwritten['styles']['typography']['fontFamily'],
+        'unrelated typography siblings survive',
+    );
+
+    [$fixedPoint, $warnings] = ThemeJsonStep::repairScaffold($overwritten);
+    assert_eq($overwritten, $fixedPoint, 'pretty enforcement reaches a fixed point');
+    assert_eq([], $warnings);
 });
 
 test('theme-json scaffold references only frozen preset slugs', function () {

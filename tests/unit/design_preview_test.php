@@ -306,6 +306,8 @@ test('design-preview freezes the first-fold shape and prompt contract', function
         'No HTML comments',
         'No CSS comments',
         'Do not load external',
+        'text-wrap: pretty',
+        'Never leave a dangling last word',
     ] as $required) {
         assert_contains($required, $prompt);
     }

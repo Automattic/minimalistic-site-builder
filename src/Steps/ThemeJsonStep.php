@@ -190,6 +190,8 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                 'fontFamily' => 'var:preset|font-family|body',
                 'fontSize' => 'var:preset|font-size|body',
                 'lineHeight' => '1.6',
+                // BIGR-869: inherited wrap policy, not a model choice.
+                'textWrap' => 'pretty',
             ],
             'elements' => [
                 'h1' => [
@@ -1950,7 +1952,27 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         [$theme, $shadowWarnings] = self::repairTextTargetShadows($theme);
         $shapeWarnings = [];
         $theme = self::mergeScaffoldDefaultsAtPath(self::SCAFFOLD, $theme, '', $shapeWarnings);
+        $theme = self::enforceTextWrapPretty($theme);
         return [$theme, array_merge($colorWarnings, $shadowWarnings, $shapeWarnings)];
+    }
+
+    /**
+     * Headings and paragraphs wrap with `text-wrap: pretty` so the last line
+     * is never a dangling single word (BIGR-869). The scaffold fills a missing
+     * leaf; this overwrite keeps a model `wrap`/`balance`/`nowrap` from
+     * winning. Idempotent.
+     *
+     * @param array<mixed> $theme
+     * @return array<mixed>
+     */
+    private static function enforceTextWrapPretty(array $theme): array
+    {
+        $typography = $theme['styles']['typography'] ?? null;
+        if (!is_array($typography) || ($typography !== [] && array_is_list($typography))) {
+            return $theme;
+        }
+        $theme['styles']['typography']['textWrap'] = 'pretty';
+        return $theme;
     }
 
     /**

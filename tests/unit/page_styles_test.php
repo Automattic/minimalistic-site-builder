@@ -1983,6 +1983,7 @@ test('site CSS path always merges a wrap policy that never splits words', functi
     assert_contains('-webkit-hyphens: none;', $style);
     assert_contains('word-break: normal;', $style);
     assert_contains('overflow-wrap: normal;', $style);
+    assert_contains('text-wrap: pretty;', $style);
     assert_true(!str_contains($style, 'break-all'), 'break-all is never introduced');
     assert_true(!str_contains($style, 'hyphens: auto'), 'no automatic hyphenation');
 
@@ -1997,7 +1998,7 @@ test('site CSS path strips heading wrap overrides so words never split mid-token
     [$project, $tmp] = ps_project('builder_ps_word_wrap_heading_lock_');
     $project->writeText(
         TransformArtifacts::SITE_CSS,
-        '.hero h1{overflow-wrap:anywhere;word-break:break-all;hyphens:auto;font-size:5rem;}'
+        '.hero h1{overflow-wrap:anywhere;word-break:break-all;hyphens:auto;text-wrap:wrap;font-size:5rem;}'
     );
     $project->writeJson('pages.json', ['pages' => [['slug' => 'home', 'front' => true]]]);
     $project->writeText('design/home.html', '<main>Home</main>');
@@ -2012,7 +2013,9 @@ test('site CSS path strips heading wrap overrides so words never split mid-token
     assert_true(!str_contains($body, 'overflow-wrap'), 'heading overflow-wrap is stripped');
     assert_true(!str_contains($body, 'word-break'), 'heading word-break is stripped');
     assert_true(!str_contains($body, 'hyphens'), 'heading hyphens are stripped');
+    assert_true(!str_contains($body, 'text-wrap'), 'heading text-wrap is stripped so pretty stays owned');
     assert_contains('overflow-wrap: normal;', $style, 'wrap policy still ships');
+    assert_contains('text-wrap: pretty;', $style, 'pretty wrap policy still ships');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
