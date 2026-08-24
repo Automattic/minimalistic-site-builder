@@ -1134,10 +1134,14 @@ final class DesignDirectionStep implements Step
         if ($rhythm !== null) {
             $facts[] = '- **Rhythm**: ' . $rhythm . ' — ' . match ($rhythm) {
                 'stacked'     => 'bands follow one another in one steady column; carry the page on type scale and spacing, not on changes of shape',
-                'alternating' => 'consecutive bands must not repeat the same layout archetype, and the background alternates so no more than two bands in a row share one surface',
+                // Deliberately says nothing about backgrounds. Alternating the
+                // page's surfaces is the "stripes" pattern the page plan already
+                // rejects, and this is the DEFAULT rhythm — a background clause
+                // here would contradict that rule on every build.
+                'alternating' => 'consecutive bands carry visibly different compositions; vary the layout archetype down the page rather than repeating one and varying only its contents',
                 'offset'      => 'bands break the centre line: unequal splits and staggered starts, so the eye never settles on one axis',
                 'interrupted' => 'a mostly steady stack broken by full-bleed bands at deliberate intervals — plan at least one edge-to-edge image or colour band per page',
-                'banded'      => 'the page reads as a sequence of distinct colour fields; lean on contrast and tinted backgrounds rather than on layout change',
+                'banded'      => 'the page is paced by its surfaces: spend the page\'s contrast and tinted bands here rather than carrying it on layout change',
                 'gallery'     => 'imagery leads and text supports; favour grids and image bands over text-led sections',
                 default       => 'the committed band rhythm',
             } . '.';
@@ -1145,10 +1149,13 @@ final class DesignDirectionStep implements Step
 
         $density = BoundedChoice::explicit($direction['density'] ?? null, self::DENSITIES);
         if ($density !== null) {
+            // A bias, not an override: spacious pauses stay accents under every
+            // density, so these clauses must not read as "spacious everywhere"
+            // — the page plan caps them and would demote the excess anyway.
             $facts[] = '- **Density**: ' . $density . ' — ' . match ($density) {
-                'airy'     => 'generous vertical breathing room; favour the spacious section density',
-                'measured' => 'an even, unhurried rhythm; the standard section density with spacious used for emphasis',
-                'dense'    => 'tightly packed; favour the compact section density and let content carry the page',
+                'airy'     => 'generous vertical breathing room; spend the page\'s spacious pauses and prefer standard over compact elsewhere',
+                'measured' => 'an even, unhurried rhythm; standard throughout, with a spacious pause only where the composition needs one',
+                'dense'    => 'tightly packed; prefer compact wherever the content supports it and let content carry the page',
                 default    => 'the committed page density',
             } . '.';
         }
