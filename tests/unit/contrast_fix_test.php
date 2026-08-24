@@ -197,6 +197,47 @@ test('an authored hover that reads on the background is preserved by a link repa
     assert_contains('":hover":{"color":{"text":"var:preset|color|secondary"}}', $res['markup'], 'passing authored hover kept');
 });
 
+function maxwell_demo_palette(): array
+{
+    // The palette from the generation in BIGR-866. On the dark band the accent
+    // is 3.01:1 and on the muted band 1.07:1, while base reads at 15.30:1.
+    return [
+        'base'      => '#F2EDE4',
+        'contrast'  => '#14181C',
+        'primary'   => '#2E4A63',
+        'secondary' => '#4E6274',
+        'accent'    => '#9E4E07',
+    ];
+}
+
+test('an unreadable hover is repaired even when the resting link color reads', function () {
+    // BIGR-866: the generator paired a readable resting color with an accent
+    // hover it never checked. Nothing repaired the resting color, so before
+    // this the whole pair went out untouched and the hover vanished on hover.
+    $fix = new ContrastFix(maxwell_demo_palette(), [], 'var(--wp--preset--color--primary)');
+    $src = '<!-- wp:group {"backgroundColor":"contrast","style":{"elements":{"link":{"color":{"text":"var:preset|color|base"},":hover":{"color":{"text":"var:preset|color|accent"}}}}}} -->' . "\n"
+        . '<div class="wp-block-group has-contrast-background-color has-background has-link-color">'
+        . '<!-- wp:paragraph {"textColor":"base"} --><p><a href="mailto:x@y.z">write to us</a></p><!-- /wp:paragraph --></div>' . "\n"
+        . '<!-- /wp:group -->';
+    $res = $fix->process($src);
+    assert_eq(true, $res['changed']);
+    assert_contains('"link":{"color":{"text":"var:preset|color|base"}', $res['markup'], 'the reading resting color is kept');
+    assert_contains('":hover":{"color":{"text":"var:preset|color|base"}}', $res['markup'], 'accent hover falls back to the resting color');
+    assert_eq('link', $res['findings'][0]['kind']);
+    assert_contains('link hover accent', $res['findings'][0]['detail']);
+});
+
+test('a reading hover is left alone when the resting link color reads too', function () {
+    $fix = new ContrastFix(maxwell_demo_palette(), [], 'var(--wp--preset--color--primary)');
+    $src = '<!-- wp:group {"backgroundColor":"contrast","style":{"elements":{"link":{"color":{"text":"var:preset|color|base"},":hover":{"color":{"text":"var:preset|color|base"}}}}}} -->' . "\n"
+        . '<div class="wp-block-group has-contrast-background-color has-background has-link-color">'
+        . '<!-- wp:paragraph {"textColor":"base"} --><p><a href="mailto:x@y.z">write to us</a></p><!-- /wp:paragraph --></div>' . "\n"
+        . '<!-- /wp:group -->';
+    $res = $fix->process($src);
+    assert_eq(false, $res['changed']);
+    assert_eq([], $res['findings']);
+});
+
 test('a quote cite is checked even when paragraphs carry the quote body', function () {
     // The paragraph is explicitly readable; the <cite> inherits the default
     // (dark) text and dies on the dark band. Old behavior recorded no row at

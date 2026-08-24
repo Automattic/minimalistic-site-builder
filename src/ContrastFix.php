@@ -109,7 +109,7 @@ final class ContrastFix
             if ($this->doc->parent($i) === null) {
                 $this->walk($i, $rootBg, 'base', null, null, $rootLink === null ? null : [
                     'rgb' => $rootLink['rgb'], 'label' => $rootLink['label'], 'fromNode' => null,
-                ]);
+                ], null);
             }
         }
 
@@ -130,9 +130,17 @@ final class ContrastFix
      * @param list<array{0:int,1:int,2:int}>|null $bgColors null = unknowable (image)
      * @param array{rgb: array{0:int,1:int,2:int}, label: string, node: int}|null $textCtx
      * @param array{rgb: array{0:int,1:int,2:int}, label: string, fromNode: ?int}|null $linkCtx
+     * @param array{rgb: array{0:int,1:int,2:int}, label: string, fromNode: ?int}|null $hoverCtx
      */
-    private function walk(int $i, ?array $bgColors, string $bgLabel, ?int $bgProvider, ?array $textCtx, ?array $linkCtx): void
-    {
+    private function walk(
+        int $i,
+        ?array $bgColors,
+        string $bgLabel,
+        ?int $bgProvider,
+        ?array $textCtx,
+        ?array $linkCtx,
+        ?array $hoverCtx,
+    ): void {
         $attrs = $this->doc->attrs($i) ?? [];
         $name = $this->doc->name($i);
 
@@ -146,6 +154,14 @@ final class ContrastFix
         $ownLink = $attrs['style']['elements']['link']['color']['text'] ?? null;
         if (is_string($ownLink) && ($resolved = $this->resolveColorValue($ownLink)) !== null) {
             $linkCtx = ['rgb' => $resolved['rgb'], 'label' => $resolved['label'], 'fromNode' => $i];
+        }
+
+        // The hover is a separate declaration, and the generator writes it
+        // without checking either colour against this background. Carry it
+        // like the resting one so a hover can be judged on its own.
+        $ownHover = $attrs['style']['elements']['link'][':hover']['color']['text'] ?? null;
+        if (is_string($ownHover) && ($resolved = $this->resolveColorValue($ownHover)) !== null) {
+            $hoverCtx = ['rgb' => $resolved['rgb'], 'label' => $resolved['label'], 'fromNode' => $i];
         }
 
         // Does this block paint a new background for its subtree?
@@ -205,6 +221,7 @@ final class ContrastFix
                 'hasAnchor' => (!$dynamic && stripos($inner, '<a ') !== false)
                     || ($name === 'post-title' && ($attrs['isLink'] ?? false) === true),
                 'link'      => $linkCtx,
+                'hover'     => $hoverCtx,
             ];
         } elseif (in_array($name, self::CAPTION_BLOCKS, true)
             && preg_match('/<figcaption\b[^>]*>(.*?)<\/figcaption>/is', $this->captionHtml($i), $cap)
@@ -227,6 +244,7 @@ final class ContrastFix
                 'hasText'   => true,
                 'hasAnchor' => stripos($cap[1], '<a ') !== false,
                 'link'      => $linkCtx,
+                'hover'     => $hoverCtx,
             ];
         } elseif (in_array($name, ['quote', 'pullquote'], true)
             && preg_match('/<cite\b[^>]*>(.*?)<\/cite>/is', $this->doc->innerHtml($i), $cite)
@@ -244,11 +262,12 @@ final class ContrastFix
                 'hasText'   => true,
                 'hasAnchor' => stripos($cite[1], '<a ') !== false,
                 'link'      => $linkCtx,
+                'hover'     => $hoverCtx,
             ];
         }
 
         foreach ($this->doc->children($i) as $child) {
-            $this->walk($child, $bgColors, $bgLabel, $bgProvider, $textCtx, $linkCtx);
+            $this->walk($child, $bgColors, $bgLabel, $bgProvider, $textCtx, $linkCtx, $hoverCtx);
         }
     }
 
@@ -440,6 +459,7 @@ final class ContrastFix
         }
         $ratio = $this->minRatio($linkRgb, $row['bg']);
         if ($ratio >= $this->normalText) {
+            $this->checkHoverOnly($row, $repair);
             return;
         }
 
@@ -518,26 +538,92 @@ final class ContrastFix
         $this->doc->setAttrs($i, $attrs);
     }
 
+    /**
+     * The resting link reads here, so no repair ran for this region — but hover
+     * is a second declaration with its own colour, and a generator that picked
+     * a readable resting colour can still pair it with an accent that vanishes
+     * on the same background.
+     *
+     * Only an authored hover is repaired: a region that inherits the theme's
+     * hover also inherits its resting colour, which would have failed here and
+     * taken the repair path instead. The global pair is ContrastFixStep's, and
+     * it checks that against the page background.
+     *
+     * @param array{bg: list<array{0:int,1:int,2:int}>, bgLabel: string,
+     *              link: array{label: string}|null,
+     *              hover: array{rgb: array{0:int,1:int,2:int}, label: string, fromNode: ?int}|null} $row
+     */
+    private function checkHoverOnly(array $row, bool $repair): void
+    {
+        $hover = $row['hover'] ?? null;
+        if ($hover === null || $hover['fromNode'] === null) {
+            return;
+        }
+        $ratio = $this->minRatio($hover['rgb'], $row['bg']);
+        if ($ratio >= $this->normalText) {
+            return;
+        }
+
+        $detail = sprintf(
+            'link hover %s on %s: %.2f < %.1f',
+            $hover['label'], $row['bgLabel'], $ratio, $this->normalText
+        );
+        $restingSlug = $row['link']['label'] ?? null;
+        $fallback = $restingSlug !== null && isset($this->palette[$restingSlug]) ? $restingSlug : null;
+        if ($fallback === null) {
+            [$best, $bestRatio] = $this->bestOf(['base', 'contrast', 'primary', 'secondary', 'accent'], $row['bg']);
+            $fallback = $best !== null && $bestRatio >= $this->normalText ? $best : null;
+        }
+        if ($fallback === null || !$repair) {
+            $this->findings[] = [
+                'kind' => 'link', 'block' => $this->doc->name($hover['fromNode']),
+                'detail' => $detail, 'repaired' => false,
+            ];
+            return;
+        }
+
+        $slug = $this->repairHover($hover['fromNode'], $fallback, $row['bg']);
+        $this->findings[] = [
+            'kind' => 'link', 'block' => $this->doc->name($hover['fromNode']),
+            'detail' => $detail . " → elements.link:hover={$slug}",
+            'repaired' => true,
+        ];
+    }
+
     /** @param list<array{0:int,1:int,2:int}> $bg */
     private function setLinkColor(int $i, string $slug, array $bg): void
     {
         $attrs = $this->doc->attrs($i) ?? [];
         $attrs['style']['elements']['link']['color']['text'] = 'var:preset|color|' . $slug;
-        // Hover is body-size text too, so it gets the same 4.5:1 bar. Keep an
-        // authored hover that reads on this background; otherwise prefer the
-        // accent when it passes, else reuse the repaired color so hover never
-        // goes invisible either.
-        $authored = $attrs['style']['elements']['link'][':hover']['color']['text'] ?? null;
-        $authoredPasses = is_string($authored)
-            && ($resolved = $this->resolveColorValue($authored)) !== null
-            && $this->minRatio($resolved['rgb'], $bg) >= $this->normalText;
-        if (!$authoredPasses) {
-            $accent = $this->rgbFor('accent');
-            $hover = ($accent !== null && $this->minRatio($accent, $bg) >= $this->normalText)
-                ? 'accent' : $slug;
-            $attrs['style']['elements']['link'][':hover']['color']['text'] = 'var:preset|color|' . $hover;
-        }
         $this->doc->setAttrs($i, $attrs);
+        $this->repairHover($i, $slug, $bg);
+    }
+
+    /**
+     * Keep the hover readable on the background the resting link was judged on.
+     *
+     * Hover is body-size text too, so it gets the same 4.5:1 bar. An authored
+     * hover that reads is left alone; otherwise prefer the accent when it
+     * passes, else fall back to $fallback so hover never goes invisible either.
+     *
+     * @param list<array{0:int,1:int,2:int}> $bg
+     * @return string|null the slug written, or null when the hover already read
+     */
+    private function repairHover(int $i, string $fallback, array $bg): ?string
+    {
+        $attrs = $this->doc->attrs($i) ?? [];
+        $authored = $attrs['style']['elements']['link'][':hover']['color']['text'] ?? null;
+        if (is_string($authored)
+            && ($resolved = $this->resolveColorValue($authored)) !== null
+            && $this->minRatio($resolved['rgb'], $bg) >= $this->normalText) {
+            return null;
+        }
+        $accent = $this->rgbFor('accent');
+        $slug = ($accent !== null && $this->minRatio($accent, $bg) >= $this->normalText)
+            ? 'accent' : $fallback;
+        $attrs['style']['elements']['link'][':hover']['color']['text'] = 'var:preset|color|' . $slug;
+        $this->doc->setAttrs($i, $attrs);
+        return $slug;
     }
 
     /**
