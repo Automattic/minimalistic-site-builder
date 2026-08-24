@@ -83,12 +83,13 @@ final class DesignPreviewStep implements Step
             }
 
             $siteSpecData = $project->readJson('siteSpec.json');
+            $sitePages = PagePlanStep::flattenPages($siteSpecData);
             $siteSpec = $project->readText('siteSpec.json');
             $designDirection = $project->readText('designDirection.json');
             $prompt = $this->renderer->render('design-preview.md', [
                 'brief' => $brief,
                 'site_spec' => $siteSpec,
-                'site_pages' => PagePlanStep::sitePagesList(PagePlanStep::flattenPages($siteSpecData)),
+                'site_pages' => PagePlanStep::sitePagesList($sitePages),
                 'design_direction' => $designDirection,
             ]);
 
@@ -98,7 +99,7 @@ final class DesignPreviewStep implements Step
                     $this->withOptions(['log_label' => 'design-preview']),
                 );
             } catch (\RuntimeException $error) {
-                $scaffold = self::safeScaffold($siteSpec, $brief);
+                $scaffold = self::safeScaffold($siteSpec, $brief, $sitePages);
                 self::writePreview($project, $scaffold);
                 $warnings[] = self::degradedWarning(
                     'initial LLM request failed: ' . $error->getMessage(),
@@ -114,7 +115,7 @@ final class DesignPreviewStep implements Step
                     'initial preview generation',
                     $initialSanitizerWarnings,
                 );
-                $issue = self::designIssue($candidate);
+                $issue = self::designIssue($candidate, $sitePages);
             } catch (\RuntimeException $error) {
                 $candidate = $authored;
                 $issue = 'sanitizer failed: ' . $error->getMessage();
@@ -137,7 +138,7 @@ final class DesignPreviewStep implements Step
                     'malformed preview repair',
                     $repairSanitizerWarnings,
                 );
-                $repairedIssue = self::designIssue($repaired);
+                $repairedIssue = self::designIssue($repaired, $sitePages);
                 if ($repairedIssue !== null) {
                     throw new \RuntimeException("repair remained invalid: {$repairedIssue}");
                 }
@@ -149,7 +150,7 @@ final class DesignPreviewStep implements Step
                     . ' delivered_value contract-valid repaired preview document '
                     . 'disposition repaired; defect ' . self::warningValue($issue);
             } catch (\RuntimeException $error) {
-                $scaffold = self::safeScaffold($siteSpec, $brief);
+                $scaffold = self::safeScaffold($siteSpec, $brief, $sitePages);
                 self::writePreview($project, $scaffold);
                 $warnings[] = self::degradedWarning(
                     $authored . '; repair failure: ' . $error->getMessage(),
@@ -351,16 +352,66 @@ final class DesignPreviewStep implements Step
     }
 
     /**
-     * Prove the browser winners for the four desktop header declarations the
+     * Prove the browser winners for the five desktop header declarations the
      * preview contract requires. A negative column regex is insufficient:
      * grid, flex-flow, higher-specificity overrides and conditional rules can
      * all stack the identity above the nav without spelling that exact token.
      */
-    private static function headerLayoutIssue(string $css, DOMElement $header): ?string
+    private static function headerLayoutIssue(
+        string $css,
+        DOMElement $header,
+        DOMElement $identity,
+        DOMElement $navigation,
+        DOMElement $identityItem,
+        DOMElement $navigationItem,
+    ): ?string
+    {
+        foreach (self::headerLayoutViewports($css) as $viewport) {
+            $issue = self::headerLayoutIssueAtViewport(
+                $css,
+                $header,
+                $identityItem,
+                $navigationItem,
+                $viewport,
+            );
+            if ($issue !== null) {
+                return $issue;
+            }
+            $critical = [
+                'header' => $header,
+                'identity' => $identity,
+                'navigation' => $navigation,
+                'identity row item' => $identityItem,
+                'navigation row item' => $navigationItem,
+            ];
+            $seen = [];
+            foreach ($critical as $label => $element) {
+                $id = spl_object_id($element);
+                if (isset($seen[$id])) {
+                    continue;
+                }
+                $seen[$id] = true;
+                $issue = self::headerCriticalElementIssueAtViewport($css, $element, $label, $viewport);
+                if ($issue !== null) {
+                    return $issue;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static function headerLayoutIssueAtViewport(
+        string $css,
+        DOMElement $header,
+        DOMElement $identity,
+        DOMElement $navigation,
+        float $viewport,
+    ): ?string
     {
         $required = [
             'display' => 'flex',
             'flex-direction' => 'row',
+            'flex-wrap' => 'nowrap',
             'align-items' => 'center',
             'justify-content' => 'space-between',
         ];
@@ -372,64 +423,214 @@ final class DesignPreviewStep implements Step
                 continue;
             }
             $property = strtolower(trim($declaration['property']));
-            if (!in_array($property, ['display', 'flex-direction', 'flex-flow', 'align-items', 'justify-content', 'all'], true)) {
+            if (!in_array(
+                $property,
+                ['display', 'flex-direction', 'flex-wrap', 'flex-flow', 'align-items', 'place-items', 'justify-content', 'order', 'all'],
+                true,
+            )) {
                 continue;
             }
-            $scope = CssChecks::declarationScopeAtViewport($declaration['ancestors'], 1366.0);
+            $scope = CssChecks::declarationScopeAtViewport($declaration['ancestors'], $viewport);
             if ($scope === 'inert') {
                 continue;
             }
 
-            $specificity = null;
-            foreach (CssValueSplitter::splitTopLevel($declaration['context'], [',']) as $selector) {
-                $parsed = CssSelectorMatcher::parse($selector);
-                if (!($parsed['supported'] ?? false)) {
-                    if (self::selectorMayTargetHeader($selector, $declaration['ancestors'])) {
-                        return 'desktop header layout cannot be proven across the CSS cascade';
-                    }
-                    continue;
-                }
-                $match = CssSelectorMatcher::matches($header, $parsed, true);
-                if (!($match['supported'] ?? false)) {
-                    if (self::selectorMayTargetHeader($selector, $declaration['ancestors'])) {
-                        return 'desktop header layout cannot be proven across the CSS cascade';
-                    }
-                    continue;
-                }
-                if (!($match['matches'] ?? false)) {
-                    continue;
-                }
-                if ($scope === 'unprovable' || ($parsed['pseudo_state_suffix_span'] ?? null) !== null) {
+            if ($property !== 'order') {
+                $match = self::matchingSpecificity(
+                    $declaration['context'],
+                    $declaration['ancestors'],
+                    $header,
+                );
+                if ($match['unprovable'] || ($match['specificity'] !== null && $scope === 'unprovable')) {
                     return 'desktop header layout cannot be proven across the CSS cascade';
                 }
-                $specificity = max($specificity ?? 0, self::selectorSpecificity($parsed));
-            }
-            if ($specificity === null) {
-                continue;
+                if ($match['specificity'] !== null) {
+                    $priority = CssChecks::splitDeclarationPriority($declaration['value']);
+                    $values = self::headerLayoutValues($property, $priority['value']);
+                    foreach ($values as $resolvedProperty => $value) {
+                        $candidate = [
+                            'value' => $value,
+                            'important' => $priority['important'],
+                            'specificity' => $match['specificity'],
+                            'order' => $declaration['start'],
+                        ];
+                        if (self::cascadeCandidateWins($candidate, $winners[$resolvedProperty] ?? null)) {
+                            $winners[$resolvedProperty] = $candidate;
+                        }
+                    }
+                }
             }
 
+            if (!in_array($property, ['order', 'all'], true)) {
+                continue;
+            }
             $priority = CssChecks::splitDeclarationPriority($declaration['value']);
-            $values = self::headerLayoutValues($property, $priority['value']);
-            foreach ($values as $resolvedProperty => $value) {
+            foreach (['identity' => $identity, 'navigation' => $navigation] as $key => $element) {
+                $match = self::matchingSpecificity(
+                    $declaration['context'],
+                    $declaration['ancestors'],
+                    $element,
+                );
+                if ($match['unprovable'] || ($match['specificity'] !== null && $scope === 'unprovable')) {
+                    return 'desktop header item order cannot be proven across the CSS cascade';
+                }
+                if ($match['specificity'] === null) {
+                    continue;
+                }
                 $candidate = [
-                    'value' => $value,
+                    'value' => $property === 'all' ? '0' : self::headerOrderValue($priority['value']),
                     'important' => $priority['important'],
-                    'specificity' => $specificity,
+                    'specificity' => $match['specificity'],
                     'order' => $declaration['start'],
                 ];
-                if (self::cascadeCandidateWins($candidate, $winners[$resolvedProperty] ?? null)) {
-                    $winners[$resolvedProperty] = $candidate;
+                if (self::cascadeCandidateWins($candidate, $winners["{$key}-order"] ?? null)) {
+                    $winners["{$key}-order"] = $candidate;
                 }
             }
         }
 
         foreach ($required as $property => $value) {
             if (($winners[$property]['value'] ?? null) !== $value) {
-                return 'header must use display:flex, flex-direction:row, align-items:center, '
-                    . 'and justify-content:space-between at desktop width';
+                return 'header must use display:flex, flex-direction:row, flex-wrap:nowrap, '
+                    . 'align-items:center, and justify-content:space-between throughout the desktop range';
             }
         }
+        $identityOrder = $winners['identity-order']['value'] ?? '0';
+        $navigationOrder = $winners['navigation-order']['value'] ?? '0';
+        if ($identityOrder === '<unproven>'
+            || $navigationOrder === '<unproven>'
+            || (int) $identityOrder > (int) $navigationOrder
+        ) {
+            return 'header identity must remain before navigation throughout the desktop range';
+        }
         return null;
+    }
+
+    private static function headerCriticalElementIssueAtViewport(
+        string $css,
+        DOMElement $element,
+        string $label,
+        float $viewport,
+    ): ?string {
+        /** @var array<string,array{value:string,important:bool,specificity:int,order:int}> $winners */
+        $winners = [];
+        $properties = [
+            'display',
+            'visibility',
+            'opacity',
+            'position',
+            'transform',
+            'animation',
+            'animation-name',
+            'all',
+        ];
+        foreach (CssChecks::scanDeclarations($css) as $declaration) {
+            if ($declaration['kind'] !== 'style' || !$declaration['structurallySafe']) {
+                continue;
+            }
+            $property = strtolower(trim($declaration['property']));
+            if (!in_array($property, $properties, true)) {
+                continue;
+            }
+            $scope = CssChecks::declarationScopeAtViewport($declaration['ancestors'], $viewport);
+            if ($scope === 'inert') {
+                continue;
+            }
+            $match = self::matchingSpecificity(
+                $declaration['context'],
+                $declaration['ancestors'],
+                $element,
+            );
+            if ($match['unprovable'] || ($match['specificity'] !== null && $scope === 'unprovable')) {
+                return "desktop {$label} visibility and flow cannot be proven across the CSS cascade";
+            }
+            if ($match['specificity'] === null) {
+                continue;
+            }
+            $priority = CssChecks::splitDeclarationPriority($declaration['value']);
+            foreach (self::headerCriticalValues($property, $priority['value']) as $resolved => $value) {
+                $candidate = [
+                    'value' => $value,
+                    'important' => $priority['important'],
+                    'specificity' => $match['specificity'],
+                    'order' => $declaration['start'],
+                ];
+                if (self::cascadeCandidateWins($candidate, $winners[$resolved] ?? null)) {
+                    $winners[$resolved] = $candidate;
+                }
+            }
+        }
+
+        $display = $winners['display']['value'] ?? '<default>';
+        if (in_array($display, ['none', 'contents', '<unproven>'], true)) {
+            return "desktop {$label} must remain a visible box in the header row";
+        }
+        if (($winners['visibility']['value'] ?? 'visible') !== 'visible') {
+            return "desktop {$label} must remain visible in the header row";
+        }
+        $opacity = $winners['opacity']['value'] ?? '1';
+        if ($opacity === '<unproven>' || (float) $opacity <= 0.0) {
+            return "desktop {$label} must remain visible in the header row";
+        }
+        if (($winners['position']['value'] ?? 'static') !== 'static') {
+            return "desktop {$label} must remain in normal header-row flow";
+        }
+        if (($winners['transform']['value'] ?? 'none') !== 'none') {
+            return "desktop {$label} must not be transformed out of its header-row position";
+        }
+        if (($winners['animation-name']['value'] ?? 'none') !== 'none') {
+            return "desktop {$label} must not animate away from the proven header-row layout";
+        }
+        return null;
+    }
+
+    /** @return array<string,string> */
+    private static function headerCriticalValues(string $property, string $value): array
+    {
+        $value = strtolower(trim($value));
+        $cssWide = in_array($value, ['initial', 'unset'], true);
+        if ($property === 'all') {
+            if (!$cssWide) {
+                return [
+                    'display' => '<unproven>',
+                    'visibility' => '<unproven>',
+                    'opacity' => '<unproven>',
+                    'position' => '<unproven>',
+                    'transform' => '<unproven>',
+                    'animation-name' => '<unproven>',
+                ];
+            }
+            return [
+                'display' => '<default>',
+                'visibility' => 'visible',
+                'opacity' => '1',
+                'position' => 'static',
+                'transform' => 'none',
+                'animation-name' => 'none',
+            ];
+        }
+        if ($property === 'animation' || $property === 'animation-name') {
+            return ['animation-name' => ($cssWide || $value === 'none') ? 'none' : '<active>'];
+        }
+        if ($property === 'opacity') {
+            if ($cssWide) {
+                return ['opacity' => '1'];
+            }
+            if (preg_match('/\A(?:\d+(?:\.\d+)?|\.\d+)\z/', $value) === 1) {
+                return ['opacity' => $value];
+            }
+            if (preg_match('/\A(?:\d+(?:\.\d+)?|\.\d+)%\z/', $value) === 1) {
+                return ['opacity' => (string) ((float) rtrim($value, '%') / 100)];
+            }
+            return ['opacity' => '<unproven>'];
+        }
+        $defaults = [
+            'display' => '<default>',
+            'visibility' => 'visible',
+            'position' => 'static',
+            'transform' => 'none',
+        ];
+        return [$property => $cssWide ? $defaults[$property] : $value];
     }
 
     /** @return array<string,string> */
@@ -440,25 +641,92 @@ final class DesignPreviewStep implements Step
             return [
                 'display' => '<unproven>',
                 'flex-direction' => '<unproven>',
+                'flex-wrap' => '<unproven>',
                 'align-items' => '<unproven>',
                 'justify-content' => '<unproven>',
             ];
+        }
+        if ($property === 'place-items') {
+            $parts = CssValueSplitter::splitTopLevelWhitespace($value);
+            return ['align-items' => $parts[0] ?? '<unproven>'];
         }
         if ($property !== 'flex-flow') {
             return [$property => $value];
         }
 
+        $parts = CssValueSplitter::splitTopLevelWhitespace($value);
+        if ($parts === []) {
+            return ['flex-direction' => '<unproven>', 'flex-wrap' => '<unproven>'];
+        }
         $direction = 'row';
-        foreach (CssValueSplitter::splitTopLevelWhitespace($value) as $part) {
+        $wrap = 'nowrap';
+        foreach ($parts as $part) {
             if (in_array($part, ['row', 'row-reverse', 'column', 'column-reverse'], true)) {
                 $direction = $part;
                 continue;
             }
-            if (!in_array($part, ['nowrap', 'wrap', 'wrap-reverse'], true)) {
-                $direction = '<unproven>';
+            if (in_array($part, ['nowrap', 'wrap', 'wrap-reverse'], true)) {
+                $wrap = $part;
+                continue;
+            }
+            $direction = '<unproven>';
+            $wrap = '<unproven>';
+        }
+        return ['flex-direction' => $direction, 'flex-wrap' => $wrap];
+    }
+
+    private static function headerOrderValue(string $value): string
+    {
+        $value = strtolower(trim($value));
+        if (in_array($value, ['initial', 'unset'], true)) {
+            return '0';
+        }
+        return preg_match('/\A[+-]?\d+\z/', $value) === 1 ? $value : '<unproven>';
+    }
+
+    /**
+     * Sample every interval where a simple min/max-width media query can
+     * change truth. This proves the whole >=720px inline-navigation range,
+     * rather than one convenient desktop screenshot width.
+     *
+     * @return list<float>
+     */
+    private static function headerLayoutViewports(string $css): array
+    {
+        $viewports = [720.0, 1366.0];
+        foreach (CssChecks::scanDeclarations($css) as $declaration) {
+            foreach ($declaration['ancestors'] as $ancestor) {
+                if (preg_match_all(
+                    '/\((?:min|max)-width\s*:\s*([+-]?(?:\d+(?:\.\d+)?|\.\d+))(px|r?em)?\s*\)/i',
+                    $ancestor,
+                    $matches,
+                    PREG_SET_ORDER,
+                ) < 1) {
+                    continue;
+                }
+                foreach ($matches as $match) {
+                    $boundary = (float) $match[1];
+                    $unit = strtolower($match[2] ?? '');
+                    if ($unit === 'em' || $unit === 'rem') {
+                        $boundary *= 16.0;
+                    } elseif ($unit === '' && $boundary !== 0.0) {
+                        continue;
+                    }
+                    foreach ([$boundary - 0.01, $boundary, $boundary + 0.01] as $candidate) {
+                        if ($candidate >= 720.0) {
+                            $viewports[] = $candidate;
+                        }
+                    }
+                }
             }
         }
-        return ['flex-direction' => $direction];
+        $viewports = array_values(array_unique(array_map(
+            static fn (float $viewport): string => sprintf('%.2F', $viewport),
+            $viewports,
+        )));
+        $viewports = array_map('floatval', $viewports);
+        sort($viewports, SORT_NUMERIC);
+        return $viewports;
     }
 
     /**
@@ -502,17 +770,118 @@ final class DesignPreviewStep implements Step
         return $specificity;
     }
 
-    /** @param list<string> $ancestors */
-    private static function selectorMayTargetHeader(string $selector, array $ancestors): bool
-    {
-        $source = $selector . ' ' . implode(' ', array_filter(
-            $ancestors,
-            static fn (string $ancestor): bool => !str_starts_with(ltrim($ancestor), '@'),
-        ));
-        return preg_match('/(?<![-_a-z0-9])header(?![-_a-z0-9])/i', $source) === 1;
+    /**
+     * @param list<string> $ancestors
+     * @return array{specificity:?int,unprovable:bool}
+     */
+    private static function matchingSpecificity(
+        string $context,
+        array $ancestors,
+        DOMElement $element,
+    ): array {
+        $specificity = null;
+        foreach (CssValueSplitter::splitTopLevel($context, [',']) as $selector) {
+            $parsed = CssSelectorMatcher::parse($selector);
+            if (!($parsed['supported'] ?? false)) {
+                if (self::selectorMayTargetElement($selector, $ancestors, $element)) {
+                    return ['specificity' => null, 'unprovable' => true];
+                }
+                continue;
+            }
+            $match = CssSelectorMatcher::matches($element, $parsed, true);
+            if (!($match['supported'] ?? false)) {
+                if (self::selectorMayTargetElement($selector, $ancestors, $element)) {
+                    return ['specificity' => null, 'unprovable' => true];
+                }
+                continue;
+            }
+            if (!($match['matches'] ?? false)) {
+                continue;
+            }
+            if (($parsed['pseudo_state_suffix_span'] ?? null) !== null) {
+                return ['specificity' => null, 'unprovable' => true];
+            }
+            $specificity = max($specificity ?? 0, self::selectorSpecificity($parsed));
+        }
+        return ['specificity' => $specificity, 'unprovable' => false];
     }
 
-    private static function designIssue(string $html): ?string
+    /** @param list<string> $ancestors */
+    private static function selectorMayTargetElement(
+        string $selector,
+        array $ancestors,
+        DOMElement $element,
+    ): bool
+    {
+        $source = $selector . ' ' . implode(' ', $ancestors);
+        $tag = preg_quote(strtolower($element->tagName), '/');
+        if (preg_match('/(?<![-_a-z0-9])' . $tag . '(?![-_a-z0-9])/i', $source) === 1) {
+            return true;
+        }
+        $id = trim($element->getAttribute('id'));
+        if ($id !== '' && preg_match('/#' . preg_quote($id, '/') . '(?![-_a-z0-9])/i', $source) === 1) {
+            return true;
+        }
+        foreach (preg_split('/\s+/', trim($element->getAttribute('class'))) ?: [] as $class) {
+            if ($class !== ''
+                && preg_match('/\.' . preg_quote($class, '/') . '(?![-_a-z0-9])/i', $source) === 1
+            ) {
+                return true;
+            }
+        }
+        return preg_match('/(?:\A|[\s>+~,])\*(?![-_a-z0-9])/i', $selector) === 1;
+    }
+
+    private static function headerRowItem(DOMElement $element, DOMElement $header): ?DOMElement
+    {
+        $item = $element;
+        while ($item->parentNode instanceof DOMElement) {
+            if ($item->parentNode->isSameNode($header)) {
+                return $item;
+            }
+            $item = $item->parentNode;
+        }
+        return null;
+    }
+
+    /** @param list<array<string,mixed>> $sitePages */
+    private static function pageLinkIssue(DOMXPath $xpath, array $sitePages): ?string
+    {
+        $expected = [];
+        foreach ($sitePages as $page) {
+            if (!is_array($page) || !empty($page['front']) || trim((string) ($page['path'] ?? '')) === '/') {
+                continue;
+            }
+            $title = trim((string) ($page['title'] ?? ''));
+            $path = trim((string) ($page['path'] ?? ''));
+            if ($title !== '' && $path !== '') {
+                $expected[] = ['title' => $title, 'path' => $path];
+            }
+        }
+
+        $anchors = $xpath->query('/html/body/header//nav//a');
+        if ($anchors->length !== count($expected)) {
+            return 'header navigation must contain exactly one link for every inner SITE PAGES entry';
+        }
+        foreach ($expected as $index => $page) {
+            $anchor = $anchors->item($index);
+            if (!$anchor instanceof DOMElement
+                || $anchor->getAttribute('href') !== $page['path']
+                || self::visibleText($anchor->textContent) !== self::visibleText($page['title'])
+            ) {
+                return 'header navigation labels and destinations must match inner SITE PAGES exactly and in order';
+            }
+        }
+        return null;
+    }
+
+    private static function visibleText(string $value): string
+    {
+        return trim((string) preg_replace('/\s+/u', ' ', $value));
+    }
+
+    /** @param list<array<string,mixed>> $sitePages */
+    private static function designIssue(string $html, array $sitePages): ?string
     {
         if (trim($html) === '') {
             return 'document is empty';
@@ -574,21 +943,51 @@ final class DesignPreviewStep implements Step
         ) {
             return 'document must contain one direct body header';
         }
+        $header = $xpath->query('/html/body/header')->item(0);
+        if (!$header instanceof DOMElement) {
+            return 'document must contain one direct body header';
+        }
         if (
             $xpath->query('//nav')->length !== 1
             || $xpath->query('/html/body/header//nav')->length !== 1
         ) {
             return 'header must contain the only navigation';
         }
-        // The prompt calls a populated nav mandatory; without this the rule is
-        // model compliance only, and an empty header nav ships clean (BIGR-872).
-        // The page list is not final at design-preview time, so completeness
-        // against SITE PAGES is enforced later, on the block markup.
-        if ($xpath->query('/html/body/header//nav//a')->length === 0) {
-            return 'header navigation contains no links';
+        $navigation = $xpath->query('/html/body/header//nav')->item(0);
+        if (!$navigation instanceof DOMElement) {
+            return 'header must contain the only navigation';
         }
-        if ($xpath->query('/html/body/header//a[not(ancestor::nav) and @href="/"]')->length !== 1) {
+        $pageLinkIssue = self::pageLinkIssue($xpath, $sitePages);
+        if ($pageLinkIssue !== null) {
+            return $pageLinkIssue;
+        }
+        $identityLinks = $xpath->query('/html/body/header//a[not(ancestor::nav) and @href="/"]');
+        if ($identityLinks->length !== 1) {
             return 'header must contain one identity home link outside navigation';
+        }
+        $identity = $identityLinks->item(0);
+        if (!$identity instanceof DOMElement) {
+            return 'header must contain one identity home link outside navigation';
+        }
+        $identityItem = self::headerRowItem($identity, $header);
+        $navigationItem = self::headerRowItem($navigation, $header);
+        if ($identityItem === null
+            || $navigationItem === null
+            || $identityItem->isSameNode($navigationItem)
+        ) {
+            return 'header identity and navigation must occupy separate row items';
+        }
+        $rowItems = [];
+        foreach ($header->childNodes as $child) {
+            if ($child instanceof DOMElement) {
+                $rowItems[] = $child;
+            }
+        }
+        if (count($rowItems) !== 2
+            || !$rowItems[0]->isSameNode($identityItem)
+            || !$rowItems[1]->isSameNode($navigationItem)
+        ) {
+            return 'header identity must be the first row item and navigation the last row item';
         }
 
         $main = $xpath->query('/html/body/main')->item(0);
@@ -661,11 +1060,14 @@ final class DesignPreviewStep implements Step
         if ($widthIssue !== null) {
             return $widthIssue;
         }
-        $header = $xpath->query('/html/body/header')->item(0);
-        if (!$header instanceof DOMElement) {
-            return 'document must contain one direct body header';
-        }
-        $layoutIssue = self::headerLayoutIssue($cssInspection['code'], $header);
+        $layoutIssue = self::headerLayoutIssue(
+            $cssInspection['code'],
+            $header,
+            $identity,
+            $navigation,
+            $identityItem,
+            $navigationItem,
+        );
         if ($layoutIssue !== null) {
             return $layoutIssue;
         }
@@ -868,7 +1270,8 @@ final class DesignPreviewStep implements Step
         return false;
     }
 
-    private static function safeScaffold(string $siteSpec, string $brief): string
+    /** @param list<array<string,mixed>> $sitePages */
+    private static function safeScaffold(string $siteSpec, string $brief, array $sitePages): string
     {
         $decoded = json_decode($siteSpec, true);
         $decoded = is_array($decoded) ? $decoded : [];
@@ -878,6 +1281,18 @@ final class DesignPreviewStep implements Step
             (string) ($decoded['description'] ?? $brief),
             'A focused introduction to this site.',
         );
+        $navigation = '';
+        foreach ($sitePages as $page) {
+            if (!is_array($page) || !empty($page['front']) || trim((string) ($page['path'] ?? '')) === '/') {
+                continue;
+            }
+            $pageTitle = trim((string) ($page['title'] ?? ''));
+            $pagePath = trim((string) ($page['path'] ?? ''));
+            if ($pageTitle === '' || $pagePath === '') {
+                continue;
+            }
+            $navigation .= '<a href="' . self::escape($pagePath) . '">' . self::escape($pageTitle) . '</a>';
+        }
 
         return '<!doctype html>'
             . '<html lang="en"><head><meta charset="utf-8">'
@@ -885,12 +1300,12 @@ final class DesignPreviewStep implements Step
             . '<style>:root { --content-size: 800px; --wide-size: 1280px; }'
             . 'body { margin: 0; font-family: system-ui, sans-serif; }'
             . 'header, main { width: min(100% - 2rem, var(--wide-size)); margin-inline: auto; }'
-            . 'header { display: flex; flex-direction: row; align-items: center; justify-content: space-between; }'
+            . 'header { display: flex; flex-direction: row; flex-wrap: nowrap; align-items: center; justify-content: space-between; }'
             . '#hero { min-height: 70vh; display: grid; align-content: center; gap: 1rem; }'
             . 'img { display: block; max-width: 100%; height: auto; }</style>'
             . '</head><body><header><a class="site-identity" href="/">'
             . self::escape($name)
-            . '</a><nav aria-label="Primary"><a href="/#hero">Explore</a></nav></header>'
+            . '</a><nav aria-label="Primary">' . $navigation . '</nav></header>'
             . '<main><section id="hero"><h1>'
             . self::escape($title)
             . '</h1><p>'

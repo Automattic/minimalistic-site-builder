@@ -115,10 +115,10 @@ function html_first_preview_document(string $marker = 'DESIGN-PREVIEW'): string
         . '<meta name="viewport" content="width=device-width, initial-scale=1">'
         . '<style>:root { --content-size: 800px; --wide-size: 1280px; }'
         . 'body { margin: 0; font-family: system-ui, sans-serif; }'
-        . '.site-header{display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:1rem}.brand{font-weight:700;text-decoration:none}'
+        . '.site-header{display:flex;flex-direction:row;flex-wrap:nowrap;align-items:center;justify-content:space-between;gap:1rem}.brand{font-weight:700;text-decoration:none}'
         . '.maintenance-loop{display:grid}.maintenance-loop li > span{display:inline-block;width:10px;max-width:10px;height:10px;border-radius:50%;background:#e08a3c}</style>'
         . '</head><body><header class="site-header"><a class="brand" href="/">Hearth &amp; Crumb</a>'
-        . '<nav aria-label="Primary"><a href="/about/">About</a></nav></header>'
+        . '<nav aria-label="Primary"></nav></header>'
         . '<main><section id="hero"><h1 class="has-display-font-size">' . $marker . '</h1>'
         . '<ul class="maintenance-loop"><li><span>Fresh daily</span></li></ul>'
         . '<img alt="AI_IMAGE: A baker sliding a sourdough loaf into a stone oven, viewed from counter height | homepage hero beside the primary headline | photorealistic | landscape">'
@@ -129,11 +129,10 @@ function html_first_nav_defect_preview_document(): string
 {
     return str_replace(
         '<header class="site-header"><a class="brand" href="/">Hearth &amp; Crumb</a>'
-            . '<nav aria-label="Primary"><a href="/about/">About</a></nav></header>',
+            . '<nav aria-label="Primary"></nav></header>',
         '<header class="site-header"><a class="brand" href="/">Hearth &amp; Crumb</a>'
             . '<div class="header-shell"><nav aria-label="Primary">'
-            . '<a href="#hero">Home</a>'
-            . '<a href="#hero">About</a>'
+            . '<a href="/about/">About</a>'
             . '</nav></div></header>',
         html_first_preview_document('NAV-LINK-HERO'),
     );
@@ -150,12 +149,11 @@ function html_first_nav_list_preview_document(): string
 {
     return str_replace(
         '<header class="site-header"><a class="brand" href="/">Hearth &amp; Crumb</a>'
-            . '<nav aria-label="Primary"><a href="/about/">About</a></nav></header>',
+            . '<nav aria-label="Primary"></nav></header>',
         '<header class="site-header"><a class="brand" href="/">Hearth &amp; Crumb</a>'
             . '<div class="header-shell"><nav aria-label="Primary">'
             . '<ul class="navlinks">'
-            . '<li><a class="is-current" href="#hero" aria-current="page">Home</a></li>'
-            . '<li><a href="#hero">About</a></li>'
+            . '<li><a href="/about/">About</a></li>'
             . '</ul>'
             . '</nav></div></header>',
         html_first_preview_document('NAV-LINK-HERO'),
@@ -188,7 +186,7 @@ function html_first_foundation_preview_document(): string
         . '<style>'
         . ':root{--content-size:800px;--wide-size:1280px;}'
         . 'body{margin:0;font-family:system-ui,sans-serif}'
-        . 'header{display:flex;flex-direction:row;align-items:center;justify-content:space-between}'
+        . 'header{display:flex;flex-direction:row;flex-wrap:nowrap;align-items:center;justify-content:space-between}'
         . '#hero{padding:4rem clamp(1.25rem,5vw,4.5rem) 6rem}'
         . '#story{padding-inline:3rem}'
         . '#about-intro{padding-left:4rem;padding-right:4rem;padding-top:2rem;padding-bottom:3rem}'

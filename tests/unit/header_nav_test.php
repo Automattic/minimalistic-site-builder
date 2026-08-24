@@ -730,3 +730,295 @@ test('HeaderNav keeps a nested logo and title unit together when inserting navig
     assert_contains('wp:site-tagline', $identityMarkup);
     assert_true(!str_contains($identityMarkup, 'wp:navigation'), 'navigation did not split the lockup');
 });
+
+test('HeaderHero repairs a complete standard header that still stacks identity above navigation', function () {
+    $markup = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:site-title /-->'
+        . '<!-- wp:navigation -->'
+        . '<!-- wp:navigation-link {"label":"Menu","url":"/menu/","kind":"custom"} /-->'
+        . '<!-- wp:navigation-link {"label":"Visit","url":"/visit/","kind":"custom"} /-->'
+        . '<!-- /wp:navigation -->'
+        . '</div><!-- /wp:group -->';
+
+    $result = HeaderHeroStep::fixHeader(
+        $markup,
+        AboveFoldContract::MODE_STACKED,
+        'Atelier',
+        ['Home', 'Menu', 'Visit'],
+        false,
+        'standard-row',
+        pages: header_nav_pages(),
+    );
+    $document = BlockMarkup::parse($result['markup']);
+    $root = $document->topLevel();
+
+    assert_true($root !== null, 'the repaired header has one root');
+    assert_eq('constrained', ($document->attrs($root) ?? [])['layout']['type'] ?? null);
+    $rootChildren = $document->children($root);
+    assert_eq(1, count($rootChildren), 'the constrained shell contains one header row');
+    $row = $rootChildren[0];
+    assert_eq('flex', ($document->attrs($row) ?? [])['layout']['type'] ?? null);
+    assert_eq('nowrap', ($document->attrs($row) ?? [])['layout']['flexWrap'] ?? null);
+    assert_eq('space-between', ($document->attrs($row) ?? [])['layout']['justifyContent'] ?? null);
+    assert_eq(
+        ['site-title', 'navigation'],
+        array_map(
+            static fn (int $index): string => $document->name($index),
+            $document->children($row),
+        ),
+        'identity and the already-complete navigation are row siblings',
+    );
+    assert_contains('repaired complete header navigation into one row', implode("\n", $result['notes']));
+    $second = HeaderHeroStep::fixHeader(
+        $result['markup'],
+        AboveFoldContract::MODE_STACKED,
+        'Atelier',
+        ['Home', 'Menu', 'Visit'],
+        false,
+        'standard-row',
+        pages: header_nav_pages(),
+    );
+    assert_eq($result['markup'], $second['markup'], 'the complete-row repair reaches a fixed point');
+});
+
+test('HeaderNav corrects a required page link whose destination has the wrong label', function () {
+    $pages = [
+        ['title' => 'Home', 'slug' => 'home', 'path' => '/', 'front' => true],
+        ['title' => 'About', 'slug' => 'about', 'path' => '/about/', 'front' => false],
+    ];
+    $markup = '<!-- wp:navigation -->'
+        . '<!-- wp:navigation-link {"label":"Home","url":"/about/","kind":"custom"} /-->'
+        . '<!-- /wp:navigation -->';
+
+    $result = HeaderNav::withCompleteInnerPages($markup, $pages);
+
+    assert_true(!str_contains($result['markup'], '"label":"Home"'), 'the misleading Home label is removed');
+    assert_contains('"label":"About","url":"/about/"', $result['markup']);
+    assert_eq(1, substr_count($result['markup'], '"url":"/about/"'), 'the destination is not duplicated');
+    assert_contains('corrected inner-page navigation label', implode("\n", $result['notes']));
+    assert_eq([], $result['warnings']);
+    assert_eq(
+        $result['markup'],
+        HeaderNav::withCompleteInnerPages($result['markup'], $pages)['markup'],
+        'the label repair reaches a fixed point',
+    );
+});
+
+test('HeaderNav keeps a deep-link CTA and adds the exact required page destination', function () {
+    $pages = [
+        ['title' => 'Home', 'slug' => 'home', 'path' => '/', 'front' => true],
+        ['title' => 'About', 'slug' => 'about', 'path' => '/about/', 'front' => false],
+    ];
+    $markup = '<!-- wp:navigation -->'
+        . '<!-- wp:navigation-link {"label":"Meet the team","url":"/about/#team","kind":"custom"} /-->'
+        . '<!-- /wp:navigation -->';
+
+    $result = HeaderNav::withCompleteInnerPages($markup, $pages);
+
+    assert_contains('"label":"Meet the team","url":"/about/#team"', $result['markup']);
+    assert_contains('"label":"About","url":"/about/"', $result['markup']);
+    assert_eq(1, substr_count($result['markup'], '"url":"/about/"'), 'canonical page appears once');
+    assert_eq([], $result['warnings']);
+    assert_eq(
+        $result['markup'],
+        HeaderNav::withCompleteInnerPages($result['markup'], $pages)['markup'],
+        'deep-link completion reaches a fixed point',
+    );
+});
+
+test('HeaderHero reorders a complete reverse standard header into identity then navigation', function () {
+    $markup = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:navigation -->'
+        . '<!-- wp:navigation-link {"label":"Menu","url":"/menu/","kind":"custom"} /-->'
+        . '<!-- wp:navigation-link {"label":"Visit","url":"/visit/","kind":"custom"} /-->'
+        . '<!-- /wp:navigation -->'
+        . '<!-- wp:site-title /-->'
+        . '</div><!-- /wp:group -->';
+
+    $result = HeaderHeroStep::fixHeader(
+        $markup,
+        AboveFoldContract::MODE_STACKED,
+        'Atelier',
+        ['Home', 'Menu', 'Visit'],
+        false,
+        'standard-row',
+        pages: header_nav_pages(),
+    );
+    $document = BlockMarkup::parse($result['markup']);
+    $root = $document->topLevel();
+    assert_true($root !== null);
+    $row = $document->children($root)[0] ?? null;
+    assert_true($row !== null);
+    assert_eq(
+        ['site-title', 'navigation'],
+        array_map(
+            static fn (int $index): string => $document->name($index),
+            $document->children($row),
+        ),
+        'source and visual order are repaired together',
+    );
+    assert_eq(
+        $result['markup'],
+        HeaderHeroStep::fixHeader(
+            $result['markup'],
+            AboveFoldContract::MODE_STACKED,
+            'Atelier',
+            ['Home', 'Menu', 'Visit'],
+            false,
+            'standard-row',
+            pages: header_nav_pages(),
+        )['markup'],
+        'reverse-order repair reaches a fixed point',
+    );
+});
+
+test('HeaderNav keeps split root identity pieces together when inserting navigation', function () {
+    $markup = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:site-logo /-->'
+        . '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">'
+        . '<!-- wp:site-title /--><!-- wp:site-tagline /-->'
+        . '</div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->';
+
+    $result = HeaderNav::withCompleteInnerPages($markup, header_nav_pages());
+    $document = BlockMarkup::parse($result['markup']);
+    $root = $document->topLevel();
+    assert_true($root !== null);
+    $row = $document->children($root)[0] ?? null;
+    assert_true($row !== null);
+    assert_eq('flex', ($document->attrs($row) ?? [])['layout']['type'] ?? null);
+    assert_eq(
+        ['group', 'navigation'],
+        array_map(
+            static fn (int $index): string => $document->name($index),
+            $document->children($row),
+        ),
+        'all identity pieces form the start-side lockup',
+    );
+    $identity = $document->children($row)[0];
+    $identityEnd = $document->endOffset($identity);
+    assert_true($identityEnd !== null);
+    $identityMarkup = substr(
+        $result['markup'],
+        $document->openingOffset($identity),
+        $identityEnd - $document->openingOffset($identity),
+    );
+    assert_contains('wp:site-logo', $identityMarkup);
+    assert_contains('wp:site-title', $identityMarkup);
+    assert_contains('wp:site-tagline', $identityMarkup);
+    assert_true(!str_contains($identityMarkup, 'wp:navigation'));
+});
+
+test('HeaderNav keeps the complete branded identity together when repairing an existing navigation row', function () {
+    $markup = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:site-logo /-->'
+        . '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">'
+        . '<!-- wp:site-title /--><!-- wp:site-tagline /-->'
+        . '</div><!-- /wp:group -->'
+        . '<!-- wp:navigation -->'
+        . '<!-- wp:navigation-link {"label":"Menu","url":"/menu/","kind":"custom"} /-->'
+        . '<!-- wp:navigation-link {"label":"Visit","url":"/visit/","kind":"custom"} /-->'
+        . '<!-- /wp:navigation -->'
+        . '</div><!-- /wp:group -->';
+
+    $result = HeaderNav::withSingleRowForArchetype($markup, 'branded-lockup');
+    $document = BlockMarkup::parse($result['markup']);
+    $root = $document->topLevel();
+    assert_true($root !== null);
+    assert_eq(1, count($document->children($root)), 'the shell contains only the repaired row');
+    $row = $document->children($root)[0];
+    assert_eq(
+        ['group', 'navigation'],
+        array_map(
+            static fn (int $index): string => $document->name($index),
+            $document->children($row),
+        ),
+        'the whole branded identity is one start-side unit beside navigation',
+    );
+    $identity = $document->children($row)[0];
+    $identityEnd = $document->endOffset($identity);
+    assert_true($identityEnd !== null);
+    $identityMarkup = substr(
+        $result['markup'],
+        $document->openingOffset($identity),
+        $identityEnd - $document->openingOffset($identity),
+    );
+    assert_contains('wp:site-logo', $identityMarkup);
+    assert_contains('wp:site-title', $identityMarkup);
+    assert_contains('wp:site-tagline', $identityMarkup);
+    assert_eq(
+        $result['markup'],
+        HeaderNav::withSingleRowForArchetype($result['markup'], 'branded-lockup')['markup'],
+        'the complete branded-row repair reaches a fixed point',
+    );
+});
+
+test('HeaderNav keeps an allowed CTA inside a repaired complete header row', function () {
+    $markup = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:site-title /-->'
+        . '<!-- wp:navigation -->'
+        . '<!-- wp:navigation-link {"label":"Menu","url":"/menu/","kind":"custom"} /-->'
+        . '<!-- /wp:navigation -->'
+        . '<!-- wp:buttons --><div class="wp-block-buttons">'
+        . '<!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link" href="/visit/">Visit</a></div><!-- /wp:button -->'
+        . '</div><!-- /wp:buttons -->'
+        . '</div><!-- /wp:group -->';
+
+    $result = HeaderNav::withSingleRowForArchetype($markup, 'standard-row');
+    $document = BlockMarkup::parse($result['markup']);
+    $root = $document->topLevel();
+    assert_true($root !== null);
+    assert_eq(1, count($document->children($root)), 'the shell contains only the repaired row');
+    $row = $document->children($root)[0];
+    assert_eq('flex', ($document->attrs($row) ?? [])['layout']['type'] ?? null);
+    assert_eq('nowrap', ($document->attrs($row) ?? [])['layout']['flexWrap'] ?? null);
+    assert_eq(
+        ['site-title', 'navigation', 'buttons'],
+        array_map(
+            static fn (int $index): string => $document->name($index),
+            $document->children($row),
+        ),
+        'the CTA remains a sibling in the single header row',
+    );
+    assert_eq(
+        $result['markup'],
+        HeaderNav::withSingleRowForArchetype($result['markup'], 'standard-row')['markup'],
+        'the CTA row repair reaches a fixed point',
+    );
+});
+
+test('HeaderNav preserves and warns on an unknown complete-header sibling', function () {
+    $markup = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:site-title /-->'
+        . '<!-- wp:navigation -->'
+        . '<!-- wp:navigation-link {"label":"Menu","url":"/menu/","kind":"custom"} /-->'
+        . '<!-- /wp:navigation -->'
+        . '<!-- wp:paragraph --><p>Unclassified header content</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->';
+
+    $result = HeaderNav::withSingleRowForArchetype($markup, 'standard-row');
+
+    assert_eq($markup, $result['markup'], 'an unknown sibling is preserved byte-for-byte');
+    assert_eq([], $result['notes']);
+    assert_eq(1, count($result['warnings']), 'the unproven row is durable');
+    assert_contains('delivered=unchanged', $result['warnings'][0]);
+});
+
+test('HeaderNav leaves an unterminated raw nav unchanged and warns instead of adding another', function () {
+    $markup = '<!-- wp:site-title /--><nav aria-label="Primary"><a href="/menu/">Menu</a>';
+
+    $result = HeaderNav::withCompleteInnerPages($markup, header_nav_pages());
+
+    assert_eq($markup, $result['markup'], 'unproven raw nav bytes are preserved');
+    assert_eq([], $result['notes']);
+    assert_eq(1, substr_count(strtolower($result['markup']), '<nav'), 'no second navigation is added');
+    assert_eq(1, count($result['warnings']), 'the retained defect is durable');
+    assert_contains("block='nav'", $result['warnings'][0]);
+    assert_contains('delivered=unchanged', $result['warnings'][0]);
+});

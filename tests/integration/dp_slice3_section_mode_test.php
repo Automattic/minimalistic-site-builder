@@ -111,7 +111,7 @@ function dp3_integration_preview(): string
         . '<meta name="viewport" content="width=device-width, initial-scale=1">'
         . '<style>:root{--content-size:800px;--wide-size:1280px;--ink:#192126;--paper:#f7f4ed}'
         . 'body{margin:0;color:var(--ink);background:var(--paper);font-family:Arial,sans-serif}'
-        . 'header{display:flex;flex-direction:row;align-items:center;justify-content:space-between}'
+        . 'header{display:flex;flex-direction:row;flex-wrap:nowrap;align-items:center;justify-content:space-between}'
         . 'h1,h2{font-family:Georgia,serif}</style></head><body>'
         . '<header><a class="brand" href="/">Northstar Studio</a>'
         . '<nav aria-label="Primary"><a href="/about/">About</a></nav></header>'

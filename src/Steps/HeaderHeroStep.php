@@ -672,6 +672,13 @@ final class HeaderHeroStep implements Step
         array_push($notes, ...$complete['notes']);
         array_push($warnings, ...$complete['warnings']);
 
+        // Completeness does not prove placement: a generated nav can contain
+        // every page while remaining a second row under the identity.
+        $row = HeaderNav::withSingleRowForArchetype($markup, $archetype);
+        $markup = $row['markup'];
+        array_push($notes, ...$row['notes']);
+        array_push($warnings, ...$row['warnings']);
+
         // Strictly after the Home strip: consolidation COPIES nav items, and a
         // copy taken first would carry a Home item — or a whole page-list the
         // strip is about to replace with inner-page links — into the collapsed

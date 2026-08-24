@@ -13,6 +13,10 @@ test('design-preview extracts byte-faithful CSS from the actual head style', fun
     $project->writeJson('siteSpec.json', [
         'name' => 'Hearth & Crumb',
         'description' => 'Neighborhood bread and pastry studio',
+        'pages' => [
+            ['slug' => 'home', 'title' => 'Home'],
+            ['slug' => 'menu', 'title' => 'Menu'],
+        ],
     ]);
     $project->writeJson('designDirection.json', [
         'direction' => [
@@ -23,7 +27,7 @@ test('design-preview extracts byte-faithful CSS from the actual head style', fun
 
     $css = "\r\n\t:root { --content-size: 800px; --wide-size: 1280px; }\n"
         . "body { margin: 0; }\r\n"
-        . "header { display: flex; flex-direction: row; align-items: center; justify-content: space-between; }\n"
+        . "header { display: flex; flex-direction: row; flex-wrap: nowrap; align-items: center; justify-content: space-between; }\n"
         . "body::before { content: \"<style>RAW-TEXT-BAIT\"; }\n ";
     $preview = '<!doctype html><html lang="en">'
         . '<head data-style-bait="<style>ATTRIBUTE-BAIT</style>">'
@@ -31,7 +35,7 @@ test('design-preview extracts byte-faithful CSS from the actual head style', fun
         . '<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">'
         . '<style>' . $css . '</style></head><body>'
         . '<header><a class="site-identity" href="/">Hearth &amp; Crumb</a>'
-        . '<nav aria-label="Primary"><a href="/menu">Menu</a></nav></header>'
+        . '<nav aria-label="Primary"><a href="/menu/">Menu</a></nav></header>'
         . '<main><section id="hero"><h1>Fresh bread</h1>'
         . '<img alt="AI_IMAGE: A baker sliding a sourdough loaf into a stone oven, viewed from counter height | homepage hero beside the primary headline | photorealistic | landscape">'
         . '</section></main></body></html>';
