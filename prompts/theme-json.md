@@ -40,7 +40,7 @@ Design intelligence to encode as tokens:
   Mid-tone `secondary`/`accent` hexes (relative luminance ~0.2–0.4) fail against BOTH light and dark backgrounds — push each palette color decisively light or decisively dark.
 - **Layout widths.** `contentSize` 800–900px (comfortable reading — NOT 640), `wideSize` 1200–1400px.
 - **Shape.** When the DESIGN DIRECTION carries a **Shape** fact, the build executes it as one authoritative corner language for contained media and buttons: `sharp` removes the `core/image` radius and gives buttons `0`; `soft` gives both `0.5rem`; `round` gives `core/image` `1.25rem` and buttons `9999px`; contained `core/cover` and `core/media-text` media pick up the same committed radius from a build-owned stylesheet. Never restate or reset any build-owned radius in a theme.json `css` string or structured style that targets `core/image` media, buttons, `core/cover`, or `core/media-text`: this includes `all`, `styles.blocks["core/button"]`, nested `elements.button`, block variations, and responsive or interaction states. Generic card/group geometry is outside this commitment and may keep a site-specific radius; express it with that component's structured block style instead of broad custom CSS that also reaches images or buttons. Without a Shape fact, make no media- or button-radius choice at all.
-- **Atmosphere.** Where it fits the direction, prefer gradient meshes, layered transparencies and dramatic shadows over flat solids; decorative borders are NOT an atmosphere tool. Expose these so sections can use them: define a few `settings.color.gradients` (give slugs derived from your palette) and a couple of `settings.shadow.presets` the sections can reference. Shadow presets style media, cards, and cover surfaces — never text: do not design presets meant for headings or copy (misregistration/echo offsets, text outlines); on a text block a box-shadow renders as stray bars and the build strips it.
+- **Atmosphere.** The DESIGN DIRECTION's **Depth** fact owns elevation: the build publishes one `depth` shadow preset and applies it deterministically to card shells and contained media, so do not author shadow presets or block-level shadows here. A gradient is optional atmosphere, not required inventory: define at most one `settings.color.gradients` preset only when the committed direction genuinely calls for that specific gradient; otherwise omit the array. Decorative borders are NOT an atmosphere tool.
 
 Build-supplied wiring — do not emit it:
 
@@ -60,8 +60,8 @@ Hard requirements — follow exactly so downstream templates can rely on the slu
     "secondary" = supporting color (metadata, captions)
     "accent"    = CTAs / interaction
   Give each a human "name".
-- settings.color.gradients: a small array of named gradient presets (slug + name + gradient) built from the palette, for section backgrounds/atmosphere.
-- settings.shadow.presets: a small array of named shadow presets (slug + name + shadow) sections can apply for depth.
+- settings.color.gradients is OPTIONAL: when the committed direction explicitly needs a gradient, define at most ONE named preset (slug + name + gradient) built from the palette; otherwise omit it.
+- Do NOT emit settings.shadow.presets. The build injects exactly one `depth` preset from the committed **Depth** fact and owns its consumers.
 - settings.typography.fluid: true.
 - settings.typography.fontSizes: the 6-step scale above (each entry { "slug", "name", "size" }) using EXACTLY the slugs caption / body / lead / heading / section-title / display — sections reference the steps by these exact slugs.
 - settings.typography.fontFamilies: an array with the heading and body slugs, plus an optional accent slug ONLY when the design-direction Type fact names `type.accent.family`:

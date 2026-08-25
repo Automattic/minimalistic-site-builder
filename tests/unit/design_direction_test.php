@@ -70,6 +70,7 @@ function designdir_direction(): array
         'type'             => designdir_type(),
         'image_grade'      => 'warm kodachrome color, soft golden light',
         'card_style'       => 'framed',
+        'depth'            => 'soft',
         'hero_blueprint'   => HeroBlueprint::defaultFor('editorial-split'),
     ];
 }
@@ -137,6 +138,7 @@ test('design-direction expands a picked seed into structured designDirection.jso
     assert_eq([700, 900], $written['type']['heading']['weights']);
     assert_eq('warm kodachrome color, soft golden light', $written['image_grade']);
     assert_eq('framed', $written['card_style']);
+    assert_eq('soft', $written['depth']);
     assert_true(!array_key_exists('signature_device', $written), 'signature_device field is gone');
     assert_true(in_array($written['hero_blueprint']['recipe'], HeroComposition::RECIPES, true));
     assert_contains('Seed ', $written['concept_seed']);
@@ -157,7 +159,7 @@ test('design-direction expands a picked seed into structured designDirection.jso
     assert_contains('cozy neighborhood bakery', $llm->calls[1]['prompt']);
     assert_contains('Hearth & Crumb', $llm->calls[1]['prompt']);
     assert_contains('Seed ', $llm->calls[1]['prompt'], 'a seed reached the expansion prompt');
-    foreach (['palette', 'type', 'image_grade', 'card_style', 'hero_blueprint'] as $field) {
+    foreach (['palette', 'type', 'image_grade', 'card_style', 'depth', 'hero_blueprint'] as $field) {
         assert_contains($field, $llm->calls[1]['prompt']);
     }
     assert_contains(
@@ -187,7 +189,7 @@ test('design-direction persists an unmappable motion-note warning and reaches a 
 
     $written = $project->readJson('designDirection.json');
     assert_eq([], $written['motion_note']);
-    foreach (['title', 'palette', 'image_grade', 'card_style'] as $sibling) {
+    foreach (['title', 'palette', 'image_grade', 'card_style', 'depth'] as $sibling) {
         assert_eq($authored[$sibling], $written[$sibling], "{$sibling} survives motion-note removal");
     }
     foreach (['heading', 'body'] as $face) {
@@ -1017,6 +1019,53 @@ test('format renders the card treatment with its executable meaning', function (
     assert_eq('Just prose.', DesignDirectionStep::format(['description' => 'Just prose.']));
 });
 
+test('normalize commits every bounded depth and warns on an unsupported treatment', function () {
+    $base = [
+        'description' => 'x',
+        'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
+    ];
+    foreach (['flat', 'soft', 'hard-offset', 'inset', 'glow'] as $depth) {
+        $warnings = [];
+        $direction = DesignDirectionStep::normalize(
+            $base + ['depth' => strtoupper($depth)],
+            'cinematic-safe-zone',
+            '',
+            warnings: $warnings,
+        );
+        assert_eq($depth, $direction['depth']);
+        assert_eq([], $warnings, $depth);
+    }
+
+    $warnings = [];
+    $direction = DesignDirectionStep::normalize(
+        $base + ['depth' => 'floaty'],
+        'cinematic-safe-zone',
+        '',
+        warnings: $warnings,
+    );
+    assert_eq('flat', $direction['depth']);
+    assert_contains('field depth', $warnings[0]);
+    assert_contains('authored "floaty"', $warnings[0]);
+    assert_contains('delivered "flat"', $warnings[0]);
+    assert_contains('disposition ', $warnings[0]);
+});
+
+test('format renders depth as an executable build-owned fact', function () {
+    foreach ([
+        'flat' => 'deliberately shadowless',
+        'soft' => 'restrained, diffuse lift',
+        'hard-offset' => 'poster-like offset plate',
+        'inset' => 'presses cards and contained media',
+        'glow' => 'primary-colored luminous halo',
+    ] as $depth => $meaning) {
+        $rendered = DesignDirectionStep::format(['description' => 'x', 'depth' => $depth]);
+        assert_contains("**Depth**: {$depth}", $rendered);
+        assert_contains($meaning, $rendered);
+        assert_contains('do not add another shadow', $rendered);
+    }
+    assert_eq('Just prose.', DesignDirectionStep::format(['description' => 'Just prose.']));
+});
+
 test('normalize commits a shape while valid normalization and a missing field stay silent', function () {
     $base = [
         'description' => 'x',
@@ -1221,6 +1270,7 @@ test('fallbackDirection builds on the chosen seed, generic brief otherwise', fun
     $generic = DesignDirectionStep::fallbackDirection('', 'cinematic-safe-zone');
     assert_contains('bold', $generic['description']);
     assert_eq('calm', $generic['motion']);
+    assert_eq('flat', $generic['depth']);
 });
 
 test('design-direction throws when meta prompt missing', function () {
@@ -1686,6 +1736,21 @@ test('shapeFor returns only an explicit valid commitment', function () {
 
     $project->writeJson('designDirection.json', ['description' => 'x', 'shape' => ' Round ']);
     assert_eq('round', DesignDirectionStep::shapeFor($project));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('depthFor returns only an explicit valid commitment', function () {
+    $tmp = sys_get_temp_dir() . '/builder_dddepth_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+
+    assert_eq(null, DesignDirectionStep::depthFor($project));
+    $project->writeJson('designDirection.json', ['description' => 'x']);
+    assert_eq(null, DesignDirectionStep::depthFor($project), 'pre-field direction stays uncommitted');
+    $project->writeJson('designDirection.json', ['description' => 'x', 'depth' => ['soft']]);
+    assert_eq(null, DesignDirectionStep::depthFor($project), 'garbled value is not guessed');
+    $project->writeJson('designDirection.json', ['description' => 'x', 'depth' => ' Hard-Offset ']);
+    assert_eq('hard-offset', DesignDirectionStep::depthFor($project));
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
