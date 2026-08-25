@@ -61,7 +61,7 @@ final class SiteSpecStep implements Step
     private const EMAIL_DOMAIN = '/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/';
 
     /** Extra keys whose values are contact facts, not identity or copy. */
-    private const CONTACT_KEY = '/(?:e-?mails?|phones?|telephones?|mobiles?|tels?|whatsapp|fax|address(?:es)?|streets?|urls?|websites?|instagram|twitter|facebook|linkedin|social)/i';
+    private const CONTACT_KEY = '/(?<![a-z])(?:e-?mails?|phones?|telephones?|mobiles?|tels?|whatsapp|fax(?:es)?|address(?:es)?|streets?|urls?|websites?|instagram|twitter|facebook|linkedin|social)(?![a-z])/i';
 
     /** Internal artifact basenames that generated page slugs must not claim. */
     private const RESERVED_PAGE_SLUGS = ['preview'];
@@ -166,13 +166,20 @@ final class SiteSpecStep implements Step
             }
         }
 
+        // Contact facts are grounded in what the USER wrote. refine-prompt runs
+        // immediately before this step and replaces meta's `prompt` with its own
+        // rewrite, so grounding against that would let a contact detail refine
+        // invented vouch for itself. `original_prompt` is absent only when no
+        // refinement happened, and `prompt` is then the raw input.
+        $statedPrompt = (string) ($meta['original_prompt'] ?? $prompt);
+
         $spec = self::normalize(
             $spec,
             $multiPage,
             $requested,
             $warnings,
             self::nameFromPrompt($prompt),
-            $prompt,
+            $statedPrompt,
             array_key_exists('site_spec', $meta),
         );
         $spec['writing_direction'] = $callerWritingDirection
@@ -271,7 +278,7 @@ final class SiteSpecStep implements Step
         array $requested = [],
         array &$warnings = [],
         string $fallbackName = 'New Site',
-        string $prompt = '',
+        string $statedPrompt = '',
         bool $hostSupplied = false,
     ): array {
         $name = trim((string) ($spec['name'] ?? ''));
@@ -358,7 +365,7 @@ final class SiteSpecStep implements Step
             $warnings[] = "site spec \"email_domain\" is not a usable domain: {$domain}; "
                 . 'dropped rather than inventing one';
             $domain = '';
-        } elseif ($domain !== '' && !$hostSupplied && !self::promptStatesDomain($prompt, $domain)) {
+        } elseif ($domain !== '' && !$hostSupplied && !self::promptStatesDomain($statedPrompt, $domain)) {
             $warnings[] = 'site spec "email_domain" was not stated in the prompt; dropped';
             $domain = '';
         } elseif ($domain !== '' && $hostSupplied && in_array('email_domain', $rawInvented, true)) {
@@ -369,7 +376,7 @@ final class SiteSpecStep implements Step
         $spec['invented'] = array_values(array_unique($invented));
 
         if (!$hostSupplied) {
-            $spec = self::scrubUngroundedContact($spec, $prompt, $warnings);
+            $spec = self::scrubUngroundedContact($spec, $statedPrompt, $warnings);
         }
 
         return $spec;
@@ -384,7 +391,7 @@ final class SiteSpecStep implements Step
      * @param list<string> $warnings
      * @return array<mixed>
      */
-    private static function scrubUngroundedContact(array $spec, string $prompt, array &$warnings): array
+    private static function scrubUngroundedContact(array $spec, string $statedPrompt, array &$warnings): array
     {
         $reserved = [
             'name' => true,
@@ -410,7 +417,7 @@ final class SiteSpecStep implements Step
             if (isset($reserved[(string) $key])) {
                 continue;
             }
-            $cleaned = self::scrubContactNode($value, (string) $key, $prompt, (string) $key, $warnings);
+            $cleaned = self::scrubContactNode($value, (string) $key, $statedPrompt, (string) $key, $warnings);
             if ($cleaned === null) {
                 unset($spec[$key]);
             } else {
@@ -426,30 +433,50 @@ final class SiteSpecStep implements Step
     private static function scrubContactNode(
         mixed $value,
         string $key,
-        string $prompt,
+        string $statedPrompt,
         string $path,
         array &$warnings,
     ): mixed {
         if (is_array($value)) {
+            $wasList = array_is_list($value);
+            $hadEntries = $value !== [];
             foreach ($value as $childKey => $child) {
                 $childPath = is_int($childKey) ? $path . '[]' : $path . '.' . $childKey;
-                $cleaned = self::scrubContactNode($child, (string) $childKey, $prompt, $childPath, $warnings);
+                // A list item inherits its parent's key: "address": ["24 Market
+                // Street"] is as much a street as "address": "24 Market Street".
+                $childName = is_int($childKey) ? $key : (string) $childKey;
+                $cleaned = self::scrubContactNode($child, $childName, $statedPrompt, $childPath, $warnings);
                 if ($cleaned === null) {
                     unset($value[$childKey]);
                 } else {
                     $value[$childKey] = $cleaned;
                 }
             }
-            return $value === [] ? null : $value;
+            // Reindex: dropping a middle item would otherwise turn the list
+            // into a JSON object keyed by the surviving offsets.
+            if ($wasList) {
+                $value = array_values($value);
+            }
+            // Only an array the scrub emptied is dropped; one that arrived
+            // empty is not a contact fact and keeps its key.
+            return $hadEntries && $value === [] ? null : $value;
         }
         if (!is_string($value)) {
+            // A phone emitted as a JSON number is still a phone, but only its key
+            // can say so — a bare number carries no contact shape of its own.
+            if ((is_int($value) || is_float($value)) && preg_match(self::CONTACT_KEY, $key) === 1
+                && !self::promptContains($statedPrompt, (string) $value)
+            ) {
+                $warnings[] = "site spec \"{$path}\" was not stated in the prompt; dropped";
+                return null;
+            }
             return $value;
         }
         $text = trim($value);
         if ($text === '' || !self::isContactShaped($key, $text)) {
             return $value;
         }
-        if (self::promptContains($prompt, $text)) {
+        if (self::promptContains($statedPrompt, $text)) {
             return $value;
         }
         $warnings[] = "site spec \"{$path}\" was not stated in the prompt; dropped";

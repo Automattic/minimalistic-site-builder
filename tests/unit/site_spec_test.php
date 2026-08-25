@@ -739,3 +739,111 @@ test('copy prompts never mint or invent contact details', function () {
         );
     }
 });
+
+test('site-spec grounds contact facts in the original prompt, not the refined rewrite', function () {
+    // refine-prompt replaces meta's `prompt` with its own rewrite immediately
+    // before this step, so a contact fact IT invented must not vouch for itself.
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    $meta = $project->readJson('meta.json');
+    $meta['original_prompt'] = 'A cozy neighborhood bakery';
+    $meta['prompt'] = 'A cozy neighborhood bakery. Reach the team at hello@hearthandcrumb.com.';
+    $project->writeJson('meta.json', $meta);
+    $llm->queueJson([
+        'name' => 'Hearth & Crumb',
+        'language' => 'en',
+        'email_domain' => 'hearthandcrumb.com',
+        'invented' => ['name'],
+        'email' => 'hello@hearthandcrumb.com',
+    ]);
+
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $spec = $project->readJson('siteSpec.json');
+    assert_eq('', $spec['email_domain'], 'the refined brief cannot ground a contact fact it invented');
+    assert_true(!isset($spec['email']), 'an email only the refined brief carries is dropped');
+    $joined = implode(' ', $project->readJson('warnings.json')['site-spec'] ?? []);
+    assert_contains('not stated in the prompt', $joined);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec keeps a contact fact the user stated even when refinement reworded around it', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    $meta = $project->readJson('meta.json');
+    $meta['original_prompt'] = 'A bakery. Email hello@hearthandcrumb.com.';
+    $meta['prompt'] = 'A warm neighborhood bakery serving naturally leavened bread and seasonal pastries.';
+    $project->writeJson('meta.json', $meta);
+    $llm->queueJson([
+        'name' => 'Hearth & Crumb',
+        'language' => 'en',
+        'email_domain' => 'hearthandcrumb.com',
+        'invented' => ['name'],
+        'email' => 'hello@hearthandcrumb.com',
+    ]);
+
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $spec = $project->readJson('siteSpec.json');
+    assert_eq('hearthandcrumb.com', $spec['email_domain']);
+    assert_eq('hello@hearthandcrumb.com', $spec['email']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec scrubs contact facts hiding in a list and reindexes what survives', function () {
+    // A list item carries no key of its own, so it inherits its parent's.
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    $meta = $project->readJson('meta.json');
+    $meta['prompt'] = 'A bakery at 24 Market Street, Portland.';
+    $project->writeJson('meta.json', $meta);
+    $llm->queueJson([
+        'name' => 'Hearth & Crumb',
+        'language' => 'en',
+        'address' => ['10 Elm Avenue', '24 Market Street'],
+        'phones' => ['+1 207 555 0100'],
+    ]);
+
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $spec = $project->readJson('siteSpec.json');
+    assert_eq(['24 Market Street'], $spec['address'], 'the unstated street is dropped and the list stays a list');
+    assert_true(!isset($spec['phones']), 'a phone stated nowhere is dropped even inside a list');
+    assert_contains(
+        '"address[]"',
+        implode(' ', $project->readJson('warnings.json')['site-spec'] ?? []),
+    );
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec scrubs a phone the model emitted as a JSON number', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    $llm->queueJson([
+        'name' => 'Hearth & Crumb',
+        'language' => 'en',
+        'phone' => 2075550100,   // a number, not a string
+        'members' => 1234567,    // a plain count under a non-contact key
+    ]);
+
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $spec = $project->readJson('siteSpec.json');
+    assert_true(!isset($spec['phone']), 'a numeric phone is still a phone');
+    assert_eq(1234567, $spec['members'], 'a bare number under a non-contact key is not a contact fact');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec keeps a numeric phone the prompt stated', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    $meta = $project->readJson('meta.json');
+    $meta['prompt'] = 'A bakery. Call 2075550100.';
+    $project->writeJson('meta.json', $meta);
+    $llm->queueJson(['name' => 'Hearth & Crumb', 'language' => 'en', 'phone' => 2075550100]);
+
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    assert_eq(2075550100, $project->readJson('siteSpec.json')['phone']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
