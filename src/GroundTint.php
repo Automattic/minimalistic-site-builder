@@ -75,12 +75,17 @@ final class GroundTint
         if ($rgb === null || !in_array($tint, self::ALL, true)) {
             return null;
         }
+        $groundKey = GroundKey::classify($hex);
         if (self::classify($hex) === $tint) {
             return self::toHex($rgb);
         }
         $target = ContrastMath::luminance($rgb);
         if ($tint === 'neutral') {
-            return self::toHex(self::atLuminance(0.0, 0.0, $target));
+            $candidate = self::toHex(self::atLuminance(0.0, 0.0, $target));
+            if ($groundKey !== null && GroundKey::classify($candidate) !== $groundKey) {
+                $candidate = GroundKey::move($candidate, $groundKey) ?? $candidate;
+            }
+            return $candidate;
         }
 
         // Chroma collapses toward the lightness extremes, so a faint ground
@@ -89,9 +94,20 @@ final class GroundTint
         // until it does, rather than returning a commitment in name only.
         [, $saturation] = self::toHsl($rgb);
         for ($try = 0; $try < 8; $try++) {
-            $out = self::atLuminance(self::CENTERS[$tint], min(1.0, $saturation), $target);
-            if (self::classify(self::toHex($out)) === $tint) {
-                return self::toHex($out);
+            $candidate = self::toHex(
+                self::atLuminance(self::CENTERS[$tint], min(1.0, $saturation), $target),
+            );
+            // Eight-bit rounding can put a color authored immediately beside
+            // the shared luminance split onto its other side. Restore that
+            // coordinate before accepting the hue-family repair.
+            if ($groundKey !== null && GroundKey::classify($candidate) !== $groundKey) {
+                $candidate = GroundKey::move($candidate, $groundKey) ?? $candidate;
+            }
+            if (
+                self::classify($candidate) === $tint
+                && ($groundKey === null || GroundKey::classify($candidate) === $groundKey)
+            ) {
+                return $candidate;
             }
             $saturation += 0.12;
         }
@@ -147,7 +163,10 @@ final class GroundTint
         $min = min($r, $g, $b);
         $lightness = ($max + $min) / 2;
         $chroma = $max - $min;
-        $saturation = $chroma === 0.0 || $lightness === 0.0 || $lightness === 1.0
+        // PHP preserves integer zero for `0 / 255`, so strict comparison with
+        // 0.0 misses exact black and divides by a zero HSL denominator. The
+        // bounds also cover exact white and any future rounding at an extreme.
+        $saturation = $chroma <= 0.0 || $lightness <= 0.0 || $lightness >= 1.0
             ? 0.0
             : $chroma / (1 - abs(2 * $lightness - 1));
         return [self::hue($rgb), $saturation, $lightness];
@@ -194,7 +213,7 @@ final class GroundTint
         [$r, $g, $b] = [$rgb[0] / 255, $rgb[1] / 255, $rgb[2] / 255];
         $max = max($r, $g, $b);
         $chroma = $max - min($r, $g, $b);
-        if ($chroma === 0.0) {
+        if ($chroma <= 0.0) {
             return 0.0;
         }
         $hue = match (true) {

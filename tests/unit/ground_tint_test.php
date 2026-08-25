@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\ContrastMath;
+use Automattic\SiteBuild\GroundKey;
 use Automattic\SiteBuild\GroundTint;
 
 test('GroundTint::classify names the hue family a ground leans toward', function () {
@@ -84,4 +85,19 @@ test('GroundTint::retint keeps a dark ground dark', function () {
 test('GroundTint::retint refuses a hex or family it cannot honor', function () {
     assert_eq(null, GroundTint::retint('nope', 'cool'));
     assert_eq(null, GroundTint::retint('#F4EBDA', 'chartreuse'));
+});
+
+test('GroundTint::retint degrades impossible luminance extremes without crashing', function () {
+    // A hue cannot be visible at zero or full luminance. These generated
+    // endpoints remain neutral instead of taking the build down while the
+    // light/dark key and tint checks execute together.
+    assert_eq(null, GroundTint::retint('#000000', 'warm'));
+    assert_eq(null, GroundTint::retint('#FFFFFF', 'cool'));
+});
+
+test('GroundTint::retint preserves the shared light-dark coordinate at its rounding boundary', function () {
+    $retinted = GroundTint::retint('#0098E0', 'green');
+
+    assert_eq('green', GroundTint::classify((string) $retinted));
+    assert_eq('dark', GroundKey::classify((string) $retinted));
 });
