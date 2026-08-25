@@ -271,11 +271,6 @@ final class DesignDirectionStep implements Step
             Narrator::write('  [design-direction] repaired ' . count($repairs)
                 . " generated direction field(s) (reported separately from durable warnings).\n");
         }
-        if ($warnings !== []) {
-            Narrator::write('  [design-direction] warning: delivered through ' . count($warnings)
-                . " generated-content degradation(s) (recorded in warnings.json)\n");
-        }
-
         // Naming the reflex faces in the prompt moved us off them and straight
         // onto the next tier — prose is a suggestion the model may decline.
         // This is the floor under it, and it runs here rather than in
@@ -295,6 +290,15 @@ final class DesignDirectionStep implements Step
         // here can be repaired deterministically (rewriting prose needs a
         // model), so this is rung 4: record it and continue.
         array_push($warnings, ...DirectionExecutability::problems($direction));
+
+        // Narrated HERE, after every source has contributed: font substitution
+        // and the executability walk both add warnings, and announcing the
+        // count before them printed no line at all for a build whose only
+        // durable warning came from one of the two.
+        if ($warnings !== []) {
+            Narrator::write('  [design-direction] warning: delivered through ' . count($warnings)
+                . " generated-content degradation(s) (recorded in warnings.json)\n");
+        }
 
         $report = [
             "Assigned hero recipe: {$recipe}",
