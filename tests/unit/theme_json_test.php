@@ -1643,9 +1643,9 @@ test('theme-json font-size repair preserves model sizes and fills each omission'
     $sizes = $theme['settings']['typography']['fontSizes'];
     assert_eq('1rem', theme_json_preset($sizes, 'caption')['size'], 'usable model size preserved');
     assert_eq(false, theme_json_preset($sizes, 'caption')['fluid'], 'model metadata preserved');
-    assert_eq('1.75rem', theme_json_preset($sizes, 'heading')['size'], 'unusable size refilled from the profile');
+    assert_eq('2rem', theme_json_preset($sizes, 'heading')['size'], 'unusable size refilled from the classic profile');
     assert_eq('9rem', theme_json_preset($sizes, 'poster')['size'], 'unrelated preset preserved');
-    assert_eq('clamp(3rem, 7vw, 6rem)', theme_json_preset($sizes, 'display')['size']);
+    assert_eq('clamp(2rem, 5vw, 4rem)', theme_json_preset($sizes, 'display')['size']);
     assert_eq(true, $theme['settings']['typography']['fluid'], 'sibling typography settings survive');
     assert_true($warnings !== [], 'every repair is warned');
 });
@@ -1678,7 +1678,7 @@ test('theme-json font-size repair rejects invalid CSS and duplicate slugs', func
     ]);
 
     $sizes = $theme['settings']['typography']['fontSizes'];
-    assert_eq('1.125rem', theme_json_preset($sizes, 'body')['size'], 'invalid required size replaced');
+    assert_eq('1rem', theme_json_preset($sizes, 'body')['size'], 'invalid required size replaced');
     assert_eq('1rem', theme_json_preset($sizes, 'caption')['size'], 'first valid duplicate wins');
     assert_eq(
         1,
@@ -1706,6 +1706,78 @@ test('theme-json font-size repair rejects invalid CSS and duplicate slugs', func
     [$fixedPoint, $fixedPointWarnings] = ThemeJsonStep::repairFontSizes($theme);
     assert_eq($theme, $fixedPoint, 'repair reaches a fixed point');
     assert_eq([], $fixedPointWarnings, 'fixed point produces no warnings');
+});
+
+test('committed type scale replaces model sizes exactly and reaches a fixed point', function () {
+    $authored = [
+        'settings' => ['typography' => [
+            'fluid' => true,
+            'fontSizes' => [
+                ['slug' => 'body', 'name' => 'Copied example', 'size' => '1.125rem'],
+                ['slug' => 'poster', 'name' => 'Invented extra', 'size' => '9rem'],
+            ],
+        ]],
+    ];
+
+    [$theme, $repairs] = ThemeJsonStep::applyTypeScale($authored, 'brutal');
+    $sizes = $theme['settings']['typography']['fontSizes'];
+    assert_eq(
+        ['caption', 'body', 'lead', 'heading', 'section-title', 'display'],
+        array_column($sizes, 'slug'),
+    );
+    assert_eq('1rem', theme_json_preset($sizes, 'body')['size']);
+    assert_eq('clamp(3.464rem, 12vw, 12rem)', theme_json_preset($sizes, 'display')['size']);
+    assert_eq([], theme_json_preset($sizes, 'poster'), 'model-invented steps are removed');
+    assert_eq(1, count($repairs));
+    assert_contains('committed "brutal" modular scale', $repairs[0]);
+
+    [$fixed, $fixedRepairs] = ThemeJsonStep::applyTypeScale($theme, 'brutal');
+    assert_eq($theme, $fixed);
+    assert_eq([], $fixedRepairs);
+});
+
+test('absent type-scale commitment leaves authored sizes byte-identical', function () {
+    $theme = ['settings' => ['typography' => ['fontSizes' => [
+        ['slug' => 'poster', 'name' => 'Poster', 'size' => '9rem'],
+    ]]]];
+    assert_eq([$theme, []], ThemeJsonStep::applyTypeScale($theme, null));
+});
+
+test('committed type scale replaces malformed typography containers atomically', function () {
+    foreach ([['settings' => 'broken'], ['settings' => ['typography' => 'broken']]] as $theme) {
+        [$delivered, $repairs] = ThemeJsonStep::applyTypeScale($theme, 'compact');
+        assert_eq(
+            'clamp(1.581rem, 4vw, 2.5rem)',
+            theme_json_preset($delivered['settings']['typography']['fontSizes'], 'display')['size'],
+        );
+        assert_eq(1, count($repairs));
+        assert_contains('disposition replaced model-authored scale', $repairs[0]);
+    }
+});
+
+test('theme-json writes the direction-committed scale and records the successful replacement', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_type_scale_write_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'An experimental theatre']);
+    $project->writeJson('siteSpec.json', ['name' => 'The Voltage']);
+    seed_test_design_direction($project, 'cinematic-safe-zone', ['type_scale' => 'dramatic']);
+
+    $llm = new FakeLlm();
+    $llm->queueJson(valid_theme_payload());
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $sizes = $project->readJson('theme/theme.json')['settings']['typography']['fontSizes'];
+    assert_eq('clamp(2.828rem, 9vw, 8rem)', theme_json_preset($sizes, 'display')['size']);
+    assert_contains(
+        'delivered committed "dramatic" modular scale',
+        $project->readText('logs/theme-json-direction-bind.txt'),
+    );
+    $warnings = $project->exists('warnings.json')
+        ? implode(' ', $project->readJson('warnings.json')['theme-json'] ?? [])
+        : '';
+    assert_true(!str_contains($warnings, 'fontSizes'), 'successful ownership replacement is not a defect');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
 });
 
 test('theme-json keeps an authored preset value when only its name is missing', function () {
@@ -2491,6 +2563,26 @@ test('theme-json request makes both committed shape radii build-owned', function
     assert_contains('Never restate or reset any build-owned radius', $prompt);
     assert_contains('in a theme.json `css` string or structured style', $prompt);
     assert_contains('block variations, and responsive or interaction states', $prompt);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json request delegates the committed type scale to the build', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_type_scale_prompt_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A brutalist music festival']);
+    $project->writeJson('siteSpec.json', ['name' => 'Noise Field']);
+    seed_test_design_direction($project, 'cinematic-safe-zone', ['type_scale' => 'brutal']);
+
+    $prompt = (new ThemeJsonStep(
+        new FakeLlm(),
+        new PromptRenderer(repo_path('prompts')),
+    ))->requests($project)['theme-json']['prompt'];
+
+    assert_contains('**Type scale**: brutal', $prompt);
+    assert_contains('Do not emit `settings.typography.fontSizes`', $prompt);
+    assert_true(!str_contains($prompt, '0.875rem / 1.125rem / 1.375rem'), 'copied example scale is gone');
+    assert_true(!str_contains($prompt, 'roughly 5–7rem'), 'model no longer chooses the display ceiling');
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
