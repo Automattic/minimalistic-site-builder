@@ -716,16 +716,21 @@ test('a kit class as an ANCESTOR removes only what can hide or animate', functio
     assert_eq(['opacity:0', 'margin-block:0'], $stagger);
 });
 
-test('a selector that EXCLUDES a kit class is not treated as targeting one', function () {
+test('excluded and relational kit references do not make the selected element kit-owned', function () {
     // `.card:not(.reveal-up)` deliberately excludes kit elements.
     [$out, $dropped] = CssChecks::dropMotionKitDeclarations('.card:not(.reveal-up){border:1px solid}');
     assert_eq([], $dropped);
     assert_eq('.card:not(.reveal-up){border:1px solid}', $out, 'byte-for-byte');
 
-    // But a hiding declaration under it is still removed, since the element
-    // can still sit inside a kit ancestor's scope.
-    [, $hides] = CssChecks::dropMotionKitDeclarations('.card:not(.reveal-up){opacity:0}');
-    assert_eq(['opacity:0'], $hides);
+    $excluded = '.card:not(.reveal-up){opacity:0}';
+    [$excludedOut, $excludedDrops] = CssChecks::dropMotionKitDeclarations($excluded);
+    assert_eq([], $excludedDrops, ':not() names what this selector cannot target');
+    assert_eq($excluded, $excludedOut, 'byte-for-byte');
+
+    $relational = '.shell:has(.reveal-up) .card{opacity:0}';
+    [$relationalOut, $relationalDrops] = CssChecks::dropMotionKitDeclarations($relational);
+    assert_eq([], $relationalDrops, ':has() selects a container, not the kit descendant');
+    assert_eq($relational, $relationalOut, 'byte-for-byte');
 });
 
 test('a kit ancestor loses a declaration that hides, judged by value not by name', function () {
