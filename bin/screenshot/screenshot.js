@@ -26,7 +26,9 @@
  *   --no-scroll      Skip the lazy-load scroll/wait (reproduces the old bug).
  *   --motion         Capture with prefers-reduced-motion: no-preference, i.e.
  *                    the branch real visitors get. Off by default; see the
- *                    reducedMotion note at the capture below.
+ *                    reducedMotion note at the capture below. Trades the
+ *                    default's freedom from reveal races for that coverage — a
+ *                    section caught mid-flight looks hidden.
  *   --chrome=<path>  Chrome/Chromium executable (or set CHROME/CHROME_BIN).
  *   --timeout=<ms>   Per-image load wait budget (default 15000).
  */

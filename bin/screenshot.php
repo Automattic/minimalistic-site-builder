@@ -32,6 +32,10 @@ use Automattic\SiteBuild\StudioCli;
  *                  motion otherwise, which switches off every rule inside
  *                  `@media (prefers-reduced-motion: no-preference)` and so
  *                  cannot photograph a defect that lives only there (BIGR-881).
+ *                  The reduced-motion default exists to stop the capture racing
+ *                  a scroll reveal, so a --motion shot can catch a section
+ *                  mid-flight: confirm a suspected hidden element against a
+ *                  default capture before treating one as evidence.
  *   --keep-alive   after the screenshot, leave the site running so it can be
  *                  inspected in a browser. Ctrl-C to stop (Playground); Studio
  *                  stays up until `php bin/serve.php <slug> --stop`.
