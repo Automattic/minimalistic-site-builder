@@ -757,11 +757,19 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         }
 
         $settings = is_array($theme['settings'] ?? null) ? $theme['settings'] : [];
-        $authored = is_array($settings['layout'] ?? null) ? $settings['layout'] : null;
-        $settings['layout'] = $widths;
+        $authored = is_array($settings['layout'] ?? null)
+            && (($settings['layout'] ?? []) === [] || !array_is_list($settings['layout']))
+                ? $settings['layout']
+                : null;
+        $layout = $authored ?? [];
+        $alreadyBound = array_key_exists('contentSize', $layout)
+            && array_key_exists('wideSize', $layout)
+            && $layout['contentSize'] === $widths['contentSize']
+            && $layout['wideSize'] === $widths['wideSize'];
+        $settings['layout'] = array_replace($layout, $widths);
         $theme['settings'] = $settings;
 
-        if ($authored === $widths) {
+        if ($alreadyBound) {
             return [$theme, []];
         }
         return [$theme, [

@@ -958,7 +958,10 @@ final class ThemeValidator
         $expectedWidths = $htmlFirst ? null : Measure::widths($measure);
         if ($expectedWidths !== null && $project->exists('theme/theme.json')) {
             $theme = $project->readJson('theme/theme.json');
-            $delivered = $theme['settings']['layout'] ?? null;
+            $layout = $theme['settings']['layout'] ?? null;
+            $delivered = is_array($layout)
+                ? array_intersect_key($layout, $expectedWidths)
+                : null;
             if ($delivered !== $expectedWidths) {
                 $warnings[] = 'theme.json settings.layout drifted from committed "' . $measure
                     . '" measure: expected ' . Warnings::value($expectedWidths)

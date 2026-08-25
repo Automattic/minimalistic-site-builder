@@ -36,6 +36,7 @@ test('layout warnings verify block-first measure and exempt HTML-first design wi
     [$project, $tmp] = validator_project();
     seed_test_design_direction($project, overrides: ['measure' => 'narrow']);
     [$theme] = ThemeJsonStep::applyMeasure(['version' => 3], 'narrow');
+    $theme['settings']['layout']['allowEditing'] = true;
     $project->writeJson('theme/theme.json', $theme);
 
     assert_true(

@@ -2594,14 +2594,14 @@ test('repairShapeWiring repairs authored cover and media-text corner styles with
 test('committed measure replaces model widths exactly and reaches a fixed point', function () {
     $authored = [
         'settings' => [
-            'layout' => ['contentSize' => '860px', 'wideSize' => '1320px', 'extra' => 'drop'],
+            'layout' => ['contentSize' => '860px', 'wideSize' => '1320px', 'allowEditing' => true],
             'spacing' => ['blockGap' => true],
         ],
     ];
 
     [$theme, $repairs] = ThemeJsonStep::applyMeasure($authored, 'full');
     assert_eq(
-        ['contentSize' => '1040px', 'wideSize' => '1760px'],
+        ['contentSize' => '1040px', 'wideSize' => '1760px', 'allowEditing' => true],
         $theme['settings']['layout'],
     );
     assert_eq(['blockGap' => true], $theme['settings']['spacing'], 'settings siblings survive');
@@ -2617,7 +2617,11 @@ test('measure binding is a no-op when absent and repairs malformed layout contai
     $legacy = ['settings' => ['layout' => ['contentSize' => '720px']]];
     assert_eq([$legacy, []], ThemeJsonStep::applyMeasure($legacy, null));
 
-    foreach ([['settings' => 'broken'], ['settings' => ['layout' => 'broken']]] as $theme) {
+    foreach ([
+        ['settings' => 'broken'],
+        ['settings' => ['layout' => 'broken']],
+        ['settings' => ['layout' => ['wide']]],
+    ] as $theme) {
         [$delivered, $repairs] = ThemeJsonStep::applyMeasure($theme, 'narrow');
         assert_eq(
             ['contentSize' => '640px', 'wideSize' => '1000px'],
