@@ -555,6 +555,21 @@ test('buttons beside a wide grid row match its edge too', function () {
     assert_contains('wp:buttons {"align":"wide"}', $r['markup'], 'buttons matched the grid edge');
 });
 
+test('centred buttons keep their own box beside a wide grid row', function () {
+    // A real band paired a centred heading with centred buttons: the copy stack
+    // was correctly skipped, and promoting the buttons alone widened a box whose
+    // content is deliberately centred. Their justification lives on the buttons
+    // block's own layout, where readsFromLeadingEdge cannot see it.
+    $extra = '<!-- wp:buttons {"layout":{"type":"flex","justifyContent":"center"}} --><div class="wp-block-buttons">'
+        . '<!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link">Go</a></div><!-- /wp:button -->'
+        . '</div><!-- /wp:buttons -->';
+    $r = LayoutFixer::fix(lf_band_with_grid('{"layout":{"type":"constrained"}}', $extra), LayoutFixer::ROLE_SECTION, 840.0);
+    // Read the buttons comment itself: "align" is appended after the layout
+    // key it already carries, so a fixed substring misses the promoted form.
+    preg_match('/<!-- wp:buttons[^>]*-->/', $r['markup'], $m);
+    assert_true(!str_contains($m[0] ?? '', '"align"'), 'centred buttons are left alone');
+    assert_contains('"justifyContent":"center"', $m[0] ?? '', 'and keep their justification');
+});
 test('centred copy keeps its own box beside a wide grid row', function () {
     // Centred text is placed on purpose; widening its box would only move the
     // whitespace around it, not line anything up.

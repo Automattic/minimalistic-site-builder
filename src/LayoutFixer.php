@@ -1357,6 +1357,9 @@ final class LayoutFixer
                     continue;
                 }
                 if (self::is($child, 'buttons')) {
+                    if (!self::buttonsRunFromLeadingEdge($child)) {
+                        continue;
+                    }
                     $child->attrs->align = $align;
                     $child->dirty = true;
                     $notes[] = "wp:buttons sat at the reading measure beside an align:{$align} grid row — matched it to the grid's edge";
@@ -1423,6 +1426,17 @@ final class LayoutFixer
             }
         }
         return true;
+    }
+
+    /**
+     * Buttons centred or pushed to the end are placed on purpose, the same way
+     * centred copy is. Their justification sits on the block's own layout
+     * rather than on its children, so readsFromLeadingEdge cannot see it.
+     */
+    private static function buttonsRunFromLeadingEdge(object $buttons): bool
+    {
+        $justify = self::layout($buttons)?->justifyContent ?? null;
+        return !is_string($justify) || ($justify !== 'center' && $justify !== 'right');
     }
 
     /** Append a class token, preserving any the block already carries. */
