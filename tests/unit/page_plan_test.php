@@ -263,12 +263,13 @@ test('PagePlanStep primary action validation preserves a valid exact visitor-fac
     assert_eq([], $mailWarnings);
 
     $domainMailWarnings = [];
-    assert_eq('mailto:reservations@example.com', PagePlanStep::normalizePrimaryAction([
+    assert_eq(null, PagePlanStep::normalizePrimaryAction([
         'label' => 'Reserve by email',
         'intent' => 'Open a reservation message at the committed site domain.',
         'destination' => 'mailto:reservations@example.com',
-    ], true, $context, $domainMailWarnings)['destination']);
-    assert_eq([], $domainMailWarnings);
+    ], true, $context, $domainMailWarnings), 'minting a local-part at email_domain is inventing an address');
+    assert_eq(1, count($domainMailWarnings));
+    assert_contains('spec-backed contact target', $domainMailWarnings[0]);
 });
 
 test('PagePlanStep primary action validation nulls the whole invalid action with actionable context', function () {
@@ -1595,7 +1596,6 @@ test('PagePlanStep::recoverSections preserves the page when generated repair rep
         actionContext: [
             'page_paths' => ['/' => true, '/menu/' => true],
             'contact_destinations' => [],
-            'email_domains' => [],
             'planned_anchors' => [
                 '/menu/' => ['menu-hero' => true, 'menu-closing' => true],
             ],
@@ -1853,7 +1853,6 @@ test('normalize rejects every CTA fragment form that names no planned section (B
             actionContext: [
                 'page_paths' => ['/' => true],
                 'contact_destinations' => [],
-                'email_domains' => [],
                 'planned_anchors' => [],
             ],
             pageSlug: 'home',
@@ -1872,7 +1871,6 @@ test('normalize rejects every CTA fragment form that names no planned section (B
     $actionContext = [
         'page_paths' => ['/' => true, '/menu/' => true],
         'contact_destinations' => [],
-        'email_domains' => [],
         'planned_anchors' => ['/menu/' => ['menu-hero' => true, 'closing' => true]],
     ];
     $sections[0]['primary_action']['destination'] = '/menu/#signature';
@@ -2043,7 +2041,7 @@ test('contact-page emphasis is brief and purpose-led, not the 3-to-6 interior pa
 
     $noForm = PagePlanStep::emphasisFor($page, false);
     assert_true(!str_contains($noForm, 'JP_FORM'));
-    assert_contains('mailto', $noForm);
+    assert_contains('omit mailto/tel when none exist', $noForm);
 
     $programs = PagePlanStep::emphasisFor([
         'slug' => 'programs',

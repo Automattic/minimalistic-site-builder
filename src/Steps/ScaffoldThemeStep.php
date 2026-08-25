@@ -131,6 +131,15 @@ final class ScaffoldThemeStep implements Step
         .caption-text-base > figcaption { color: var(--wp--preset--color--base); }
         .caption-text-contrast > figcaption { color: var(--wp--preset--color--contrast); }
 
+        /* A section's copy stack widened to sit on the same edge as the grid
+           row below it (LayoutFixer marks it "copy-flush"). The group stays
+           constrained, so core still caps these children at contentSize; all
+           this undoes is core's auto side margins, which would centre that
+           cap in the wider box and leave the text floating again. */
+        .wp-block-group.copy-flush > * {
+            margin-inline-start: 0 !important;
+            margin-inline-end: auto !important;
+        }
         /* Equal-height, equal-width card rows (sections opt in via className="equal-cards"). */
         .equal-cards > .wp-block-column {
             display: flex;

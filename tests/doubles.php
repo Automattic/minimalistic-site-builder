@@ -53,8 +53,8 @@ function valid_theme_payload(): array
                 ['slug' => 'base', 'color' => '#fff', 'name' => 'Base'],
                 ['slug' => 'contrast', 'color' => '#111', 'name' => 'Contrast'],
                 ['slug' => 'primary', 'color' => '#2f6b4f', 'name' => 'Primary'],
-                ['slug' => 'secondary', 'color' => '#a7c4a0', 'name' => 'Secondary'],
-                ['slug' => 'accent', 'color' => '#d98c3f', 'name' => 'Accent'],
+                ['slug' => 'secondary', 'color' => '#4f6f48', 'name' => 'Secondary'],
+                ['slug' => 'accent', 'color' => '#8b5a2b', 'name' => 'Accent'],
             ]],
             'typography' => ['fontFamilies' => [
                 ['slug' => 'heading', 'fontFamily' => 'Fraunces, serif', 'name' => 'Heading'],

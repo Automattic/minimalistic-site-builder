@@ -60,9 +60,9 @@ When present, keep `label` to 1-80 Unicode grapheme clusters of plain text with 
 markup or control characters. Use that exact visitor-facing label; `intent` is
 non-empty plain-text planning context and must never become button copy;
 `destination` is also plain text. Never invent or guess a
-route, placeholder `#`, phone number, or external URL. A contact mailto may
-mint a short local part only at SITE SPEC's exact `email_domain`; never invent
-an alternate domain.
+route, placeholder `#`, phone number, or external URL. A contact mailto or
+tel: is valid only when that exact address or number appears in SITE SPEC.
+Never invent an email, street address, phone number, or URL.
 
 Layout archetypes (pick the one that best serves each section's content):
 - full-bleed-cover — a full-width cover image or gradient with overlaid text
@@ -95,7 +95,7 @@ author improvises:
 
 Rules:
 - LANGUAGE: every "title" and every copy point inside "content_notes" is written in {{language}} — section titles become on-page headings and the notes seed each section's copy, so a plan in the wrong language leaks into the page. "slug" and "type" are machine-facing identifiers and are ALWAYS plain English words in lowercase a-z ASCII, regardless of {{language}} — they are never rendered on the page.
-- IDENTITY: where the plan names the brand or the person, use the spec's `name` / `persona_name` exactly, and any planned email uses the spec's `email_domain` — never invent alternates.
+- IDENTITY: where the plan names the brand or the person, use the spec's `name` / `persona_name` exactly. Any planned email, phone, address, or URL must be an exact SITE SPEC value — never invent alternates, and never construct an address at `email_domain`.
 - A shop is a catalog: product cards, prices only when SITE SPEC supplies them, enquire. Never plan a cart, checkout, quantity field, or add-to-cart control. There is no cart backend.
 - THIS PAGE ONLY: plan only content that belongs here per this page's purpose and the SITE PAGES list. The purpose is the contract — do not pad a narrow page (contact, enquiry, hours) with homepage-style bands. Content that lives on a sibling page gets, at most, a teaser that links onward — "content_notes" may reference another page by its path ONLY when that exact path appears in SITE PAGES (e.g. "closes with a link to /menu/"). Never invent paths for pages that are not listed; on a one-page site, keep CTAs on-page (section anchors or same-page actions) instead of dead routes like /menu/ or /about/. Follow {{page_emphasis}} for section count: a contact page is 2 to 4 sections.
 - The FIRST section is the page-opening hero. In a plan with two or more sections, the LAST provides a strong closing next step, while every section between them carries the page's content. A one-section plan is necessarily the opening hero.

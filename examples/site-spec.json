@@ -10,10 +10,9 @@
     "language": "en",
     "writing_direction": "ltr",
     "persona_name": "",
-    "email_domain": "hearthandcrumb.com",
+    "email_domain": "",
     "invented": [
-        "name",
-        "email_domain"
+        "name"
     ],
     "visual_vibe": "warm and rustic",
     "subject_is_visual_work": false,
@@ -60,7 +59,6 @@
         }
     ],
     "location": {
-        "street": "24 Market Street",
         "city": "Portland",
         "region": "Maine"
     },

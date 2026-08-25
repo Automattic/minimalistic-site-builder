@@ -60,13 +60,14 @@ final class FooterComposition
         . 'A footer button may use one purposeful canonical SITE PAGES destination — '
         . 'the page holding what this site actually asks visitors to do next — '
         . 'but never a generic Home/back action merely to fill the design; '
-        . 'a spec-backed mailto: action is also valid.';
+        . 'a mailto: action is valid only for an exact email in SITE SPEC; omit it when the spec has none.';
 
     /** Footer utility/action behavior for a one-page site. */
     private const NAV_RULE_SINGLE = '- This site is ONE page: NEVER use `wp:page-list`, `href="/"`, or '
         . '`"url":"/"` in the footer because each is a self-link. Utility navigation may use only exact '
         . 'root-relative `/#anchor` destinations from the HOMEPAGE OUTLINE. A footer action may use one such real '
-        . 'section destination or a spec-backed mailto:; omit navigation/action entirely when neither exists. '
+        . 'section destination or a mailto: for an exact email in SITE SPEC; omit the mailto when the spec has none; '
+        . 'omit navigation/action entirely when neither a real destination nor a spec email exists. '
         . 'A `wp:site-title` block defaults to a homepage link, so every footer site-title MUST explicitly set '
         . '`"isLink":false`.';
 

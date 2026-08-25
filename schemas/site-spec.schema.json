@@ -84,18 +84,17 @@
         },
         "email_domain": {
             "type": "string",
-            "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$",
-            "description": "Lowercase bare domain used to construct contact email addresses; no @ sign or URL scheme."
+            "pattern": "^$|^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$",
+            "description": "Lowercase bare domain the user stated for contact; empty when none was given. Never invented. No @ sign or URL scheme."
         },
         "invented": {
             "type": "array",
-            "description": "Identity fields invented because the source prompt did not state them.",
+            "description": "Identity fields invented because the source prompt did not state them. Contact facts are never invented.",
             "items": {
                 "type": "string",
                 "enum": [
                     "name",
-                    "persona_name",
-                    "email_domain"
+                    "persona_name"
                 ]
             },
             "uniqueItems": true

@@ -33,7 +33,7 @@ Use the full outline to understand this section's position, neighboring sections
 
 {{section_slug}}
 
-Write specific visitor-facing copy grounded in the site spec, page spec, and section spec. Keep copy consistent across the full page outline. Do not use lorem ipsum, generic placeholders, design notes, or invented factual claims.
+Write specific visitor-facing copy grounded in the site spec, page spec, and section spec. Keep copy consistent across the full page outline. Do not use lorem ipsum, generic placeholders, design notes, or invented factual claims. Never invent an email, street address, phone number, or URL.
 
 LANGUAGE: write ALL visitor-facing copy — headings, body text, captions, list items, labels, button text, image alt text — in {{language}}. Do NOT mix languages; the only exceptions are proper nouns and the spec's verbatim identity values.
 

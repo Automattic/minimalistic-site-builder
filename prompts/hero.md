@@ -56,7 +56,7 @@ Rules:
 - Reference theme presets by slug. Mirror every saved HTML class/style in supported block attributes. Keep text readable against its actual surface and the exact protection tokens in the contract. Shadow presets go on media, cards, and cover surfaces ONLY — never on a heading or paragraph block: a box-shadow on a text block renders as stray bars around the copy, and a deterministic build step strips it.
 - Internal links use SITE PAGES paths or valid planned anchors exactly. No `href="#"`, invented route, form markup, script-capable markup, emoji, or placeholder UI.
 - Write all visitor-facing copy in {{language}} while preserving proper nouns and exact identity/action values.
-- Hard facts — dates, times, prices, street addresses, phone numbers, capacities — come only from the SITE SPEC, verbatim. Sections are authored independently, so an invented specific WILL contradict a sibling section. When the spec lacks the value, write copy that does not need it instead of inventing one.
+- Hard facts — dates, times, prices, street addresses, phone numbers, email addresses, URLs, capacities — come only from the SITE SPEC, verbatim. Never invent an email, street address, phone number, or URL. Sections are authored independently, so an invented specific WILL contradict a sibling section. When the spec lacks the value, write copy that does not need it instead of inventing one.
 
 Hero motion (optional; the DESIGN DIRECTION's Motion value is authoritative):
 - `none` means no motion classes; `minimal` permits only a quiet hover response. Otherwise, `hero-entrance` may appear once on the primary copy group, and `reveal-up` or `reveal-scale` may be used instead when that better fits the committed profile.
