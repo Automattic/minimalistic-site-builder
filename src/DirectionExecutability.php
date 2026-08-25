@@ -83,9 +83,9 @@ final class DirectionExecutability
         'filigree', 'rosette', 'rosettes', 'tendril', 'tendrils',
         'scrollwork', 'arabesque', 'arabesques', 'fleuron', 'fleurons',
         'curlicue', 'curlicues', 'damask', 'paisley', 'dingbat', 'dingbats',
-        'woodcut', 'woodcuts', 'linocut', 'linocuts', 'latticework',
+        'linocut', 'linocuts', 'latticework',
         'trellis', 'interlace', 'knotwork', 'fret', 'frets', 'fretwork',
-        'roundel', 'roundels', 'medallion', 'medallions',
+        'roundel', 'roundels',
         'cartouche', 'cartouches', 'fleur-de-lis', 'filagree',
     ];
 
@@ -95,13 +95,13 @@ final class DirectionExecutability
      * the page.
      */
     private const DECORATION_NOUNS = [
-        'ornament', 'ornaments', 'ornamentation', 'ornamental',
+        'ornament', 'ornaments', 'ornamentation',
         'motif', 'motifs', 'illustration', 'illustrations',
         'silhouette', 'silhouettes', 'emblem', 'emblems', 'insignia',
         'monogram', 'monograms', 'crest', 'crests', 'heraldry',
         'flourish', 'flourishes', 'lattice', 'wreath', 'wreaths',
-        'garland', 'garlands', 'vignette', 'vignettes', 'seal', 'seals',
-        'drawing', 'drawings', 'doodle', 'doodles',
+        'garland', 'garlands', 'vignette', 'vignettes',
+        'drawing', 'drawings',
     ];
 
     /** Says the thing was made by hand rather than composed from the kit. */
@@ -135,7 +135,7 @@ final class DirectionExecutability
 
     /**
      * How near a qualifier or placement phrase must sit to the noun it
-     * governs, in bytes. Anywhere-in-the-sentence was too loose once the
+     * governs, in characters. Anywhere-in-the-sentence was too loose once the
      * sentence is a 300-character clause chain.
      */
     private const GOVERNS_REACH = 60;
@@ -176,14 +176,16 @@ final class DirectionExecutability
             ? 'the direction committed no device, so the build ships no mark at all'
             : "the build ships one '{$device}' on at most one non-hero band";
 
-        return [
-            "file='designDirection.json'; path=\"description\"; authored="
-                . Warnings::value(implode(' | ', $found))
+        return array_map(
+            static fn (string $finding): string =>
+                "file='designDirection.json'; path=\"description\"; authored="
+                . Warnings::value($finding)
                 . '; delivered=not executed; disposition=the narrative promises drawn ornament that no'
                 . ' step can produce — the ornament vocabulary is ' . self::vocabulary() . ', and '
                 . $shipped . '. Every downstream design and section prompt receives this narrative as'
                 . ' the authoritative brief, so the delivered page is plainer than its own direction.',
-        ];
+            $found,
+        );
     }
 
     /**
@@ -199,9 +201,9 @@ final class DirectionExecutability
     {
         $found = [];
         foreach (self::sentences($description) as $sentence) {
-            $reason = self::promiseIn($sentence);
-            if ($reason !== null) {
-                $found[] = self::clip($sentence);
+            $match = self::promiseMatchIn($sentence);
+            if ($match !== null) {
+                $found[] = self::clip($sentence, $match['offset']);
             }
         }
         return $found;
@@ -215,10 +217,25 @@ final class DirectionExecutability
      */
     public static function promiseIn(string $sentence): ?string
     {
+        return self::promiseMatchIn($sentence)['reason'] ?? null;
+    }
+
+    /**
+     * The earliest unnegated promise in one sentence.
+     *
+     * Every occurrence is considered. A negated mention at the start of a
+     * sentence must not hide a later commitment in that same sentence.
+     *
+     * @return array{reason:string,offset:int,character:int}|null
+     */
+    private static function promiseMatchIn(string $sentence): ?array
+    {
+        $candidates = [];
         foreach (self::ORNAMENT_NOUNS as $noun) {
-            $at = self::wordPosition($sentence, $noun);
-            if ($at !== null && !self::negatedBefore($sentence, $at)) {
-                return $noun;
+            foreach (self::wordPositions($sentence, $noun) as $position) {
+                if (!self::negatedBefore($sentence, $position['offset'])) {
+                    $candidates[] = ['reason' => $noun] + $position;
+                }
             }
         }
 
@@ -226,21 +243,29 @@ final class DirectionExecutability
             self::positionsOf($sentence, self::DRAWN_QUALIFIERS),
             self::positionsOf($sentence, self::PLACEMENT_PHRASES),
         );
-        if ($governors === []) {
-            return null;
-        }
-        foreach (self::DECORATION_NOUNS as $noun) {
-            $at = self::wordPosition($sentence, $noun);
-            if ($at === null || self::negatedBefore($sentence, $at)) {
-                continue;
-            }
-            foreach ($governors as $governor) {
-                if (abs($governor - $at) <= self::GOVERNS_REACH) {
-                    return $noun;
+        if ($governors !== []) {
+            foreach (self::DECORATION_NOUNS as $noun) {
+                foreach (self::wordPositions($sentence, $noun) as $position) {
+                    if (self::negatedBefore($sentence, $position['offset'])) {
+                        continue;
+                    }
+                    foreach ($governors as $governor) {
+                        if (abs($governor['character'] - $position['character']) <= self::GOVERNS_REACH) {
+                            $candidates[] = ['reason' => $noun] + $position;
+                            break;
+                        }
+                    }
                 }
             }
         }
-        return null;
+        if ($candidates === []) {
+            return null;
+        }
+        usort(
+            $candidates,
+            static fn (array $a, array $b): int => $a['offset'] <=> $b['offset'],
+        );
+        return $candidates[0];
     }
 
     /**
@@ -275,27 +300,46 @@ final class DirectionExecutability
      */
     private static function wordPosition(string $sentence, string $word): ?int
     {
+        return self::wordPositions($sentence, $word)[0]['offset'] ?? null;
+    }
+
+    /**
+     * Every whole-word occurrence, with both byte and character offsets.
+     *
+     * Regex offsets are bytes; proximity is a prose relationship and must use
+     * characters so em dashes and curly quotes do not silently shrink the
+     * governor reach.
+     *
+     * @return list<array{offset:int,character:int}>
+     */
+    private static function wordPositions(string $sentence, string $word): array
+    {
         $pattern = '/(?<![\p{L}\p{N}_])' . preg_quote($word, '/') . '(?![\p{L}\p{N}_])/iu';
-        if (preg_match($pattern, $sentence, $m, PREG_OFFSET_CAPTURE) !== 1) {
-            return null;
+        if (preg_match_all($pattern, $sentence, $matches, PREG_OFFSET_CAPTURE) === false) {
+            return [];
         }
-        return $m[0][1];
+        $positions = [];
+        foreach ($matches[0] ?? [] as $match) {
+            $offset = (int) $match[1];
+            $positions[] = [
+                'offset' => $offset,
+                'character' => mb_strlen(substr($sentence, 0, $offset)),
+            ];
+        }
+        return $positions;
     }
 
     /**
      * Byte offsets of every one of these that appears in the sentence.
      *
      * @param list<string> $needles
-     * @return list<int>
+     * @return list<array{offset:int,character:int}>
      */
     private static function positionsOf(string $sentence, array $needles): array
     {
         $found = [];
         foreach ($needles as $needle) {
-            $at = self::wordPosition($sentence, $needle);
-            if ($at !== null) {
-                $found[] = $at;
-            }
+            array_push($found, ...self::wordPositions($sentence, $needle));
         }
         return $found;
     }
@@ -351,16 +395,21 @@ final class DirectionExecutability
      * which would silently replace the whole evidence string with nothing.
      * These narratives are full of em dashes and curly quotes.
      */
-    private static function clip(string $sentence): string
+    private static function clip(string $sentence, int $matchOffset): string
     {
-        $collapsed = preg_replace('/\s+/u', ' ', $sentence);
+        $length = mb_strlen($sentence);
+        $matchCharacter = mb_strlen(substr($sentence, 0, $matchOffset));
+        $start = max(0, $matchCharacter - 60);
+        $limit = 148;
+        $fragment = mb_substr($sentence, $start, $limit);
+        $collapsed = preg_replace('/\s+/u', ' ', $fragment);
         if (!is_string($collapsed)) {
-            $collapsed = (string) preg_replace('/\s+/', ' ', $sentence);
+            $collapsed = (string) preg_replace('/\s+/', ' ', $fragment);
         }
         $collapsed = trim($collapsed);
-        return mb_strlen($collapsed) > 150
-            ? mb_substr($collapsed, 0, 150) . '…'
-            : $collapsed;
+        return ($start > 0 ? '…' : '')
+            . $collapsed
+            . ($start + $limit < $length ? '…' : '');
     }
 
     /** The marks the build can actually draw, for the warning row. */

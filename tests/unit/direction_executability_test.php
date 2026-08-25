@@ -9,18 +9,15 @@ function de_direction(string $description, string $device = 'hairline-rule'): ar
     return ['description' => $description, 'device' => $device];
 }
 
-/** Every delivered demo direction, so the cohort result is locked by a test. */
+/** The reviewed delivered-demo cohort, pinned as repository test data. */
 function de_cohort(): array
 {
-    $directions = [];
-    foreach (glob(repo_path('projects') . '/*/designDirection.json') ?: [] as $file) {
-        $decoded = json_decode((string) file_get_contents($file), true);
-        if (is_array($decoded) && is_string($decoded['description'] ?? null)) {
-            $directions[basename(dirname($file))] = $decoded;
-        }
+    $path = dirname(__DIR__) . '/fixtures/direction-executability/cohort.json';
+    $decoded = json_decode((string) file_get_contents($path), true, 512, JSON_THROW_ON_ERROR);
+    if (!is_array($decoded)) {
+        throw new RuntimeException("Invalid direction-executability fixture: {$path}");
     }
-    ksort($directions);
-    return $directions;
+    return $decoded;
 }
 
 test('a narrative promising hand-drawn ornament is reported as a delivered defect', function () {
@@ -149,6 +146,12 @@ test('ordinary narrative language is never flagged', function () {
         'Photographs of hand-painted shopfronts line the alternating bands.',
         'Headlines feel like a hand-painted bakery transom, set in bands of warm mass.',
         'Cards are framed, echoing the hand-painted signs, with a 1px border on each frame.',
+        // Detector words with genuine non-ornament readings.
+        'Terracotta appears in rules, small ornamental marks, and section eyebrows.',
+        'A navy footer that lands like a seal at the base of the page.',
+        'Client faces appear as large circular portraits, a nod to enamel medallions.',
+        'A hand-drawn doodle vibe is suggested by the lettering.',
+        'Fraunces 500/600/700 for headings with its slightly soft, woodcut-ish terminals.',
     ] as $description) {
         assert_eq([], DirectionExecutability::problems(de_direction($description)), $description);
     }
@@ -215,6 +218,35 @@ test('one sentence is one finding, however many ornament words it holds', functi
     );
     assert_eq(2, count($two), 'two sentences, two findings');
     assert_contains('Filigree', $two[0], 'in source order');
+
+    $rows = DirectionExecutability::problems(de_direction(
+        'Filigree opens the page. Rosettes close it.'
+    ));
+    assert_eq(2, count($rows), 'each defective sentence gets its own actionable warning row');
+    assert_contains('Filigree', $rows[0]);
+    assert_contains('Rosettes', $rows[1]);
+});
+
+test('every same-sentence occurrence is judged independently', function () {
+    $row = DirectionExecutability::problems(de_direction(
+        'There is no ornament in the header, but every band seam carries hand-drawn ornament.'
+    ))[0] ?? '';
+    assert_contains('hand-drawn ornament', $row, 'the later promise is not hidden by the negated mention');
+});
+
+test('governor reach is measured in characters, not UTF-8 bytes', function () {
+    $description = 'A hand-drawn ' . str_repeat('—', 16) . ' motif opens each band.';
+    assert_true(
+        DirectionExecutability::problems(de_direction($description)) !== [],
+        'multibyte punctuation does not shrink the 60-character reach',
+    );
+});
+
+test('long findings quote the trigger instead of only the sentence opening', function () {
+    $description = str_repeat('A quiet introductory phrase fills this direction, ', 4)
+        . 'and filigree runs along every band edge.';
+    $row = DirectionExecutability::problems(de_direction($description))[0] ?? '';
+    assert_contains('filigree', $row, 'the authored evidence includes the word that triggered the warning');
 });
 
 test('an empty or absent narrative is silent', function () {
@@ -229,9 +261,7 @@ test('the delivered demo cohort holds its measured verdict', function () {
     // synthetic case measures that. Update the lists deliberately, never by
     // accident.
     $cohort = de_cohort();
-    if ($cohort === []) {
-        return; // a checkout with no built demos has nothing to measure
-    }
+    assert_eq(24, count($cohort), 'the committed cohort is complete and cannot pass vacuously');
 
     $expected = [
         'naturaleza3' => true,  // hand-drawn botanical illustrations off band edges
@@ -251,8 +281,9 @@ test('the delivered demo cohort holds its measured verdict', function () {
 
     foreach (array_keys($expected) as $slug) {
         assert_true(isset($cohort[$slug]), "cohort is missing {$slug}");
-        // Exactly one row per project: the operative sentence, not three
-        // overlapping windows onto the same clause.
-        assert_eq(1, count(DirectionExecutability::problems($cohort[$slug])), "one row for {$slug}");
+        assert_true(
+            DirectionExecutability::problems($cohort[$slug]) !== [],
+            "at least one actionable row for {$slug}",
+        );
     }
 });
