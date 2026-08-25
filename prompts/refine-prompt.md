@@ -8,7 +8,7 @@ Your rewrite should:
 
 - Fix vague or one-word requests. If the prompt is short (e.g. "a bakery", "portfolio") or ambiguous, flesh it out into a concrete, buildable description: what the site is, who it's for, what it offers, and the overall vibe. Make reasonable, conventional assumptions for anything the user left unspecified.
 - PRESERVE every concrete fact the user gave — names, locations, hours, contact details, products/services, prices, taglines, colors or style words, requested sections, and any specific animation/motion behavior they asked for (keep such requests verbatim). For named pages, the page-scope rule above controls whether they remain separate destinations or become on-page sections; preserve their names and intended content either way. Never drop or contradict any other stated fact.
-- Do NOT invent specific unverifiable facts (real addresses, phone numbers, prices, dates, named people). Keep added detail generic and descriptive, not falsely precise.
+- Do NOT invent specific unverifiable facts (real addresses, phone numbers, email addresses, URLs, prices, dates, named people). Keep added detail generic and descriptive, not falsely precise. Never invent an email, street address, phone number, or URL.
 - Stay faithful to intent. A good rewrite is what the user *meant*, expanded — not a different site. Do not change the type of site, the topic, or the language.
 
 If the original prompt is already clear and detailed, keep its facts and wording essentially unchanged (light polish only) while applying the page-scope rule above.

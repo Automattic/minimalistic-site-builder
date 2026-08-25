@@ -85,6 +85,9 @@ function site_spec_tree_slugs(array $pages): array
 
 test('site-spec writes a factual, normalized siteSpec.json', function () {
     [$project, $llm, $tmp] = make_sitespec_fixture();
+    $meta = $project->readJson('meta.json');
+    $meta['prompt'] = 'A cozy neighborhood bakery at hearthandcrumb.com, open Tue–Sun 7am–3pm';
+    $project->writeJson('meta.json', $meta);
     $llm->queueJson([
         'name' => 'Hearth & Crumb',
         // slug intentionally omitted -> derived from name
@@ -95,7 +98,7 @@ test('site-spec writes a factual, normalized siteSpec.json', function () {
         'language' => 'en',
         'persona_name' => '',
         'email_domain' => 'HearthAndCrumb.com',          // must be lowercased
-        'invented' => ['name', 'email_domain', 'colors'], // unknown key must be dropped
+        'invented' => ['name', 'colors'],                // unknown key must be dropped
         'visual_vibe' => 'warm and rustic',
         'sections' => ['Hero', 'Menu', 'About', 'Visit'],
         // An extra factual field the user stated — must pass through.
@@ -112,8 +115,8 @@ test('site-spec writes a factual, normalized siteSpec.json', function () {
     assert_eq('warm and rustic', $spec['visual_vibe']);
     assert_eq('en', $spec['language']);
     assert_eq('ltr', $spec['writing_direction']);
-    assert_eq('hearthandcrumb.com', $spec['email_domain']);       // lowercased
-    assert_eq(['name', 'email_domain'], $spec['invented']);       // non-identity key dropped
+    assert_eq('hearthandcrumb.com', $spec['email_domain']);       // lowercased stated domain
+    assert_eq(['name'], $spec['invented']);                       // non-identity key dropped
     assert_true(is_array($spec['sections']));
     assert_eq('Hero', $spec['sections'][0]);
     assert_eq('Tue–Sun 7am–3pm', $spec['hours']);        // arbitrary fact preserved
@@ -124,7 +127,7 @@ test('site-spec writes a factual, normalized siteSpec.json', function () {
     assert_true(!isset($spec['layout']), 'no layout in factual spec');
 
     // The rendered prompt must carry the user's words.
-    assert_contains('cozy neighborhood bakery', $llm->calls[0]['prompt']);
+    assert_contains('hearthandcrumb.com', $llm->calls[0]['prompt']);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -142,14 +145,14 @@ test('site-spec fills missing fixed properties with empty strings', function () 
         assert_true(array_key_exists($key, $spec), "{$key} key present");
     }
     assert_eq([], $spec['sections']);
-    // A missing email_domain is derived from the slug and flagged as invented.
-    assert_eq('solo.com', $spec['email_domain']);
-    assert_eq(['email_domain'], $spec['invented']);
+    // A missing email_domain stays empty — never derived from the slug.
+    assert_eq('', $spec['email_domain']);
+    assert_eq([], $spec['invented']);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('site-spec derives email_domain from multi-word slug when implausible', function () {
+test('site-spec drops an implausible email_domain instead of inventing one', function () {
     [$project, $llm, $tmp] = make_sitespec_fixture();
     $llm->queueJson(['name' => 'Hearth & Crumb', 'language' => 'en', 'email_domain' => 'not a domain!']);
     $renderer = new PromptRenderer(repo_path('prompts'));
@@ -157,8 +160,91 @@ test('site-spec derives email_domain from multi-word slug when implausible', fun
     (new SiteSpecStep($llm, $renderer))->run($project);
 
     $spec = $project->readJson('siteSpec.json');
-    assert_eq('hearthcrumb.com', $spec['email_domain']); // slug minus hyphens
-    assert_eq(['email_domain'], $spec['invented']);
+    assert_eq('', $spec['email_domain']);
+    assert_eq([], $spec['invented']);
+    $joined = implode(' ', $project->readJson('warnings.json')['site-spec'] ?? []);
+    assert_contains('not a usable domain', $joined);
+    assert_contains('dropped rather than inventing one', $joined);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec drops an unflagged email_domain the prompt never stated', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    $llm->queueJson([
+        'name' => 'Hearth & Crumb',
+        'language' => 'en',
+        'email_domain' => 'hearthandcrumb.com',
+        'invented' => ['name'],
+        'email' => 'hello@hearthandcrumb.com',
+        'phone' => '+1 207 555 0100',
+        'website' => 'https://hearthandcrumb.com',
+        'location' => ['street' => '24 Market Street', 'city' => 'Portland'],
+    ]);
+    $renderer = new PromptRenderer(repo_path('prompts'));
+
+    (new SiteSpecStep($llm, $renderer))->run($project);
+
+    $spec = $project->readJson('siteSpec.json');
+    assert_eq('', $spec['email_domain'], 'a plausible domain still needs to appear in the prompt');
+    assert_true(!isset($spec['email']));
+    assert_true(!isset($spec['phone']));
+    assert_true(!isset($spec['website']));
+    assert_true(!isset($spec['location']['street']));
+    $joined = implode(' ', $project->readJson('warnings.json')['site-spec'] ?? []);
+    assert_contains('email_domain', $joined);
+    assert_contains('not stated in the prompt', $joined);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec keeps generated contact facts that the prompt stated', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    $meta = $project->readJson('meta.json');
+    $meta['prompt'] = 'A bakery. Email hello@hearthandcrumb.com or call +1 207 555 0100. '
+        . 'Site https://hearthandcrumb.com. 24 Market Street, Portland.';
+    $project->writeJson('meta.json', $meta);
+    $llm->queueJson([
+        'name' => 'Hearth & Crumb',
+        'language' => 'en',
+        'email_domain' => 'hearthandcrumb.com',
+        'invented' => ['name'],
+        'email' => 'hello@hearthandcrumb.com',
+        'phone' => '+1 207 555 0100',
+        'website' => 'https://hearthandcrumb.com',
+        'location' => ['street' => '24 Market Street', 'city' => 'Portland'],
+    ]);
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $spec = $project->readJson('siteSpec.json');
+    assert_eq('hearthandcrumb.com', $spec['email_domain']);
+    assert_eq('hello@hearthandcrumb.com', $spec['email']);
+    assert_eq('+1 207 555 0100', $spec['phone']);
+    assert_eq('https://hearthandcrumb.com', $spec['website']);
+    assert_eq('24 Market Street', $spec['location']['street']);
+    assert_eq('Portland', $spec['location']['city']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec drops an invented email_domain even when it looks valid', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    $llm->queueJson([
+        'name' => 'Hearth & Crumb',
+        'language' => 'en',
+        'email_domain' => 'hearthandcrumb.com',
+        'invented' => ['name', 'email_domain'],
+    ]);
+    $renderer = new PromptRenderer(repo_path('prompts'));
+
+    (new SiteSpecStep($llm, $renderer))->run($project);
+
+    $spec = $project->readJson('siteSpec.json');
+    assert_eq('', $spec['email_domain'], 'an invented domain is not a contact fact');
+    assert_eq(['name'], $spec['invented']);
+    $joined = implode(' ', $project->readJson('warnings.json')['site-spec'] ?? []);
+    assert_contains('email_domain', $joined);
+    assert_contains('not stated in the prompt', $joined);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -621,6 +707,213 @@ test('site-spec normalizes subject_is_visual_work to a strict boolean', function
         $llm->queueJson($payload);
         (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
         assert_eq($expected, $project->readJson('siteSpec.json')['subject_is_visual_work']);
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('copy prompts never mint or invent contact details', function () {
+    $files = [
+        'prompts/site-spec.md',
+        'prompts/refine-prompt.md',
+        'prompts/section.md',
+        'prompts/footer.md',
+        'prompts/page-plan.md',
+        'prompts/no-forms.md',
+        'prompts/hero.md',
+        'prompts/inner-page-design.md',
+        'prompts/homepage-design.md',
+        'prompts/home-body-design.md',
+        'prompts/inner-section-design.md',
+        'prompts/design-preview.md',
+    ];
+    foreach ($files as $file) {
+        $text = (string) file_get_contents(repo_path($file));
+        assert_contains(
+            'Never invent an email, street address, phone number, or URL',
+            $text,
+            $file,
+        );
+        assert_true(
+            !preg_match('/mint(?:ed| a short local part)/i', $text),
+            "{$file} must not tell the model to mint a contact address",
+        );
+    }
+});
+
+test('site-spec grounds contact facts in the original prompt, not the refined rewrite', function () {
+    // refine-prompt replaces meta's `prompt` with its own rewrite immediately
+    // before this step, so a contact fact IT invented must not vouch for itself.
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    $meta = $project->readJson('meta.json');
+    $meta['original_prompt'] = 'A cozy neighborhood bakery';
+    $meta['prompt'] = 'A cozy neighborhood bakery. Reach the team at hello@hearthandcrumb.com.';
+    $project->writeJson('meta.json', $meta);
+    $llm->queueJson([
+        'name' => 'Hearth & Crumb',
+        'language' => 'en',
+        'email_domain' => 'hearthandcrumb.com',
+        'invented' => ['name'],
+        'email' => 'hello@hearthandcrumb.com',
+    ]);
+
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $spec = $project->readJson('siteSpec.json');
+    assert_eq('', $spec['email_domain'], 'the refined brief cannot ground a contact fact it invented');
+    assert_true(!isset($spec['email']), 'an email only the refined brief carries is dropped');
+    $joined = implode(' ', $project->readJson('warnings.json')['site-spec'] ?? []);
+    assert_contains('not stated in the prompt', $joined);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec keeps a contact fact the user stated even when refinement reworded around it', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    $meta = $project->readJson('meta.json');
+    $meta['original_prompt'] = 'A bakery. Email hello@hearthandcrumb.com.';
+    $meta['prompt'] = 'A warm neighborhood bakery serving naturally leavened bread and seasonal pastries.';
+    $project->writeJson('meta.json', $meta);
+    $llm->queueJson([
+        'name' => 'Hearth & Crumb',
+        'language' => 'en',
+        'email_domain' => 'hearthandcrumb.com',
+        'invented' => ['name'],
+        'email' => 'hello@hearthandcrumb.com',
+    ]);
+
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $spec = $project->readJson('siteSpec.json');
+    assert_eq('hearthandcrumb.com', $spec['email_domain']);
+    assert_eq('hello@hearthandcrumb.com', $spec['email']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec scrubs contact facts hiding in a list and reindexes what survives', function () {
+    // A list item carries no key of its own, so it inherits its parent's.
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    $meta = $project->readJson('meta.json');
+    $meta['prompt'] = 'A bakery at 24 Market Street, Portland.';
+    $project->writeJson('meta.json', $meta);
+    $llm->queueJson([
+        'name' => 'Hearth & Crumb',
+        'language' => 'en',
+        'address' => ['10 Elm Avenue', '24 Market Street'],
+        'phones' => ['+1 207 555 0100'],
+    ]);
+
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $spec = $project->readJson('siteSpec.json');
+    assert_eq(['24 Market Street'], $spec['address'], 'the unstated street is dropped and the list stays a list');
+    assert_true(!isset($spec['phones']), 'a phone stated nowhere is dropped even inside a list');
+    assert_contains(
+        '"address[]"',
+        implode(' ', $project->readJson('warnings.json')['site-spec'] ?? []),
+    );
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec scrubs a phone the model emitted as a JSON number', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    $llm->queueJson([
+        'name' => 'Hearth & Crumb',
+        'language' => 'en',
+        'phone' => 2075550100,   // a number, not a string
+        'members' => 1234567,    // a plain count under a non-contact key
+    ]);
+
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $spec = $project->readJson('siteSpec.json');
+    assert_true(!isset($spec['phone']), 'a numeric phone is still a phone');
+    assert_eq(1234567, $spec['members'], 'a bare number under a non-contact key is not a contact fact');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec keeps a numeric phone the prompt stated', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    $meta = $project->readJson('meta.json');
+    $meta['prompt'] = 'A bakery. Call 2075550100.';
+    $project->writeJson('meta.json', $meta);
+    $llm->queueJson(['name' => 'Hearth & Crumb', 'language' => 'en', 'phone' => 2075550100]);
+
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    assert_eq(2075550100, $project->readJson('siteSpec.json')['phone']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec scrubs contact facts under camelCase keys', function () {
+    // Generated JSON spells one key three ways. The word boundaries that keep
+    // `tel` out of `hotel` must cut at a camelCase hump too.
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    $llm->queueJson([
+        'name' => 'Harbor House',
+        'language' => 'en',
+        'emailAddress' => 'hello@harborhouse.com',
+        'phoneNumber' => 2075550100,
+        'streetAddress' => '24 Market Street',
+        'whatsApp' => '+1 207 555 0111',
+        'hotelName' => 'The Harbor',   // `tel` inside `hotel` is not a phone
+        'memberCount' => 1234567,      // a plain count is not a contact fact
+    ]);
+
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $spec = $project->readJson('siteSpec.json');
+    foreach (['emailAddress', 'phoneNumber', 'streetAddress', 'whatsApp'] as $key) {
+        assert_true(!isset($spec[$key]), "{$key} was stated nowhere and must be dropped");
+    }
+    assert_eq('The Harbor', $spec['hotelName'], 'a word merely containing `tel` is not a contact key');
+    assert_eq(1234567, $spec['memberCount']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec keeps camelCase contact facts the prompt stated', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    $meta = $project->readJson('meta.json');
+    $meta['prompt'] = 'A shop. Email hello@harborhouse.com or call +1 207 555 0100.';
+    $project->writeJson('meta.json', $meta);
+    $llm->queueJson([
+        'name' => 'Harbor House',
+        'language' => 'en',
+        'emailAddress' => 'hello@harborhouse.com',
+        'phoneNumber' => '+1 207 555 0100',
+    ]);
+
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $spec = $project->readJson('siteSpec.json');
+    assert_eq('hello@harborhouse.com', $spec['emailAddress']);
+    assert_eq('+1 207 555 0100', $spec['phoneNumber']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec falls back to the prompt when original_prompt is unusable', function () {
+    // A blank or non-string original_prompt must not ground everything to
+    // nothing — that would scrub every contact fact the real prompt states.
+    foreach (['' => 'blank', '   ' => 'whitespace', 0 => 'non-string'] as $bad => $label) {
+        [$project, $llm, $tmp] = make_sitespec_fixture();
+        $meta = $project->readJson('meta.json');
+        $meta['prompt'] = 'A bakery. Email hello@hearthandcrumb.com.';
+        $meta['original_prompt'] = $bad === 0 ? ['not', 'a', 'string'] : $bad;
+        $project->writeJson('meta.json', $meta);
+        $llm->queueJson(['name' => 'Hearth & Crumb', 'language' => 'en', 'email' => 'hello@hearthandcrumb.com']);
+
+        (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+        assert_eq(
+            'hello@hearthandcrumb.com',
+            $project->readJson('siteSpec.json')['email'] ?? null,
+            "a {$label} original_prompt must fall back to the prompt, not scrub everything",
+        );
         exec('rm -rf ' . escapeshellarg($tmp));
     }
 });

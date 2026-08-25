@@ -188,19 +188,25 @@ test('siteSpec schema required fields match exhaustive normalization', function 
 });
 
 test('siteSpec schema invented enum matches the identities normalization can invent', function () {
-    // The schema's invented.items.enum and SiteSpecStep's identity handling are
-    // written by hand in two places. Same tripwire style as the required-fields
-    // test above: force every invention from an empty spec and check the schema
-    // admits exactly what normalization produced.
+    // The schema's invented.items.enum and SiteSpecStep's IDENTITY_KEYS are
+    // written by hand in two places. Normalization no longer invents anything
+    // on its own, so an empty spec can no longer enumerate them: compare the two
+    // hand-written lists directly, or a new identity key the schema never learned
+    // about goes unnoticed.
     $schema = site_spec_contract_object(Package::siteSpecSchemaPath());
     $allowed = $schema['properties']['invented']['items']['enum'];
 
+    $identityKeys = (new ReflectionClass(SiteSpecStep::class))->getConstant('IDENTITY_KEYS');
+    $sortedAllowed = $allowed;
+    sort($sortedAllowed);
+    sort($identityKeys);
+    assert_eq($sortedAllowed, $identityKeys, 'schema enum and IDENTITY_KEYS must list the same keys');
+
     site_spec_contract_normalized(multiPage: false, siteSpec: [], fn: function ($project) use ($allowed) {
-        $invented = $project->readJson('siteSpec.json')['invented'];
-        assert_true($invented !== [], 'an empty spec must invent identity fields');
-        foreach ($invented as $key) {
-            assert_true(in_array($key, $allowed, true), "schema enum is missing invented key '{$key}'");
-        }
+        $spec = $project->readJson('siteSpec.json');
+        assert_eq('', $spec['email_domain'], 'an empty spec must not invent a contact domain');
+        assert_true(!in_array('email_domain', $allowed, true), 'email_domain is a contact fact, not an inventable identity');
+        assert_eq([], $spec['invented'], 'an empty spec invents no identity of its own');
     });
 
     // Reverse direction: a spec claiming every enum key as invented must keep
@@ -222,6 +228,7 @@ test('siteSpec schema email_domain pattern agrees with normalization', function 
     $pattern = '/' . str_replace('/', '\\/', $schema['properties']['email_domain']['pattern']) . '/';
 
     $samples = [
+        ''                   => true,
         'valid-domain.com'   => true,
         'sub.valid.org'      => true,
         'Bad_Domain!'        => false,

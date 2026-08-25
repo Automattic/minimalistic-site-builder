@@ -17,8 +17,8 @@ Always include exactly these fixed properties:
   "audience": string,        // who the site is for
   "language": string,        // BCP-47 code (e.g. "en", "es-AR") — the language ALL site copy will be written in: the language the prompt above is WRITTEN in, UNLESS the user explicitly asks for the site in another language. NOT the language of the site's subject, location, or audience: an English prompt about an Argentinean photographer in Buenos Aires → "en", never "es"
   "persona_name": string,    // personal sites only (portfolio, CV, personal blog): the full name of the one person the site is about; "" for non-personal sites
-  "email_domain": string,    // domain for contact email addresses, derived from the name — lowercase, no "@" or scheme, e.g. "hearthandcrumb.com"
-  "invented": [string],      // which of "name" / "persona_name" / "email_domain" you invented rather than took from the prompt; [] if all were stated by the user
+  "email_domain": string,    // user-stated domain for contact — lowercase, no "@" or scheme; "" when the user stated none. NEVER invent one
+  "invented": [string],      // which of "name" / "persona_name" you invented rather than took from the prompt; [] if both were stated. NEVER invent email_domain or any other contact fact
   "visual_vibe": string,     // a SHORT descriptive phrase of the overall feeling, e.g. "warm and rustic", "clean and clinical" — a vibe, NOT concrete colors or fonts
   "subject_is_visual_work": boolean, // true ONLY when the site's core offering IS visual imagery — a photography, art, design, food, or architecture portfolio where the pictures are the product; false for everything else (a factual judgment about the subject, not a design choice)
   "animation_request": string, // VERBATIM any SPECIFIC animation/motion behavior the user explicitly asked for (e.g. "the logo should spin on hover", "typewriter effect on the headline"); "" when none — never invent one, and general mood words ("dynamic", "lively") do NOT count
@@ -33,11 +33,13 @@ Always include exactly these fixed properties:
   ]
 }
 
-**Identity is the one place you may — and must — invent.** The site needs exactly ONE coherent identity: masthead, hero, contact email, and footer copyright will all be generated from `name`, `persona_name`, and `email_domain`, so they must agree. When the prompt states a name, person, or domain, use it verbatim. When it doesn't, COMMIT to one invented identity that fits the topic and `language` — a short proper name (e.g. "Hearth & Crumb", "Mercedes Alcorta"), not a description of the site type — and list every key you invented in `invented` so the user can later be told to replace it. Never output a generic descriptor as `name`, and never invent more than one identity.
+**You may invent a brand or persona name. Never invent an email, street address, phone number, or URL.** The site needs exactly ONE coherent identity for masthead, hero, and footer copyright: `name` and `persona_name`. When the prompt states a name or person, use it verbatim. When it doesn't, COMMIT to one invented name that fits the topic and `language` — a short proper name (e.g. "Hearth & Crumb", "Mercedes Alcorta"), not a description of the site type — and list every name key you invented in `invented` so the user can later be told to replace it. Never output a generic descriptor as `name`, and never invent more than one identity.
+
+`email_domain` is a contact fact, not identity: set it only when the user stated a domain, otherwise "". Never construct a contact address, even at a stated domain.
 
 {{page_tree_rule}}
 
-Beyond these fixed properties, **add any additional factual fields the user actually stated or strongly implied** — for example business hours, location/address, phone, email, a product or service list, price ranges, social links, founding year, tagline. Preserve them as structured data (strings, arrays, or nested objects) under clearly named keys. Only include facts that are grounded in the prompt; apart from the identity fields above, do NOT invent specifics, and do NOT add design fields (colors, typography, layout, imagery).
+Beyond these fixed properties, **add any additional factual fields the user actually stated** — for example business hours, location/address, phone, email, a product or service list, price ranges, social links, founding year, tagline. Preserve them as structured data (strings, arrays, or nested objects) under clearly named keys. Only include facts that are grounded in the prompt; apart from inventing a missing `name` / `persona_name`, do NOT invent specifics, and do NOT add design fields (colors, typography, layout, imagery).
 
 A shop is a catalog storefront: product cards, prices only when the user supplied them, and a contact enquiry. Do NOT invent Cart, Checkout, Basket, or WooCommerce pages. The build has no cart backend.
 
