@@ -168,6 +168,27 @@ test('HeroUnit prompt bounds the standfirst without absorbing overflow', functio
     assert_true(!str_contains($prompt, 'fold it into the one standfirst'), 'the contradictory overflow option is absent');
 });
 
+test('HeroUnit prompt assigns the display token to every hero H1 recipe', function () {
+    $renderer = new PromptRenderer(repo_path('prompts'));
+
+    foreach (HeroComposition::RECIPES as $recipe) {
+        $prompt = (new HeroUnit(new FakeLlm(), $renderer))
+            ->request(hero_unit_contract_input($recipe));
+        $prompt = markup_request_text($prompt);
+
+        assert_contains('hero H1 always authors `"fontSize":"display"`', $prompt, "{$recipe} receives the masthead token contract");
+        assert_contains('one level-1 `wp:heading` with `"fontSize":"display"`', $prompt, "{$recipe} receives the exact H1 shape");
+        assert_true(
+            !str_contains($prompt, 'never the `display` preset'),
+            "{$recipe} does not contradict the display-token contract",
+        );
+        assert_true(
+            !str_contains($prompt, 'step down to the largest heading preset'),
+            "{$recipe} cannot author the cohort's section-title fallback",
+        );
+    }
+});
+
 test('HeroUnit prompt rejects generic headline registers without inventing differentiation', function () {
     $prompt = (new HeroUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts'))))
         ->request(hero_unit_contract_input());
