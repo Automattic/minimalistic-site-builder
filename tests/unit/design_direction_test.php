@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\JsonBatchRecovery;
+use Automattic\SiteBuild\GroundKey;
 use Automattic\SiteBuild\GroundTint;
 use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
@@ -547,15 +548,18 @@ test('normalize keeps valid palette hexes, drops invalid ones, and requires a de
     assert_eq(null, DesignDirectionStep::normalize('not an array', 'cinematic-safe-zone'));
 });
 
-test('format renders the ground tint as a fact, so downstream prompts can cite it', function () {
+test('format renders the ground key and tint as facts, so downstream prompts can cite them', function () {
     // theme-json.md tells the model a **Ground tint** fact may arrive. If
     // format() never emits one, that instruction describes something that
     // does not exist.
     $rendered = DesignDirectionStep::format([
         'description' => 'x',
         'palette'     => ['base' => '#1B2233'],
+        'ground_key'  => 'dark',
         'ground_tint' => 'cool',
     ]);
+    assert_contains('**Ground key**', $rendered);
+    assert_contains('dark', $rendered);
     assert_contains('**Ground tint**', $rendered);
     assert_contains('cool', $rendered);
 
@@ -563,9 +567,10 @@ test('format renders the ground tint as a fact, so downstream prompts can cite i
         !str_contains(DesignDirectionStep::format(['description' => 'x']), 'Ground tint'),
         'an uncommitted ground states nothing',
     );
+    assert_true(!str_contains(DesignDirectionStep::format(['description' => 'x']), 'Ground key'));
 });
 
-test('the seed and expansion prompts ask for the ground tint, and ban treatments not hues', function () {
+test('the seed and expansion prompts ask for both ground coordinates, and ban treatments not hues', function () {
     $renderer = new PromptRenderer(repo_path('prompts'));
 
     $seeds = $renderer->render('design-direction-seeds.md', [
@@ -578,9 +583,11 @@ test('the seed and expansion prompts ask for the ground tint, and ban treatments
 
     $direction = $renderer->render('design-direction.md', [
         'user_prompt' => 'a bakery', 'site_spec' => '{}', 'seed' => 'Seed',
-        'hero_composition' => '', 'ground_tint' => 'violet',
+        'hero_composition' => '', 'ground_key' => 'dark', 'ground_tint' => 'violet',
         'register' => 'editorial', 'type_register' => 'didone',
     ]);
+    assert_contains('ground_key', $direction, 'the expansion commits the light/dark field the build enforces');
+    assert_contains('dark', $direction, 'and is told which side the seed chose');
     assert_contains('ground_tint', $direction, 'the expansion commits the field the build enforces');
     assert_contains('violet', $direction, 'and is told which family the seed chose');
 
@@ -608,11 +615,88 @@ test('design-direction carries the chosen seed tint into the direction it writes
     (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
 
     $written = $project->readJson('designDirection.json');
+    assert_eq('light', $written['ground_key'], 'the seed light/dark coordinate reaches the written direction');
     assert_eq('cool', $written['ground_tint'], 'the seed coordinate reaches the written direction');
     assert_eq('cool', GroundTint::classify($written['palette']['base']), 'and the cream ground was moved onto it');
     assert_eq('#26221E', $written['palette']['contrast'], 'siblings are untouched');
+    assert_contains(
+        'seed already committed this: **light**',
+        $llm->calls[1]['prompt'],
+        'the expansion sees the selected seed ground instead of deciding it again',
+    );
 
     exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('normalize moves a base that contradicts the light or dark key its seed committed', function () {
+    foreach (
+        [
+            ['key' => 'dark', 'base' => '#F4EBDA', 'tint' => 'warm'],
+            ['key' => 'light', 'base' => '#1B2233', 'tint' => 'cool'],
+        ] as $case
+    ) {
+        $repairs = [];
+        $warnings = [];
+        $direction = DesignDirectionStep::normalize(
+            ['description' => 'x', 'palette' => ['base' => $case['base']]],
+            'cinematic-safe-zone',
+            'committed seed',
+            $repairs,
+            $warnings,
+            $case['tint'],
+            $case['key'],
+        );
+
+        assert_eq($case['key'], $direction['ground_key']);
+        assert_eq($case['key'], GroundKey::classify($direction['palette']['base']));
+        assert_eq($case['tint'], GroundTint::classify($direction['palette']['base']));
+        assert_contains('palette.base', $repairs[0]);
+        assert_contains('committed "' . $case['key'] . '" ground', $repairs[0]);
+
+        $fixedPointRepairs = [];
+        $fixedPointWarnings = [];
+        $again = DesignDirectionStep::normalize(
+            $direction,
+            'cinematic-safe-zone',
+            'committed seed',
+            $fixedPointRepairs,
+            $fixedPointWarnings,
+            $case['tint'],
+            $case['key'],
+        );
+        assert_eq($direction['palette']['base'], $again['palette']['base']);
+        assert_eq([], $fixedPointRepairs);
+        assert_eq([], $fixedPointWarnings);
+    }
+});
+
+test('normalize falls back to the direction own ground_key when the seed committed none', function () {
+    $repairs = [];
+    $warnings = [];
+    $direction = DesignDirectionStep::normalize(
+        ['description' => 'x', 'ground_key' => 'dark', 'palette' => ['base' => '#F4EBDA']],
+        'cinematic-safe-zone',
+        'seed without coordinates',
+        $repairs,
+        $warnings,
+    );
+    assert_eq('dark', $direction['ground_key']);
+    assert_eq('dark', GroundKey::classify($direction['palette']['base']));
+});
+
+test('normalize ignores a ground_key outside the vocabulary', function () {
+    $repairs = [];
+    $warnings = [];
+    $direction = DesignDirectionStep::normalize(
+        ['description' => 'x', 'ground_key' => 'dim', 'palette' => ['base' => '#F4EBDA']],
+        'cinematic-safe-zone',
+        '',
+        $repairs,
+        $warnings,
+    );
+    assert_eq('', $direction['ground_key']);
+    assert_eq('#F4EBDA', $direction['palette']['base']);
+    assert_eq([], $repairs);
 });
 
 test('normalize moves a base that drifted off the tint its seed committed', function () {

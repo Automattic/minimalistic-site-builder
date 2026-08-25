@@ -94,11 +94,7 @@ final class Surface
 
     public static function isDark(?string $hex): bool
     {
-        $rgb = ContrastMath::hexToRgb((string) $hex);
-        if ($rgb === null) {
-            return false;
-        }
-        return ContrastMath::luminance($rgb) < 0.28;
+        return GroundKey::classify((string) $hex) === 'dark';
     }
 
     /**
