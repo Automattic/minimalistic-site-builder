@@ -7,6 +7,7 @@ use Automattic\BlocksEngine\PhpTransformer\HtmlToBlocks\Style\CssValueSplitter;
 use Automattic\SiteBuild\BlockSerializer\Html\HtmlFragment;
 use Automattic\SiteBuild\BlockSerializer\Html\HtmlNode;
 use Automattic\SiteBuild\BlockSerializer\Html\Selector;
+use Automattic\SiteBuild\BoundedChoice;
 use Automattic\SiteBuild\CssTokenExtractor;
 use Automattic\SiteBuild\FontCatalog;
 use Automattic\SiteBuild\GeneratedJsonException;
@@ -146,23 +147,40 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         ['slug' => 'display', 'name' => 'Display', 'size' => 'clamp(3rem, 7vw, 6rem)'],
     ];
     /**
-     * One bounded spacing vocabulary for every generated site.
+     * Stable component spacing shared by every page density.
      *
      * xs is the tight intra-component text rhythm (an eyebrow/heading/line
      * stack inside one card or list row — BIGR-777). sm/md are component-level
-     * gaps. lg/xl/xxl are the compact, standard, and spacious section-padding
-     * choices. Their fluid ranges prevent the largest token from becoming
-     * fixed 128px padding on mobile or growing beyond 112px on wide screens.
-     *
      * @var list<array{slug: string, name: string, size: string}>
      */
-    private const SPACING_PROFILE = [
+    private const COMPONENT_SPACING_PROFILE = [
         ['slug' => 'xs', 'name' => 'Extra Small', 'size' => 'clamp(0.25rem, 0.5vw, 0.5rem)'],
         ['slug' => 'sm', 'name' => 'Small', 'size' => 'clamp(0.75rem, 1vw, 1rem)'],
         ['slug' => 'md', 'name' => 'Medium', 'size' => 'clamp(1.5rem, 2vw, 2rem)'],
-        ['slug' => 'lg', 'name' => 'Compact', 'size' => 'clamp(3rem, 4vw, 4rem)'],
-        ['slug' => 'xl', 'name' => 'Standard', 'size' => 'clamp(4rem, 6vw, 6rem)'],
-        ['slug' => 'xxl', 'name' => 'Spacious', 'size' => 'clamp(5rem, 7vw, 7rem)'],
+    ];
+
+    /**
+     * Density-owned section padding. lg/xl/xxl remain the compact, standard,
+     * and spacious semantic choices; only their physical breathing room moves.
+     *
+     * @var array<string,list<array{slug: string, name: string, size: string}>>
+     */
+    private const SECTION_SPACING_PROFILES = [
+        'airy' => [
+            ['slug' => 'lg', 'name' => 'Compact', 'size' => 'clamp(4rem, 6vw, 6rem)'],
+            ['slug' => 'xl', 'name' => 'Standard', 'size' => 'clamp(5rem, 8vw, 9rem)'],
+            ['slug' => 'xxl', 'name' => 'Spacious', 'size' => 'clamp(6rem, 10vw, 12rem)'],
+        ],
+        'measured' => [
+            ['slug' => 'lg', 'name' => 'Compact', 'size' => 'clamp(3rem, 4vw, 4rem)'],
+            ['slug' => 'xl', 'name' => 'Standard', 'size' => 'clamp(4rem, 6vw, 6rem)'],
+            ['slug' => 'xxl', 'name' => 'Spacious', 'size' => 'clamp(5rem, 7vw, 7rem)'],
+        ],
+        'dense' => [
+            ['slug' => 'lg', 'name' => 'Compact', 'size' => 'clamp(2.25rem, 3vw, 3rem)'],
+            ['slug' => 'xl', 'name' => 'Standard', 'size' => 'clamp(3rem, 4.5vw, 4.5rem)'],
+            ['slug' => 'xxl', 'name' => 'Spacious', 'size' => 'clamp(3.75rem, 5.5vw, 5.5rem)'],
+        ],
     ];
     /**
      * Build-supplied wiring the model no longer writes. It maps presets to
@@ -442,7 +460,10 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         $theme['$schema'] = 'https://schemas.wp.org/trunk/theme.json';
         $theme['version'] = 3;
         $theme = self::disableCoreDefaultPresets($theme);
-        $theme = self::normalizeSpacingSettings($theme);
+        $theme = self::normalizeSpacingSettings(
+            $theme,
+            DesignDirectionStep::densityFor($project),
+        );
         [$theme, $layoutWarnings] = self::normalizeLayoutWidths(
             $theme,
             $this->htmlFirst && $project->exists('design/site.css')
@@ -624,7 +645,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      * @param array<mixed> $theme
      * @return array<mixed>
      */
-    public static function normalizeSpacingSettings(array $theme): array
+    public static function normalizeSpacingSettings(array $theme, ?string $density = null): array
     {
         if (!isset($theme['settings']) || !is_array($theme['settings'])) {
             $theme['settings'] = [];
@@ -635,7 +656,11 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
 
         $theme['settings']['spacing']['blockGap'] = true;
         $theme['settings']['spacing']['defaultSpacingSizes'] = false;
-        $theme['settings']['spacing']['spacingSizes'] = self::SPACING_PROFILE;
+        $density = BoundedChoice::explicit($density, DesignDirectionStep::DENSITIES) ?? 'measured';
+        $theme['settings']['spacing']['spacingSizes'] = array_merge(
+            self::COMPONENT_SPACING_PROFILE,
+            self::SECTION_SPACING_PROFILES[$density],
+        );
 
         return $theme;
     }

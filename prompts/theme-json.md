@@ -71,14 +71,7 @@ Hard requirements — follow exactly so downstream templates can rely on the slu
   Each entry: { "fontFamily": "<stack>", "name": "...", "slug": "..." }.
   Pick REAL Google Fonts families spelled exactly (e.g. "Cormorant Garamond", "Source Serif 4", "Oswald", "Caveat") — the build enqueues them from Google Fonts automatically by name, so no fontFace/src is needed here. Just make the FIRST family in each stack the exact Google font name.
   Do not invent a fourth family. Without an accent Type fact, include EXACTLY heading and body.
-- settings.spacing: set `"blockGap": true` and include EXACTLY this bounded, responsive `spacingSizes` profile (the build normalizes it deterministically, so do not rename or rescale it):
-    `xs` — Extra Small — `clamp(0.25rem, 0.5vw, 0.5rem)`
-    `sm` — Small — `clamp(0.75rem, 1vw, 1rem)`
-    `md` — Medium — `clamp(1.5rem, 2vw, 2rem)`
-    `lg` — Compact — `clamp(3rem, 4vw, 4rem)`
-    `xl` — Standard — `clamp(4rem, 6vw, 6rem)`
-    `xxl` — Spacious — `clamp(5rem, 7vw, 7rem)`
-  Use xs for the tight typographic rhythm inside one component (an eyebrow/heading/line stack in a card or list row), sm/md for component gaps, and lg/xl/xxl for compact/standard/spacious section padding. Never replace these with fixed large values: the fluid bounds keep mobile padding proportional and cap a spacious desktop edge at 7rem.
+- settings.spacing: set `"blockGap": true`, but do not emit `spacingSizes`. The build supplies the bounded responsive `xs` / `sm` / `md` / `lg` / `xl` / `xxl` profile after this response. `xs`–`md` stay fixed for predictable component rhythm; the DESIGN DIRECTION's committed **Density** deterministically scales `lg` / `xl` / `xxl`, which remain the compact / standard / spacious section-padding roles. Do not invent, rename, or numerically rescale these presets.
 - styles.spacing.blockGap: a default vertical rhythm between sibling blocks, from the spacing scale (e.g. "var:preset|spacing|md") — a null blockGap makes WordPress skip ALL frontend block-gap CSS while the editor still previews it, so the two render different spacing.
 - NEVER set top/bottom padding in `styles.blocks["core/group"].spacing.padding`. Group is a recursive layout primitive, so that global selector pads every nested structural wrapper and compounds section-scale spacing inside headers, cards, and sections. Put vertical padding on the explicit section/component block that owns it; a deterministic page pass owns section-root rhythm.
 - styles.elements.button: background = accent (or primary), text = whichever of base/contrast reads ≥ 4.5:1 on that background, with padding but no borderRadius (the build owns it when Shape is committed). Also define the button's `:hover` state here (e.g. a decisively darkened/lightened background, or swap background↔text, keeping label contrast ≥ 4.5:1) — theme.json is the ONLY place button hover styling exists; per-block hover attributes in section markup do not work and must never be written there.

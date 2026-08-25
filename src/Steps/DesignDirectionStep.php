@@ -1223,7 +1223,7 @@ final class DesignDirectionStep implements Step
                 'measured' => 'an even, unhurried rhythm; standard throughout, with a spacious pause only where the composition needs one',
                 'dense'    => 'tightly packed; prefer compact wherever the content supports it and let content carry the page',
                 default    => 'the committed page density',
-            } . '.';
+            } . '. The build derives the lg/xl/xxl section-padding ramp from this commitment.';
         }
 
         // Render the shape commitment with its executable meaning. The build
@@ -1482,6 +1482,18 @@ final class DesignDirectionStep implements Step
             return null;
         }
         return self::explicitShape($project->readJson(self::FILE)['shape'] ?? null);
+    }
+
+    /** The persisted page density, measured when the artifact is absent/garbled. */
+    public static function densityFor(Project $project): string
+    {
+        if (!$project->exists(self::FILE)) {
+            return 'measured';
+        }
+        return BoundedChoice::explicit(
+            $project->readJson(self::FILE)['density'] ?? null,
+            self::DENSITIES,
+        ) ?? 'measured';
     }
 
     /**
