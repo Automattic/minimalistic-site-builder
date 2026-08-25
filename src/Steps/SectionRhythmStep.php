@@ -63,7 +63,12 @@ final class SectionRhythmStep implements Step
             $pageSlug = trim((string) ($page['slug'] ?? ''));
             try {
                 [$entries, $rels] = self::planEntries($project, $page);
-                $result = SectionRhythm::rewrite($entries, $footerSurface);
+                $result = SectionRhythm::rewrite(
+                    $entries,
+                    $footerSurface,
+                    DesignDirectionStep::deviceFor($project),
+                    self::footerMarkup($project),
+                );
             } catch (\RuntimeException|\InvalidArgumentException $e) {
                 $degradationWarnings[] = "page '{$pageSlug}': section rhythm skipped ({$e->getMessage()}); "
                     . 'authored section spacing delivered';
@@ -167,6 +172,14 @@ final class SectionRhythmStep implements Step
             $entries[] = self::entry($section, trim((string) ($section['slug'] ?? '')), $markups[$i]);
         }
         return $entries;
+    }
+
+    /** The footer part's markup, when it still exists at this point in the graph. */
+    public static function footerMarkup(Project $project): ?string
+    {
+        return $project->exists('theme/parts/footer.html')
+            ? $project->readText('theme/parts/footer.html')
+            : null;
     }
 
     /** The footer's seam-owning surface, when a footer part exists and supplies one. */
