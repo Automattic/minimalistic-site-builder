@@ -4359,6 +4359,16 @@ CSS;
         ) {
             return 'hides content';
         }
+        // validate() reports a fully-clipping clip-path, so the salvage pass
+        // must be able to remove one. Without this arm the declaration
+        // survived, re-validation failed again, and the ENTIRE appendix was
+        // dropped over one property (BIGR-887) — rung 3 asks for the smallest
+        // cut that isolates the defect.
+        if ($property === 'clip-path'
+            && CssChecks::hiddenContentProblems('a{clip-path:' . $value . '}') !== []
+        ) {
+            return 'hides content';
+        }
         return null;
     }
 

@@ -11,7 +11,7 @@ use Automattic\SiteBuild\StudioCli;
 /**
  * Build every demo website listed in eval/theme-prompts.json in one command.
  *
- *   php bin/build-demos.php [--with-images] [--html-first|--blocks-first] [--provider=<name>] [--no-screenshot] [--only=<slug>] [--parallel=<n>] [--serve] [--stop] [--port=<n>] [--file=<path>]
+ *   php bin/build-demos.php [--with-images] [--html-first|--blocks-first] [--provider=<name>] [--no-screenshot] [--motion] [--only=<slug>] [--parallel=<n>] [--serve] [--stop] [--port=<n>] [--file=<path>]
  *
  * Each entry in the prompts file becomes a project under projects/. If a folder
  * with that entry's slug already exists, a fresh sibling is created by appending
@@ -56,6 +56,13 @@ use Automattic\SiteBuild\StudioCli;
  *                   OpenRouter is bounded at 3).
  *   --screenshot    capture the post-build home-page screenshots (the default).
  *   --no-screenshot skip the post-build home-page screenshots.
+ *   --motion        capture those screenshots with prefers-reduced-motion:
+ *                   no-preference — the branch a default visitor gets. The
+ *                   capture emulates reduced motion otherwise, which switches
+ *                   off every rule inside
+ *                   `@media (prefers-reduced-motion: no-preference)`, so this
+ *                   cohort cannot photograph a defect that lives only there
+ *                   (BIGR-881 shipped exactly that way).
  *   --serve         after the batch, serve ALL built sites. Studio sites are
  *                   daemons: URLs print and the command returns. Playground
  *                   still blocks until Ctrl-C. Off by default.
@@ -98,11 +105,12 @@ $args = parse_cli_args($argv, [
     '--file'         => 'value',
     '--serve'        => 'toggle',
     '--screenshot'   => 'toggle',
+    '--motion'       => 'bool',
     '--stop'         => 'bool',
 ]);
 if ($args['unknown'] !== null) {
     fwrite(STDERR, "Unknown argument: {$args['unknown']}\n");
-    fwrite(STDERR, "Usage: php bin/build-demos.php [--html-first|--blocks-first] [--multi-page] [--pages=\"Home, Menu, About\"] [--with-images] [--only=<slug>] [--provider=anthropic|openai|xai|openrouter] [--parallel=<n>] [--no-screenshot] [--serve] [--stop] [--port=9400] [--no-serve] [--file=<path>]\n");
+    fwrite(STDERR, "Usage: php bin/build-demos.php [--html-first|--blocks-first] [--multi-page] [--pages=\"Home, Menu, About\"] [--with-images] [--only=<slug>] [--provider=anthropic|openai|xai|openrouter] [--parallel=<n>] [--no-screenshot] [--motion] [--serve] [--stop] [--port=9400] [--no-serve] [--file=<path>]\n");
     exit(1);
 }
 $flags = $args['flags'];
@@ -114,6 +122,7 @@ $pagesArg = $flags['--pages'] ?? null;
 $only = $flags['--only'] ?? null;
 $serve = $flags['--serve'] ?? false;
 $screenshot = $flags['--screenshot'] ?? true;
+$shotMotion = $flags['--motion'] ?? false;
 // 0 = provider-aware default (all entries; OpenRouter <= 3)
 $parallel = isset($flags['--parallel']) ? max(1, (int) $flags['--parallel']) : 0;
 $port = (int) ($flags['--port'] ?? 9400);
@@ -269,7 +278,8 @@ if ($screenshot && $built !== []) {
             'cmd'  => 'exec php ' . escapeshellarg(repo_path('bin/screenshot.php'))
                 . ' ' . escapeshellarg($b['slug'])
                 . ' --port=' . ($port + $i * PORT_STRIDE)
-                . ' --out=' . escapeshellarg($b['path'] . '/logs/home.png'),
+                . ' --out=' . escapeshellarg($b['path'] . '/logs/home.png')
+                . ($shotMotion ? ' --motion' : ''),
         ];
     }
     // The provider-aware OpenRouter cap protects LLM generation only. Keep

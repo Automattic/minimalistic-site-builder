@@ -189,6 +189,15 @@ test('custom-motion validate keeps the hidden-content and scoping rules', functi
             . "@keyframes custom-motion-out { from { opacity: 1; } to { opacity: 0; } }",
         'mid-keyframe zero opacity' => ".custom-motion { animation: custom-motion-blink 1s both; }\n"
             . "@keyframes custom-motion-blink { 0% { opacity: 1; } 50%, 100% { opacity: 0%; } }",
+        // Same shape spelled with clip-path. hiddenContentProblems() exempts
+        // every keyframe so an entrance may start clipped (BIGR-887), which
+        // leaves the parked LAST step to this walk alone.
+        'clip-path exit ends hidden' => ".custom-motion { animation: custom-motion-out 1s forwards; }\n"
+            . "@keyframes custom-motion-out { from { clip-path: inset(0); } to { clip-path: inset(0 0 100% 0); } }",
+        'clip-path parked by both'   => ".custom-motion { animation: custom-motion-iris 1s both; }\n"
+            . "@keyframes custom-motion-iris { from { clip-path: circle(100%); } to { clip-path: circle(0); } }",
+        'mid-keyframe full clip'     => ".custom-motion { animation: custom-motion-wink 1s both; }\n"
+            . "@keyframes custom-motion-wink { 0% { clip-path: inset(0); } 50%, 100% { clip-path: inset(100%); } }",
         'motion token override'     => ".custom-motion { --motion-hover-duration: 180ms; transform: none; }",
         'url()'                     => ".custom-motion { background: url(x.png); }",
         'image-set()'               => '.custom-motion { background-image: image-set("https://example.invalid/t.png" 1x); }',
@@ -210,6 +219,15 @@ test('custom-motion validate keeps the hidden-content and scoping rules', functi
     assert_eq([], CustomMotionStep::validate(
         ".custom-motion { animation: custom-motion-in 1s both; }\n"
         . "@keyframes custom-motion-in { 0% { opacity: 0; } 100% { opacity: 1; } }"
+    ));
+    // And so is a clip-path START — the wipe-in and the iris-in (BIGR-887).
+    assert_eq([], CustomMotionStep::validate(
+        ".custom-motion { animation: custom-motion-wipe 1s both; }\n"
+        . "@keyframes custom-motion-wipe { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0); } }"
+    ));
+    assert_eq([], CustomMotionStep::validate(
+        ".custom-motion { animation: custom-motion-iris 1s both; }\n"
+        . "@keyframes custom-motion-iris { 0% { clip-path: circle(0); } 100% { clip-path: circle(75%); } }"
     ));
 });
 
