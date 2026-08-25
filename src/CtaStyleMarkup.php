@@ -139,21 +139,25 @@ final class CtaStyleMarkup
 
             $authoredWidth = $attrs['width'] ?? null;
             $htmlWidths = self::ownHtmlWidthClassValues($doc, $i);
-            foreach ($htmlWidths as $width) {
+            $rootHtmlWidths = self::ownHtmlWidthClassValues($doc, $i, true);
+            $canonicalBlockHtml = $style === 'block'
+                && $htmlWidths === ['100']
+                && $rootHtmlWidths === ['100'];
+            foreach (array_values(array_unique($htmlWidths)) as $width) {
                 $token = 'wp-block-button__width-' . $width;
-                if ($style !== 'block' || $width !== '100') {
+                if (!$canonicalBlockHtml) {
                     $doc->removeClassTokenInOwnHtml($i, $token);
                 }
             }
             if ($style === 'block') {
-                if (!in_array('100', $htmlWidths, true)) {
+                if (!$canonicalBlockHtml) {
                     $doc->replaceClassTokenInOwnHtml(
                         $i,
                         'wp-block-button',
                         'wp-block-button wp-block-button__width-100',
                     );
                 }
-                if (array_key_exists('width', $attrs) || $htmlWidths !== ['100']) {
+                if (array_key_exists('width', $attrs) || !$canonicalBlockHtml) {
                     unset($attrs['width']);
                     $changed = true;
                     self::record(
@@ -294,21 +298,32 @@ final class CtaStyleMarkup
         return false;
     }
 
-    /** @return list<string> exact suffixes of every saved width class token */
-    private static function ownHtmlWidthClassValues(BlockMarkup $doc, int $i): array
+    /** @return list<string> exact suffixes of saved width class tokens, in appearance order */
+    private static function ownHtmlWidthClassValues(
+        BlockMarkup $doc,
+        int $i,
+        bool $rootOnly = false,
+    ): array
     {
         $values = [];
-        if (preg_match_all('/\bclass\s*=\s*(["\'])(.*?)\1/is', $doc->ownHtml($i), $matches) < 1) {
+        $html = $doc->ownHtml($i);
+        if ($rootOnly) {
+            if (preg_match('/<[a-z][^>]*>/i', $html, $root) !== 1) {
+                return [];
+            }
+            $html = $root[0];
+        }
+        if (preg_match_all('/\bclass\s*=\s*(["\'])(.*?)\1/is', $html, $matches) < 1) {
             return [];
         }
         foreach ($matches[2] as $classValue) {
             foreach (preg_split('/[\x20\t\r\n\f]+/', trim($classValue), -1, PREG_SPLIT_NO_EMPTY) ?: [] as $token) {
                 if (preg_match('/^wp-block-button__width-(.+)$/', $token, $width) === 1) {
-                    $values[$width[1]] = true;
+                    $values[] = $width[1];
                 }
             }
         }
-        return array_map(static fn (int|string $value): string => (string) $value, array_keys($values));
+        return $values;
     }
 
     /** @param list<array<mixed>> $changes */
