@@ -56,6 +56,25 @@ final class LayoutFixer
      */
     private const COVER_MEASURE_FLOOR = 0.8;
 
+    /**
+     * Above this the theme's contentSize is not itself a reading column:
+     * theme-json asks for 800-900px, but a viewport-fluid design preview
+     * derives it from the carrier instead and can land at the full 1366px
+     * reference viewport. Pinning copy to that reads worse than letting
+     * sections keep their own narrower measures, so the pass stands down.
+     */
+    private const READABLE_MEASURE_MAX = 900.0;
+
+    /**
+     * What a pure text stack is made of. prompts/section.md reserves the
+     * narrowed wrapper for these; anything else inside the group means the
+     * measure belongs to a component, not to the section's reading column.
+     */
+    private const TEXT_STACK_BLOCKS = [
+        'heading', 'paragraph', 'buttons', 'list', 'separator', 'spacer',
+        'site-title', 'site-tagline',
+    ];
+
     /** The role a theme file plays, from its path relative to the theme root. */
     public static function roleFor(string $rel): string
     {
@@ -138,6 +157,7 @@ final class LayoutFixer
         if ($pageWidth && !$htmlFirst) {
             self::freeGridsFromNarrowWrappers($roots, $notes);
             self::restoreCoverMeasure($all, $contentSize, $notes);
+            self::normalizeTextMeasure($all, $contentSize, $notes);
         }
         // Last: the rules above rewrite "align" attributes, and an align class
         // left behind in the saved HTML is not derivable from the new
@@ -1239,6 +1259,93 @@ final class LayoutFixer
             $node->dirty = true;
             $notes[] = "cover content was capped at {$size} — removed the override so it uses the theme's contentSize";
         }
+    }
+
+    /**
+     * One reading measure per site.
+     *
+     * prompts/section.md used to let a section wrap its copy in a group whose
+     * contentSize was anything at or below the theme's, and generations took
+     * that literally: one demo shipped 620px, 680px, 720px, 760px and the
+     * theme's own 840px across five pages, so the text column moved every
+     * time a section changed. The theme's contentSize is the reading measure
+     * already, so a text stack that restates it with a number of its own only
+     * drifts away from its neighbours.
+     *
+     * Hero copy keeps its override. It sits inside a wp:cover and
+     * HeroHeadlineFit reads that group's contentSize to size the headline,
+     * running after this step.
+     *
+     * @param object[] $all
+     * @param string[] $notes
+     */
+    private static function normalizeTextMeasure(array $all, ?float $contentSize, array &$notes): void
+    {
+        if ($contentSize === null || $contentSize > self::READABLE_MEASURE_MAX) {
+            return;
+        }
+
+        $inCover = [];
+        $mark = static function (object $node) use (&$mark, &$inCover): void {
+            foreach ($node->children as $child) {
+                $inCover[spl_object_id($child)] = true;
+                $mark($child);
+            }
+        };
+        foreach ($all as $node) {
+            if (self::is($node, 'cover')) {
+                $mark($node);
+            }
+        }
+
+        foreach ($all as $node) {
+            if (!self::is($node, 'group')
+                || self::layoutType($node) !== 'constrained'
+                || isset($inCover[spl_object_id($node)])
+                || !self::isTextStack($node)) {
+                continue;
+            }
+            $layout = self::layout($node);
+            $size = $layout->contentSize ?? null;
+            if (!is_string($size) || preg_match('/^([0-9.]+)px$/', $size, $m) !== 1) {
+                continue;
+            }
+            // A wrapper that restates the theme's own measure already agrees
+            // with its neighbours, and freeGridsFromNarrowWrappers is tested
+            // on it staying put. Only a number that differs makes the column
+            // move between sections.
+            if (abs((float) $m[1] - $contentSize) < 0.5) {
+                continue;
+            }
+            unset($layout->contentSize);
+            $node->dirty = true;
+            $notes[] = "text stack carried its own {$size} measure — removed it so the section reads at the theme's contentSize";
+        }
+    }
+
+    /**
+     * A group holding nothing but the blocks a copy stack is made of. One
+     * structural child (a columns row, a gallery, a nested group) and the
+     * measure stops being the section's reading column.
+     */
+    private static function isTextStack(object $node): bool
+    {
+        if ($node->children === []) {
+            return false;
+        }
+        foreach ($node->children as $child) {
+            $isText = false;
+            foreach (self::TEXT_STACK_BLOCKS as $short) {
+                if (self::is($child, $short)) {
+                    $isText = true;
+                    break;
+                }
+            }
+            if (!$isText) {
+                return false;
+            }
+        }
+        return true;
     }
 
     // ── Block-grammar parsing / rendering ────────────────────────────────
