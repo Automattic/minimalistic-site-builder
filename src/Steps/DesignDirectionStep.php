@@ -7,6 +7,7 @@ use Automattic\SiteBuild\AboveFoldContract;
 use Automattic\SiteBuild\CardStyle;
 use Automattic\SiteBuild\ConceptSeeds;
 use Automattic\SiteBuild\Device;
+use Automattic\SiteBuild\DirectionExecutability;
 use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\FontCatalog;
 use Automattic\SiteBuild\FontMonoculture;
@@ -285,6 +286,15 @@ final class DesignDirectionStep implements Step
             FontCatalog::load(),
             $warnings,
         );
+
+        // Last, with every field final: does the narrative promise decoration
+        // no step can execute? The prose is handed to every downstream design
+        // and section prompt as the authoritative brief, so a promise outside
+        // the bounded vocabulary is never refused and never delivered — the
+        // page just ships plainer than its own direction (BIGR-884). Nothing
+        // here can be repaired deterministically (rewriting prose needs a
+        // model), so this is rung 4: record it and continue.
+        array_push($warnings, ...DirectionExecutability::problems($direction));
 
         $report = [
             "Assigned hero recipe: {$recipe}",
