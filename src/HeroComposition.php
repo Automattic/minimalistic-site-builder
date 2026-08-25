@@ -486,7 +486,7 @@ final class HeroComposition
             if ($isMediaRegion && (string) ($attrs['align'] ?? '') === 'full') {
                 $fullWidthMedia++;
             }
-            if ($inMedia && in_array($name, ['heading', 'paragraph', 'buttons', 'button'], true)) {
+            if ($inMedia && in_array($name, ['heading', 'paragraph', 'buttons'], true)) {
                 $textInMedia++;
             }
             if ($root !== null && $document->parent($index) === $root && $name === 'cover') {

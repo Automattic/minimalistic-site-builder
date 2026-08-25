@@ -1508,6 +1508,79 @@ test('bandMediaAlignment frees a wrapped image band from the reading measure (BI
     $untouched = [];
     assert_eq($noRegion, Automattic\SiteBuild\Units\GeneratedMarkup::bandMediaAlignment($noRegion, 'p', $untouched));
     assert_eq([], $untouched);
+    assert_true(
+        !in_array('hero-band-crop', array_column($repairs, 'code'), true),
+        'a band with no crop of its own is never reported as recropped',
+    );
+});
+
+test('bandMediaAlignment returns the band crop to the stylesheet (BIGR-885)', function () {
+    // core/image serializes aspectRatio+scale into an inline style, and an
+    // inline declaration outranks the recipe stylesheet at any specificity.
+    // Measured on the corpus: 50 of 377 image blocks carry the pair, always
+    // both attrs and inline together, never one alone.
+    $band = static fn (string $imageAttrs, string $style): string =>
+        '<!-- wp:group {"className":"hero-composition--stacked-headline-band","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group hero-composition--stacked-headline-band">'
+        . '<!-- wp:group {"className":"hero-composition__copy","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group hero-composition__copy">'
+        . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">A wide horizon</h1><!-- /wp:heading -->'
+        . '</div><!-- /wp:group -->'
+        . '<!-- wp:image ' . $imageAttrs . ' --><figure class="wp-block-image hero-composition__media">'
+        . '<img src="theme:./assets/band.jpg" alt="AI_IMAGE: A valley | band | photorealistic | landscape"'
+        . $style . '/></figure><!-- /wp:image -->'
+        . '</div><!-- /wp:group -->';
+
+    $doc = $band(
+        '{"aspectRatio":"4/3","scale":"cover","className":"hero-composition__media"}',
+        ' style="aspect-ratio:4/3;object-fit:cover"',
+    );
+    $repairs = [];
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::bandMediaAlignment($doc, 'p', $repairs);
+    assert_true(!str_contains($out, 'aspectRatio'), 'the competing aspectRatio attr is gone');
+    assert_true(!str_contains($out, '"scale"'), 'its scale companion goes with it');
+    assert_true(!str_contains($out, 'aspect-ratio:'), 'the inline declaration goes with the attr');
+    assert_true(!str_contains($out, 'object-fit:'), 'so does the object-fit it was paired with');
+    assert_contains('"align":"full"', $out);
+    assert_eq(
+        ['hero-band-alignment', 'hero-band-crop'],
+        array_column($repairs, 'code'),
+        'the widening and the recrop are attributable separately',
+    );
+
+    // Idempotent.
+    $again = [];
+    assert_eq($out, Automattic\SiteBuild\Units\GeneratedMarkup::bandMediaAlignment($out, 'p', $again));
+    assert_eq([], $again);
+
+    // The regression the crop pass must not inherit: a band ALREADY marked
+    // align:full still carries its own crop, and an early return on the
+    // alignment check would leave that crop in place unseen.
+    $alreadyFull = $band(
+        '{"align":"full","aspectRatio":"4/3","scale":"cover","className":"hero-composition__media"}',
+        ' style="aspect-ratio:4/3;object-fit:cover"',
+    );
+    $fullRepairs = [];
+    $fixed = Automattic\SiteBuild\Units\GeneratedMarkup::bandMediaAlignment($alreadyFull, 'p', $fullRepairs);
+    assert_true(!str_contains($fixed, 'aspect-ratio:'), 'an already-full band still loses its crop');
+    assert_eq(['hero-band-crop'], array_column($fullRepairs, 'code'), 'and reports only the recrop');
+
+    // Only the crop pair is taken. Other authored geometry is not this
+    // repair's business and must survive intact.
+    $shadowed = $band(
+        '{"aspectRatio":"4/3","className":"hero-composition__media"}',
+        ' style="aspect-ratio:4/3;border-radius:4px"',
+    );
+    $keptRepairs = [];
+    $kept = Automattic\SiteBuild\Units\GeneratedMarkup::bandMediaAlignment($shadowed, 'p', $keptRepairs);
+    assert_contains('style="border-radius:4px"', $kept);
+    assert_true(!str_contains($kept, 'aspect-ratio:'), 'only the crop declaration was removed');
+
+    // A band that never carried a crop reports no recrop.
+    $plain = $band('{"className":"hero-composition__media"}', '');
+    $plainRepairs = [];
+    Automattic\SiteBuild\Units\GeneratedMarkup::bandMediaAlignment($plain, 'p', $plainRepairs);
+    assert_eq(['hero-band-alignment'], array_column($plainRepairs, 'code'));
 });
 
 test('wrapper repair synthesizes closers for container frames crossed at a closer', function () {
