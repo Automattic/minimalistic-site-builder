@@ -66,9 +66,9 @@ final class CssChecks
         // circle(0) }` the canonical iris-in — both are legal entrances that
         // END visible, and rejecting them killed the user's one explicit
         // animation request outright (BIGR-887). A `forwards`/`both` fill
-        // parking an element in a hidden LAST keyframe is a real defect, but
-        // that is the shape CustomMotionStep's own non-start-keyframe walk
-        // already owns.
+        // parking an element in a hidden LAST keyframe is a real defect, and
+        // this exemption is why CustomMotionStep's non-start-keyframe walk
+        // has to check `clip-path` there alongside `opacity`.
         $seen = [];
         foreach (self::scanDeclarations($css) as $declaration) {
             if ($declaration['kind'] === 'keyframe'
@@ -208,9 +208,13 @@ final class CssChecks
      *   *`) — it is styling the kit element itself, so every declaration goes.
      * - Only an ANCESTOR is a kit class (`.hero-entrance h1`) — the rule
      *   styles something else that merely lives inside a kit element, so only
-     *   the properties that can hide it or fight the kit's choreography go.
-     *   `.hero-entrance h1 { letter-spacing: -0.03em; max-width: 18ch }` is
-     *   ordinary design intent and used to be deleted whole (BIGR-887).
+     *   the properties that can fight the kit's choreography go, plus any
+     *   declaration whose VALUE hides outright. `display` is judged by value
+     *   and not by name: `display: none` under a kit ancestor is the BIGR-881
+     *   shape and nothing else in the theme.json path would catch it, while
+     *   `display: flex` is ordinary layout. `.hero-entrance h1 {
+     *   letter-spacing: -0.03em; max-width: 18ch }` is ordinary design intent
+     *   and used to be deleted whole (BIGR-887).
      *
      * Removal is per declaration, so an emptied kit rule stays in place as
      * inert bytes rather than forcing a structural rewrite of the surrounding
@@ -234,7 +238,10 @@ final class CssChecks
                 }
                 foreach ([$declaration['context'], ...$declaration['ancestors']] as $selector) {
                     if (self::selectorNamesMotionClass($selector)) {
-                        return self::isMotionCapableProperty($declaration['property']);
+                        return self::isMotionCapableProperty($declaration['property'])
+                            || self::hiddenContentProblems(
+                                'a{' . $declaration['property'] . ':' . $declaration['value'] . '}'
+                            ) !== [];
                     }
                 }
                 return false;

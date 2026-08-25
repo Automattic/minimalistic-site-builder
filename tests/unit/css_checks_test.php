@@ -728,6 +728,33 @@ test('a selector that EXCLUDES a kit class is not treated as targeting one', fun
     assert_eq(['opacity:0'], $hides);
 });
 
+test('a kit ancestor loses a declaration that hides, judged by value not by name', function () {
+    // The scrub's only caller is ThemeJsonStep, whose custom CSS never reaches
+    // hiddenContentProblems(). Narrowing the ancestor cut to motion-capable
+    // properties must not drop `display: none` out of every guard at once.
+    foreach (['display:none', 'visibility:hidden', 'clip-path:inset(0 0 100% 0)'] as $declaration) {
+        [$out, $dropped] = CssChecks::dropMotionKitDeclarations(
+            '.hero-entrance h1{letter-spacing:-0.03em;' . $declaration . '}'
+        );
+        assert_eq([$declaration], $dropped, $declaration);
+        assert_contains('letter-spacing:-0.03em', $out, 'the type still survives');
+    }
+
+    // And `display` is judged by VALUE: naming the property outright would
+    // delete ordinary layout under any kit ancestor, which is the over-reach
+    // this branch exists to stop.
+    foreach ([
+        '.hero-entrance .row{display:flex;gap:1rem}',
+        '.hero-entrance .grid{display:grid}',
+        '.hero-entrance h1{display:block}',
+        '.hero-entrance .perf{content-visibility:auto}',
+    ] as $css) {
+        [$kept, $none] = CssChecks::dropMotionKitDeclarations($css);
+        assert_eq($css, $kept, 'byte-for-byte: ' . $css);
+        assert_eq([], $none, $css);
+    }
+});
+
 test('isMotionCapableProperty separates choreography from ordinary design', function () {
     foreach ([
         'opacity', 'visibility', 'clip-path', 'filter', 'backdrop-filter', 'will-change',
@@ -737,9 +764,12 @@ test('isMotionCapableProperty separates choreography from ordinary design', func
     ] as $property) {
         assert_true(CssChecks::isMotionCapableProperty($property), $property);
     }
+    // `display` belongs here and not above: the ancestor cut judges it by
+    // value, so `display: flex` survives and `display: none` does not.
     foreach ([
         'color', 'background-color', 'letter-spacing', 'max-width', 'margin-block',
-        'border', 'font-size', 'padding', 'display', 'gap', 'transformation',
+        'border', 'font-size', 'padding', 'gap', 'transformation', 'displays',
+        'display', 'content-visibility',
     ] as $property) {
         assert_true(!CssChecks::isMotionCapableProperty($property), $property);
     }
