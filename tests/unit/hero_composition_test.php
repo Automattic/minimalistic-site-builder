@@ -5,7 +5,7 @@ use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
 
 test('hero catalog entries own complete metadata, defaults, prompts, and unique hooks', function () {
-    assert_eq(5, count(HeroComposition::RECIPES));
+    assert_eq(6, count(HeroComposition::RECIPES));
     $hooks = [];
     foreach (HeroComposition::RECIPES as $recipe) {
         $meta = HeroComposition::metadata($recipe);
@@ -33,9 +33,10 @@ test('hero catalog entries own complete metadata, defaults, prompts, and unique 
 });
 
 test('hero compatibility filters objective caller constraints before selection', function () {
-    // The image-free constraint values were retired with typographic-poster:
-    // every cataloged hero bears an image, so they fail loud at validation.
-    assert_throws(fn () => HeroComposition::validateConstraints(['allowed_hero_media_modes' => ['none']]));
+    // BIGR-885: 'none' is requestable again, and it isolates the one imageless
+    // recipe. The image-count constraint still starts at 1, because an
+    // image-bearing recipe capped at zero images has no meaning.
+    assert_eq(['type-manifesto'], HeroComposition::compatible(['allowed_hero_media_modes' => ['none']]));
     assert_throws(fn () => HeroComposition::validateConstraints(['max_hero_images' => 0]));
     $oneImage = HeroComposition::compatible(['max_hero_images' => 1]);
     assert_true(in_array('editorial-split', $oneImage, true));
@@ -85,6 +86,77 @@ test('hero catalog exposes image gating and deterministic page-plan projection',
     ], HeroComposition::planProjection(HeroBlueprint::defaultFor('cinematic-safe-zone')));
 });
 
+test('type-manifesto is the imageless recipe and disarms image generation on both branches (BIGR-885)', function () {
+    $meta = HeroComposition::metadata('type-manifesto');
+    assert_eq(['none'], $meta['media_modes']);
+    assert_eq(0, $meta['min_images']);
+    assert_eq(0, $meta['max_images']);
+    assert_eq('centered-stack', $meta['layout_archetype']);
+    assert_eq(['stacked'], $meta['header_modes']);
+    assert_eq(['base', 'tinted', 'contrast'], $meta['backgrounds']);
+
+    // The recipe-id branch reads min_images.
+    assert_true(!HeroComposition::usesGeneratedImages('type-manifesto'));
+    // The blueprint branch reads the catalog first, so blueprint drift toward
+    // an image mode still cannot arm a slot the composition has nowhere to put.
+    assert_true(!HeroComposition::usesGeneratedImages(HeroBlueprint::defaultFor('type-manifesto')));
+    assert_true(!HeroComposition::usesGeneratedImages([
+        'recipe' => 'type-manifesto',
+        'media_mode' => 'cover-image',
+    ]));
+
+    assert_eq([
+        'layout_archetype' => 'centered-stack',
+        'allowed_backgrounds' => ['base', 'tinted', 'contrast'],
+        'default_background' => 'contrast',
+        'fallback_family' => 'typographic',
+    ], HeroComposition::planProjection(HeroBlueprint::defaultFor('type-manifesto')));
+});
+
+test('every hero recipe default blueprint is already a normalize fixed point', function () {
+    // HeroUnit::context() rejects any blueprint that normalize() would still
+    // change, so a catalog default that is not a fixed point breaks the unit.
+    foreach (HeroComposition::RECIPES as $recipe) {
+        $default = HeroBlueprint::defaultFor($recipe);
+        $repairs = [];
+        $warnings = [];
+        assert_eq($default, HeroBlueprint::normalize($default, $recipe, $repairs, $warnings), $recipe);
+        assert_eq([], $repairs, $recipe);
+        assert_eq([], $warnings, $recipe);
+    }
+});
+
+test('an imageless hero reports one actionable image row and no media-count row (BIGR-885)', function () {
+    $copyOpen = '<!-- wp:group {"className":"hero-composition__copy"} -->'
+        . '<div class="wp-block-group hero-composition__copy">'
+        . '<!-- wp:heading {"level":1,"fontSize":"display"} -->'
+        . '<h1 class="wp-block-heading has-display-font-size">A stated position</h1><!-- /wp:heading -->'
+        . '<!-- wp:group {"className":"hero-composition__standfirst"} -->'
+        . '<div class="wp-block-group hero-composition__standfirst">'
+        . '<!-- wp:paragraph --><p>One supporting line.</p><!-- /wp:paragraph -->';
+    $copyClose = '</div><!-- /wp:group --></div><!-- /wp:group -->';
+    $clean = '<!-- wp:group --><div class="wp-block-group">' . $copyOpen . $copyClose . '</div><!-- /wp:group -->';
+    assert_eq([], HeroComposition::markupWarnings($clean, 'type-manifesto', 'page-home--hero'));
+
+    $withImage = '<!-- wp:group --><div class="wp-block-group">' . $copyOpen
+        . '<!-- wp:image --><figure class="wp-block-image">'
+        . '<img src="theme:./assets/subject.jpg" alt="AI_IMAGE: Subject | hero slot | photorealistic | landscape" />'
+        . '</figure><!-- /wp:image -->' . $copyClose . '</div><!-- /wp:group -->';
+    $warnings = HeroComposition::markupWarnings($withImage, 'type-manifesto', 'page-home--hero');
+    $imageless = array_values(array_filter(
+        $warnings,
+        fn (string $w): bool => str_contains($w, 'imageless hero media'),
+    ));
+    assert_eq(1, count($imageless));
+    assert_contains('type-manifesto', $imageless[0]);
+    assert_contains('"image_count":1', $imageless[0]);
+    // The generic count rule must not double-report the same defect.
+    assert_eq([], array_values(array_filter(
+        $warnings,
+        fn (string $w): bool => str_contains($w, 'recipe media count'),
+    )));
+});
+
 test('structured selector fixture corpus exercises eligibility and media distribution', function () {
     $corpus = json_decode(
         (string) file_get_contents(repo_path('tests/fixtures/hero-selector-fixtures.json')),
@@ -116,7 +188,7 @@ test('structured selector fixture corpus exercises eligibility and media distrib
         }
     }
     assert_true(count($selected) >= 5, 'objective fixture set exercises broad catalog selection');
-    foreach (['cover-image', 'foreground-image'] as $mode) {
+    foreach (['none', 'cover-image', 'foreground-image'] as $mode) {
         assert_true(isset($mediaModes[$mode]), "fixture selections cover {$mode}");
     }
 });

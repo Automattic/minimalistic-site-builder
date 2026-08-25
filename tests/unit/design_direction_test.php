@@ -1636,18 +1636,40 @@ test('legacy signature-device fields are dropped from the normalized direction',
     assert_true(!array_key_exists('signature_device_use', $direction['hero_blueprint']));
 });
 
-test('every cataloged hero recipe bears an image (the image-free poster is retired)', function () {
-    foreach (Automattic\SiteBuild\HeroComposition::RECIPES as $recipe) {
-        $meta = Automattic\SiteBuild\HeroComposition::metadata($recipe);
-        assert_true((int) $meta['min_images'] >= 1, "{$recipe} carries at least one image");
-    }
-    // Automatic selection therefore always lands on an image-bearing recipe.
+test('automatic hero selection keeps the image gate aligned with each catalog media budget (BIGR-885)', function () {
+    // type-manifesto reopened the imageless shape, so the old "every recipe
+    // bears an image" invariant is gone. The invariant that replaces it: the
+    // image gate always agrees with the selected recipe's own budget, so an
+    // unconstrained build never generates an orphan image and never leaves an
+    // image-bearing recipe without one.
+    $imageless = array_values(array_filter(
+        Automattic\SiteBuild\HeroComposition::RECIPES,
+        fn (string $recipe): bool
+            => (int) Automattic\SiteBuild\HeroComposition::metadata($recipe)['max_images'] === 0,
+    ));
+    assert_eq(['type-manifesto'], $imageless);
+
+    $selected = [];
     foreach (range(1, 16) as $i) {
         $w = [];
         $recipe = DesignDirectionStep::selectHeroRecipe([], "gate-site-{$i}", 'Committed seed', $w);
-        assert_true((int) Automattic\SiteBuild\HeroComposition::metadata($recipe)['min_images'] >= 1);
+        $meta = Automattic\SiteBuild\HeroComposition::metadata($recipe);
+        assert_eq(
+            (int) $meta['min_images'] >= 1,
+            Automattic\SiteBuild\HeroComposition::usesGeneratedImages($recipe),
+            $recipe,
+        );
+        assert_eq(
+            (int) $meta['min_images'] >= 1,
+            Automattic\SiteBuild\HeroComposition::usesGeneratedImages(
+                HeroBlueprint::defaultFor($recipe),
+            ),
+            $recipe,
+        );
         assert_eq([], $w);
+        $selected[$recipe] = true;
     }
+    assert_true(count($selected) > 1, 'unconstrained selection spreads across the catalog');
 });
 
 test('shapeFor returns only an explicit valid commitment', function () {
