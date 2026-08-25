@@ -1484,7 +1484,7 @@ final class DesignDirectionStep implements Step
         return self::explicitShape($project->readJson(self::FILE)['shape'] ?? null);
     }
 
-    /** The persisted page density, measured when the artifact is absent/garbled. */
+    /** The persisted page density, measured when absent or not a committed value. */
     public static function densityFor(Project $project): string
     {
         if (!$project->exists(self::FILE)) {
