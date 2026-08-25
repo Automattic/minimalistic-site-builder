@@ -1023,3 +1023,60 @@ test('a device class on a NESTED element does not widen the seam', function () {
         'the rule is not at the seam, so the seam still collapses'
     );
 });
+
+test('only a device that paints the ROOT top edge widens a seam', function () {
+    // The floor is an allowlist, not "the committed device is on the band".
+    // `stamp` and `section-numeral` are inset marks (Device::kitCss): they draw
+    // inside the band's own top padding, so the seam below the section above
+    // them still collapses. Without this, widening TOP_EDGE_DEVICE_CLASSES to
+    // a mark that paints nothing at the boundary fails no test.
+    $plain = sr_section(['layout' => ['type' => 'constrained']],
+        '<!-- wp:paragraph --><p>Body</p><!-- /wp:paragraph -->');
+
+    foreach (['stamp', 'section-numeral'] as $device) {
+        $marked = sr_section([
+            'className' => 'device--' . $device,
+            'layout' => ['type' => 'constrained'],
+        ], '<!-- wp:paragraph --><p>Body</p><!-- /wp:paragraph -->');
+
+        $result = SectionRhythm::rewrite([
+            ['slug' => 'overview', 'markup' => $plain, 'density' => 'standard', 'background' => 'base'],
+            ['slug' => 'archive', 'markup' => $marked, 'density' => 'standard', 'background' => 'base'],
+        ], null, $device);
+
+        assert_eq(
+            '0',
+            sr_root_attrs($result['markups'][0])['style']['spacing']['padding']['bottom'],
+            "'{$device}' paints no top-edge rule, so the seam still collapses"
+        );
+    }
+});
+
+test('a device on the hero does not consume the budget the next band claims', function () {
+    // MotionSanityStep strips the hero copy WITHOUT charging the budget, so the
+    // first non-hero carrier still keeps its class. Reading the hero as the
+    // painter would return index 0 and stop, leaving the seam above the band
+    // that actually paints collapsed — the original BIGR-882 defect.
+    $plain = sr_section(['layout' => ['type' => 'constrained']],
+        '<!-- wp:paragraph --><p>Body</p><!-- /wp:paragraph -->');
+    $ruledHero = sr_section([
+        'className' => 'hero-composition--editorial-split device--hairline-rule',
+        'layout' => ['type' => 'constrained'],
+    ], '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Headline</h1><!-- /wp:heading -->');
+    $ruled = sr_section([
+        'className' => 'device--hairline-rule',
+        'layout' => ['type' => 'constrained'],
+    ], '<!-- wp:paragraph --><p>Body</p><!-- /wp:paragraph -->');
+
+    $result = SectionRhythm::rewrite([
+        ['slug' => 'hero', 'markup' => $ruledHero, 'density' => 'standard', 'background' => 'base'],
+        ['slug' => 'one', 'markup' => $plain, 'density' => 'standard', 'background' => 'base'],
+        ['slug' => 'two', 'markup' => $ruled, 'density' => 'standard', 'background' => 'base'],
+    ], null, 'hairline-rule');
+
+    assert_eq(
+        'var:preset|spacing|xl',
+        sr_root_attrs($result['markups'][1])['style']['spacing']['padding']['bottom'],
+        "'two' is the first non-hero carrier, so the seam above it keeps an edge"
+    );
+});

@@ -184,9 +184,9 @@ final class SectionRhythm
             //    two equal gaps.
             //
             // The largest floor wins; every other shared seam still collapses.
-            // Judged on the markup as authored, so a device class a later
-            // motion-sanity budget strips leaves this seam merely uncollapsed,
-            // never crowded.
+            // Judged on the band that will actually paint (see $rulePainter),
+            // not on the authored class: a device a later motion-sanity budget
+            // strips must leave this seam collapsed, or the two passes disagree.
             $bottomFloor = null;
             if ($sharedSeam) {
                 $floors = [];
