@@ -116,6 +116,7 @@ test('HeroUnit exposes one isolated assigned recipe behind the shared site layer
         'framed-portrait' => 'contained vertical foreground image',
         'focal-subject-stage' => 'singular subject as an opaque foreground content image',
         'layered-poster' => 'cover image beneath controlled block-built type',
+        'type-manifesto' => 'one imageless, type-led band',
     ];
 
     assert_eq(HeroComposition::RECIPES, array_keys($markers));
