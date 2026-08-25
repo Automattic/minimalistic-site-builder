@@ -559,7 +559,9 @@ test('centred copy keeps its own box beside a wide grid row', function () {
     // Centred text is placed on purpose; widening its box would only move the
     // whitespace around it, not line anything up.
     $copy = '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">'
-        . '<!-- wp:heading {"textAlign":"center"} --><h2 class="wp-block-heading has-text-align-center">Why us</h2><!-- /wp:heading -->'
+        // Generations spell centring under style.typography almost without
+        // exception; every centred heading in three real builds used it.
+        . '<!-- wp:heading {"style":{"typography":{"textAlign":"center"}}} --><h2 class="wp-block-heading has-text-align-center">Why us</h2><!-- /wp:heading -->'
         . '</div><!-- /wp:group -->';
     $markup = '<!-- wp:group {"align":"full","layout":{"type":"constrained"}} --><div class="wp-block-group alignfull">'
         . $copy
@@ -572,6 +574,20 @@ test('centred copy keeps its own box beside a wide grid row', function () {
     assert_true(!str_contains($r['markup'], 'copy-flush'), 'centred copy is left alone');
 });
 
+test('copy centred by the top-level attribute is left alone too', function () {
+    $copy = '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">'
+        . '<!-- wp:heading {"textAlign":"center"} --><h2 class="wp-block-heading has-text-align-center">Why us</h2><!-- /wp:heading -->'
+        . '</div><!-- /wp:group -->';
+    $markup = '<!-- wp:group {"align":"full","layout":{"type":"constrained"}} --><div class="wp-block-group alignfull">'
+        . $copy
+        . '<!-- wp:columns {"align":"wide"} --><div class="wp-block-columns alignwide">'
+        . '<!-- wp:column --><div class="wp-block-column"></div><!-- /wp:column -->'
+        . '<!-- wp:column --><div class="wp-block-column"></div><!-- /wp:column -->'
+        . '</div><!-- /wp:columns -->'
+        . '</div><!-- /wp:group -->';
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 840.0);
+    assert_true(!str_contains($r['markup'], 'copy-flush'), 'centred copy is left alone');
+});
 test('an unconstrained copy group is left alone beside a wide grid row', function () {
     // Without a constrained layout the group does not cap its own children, so
     // widening it would run the paragraphs the full width of the band.

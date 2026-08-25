@@ -1408,8 +1408,15 @@ final class LayoutFixer
     private static function readsFromLeadingEdge(object $group): bool
     {
         foreach ($group->children as $child) {
-            foreach (['align', 'textAlign'] as $key) {
-                $value = $child->attrs->$key ?? null;
+            // Three channels carry the same decision. Generations reach for the
+            // style.typography spelling almost exclusively, so a check of the
+            // top-level attributes alone never sees a centred heading.
+            $values = [
+                $child->attrs->align ?? null,
+                $child->attrs->textAlign ?? null,
+                $child->attrs->style->typography->textAlign ?? null,
+            ];
+            foreach ($values as $value) {
                 if (is_string($value) && ($value === 'center' || $value === 'right')) {
                     return false;
                 }
