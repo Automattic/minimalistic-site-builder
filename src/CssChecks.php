@@ -237,7 +237,9 @@ final class CssChecks
                     return true;
                 }
                 foreach ([$declaration['context'], ...$declaration['ancestors']] as $selector) {
-                    if (self::selectorNamesMotionClass($selector)) {
+                    if (self::selectorNamesMotionClass(
+                        self::withoutExcludedOrRelationalArguments($selector),
+                    )) {
                         return self::isMotionCapableProperty($declaration['property'])
                             || self::hiddenContentProblems(
                                 'a{' . $declaration['property'] . ':' . $declaration['value'] . '}'
@@ -275,11 +277,7 @@ final class CssChecks
                 continue;
             }
             // Drop negation/relational arguments — they name what is excluded.
-            $subject = (string) preg_replace(
-                '/:(?:not|has)\((?:[^()]*|\([^()]*\))*\)/i',
-                '',
-                $compound,
-            );
+            $subject = self::withoutExcludedOrRelationalArguments($compound);
             if (self::selectorNamesMotionClass($subject)) {
                 return true;
             }
@@ -294,6 +292,21 @@ final class CssChecks
             }
         }
         return false;
+    }
+
+    /**
+     * Remove class references that do not describe the selected element.
+     * `:not(.reveal-up)` explicitly excludes that kit class, while
+     * `:has(.reveal-up)` selects its container. Neither makes the subject (or
+     * an ancestor subject) part of the motion kit.
+     */
+    private static function withoutExcludedOrRelationalArguments(string $selector): string
+    {
+        return (string) preg_replace(
+            '/:(?:not|has)\((?:[^()]*|\([^()]*\))*\)/i',
+            '',
+            $selector,
+        );
     }
 
     /**
