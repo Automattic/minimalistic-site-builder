@@ -4,8 +4,11 @@ declare(strict_types=1);
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\CtaStyle;
 use Automattic\SiteBuild\CtaStyleMarkup;
+use Automattic\SiteBuild\PhpBlockFixer;
+use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\Steps\FixBlocksStep;
 use Automattic\SiteBuild\Steps\ThemeJsonStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
 
@@ -157,6 +160,54 @@ test('CTA markup removes local construction and block style enforces full width'
     $nonBlockFixed = CtaStyleMarkup::normalize($nonBlock['markup'], 'outline');
     assert_eq($nonBlock['markup'], $nonBlockFixed['markup']);
     assert_eq([], $nonBlockFixed['changes']);
+});
+
+test('FixBlocks CTA normalization isolates failed files and keeps healthy siblings repaired', function () {
+    with_temp_dir('cta-style-rollback-', function (string $tmp): void {
+        $project = new Project($tmp);
+        $project->writeJson('designDirection.json', ['cta_style' => 'outline']);
+        $project->writeJson('theme/theme.json', ['version' => 3]);
+        $healthy = '<!-- wp:button {"backgroundColor":"accent"} -->'
+            . '<div class="wp-block-button"><a class="wp-block-button__link has-accent-background-color '
+            . 'has-background wp-element-button">Healthy</a></div><!-- /wp:button -->';
+        $failed = '<!-- wp:group --><div class="wp-block-group">'
+            . '<!-- wp:button {"backgroundColor":"accent"} -->'
+            . '<div class="wp-block-button"><a class="wp-block-button__link has-accent-background-color '
+            . 'has-background wp-element-button">Failed</a></div><!-- /wp:button -->'
+            . '<!-- wp:heading --><h2 class="wp-block-heading has-text-align-center" '
+            . 'style="text-align:right">Conflict</h2><!-- /wp:heading -->'
+            . '</div><!-- /wp:group -->';
+        $project->writeText('theme/parts/a-healthy.html', $healthy);
+        $project->writeText('theme/parts/b-failed.html', $failed);
+
+        (new FixBlocksStep(new PhpBlockFixer()))->run($project);
+
+        $deliveredHealthy = $project->readText('theme/parts/a-healthy.html');
+        assert_true(!str_contains($deliveredHealthy, 'backgroundColor'));
+        assert_true(!str_contains($deliveredHealthy, 'has-accent-background-color'));
+        assert_contains('Healthy', $deliveredHealthy, 'healthy button content survives');
+        assert_eq($failed, $project->readText('theme/parts/b-failed.html'), 'failed file restores entry bytes');
+
+        $beforeWarnings = $project->readJson('warnings.json');
+        $warnings = implode("\n", $beforeWarnings['fix-blocks'] ?? []);
+        assert_contains(
+            'parts/b-failed.html block 0/0 (core/button): CTA property backgroundColor; '
+                . 'authored "accent"; delivered "accent" (pre-step value restored); '
+                . 'disposition CTA normalization rolled back',
+            $warnings,
+        );
+        assert_true(
+            !str_contains($warnings, 'parts/a-healthy.html block 0 (core/button): CTA property'),
+            'successful sibling repair does not enter warnings.json',
+        );
+        $log = $project->readText('logs/fix-blocks.log');
+        assert_contains('[cta-style] 1 CTA construction normalization(s)', $log);
+        assert_contains('parts/a-healthy.html block 0 (core/button): backgroundColor "accent" -> removed', $log);
+
+        (new FixBlocksStep(new PhpBlockFixer()))->run($project);
+        assert_eq($deliveredHealthy, $project->readText('theme/parts/a-healthy.html'));
+        assert_eq($beforeWarnings, $project->readJson('warnings.json'), 'fixed point adds no warning rows');
+    });
 });
 
 test('CTA prompt contract delegates construction and keeps radius separate', function () {
