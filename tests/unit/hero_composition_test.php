@@ -5,7 +5,7 @@ use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
 
 test('hero catalog entries own complete metadata, defaults, prompts, and unique hooks', function () {
-    assert_eq(5, count(HeroComposition::RECIPES));
+    assert_eq(6, count(HeroComposition::RECIPES));
     $hooks = [];
     foreach (HeroComposition::RECIPES as $recipe) {
         $meta = HeroComposition::metadata($recipe);
@@ -146,6 +146,123 @@ test('hero recipe inspection keeps cover and aspect drift actionable at their ex
     assert_contains('recipe image aspect', $aspectWarnings[0]);
     assert_contains('portrait', $aspectWarnings[0]);
     assert_contains('landscape', $aspectWarnings[0]);
+});
+
+test('the band recipe is the only one selectable through media mode band-image (BIGR-885)', function () {
+    $pool = HeroComposition::compatible(['allowed_hero_media_modes' => ['band-image']]);
+    assert_eq(['stacked-headline-band'], $pool);
+    assert_eq(
+        'stacked-headline-band',
+        HeroComposition::select('band-site', 'A wide horizon under a short line.', [
+            'allowed_hero_media_modes' => ['band-image'],
+        ]),
+    );
+
+    $meta = HeroComposition::metadata('stacked-headline-band');
+    // The copy is the section's first element, so an overlay header would
+    // float over the headline instead of over media.
+    assert_eq(['stacked'], $meta['header_modes']);
+    // The copy sits on a solid surface; an 'image' surface would wrap the band
+    // in a cover and put the copy back over pixels.
+    assert_eq(['base', 'tinted', 'contrast'], $meta['backgrounds']);
+    assert_eq('mixed-width-editorial', $meta['layout_archetype']);
+
+    // The trap this recipe was written against: a media mode outside the
+    // hard-coded pair silently disarms image generation on both branches.
+    assert_true(HeroComposition::usesGeneratedImages('stacked-headline-band'));
+    assert_true(HeroComposition::usesGeneratedImages(
+        HeroBlueprint::defaultFor('stacked-headline-band')
+    ));
+    assert_true(!HeroComposition::usesGeneratedImages([
+        'recipe' => 'stacked-headline-band',
+        'media_mode' => 'none',
+    ]));
+
+    // The blueprint accepts the new mode and keeps the cover-only spatial
+    // fields at their non-cover values, so the default is a fixed point.
+    $repairs = [];
+    $normalized = HeroBlueprint::normalize(
+        HeroBlueprint::defaultFor('stacked-headline-band'),
+        'stacked-headline-band',
+        $repairs,
+    );
+    assert_eq('band-image', $normalized['media_mode']);
+    assert_eq('none', $normalized['focal_region']);
+    assert_eq('full', $normalized['text_safe_region']);
+    assert_eq([], $repairs);
+});
+
+test('the band recipe reports text over the band, a cover, and a short band (BIGR-885)', function () {
+    $copy = '<!-- wp:group {"className":"hero-composition__copy"} --><div class="wp-block-group hero-composition__copy">'
+        . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">A wide horizon</h1><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>One orienting line.</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->';
+    $band = '<!-- wp:image {"align":"full","className":"hero-composition__media"} -->'
+        . '<figure class="wp-block-image alignfull hero-composition__media">'
+        . '<img src="theme:./assets/band.jpg" alt="AI_IMAGE: A wide valley | wide band under the copy | photorealistic | landscape" />'
+        . '</figure><!-- /wp:image -->';
+    $valid = '<!-- wp:group --><div class="wp-block-group">' . $copy . $band . '</div><!-- /wp:group -->';
+    assert_eq([], HeroComposition::markupWarnings($valid, 'stacked-headline-band', 'page-home--hero'));
+
+    // The recipe's own objective failure: copy authored inside the band.
+    $overBand = '<!-- wp:group --><div class="wp-block-group">'
+        . '<!-- wp:group {"align":"full","className":"hero-composition__media"} -->'
+        . '<div class="wp-block-group alignfull hero-composition__media">'
+        . '<img src="theme:./assets/band.jpg" alt="AI_IMAGE: A wide valley | wide band | photorealistic | landscape" />'
+        . $copy . '</div><!-- /wp:group --></div><!-- /wp:group -->';
+    $warnings = HeroComposition::markupWarnings($overBand, 'stacked-headline-band', 'page-home--hero');
+    $overlaid = array_values(array_filter(
+        $warnings,
+        fn (string $w): bool => str_contains($w, 'band recipe text over media'),
+    ));
+    assert_eq(1, count($overlaid));
+    assert_contains('text_blocks_inside_media', $overlaid[0]);
+
+    // A cover is the other way copy lands on the photograph.
+    $covered = '<!-- wp:group --><div class="wp-block-group">' . $copy
+        . '<!-- wp:cover {"align":"full","className":"hero-composition__media"} -->'
+        . '<div class="wp-block-cover alignfull hero-composition__media">'
+        . '<img src="theme:./assets/band.jpg" alt="AI_IMAGE: A wide valley | wide band | photorealistic | landscape" />'
+        . '</div><!-- /wp:cover --></div><!-- /wp:group -->';
+    $warnings = HeroComposition::markupWarnings($covered, 'stacked-headline-band', 'page-home--hero');
+    assert_eq(1, count(array_filter(
+        $warnings,
+        fn (string $w): bool => str_contains($w, 'band recipe cover usage'),
+    )));
+
+    // A band capped below full width breaks the recipe's other promise.
+    $narrow = str_replace(
+        ['{"align":"full","className":"hero-composition__media"}', ' alignfull'],
+        ['{"className":"hero-composition__media"}', ''],
+        $valid,
+    );
+    $warnings = HeroComposition::markupWarnings($narrow, 'stacked-headline-band', 'page-home--hero');
+    assert_eq(1, count(array_filter(
+        $warnings,
+        fn (string $w): bool => str_contains($w, 'band recipe media width'),
+    )));
+
+    // A missing region hook stays actionable at its own boundary.
+    $noRegion = str_replace('hero-composition__media', 'band', $valid);
+    $warnings = HeroComposition::markupWarnings($noRegion, 'stacked-headline-band', 'page-home--hero');
+    assert_eq(1, count(array_filter(
+        $warnings,
+        fn (string $w): bool => str_contains($w, 'recipe band media region'),
+    )));
+
+    // A full-bleed band spans the viewport, so ultrawide fits it too.
+    $ultrawide = str_replace('| landscape', '| ultrawide', $valid);
+    assert_eq([], HeroComposition::markupWarnings($ultrawide, 'stacked-headline-band', 'page-home--hero'));
+
+    // A portrait band is the aspect the letterbox crop cannot serve.
+    $portrait = str_replace('| landscape', '| portrait', $valid);
+    $warnings = HeroComposition::markupWarnings($portrait, 'stacked-headline-band', 'page-home--hero');
+    $aspect = array_values(array_filter(
+        $warnings,
+        fn (string $w): bool => str_contains($w, 'recipe image aspect'),
+    ));
+    assert_eq(1, count($aspect));
+    assert_contains('landscape or ultrawide', $aspect[0]);
 });
 
 test('hero copy budget and headline punctuation overruns warn without hiding valid heroes (BIGR-775)', function () {

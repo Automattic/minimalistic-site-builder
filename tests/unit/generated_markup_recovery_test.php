@@ -1470,6 +1470,46 @@ test('fullBleedCoverAlignment upgrades a wide-capped cover-band hero to align:fu
     assert_eq([], $again);
 });
 
+test('bandMediaAlignment frees a wrapped image band from the reading measure (BIGR-885)', function () {
+    // Regression: bindery-en wrapped the band in a constrained group. The
+    // image kept align:full, the wrapper capped it at contentSize, and the
+    // band rendered 840px wide inside a 1366px viewport.
+    $doc = '<!-- wp:group {"anchor":"hero","className":"hero-composition--stacked-headline-band","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group hero-composition--stacked-headline-band" id="hero">'
+        . '<!-- wp:group {"className":"hero-composition__copy","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group hero-composition__copy">'
+        . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Sewn and restored</h1><!-- /wp:heading -->'
+        . '</div><!-- /wp:group -->'
+        . '<!-- wp:group {"align":"wide","className":"hero-composition__media","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group alignwide hero-composition__media">'
+        . '<!-- wp:image {"sizeSlug":"full"} --><figure class="wp-block-image size-full">'
+        . '<img src="theme:./assets/band.jpg" alt="AI_IMAGE: A bench | wide band | photorealistic | landscape" />'
+        . '</figure><!-- /wp:image -->'
+        . '</div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->';
+    $repairs = [];
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::bandMediaAlignment($doc, 'p', $repairs);
+    assert_eq(2, substr_count($out, '"align":"full"'), 'the media wrapper and its image both reach full width');
+    assert_true(!str_contains($out, 'alignwide'), 'stale alignwide class token removed');
+    assert_true(in_array('hero-band-alignment', array_column($repairs, 'code'), true));
+    // The copy region keeps its reading measure; only the band was widened.
+    assert_true(
+        !str_contains($out, '"className":"hero-composition__copy","layout":{"type":"constrained"},"align"'),
+        'the copy region is never widened',
+    );
+
+    // Idempotent: an already-full band is untouched byte-for-byte.
+    $again = [];
+    assert_eq($out, Automattic\SiteBuild\Units\GeneratedMarkup::bandMediaAlignment($out, 'p', $again));
+    assert_eq([], $again);
+
+    // A hero with no media-region hook is left alone.
+    $noRegion = str_replace('hero-composition__media', 'band', $doc);
+    $untouched = [];
+    assert_eq($noRegion, Automattic\SiteBuild\Units\GeneratedMarkup::bandMediaAlignment($noRegion, 'p', $untouched));
+    assert_eq([], $untouched);
+});
+
 test('wrapper repair synthesizes closers for container frames crossed at a closer', function () {
     // Regression: pulso4 lost its whole 24KB schedule section because a
     // day-grid's wp:columns/wp:column never closed and the root closer

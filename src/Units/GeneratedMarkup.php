@@ -3137,6 +3137,70 @@ final class GeneratedMarkup
     }
 
     /**
+     * Force a band recipe's image band to span the full viewport width.
+     *
+     * stacked-headline-band (BIGR-885) stacks the copy above ONE full-width
+     * image band. Models wrap that band in a constrained group, and a
+     * constrained wrapper caps its `alignfull` image at the reading measure —
+     * the band then stops short of both viewport edges (audited: bindery-en,
+     * 840px of 1366px). Every block that carries `hero-composition__media`,
+     * and every image inside one, is upgraded to `"align":"full"`.
+     * Attribute-only edit per the shared convention (fix-blocks re-serializes
+     * the saved HTML's alignfull class from the attrs); the stale alignwide
+     * class token is removed here so re-serialization cannot resurrect it.
+     *
+     * @param list<array<string,mixed>> $repairs
+     */
+    public static function bandMediaAlignment(string $markup, string $part, array &$repairs = []): string
+    {
+        $document = BlockMarkup::parse($markup);
+        $regions = [];
+        foreach ($document->indices() as $index) {
+            $classes = self::classTokens((string) (($document->attrs($index) ?? [])['className'] ?? ''));
+            if (in_array('hero-composition__media', $classes, true)) {
+                $regions[] = $index;
+            }
+        }
+        if ($regions === []) {
+            return $markup;
+        }
+
+        $upgraded = 0;
+        foreach ($document->indices() as $index) {
+            $isRegion = in_array($index, $regions, true);
+            $insideRegion = false;
+            for ($parent = $document->parent($index); $parent !== null; $parent = $document->parent($parent)) {
+                if (in_array($parent, $regions, true)) {
+                    $insideRegion = true;
+                    break;
+                }
+            }
+            if (!$isRegion && !($insideRegion && $document->name($index) === 'image')) {
+                continue;
+            }
+            $attrs = $document->attrs($index) ?? [];
+            if ((string) ($attrs['align'] ?? '') === 'full') {
+                continue;
+            }
+            $attrs['align'] = 'full';
+            $document->setAttrs($index, $attrs);
+            $document->removeClassTokenInOwnHtml($index, 'alignwide');
+            $upgraded++;
+        }
+        if ($upgraded === 0) {
+            return $markup;
+        }
+        $repairs[] = [
+            'code' => 'hero-band-alignment',
+            'part' => $part,
+            'authored' => "{$upgraded} image-band block(s) capped below full width",
+            'delivered' => 'align:full edge-to-edge (the band recipe promises a band that reaches both viewport edges)',
+            'disposition' => 'repaired',
+        ];
+        return $document->render();
+    }
+
+    /**
      * Retain non-overlapping outermost source spans.
      *
      * Structurally safe block ranges are disjoint or nested. The defensive
