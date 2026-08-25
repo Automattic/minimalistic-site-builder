@@ -124,7 +124,7 @@ final class HeroHeadlineFit
     public static function apply(string $markup, array $theme, ?array $desktopLineTarget = null): array
     {
         $displayMax = self::displayMaxPx($theme);
-        if ($displayMax === null) {
+        if ($displayMax === null || !is_finite($displayMax) || $displayMax <= 0 || $displayMax > PHP_INT_MAX) {
             return ['markup' => $markup, 'notes' => []];
         }
         $doc = BlockMarkup::parse($markup);
@@ -162,20 +162,7 @@ final class HeroHeadlineFit
                 // pinning. This is the one case where a hyphen beats a bare
                 // mid-word snap, so opt this heading — and only this heading —
                 // into the stylesheet's hyphenation hook.
-                $classes = self::classes($attrs);
-                if (!in_array(self::HYPHENATE_CLASS, $classes, true)) {
-                    $classes[] = self::HYPHENATE_CLASS;
-                    $attrs['className'] = implode(' ', $classes);
-                    $doc->setAttrs($i, $attrs);
-                    $notes[] = sprintf(
-                        "headline word-fit: '%s' (%d chars) fits no size above %dpx in the %dpx measure; "
-                            . 'heading opted into hyphenation instead of a pinned size',
-                        $word,
-                        $chars,
-                        self::MINIMUM_CAP_PX,
-                        (int) round($measure),
-                    );
-                }
+                self::optIntoHyphenation($doc, $i, $attrs, $fit, $notes);
                 continue;
             }
             // The preset class must go with the preset attr: WordPress
@@ -323,6 +310,7 @@ final class HeroHeadlineFit
             $fit = self::wordFit($doc, $i, $theme, $attrs, $displayMax);
             $wordCap = $fit['cap'] ?? null;
 
+            $currentMax = $current === null ? null : self::presetMaxPx($theme, $current);
             $caps = array_values(array_filter(
                 [$lineCap, $wordCap],
                 static fn (?int $value): bool => $value !== null,
@@ -330,15 +318,23 @@ final class HeroHeadlineFit
             $cap = $caps === [] ? null : min($caps);
             if ($cap !== null && $cap < self::MINIMUM_CAP_PX) {
                 // No size in this measure satisfies both bounds. The model's
-                // smaller preset is the better answer, and if it is the WORD
-                // that cannot fit, the word-fit loop still owns the
-                // hyphenation escape for it.
+                // smaller preset is the better answer. A below-display
+                // heading will not enter the word-fit loop, though, so apply
+                // its hyphenation escape here when the current preset would
+                // still overflow the unbreakable word.
+                if (
+                    $fit !== null
+                    && $wordCap !== null
+                    && $wordCap < self::MINIMUM_CAP_PX
+                    && ($currentMax === null || $currentMax > $wordCap)
+                ) {
+                    self::optIntoHyphenation($doc, $i, $attrs, $fit, $notes);
+                }
                 return;
             }
             $delivered = $cap === null ? $displayMax : min((float) $cap, $displayMax);
 
             // Never promote into a smaller rendered size than the model chose.
-            $currentMax = $current === null ? null : self::presetMaxPx($theme, $current);
             if ($currentMax !== null && $delivered <= $currentMax) {
                 return;
             }
@@ -445,18 +441,31 @@ final class HeroHeadlineFit
         }
 
         $available = $measure * self::MEASURE_SAFETY;
-        // Line count is monotonic in size, so the first size that fits, walking
-        // down from the preset maximum, is the largest one that fits. The floor
-        // is the smaller of the pin threshold and the preset's own maximum, so
-        // a theme whose display preset tops out below the threshold is still
-        // evaluated instead of reporting "nothing fits".
-        $floor = (int) min(self::MINIMUM_CAP_PX, floor($displayMax));
-        for ($size = (int) floor($displayMax); $size >= $floor; $size--) {
+        // Line count is monotonic in size, so a binary search finds the
+        // largest fitting whole-pixel size without trusting an LLM-authored
+        // preset maximum as a loop bound. The floor is the smaller of the pin
+        // threshold and the preset's own maximum, so a theme whose display
+        // preset tops out below the threshold is still evaluated instead of
+        // reporting "nothing fits".
+        $maximum = (int) floor($displayMax);
+        $floor = min(self::MINIMUM_CAP_PX, $maximum);
+        if (self::wrappedLines($words, $charEm, $spacingEm, (float) $floor, $available) > (int) $maxLines) {
+            return $floor - 1;
+        }
+
+        $best = $floor;
+        $low = $floor + 1;
+        $high = $maximum;
+        while ($low <= $high) {
+            $size = $low + intdiv($high - $low, 2);
             if (self::wrappedLines($words, $charEm, $spacingEm, (float) $size, $available) <= (int) $maxLines) {
-                return $size;
+                $best = $size;
+                $low = $size + 1;
+            } else {
+                $high = $size - 1;
             }
         }
-        return $floor - 1;
+        return $best;
     }
 
     /**
@@ -538,6 +547,37 @@ final class HeroHeadlineFit
     private static function classes(array $attrs): array
     {
         return preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+    }
+
+    /**
+     * Add the reviewed last-resort word-break hook exactly once.
+     *
+     * @param array<mixed> $attrs
+     * @param array{cap:?int,word:string,chars:int,uppercase:bool,wordEm:float,measure:float} $fit
+     * @param list<string> $notes
+     */
+    private static function optIntoHyphenation(
+        BlockMarkup $doc,
+        int $heading,
+        array $attrs,
+        array $fit,
+        array &$notes,
+    ): void {
+        $classes = self::classes($attrs);
+        if (in_array(self::HYPHENATE_CLASS, $classes, true)) {
+            return;
+        }
+        $classes[] = self::HYPHENATE_CLASS;
+        $attrs['className'] = implode(' ', $classes);
+        $doc->setAttrs($heading, $attrs);
+        $notes[] = sprintf(
+            "headline word-fit: '%s' (%d chars) fits no size above %dpx in the %dpx measure; "
+                . 'heading opted into hyphenation instead of a pinned size',
+            $fit['word'],
+            $fit['chars'],
+            self::MINIMUM_CAP_PX,
+            (int) round($fit['measure']),
+        );
     }
 
     /** The heading's longest word, or null when it has no text. */

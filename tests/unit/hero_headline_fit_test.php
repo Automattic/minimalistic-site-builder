@@ -335,6 +335,26 @@ test('promotion never makes the headline smaller than the model chose', function
     assert_eq($long, HeroHeadlineFit::apply($long, hhf_scale_theme(), [1, 1])['markup'], 'byte-identical');
 });
 
+test('a below-display masthead still gets the impossible-word hyphenation escape', function () {
+    // Review regression: promotion used to return before the ordinary word-fit
+    // loop, but that loop only visits display headings. The original
+    // section-title heading therefore kept overflowing with no escape at all.
+    $markup = str_replace(
+        '"contentSize":"720px"',
+        '"contentSize":"320px"',
+        hhf_scale_hero('Rechtsschutzversicherungen'),
+    );
+    $first = HeroHeadlineFit::apply($markup, hhf_scale_theme(), [1, 2]);
+
+    assert_contains('"fontSize":"section-title"', $first['markup'], 'the safer existing scale survives');
+    assert_contains('"className":"headline-hyphenate"', $first['markup'], 'hyphenation is opted in');
+    assert_contains('opted into hyphenation', implode("\n", $first['notes']));
+
+    $second = HeroHeadlineFit::apply($first['markup'], hhf_scale_theme(), [1, 2]);
+    assert_eq($first['markup'], $second['markup'], 'fixed point');
+    assert_eq([], $second['notes'], 'and silent on the second pass');
+});
+
 test('promotion only ever touches the page masthead h1', function () {
     // A section heading in the hero keeps its own scale.
     $withH2 = '<!-- wp:group {"className":"hero-composition__copy","layout":{"type":"constrained","contentSize":"720px"}} -->'
@@ -450,4 +470,22 @@ test('a malformed line target still bounds the headline', function () {
             'the only number supplied is still used as the bound'
         );
     }
+});
+
+test('an extreme generated display maximum cannot become an unbounded search', function () {
+    $theme = hhf_scale_theme();
+    $theme['settings']['typography']['fontSizes'][2]['size'] = '1000000000px';
+
+    $out = (new Serializer())->transform(
+        HeroHeadlineFit::apply(
+            hhf_scale_hero('Glass Given a Second Life as Light'),
+            $theme,
+            [1, 2],
+        )['markup']
+    )->html;
+    assert_true(
+        preg_match('/min\(var\(--wp--preset--font-size--display\), (\d+)px\)/', $out, $m) === 1,
+        'the hostile maximum is reduced to a finite cap',
+    );
+    assert_true((int) $m[1] < 1000, 'the cap comes from the measure, not the hostile preset maximum');
 });
