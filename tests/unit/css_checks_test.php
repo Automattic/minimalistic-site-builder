@@ -535,3 +535,123 @@ test('declarationScopeAtViewport refuses to decide anything a width comparison c
         );
     }
 });
+
+test('hiddenContentProblems catches a clip-path that leaves no visible area', function () {
+    // Regression (BIGR-881): pulso2's hero copy shipped
+    // `clip-path: inset(0 0 100% 0)`. Every visibility check we had read the
+    // element as visible; on screen it was clipped to nothing.
+    foreach ([
+        'inset(0 0 100% 0)',
+        'inset(100% 0 0 0)',
+        'inset(0 100% 0 0)',
+        'inset(60% 0 40% 0)',
+        'inset(100%)',
+        'inset(0 0 100% 0 round 4px)',
+        'circle(0)',
+        'circle(0%)',
+        'ellipse(0 0 at center)',
+    ] as $value) {
+        assert_eq(
+            ['clip-path clips generated content away entirely: ' . $value],
+            CssChecks::hiddenContentProblems(".a { clip-path: {$value}; }"),
+            "hides: {$value}"
+        );
+    }
+});
+
+test('hiddenContentProblems leaves a clip-path that still shows something', function () {
+    foreach ([
+        'inset(0 0 0 0)',
+        'inset(0)',
+        'inset(50% 0 0 0)',
+        'inset(0 0 99.9% 0)',
+        'inset(0 0 4rem 0)',
+        'circle(50%)',
+        'circle(12px at center)',
+        'polygon(0 0, 100% 0, 100% 100%)',
+        'var(--clip)',
+        'none',
+    ] as $value) {
+        assert_eq(
+            [],
+            CssChecks::hiddenContentProblems(".a { clip-path: {$value}; }"),
+            "visible: {$value}"
+        );
+    }
+});
+
+test('selectorNamesMotionClass reads the whole selector, not just its subject', function () {
+    foreach ([
+        '.reveal-up',
+        '.stagger-children > *',
+        '.stagger-children > *:nth-child(2)',
+        '.gradient-shift',
+        '.hero-entrance .card',
+        '.wp-block-group:is(.reveal-fade, .card)',
+        '.reveal-left',       // an invented variant the kit ships no CSS for
+        '.is-visible',        // the JS-owned state class
+    ] as $selector) {
+        assert_true(CssChecks::selectorNamesMotionClass($selector), "kit selector: {$selector}");
+    }
+
+    foreach ([
+        '.text-measure',
+        '.overlap-up',
+        '.wp-block-cover__inner-container',
+        '.card[data-motion=".reveal-up"]',   // an attribute value is not a class
+        '.card::after',
+        'h1',
+    ] as $selector) {
+        assert_true(!CssChecks::selectorNamesMotionClass($selector), "ordinary selector: {$selector}");
+    }
+});
+
+test('dropMotionKitDeclarations removes only kit rules and leaves every other byte', function () {
+    // The exact shape pulso2 shipped, trimmed to two rules plus a neighbour.
+    $css = 'body{-webkit-font-smoothing:antialiased}'
+        . '.device--hairline-rule{border-top:1px solid currentColor}'
+        . '@media (prefers-reduced-motion: no-preference){'
+        . '.reveal-up{opacity:0;transform:translate3d(0,2.75rem,0);clip-path:inset(0 0 100% 0);'
+        . 'animation:nn-reveal-up 1.15s ease both;animation-timeline:view()}'
+        . '.stagger-children>*:nth-child(2){animation-delay:.09s}'
+        . '.text-measure{max-width:38rem}'
+        . '}'
+        . '@keyframes nn-reveal-up{to{opacity:1;clip-path:inset(0 0 0 0)}}';
+
+    [$repaired, $dropped] = CssChecks::dropMotionKitDeclarations($css);
+
+    assert_eq([
+        'opacity:0',
+        'transform:translate3d(0,2.75rem,0)',
+        'clip-path:inset(0 0 100% 0)',
+        'animation:nn-reveal-up 1.15s ease both',
+        'animation-timeline:view()',
+        'animation-delay:.09s',
+    ], $dropped);
+
+    // Emptied kit rules stay as inert bytes; everything else is untouched,
+    // including the now-unreferenced keyframe, which renders nothing.
+    assert_eq(
+        'body{-webkit-font-smoothing:antialiased}'
+        . '.device--hairline-rule{border-top:1px solid currentColor}'
+        . '@media (prefers-reduced-motion: no-preference){'
+        . '.reveal-up{}'
+        . '.stagger-children>*:nth-child(2){}'
+        . '.text-measure{max-width:38rem}'
+        . '}'
+        . '@keyframes nn-reveal-up{to{opacity:1;clip-path:inset(0 0 0 0)}}',
+        $repaired
+    );
+
+    // Idempotent: a repair pass must reach a fixed point.
+    [$again, $droppedAgain] = CssChecks::dropMotionKitDeclarations($repaired);
+    assert_eq($repaired, $again);
+    assert_eq([], $droppedAgain);
+});
+
+test('dropMotionKitDeclarations leaves CSS that names no motion class alone', function () {
+    $css = '.text-measure{max-width:38rem}.overlap-up{margin-top:-3.5rem}';
+    [$repaired, $dropped] = CssChecks::dropMotionKitDeclarations($css);
+    assert_eq($css, $repaired, 'byte-for-byte');
+    assert_eq([], $dropped);
+});

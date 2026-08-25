@@ -1951,7 +1951,69 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         $shapeWarnings = [];
         $theme = self::mergeScaffoldDefaultsAtPath(self::SCAFFOLD, $theme, '', $shapeWarnings);
         $theme = self::removeUnsupportedTextWrapProperties($theme);
-        return [$theme, array_merge($colorWarnings, $shadowWarnings, $shapeWarnings)];
+        [$theme, $motionWarnings] = self::removeMotionKitCustomCss($theme);
+        return [
+            $theme,
+            array_merge($colorWarnings, $shadowWarnings, $shapeWarnings, $motionWarnings),
+        ];
+    }
+
+    /**
+     * Remove custom-CSS declarations that redefine a motion-kit class.
+     *
+     * The motion kit is a closed system: `assets/motion/motion.css` owns every
+     * hidden and revealed state for `.reveal*`, `.stagger-children`,
+     * `.hero-entrance`, the ambient classes and the hover classes, and
+     * `assets/motion/motion.js` drives them. Both ship verbatim and are never
+     * LLM-generated. `prompts/page-styles.md` already forbids writing CSS for
+     * those classes, and PageStylesStep enforces it through its scoped-selector
+     * policy; theme.json custom CSS had neither the instruction nor the check.
+     *
+     * pulso2 shipped `.reveal-up { opacity: 0; transform: …; clip-path: inset(0
+     * 0 100% 0); animation: nn-reveal-up … view() }` in `styles.css`. The kit's
+     * `motion-skip` escape — applied to every target already above the fold —
+     * clears `opacity` and `animation` but deliberately leaves `transform`
+     * alone for authored hover effects, so the generated `clip-path` survived
+     * with nothing left to animate it away and the whole hero copy was clipped
+     * to nothing (BIGR-881).
+     *
+     * Every `css` string under `styles` is walked, at any depth, so a rule
+     * nested in a block or element style is repaired too.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>} theme, warnings
+     */
+    private static function removeMotionKitCustomCss(array $theme): array
+    {
+        if (!is_array($theme['styles'] ?? null)) {
+            return [$theme, []];
+        }
+
+        $warnings = [];
+        $remove = static function (array $node, string $path) use (&$remove, &$warnings): array {
+            foreach ($node as $key => $value) {
+                if ($key === 'css' && is_string($value)) {
+                    [$repaired, $dropped] = CssChecks::dropMotionKitDeclarations($value);
+                    if ($dropped === []) {
+                        continue;
+                    }
+                    $node[$key] = $repaired;
+                    foreach ($dropped as $declaration) {
+                        $warnings[] = "theme/theme.json {$path}.css: authored declaration "
+                            . Warnings::value($declaration)
+                            . '; delivered removed; disposition removed custom CSS for a motion-kit class'
+                            . ' — assets/motion/ owns those states and the JS driver reveals them';
+                    }
+                    continue;
+                }
+                if (is_array($value)) {
+                    $node[$key] = $remove($value, $path . '.' . $key);
+                }
+            }
+            return $node;
+        };
+        $theme['styles'] = $remove($theme['styles'], 'styles');
+        return [$theme, $warnings];
     }
 
     /**
