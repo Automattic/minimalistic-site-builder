@@ -43,6 +43,7 @@ Use `<button>` only for a real non-scripted action. Prefer an `<a>` link styled 
 ## Image contract
 
 Use `<img>` only where imagery materially improves the page. Every image needs meaningful `alt` text written as a usable image generation prompt: name subject, setting, composition, lighting, palette or grade, and framing. Do not use vague alt text such as "hero image", file names, or empty alt text for content imagery. Keep any readable words or brand names out of generated images; render them as HTML text.
+- Never put a `<figcaption>` on an image. Captions belong only to a genuine gallery of photographs, and even there they are optional — the surrounding copy carries the detail.
 
 ## Responsive CSS contract
 

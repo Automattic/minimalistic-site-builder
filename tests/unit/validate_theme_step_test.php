@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\Pipeline;
 use Automattic\SiteBuild\AboveFoldContract;
+use Automattic\SiteBuild\DesignFloor;
 use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\SectionRhythm;
@@ -831,6 +832,36 @@ test('validate-theme rejects a smooth surface change with an unreadable midpoint
             !str_contains($safe, 'unreadable contrast midpoint'),
             'safe mixed-channel smooth transitions do not create false warnings',
         );
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('validate-theme records design-floor findings as warnings without rewriting markup', function () {
+    [$project, $tmp] = final_validation_project();
+    $markup = (string) file_get_contents(repo_path('tests/fixtures/design-floor/all-defects.html'));
+    $project->writeText('plugin/pages/home.html', $markup);
+    $theme = json_decode($project->readText('theme/theme.json'), true);
+    $defects = json_decode(
+        (string) file_get_contents(repo_path('tests/fixtures/design-floor/theme-defects.json')),
+        true,
+    );
+    $theme['settings']['typography'] = $defects['settings']['typography'];
+    $theme['styles']['typography'] = $defects['styles']['typography'];
+    $project->writeJson('theme/theme.json', $theme);
+
+    try {
+        (new ValidateThemeStep())->run($project);
+
+        assert_eq($markup, $project->readText('plugin/pages/home.html'), 'report only — markup unchanged');
+        $joined = implode("\n", $project->readJson('warnings.json')['validate-theme'] ?? []);
+        foreach (array_merge(DesignFloor::MARKUP_RULES, DesignFloor::THEME_RULES) as $rule) {
+            assert_contains('rule=' . $rule, $joined, $rule . ' lands in warnings.json');
+        }
+        assert_contains('design-floor: file=plugin/pages/home.html', $joined);
+        assert_contains('delivered=unchanged', $joined);
+        assert_contains('disposition=reported, not repaired', $joined);
+        assert_contains('theme delivered anyway', $project->readText('logs/validate-theme.log'));
     } finally {
         exec('rm -rf ' . escapeshellarg($tmp));
     }

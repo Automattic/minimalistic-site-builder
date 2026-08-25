@@ -202,6 +202,31 @@ test('above-fold assignment is stable and honors one exact compatible forced arc
     assert_throws(fn () => above_fold_resolve($pages, forced: 'invented-header'));
 });
 
+test('centered-masthead and split-nav are never auto-assigned (BIGR-872)', function () {
+    $pages = above_fold_pages(null, 'base', 'base');
+    foreach (['focal-subject-stage', 'editorial-split'] as $recipe) {
+        foreach (range(1, 40) as $seed) {
+            $contract = AboveFoldContract::resolve(
+                $pages,
+                HeroBlueprint::defaultFor($recipe),
+                'full-bleed',
+                ['base' => '#FFFFFF', 'contrast' => '#111111'],
+                ['stable_id' => "header-layout-seed-{$seed}", 'writing_direction' => 'ltr', 'page_count' => count($pages)],
+                ['archetype' => 'minimal-columns', 'surface' => 'base'],
+            );
+            assert_true(
+                !in_array($contract['header']['archetype'], ['centered-masthead', 'split-nav'], true),
+                "{$contract['header']['archetype']} must not be auto-assigned ({$recipe} seed {$seed})",
+            );
+        }
+    }
+
+    $forcedMasthead = above_fold_resolve($pages, recipe: 'editorial-split', forced: 'centered-masthead');
+    assert_eq('centered-masthead', $forcedMasthead['header']['archetype']);
+    $forcedSplit = above_fold_resolve($pages, recipe: 'editorial-split', forced: 'split-nav');
+    assert_eq('split-nav', $forcedSplit['header']['archetype']);
+});
+
 test('double-decker is removed from the catalog: never assigned, rejected as an override', function () {
     $pages = above_fold_pages(null, 'base', 'base');
     foreach (['focal-subject-stage', 'editorial-split'] as $recipe) {

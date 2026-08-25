@@ -23,6 +23,10 @@ function design_preview_fixture(): array
     $project->writeJson('siteSpec.json', [
         'name' => 'Hearth & Crumb',
         'description' => 'Neighborhood bread and pastry studio',
+        'pages' => [
+            ['slug' => 'home', 'title' => 'Home', 'front' => true],
+            ['slug' => 'menu', 'title' => 'Menu', 'front' => false],
+        ],
     ]);
     $project->writeJson('designDirection.json', [
         'direction' => [
@@ -40,9 +44,11 @@ function design_preview_document(string $marker = 'DESIGN-PREVIEW'): string
         . '<meta name="viewport" content="width=device-width, initial-scale=1">'
         . '<style>:root { --content-size: 800px; --wide-size: 1280px; }'
         . 'body { margin: 0; font-family: system-ui, sans-serif; }'
+        . design_preview_header_css()
         . 'main { max-width: var(--wide-size); margin-inline: auto; }</style>'
         . '</head><body>'
-        . '<header><nav aria-label="Primary"><a href="/menu">Menu</a></nav></header>'
+        . '<header><a class="site-identity" href="/">Hearth &amp; Crumb</a>'
+        . '<nav aria-label="Primary"><a href="/menu/">Menu</a></nav></header>'
         . '<main><section id="hero"><h1>' . $marker . '</h1>'
         . '<img alt="AI_IMAGE: A baker sliding a sourdough loaf into a stone oven, viewed from counter height | homepage hero beside the primary headline | photorealistic | landscape">'
         . '</section></main>'
@@ -53,7 +59,13 @@ function design_preview_css(): string
 {
     return ':root { --content-size: 800px; --wide-size: 1280px; }'
         . 'body { margin: 0; font-family: system-ui, sans-serif; }'
+        . design_preview_header_css()
         . 'main { max-width: var(--wide-size); margin-inline: auto; }';
+}
+
+function design_preview_header_css(): string
+{
+    return 'header { display: flex; flex-direction: row; flex-wrap: nowrap; align-items: center; justify-content: space-between; }';
 }
 
 function design_preview_run(
@@ -107,6 +119,7 @@ function design_preview_assert_shape(string $html): void
     assert_eq(1, $xpath->query('//nav')->length, 'one total nav');
     assert_eq(1, $xpath->query('/html/body/header')->length, 'one header');
     assert_eq(1, $xpath->query('/html/body/header//nav')->length, 'one header nav');
+    assert_eq(1, $xpath->query('/html/body/header//a[not(ancestor::nav) and @href="/"]')->length, 'identity home link sits outside nav');
     assert_eq(1, $xpath->query('/html/body/main')->length, 'one main');
     $main = $xpath->query('/html/body/main')->item(0);
     assert_true($main instanceof DOMElement, 'preview has one main element');
@@ -118,6 +131,10 @@ function design_preview_assert_shape(string $html): void
     assert_eq(1, $xpath->query('/html/body/main/*')->length, 'main contains only hero');
     assert_eq(1, $xpath->query('/html/body/main/section[@id="hero"]')->length, 'hero landmark');
     assert_eq(1, $xpath->query('//section')->length, 'no content sections below hero');
+
+    $style = $xpath->query('/html/head/style')->item(0);
+    assert_true($style instanceof DOMElement, 'preview has one head style');
+    assert_contains(design_preview_header_css(), $style->textContent, 'desktop header contract is explicit');
     assert_eq(0, $xpath->query('//footer')->length, 'no footer');
 
     $images = $xpath->query('//img');
@@ -264,7 +281,11 @@ test('G4 design-preview renders a labelled SITE PAGES list and shared-header lin
             ],
         ],
     ]);
-    $llm->queueText(design_preview_document());
+    $llm->queueText(str_replace(
+        '<a href="/menu/">Menu</a>',
+        '<a href="/classes/">Classes</a>',
+        design_preview_document(),
+    ));
 
     design_preview_run($project, $llm);
 
@@ -275,6 +296,13 @@ test('G4 design-preview renders a labelled SITE PAGES list and shared-header lin
     assert_contains('page links use the SITE PAGES paths verbatim', $prompt);
     assert_contains('do NOT put a Home item', $prompt);
     assert_contains('Nav lists SITE PAGES except the front page', $prompt);
+    assert_contains('exactly one `<a>` for every SITE PAGES entry except the front page', $prompt);
+    assert_contains('flex-direction:row', $prompt);
+    assert_contains('flex-wrap:nowrap', $prompt);
+    assert_contains('NEVER `flex-direction:column`', $prompt);
+    assert_contains('NEVER nav links on both sides of the identity', $prompt);
+    assert_contains('NEVER identity stacked above the nav', $prompt);
+    assert_contains('An empty `<nav>` is forbidden', $prompt);
     assert_contains('href="/#anchor"', $prompt);
     assert_contains('NEVER a bare `href="#anchor"`', $prompt);
     assert_contains('No `href="#"` placeholders', $prompt);
@@ -318,7 +346,7 @@ test('design-preview freezes the first-fold shape and prompt contract', function
     $defects = [
         'live script' => str_replace('</header>', '</header><script>globalThis.previewAttack=true</script>', $validRepair),
         'event handler' => str_replace('<header>', '<header onclick="globalThis.previewAttack=true">', $validRepair),
-        'javascript URL' => str_replace('href="/menu"', 'href="javascript:alert(1)"', $validRepair),
+        'javascript URL' => str_replace('href="/menu/"', 'href="javascript:alert(1)"', $validRepair),
         'HTML comment' => str_replace('<main>', '<!-- preview comment --><main>', $validRepair),
         'CSS comment' => str_replace(':root {', '/* preview comment */:root {', $validRepair),
         'remote stylesheet link' => str_replace(
@@ -339,6 +367,12 @@ test('design-preview freezes the first-fold shape and prompt contract', function
         'remote font' => str_replace(
             '</style>',
             '@font-face{font-family:Remote;src:url("https://cdn.example.test/font.woff2")}</style>',
+            $validRepair,
+        ),
+        'empty header nav' => str_replace('<a href="/menu/">Menu</a>', '', $validRepair),
+        'column header' => str_replace(
+            'main { max-width:',
+            'header{display:flex;flex-direction:column}main { max-width:',
             $validRepair,
         ),
         'extra header' => str_replace('<main>', '<header><nav></nav></header><main>', $validRepair),
@@ -405,6 +439,200 @@ test('design-preview repairs one malformed response once and warns', function ()
     assert_contains('authored_value', $warnings);
     assert_contains('delivered_value', $warnings);
     assert_contains('disposition repaired', $warnings);
+    design_preview_cleanup($tmp);
+});
+
+test('design-preview repairs desktop header CSS that cannot prove the required row', function () {
+    $valid = design_preview_document('VALID-HEADER-ROW');
+    $required = design_preview_header_css();
+    $invalidRules = [
+        'missing layout' => '',
+        'grid layout' => 'header { display: grid; align-items: center; justify-content: space-between; }',
+        'column direction' => 'header { display: flex; flex-direction: column; align-items: center; justify-content: space-between; }',
+        'column flex-flow' => 'header { display: flex; flex-flow: column nowrap; align-items: center; justify-content: space-between; }',
+        'wrapping row' => $required . 'header { flex-wrap: wrap; }',
+        'wrapping flex-flow' => str_replace(
+            'flex-direction: row; flex-wrap: nowrap;',
+            'flex-flow: row wrap;',
+            $required,
+        ),
+        'higher specificity override' => $required . 'body > header { display: grid; }',
+        'important override' => $required . 'header { flex-direction: column !important; }',
+        'desktop media override' => $required . '@media (min-width: 800px) { header { flex-direction: column; } }',
+        'tablet-width wrap override' => $required
+            . '@media (min-width: 720px) and (max-width: 999px) { header { flex-wrap: wrap; } }',
+        'unprovable support override' => $required . '@supports (display: grid) { header { display: grid; } }',
+    ];
+
+    foreach ($invalidRules as $name => $rule) {
+        [$project, $llm, $tmp] = design_preview_fixture();
+        $defective = str_replace($required, $rule, $valid);
+        assert_true($defective !== $valid, "{$name} fixture carries its defect");
+        $llm->queueText($defective);
+        $llm->queueText($valid);
+
+        design_preview_run($project, $llm);
+
+        assert_eq(2, $llm->completeCalls, "{$name} triggers one repair");
+        assert_eq($valid, $project->readText('design/preview.html'), "{$name} delivers the repaired row");
+        design_preview_cleanup($tmp);
+    }
+});
+
+test('design-preview rejects indirect, reordered and partially responsive header rows', function () {
+    $valid = design_preview_document('STRICT-HEADER-ROW');
+    $required = design_preview_header_css();
+    $identity = '<a class="site-identity" href="/">Hearth &amp; Crumb</a>';
+    $navigation = '<nav aria-label="Primary"><a href="/menu/">Menu</a></nav>';
+    $defects = [
+        'nested column wrapper' => str_replace(
+            $identity . $navigation,
+            '<div class="stack">' . $identity . $navigation . '</div>',
+            str_replace($required, $required . '.stack{display:flex;flex-direction:column}', $valid),
+        ),
+        'navigation reordered before identity' => str_replace(
+            $required,
+            $required . 'header nav{order:-1}',
+            $valid,
+        ),
+        'tablet-width column override' => str_replace(
+            $required,
+            $required . '@media (min-width:720px) and (max-width:999px){header{flex-direction:column}}',
+            $valid,
+        ),
+        'unsupported matching class selector' => str_replace(
+            [$required, '<header>'],
+            [$required . '.site-header:is(.site-header){display:grid}', '<header class="site-header">'],
+            $valid,
+        ),
+        'alignment shorthand override' => str_replace(
+            $required,
+            $required . 'header{place-items:stretch}',
+            $valid,
+        ),
+    ];
+
+    foreach ($defects as $name => $defective) {
+        [$project, $llm, $tmp] = design_preview_fixture();
+        assert_true($defective !== $valid, "{$name} fixture carries its defect");
+        $llm->queueText($defective);
+        $llm->queueText($valid);
+
+        design_preview_run($project, $llm);
+
+        assert_eq(2, $llm->completeCalls, "{$name} triggers one repair");
+        assert_eq($valid, $project->readText('design/preview.html'), "{$name} delivers the repaired row");
+        design_preview_cleanup($tmp);
+    }
+});
+
+test('design-preview rejects hidden, displaced, animated and edge-obstructed header rows', function () {
+    $valid = design_preview_document('VISIBLE-HEADER-ROW');
+    $required = design_preview_header_css();
+    $identity = '<a class="site-identity" href="/">Hearth &amp; Crumb</a>';
+    $navigation = '<nav aria-label="Primary"><a href="/menu/">Menu</a></nav>';
+    $defects = [
+        'hidden navigation' => str_replace($required, $required . 'header nav{display:none}', $valid),
+        'out-of-flow navigation' => str_replace(
+            $required,
+            $required . 'header nav{position:absolute;inset-inline-start:0}',
+            $valid,
+        ),
+        'animated header layout' => str_replace(
+            $required,
+            $required . 'header{animation:stack 1ms forwards}@keyframes stack{to{flex-direction:column}}',
+            $valid,
+        ),
+        'item before identity' => str_replace(
+            $identity,
+            '<button type="button">Menu</button>' . $identity,
+            $valid,
+        ),
+        'item after navigation' => str_replace(
+            $navigation,
+            $navigation . '<a href="/contact/">Contact</a>',
+            $valid,
+        ),
+    ];
+
+    foreach ($defects as $name => $defective) {
+        [$project, $llm, $tmp] = design_preview_fixture();
+        assert_true($defective !== $valid, "{$name} fixture carries its defect");
+        $llm->queueText($defective);
+        $llm->queueText($valid);
+
+        design_preview_run($project, $llm);
+
+        assert_eq(2, $llm->completeCalls, "{$name} triggers one repair");
+        assert_eq($valid, $project->readText('design/preview.html'), "{$name} delivers the repaired row");
+        design_preview_cleanup($tmp);
+    }
+});
+
+test('design-preview requires exactly the supplied inner-page links', function () {
+    [$project, $llm, $tmp] = design_preview_fixture();
+    $project->writeJson('siteSpec.json', [
+        'name' => 'Hearth & Crumb',
+        'description' => 'Neighborhood bread and pastry studio',
+        'pages' => [
+            ['slug' => 'home', 'title' => 'Home', 'front' => true],
+            ['slug' => 'classes', 'title' => 'Classes', 'front' => false],
+            ['slug' => 'contact', 'title' => 'Contact', 'front' => false],
+        ],
+    ]);
+    $valid = str_replace(
+        '<a href="/menu/">Menu</a>',
+        '<a href="/classes/">Classes</a><a href="/contact/">Contact</a>',
+        design_preview_document('EXACT-PAGE-NAV'),
+    );
+    $wrong = str_replace(
+        '<a href="/classes/">Classes</a><a href="/contact/">Contact</a>',
+        '<a href="/classes/">Classes</a><a href="/invented/">Invented</a>',
+        $valid,
+    );
+    $llm->queueText($wrong);
+    $llm->queueText($valid);
+
+    design_preview_run($project, $llm);
+
+    assert_eq(2, $llm->completeCalls, 'missing and invented page links trigger repair');
+    assert_eq($valid, $project->readText('design/preview.html'));
+    design_preview_cleanup($tmp);
+});
+
+test('design-preview permits a column override that is provably narrow-screen only', function () {
+    [$project, $llm, $tmp] = design_preview_fixture();
+    $valid = design_preview_document('MOBILE-COLUMN');
+    $mobile = str_replace(
+        design_preview_header_css(),
+        design_preview_header_css()
+            . '@media (max-width: 719px) { header { flex-direction: column; flex-wrap: wrap; } }',
+        $valid,
+    );
+    $llm->queueText($mobile);
+
+    design_preview_run($project, $llm);
+
+    assert_eq(1, $llm->completeCalls, 'narrow-screen override does not trigger repair');
+    assert_eq($mobile, $project->readText('design/preview.html'));
+    design_preview_cleanup($tmp);
+});
+
+test('design-preview accepts flex-flow only when it proves a non-wrapping row', function () {
+    [$project, $llm, $tmp] = design_preview_fixture();
+    $valid = design_preview_document('FLEX-FLOW-NOWRAP');
+    $shorthand = str_replace(
+        'flex-direction: row; flex-wrap: nowrap;',
+        'flex-flow: row nowrap;',
+        $valid,
+    );
+    assert_true($shorthand !== $valid, 'fixture uses the flex-flow shorthand');
+    $llm->queueText($shorthand);
+
+    design_preview_run($project, $llm);
+
+    assert_eq(1, $llm->completeCalls, 'a proven row/nowrap shorthand needs no repair');
+    assert_eq($shorthand, $project->readText('design/preview.html'));
     design_preview_cleanup($tmp);
 });
 
@@ -482,4 +710,30 @@ test('design-preview degrades two malformed responses to one deterministic safe 
 
     assert_eq($outputs[0], $outputs[1], 'safe scaffold is deterministic');
     assert_eq($styles[0], $styles[1], 'safe scaffold CSS is deterministic');
+});
+
+test('design-preview safe scaffold uses the supplied inner pages exactly', function () {
+    [$project, $llm, $tmp] = design_preview_fixture();
+    $project->writeJson('siteSpec.json', [
+        'name' => 'Hearth & Crumb',
+        'description' => 'Neighborhood bread and pastry studio',
+        'pages' => [
+            ['slug' => 'home', 'title' => 'Home', 'front' => true],
+            ['slug' => 'classes', 'title' => 'Classes', 'front' => false],
+            ['slug' => 'contact', 'title' => 'Contact', 'front' => false],
+        ],
+    ]);
+    $llm->queueText('MALFORMED-INITIAL');
+    $llm->queueText('MALFORMED-REPAIR');
+
+    design_preview_run($project, $llm);
+
+    $html = $project->readText('design/preview.html');
+    assert_contains('<a href="/classes/">Classes</a>', $html);
+    assert_contains('<a href="/contact/">Contact</a>', $html);
+    $dom = Html::loadUtf8Html($html, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING);
+    assert_true($dom instanceof DOMDocument);
+    assert_eq(2, (new DOMXPath($dom))->query('/html/body/header/nav/a')->length);
+    assert_true(!str_contains($html, 'Explore'), 'safe scaffold invents no navigation item');
+    design_preview_cleanup($tmp);
 });

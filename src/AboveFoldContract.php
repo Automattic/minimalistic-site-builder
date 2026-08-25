@@ -181,7 +181,7 @@ final class AboveFoldContract
             );
         }
 
-        $pool = self::headerPool($mode, count($pages), $imageLed);
+        $pool = self::headerPool($mode);
         if ($forced !== '' && self::forcedHeaderCompatible($forced, $overlaySupported, count($pages), $imageLed)) {
             $archetype = $forced;
             $mode = $forced === 'minimal-overlay' ? self::MODE_OVERLAY : self::MODE_STACKED;
@@ -595,21 +595,20 @@ final class AboveFoldContract
     }
 
     /** @return list<string> */
-    private static function headerPool(
-        string $mode,
-        int $pageCount,
-        bool $imageLed,
-    ): array {
+    private static function headerPool(string $mode): array
+    {
         if ($mode === self::MODE_OVERLAY) {
             return ['minimal-overlay'];
         }
-        $excluded = ['minimal-overlay', 'oversized-wordmark'];
-        if ($pageCount <= 1) {
-            $excluded[] = 'split-nav';
-        }
-        if ($imageLed) {
-            $excluded[] = 'centered-masthead';
-        }
+        // centered-masthead and split-nav are retired from auto-assignment
+        // (BIGR-872). Forced HEADER_ARCHETYPE can still pick them through
+        // forcedHeaderCompatible().
+        $excluded = [
+            'minimal-overlay',
+            'oversized-wordmark',
+            'centered-masthead',
+            'split-nav',
+        ];
         return array_values(array_diff(self::HEADER_ARCHETYPES, $excluded));
     }
 
