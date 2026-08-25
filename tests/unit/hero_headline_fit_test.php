@@ -489,3 +489,25 @@ test('an extreme generated display maximum cannot become an unbounded search', f
     );
     assert_true((int) $m[1] < 1000, 'the cap comes from the measure, not the hostile preset maximum');
 });
+
+test('a scalar style attr degrades instead of taking the build down', function () {
+    // Reading through a scalar is safe (`??` yields null); WRITING through it is
+    // a TypeError, and nothing between HeaderHeroStep and the CLI catches it.
+    // The promotion pass added the second write site, on the path this feature
+    // exists to trigger. FooterMarkup already repairs the same malformed shape.
+    foreach (['"style":"color:red"', '"style":{"typography":"big"}'] as $malformed) {
+        $markup = '<!-- wp:group {"className":"hero-composition__copy","layout":{"type":"constrained","contentSize":"720px"}} -->'
+            . '<div class="wp-block-group hero-composition__copy">'
+            . '<!-- wp:heading {"level":1,"fontSize":"section-title",' . $malformed . '} -->' . "\n"
+            . '<h1 class="wp-block-heading has-section-title-font-size">Glass Given a Second Life as Light</h1>'
+            . '<!-- /wp:heading --></div><!-- /wp:group -->';
+
+        $r = HeroHeadlineFit::apply($markup, hhf_scale_theme(), [1, 2]);
+        assert_contains('promoted to the display preset', implode("\n", $r['notes']));
+        assert_contains(
+            'font-size:min(var(--wp--preset--font-size--display)',
+            (new Serializer())->transform($r['markup'])->html,
+            'and the pin still lands'
+        );
+    }
+});

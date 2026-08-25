@@ -170,8 +170,10 @@ final class HeroHeadlineFit
             // beat the pinned inline size. The min() keeps the preset var,
             // so fluid behaviour below the cap is unchanged.
             unset($attrs['fontSize']);
-            $attrs['style']['typography']['fontSize'] =
-                'min(var(--wp--preset--font-size--display), ' . $cap . 'px)';
+            $attrs = self::withPinnedFontSize(
+                $attrs,
+                'min(var(--wp--preset--font-size--display), ' . $cap . 'px)',
+            );
             $doc->setAttrs($i, $attrs);
             $doc->removeClassTokenInOwnHtml($i, 'has-display-font-size');
             $notes[] = sprintf(
@@ -350,8 +352,10 @@ final class HeroHeadlineFit
             }
             if ($cap !== null && $cap < $displayMax) {
                 unset($attrs['fontSize']);
-                $attrs['style']['typography']['fontSize'] =
-                    'min(var(--wp--preset--font-size--' . self::DISPLAY_SLUG . '), ' . $cap . 'px)';
+                $attrs = self::withPinnedFontSize(
+                    $attrs,
+                    'min(var(--wp--preset--font-size--' . self::DISPLAY_SLUG . '), ' . $cap . 'px)',
+                );
             } else {
                 $attrs['fontSize'] = self::DISPLAY_SLUG;
             }
@@ -541,6 +545,28 @@ final class HeroHeadlineFit
             return is_string($size) ? self::cssMaxPx($size) : null;
         }
         return null;
+    }
+
+    /**
+     * Write the explicit size, tolerating a model-authored `style` (or
+     * `style.typography`) that is not an array. Reading through one is safe
+     * (`??` on a scalar offset yields null), but WRITING through it is a
+     * TypeError that takes the whole build down, and a scalar cannot have
+     * held a font size for WordPress to render in the first place.
+     *
+     * @param array<mixed> $attrs
+     * @return array<mixed>
+     */
+    private static function withPinnedFontSize(array $attrs, string $size): array
+    {
+        if (!is_array($attrs['style'] ?? null)) {
+            unset($attrs['style']);
+        }
+        if (!is_array($attrs['style']['typography'] ?? null)) {
+            unset($attrs['style']['typography']);
+        }
+        $attrs['style']['typography']['fontSize'] = $size;
+        return $attrs;
     }
 
     /** @return list<string> the block's own class tokens */
