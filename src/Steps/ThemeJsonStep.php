@@ -14,6 +14,7 @@ use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\GeneratedJsonFallbackStep;
 use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\CssChecks;
+use Automattic\SiteBuild\CtaStyle;
 use Automattic\SiteBuild\PaletteFloor;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
@@ -188,9 +189,8 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      * roles and makes zero aesthetic choices — every value is a var:preset
      * token whose actual color, family and size the model chose, so sites stay
      * visually distinct. No borders, radii, shadows or decorative treatment.
-     * (The direction-committed shape wiring in repairShapeWiring() is the one
-     * deliberate exception, and it executes an explicit design commitment
-     * rather than making a choice here.)
+     * (The direction-committed CTA and shape wiring are deliberate exceptions,
+     * and execute explicit design commitments rather than making choices here.)
      *
      * Context-free block/caption text colors are deliberately absent:
      * ContrastFixStep evaluates rendered backgrounds but cannot see
@@ -529,12 +529,17 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         [$theme, $sizeWarnings] = self::repairFontSizes($theme);
 
         // Last: the scaffold references the preset slugs repaired above. The
-        // committed shape is then authoritative over model-authored radii.
+        // committed CTA construction and shape are then authoritative over
+        // their model-authored leaves.
         [$theme, $scaffoldWarnings] = self::repairScaffold($theme);
         if ($this->htmlFirst) {
             $theme = self::removeGeneratedControlTypography($theme);
         }
         [$theme, $accentCaptionWarnings] = self::repairAccentCaption($theme);
+        [$theme, $ctaRepairs] = self::repairCtaStyle(
+            $theme,
+            DesignDirectionStep::ctaStyleFor($project) ?? '',
+        );
         [$theme, $shapeRepairs, $shapeWarnings] = self::repairShapeWiring(
             $theme,
             DesignDirectionStep::shapeFor($project) ?? '',
@@ -556,7 +561,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         [$theme, $floorWarnings] = self::applyPaletteFloor($theme);
         $warnings = array_merge($warnings, $floorWarnings);
 
-        $bindRepairs = array_merge($colorRepairs, $fontRepairs, $measureRepairs);
+        $bindRepairs = array_merge($colorRepairs, $fontRepairs, $measureRepairs, $ctaRepairs);
         $bindReport = ['Successful design-direction writebacks: ' . count($bindRepairs)];
         foreach ($bindRepairs as $repair) {
             $bindReport[] = '- ' . $repair;
@@ -2427,6 +2432,363 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $node[$mapKey] = $map;
         }
         return true;
+    }
+
+    /**
+     * Execute the committed CTA construction at styles.elements.button while
+     * preserving model-authored typography and shape-owned border.radius.
+     * Competing core/button, variation, nested-element, responsive and
+     * interaction construction is removed before the authoritative base and
+     * states are installed. A pre-field direction is a complete no-op.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>} theme, successful repair notes
+     */
+    public static function repairCtaStyle(array $theme, string $style): array
+    {
+        $desired = CtaStyle::themeStyle($style);
+        if ($desired === null) {
+            return [$theme, []];
+        }
+
+        $authoredTheme = $theme;
+        $repairs = [];
+        $styles = $theme['styles'] ?? null;
+        if (!is_array($styles) || ($styles !== [] && array_is_list($styles))) {
+            $styles = [];
+        }
+        $authoredLabel = $styles['elements']['button']['color']['text'] ?? null;
+        $styles = self::stripCompetingCtaStyles($styles, 'styles', null, $style, $repairs);
+
+        $elements = $styles['elements'] ?? null;
+        if (!is_array($elements) || ($elements !== [] && array_is_list($elements))) {
+            $elements = [];
+        }
+        $button = $elements['button'] ?? null;
+        if (!is_array($button) || ($button !== [] && array_is_list($button))) {
+            if (array_key_exists('button', $elements)) {
+                $repairs[] = 'theme/theme.json styles.elements.button: authored '
+                    . Warnings::value($button)
+                    . '; delivered object; disposition replaced malformed button style to enforce committed '
+                    . $style . ' CTA construction';
+            }
+            $button = [];
+        }
+        $committedCss = is_string($desired['css'] ?? null) ? $desired['css'] : null;
+        unset($desired['css']);
+        $button = self::mergeCommittedCtaStyle(
+            $button,
+            $desired,
+            'styles.elements.button',
+            $style,
+            $repairs,
+        );
+        if ($committedCss !== null) {
+            $residualCss = is_string($button['css'] ?? null) ? trim($button['css']) : '';
+            $deliveredCss = $residualCss === '' ? $committedCss : $residualCss . "\n" . $committedCss;
+            if (($button['css'] ?? null) !== $deliveredCss) {
+                $repairs[] = 'theme/theme.json styles.elements.button.css: authored '
+                    . Warnings::value($button['css'] ?? null)
+                    . ' delivered ' . Warnings::value($deliveredCss)
+                    . '; disposition appended build-owned CSS for committed ' . $style . ' CTA construction';
+            }
+            $button['css'] = $deliveredCss;
+        }
+
+        // Solid's accent can be light or dark, so ContrastFixStep owns the
+        // exact readable label choice. Preserve an authored/repaired label and
+        // seed base only when no color exists for that later check to inspect.
+        if ($style === 'solid') {
+            $label = is_string($authoredLabel) && trim($authoredLabel) !== ''
+                ? $authoredLabel
+                : 'var:preset|color|base';
+            if (($button['color']['text'] ?? null) !== $label) {
+                $repairs[] = 'theme/theme.json styles.elements.button.color.text: authored '
+                    . Warnings::value($button['color']['text'] ?? null)
+                    . ' delivered ' . Warnings::value($label)
+                    . '; disposition supplied a label color for deterministic contrast repair';
+            }
+            $button['color']['text'] = $label;
+        }
+
+        $elements['button'] = $button;
+        $styles['elements'] = $elements;
+        $theme['styles'] = $styles;
+        if ($theme === $authoredTheme) {
+            return [$theme, []];
+        }
+        return [$theme, $repairs];
+    }
+
+    /**
+     * @param array<mixed> $node
+     * @param ?string $target button | null
+     * @param list<string> $repairs
+     * @return array<mixed>
+     */
+    private static function stripCompetingCtaStyles(
+        array $node,
+        string $path,
+        ?string $target,
+        string $style,
+        array &$repairs,
+    ): array {
+        if ($target === 'button') {
+            $preserveSolidLabel = $style === 'solid' && $path === 'styles.elements.button';
+            $color = $node['color'] ?? null;
+            if (is_array($color) && ($color === [] || !array_is_list($color))) {
+                foreach (['background', 'gradient', 'text'] as $property) {
+                    if ($property === 'text' && $preserveSolidLabel) {
+                        continue;
+                    }
+                    self::removeCtaLeaf(
+                        $color,
+                        $property,
+                        $path . '.color.' . $property,
+                        $style,
+                        $repairs,
+                    );
+                }
+                if ($color === []) {
+                    unset($node['color']);
+                } else {
+                    $node['color'] = $color;
+                }
+            } elseif (array_key_exists('color', $node)) {
+                self::removeCtaLeaf($node, 'color', $path . '.color', $style, $repairs);
+            }
+
+            $border = $node['border'] ?? null;
+            if (is_array($border) && ($border === [] || !array_is_list($border))) {
+                foreach (array_keys($border) as $property) {
+                    if ($property === 'radius') {
+                        continue;
+                    }
+                    self::removeCtaLeaf(
+                        $border,
+                        (string) $property,
+                        $path . '.border.' . $property,
+                        $style,
+                        $repairs,
+                    );
+                }
+                if ($border === []) {
+                    unset($node['border']);
+                } else {
+                    $node['border'] = $border;
+                }
+            } elseif (array_key_exists('border', $node)) {
+                self::removeCtaLeaf($node, 'border', $path . '.border', $style, $repairs);
+            }
+
+            $spacing = $node['spacing'] ?? null;
+            if (is_array($spacing) && ($spacing === [] || !array_is_list($spacing))) {
+                self::removeCtaLeaf($spacing, 'padding', $path . '.spacing.padding', $style, $repairs);
+                if ($spacing === []) {
+                    unset($node['spacing']);
+                } else {
+                    $node['spacing'] = $spacing;
+                }
+            }
+
+            $typography = $node['typography'] ?? null;
+            if (is_array($typography) && ($typography === [] || !array_is_list($typography))) {
+                self::removeCtaLeaf(
+                    $typography,
+                    'textDecoration',
+                    $path . '.typography.textDecoration',
+                    $style,
+                    $repairs,
+                );
+                if ($typography === []) {
+                    unset($node['typography']);
+                } else {
+                    $node['typography'] = $typography;
+                }
+            }
+            if (is_string($node['css'] ?? null)) {
+                $css = rtrim($node['css']);
+                $ownedCss = CtaStyle::themeStyle($style)['css'] ?? null;
+                if (is_string($ownedCss) && str_ends_with($css, $ownedCss)) {
+                    $css = rtrim(substr($css, 0, -strlen($ownedCss)));
+                }
+                [$deliveredCss, $dropped] = CssChecks::dropDeclarations(
+                    $css,
+                    static fn (array $declaration): bool => CssChecks::isCtaAffectingDeclaration(
+                        $declaration['property'],
+                        $declaration['value'],
+                    ),
+                    true,
+                );
+                if ($dropped !== [] || $css !== rtrim($node['css'])) {
+                    if (trim($deliveredCss) === '') {
+                        unset($node['css']);
+                    } else {
+                        $node['css'] = $deliveredCss;
+                    }
+                    foreach ($dropped as $declaration) {
+                        $repairs[] = 'theme/theme.json ' . $path . '.css: authored declaration '
+                            . Warnings::value(trim($declaration['raw']))
+                            . '; delivered removed; disposition removed competing custom CSS for committed '
+                            . $style . ' CTA construction';
+                    }
+                }
+            } elseif (array_key_exists('css', $node)) {
+                self::removeCtaLeaf($node, 'css', $path . '.css', $style, $repairs);
+            }
+        }
+
+        foreach ([['blocks', 'core/button'], ['elements', 'button']] as [$family, $ownedName]) {
+            $children = $node[$family] ?? null;
+            if (!is_array($children) || ($children !== [] && array_is_list($children))) {
+                continue;
+            }
+            foreach ($children as $name => $child) {
+                if (!is_string($name)
+                    || !is_array($child)
+                    || ($child !== [] && array_is_list($child))
+                ) {
+                    continue;
+                }
+                $childPath = $path . '.' . $family . '.' . $name;
+                $child = self::stripCompetingCtaStyles(
+                    $child,
+                    $childPath,
+                    $name === $ownedName ? 'button' : null,
+                    $style,
+                    $repairs,
+                );
+                if ($child === []) {
+                    unset($children[$name]);
+                } else {
+                    $children[$name] = $child;
+                }
+            }
+            if ($children === []) {
+                unset($node[$family]);
+            } else {
+                $node[$family] = $children;
+            }
+        }
+
+        $variations = $node['variations'] ?? null;
+        if (is_array($variations) && ($variations === [] || !array_is_list($variations))) {
+            foreach ($variations as $name => $child) {
+                if (!is_string($name)
+                    || !is_array($child)
+                    || ($child !== [] && array_is_list($child))
+                ) {
+                    continue;
+                }
+                $child = self::stripCompetingCtaStyles(
+                    $child,
+                    $path . '.variations.' . $name,
+                    $target,
+                    $style,
+                    $repairs,
+                );
+                if ($child === []) {
+                    unset($variations[$name]);
+                } else {
+                    $variations[$name] = $child;
+                }
+            }
+            if ($variations === []) {
+                unset($node['variations']);
+            } else {
+                $node['variations'] = $variations;
+            }
+        }
+
+        foreach (array_keys($node) as $state) {
+            $child = $node[$state] ?? null;
+            if (!is_string($state)
+                || (!str_starts_with($state, ':')
+                    && !str_starts_with($state, '@')
+                    && !in_array($state, ['mobile', 'tablet', 'desktop'], true))
+                || !is_array($child)
+                || ($child !== [] && array_is_list($child))
+            ) {
+                continue;
+            }
+            $child = self::stripCompetingCtaStyles(
+                $child,
+                $path . '.' . $state,
+                $target,
+                $style,
+                $repairs,
+            );
+            if ($child === []) {
+                unset($node[$state]);
+            } else {
+                $node[$state] = $child;
+            }
+        }
+        return $node;
+    }
+
+    /** @param array<mixed> $node @param list<string> $repairs */
+    private static function removeCtaLeaf(
+        array &$node,
+        string $property,
+        string $path,
+        string $style,
+        array &$repairs,
+    ): void {
+        if (!array_key_exists($property, $node)) {
+            return;
+        }
+        $repairs[] = 'theme/theme.json ' . $path . ': authored '
+            . Warnings::value($node[$property])
+            . '; delivered removed; disposition removed competing declaration for committed '
+            . $style . ' CTA construction';
+        unset($node[$property]);
+    }
+
+    /**
+     * @param array<mixed> $delivered
+     * @param array<mixed> $committed
+     * @param list<string> $repairs
+     * @return array<mixed>
+     */
+    private static function mergeCommittedCtaStyle(
+        array $delivered,
+        array $committed,
+        string $path,
+        string $style,
+        array &$repairs,
+    ): array {
+        foreach ($committed as $property => $value) {
+            $childPath = $path . '.' . $property;
+            if (is_array($value) && ($value === [] || !array_is_list($value))) {
+                $existing = $delivered[$property] ?? null;
+                if (!is_array($existing) || ($existing !== [] && array_is_list($existing))) {
+                    if (array_key_exists($property, $delivered)) {
+                        $repairs[] = 'theme/theme.json ' . $childPath . ': authored '
+                            . Warnings::value($existing)
+                            . '; delivered object; disposition replaced malformed container for committed '
+                            . $style . ' CTA construction';
+                    }
+                    $existing = [];
+                }
+                $delivered[$property] = self::mergeCommittedCtaStyle(
+                    $existing,
+                    $value,
+                    $childPath,
+                    $style,
+                    $repairs,
+                );
+                continue;
+            }
+            if (($delivered[$property] ?? null) !== $value) {
+                $repairs[] = 'theme/theme.json ' . $childPath . ': authored '
+                    . Warnings::value($delivered[$property] ?? null)
+                    . ' delivered ' . Warnings::value($value)
+                    . '; disposition enforced committed ' . $style . ' CTA construction';
+            }
+            $delivered[$property] = $value;
+        }
+        return $delivered;
     }
 
     /**

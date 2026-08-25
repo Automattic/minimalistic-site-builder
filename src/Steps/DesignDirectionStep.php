@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\AboveFoldContract;
 use Automattic\SiteBuild\CardStyle;
 use Automattic\SiteBuild\ConceptSeeds;
+use Automattic\SiteBuild\CtaStyle;
 use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\DirectionExecutability;
 use Automattic\SiteBuild\Env;
@@ -358,6 +359,7 @@ final class DesignDirectionStep implements Step
             'canvas'           => $canvas,
             'measure'          => Measure::DEFAULT,
             'card_style'       => 'flush',
+            'cta_style'        => CtaStyle::DEFAULT,
             'shape'            => 'sharp',
             'surface'          => Surface::DEFAULT,
             'device'           => Device::DEFAULT,
@@ -728,6 +730,14 @@ final class DesignDirectionStep implements Step
         );
 
         $cardStyle = self::normalizeCardStyle($raw['card_style'] ?? null, $warnings);
+        $ctaStyle = BoundedChoice::normalize(
+            $raw['cta_style'] ?? null,
+            CtaStyle::ALL,
+            CtaStyle::DEFAULT,
+            'cta_style',
+            $warnings,
+            'invalid CTA construction replaced by deterministic solid fallback',
+        );
         $surface = self::normalizeSurface($raw['surface'] ?? null, $warnings);
         $device = self::normalizeDevice($raw['device'] ?? null, $warnings);
         $rhythm = self::normalizeRhythm($raw['rhythm'] ?? null, $warnings);
@@ -816,6 +826,7 @@ final class DesignDirectionStep implements Step
             // flush default — inset media must be an explicit opt-in, never
             // the accidental look every site gets.
             'card_style'       => $cardStyle,
+            'cta_style'        => $ctaStyle,
             'shape'            => $shape,
             'surface'          => $surface,
             'device'           => $device,
@@ -1212,6 +1223,13 @@ final class DesignDirectionStep implements Step
             $facts[] = "- **Card treatment**: {$cardStyle} — {$meaning}.";
         }
 
+        $ctaStyle = CtaStyle::explicit($direction['cta_style'] ?? null);
+        if ($ctaStyle !== null) {
+            $facts[] = '- **CTA style**: ' . $ctaStyle . ' — ' . CtaStyle::meaning($ctaStyle)
+                . '. The build owns button fill, border, padding, interaction construction, and any arrow glyph;'
+                . ' do not restyle those per button.';
+        }
+
         // The page plan reads these two and assigns its per-section archetype,
         // background and density against them. Stated as executable meaning
         // rather than a bare keyword for the same reason as canvas: a keyword
@@ -1524,6 +1542,15 @@ final class DesignDirectionStep implements Step
             $project->readJson(self::FILE)['density'] ?? null,
             self::DENSITIES,
         ) ?? 'measured';
+    }
+
+    /** The explicit site-wide CTA construction, or null for a pre-field artifact. */
+    public static function ctaStyleFor(Project $project): ?string
+    {
+        if (!$project->exists(self::FILE)) {
+            return null;
+        }
+        return CtaStyle::explicit($project->readJson(self::FILE)['cta_style'] ?? null);
     }
 
     /**

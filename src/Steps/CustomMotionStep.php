@@ -104,6 +104,7 @@ final class CustomMotionStep implements Step
             return;
         }
         $shapeTagged = self::hasShapeTaggedElement($project);
+        $ctaTagged = self::hasCtaTaggedElement($project);
 
         $rendered = $this->renderer->render('custom-motion.md', [
             'animation_request' => $request,
@@ -119,10 +120,12 @@ final class CustomMotionStep implements Step
         // possible by removing only those declarations, including inside
         // keyframes, before applying the rest of the CSS policy below.
         [$css, $droppedShapeDeclarations] = self::dropShapeOwnedDeclarations($css, $shapeTagged);
+        [$css, $droppedCtaDeclarations] = self::dropCtaOwnedDeclarations($css, $ctaTagged);
         [$css, $droppedMotionDeclarations] = self::dropProfileOwnedMotionDeclarations($css);
         foreach (
             [
                 'shape-owned corner' => $droppedShapeDeclarations,
+                'CTA-owned construction' => $droppedCtaDeclarations,
                 'profile-owned motion custom property' => $droppedMotionDeclarations,
             ] as $kind => $dropped
         ) {
@@ -138,12 +141,16 @@ final class CustomMotionStep implements Step
                 $dropped,
             ));
         }
-        $problems = self::validate($css, $shapeTagged);
+        $problems = self::validate($css, $shapeTagged, $ctaTagged);
         $preValidationDropLog = implode('', [
             $droppedShapeDeclarations === []
                 ? ''
                 : "\nSHAPE-OWNED DECLARATIONS REMOVED BEFORE VALIDATION:\n- "
                     . implode("\n- ", $droppedShapeDeclarations) . "\n",
+            $droppedCtaDeclarations === []
+                ? ''
+                : "\nCTA-OWNED DECLARATIONS REMOVED BEFORE VALIDATION:\n- "
+                    . implode("\n- ", $droppedCtaDeclarations) . "\n",
             $droppedMotionDeclarations === []
                 ? ''
                 : "\nPROFILE-OWNED MOTION DECLARATIONS REMOVED BEFORE VALIDATION:\n- "
@@ -167,7 +174,9 @@ final class CustomMotionStep implements Step
             return;
         }
 
-        $droppedCount = count($droppedShapeDeclarations) + count($droppedMotionDeclarations);
+        $droppedCount = count($droppedShapeDeclarations)
+            + count($droppedCtaDeclarations)
+            + count($droppedMotionDeclarations);
         if ($droppedCount > 0) {
             file_put_contents(
                 $project->logPath(self::LOG_FILE),
@@ -248,6 +257,32 @@ final class CustomMotionStep implements Step
         return false;
     }
 
+    /** Whether the custom-motion class is attached to a core/button block. */
+    public static function hasCtaTaggedElement(Project $project): bool
+    {
+        $token = '(?<![\w-])' . self::CLASS_NAME . '(?![\w-])';
+        foreach ($project->themeFiles() as $rel) {
+            $doc = BlockMarkup::parse($project->readText('theme/' . $rel));
+            foreach ($doc->indices() as $i) {
+                $name = $doc->name($i);
+                $name = str_contains($name, '/') ? $name : 'core/' . $name;
+                if ($name !== 'core/button') {
+                    continue;
+                }
+                $attrs = $doc->attrs($i);
+                $className = is_array($attrs) && is_string($attrs['className'] ?? null)
+                    ? $attrs['className']
+                    : '';
+                if (preg_match('/' . $token . '/', $className) === 1
+                    || preg_match('/\bclass\s*=\s*(["\'])[^"\']*' . $token . '[^"\']*\1/i', $doc->ownHtml($i)) === 1
+                ) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private static function clip(string $element): string
     {
         return strlen($element) > 300 ? substr($element, 0, 300) . '…' : $element;
@@ -259,7 +294,11 @@ final class CustomMotionStep implements Step
      *
      * @return string[]
      */
-    public static function validate(string $css, bool $shapeTagged = false): array
+    public static function validate(
+        string $css,
+        bool $shapeTagged = false,
+        bool $ctaTagged = false,
+    ): array
     {
         $css = trim($css);
         if ($css === '') {
@@ -298,6 +337,10 @@ final class CustomMotionStep implements Step
         }
         foreach (self::shapeOwnedDeclarations($stripped, $shapeTagged) as $declaration) {
             $problems[] = 'shape-owned image/button corner declaration is not allowed: '
+                . trim($declaration['raw']);
+        }
+        foreach (self::ctaOwnedDeclarations($stripped, $ctaTagged) as $declaration) {
+            $problems[] = 'CTA-owned button construction declaration is not allowed: '
                 . trim($declaration['raw']);
         }
 
@@ -391,6 +434,27 @@ final class CustomMotionStep implements Step
     }
 
     /**
+     * Remove only declarations that can replace build-owned CTA construction.
+     * Referenced keyframes are followed so a button animation cannot change
+     * color, border, padding, width, or related construction mid-flight.
+     *
+     * @return array{0:string,1:list<string>} repaired CSS and dropped declarations
+     */
+    public static function dropCtaOwnedDeclarations(string $css, bool $ctaTagged = false): array
+    {
+        $owned = self::ctaOwnedDeclarations($css, $ctaTagged);
+        $ownedStarts = array_fill_keys(array_column($owned, 'start'), true);
+        [$repaired, $dropped] = CssChecks::dropDeclarations(
+            $css,
+            static fn (array $declaration): bool => isset($ownedStarts[$declaration['start']]),
+        );
+        return [
+            $repaired,
+            array_map(static fn (array $declaration): string => trim($declaration['raw']), $dropped),
+        ];
+    }
+
+    /**
      * Remove only `--motion-*` custom properties. The committed profile owns
      * those values on `:root`; a local override retunes the element and
      * everything under it. Selectors, at-rules, and every other declaration
@@ -421,6 +485,19 @@ final class CustomMotionStep implements Step
             $css,
             static fn (string $selector): bool => CssChecks::selectorTargetsShape($selector)
                 || ($shapeTagged && self::selectorTargetsCustomMotionRoot($selector)),
+        );
+    }
+
+    /**
+     * @return list<array{property:string,value:string,raw:string,start:int,end:int,
+     *     context:string,ancestors:list<string>,kind:string}>
+     */
+    private static function ctaOwnedDeclarations(string $css, bool $ctaTagged): array
+    {
+        return CssChecks::ctaAffectingDeclarations(
+            $css,
+            static fn (string $selector): bool => CssChecks::selectorTargetsCta($selector)
+                || ($ctaTagged && self::selectorTargetsCustomMotionRoot($selector)),
         );
     }
 

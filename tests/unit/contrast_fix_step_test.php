@@ -106,3 +106,32 @@ test('theme.json passing global link hover is left alone', function () {
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('button interaction states keep normal-text contrast', function () {
+    $tmp = sys_get_temp_dir() . '/builder_cfs_button_states_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('theme/theme.json', contrast_step_theme_json([
+        'elements' => ['button' => [
+            'color' => ['background' => 'var:preset|color|contrast', 'text' => 'var:preset|color|base'],
+            ':hover' => ['color' => [
+                'background' => 'var:preset|color|accent',
+                'text' => 'var:preset|color|base',
+            ]],
+            ':focus' => ['color' => [
+                'background' => 'transparent',
+                'text' => 'inherit',
+            ]],
+        ]],
+    ]));
+
+    quietly(fn () => (new ContrastFixStep())->run($project));
+    $theme = $project->readJson('theme/theme.json');
+    assert_eq(
+        'var(--wp--preset--color--contrast)',
+        $theme['styles']['elements']['button'][':hover']['color']['text'],
+        'failing opaque hover label is repaired',
+    );
+    assert_eq('inherit', $theme['styles']['elements']['button'][':focus']['color']['text']);
+    assert_contains('button hover text', $project->readText('logs/contrast-report.txt'));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

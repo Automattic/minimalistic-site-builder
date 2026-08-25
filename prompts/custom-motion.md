@@ -26,6 +26,7 @@ HARD RULES — the output is machine-validated and rejected entirely if any rule
 - ALWAYS write the fallback on every `var()`: a direction that committed to `none` ships no motion kit, and a bare `var()` there is an invalid declaration.
 - Never declare a `--motion-*` custom property, even inside `.custom-motion`; the committed profile owns those values.
 - Contained-media and button corner shape is build-owned. Rules targeting `.wp-block-image`, its `img`, `.wp-block-button__link`, `.wp-element-button`, `button`, `.wp-block-cover` (or its background layers), or `.wp-block-media-text` / `.wp-block-media-text__media` must not declare `border-radius`, physical/logical/vendor corner longhands, or a CSS-wide `all` reset; keyframes used by those targets must not animate them either. A tagged generic wrapper/card may retain its own unrelated radius.
+- CTA construction is build-owned too. A `.custom-motion` button may animate only compositing properties; never change its fill/text color, border, padding, width/display construction, text decoration, or arrow content in the resting rule or its keyframes.
 - No `url()`, no `@import`, no `@font-face` — only style rules, `@media`, and `@keyframes`.
 - Do NOT wrap the output in `@media (prefers-reduced-motion: …)` — the build adds that wrapper itself.
 - Under 50 lines total. Implement the request faithfully but economically; if it is ambiguous, choose the tasteful reading.

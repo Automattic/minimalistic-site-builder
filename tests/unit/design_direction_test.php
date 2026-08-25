@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\JsonBatchRecovery;
+use Automattic\SiteBuild\CtaStyle;
 use Automattic\SiteBuild\GroundTint;
 use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
@@ -139,6 +140,7 @@ test('design-direction expands a picked seed into structured designDirection.jso
     assert_eq('warm kodachrome color, soft golden light', $written['image_grade']);
     assert_eq('framed', $written['card_style']);
     assert_eq(Measure::DEFAULT, $written['measure']);
+    assert_eq(CtaStyle::DEFAULT, $written['cta_style']);
     assert_true(!array_key_exists('signature_device', $written), 'signature_device field is gone');
     assert_true(in_array($written['hero_blueprint']['recipe'], HeroComposition::RECIPES, true));
     assert_contains('Seed ', $written['concept_seed']);
@@ -159,7 +161,7 @@ test('design-direction expands a picked seed into structured designDirection.jso
     assert_contains('cozy neighborhood bakery', $llm->calls[1]['prompt']);
     assert_contains('Hearth & Crumb', $llm->calls[1]['prompt']);
     assert_contains('Seed ', $llm->calls[1]['prompt'], 'a seed reached the expansion prompt');
-    foreach (['palette', 'type', 'image_grade', 'canvas', 'measure', 'card_style', 'hero_blueprint'] as $field) {
+    foreach (['palette', 'type', 'image_grade', 'canvas', 'measure', 'card_style', 'cta_style', 'hero_blueprint'] as $field) {
         assert_contains($field, $llm->calls[1]['prompt']);
     }
     assert_contains(
@@ -1744,6 +1746,39 @@ test('measureFor returns only an explicit valid persisted commitment', function 
     $project->writeJson('designDirection.json', ['measure' => ' Full ']);
     assert_eq('full', DesignDirectionStep::measureFor($project));
 
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('CTA style normalizes actionably, renders executable meaning, and accessor fails closed', function () {
+    $repairs = [];
+    $warnings = [];
+    $direction = DesignDirectionStep::normalize(
+        ['description' => 'x', 'cta_style' => 'pill',
+            'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone')],
+        'cinematic-safe-zone',
+        '',
+        $repairs,
+        $warnings,
+    );
+    assert_eq('solid', $direction['cta_style']);
+    assert_eq([], $repairs);
+    assert_eq(1, count($warnings));
+    foreach (['field cta_style', 'pill', 'delivered "solid"', 'invalid CTA construction'] as $part) {
+        assert_contains($part, $warnings[0]);
+    }
+
+    $formatted = DesignDirectionStep::format(['description' => 'x', 'cta_style' => 'ghost-arrow']);
+    assert_contains('**CTA style**: ghost-arrow', $formatted);
+    assert_contains('arrow glyph', $formatted);
+    assert_contains('do not restyle those per button', $formatted);
+
+    $tmp = sys_get_temp_dir() . '/builder_cta_accessor_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    assert_eq(null, DesignDirectionStep::ctaStyleFor($project));
+    $project->writeJson('designDirection.json', ['cta_style' => ['block']]);
+    assert_eq(null, DesignDirectionStep::ctaStyleFor($project));
+    $project->writeJson('designDirection.json', ['cta_style' => ' Block ']);
+    assert_eq('block', DesignDirectionStep::ctaStyleFor($project));
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
