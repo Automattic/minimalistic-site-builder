@@ -75,6 +75,12 @@ test('CTA theme repair owns construction while preserving typography and shape r
     [$fixed, $fixedRepairs] = ThemeJsonStep::repairCtaStyle($theme, 'ghost-arrow');
     assert_eq($theme, $fixed);
     assert_eq([], $fixedRepairs, 'the deterministic repair reaches a fixed point');
+
+    [$shaped] = ThemeJsonStep::repairShapeWiring($theme, 'soft');
+    [$afterShape, $afterShapeRepairs] = ThemeJsonStep::repairCtaStyle($shaped, 'ghost-arrow');
+    assert_eq($shaped, $afterShape, 'later shape wiring may reorder border keys but does not drift CTA');
+    assert_eq([], $afterShapeRepairs, 'JSON object key order is not reported as CTA drift');
+
 });
 
 test('theme-json production write binds the committed CTA construction', function () {

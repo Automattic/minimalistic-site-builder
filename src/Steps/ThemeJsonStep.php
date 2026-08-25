@@ -2514,10 +2514,32 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         $elements['button'] = $button;
         $styles['elements'] = $elements;
         $theme['styles'] = $styles;
-        if ($theme === $authoredTheme) {
+        if (self::sameJsonValue($theme, $authoredTheme)) {
             return [$theme, []];
         }
         return [$theme, $repairs];
+    }
+
+    /** Compare decoded JSON values without treating object-key order as data. */
+    private static function sameJsonValue(mixed $left, mixed $right): bool
+    {
+        return self::canonicalJsonValue($left) === self::canonicalJsonValue($right);
+    }
+
+    /** Recursively sort object-shaped arrays while preserving list order and scalar types. */
+    private static function canonicalJsonValue(mixed $value): mixed
+    {
+        if (!is_array($value)) {
+            return $value;
+        }
+        if (array_is_list($value)) {
+            return array_map(self::canonicalJsonValue(...), $value);
+        }
+        ksort($value, SORT_STRING);
+        foreach ($value as $key => $child) {
+            $value[$key] = self::canonicalJsonValue($child);
+        }
+        return $value;
     }
 
     /**
