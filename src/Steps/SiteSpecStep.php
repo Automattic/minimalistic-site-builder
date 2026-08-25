@@ -27,9 +27,11 @@ use Automattic\SiteBuild\WritingDirection;
  *
  * The spec is also the single source of truth for voice and identity: it
  * records the `language` all site copy must be written in, and one committed
- * identity (name / persona_name / email_domain) that masthead, hero, contact
- * and footer copy must agree on. Identity values the model invented (because
- * the user stated none) are listed under `invented`.
+ * identity (name / persona_name) that masthead, hero, and footer copy must
+ * agree on. Identity values the model invented (because the user stated none)
+ * are listed under `invented`. Contact facts (email_domain, emails, phones,
+ * street addresses, URLs) are never invented — they stay empty unless the
+ * user stated them.
  *
  * The user prompt and this spec are the inputs the theme-json and landing-page
  * steps build the design from.
@@ -53,7 +55,14 @@ final class SiteSpecStep implements Step
     private const REQUIRED = ['name', 'title', 'description', 'site_type', 'topic', 'area', 'audience', 'visual_vibe', 'persona_name'];
 
     /** Identity keys the model may invent (and must then flag in `invented`). */
-    private const IDENTITY_KEYS = ['name', 'persona_name', 'email_domain'];
+    private const IDENTITY_KEYS = ['name', 'persona_name'];
+
+    /** A user-stated contact domain; empty is the no-contact-domain state. */
+    private const EMAIL_DOMAIN = '/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/';
+
+    /** Extra keys whose values are contact facts, not identity or copy. Matched
+     * against a key normalized by keyNamesContact(), so it needs no case flag. */
+    private const CONTACT_KEY = '/(?<![a-z])(?:e[-_]?mails?|phones?|telephones?|mobiles?|tels?|whats[-_]?app|fax(?:es)?|address(?:es)?|streets?|urls?|websites?|instagram|twitter|facebook|linkedin|social)(?![a-z])/';
 
     /** Internal artifact basenames that generated page slugs must not claim. */
     private const RESERVED_PAGE_SLUGS = ['preview'];
@@ -158,7 +167,23 @@ final class SiteSpecStep implements Step
             }
         }
 
-        $spec = self::normalize($spec, $multiPage, $requested, $warnings, self::nameFromPrompt($prompt));
+        // Contact facts are grounded in what the USER wrote. refine-prompt runs
+        // immediately before this step and replaces meta's `prompt` with its own
+        // rewrite, so grounding against that would let a contact detail refine
+        // invented vouch for itself. `original_prompt` is absent only when no
+        // refinement happened, and `prompt` is then the raw input.
+        $stated = $meta['original_prompt'] ?? null;
+        $statedPrompt = is_string($stated) && trim($stated) !== '' ? $stated : $prompt;
+
+        $spec = self::normalize(
+            $spec,
+            $multiPage,
+            $requested,
+            $warnings,
+            self::nameFromPrompt($prompt),
+            $statedPrompt,
+            array_key_exists('site_spec', $meta),
+        );
         $spec['writing_direction'] = $callerWritingDirection
             ?? WritingDirection::fromLanguage((string) ($spec['language'] ?? ''));
         if ($warnings !== []) {
@@ -237,8 +262,9 @@ final class SiteSpecStep implements Step
 
     /**
      * Require the fixed factual properties and normalize name/slug/sections.
-     * Any extra factual keys the model returned pass through untouched — the
-     * spec has no fixed/exhaustive schema beyond the required properties. No
+     * Extra factual keys the user stated pass through — the spec has no
+     * exhaustive schema beyond the required properties. On the generated
+     * path, contact-shaped extras must also appear in the user prompt. No
      * design fields are filled in: design is decided later by the theme-json
      * and landing-page steps.
      *
@@ -254,6 +280,8 @@ final class SiteSpecStep implements Step
         array $requested = [],
         array &$warnings = [],
         string $fallbackName = 'New Site',
+        string $statedPrompt = '',
+        bool $hostSupplied = false,
     ): array {
         $name = trim((string) ($spec['name'] ?? ''));
         if ($name === '') {
@@ -303,10 +331,11 @@ final class SiteSpecStep implements Step
 
         // `invented` lists which identity values the model made up; keep only
         // the identity keys so downstream features can trust its contents.
-        $invented = array_values(array_intersect(
-            array_map('strval', is_array($spec['invented'] ?? null) ? $spec['invented'] : []),
-            self::IDENTITY_KEYS,
-        ));
+        $rawInvented = array_map(
+            'strval',
+            is_array($spec['invented'] ?? null) ? $spec['invented'] : [],
+        );
+        $invented = array_values(array_intersect($rawInvented, self::IDENTITY_KEYS));
 
         // Every piece of site copy is written in this language. A missing or
         // implausible value degrades to '' — languageOf() then renders the
@@ -332,18 +361,174 @@ final class SiteSpecStep implements Step
         // the hero recipe pool, so absence must never change behavior.
         $spec['subject_is_visual_work'] = ($spec['subject_is_visual_work'] ?? null) === true;
 
-        // Contact emails are minted from this domain; when the model returned
-        // none (or something that is not a domain), derive it from the slug so
-        // the identity stays coherent — and flag it as invented.
+        // Empty email_domain is the no-contact-domain state; do not fill it from the slug.
         $domain = strtolower(trim((string) ($spec['email_domain'] ?? '')));
-        if (!preg_match('/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/', $domain)) {
-            $domain = str_replace('-', '', $slug) . '.com';
-            $invented[] = 'email_domain';
+        if ($domain !== '' && preg_match(self::EMAIL_DOMAIN, $domain) !== 1) {
+            $warnings[] = "site spec \"email_domain\" is not a usable domain: {$domain}; "
+                . 'dropped rather than inventing one';
+            $domain = '';
+        } elseif ($domain !== '' && !$hostSupplied && !self::promptStatesDomain($statedPrompt, $domain)) {
+            $warnings[] = 'site spec "email_domain" was not stated in the prompt; dropped';
+            $domain = '';
+        } elseif ($domain !== '' && $hostSupplied && in_array('email_domain', $rawInvented, true)) {
+            $warnings[] = 'site spec "email_domain" was invented rather than stated; dropped';
+            $domain = '';
         }
         $spec['email_domain'] = $domain;
         $spec['invented'] = array_values(array_unique($invented));
 
+        if (!$hostSupplied) {
+            $spec = self::scrubUngroundedContact($spec, $statedPrompt, $warnings);
+        }
+
         return $spec;
+    }
+
+    /**
+     * Drop generated emails, phones, streets, and URLs that do not appear in
+     * the user prompt. Host-supplied specs skip this: the host already stated
+     * those facts by handing them over.
+     *
+     * @param array<mixed> $spec
+     * @param list<string> $warnings
+     * @return array<mixed>
+     */
+    private static function scrubUngroundedContact(array $spec, string $statedPrompt, array &$warnings): array
+    {
+        $reserved = [
+            'name' => true,
+            'slug' => true,
+            'title' => true,
+            'description' => true,
+            'site_type' => true,
+            'topic' => true,
+            'area' => true,
+            'audience' => true,
+            'language' => true,
+            'writing_direction' => true,
+            'persona_name' => true,
+            'email_domain' => true,
+            'invented' => true,
+            'visual_vibe' => true,
+            'subject_is_visual_work' => true,
+            'animation_request' => true,
+            'sections' => true,
+            'pages' => true,
+        ];
+        foreach ($spec as $key => $value) {
+            if (isset($reserved[(string) $key])) {
+                continue;
+            }
+            $cleaned = self::scrubContactNode($value, (string) $key, $statedPrompt, (string) $key, $warnings);
+            if ($cleaned === null) {
+                unset($spec[$key]);
+            } else {
+                $spec[$key] = $cleaned;
+            }
+        }
+        return $spec;
+    }
+
+    /**
+     * @param list<string> $warnings
+     */
+    private static function scrubContactNode(
+        mixed $value,
+        string $key,
+        string $statedPrompt,
+        string $path,
+        array &$warnings,
+    ): mixed {
+        if (is_array($value)) {
+            $wasList = array_is_list($value);
+            $hadEntries = $value !== [];
+            foreach ($value as $childKey => $child) {
+                $childPath = is_int($childKey) ? $path . '[]' : $path . '.' . $childKey;
+                // A list item inherits its parent's key: "address": ["24 Market
+                // Street"] is as much a street as "address": "24 Market Street".
+                $childName = is_int($childKey) ? $key : (string) $childKey;
+                $cleaned = self::scrubContactNode($child, $childName, $statedPrompt, $childPath, $warnings);
+                if ($cleaned === null) {
+                    unset($value[$childKey]);
+                } else {
+                    $value[$childKey] = $cleaned;
+                }
+            }
+            // Reindex: dropping a middle item would otherwise turn the list
+            // into a JSON object keyed by the surviving offsets.
+            if ($wasList) {
+                $value = array_values($value);
+            }
+            // Only an array the scrub emptied is dropped; one that arrived
+            // empty is not a contact fact and keeps its key.
+            return $hadEntries && $value === [] ? null : $value;
+        }
+        if (!is_string($value)) {
+            // A phone emitted as a JSON number is still a phone, but only its key
+            // can say so — a bare number carries no contact shape of its own.
+            if ((is_int($value) || is_float($value)) && self::keyNamesContact($key)
+                && !self::promptContains($statedPrompt, (string) $value)
+            ) {
+                $warnings[] = "site spec \"{$path}\" was not stated in the prompt; dropped";
+                return null;
+            }
+            return $value;
+        }
+        $text = trim($value);
+        if ($text === '' || !self::isContactShaped($key, $text)) {
+            return $value;
+        }
+        if (self::promptContains($statedPrompt, $text)) {
+            return $value;
+        }
+        $warnings[] = "site spec \"{$path}\" was not stated in the prompt; dropped";
+        return null;
+    }
+
+    private static function isContactShaped(string $key, string $value): bool
+    {
+        if (self::keyNamesContact($key)) {
+            return true;
+        }
+        if (filter_var($value, FILTER_VALIDATE_EMAIL)) {
+            return true;
+        }
+        if (preg_match('#^https?://#i', $value) === 1) {
+            return true;
+        }
+        if (str_starts_with(strtolower($value), 'mailto:')
+            || str_starts_with(strtolower($value), 'tel:')
+        ) {
+            return true;
+        }
+        return preg_match('/^\+?[0-9][0-9(). -]{6,}$/', $value) === 1;
+    }
+
+    /**
+     * Whether the key names a contact fact. Generated JSON spells one key three
+     * ways — emailAddress, email_address, email — so the word boundaries the
+     * pattern needs (to keep `tel` out of `hotel`) are cut at a camelCase hump
+     * too, or every camelCase contact key reads as ordinary copy.
+     */
+    private static function keyNamesContact(string $key): bool
+    {
+        $words = strtolower((string) preg_replace('/(?<=[a-z0-9])(?=[A-Z])/', '_', $key));
+        return preg_match(self::CONTACT_KEY, $words) === 1;
+    }
+
+    private static function promptStatesDomain(string $prompt, string $domain): bool
+    {
+        return self::promptContains($prompt, $domain)
+            || self::promptContains($prompt, '@' . $domain);
+    }
+
+    private static function promptContains(string $prompt, string $needle): bool
+    {
+        $needle = trim($needle);
+        if ($needle === '' || trim($prompt) === '') {
+            return false;
+        }
+        return mb_stripos($prompt, $needle) !== false;
     }
 
     /**

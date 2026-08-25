@@ -13,6 +13,7 @@ use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\GeneratedJsonFallbackStep;
 use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\CssChecks;
+use Automattic\SiteBuild\PaletteFloor;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
 use Automattic\SiteBuild\Narrator;
@@ -524,6 +525,10 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $groupPaddingWarnings,
             $shapeWarnings,
         );
+
+        // Floors run on the palette about to be written, after every other repair.
+        [$theme, $floorWarnings] = self::applyPaletteFloor($theme);
+        $warnings = array_merge($warnings, $floorWarnings);
 
         $bindRepairs = array_merge($colorRepairs, $fontRepairs);
         $bindReport = ['Successful design-direction writebacks: ' . count($bindRepairs)];
@@ -1414,6 +1419,49 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     }
 
     /**
+     * Last pass on the delivered palette: WCAG / hue / chroma floors.
+     * Walks settings.color.palette the same way repairColors does. Pure.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>} theme, warnings
+     */
+    public static function applyPaletteFloor(array $theme): array
+    {
+        $palette = $theme['settings']['color']['palette'] ?? null;
+        if (!is_array($palette)) {
+            return [$theme, []];
+        }
+        $map = [];
+        foreach ($palette as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            $slug = is_string($entry['slug'] ?? null) ? trim($entry['slug']) : '';
+            if ($slug === '') {
+                continue;
+            }
+            $color = $entry['color'] ?? null;
+            if (!is_string($color) || ContrastMath::hexToRgb($color) === null) {
+                continue;
+            }
+            $map[$slug] = trim($color);
+        }
+        $warnings = [];
+        $fixed = PaletteFloor::repair($map, $warnings);
+        foreach ($theme['settings']['color']['palette'] as $i => $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            $slug = is_string($entry['slug'] ?? null) ? trim($entry['slug']) : '';
+            if ($slug === '' || !array_key_exists($slug, $fixed)) {
+                continue;
+            }
+            $theme['settings']['color']['palette'][$i]['color'] = $fixed[$slug];
+        }
+        return [$theme, $warnings];
+    }
+
+    /**
      * Ensure every required palette slug exists, filling gaps from the design
      * direction's committed hexes and then the neutral fallbacks. Malformed
      * entries are removed at the smallest unit and recorded before a required
@@ -1951,7 +1999,69 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         $shapeWarnings = [];
         $theme = self::mergeScaffoldDefaultsAtPath(self::SCAFFOLD, $theme, '', $shapeWarnings);
         $theme = self::removeUnsupportedTextWrapProperties($theme);
-        return [$theme, array_merge($colorWarnings, $shadowWarnings, $shapeWarnings)];
+        [$theme, $motionWarnings] = self::removeMotionKitCustomCss($theme);
+        return [
+            $theme,
+            array_merge($colorWarnings, $shadowWarnings, $shapeWarnings, $motionWarnings),
+        ];
+    }
+
+    /**
+     * Remove custom-CSS declarations that redefine a motion-kit class.
+     *
+     * The motion kit is a closed system: `assets/motion/motion.css` owns every
+     * hidden and revealed state for `.reveal*`, `.stagger-children`,
+     * `.hero-entrance`, the ambient classes and the hover classes, and
+     * `assets/motion/motion.js` drives them. Both ship verbatim and are never
+     * LLM-generated. `prompts/page-styles.md` already forbids writing CSS for
+     * those classes, and PageStylesStep enforces it through its scoped-selector
+     * policy; theme.json custom CSS had neither the instruction nor the check.
+     *
+     * pulso2 shipped `.reveal-up { opacity: 0; transform: …; clip-path: inset(0
+     * 0 100% 0); animation: nn-reveal-up … view() }` in `styles.css`. The kit's
+     * `motion-skip` escape — applied to every target already above the fold —
+     * clears `opacity` and `animation` but deliberately leaves `transform`
+     * alone for authored hover effects, so the generated `clip-path` survived
+     * with nothing left to animate it away and the whole hero copy was clipped
+     * to nothing (BIGR-881).
+     *
+     * Every `css` string under `styles` is walked, at any depth, so a rule
+     * nested in a block or element style is repaired too.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>} theme, warnings
+     */
+    private static function removeMotionKitCustomCss(array $theme): array
+    {
+        if (!is_array($theme['styles'] ?? null)) {
+            return [$theme, []];
+        }
+
+        $warnings = [];
+        $remove = static function (array $node, string $path) use (&$remove, &$warnings): array {
+            foreach ($node as $key => $value) {
+                if ($key === 'css' && is_string($value)) {
+                    [$repaired, $dropped] = CssChecks::dropMotionKitDeclarations($value);
+                    if ($dropped === []) {
+                        continue;
+                    }
+                    $node[$key] = $repaired;
+                    foreach ($dropped as $declaration) {
+                        $warnings[] = "theme/theme.json {$path}.css: authored declaration "
+                            . Warnings::value($declaration)
+                            . '; delivered removed; disposition removed custom CSS for a motion-kit class'
+                            . ' — assets/motion/ owns those states and the JS driver reveals them';
+                    }
+                    continue;
+                }
+                if (is_array($value)) {
+                    $node[$key] = $remove($value, $path . '.' . $key);
+                }
+            }
+            return $node;
+        };
+        $theme['styles'] = $remove($theme['styles'], 'styles');
+        return [$theme, $warnings];
     }
 
     /**

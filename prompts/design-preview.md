@@ -17,7 +17,7 @@ SITE PAGES (the whole site — the shared header navigation uses these exact pat
 
 {{design_direction}}
 
-Treat design direction as binding. Write specific, finished visitor-facing copy grounded in brief and site spec. Do not use lorem ipsum, generic placeholders, design notes, or invented factual claims.
+Treat design direction as binding. Write specific, finished visitor-facing copy grounded in brief and site spec. Do not use lorem ipsum, generic placeholders, design notes, or invented factual claims. Never invent an email, street address, phone number, or URL.
 
 ## First-fold document contract
 

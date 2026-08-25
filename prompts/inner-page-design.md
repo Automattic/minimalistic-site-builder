@@ -21,7 +21,7 @@ SITE PAGES (the whole site, for internal links):
 
 {{design_preview}}
 
-Treat the cached site CSS and design preview as binding design authority. Reuse existing classes from the site CSS and follow the fold's composition, typography, palette, spacing rhythm, and visual language without copying its header or hero. Write specific visitor-facing copy from the page spec and keep it consistent with the site spec. Honor THIS page's purpose: a contact or enquiry page stays brief (a short opener, how to reach the organization, optional hours or address) and does not grow programs, galleries, or homepage-length stories. Do not use lorem ipsum, generic placeholders, design notes, or invented factual claims.
+Treat the cached site CSS and design preview as binding design authority. Reuse existing classes from the site CSS and follow the fold's composition, typography, palette, spacing rhythm, and visual language without copying its header or hero. Write specific visitor-facing copy from the page spec and keep it consistent with the site spec. Honor THIS page's purpose: a contact or enquiry page stays brief (a short opener, how to reach the organization, optional hours or address) and does not grow programs, galleries, or homepage-length stories. Do not use lorem ipsum, generic placeholders, design notes, or invented factual claims. Never invent an email, street address, phone number, or URL; use only contact facts present in the site spec, and omit them when the spec has none.
 
 LANGUAGE: write ALL visitor-facing copy — headings, body text, captions, list items, labels, button text, image alt text — in {{language}}. Do NOT mix languages within the page; the only exceptions are proper nouns and the spec's verbatim identity values.
 

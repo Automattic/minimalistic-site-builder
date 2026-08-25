@@ -18,7 +18,9 @@ namespace Automattic\SiteBuild;
  *
  * A section always owns its top edge. Consecutive exact solid surfaces (base or
  * contrast) share one seam: the current section's bottom edge is zero and the
- * following section owns the gap. Tinted gradients and image assets are treated
+ * following section owns the gap — unless that following section PAINTS its own
+ * top edge, which splits the one gap in two and leaves the half above the line
+ * at zero. Tinted gradients and image assets are treated
  * as distinct even when their plan labels match. Image-section density is put
  * on the direct cover inside the required root group, so it remains inside the
  * image band instead of opening page-background gutters around it. An image
@@ -38,6 +40,17 @@ final class SectionRhythm
 
     /** Only these plan labels guarantee one identical continuous surface. */
     private const COLLAPSIBLE_SURFACES = ['base', 'contrast'];
+
+    /**
+     * Device classes that paint a line on the section root's OWN top edge
+     * (`Device::kitCss()`; `hairline-rule` is `box-shadow: inset 0 1px 0`).
+     * A collapsed seam hands the whole gap to the following section, which is
+     * only correct while nothing is drawn at the boundary — see rewrite().
+     */
+    private const TOP_EDGE_DEVICE_CLASSES = ['device--hairline-rule'];
+
+    /** Spacing slugs this pass can own as a bottom floor, smallest first. */
+    private const FLOOR_ORDER = ['sm', 'md', 'lg', 'xl', 'xxl'];
 
     /** Utilities whose vertical effect conflicts with page-owned wrapper margins. */
     private const FORBIDDEN_OWNED_WRAPPER_CLASSES = ['overlap-up'];
@@ -84,8 +97,12 @@ final class SectionRhythm
      *     }>
      * }
      */
-    public static function rewrite(array $entries, ?string $followingBackground = null): array
-    {
+    public static function rewrite(
+        array $entries,
+        ?string $followingBackground = null,
+        ?string $committedDevice = null,
+        ?string $footerMarkup = null,
+    ): array {
         if (!array_is_list($entries)) {
             throw new \InvalidArgumentException('section-rhythm: entries must be an ordered list');
         }
@@ -129,6 +146,20 @@ final class SectionRhythm
             throw new \InvalidArgumentException('section-rhythm: invalid following background');
         }
 
+        // Which band will actually PAINT a top-edge rule, if any.
+        //
+        // The authored class is not the answer: MotionSanityStep runs after
+        // this pass and strips `device--*` when the direction committed no
+        // device, when it is not the committed one, when it sits on the hero,
+        // or when a band already carries it — and FinalizeThemeStep only ships
+        // the CSS for the committed device. Reading the class alone left a
+        // double gap on a seam whose rule was later removed, and made
+        // ThemeValidator's re-run of this pass report permanent spacing drift
+        // (it re-derives from the DELIVERED markup, where the class is gone).
+        // Resolving the same first-band-wins budget here keeps the two passes
+        // in agreement and the whole pass at a fixed point.
+        $rulePainter = self::rulePainterIndex($normalized, $committedDevice, $footerMarkup);
+
         $markups = [];
         $notes = [];
         $degradations = [];
@@ -139,12 +170,39 @@ final class SectionRhythm
             $nextBackground = $next['background'] ?? ($i === count($normalized) - 1 ? $followingBackground : null);
             $sharedSeam = is_string($nextBackground)
                 && self::sharesContinuousSurface($entry['background'], $nextBackground);
-            // The opening hero never fully collapses its bottom seam
-            // (BIGR-775 follow-up): with a shared surface the section below
-            // owned the whole gap, and its compact top read as the hero
-            // crowding the next band (lumen9/atlas9). The hero keeps a `lg`
-            // floor; every other shared seam still collapses to 0.
-            $bottomFloor = $sharedSeam && $i === 0 && self::isHeroRoot($entry['markup']) ? 'lg' : null;
+            // Floors that stop a shared seam from collapsing all the way to 0.
+            //
+            // 1. The opening hero never fully collapses its bottom seam
+            //    (BIGR-775 follow-up): with a shared surface the section below
+            //    owned the whole gap, and its compact top read as the hero
+            //    crowding the next band (lumen9/atlas9). The hero keeps `lg`.
+            // 2. A following section that paints a line on its own top edge
+            //    splits the one gap in two, and the half ABOVE the line has no
+            //    owner — portfolio2's "Twenty Years of Witness" ended flush
+            //    against the next band's hairline rule (BIGR-882). Mirror that
+            //    section's own top preset here so the line sits centred between
+            //    two equal gaps.
+            //
+            // The largest floor wins; every other shared seam still collapses.
+            // Judged on the band that will actually paint (see $rulePainter),
+            // not on the authored class: a device a later motion-sanity budget
+            // strips must leave this seam collapsed, or the two passes disagree.
+            $bottomFloor = null;
+            if ($sharedSeam) {
+                $floors = [];
+                if ($i === 0 && self::isHeroRoot($entry['markup'])) {
+                    $floors[] = 'lg';
+                }
+                if ($rulePainter !== null && $rulePainter === $i + 1) {
+                    // The following band paints a line on its own top edge, so
+                    // the one seam gap is split in two and the half above the
+                    // line has no owner. Mirror that band's own top edge here.
+                    $floors[] = $next === null
+                        ? self::DENSITY_PRESETS[$entry['density']]
+                        : self::DENSITY_PRESETS[$next['density']];
+                }
+                $bottomFloor = self::largestPreset($floors);
+            }
 
             [$markup, $changed, $degradation] = self::rewriteOne(
                 $entry['markup'],
@@ -186,6 +244,10 @@ final class SectionRhythm
                 if ($sharedSeam) {
                     $owner = $next['label'] ?? 'the footer';
                     $note .= " (shared {$entry['background']} seam is owned by {$owner})";
+                    if ($bottomFloor !== null && $rulePainter === $i + 1) {
+                        $note .= " (kept a {$bottomFloor} bottom edge because {$owner}"
+                            . ' paints a rule on its own top edge)';
+                    }
                 }
                 $notes[] = $note;
             }
@@ -238,6 +300,104 @@ final class SectionRhythm
             (string) (($document->attrs($root) ?? [])['className'] ?? ''),
             'hero-composition--'
         );
+    }
+
+    /**
+     * The index of the one band that will actually paint a top-edge rule, or
+     * null when nothing will.
+     *
+     * Mirrors MotionSanityStep::enforceDeviceBudget(), which runs after this
+     * pass: a `device--*` class survives only when it IS the committed device,
+     * is not on the page-opening hero, and is the first band to claim the
+     * one-per-page budget. Chrome joins the front page's group after the
+     * sections, so a footer can only paint when no section claimed it first.
+     *
+     * `count($entries)` is returned for the footer, i.e. one past the last
+     * section, which is exactly the index the seam check compares against.
+     *
+     * @param list<array{markup:string,density:string,background:string,label:string}> $entries
+     */
+    private static function rulePainterIndex(
+        array $entries,
+        ?string $committedDevice,
+        ?string $footerMarkup,
+    ): ?int {
+        $class = Device::className($committedDevice);
+        if ($class === null || !in_array($class, self::TOP_EDGE_DEVICE_CLASSES, true)) {
+            return null;
+        }
+        foreach ($entries as $i => $entry) {
+            if ($i === 0) {
+                continue; // the hero never carries the device
+            }
+            if (self::rootCarriesClass($entry['markup'], $class)) {
+                return $i;
+            }
+        }
+        return $footerMarkup !== null && self::rootCarriesClass($footerMarkup, $class)
+            ? count($entries)
+            : null;
+    }
+
+    /**
+     * Whether a section's ROOT block carries one exact class token.
+     *
+     * Both representations are read, because this pass runs before fix-blocks
+     * and a class can still live only in the saved HTML. The root's own tag is
+     * resolved with MarkupScan rather than scanning every `class="…"` in the
+     * root's own HTML: a root whose leading content is raw HTML would
+     * otherwise leak a nested element's classes in, and a device painting
+     * inside the section is not a device painting at the seam.
+     */
+    private static function rootCarriesClass(string $markup, string $class): bool
+    {
+        try {
+            $document = BlockMarkup::parse($markup);
+        } catch (\Throwable) {
+            return false;
+        }
+        $root = $document->topLevel();
+        if ($root === null) {
+            return false;
+        }
+        if (in_array($class, self::classTokens(
+            (string) (($document->attrs($root) ?? [])['className'] ?? '')
+        ), true)) {
+            return true;
+        }
+
+        $tagHtml = MarkupScan::wrapperTag(
+            $markup,
+            $document->openingOffset($root) + $document->openingLength($root),
+        );
+        $attribute = $tagHtml === null ? null : MarkupScan::tagAttribute($tagHtml, 'class');
+        return $attribute !== null && in_array($class, self::classTokens($attribute[0]), true);
+    }
+
+    /** @return list<string> */
+    private static function classTokens(string $classes): array
+    {
+        return preg_split('/[\x20\t\r\n\f]+/', trim($classes), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+    }
+
+    /**
+     * The largest of the candidate bottom floors, or null when there is none.
+     *
+     * @param list<string> $slugs
+     */
+    private static function largestPreset(array $slugs): ?string
+    {
+        $best = null;
+        $bestRank = -1;
+        foreach ($slugs as $slug) {
+            $rank = array_search($slug, self::FLOOR_ORDER, true);
+            if ($rank === false || $rank <= $bestRank) {
+                continue;
+            }
+            $best = $slug;
+            $bestRank = $rank;
+        }
+        return $best;
     }
 
     /** Whether a hero root's first visual child is its media band/cover. */

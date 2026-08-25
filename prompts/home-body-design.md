@@ -21,7 +21,7 @@ SITE PAGES (the whole site — shared footer navigation uses these exact paths, 
 
 {{design_preview}}
 
-Treat the cached site CSS and design preview as binding design authority. Continue the preview's composition, typography, palette, spacing rhythm, and visual language. Write specific visitor-facing copy from the site spec and front-page spec. Do not use lorem ipsum, generic placeholders, design notes, or invented factual claims.
+Treat the cached site CSS and design preview as binding design authority. Continue the preview's composition, typography, palette, spacing rhythm, and visual language. Write specific visitor-facing copy from the site spec and front-page spec. Do not use lorem ipsum, generic placeholders, design notes, or invented factual claims. Never invent an email, street address, phone number, or URL.
 
 LANGUAGE: write ALL visitor-facing copy — headings, body text, captions, list items, labels, button text, image alt text, and the footer's own link and credit lines — in {{language}}. Do NOT mix languages; the only exceptions are proper nouns and the spec's verbatim identity values.
 

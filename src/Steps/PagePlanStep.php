@@ -1466,12 +1466,12 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     /**
      * Build the structured first-pass destination context. Page paths come
      * from the normalized spec tree; non-page destinations must occur in the
-     * factual spec itself, so the planner cannot invent an external/contact
-     * route merely because its syntax looks plausible.
+     * factual spec itself as exact emails, phones, or URLs, so the planner
+     * cannot invent a contact route merely because its syntax looks plausible.
      *
      * @param array<mixed> $siteSpec
      * @param array<int,array<string,mixed>> $pages
-     * @return array{page_paths:array<string,true>,contact_destinations:array<string,true>,email_domains:array<string,true>,planned_anchors:array<string,array<string,true>>}
+     * @return array{page_paths:array<string,true>,contact_destinations:array<string,true>,planned_anchors:array<string,array<string,true>>}
      */
     public static function primaryActionContext(array $siteSpec, array $pages): array
     {
@@ -1529,16 +1529,9 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         };
         $walk($siteSpec);
 
-        $emailDomains = [];
-        $domain = strtolower(trim((string) ($siteSpec['email_domain'] ?? '')));
-        if (preg_match('/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/', $domain)) {
-            $emailDomains[$domain] = true;
-        }
-
         return [
             'page_paths' => $paths,
             'contact_destinations' => $contacts,
-            'email_domains' => $emailDomains,
             'planned_anchors' => [],
         ];
     }
@@ -1627,17 +1620,6 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             : [];
         if (isset($contacts[$destination]) || in_array($destination, $contacts, true)) {
             return true;
-        }
-
-        if (str_starts_with(strtolower($destination), 'mailto:')) {
-            $address = substr($destination, 7);
-            if (!filter_var($address, FILTER_VALIDATE_EMAIL)) {
-                return false;
-            }
-            $at = strrpos($address, '@');
-            $domain = $at === false ? '' : strtolower(substr($address, $at + 1));
-            $domains = is_array($context['email_domains'] ?? null) ? $context['email_domains'] : [];
-            return isset($domains[$domain]) || in_array($domain, $domains, true);
         }
 
         if (str_starts_with($destination, '#')) {
@@ -1748,8 +1730,8 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 ? ' This build has a form backend: exactly one section must be the contact form'
                     . ' (type `contact`; content_notes say to reserve a JP_FORM contact placeholder).'
                     . ' Never a fake HTML form.'
-                : ' There is no form backend: present the spec\'s contact facts and a mailto/tel CTA,'
-                    . ' never a fake form.';
+                : ' There is no form backend: present only contact facts present in SITE SPEC;'
+                    . ' omit mailto/tel when none exist, never a fake form.';
             return 'THIS PAGE\'s purpose is the contract' . $purposeClause
                 . '. Honor it. A contact page is brief — 2 to 4 sections total, never more. '
                 . 'Typical shape: a compact opener, the form or contact facts as the main act, '

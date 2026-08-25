@@ -458,6 +458,173 @@ test('layout fixer widens grid rows sitting at content width inside a wide band'
     assert_contains('"contentSize":"860px"', $r['markup']);
 });
 
+test('a section text stack loses a measure that differs from the theme (BIGR-870)', function () {
+    // The demo generation shipped 620px, 680px, 720px, 760px and the theme's
+    // own 840px across five pages, so the text column moved every time a
+    // section changed.
+    $markup = '<!-- wp:group {"align":"full","layout":{"type":"constrained"}} --><div class="wp-block-group alignfull">'
+        . '<!-- wp:group {"layout":{"type":"constrained","contentSize":"720px"}} --><div class="wp-block-group">'
+        . '<!-- wp:heading --><h2 class="wp-block-heading">What we do</h2><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>Five core services.</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->';
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 840.0);
+    assert_true(!str_contains($r['markup'], 'contentSize'), 'the section reads at the theme measure');
+    assert_contains('720px', implode(' ', $r['notes']));
+});
+
+test('hero copy keeps its own measure because HeroHeadlineFit reads it', function () {
+    // normalize-layout runs before header-hero, so stripping this would hand
+    // HeroHeadlineFit a different number than the generation chose. 700px is
+    // above restoreCoverMeasure's squeeze floor, so that rule leaves it too.
+    $markup = '<!-- wp:cover {"url":"/x.jpg"} --><div class="wp-block-cover">'
+        . '<!-- wp:group {"layout":{"type":"constrained","contentSize":"700px"}} --><div class="wp-block-group">'
+        . '<!-- wp:heading --><h1 class="wp-block-heading">Demolition</h1><!-- /wp:heading -->'
+        . '</div><!-- /wp:group -->'
+        . '</div><!-- /wp:cover -->';
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 840.0);
+    assert_contains('"contentSize":"700px"', $r['markup'], 'hero copy measure survives');
+});
+
+test('a wrapper holding more than copy keeps its measure', function () {
+    // The narrowed wrapper is for copy. Once something else shares it the
+    // number is a component decision, not the section's reading column. A
+    // grid there is freeGridsFromNarrowWrappers' case, so use an image.
+    $markup = '<!-- wp:group {"align":"full","layout":{"type":"constrained"}} --><div class="wp-block-group alignfull">'
+        . '<!-- wp:group {"layout":{"type":"constrained","contentSize":"760px"}} --><div class="wp-block-group">'
+        . '<!-- wp:heading --><h2 class="wp-block-heading">Services</h2><!-- /wp:heading -->'
+        . '<!-- wp:image --><figure class="wp-block-image"><img src="/a.jpg" alt="a"/></figure><!-- /wp:image -->'
+        . '</div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->';
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 840.0);
+    assert_contains('"contentSize":"760px"', $r['markup']);
+});
+
+test('a wide derived contentSize leaves section measures alone (BIGR-870)', function () {
+    // theme-json asks for 800-900px, but a viewport-fluid design preview
+    // derives contentSize from its carrier instead and can land at the 1366px
+    // reference viewport. Stripping the wrapper there would run body copy the
+    // full width of the band, which is the case this rule exists to prevent.
+    $markup = '<!-- wp:group {"align":"full","layout":{"type":"constrained"}} --><div class="wp-block-group alignfull">'
+        . '<!-- wp:group {"layout":{"type":"constrained","contentSize":"720px"}} --><div class="wp-block-group">'
+        . '<!-- wp:heading --><h2 class="wp-block-heading">What we do</h2><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>Five core services.</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->';
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 1366.0);
+    assert_contains('"contentSize":"720px"', $r['markup'], 'the section keeps its readable measure');
+});
+
+/** A band whose copy stack sits above an align:wide card row. */
+function lf_band_with_grid(string $copyAttrs = '{"layout":{"type":"constrained"}}', string $extra = ''): string
+{
+    return '<!-- wp:group {"align":"full","layout":{"type":"constrained"}} --><div class="wp-block-group alignfull">'
+        . '<!-- wp:group ' . $copyAttrs . ' --><div class="wp-block-group">'
+        . '<!-- wp:heading --><h2 class="wp-block-heading">Why us</h2><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>Three places people stall.</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->'
+        . $extra
+        . '<!-- wp:columns {"align":"wide"} --><div class="wp-block-columns alignwide">'
+        . '<!-- wp:column --><div class="wp-block-column"></div><!-- /wp:column -->'
+        . '<!-- wp:column --><div class="wp-block-column"></div><!-- /wp:column -->'
+        . '</div><!-- /wp:columns -->'
+        . '</div><!-- /wp:group -->';
+}
+
+test('section copy matches the edge of the wide grid row beside it', function () {
+    // Generations give the card row align:wide and leave the heading/copy group
+    // unaligned, so the text starts well inside the cards it introduces.
+    $r = LayoutFixer::fix(lf_band_with_grid(), LayoutFixer::ROLE_SECTION, 840.0);
+    assert_contains('"align":"wide","className":"copy-flush"', $r['markup'], 'copy stack matched the grid edge');
+    assert_contains('matched it to the grid', implode(' ', $r['notes']));
+});
+
+test('the promoted copy stack keeps core capping it at the reading measure', function () {
+    // The group stays constrained, so core still caps its children; only the
+    // centring is undone, by the copy-flush rule in the theme stylesheet.
+    $r = LayoutFixer::fix(lf_band_with_grid(), LayoutFixer::ROLE_SECTION, 840.0);
+    assert_contains('"type":"constrained"', $r['markup'], 'copy stack stays constrained');
+    assert_true(!str_contains($r['markup'], '"contentSize"'), 'and carries no measure of its own');
+});
+
+test('buttons beside a wide grid row match its edge too', function () {
+    $extra = '<!-- wp:buttons --><div class="wp-block-buttons">'
+        . '<!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link">Go</a></div><!-- /wp:button -->'
+        . '</div><!-- /wp:buttons -->';
+    $r = LayoutFixer::fix(lf_band_with_grid('{"layout":{"type":"constrained"}}', $extra), LayoutFixer::ROLE_SECTION, 840.0);
+    assert_contains('wp:buttons {"align":"wide"}', $r['markup'], 'buttons matched the grid edge');
+});
+
+test('centred buttons keep their own box beside a wide grid row', function () {
+    // A real band paired a centred heading with centred buttons: the copy stack
+    // was correctly skipped, and promoting the buttons alone widened a box whose
+    // content is deliberately centred. Their justification lives on the buttons
+    // block's own layout, where readsFromLeadingEdge cannot see it.
+    $extra = '<!-- wp:buttons {"layout":{"type":"flex","justifyContent":"center"}} --><div class="wp-block-buttons">'
+        . '<!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link">Go</a></div><!-- /wp:button -->'
+        . '</div><!-- /wp:buttons -->';
+    $r = LayoutFixer::fix(lf_band_with_grid('{"layout":{"type":"constrained"}}', $extra), LayoutFixer::ROLE_SECTION, 840.0);
+    // Read the buttons comment itself: "align" is appended after the layout
+    // key it already carries, so a fixed substring misses the promoted form.
+    preg_match('/<!-- wp:buttons[^>]*-->/', $r['markup'], $m);
+    assert_true(!str_contains($m[0] ?? '', '"align"'), 'centred buttons are left alone');
+    assert_contains('"justifyContent":"center"', $m[0] ?? '', 'and keep their justification');
+});
+test('centred copy keeps its own box beside a wide grid row', function () {
+    // Centred text is placed on purpose; widening its box would only move the
+    // whitespace around it, not line anything up.
+    $copy = '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">'
+        // Generations spell centring under style.typography almost without
+        // exception; every centred heading in three real builds used it.
+        . '<!-- wp:heading {"style":{"typography":{"textAlign":"center"}}} --><h2 class="wp-block-heading has-text-align-center">Why us</h2><!-- /wp:heading -->'
+        . '</div><!-- /wp:group -->';
+    $markup = '<!-- wp:group {"align":"full","layout":{"type":"constrained"}} --><div class="wp-block-group alignfull">'
+        . $copy
+        . '<!-- wp:columns {"align":"wide"} --><div class="wp-block-columns alignwide">'
+        . '<!-- wp:column --><div class="wp-block-column"></div><!-- /wp:column -->'
+        . '<!-- wp:column --><div class="wp-block-column"></div><!-- /wp:column -->'
+        . '</div><!-- /wp:columns -->'
+        . '</div><!-- /wp:group -->';
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 840.0);
+    assert_true(!str_contains($r['markup'], 'copy-flush'), 'centred copy is left alone');
+});
+
+test('copy centred by the top-level attribute is left alone too', function () {
+    $copy = '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">'
+        . '<!-- wp:heading {"textAlign":"center"} --><h2 class="wp-block-heading has-text-align-center">Why us</h2><!-- /wp:heading -->'
+        . '</div><!-- /wp:group -->';
+    $markup = '<!-- wp:group {"align":"full","layout":{"type":"constrained"}} --><div class="wp-block-group alignfull">'
+        . $copy
+        . '<!-- wp:columns {"align":"wide"} --><div class="wp-block-columns alignwide">'
+        . '<!-- wp:column --><div class="wp-block-column"></div><!-- /wp:column -->'
+        . '<!-- wp:column --><div class="wp-block-column"></div><!-- /wp:column -->'
+        . '</div><!-- /wp:columns -->'
+        . '</div><!-- /wp:group -->';
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 840.0);
+    assert_true(!str_contains($r['markup'], 'copy-flush'), 'centred copy is left alone');
+});
+test('an unconstrained copy group is left alone beside a wide grid row', function () {
+    // Without a constrained layout the group does not cap its own children, so
+    // widening it would run the paragraphs the full width of the band.
+    $r = LayoutFixer::fix(lf_band_with_grid('{}'), LayoutFixer::ROLE_SECTION, 840.0);
+    assert_true(!str_contains($r['markup'], 'copy-flush'), 'no cap of its own, so no promotion');
+});
+
+test('copy is left alone when the grid row sits at the reading measure', function () {
+    // freeGridsFromNarrowWrappers only widens grids inside a wide band; where
+    // it leaves one at the measure, there is no edge to match.
+    $markup = '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">'
+        . '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">'
+        . '<!-- wp:heading --><h2 class="wp-block-heading">Why us</h2><!-- /wp:heading -->'
+        . '</div><!-- /wp:group -->'
+        . '<!-- wp:columns --><div class="wp-block-columns">'
+        . '<!-- wp:column --><div class="wp-block-column"></div><!-- /wp:column -->'
+        . '<!-- wp:column --><div class="wp-block-column"></div><!-- /wp:column -->'
+        . '</div><!-- /wp:columns -->'
+        . '</div><!-- /wp:group -->';
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 840.0);
+    assert_true(!str_contains($r['markup'], 'copy-flush'), 'nothing to match');
+});
 test('layout fixer frees a grid boxed inside a narrow contentSize wrapper', function () {
     $markup = '<!-- wp:group {"align":"wide","layout":{"type":"constrained"}} --><div class="wp-block-group alignwide">'
         . '<!-- wp:group {"layout":{"type":"constrained","contentSize":"800px"}} --><div class="wp-block-group">'

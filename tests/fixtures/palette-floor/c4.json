@@ -1,0 +1,11 @@
+{
+    "id": "c4",
+    "label": "clean",
+    "palette": {
+        "base": "#1A1512",
+        "contrast": "#F0E9DF",
+        "primary": "#D98E48",
+        "secondary": "#9FB4A0",
+        "accent": "#7FA6C9"
+    }
+}

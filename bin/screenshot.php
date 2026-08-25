@@ -12,7 +12,7 @@ use Automattic\SiteBuild\StudioCli;
  * Playground as failover), capture a full-page screenshot of its home page,
  * and save it under the project's logs/ directory.
  *
- *   php bin/screenshot.php <slug> [--runner=studio|playground] [--port=9400] [--out=<path>] [--timeout=240] [--workers=N] [--keep-alive]
+ *   php bin/screenshot.php <slug> [--runner=studio|playground] [--port=9400] [--out=<path>] [--timeout=240] [--workers=N] [--motion] [--keep-alive]
  *
  * Starts the site via the runner, screenshots `/` via the lazy-load-aware
  * Playwright helper, then shuts the site down unless --keep-alive. The
@@ -27,6 +27,15 @@ use Automattic\SiteBuild\StudioCli;
  *                  which is slow. Studio does not).
  *   --workers=<n>  Playground only: worker threads, forwarded to Playground
  *                  (default 2; each worker holds a PHP wasm runtime).
+ *   --motion       capture with prefers-reduced-motion: no-preference — the
+ *                  branch a default visitor gets. The capture emulates reduced
+ *                  motion otherwise, which switches off every rule inside
+ *                  `@media (prefers-reduced-motion: no-preference)` and so
+ *                  cannot photograph a defect that lives only there (BIGR-881).
+ *                  The reduced-motion default exists to stop the capture racing
+ *                  a scroll reveal, so a --motion shot can catch a section
+ *                  mid-flight: confirm a suspected hidden element against a
+ *                  default capture before treating one as evidence.
  *   --keep-alive   after the screenshot, leave the site running so it can be
  *                  inspected in a browser. Ctrl-C to stop (Playground); Studio
  *                  stays up until `php bin/serve.php <slug> --stop`.
@@ -44,6 +53,7 @@ $args = parse_cli_args($argv, [
     '--timeout'    => 'value',
     '--workers'    => 'value',
     '--route'      => 'value',
+    '--motion'     => 'bool',
     '--keep-alive' => 'bool',
 ], maxPositionals: 1);
 if ($args['unknown'] !== null) {
@@ -56,6 +66,7 @@ $port = (int) ($flags['--port'] ?? 9400);
 $out = $flags['--out'] ?? null;
 $timeout = (int) ($flags['--timeout'] ?? 240);
 $keepAlive = $flags['--keep-alive'] ?? false;
+$motion = $flags['--motion'] ?? false;
 // Normalize the route to a single leading slash so it appends cleanly to the
 // site base URL (which already ends in "/"). Default "/" captures home.
 $route = '/' . ltrim($flags['--route'] ?? '/', '/');
@@ -134,7 +145,8 @@ try {
     echo "Capturing {$baseUrl} → {$out}\n";
     $shot = 'node ' . escapeshellarg(repo_path('bin/screenshot/screenshot.js'))
         . ' ' . escapeshellarg($baseUrl) . ' ' . escapeshellarg($out)
-        . ' ' . escapeshellarg('--chrome=' . $chrome);
+        . ' ' . escapeshellarg('--chrome=' . $chrome)
+        . ($motion ? ' ' . escapeshellarg('--motion') : '');
     passthru($shot, $exit);
     if ($exit === 0 && is_file($out)) {
         echo "Saved screenshot: {$out}\n";
@@ -176,7 +188,7 @@ exit($exit);
 /** The one invocation summary, shared by every path that rejects the line. */
 function usage(): never
 {
-    fwrite(STDERR, "Usage: php bin/screenshot.php <slug> [--runner=studio|playground] [--port=9400] [--out=<path>] [--timeout=240] [--workers=N] [--keep-alive]\n");
+    fwrite(STDERR, "Usage: php bin/screenshot.php <slug> [--runner=studio|playground] [--port=9400] [--out=<path>] [--timeout=240] [--workers=N] [--motion] [--keep-alive]\n");
     exit(1);
 }
 

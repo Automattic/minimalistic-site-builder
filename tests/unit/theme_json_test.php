@@ -2852,3 +2852,175 @@ test('theme-json scaffold does not assign core/quote a font size', function () {
         'an explicitly authored quote size survives',
     );
 });
+
+test('theme-json scaffold removes motion-kit custom CSS at every style depth', function () {
+    // Regression (BIGR-881): pulso2's theme.json styles.css redefined
+    // `.reveal-up` with a `clip-path: inset(0 0 100% 0)` resting state and a
+    // scroll-driven animation. The kit's `motion-skip` escape clears only
+    // `opacity` and `animation`, so the clip survived with nothing left to
+    // reveal it and the whole hero copy rendered as an empty band.
+    [$theme, $warnings] = ThemeJsonStep::repairScaffold([
+        'styles' => [
+            'css' => 'body{-webkit-font-smoothing:antialiased}'
+                . '@media (prefers-reduced-motion: no-preference){'
+                . '.reveal-up{opacity:0;clip-path:inset(0 0 100% 0);animation:nn-up 1s both}'
+                . '.text-measure{max-width:38rem}'
+                . '}',
+            'blocks' => ['core/group' => [
+                'css' => '.stagger-children>*{opacity:0}&{isolation:isolate}',
+            ]],
+            'elements' => ['h2' => [
+                'css' => '.hero-entrance &{transform:translateY(2rem)}',
+            ]],
+        ],
+    ]);
+
+    $root = $theme['styles']['css'];
+    assert_true(!str_contains($root, 'clip-path'), 'the hidden resting state is gone');
+    assert_true(!str_contains($root, 'animation:nn-up'), 'the generated animation is gone');
+    assert_true(str_contains($root, '.text-measure{max-width:38rem}'), 'a sibling rule survives');
+    assert_true(str_contains($root, 'body{-webkit-font-smoothing:antialiased}'), 'unrelated CSS survives');
+
+    assert_eq(
+        '.stagger-children>*{}&{isolation:isolate}',
+        $theme['styles']['blocks']['core/group']['css'],
+        'nested block CSS is repaired and its non-kit sibling declaration is kept',
+    );
+    assert_eq(
+        '.hero-entrance &{}',
+        $theme['styles']['elements']['h2']['css'],
+        'a kit class as an ANCESTOR is owned too, not only as the subject',
+    );
+
+    // Every removal is actionable and durable.
+    assert_eq(5, count($warnings), 'one warning per removed declaration');
+    foreach ($warnings as $warning) {
+        assert_contains('delivered removed', $warning);
+        assert_contains('motion-kit class', $warning);
+    }
+    assert_contains('styles.css: authored declaration', implode("\n", $warnings));
+    assert_contains('styles.blocks.core/group.css: authored declaration', implode("\n", $warnings));
+    assert_contains('styles.elements.h2.css: authored declaration', implode("\n", $warnings));
+
+    // A repair pass must reach a fixed point.
+    [$again, $noWarnings] = ThemeJsonStep::repairScaffold($theme);
+    assert_eq($theme, $again, 'idempotent');
+    assert_eq([], $noWarnings);
+});
+
+test('theme-json scaffold leaves custom CSS that names no motion class untouched', function () {
+    $css = '.text-measure{max-width:38rem}.overlap-up{margin-top:-3.5rem}';
+    [$theme, $warnings] = ThemeJsonStep::repairScaffold(['styles' => ['css' => $css]]);
+    assert_eq($css, $theme['styles']['css'], 'byte-for-byte');
+    assert_eq([], $warnings);
+});
+
+test('applyPaletteFloor repairs a V1 palette in theme.json list shape', function () {
+    $theme = [
+        'settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#131313', 'name' => 'Base'],
+            ['slug' => 'contrast', 'color' => '#EDE0CC', 'name' => 'Contrast'],
+            ['slug' => 'primary', 'color' => '#8E1F26', 'name' => 'Primary', 'origin' => 'v1'],
+            ['slug' => 'secondary', 'color' => '#A7C4A0', 'name' => 'Secondary'],
+            ['slug' => 'accent', 'color' => '#D98C3F', 'name' => 'Accent'],
+        ]]],
+    ];
+
+    [$out, $warnings] = ThemeJsonStep::applyPaletteFloor($theme);
+    $bySlug = array_column($out['settings']['color']['palette'], null, 'slug');
+
+    assert_true($bySlug['primary']['color'] !== '#8E1F26', 'primary changes');
+    assert_eq('#131313', $bySlug['base']['color'], 'base unchanged');
+    assert_eq('Primary', $bySlug['primary']['name'], 'name preserved');
+    assert_eq('v1', $bySlug['primary']['origin'], 'extra keys preserved');
+    assert_eq(
+        ['base', 'contrast', 'primary', 'secondary', 'accent'],
+        array_column($out['settings']['color']['palette'], 'slug'),
+        'order preserved',
+    );
+    $joined = implode(' ', $warnings);
+    assert_contains('authored=', $joined);
+    assert_contains('delivered=', $joined);
+    assert_contains('disposition=', $joined);
+    assert_contains('palette.primary', $joined);
+});
+
+test('theme-json write applies the palette floor to V1 hexes', function () {
+    with_project('builder_tj_floor_', function ($project): void {
+        $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
+        $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+        seed_test_design_direction($project);
+
+        $payload = valid_theme_payload();
+        $v1 = [
+            'base' => '#131313',
+            'contrast' => '#EDE0CC',
+            'primary' => '#8E1F26',
+            'secondary' => '#A7C4A0',
+            'accent' => '#D98C3F',
+        ];
+        foreach ($payload['settings']['color']['palette'] as &$entry) {
+            $slug = $entry['slug'] ?? '';
+            if (isset($v1[$slug])) {
+                $entry['color'] = $v1[$slug];
+            }
+        }
+        unset($entry);
+
+        $llm = new FakeLlm();
+        $llm->queueJson($payload);
+        quietly(fn () => (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project));
+
+        $bySlug = array_column(
+            $project->readJson('theme/theme.json')['settings']['color']['palette'],
+            'color',
+            'slug',
+        );
+        assert_true($bySlug['primary'] !== '#8E1F26', 'written primary left the failing V1 hex');
+        assert_eq('#131313', $bySlug['base'], 'base stays');
+        $joined = implode(' ', $project->readJson('warnings.json')['theme-json'] ?? []);
+        assert_contains('palette.primary', $joined);
+    });
+});
+
+test('applyPaletteFloor leaves a clean C1 palette unchanged', function () {
+    $theme = [
+        'settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#F7F4EE', 'name' => 'Base'],
+            ['slug' => 'contrast', 'color' => '#1B1B1B', 'name' => 'Contrast'],
+            ['slug' => 'primary', 'color' => '#7B2D26', 'name' => 'Primary'],
+            ['slug' => 'secondary', 'color' => '#3E5C4A', 'name' => 'Secondary'],
+            ['slug' => 'accent', 'color' => '#1F6F8B', 'name' => 'Accent'],
+        ]]],
+    ];
+    $before = $theme;
+
+    [$out, $warnings] = ThemeJsonStep::applyPaletteFloor($theme);
+
+    assert_eq([], $warnings);
+    assert_eq($before, $out, 'hexes unchanged');
+});
+
+test('applyPaletteFloor records unrepaired when a contrast floor cannot be met', function () {
+    $theme = [
+        'settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#808080', 'name' => 'Base'],
+            ['slug' => 'contrast', 'color' => '#AAAAAA', 'name' => 'Contrast'],
+            ['slug' => 'primary', 'color' => '#000000', 'name' => 'Primary'],
+            ['slug' => 'secondary', 'color' => '#000000', 'name' => 'Secondary'],
+            ['slug' => 'accent', 'color' => '#000000', 'name' => 'Accent'],
+        ]]],
+    ];
+
+    [$out, $warnings] = ThemeJsonStep::applyPaletteFloor($theme);
+    $bySlug = array_column($out['settings']['color']['palette'], 'color', 'slug');
+    assert_eq('#AAAAAA', $bySlug['contrast'], 'authored contrast kept');
+    $joined = implode(' ', $warnings);
+    assert_contains('path="palette.contrast"', $joined);
+    assert_contains('disposition=unrepaired', $joined);
+    assert_contains('best achieved', $joined);
+    assert_true(!str_contains($joined, 'path="palette.contrast"') || !preg_match(
+        '/path="palette\\.contrast"[^;]*;[^;]*; disposition=repaired/',
+        $joined,
+    ));
+});

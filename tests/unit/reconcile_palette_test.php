@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\PaletteReconciliation;
 use Automattic\SiteBuild\Steps\ReconcilePaletteStep;
+use Automattic\SiteBuild\Steps\ThemeJsonStep;
 
 /** theme.json shape carrying only the palette the reconciler reads. */
 function palette_theme(array $slugToHex): array
@@ -351,6 +352,43 @@ test('resyncing the palette does not retarget a persisted footer archetype', fun
             \Automattic\SiteBuild\FooterComposition::archetypeForProject($project),
         );
         assert_eq('#C9542F', $project->readJson('designDirection.json')['palette']['primary']);
+    });
+});
+
+test('reconcile resyncs planning artifacts onto palette-floor delivered hexes', function () {
+    with_project('builder_palette_floor_', function ($project): void {
+        $proposed = [
+            'base' => '#131313',
+            'contrast' => '#EDE0CC',
+            'primary' => '#8E1F26',
+            'secondary' => '#A7C4A0',
+            'accent' => '#D98C3F',
+        ];
+        [$deliveredTheme] = ThemeJsonStep::applyPaletteFloor(palette_theme($proposed));
+        $delivered = array_column($deliveredTheme['settings']['color']['palette'], 'color', 'slug');
+        assert_true($delivered['primary'] !== '#8E1F26', 'floor moved primary');
+        assert_eq('#131313', $delivered['base']);
+
+        $project->writeJson('designDirection.json', palette_direction($proposed));
+        $project->writeJson('pages.json', palette_pages($proposed));
+        $project->writeJson('theme/theme.json', $deliveredTheme);
+
+        quietly(fn () => (new ReconcilePaletteStep())->run($project));
+
+        $direction = $project->readJson('designDirection.json');
+        assert_eq($delivered['primary'], $direction['palette']['primary']);
+        assert_contains(
+            'Terracotta ' . $delivered['primary'] . ' carries the brand',
+            $direction['description'],
+        );
+        assert_contains(
+            'button in ' . $delivered['primary'],
+            $project->readJson('pages.json')['pages'][0]['sections'][0]['content_notes'],
+        );
+        assert_true(
+            !str_contains(json_encode($direction, JSON_UNESCAPED_SLASHES), '#8E1F26'),
+            'no proposed primary survives anywhere in the direction',
+        );
     });
 });
 
