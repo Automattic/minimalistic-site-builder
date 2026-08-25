@@ -91,7 +91,9 @@ final class CtaStyleMarkup
             $className = is_string($attrs['className'] ?? null) ? $attrs['className'] : '';
             $tokens = preg_split('/\s+/', trim($className), -1, PREG_SPLIT_NO_EMPTY) ?: [];
             foreach ($tokens as $token) {
-                if (!str_starts_with($token, 'wp-block-button__width-')) {
+                if (!str_starts_with($token, 'wp-block-button__width-')
+                    || ($style === 'block' && $token === 'wp-block-button__width-100')
+                ) {
                     continue;
                 }
                 $tokens = array_values(array_filter(
@@ -116,12 +118,23 @@ final class CtaStyleMarkup
                 $changed = true;
                 self::record($changes, $path, 'className', $variation, null, $style);
             }
-            if ($className !== '') {
-                if ($tokens === []) {
-                    unset($attrs['className']);
-                } else {
-                    $attrs['className'] = implode(' ', $tokens);
-                }
+            if ($style === 'block' && !in_array('wp-block-button__width-100', $tokens, true)) {
+                $tokens[] = 'wp-block-button__width-100';
+                $changed = true;
+                self::record(
+                    $changes,
+                    $path,
+                    'className',
+                    null,
+                    'wp-block-button__width-100',
+                    $style,
+                );
+            }
+            $deliveredClassName = implode(' ', $tokens);
+            if ($deliveredClassName === '') {
+                unset($attrs['className']);
+            } else {
+                $attrs['className'] = $deliveredClassName;
             }
 
             $authoredWidth = $attrs['width'] ?? null;
@@ -140,10 +153,17 @@ final class CtaStyleMarkup
                         'wp-block-button wp-block-button__width-100',
                     );
                 }
-                if ($authoredWidth !== 100 || $htmlWidths !== ['100']) {
-                    $attrs['width'] = 100;
+                if (array_key_exists('width', $attrs) || $htmlWidths !== ['100']) {
+                    unset($attrs['width']);
                     $changed = true;
-                    self::record($changes, $path, 'width', $authoredWidth, 100, $style);
+                    self::record(
+                        $changes,
+                        $path,
+                        'width',
+                        $authoredWidth,
+                        'wp-block-button__width-100 class',
+                        $style,
+                    );
                 }
             } elseif (array_key_exists('width', $attrs) || $htmlWidths !== []) {
                 unset($attrs['width']);
@@ -288,7 +308,7 @@ final class CtaStyleMarkup
                 }
             }
         }
-        return array_keys($values);
+        return array_map(static fn (int|string $value): string => (string) $value, array_keys($values));
     }
 
     /** @param list<array<mixed>> $changes */

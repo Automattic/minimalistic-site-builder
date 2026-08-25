@@ -150,7 +150,8 @@ test('CTA markup removes local construction and block style enforces full width'
     assert_eq([], $fixed['changes']);
 
     $block = CtaStyleMarkup::normalize($markup, 'block');
-    assert_eq(100, BlockMarkup::parse($block['markup'])->attrs(0)['width']);
+    assert_true(!isset(BlockMarkup::parse($block['markup'])->attrs(0)['width']));
+    assert_contains('wp-block-button__width-100', BlockMarkup::parse($block['markup'])->attrs(0)['className']);
     assert_true(!str_contains($block['markup'], 'wp-block-button__width-50'));
     assert_contains('wp-block-button__width-100', $block['markup']);
 
@@ -165,10 +166,13 @@ test('CTA markup removes local construction and block style enforces full width'
         . '<div class="wp-block-button wp-block-button__width-33">'
         . '<a class="wp-block-button__link wp-element-button">Odd</a></div><!-- /wp:button -->';
     $unsupportedBlock = CtaStyleMarkup::normalize($unsupportedWidth, 'block');
-    assert_contains('"width":100', $unsupportedBlock['markup']);
+    assert_true(!str_contains($unsupportedBlock['markup'], '"width":'));
     assert_contains('wp-block-button__width-100', $unsupportedBlock['markup']);
     assert_true(!str_contains($unsupportedBlock['markup'], 'wp-block-button__width-33'));
-    assert_eq('keep', BlockMarkup::parse($unsupportedBlock['markup'])->attrs(0)['className']);
+    assert_eq(
+        'keep wp-block-button__width-100',
+        BlockMarkup::parse($unsupportedBlock['markup'])->attrs(0)['className'],
+    );
     $unsupportedOutline = CtaStyleMarkup::normalize($unsupportedWidth, 'outline');
     assert_true(!str_contains($unsupportedOutline['markup'], '"width"'));
     assert_true(!str_contains($unsupportedOutline['markup'], 'wp-block-button__width-33'));
@@ -220,6 +224,33 @@ test('FixBlocks CTA normalization isolates failed files and keeps healthy siblin
         (new FixBlocksStep(new PhpBlockFixer()))->run($project);
         assert_eq($deliveredHealthy, $project->readText('theme/parts/a-healthy.html'));
         assert_eq($beforeWarnings, $project->readJson('warnings.json'), 'fixed point adds no warning rows');
+    });
+});
+
+test('block CTA width uses the frozen serializer canonical class and reaches a fixed point', function () {
+    with_temp_dir('cta-style-width-fixed-point-', function (string $tmp): void {
+        $project = new Project($tmp);
+        $project->writeJson('designDirection.json', ['cta_style' => 'block']);
+        $project->writeJson('theme/theme.json', ['version' => 3]);
+        $project->writeText(
+            'theme/parts/cta.html',
+            '<!-- wp:button {"width":100} --><div class="wp-block-button wp-block-button__width-100">'
+                . '<a class="wp-block-button__link wp-element-button">Go</a></div><!-- /wp:button -->',
+        );
+
+        (new FixBlocksStep(new PhpBlockFixer()))->run($project);
+
+        $delivered = $project->readText('theme/parts/cta.html');
+        $attrs = BlockMarkup::parse($delivered)->attrs(0);
+        assert_true(!isset($attrs['width']), 'the frozen serializer does not retain a width support attr');
+        assert_eq('wp-block-button__width-100', $attrs['className']);
+        assert_contains('wp-block-button__width-100', $delivered);
+        $normalized = CtaStyleMarkup::normalize($delivered, 'block');
+        assert_eq($delivered, $normalized['markup']);
+        assert_eq([], $normalized['changes'], 'the token normalizer accepts serializer-canonical delivery');
+
+        (new FixBlocksStep(new PhpBlockFixer()))->run($project);
+        assert_eq($delivered, $project->readText('theme/parts/cta.html'));
     });
 });
 
