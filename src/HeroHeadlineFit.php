@@ -147,29 +147,16 @@ final class HeroHeadlineFit
                 // also makes the pass idempotent.
                 continue;
             }
-            $word = self::longestWord($doc->innerHtml($i));
-            if ($word === null) {
+            $fit = self::wordFit($doc, $i, $theme, $attrs, $displayMax);
+            if ($fit === null || $fit['cap'] === null) {
                 continue;
             }
-            $measure = self::measurePx($doc, $i, $theme);
-            if ($measure === null) {
-                continue;
-            }
-            $level = is_numeric($attrs['level'] ?? null) ? (int) $attrs['level'] : 2;
-            $uppercase = self::effectiveTransform($attrs, $theme, $level) === 'uppercase';
-            $spacingEm = self::effectiveLetterSpacingEm($attrs, $theme, $level);
-            $chars = mb_strlen($word);
-            $wordEm = $chars * ($uppercase ? self::UPPERCASE_EM : self::MIXED_CASE_EM)
-                + max(0, $chars - 1) * $spacingEm;
-            if ($wordEm <= 0) {
-                continue;
-            }
-
-            $available = $measure * self::MEASURE_SAFETY;
-            if ($displayMax * $wordEm <= $available) {
-                continue;
-            }
-            $cap = (int) floor($available / $wordEm);
+            $word = $fit['word'];
+            $chars = $fit['chars'];
+            $uppercase = $fit['uppercase'];
+            $wordEm = $fit['wordEm'];
+            $measure = $fit['measure'];
+            $cap = $fit['cap'];
             if ($cap < self::MINIMUM_CAP_PX) {
                 // A word this long in a measure this narrow has no size worth
                 // pinning. This is the one case where a hyphen beats a bare
@@ -217,6 +204,61 @@ final class HeroHeadlineFit
     }
 
     /**
+     * The largest size at which this heading's longest word fits its measure.
+     *
+     * Extracted so the promotion below can consult the SAME answer. Promotion
+     * writes an explicit size, and the word-fit loop deliberately skips any
+     * heading that has one (that skip is what makes the pass idempotent), so a
+     * promoted heading would otherwise never be word-checked at all — a hard
+     * bypass of the guard BIGR-798/864 exist for. Hero headings are set to
+     * `overflow-wrap: normal; hyphens: manual` precisely because this pass is
+     * the only guard, and `.hero-composition--layered-poster` clips overflow,
+     * so the failure is a headline cut off at the column edge.
+     *
+     * @param array<mixed> $attrs
+     * @return array{cap:?int,word:string,chars:int,uppercase:bool,wordEm:float,measure:float}|null
+     *         null when the heading cannot be measured at all; `cap` null when
+     *         the word already fits at the display maximum.
+     */
+    private static function wordFit(
+        BlockMarkup $doc,
+        int $heading,
+        array $theme,
+        array $attrs,
+        float $displayMax,
+    ): ?array {
+        $word = self::longestWord($doc->innerHtml($heading));
+        if ($word === null) {
+            return null;
+        }
+        $measure = self::measurePx($doc, $heading, $theme);
+        if ($measure === null) {
+            return null;
+        }
+        $level = is_numeric($attrs['level'] ?? null) ? (int) $attrs['level'] : 2;
+        $uppercase = self::effectiveTransform($attrs, $theme, $level) === 'uppercase';
+        $spacingEm = self::effectiveLetterSpacingEm($attrs, $theme, $level);
+        $chars = mb_strlen($word);
+        $wordEm = $chars * ($uppercase ? self::UPPERCASE_EM : self::MIXED_CASE_EM)
+            + max(0, $chars - 1) * $spacingEm;
+        if ($wordEm <= 0) {
+            return null;
+        }
+
+        $available = $measure * self::MEASURE_SAFETY;
+        return [
+            'cap' => $displayMax * $wordEm <= $available
+                ? null
+                : (int) floor($available / $wordEm),
+            'word' => $word,
+            'chars' => $chars,
+            'uppercase' => $uppercase,
+            'wordEm' => $wordEm,
+            'measure' => $measure,
+        ];
+    }
+
+    /**
      * Raise the hero's one H1 to the masthead preset when the model set it
      * below that, then bound it by the measure and the desktop line target.
      *
@@ -241,12 +283,21 @@ final class HeroHeadlineFit
         array &$notes,
     ): void {
         foreach ($doc->indices() as $i) {
-            if ($doc->name($i) !== 'heading' || !$doc->isStructurallySafe($i)) {
+            if ($doc->name($i) !== 'heading') {
                 continue;
             }
             $attrs = $doc->attrs($i) ?? [];
             if ((int) ($attrs['level'] ?? 2) !== 1) {
                 continue;
+            }
+            // The FIRST h1 is the masthead. If it cannot be edited safely,
+            // stop — the next h1 down the page is not a substitute for it.
+            if (!$doc->isStructurallySafe($i)) {
+                return;
+            }
+            // An empty headline has no scale worth promoting.
+            if (trim(html_entity_decode(strip_tags($doc->innerHtml($i)), ENT_QUOTES | ENT_HTML5)) === '') {
+                return;
             }
 
             $current = $attrs['fontSize'] ?? null;
@@ -255,10 +306,33 @@ final class HeroHeadlineFit
                 return;
             }
 
-            $cap = self::lineTargetCapPx($doc, $i, $theme, $attrs, $desktopLineTarget, $displayMax);
+            // Two independent bounds, and the smaller one wins.
+            //
+            // The line target keeps the headline inside the blueprint's wrap;
+            // the word fit keeps its longest word inside the measure. Promotion
+            // writes an explicit size and the word-fit loop skips any heading
+            // that has one, so consulting only the line target here would ship
+            // a masthead whose longest word overflows a clipped hero — the
+            // exact defect BIGR-798/864 exist to prevent.
+            if (self::measurePx($doc, $i, $theme) === null) {
+                // Neither bound can be computed, so promoting would ship an
+                // unbounded display headline nothing has checked. Leave it.
+                return;
+            }
+            $lineCap = self::lineTargetCapPx($doc, $i, $theme, $attrs, $desktopLineTarget, $displayMax);
+            $fit = self::wordFit($doc, $i, $theme, $attrs, $displayMax);
+            $wordCap = $fit['cap'] ?? null;
+
+            $caps = array_values(array_filter(
+                [$lineCap, $wordCap],
+                static fn (?int $value): bool => $value !== null,
+            ));
+            $cap = $caps === [] ? null : min($caps);
             if ($cap !== null && $cap < self::MINIMUM_CAP_PX) {
-                // No size in this measure keeps the headline inside its own
-                // line target. The model's smaller preset is the better answer.
+                // No size in this measure satisfies both bounds. The model's
+                // smaller preset is the better answer, and if it is the WORD
+                // that cannot fit, the word-fit loop still owns the
+                // hyphenation escape for it.
                 return;
             }
             $delivered = $cap === null ? $displayMax : min((float) $cap, $displayMax);
@@ -269,12 +343,14 @@ final class HeroHeadlineFit
                 return;
             }
 
-            if ($current !== null) {
-                // The preset class must go with the preset attr — WordPress
-                // renders `.has-<slug>-font-size` with !important — and the
-                // block fixer that runs after this step would otherwise rescue
-                // the stale token straight back out of the saved HTML.
-                $doc->removeClassTokenInOwnHtml($i, 'has-' . $current . '-font-size');
+            // Every preset class must go with the preset attr — WordPress
+            // renders `.has-<slug>-font-size` with !important, which beats an
+            // inline size — and the block fixer that runs after this step
+            // rescues a stale token straight back out of the saved HTML. The
+            // class can be present with NO matching attr (the very shape the
+            // fixer exists to repair), so this cannot key off `$current`.
+            foreach (self::presetSlugs($theme) as $slug) {
+                $doc->removeClassTokenInOwnHtml($i, 'has-' . $slug . '-font-size');
             }
             if ($cap !== null && $cap < $displayMax) {
                 unset($attrs['fontSize']);
@@ -285,14 +361,20 @@ final class HeroHeadlineFit
             }
             $doc->setAttrs($i, $attrs);
 
+            $bound = match (true) {
+                $cap === null || $cap >= $displayMax => '',
+                $wordCap !== null && $cap === $wordCap && $cap !== $lineCap =>
+                    sprintf(", pinned to min(display, %dpx) so '%s' fits the measure", $cap, $fit['word']),
+                $wordCap !== null && $cap === $wordCap =>
+                    sprintf(', pinned to min(display, %dpx) by the line target and the word fit', $cap),
+                default => sprintf(', pinned to min(display, %dpx) by the desktop line target', $cap),
+            };
             $notes[] = sprintf(
                 'headline scale: hero h1 was set at %s (max %s); promoted to the display preset%s '
                     . '— the display preset is the masthead and nothing else on the page uses it',
                 $current ?? 'no preset',
                 $currentMax === null ? 'unknown' : (int) round($currentMax) . 'px',
-                $cap !== null && $cap < $displayMax
-                    ? sprintf(', pinned to min(display, %dpx) by the desktop line target', $cap)
-                    : '',
+                $bound,
             );
             return;
         }
@@ -329,8 +411,15 @@ final class HeroHeadlineFit
         ?array $desktopLineTarget,
         float $displayMax,
     ): ?int {
-        $maxLines = is_array($desktopLineTarget) ? ($desktopLineTarget[1] ?? null) : null;
-        if (!is_numeric($maxLines) || (int) $maxLines < 1) {
+        // The blueprint shape is [min, max]; fall back to the only number a
+        // malformed target supplies rather than leaving the headline unbounded.
+        $maxLines = null;
+        foreach (is_array($desktopLineTarget) ? $desktopLineTarget : [] as $value) {
+            if (is_numeric($value) && (int) $value >= 1) {
+                $maxLines = max((int) $maxLines, (int) $value);
+            }
+        }
+        if ($maxLines === null) {
             return null;
         }
         $measure = self::measurePx($doc, $heading, $theme);
@@ -357,13 +446,17 @@ final class HeroHeadlineFit
 
         $available = $measure * self::MEASURE_SAFETY;
         // Line count is monotonic in size, so the first size that fits, walking
-        // down from the preset maximum, is the largest one that fits.
-        for ($size = (int) floor($displayMax); $size >= self::MINIMUM_CAP_PX; $size--) {
+        // down from the preset maximum, is the largest one that fits. The floor
+        // is the smaller of the pin threshold and the preset's own maximum, so
+        // a theme whose display preset tops out below the threshold is still
+        // evaluated instead of reporting "nothing fits".
+        $floor = (int) min(self::MINIMUM_CAP_PX, floor($displayMax));
+        for ($size = (int) floor($displayMax); $size >= $floor; $size--) {
             if (self::wrappedLines($words, $charEm, $spacingEm, (float) $size, $available) <= (int) $maxLines) {
                 return $size;
             }
         }
-        return self::MINIMUM_CAP_PX - 1;
+        return $floor - 1;
     }
 
     /**
@@ -409,6 +502,23 @@ final class HeroHeadlineFit
         $text = preg_replace('/<br\s*\/?>/i', ' ', $innerHtml) ?? $innerHtml;
         $text = html_entity_decode(strip_tags($text), ENT_QUOTES | ENT_HTML5);
         return trim((string) preg_replace('/\s+/u', ' ', $text));
+    }
+
+    /**
+     * Every font-size preset slug the theme defines.
+     *
+     * @return list<string>
+     */
+    private static function presetSlugs(array $theme): array
+    {
+        $slugs = [];
+        foreach ((array) ($theme['settings']['typography']['fontSizes'] ?? []) as $preset) {
+            $slug = is_array($preset) ? ($preset['slug'] ?? null) : null;
+            if (is_string($slug) && $slug !== '') {
+                $slugs[] = $slug;
+            }
+        }
+        return $slugs;
     }
 
     /** One named preset's largest resolvable size in px, or null. */
