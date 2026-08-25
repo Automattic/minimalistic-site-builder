@@ -62,7 +62,9 @@ use Automattic\SiteBuild\StudioCli;
  *                   off every rule inside
  *                   `@media (prefers-reduced-motion: no-preference)`, so this
  *                   cohort cannot photograph a defect that lives only there
- *                   (BIGR-881 shipped exactly that way).
+ *                   (BIGR-881 shipped exactly that way). The capture visits
+ *                   every reveal target and waits for finite entrances before
+ *                   saving, so scroll timing does not manufacture omissions.
  *   --serve         after the batch, serve ALL built sites. Studio sites are
  *                   daemons: URLs print and the command returns. Playground
  *                   still blocks until Ctrl-C. Off by default.
@@ -275,11 +277,12 @@ if ($screenshot && $built !== []) {
     foreach ($built as $i => $b) {
         $shotJobs[] = [
             'slug' => $b['slug'],
-            'cmd'  => 'exec php ' . escapeshellarg(repo_path('bin/screenshot.php'))
-                . ' ' . escapeshellarg($b['slug'])
-                . ' --port=' . ($port + $i * PORT_STRIDE)
-                . ' --out=' . escapeshellarg($b['path'] . '/logs/home.png')
-                . ($shotMotion ? ' --motion' : ''),
+            'cmd'  => demo_screenshot_command(
+                $b['slug'],
+                $b['path'] . '/logs/home.png',
+                $port + $i * PORT_STRIDE,
+                $shotMotion,
+            ),
         ];
     }
     // The provider-aware OpenRouter cap protects LLM generation only. Keep
@@ -320,6 +323,16 @@ if ($serve && $built !== []) {
 
 exit($exitCode);
 
+}
+
+/** Build one screenshot child command; pure so option forwarding is testable. */
+function demo_screenshot_command(string $slug, string $out, int $port, bool $motion): string
+{
+    return 'exec php ' . escapeshellarg(repo_path('bin/screenshot.php'))
+        . ' ' . escapeshellarg($slug)
+        . ' --port=' . $port
+        . ' --out=' . escapeshellarg($out)
+        . ($motion ? ' --motion' : '');
 }
 
 /**
