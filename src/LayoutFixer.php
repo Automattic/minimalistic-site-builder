@@ -70,6 +70,13 @@ final class LayoutFixer
      * narrowed wrapper for these; anything else inside the group means the
      * measure belongs to a component, not to the section's reading column.
      */
+    /**
+     * Marks a copy stack promoted to a wide grid sibling's align. The theme
+     * keeps core's reading-measure cap on its children and only stops them
+     * being centred, so the copy starts on the band's leading edge.
+     */
+    public const COPY_FLUSH_CLASS = 'copy-flush';
+
     private const TEXT_STACK_BLOCKS = [
         'heading', 'paragraph', 'buttons', 'list', 'separator', 'spacer',
         'site-title', 'site-tagline',
@@ -158,6 +165,7 @@ final class LayoutFixer
             self::freeGridsFromNarrowWrappers($roots, $notes);
             self::restoreCoverMeasure($all, $contentSize, $notes);
             self::normalizeTextMeasure($all, $contentSize, $notes);
+            self::flushCopyToGridEdge($all, $notes);
         }
         // Last: the rules above rewrite "align" attributes, and an align class
         // left behind in the saved HTML is not derivable from the new
@@ -1321,6 +1329,126 @@ final class LayoutFixer
             $node->dirty = true;
             $notes[] = "text stack carried its own {$size} measure — removed it so the section reads at the theme's contentSize";
         }
+    }
+
+    /**
+     * A band's copy left floating inside the grid it introduces. Generations
+     * give the card row align:wide and leave the heading/copy group and its
+     * buttons unaligned, so the text starts 156px inside the cards below it.
+     * Promote those siblings to the grid's own align. The copy group stays
+     * constrained, so core still caps its children at the reading measure;
+     * COPY_FLUSH_CLASS only stops that cap being centred.
+     *
+     * @param object[] $all
+     * @param string[] $notes
+     */
+    private static function flushCopyToGridEdge(array $all, array &$notes): void
+    {
+        foreach ($all as $band) {
+            if (!self::is($band, 'group')) {
+                continue;
+            }
+            $align = self::gridAlignIn($band);
+            if ($align === null) {
+                continue;
+            }
+            foreach ($band->children as $child) {
+                if (isset($child->attrs->align)) {
+                    continue;
+                }
+                if (self::is($child, 'buttons')) {
+                    if (!self::buttonsRunFromLeadingEdge($child)) {
+                        continue;
+                    }
+                    $child->attrs->align = $align;
+                    $child->dirty = true;
+                    $notes[] = "wp:buttons sat at the reading measure beside an align:{$align} grid row — matched it to the grid's edge";
+                    continue;
+                }
+                // Only a constrained copy stack: without that layout the group
+                // does not cap its own children, so widening it would run the
+                // paragraphs the full width of the band.
+                if (!self::is($child, 'group')
+                    || self::layoutType($child) !== 'constrained'
+                    || !self::isTextStack($child)
+                    || !self::readsFromLeadingEdge($child)) {
+                    continue;
+                }
+                $child->attrs->align = $align;
+                self::addClassName($child, self::COPY_FLUSH_CLASS);
+                $child->dirty = true;
+                $notes[] = "section copy sat at the reading measure beside an align:{$align} grid row — matched it to the grid's edge and kept the measure";
+            }
+        }
+    }
+
+    /**
+     * The align of the first direct grid row that has one. Grid rows are the
+     * blocks freeGridsFromNarrowWrappers already treats as component rows.
+     */
+    private static function gridAlignIn(object $band): ?string
+    {
+        foreach ($band->children as $child) {
+            $isGrid = (self::is($child, 'columns') && self::columnCount($child) >= 2)
+                || self::is($child, 'gallery')
+                || self::is($child, 'media-text');
+            if (!$isGrid) {
+                continue;
+            }
+            $align = self::align($child);
+            if ($align === 'wide' || $align === 'full') {
+                return $align;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Copy that actually starts on the leading edge. Centred or end-aligned
+     * text is placed on purpose and reads as intended in a narrower column,
+     * so moving its box would only shift the whitespace around it.
+     */
+    private static function readsFromLeadingEdge(object $group): bool
+    {
+        foreach ($group->children as $child) {
+            // Three channels carry the same decision. Generations reach for the
+            // style.typography spelling almost exclusively, so a check of the
+            // top-level attributes alone never sees a centred heading.
+            $values = [
+                $child->attrs->align ?? null,
+                $child->attrs->textAlign ?? null,
+                $child->attrs->style->typography->textAlign ?? null,
+            ];
+            foreach ($values as $value) {
+                if (is_string($value) && ($value === 'center' || $value === 'right')) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Buttons centred or pushed to the end are placed on purpose, the same way
+     * centred copy is. Their justification sits on the block's own layout
+     * rather than on its children, so readsFromLeadingEdge cannot see it.
+     */
+    private static function buttonsRunFromLeadingEdge(object $buttons): bool
+    {
+        $justify = self::layout($buttons)?->justifyContent ?? null;
+        return !is_string($justify) || ($justify !== 'center' && $justify !== 'right');
+    }
+
+    /** Append a class token, preserving any the block already carries. */
+    private static function addClassName(object $node, string $class): void
+    {
+        $existing = $node->attrs->className ?? '';
+        $classes = is_string($existing) ? (preg_split('/\s+/', trim($existing)) ?: []) : [];
+        if (in_array($class, $classes, true)) {
+            return;
+        }
+        $classes[] = $class;
+        $node->attrs->className = implode(' ', array_filter($classes, static fn (string $c): bool => $c !== ''));
     }
 
     /**
