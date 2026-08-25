@@ -117,6 +117,7 @@ test('HeroUnit exposes one isolated assigned recipe behind the shared site layer
         'focal-subject-stage' => 'singular subject as an opaque foreground content image',
         'layered-poster' => 'cover image beneath controlled block-built type',
         'stacked-headline-band' => 'Stack the proposition above one full-width image band',
+        'type-manifesto' => 'one imageless, type-led band',
     ];
 
     assert_eq(HeroComposition::RECIPES, array_keys($markers));
@@ -167,6 +168,27 @@ test('HeroUnit prompt bounds the standfirst without absorbing overflow', functio
     assert_contains('no more than roughly 180 characters', $prompt, 'the character guidance is an upper bound');
     assert_contains('Do not fold overflow into the standfirst', $prompt, 'section copy cannot fill the sole support slot');
     assert_true(!str_contains($prompt, 'fold it into the one standfirst'), 'the contradictory overflow option is absent');
+});
+
+test('HeroUnit prompt assigns the display token to every hero H1 recipe', function () {
+    $renderer = new PromptRenderer(repo_path('prompts'));
+
+    foreach (HeroComposition::RECIPES as $recipe) {
+        $prompt = (new HeroUnit(new FakeLlm(), $renderer))
+            ->request(hero_unit_contract_input($recipe));
+        $prompt = markup_request_text($prompt);
+
+        assert_contains('hero H1 always authors `"fontSize":"display"`', $prompt, "{$recipe} receives the masthead token contract");
+        assert_contains('one level-1 `wp:heading` with `"fontSize":"display"`', $prompt, "{$recipe} receives the exact H1 shape");
+        assert_true(
+            !str_contains($prompt, 'never the `display` preset'),
+            "{$recipe} does not contradict the display-token contract",
+        );
+        assert_true(
+            !str_contains($prompt, 'step down to the largest heading preset'),
+            "{$recipe} cannot author the cohort's section-title fallback",
+        );
+    }
 });
 
 test('HeroUnit prompt rejects generic headline registers without inventing differentiation', function () {

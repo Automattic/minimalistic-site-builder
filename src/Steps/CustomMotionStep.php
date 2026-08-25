@@ -319,9 +319,12 @@ final class CustomMotionStep implements Step
             }
         }
 
-        // Inside keyframes, zero opacity is only ever the transient start of
-        // an entrance (`from`/`0%`). In any later step it can be the state a
-        // forwards/both fill parks the element in — invisible for good.
+        // Inside keyframes, a hidden state is only ever the transient start
+        // of an entrance (`from`/`0%`). In any later step it can be the state
+        // a forwards/both fill parks the element in — invisible for good.
+        // Both properties that can spell it are checked here, because
+        // hiddenContentProblems() exempts every keyframe so that an entrance
+        // may legally start clipped (BIGR-887).
         foreach ($keyframeBodies as $body) {
             if (preg_match_all('/([^{}]+)\{([^{}]*)\}/', $body, $steps, PREG_SET_ORDER) === 0) {
                 continue;
@@ -336,6 +339,14 @@ final class CustomMotionStep implements Step
                         if (self::hidesContent($value)) {
                             $problems[] = 'zero opacity in a non-start keyframe can leave content hidden: '
                                 . trim($step[1]) . ' { opacity: ' . trim($value) . ' }';
+                        }
+                    }
+                }
+                if (preg_match_all('/(?<![-\w])clip-path\s*:\s*([^;{}]+)/i', $step[2], $clips) > 0) {
+                    foreach ($clips[1] as $value) {
+                        if (CssChecks::hiddenContentProblems('a{clip-path:' . $value . '}') !== []) {
+                            $problems[] = 'a fully-clipping clip-path in a non-start keyframe can leave'
+                                . ' content hidden: ' . trim($step[1]) . ' { clip-path: ' . trim($value) . ' }';
                         }
                     }
                 }

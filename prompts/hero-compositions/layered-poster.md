@@ -13,10 +13,10 @@ content off screen.
   `hero-composition__copy` zone and the controlled type/color layers.
 - Safe zone discipline: the headline, the supporting copy, and any planned
   action ALL live inside the one authored copy-safe zone over the image's
-  quiet area. Scale the poster gesture to that zone: when the zone spans less
-  than half the wide measure, the `display` preset no longer fits its own
-  words — step down to the largest heading preset whose longest word holds on
-  one line (uppercase and wide-tracked type break soonest). Bound the zone's width explicitly (a constrained inner group or
+  quiet area. Keep the H1 on the `display` token even when the zone spans less
+  than half the wide measure; shorten its words and line count to fit, while
+  the deterministic headline-fit pass bounds the rendered token when needed
+  (uppercase and wide-tracked type break soonest). Bound the zone's width explicitly (a constrained inner group or
   column) so no line of supporting text runs past it into the busy or focal
   area — when the copy does not fit the zone legibly, shorten the copy rather
   than widening the zone.

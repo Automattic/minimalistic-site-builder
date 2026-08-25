@@ -394,10 +394,16 @@ final class HeaderHeroStep implements Step
             $writes[$heroRel] = $emptyActions['markup'];
             array_push($warnings, ...$emptyActions['warnings']);
 
-            // With the hero copy final, guarantee its longest headline word
-            // fits the measure its layout chain implies — the CSS mid-word
-            // break guard must stay dormant (BIGR-798).
-            $fit = HeroHeadlineFit::apply($writes[$heroRel], $theme);
+            // With the hero copy final, put the H1 at the masthead scale it
+            // was always meant to have (BIGR-883) and guarantee its longest
+            // word fits the measure its layout chain implies — the CSS
+            // mid-word break guard must stay dormant (BIGR-798).
+            $lineTarget = $delivery['viewport']['headline_line_target']['desktop'] ?? null;
+            $fit = HeroHeadlineFit::apply(
+                $writes[$heroRel],
+                $theme,
+                is_array($lineTarget) ? array_values($lineTarget) : null,
+            );
             $writes[$heroRel] = $fit['markup'];
             foreach ($fit['notes'] as $note) {
                 $report[] = "[{$heroRel}] {$note}";

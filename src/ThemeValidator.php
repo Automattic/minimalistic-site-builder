@@ -1026,7 +1026,12 @@ final class ThemeValidator
             foreach (Steps\SectionRhythmStep::pages($project) as $page) {
                 $slug = trim((string) ($page['slug'] ?? ''));
                 $entries = Steps\SectionRhythmStep::assembledEntries($project, $page);
-                $result = SectionRhythm::rewrite($entries, $footerSurface);
+                $result = SectionRhythm::rewrite(
+                    $entries,
+                    $footerSurface,
+                    Steps\DesignDirectionStep::deviceFor($project),
+                    Steps\SectionRhythmStep::footerMarkup($project),
+                );
                 foreach ($result['notes'] as $note) {
                     $warnings[] = "section root spacing drift (page '{$slug}'): " . $note;
                 }

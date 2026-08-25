@@ -20,18 +20,21 @@ final class HeroComposition
         'focal-subject-stage',
         'layered-poster',
         'stacked-headline-band',
+        'type-manifesto',
     ];
 
-    // Caller-constraint enum. Every cataloged recipe now carries an image;
-    // 'none' remains a valid HeroBlueprint media_mode only as the delivered
-    // value of a media-loss degradation, never as a requestable constraint.
-    public const MEDIA_MODES = ['cover-image', 'foreground-image', 'band-image'];
+    // Caller-constraint enum. 'none' became requestable with type-manifesto
+    // (BIGR-885), the first cataloged recipe that carries no image. It stays a
+    // valid HeroBlueprint media_mode for the delivered value of a media-loss
+    // degradation too, so an image-bearing recipe can still degrade to it.
+    public const MEDIA_MODES = ['none', 'cover-image', 'foreground-image', 'band-image'];
 
     /**
      * The media modes that put real pixels on the page, so the build must
      * generate an image for them. A mode absent from this list disarms image
-     * generation: 'none' is the delivered value of a media-loss degradation,
-     * and a future non-image mode must opt in here on purpose.
+     * generation: 'none' is both a requestable constraint and the delivered
+     * value of a media-loss degradation, and a future non-image mode must opt
+     * in here on purpose.
      *
      * @var list<string>
      */
@@ -236,6 +239,45 @@ final class HeroComposition
                 'mobile_transformation' => 'stack-copy-first',
             ],
         ],
+        // BIGR-885: the catalog's first imageless recipe. Type and negative
+        // space carry the band, so the recipe removes overlay contrast risk,
+        // image-aspect drift, and the media plate that pushes copy below the
+        // fold. 'centered-stack' is the projection because it is the only
+        // archetype in PagePlanStep::ARCHETYPES that a plan reader can read as
+        // "one column carried by type and whitespace"; the row archetypes
+        // would promise the following section a second column that this hero
+        // does not have.
+        'type-manifesto' => [
+            'canvases' => ['full-bleed', 'framed'],
+            'media_modes' => ['none'],
+            'min_images' => 0,
+            'max_images' => 0,
+            'backgrounds' => ['base', 'tinted', 'contrast'],
+            'default_background' => 'contrast',
+            'fallback_background' => 'base',
+            'header_modes' => ['stacked'],
+            'copy_capacity' => 'compact',
+            'mobile_transformations' => ['stack-copy-first'],
+            'layout_archetype' => 'centered-stack',
+            'fallback_family' => 'typographic',
+            'root_hook' => '.hero-composition--type-manifesto',
+            'prompt' => 'hero-compositions/type-manifesto.md',
+            'headline_registers' => ['display', 'poster'],
+            // No image means no media plate to balance, so an immersive band
+            // would only add empty canvas under the copy.
+            'height_profiles' => ['compact', 'standard'],
+            'defaults' => [
+                'media_mode' => 'none', 'headline_register' => 'display',
+                'text_anchor' => 'center-start',
+                'headline_line_target' => ['desktop' => [1, 3], 'mobile' => [2, 5]],
+                // HeroBlueprint::repairSpatialCompatibility() pins both fields
+                // for every non-cover recipe; these values keep defaultFor() a
+                // fixed point.
+                'focal_region' => 'none', 'text_safe_region' => 'full',
+                'height_profile' => 'standard', 'cta_treatment' => 'prominent',
+                'mobile_transformation' => 'stack-copy-first',
+            ],
+        ],
     ];
 
     public static function assertKnown(string $recipe): void
@@ -275,9 +317,15 @@ final class HeroComposition
      * The blueprint's delivered media_mode wins so a later deterministic
      * degradation to `none` cannot accidentally keep image generation armed.
      *
-     * Both branches read IMAGE_MEDIA_MODES (BIGR-885). An inline mode list
-     * silently disarmed generation for every mode added after it was written,
-     * and the recipe then shipped with an empty media slot.
+     * An imageless recipe disarms generation on BOTH branches. The recipe
+     * branch reads min_images, which is 0. The blueprint branch reads the
+     * catalog's max_images first, so a blueprint that drifted to an image
+     * media_mode the recipe does not own cannot arm a slot the composition
+     * has nowhere to put (BIGR-885).
+     *
+     * Both branches then read IMAGE_MEDIA_MODES rather than an inline pair
+     * (BIGR-885). An inline list silently disarmed generation for every mode
+     * added after it was written, and that recipe shipped with an empty slot.
      *
      * @param string|array<string,mixed> $recipeOrBlueprint
      */
@@ -286,6 +334,9 @@ final class HeroComposition
         if (is_array($recipeOrBlueprint)) {
             $recipe = trim((string) ($recipeOrBlueprint['recipe'] ?? ''));
             self::assertKnown($recipe);
+            if ((int) self::metadata($recipe)['max_images'] < 1) {
+                return false;
+            }
             $mode = strtolower(trim((string) ($recipeOrBlueprint['media_mode'] ?? '')));
             return in_array($mode, self::IMAGE_MEDIA_MODES, true);
         }
@@ -497,7 +548,22 @@ final class HeroComposition
         $warnings = [];
         $minImages = (int) $meta['min_images'];
         $maxImages = (int) $meta['max_images'];
-        if ($imageCount < $minImages || $imageCount > $maxImages) {
+        $mediaModes = (array) $meta['media_modes'];
+        // BIGR-885 objective failure for an imageless recipe: any <img> at all.
+        // The recipe exists to remove overlay contrast risk, aspect drift, and
+        // the media plate that pushes copy below the fold, and one image
+        // returns all three. The row names the recipe so the repair pass can
+        // act on it without re-deriving the media budget from the count rule.
+        $imageless = $mediaModes === ['none'];
+        if ($imageless && $imageCount > 0) {
+            $warnings[] = self::markupWarning(
+                $part,
+                'imageless hero media',
+                ['recipe' => $recipe, 'media_modes' => $mediaModes, 'image_count' => 0],
+                ['image_count' => $imageCount],
+                'safe parseable hero was retained; delete only the image and let type and negative space carry the band',
+            );
+        } elseif (!$imageless && ($imageCount < $minImages || $imageCount > $maxImages)) {
             $warnings[] = self::markupWarning(
                 $part,
                 'recipe media count',
@@ -516,7 +582,6 @@ final class HeroComposition
             );
         }
 
-        $mediaModes = (array) $meta['media_modes'];
         if (in_array('cover-image', $mediaModes, true) && $directCovers !== 1) {
             $warnings[] = self::markupWarning(
                 $part,

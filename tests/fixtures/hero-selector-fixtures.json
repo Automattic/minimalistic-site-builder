@@ -143,6 +143,19 @@
       ]
     },
     {
+      "id": "imageless-manifesto",
+      "stable_identifier": "stated-position",
+      "concept_seed": "One stated position holds the field with no photograph.",
+      "constraints": {
+        "allowed_hero_media_modes": [
+          "none"
+        ]
+      },
+      "eligible": [
+        "type-manifesto"
+      ]
+    },
+    {
       "id": "horizon-rail",
       "stable_identifier": "corpus-seed-1",
       "concept_seed": "A contained vertical subject.",

@@ -60,12 +60,28 @@ final class CssChecks
         if (preg_match('/(?<![-\w])visibility\s*:\s*hidden(?:\s*!important)?\s*(?=;|}|$)/i', $css) === 1) {
             $problems[] = 'visibility:hidden hides generated content';
         }
-        if (preg_match_all('/(?<![-\w])clip-path\s*:\s*([^;{}]+)/i', $css, $clips) > 0) {
-            foreach ($clips[1] as $value) {
-                if (self::clipsEverythingAway($value)) {
-                    $problems[] = 'clip-path clips generated content away entirely: ' . trim($value);
-                }
+        // Scoped to rules OUTSIDE @keyframes, exactly like the opacity check
+        // the two callers run alongside this one. A `from { clip-path: inset(0
+        // 0 100% 0) }` is the canonical wipe-in and a `from { clip-path:
+        // circle(0) }` the canonical iris-in — both are legal entrances that
+        // END visible, and rejecting them killed the user's one explicit
+        // animation request outright (BIGR-887). A `forwards`/`both` fill
+        // parking an element in a hidden LAST keyframe is a real defect, and
+        // this exemption is why CustomMotionStep's non-start-keyframe walk
+        // has to check `clip-path` there alongside `opacity`.
+        $seen = [];
+        foreach (self::scanDeclarations($css) as $declaration) {
+            if ($declaration['kind'] === 'keyframe'
+                || strtolower(trim($declaration['property'])) !== 'clip-path'
+            ) {
+                continue;
             }
+            $value = trim($declaration['value']);
+            if (!self::clipsEverythingAway($value) || isset($seen[$value])) {
+                continue;
+            }
+            $seen[$value] = true;
+            $problems[] = 'clip-path clips generated content away entirely: ' . $value;
         }
         return $problems;
     }
@@ -185,6 +201,21 @@ final class CssChecks
      * generated `clip-path`/`transform` hidden state survives with nothing left
      * to reveal it, and the content never appears (BIGR-881).
      *
+     * Two removal widths, cut at the smallest unit that isolates the defect
+     * (escalation ladder, rung 3):
+     *
+     * - The rule's SUBJECT is a kit class (`.reveal-up`, `.stagger-children >
+     *   *`) — it is styling the kit element itself, so every declaration goes.
+     * - Only an ANCESTOR is a kit class (`.hero-entrance h1`) — the rule
+     *   styles something else that merely lives inside a kit element, so only
+     *   the properties that can fight the kit's choreography go, plus any
+     *   declaration whose VALUE hides outright. `display` is judged by value
+     *   and not by name: `display: none` under a kit ancestor is the BIGR-881
+     *   shape and nothing else in the theme.json path would catch it, while
+     *   `display: flex` is ordinary layout. `.hero-entrance h1 {
+     *   letter-spacing: -0.03em; max-width: 18ch }` is ordinary design intent
+     *   and used to be deleted whole (BIGR-887).
+     *
      * Removal is per declaration, so an emptied kit rule stays in place as
      * inert bytes rather than forcing a structural rewrite of the surrounding
      * CSS. Keyframes the removed declarations referenced are left alone: with
@@ -202,9 +233,17 @@ final class CssChecks
                 if ($declaration['kind'] !== 'style') {
                     return false;
                 }
+                if (self::selectorTargetsMotionElement($declaration['context'])) {
+                    return true;
+                }
                 foreach ([$declaration['context'], ...$declaration['ancestors']] as $selector) {
-                    if (self::selectorNamesMotionClass($selector)) {
-                        return true;
+                    if (self::selectorNamesMotionClass(
+                        self::withoutExcludedOrRelationalArguments($selector),
+                    )) {
+                        return self::isMotionCapableProperty($declaration['property'])
+                            || self::hiddenContentProblems(
+                                'a{' . $declaration['property'] . ':' . $declaration['value'] . '}'
+                            ) !== [];
                     }
                 }
                 return false;
@@ -215,6 +254,77 @@ final class CssChecks
             $repaired,
             array_map(static fn (array $declaration): string => trim($declaration['raw']), $dropped),
         ];
+    }
+
+    /**
+     * Whether a selector styles a motion-kit ELEMENT itself, rather than
+     * something that merely lives inside one.
+     *
+     * Only the rightmost (subject) compound counts, so `.hero-entrance h1`
+     * styles an h1 and not the entrance. `:not()` arguments are stripped
+     * first: `.card:not(.reveal-up)` deliberately EXCLUDES kit elements, so
+     * reading its name there had it removed as if it targeted them.
+     *
+     * `.stagger-children > *` is included on purpose even though its subject
+     * is the universal selector: motion.js registers those direct children as
+     * targets, so that selector IS the kit's own.
+     */
+    public static function selectorTargetsMotionElement(string $selector): bool
+    {
+        foreach (self::splitSelectorList($selector) as $candidate) {
+            $compound = self::rightmostSelectorCompound($candidate);
+            if ($compound === '') {
+                continue;
+            }
+            // Drop negation/relational arguments — they name what is excluded.
+            $subject = self::withoutExcludedOrRelationalArguments($compound);
+            if (self::selectorNamesMotionClass($subject)) {
+                return true;
+            }
+            // The kit registers `.stagger-children > *` itself.
+            $head = trim(substr($candidate, 0, strlen($candidate) - strlen($compound)));
+            if ($head !== ''
+                && preg_match('/(?:>|\s)$/', $head) === 1
+                && preg_match('/(?<![\w-])stagger-children(?![\w-])/i', $head) === 1
+                && preg_match('/^\*(?:$|[:\[])/', trim($compound)) === 1
+            ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Remove class references that do not describe the selected element.
+     * `:not(.reveal-up)` explicitly excludes that kit class, while
+     * `:has(.reveal-up)` selects its container. Neither makes the subject (or
+     * an ancestor subject) part of the motion kit.
+     */
+    private static function withoutExcludedOrRelationalArguments(string $selector): string
+    {
+        return (string) preg_replace(
+            '/:(?:not|has)\((?:[^()]*|\([^()]*\))*\)/i',
+            '',
+            $selector,
+        );
+    }
+
+    /**
+     * Whether a property can hide an element at rest or compete with the
+     * motion kit's own choreography.
+     *
+     * The narrow cut for a rule that only sits INSIDE a kit element. Anything
+     * outside this list — colour, spacing, type, borders — cannot produce the
+     * BIGR-881 failure and is ordinary design intent.
+     */
+    public static function isMotionCapableProperty(string $property): bool
+    {
+        return preg_match(
+            '/^(?:-[a-z]+-)?(?:opacity|visibility|clip-path|clip|filter|backdrop-filter'
+            . '|will-change|transform(?:-[a-z]+)?|translate|rotate|scale|perspective(?:-[a-z]+)?'
+            . '|animation(?:-[a-z]+)*|transition(?:-[a-z]+)*|offset(?:-[a-z]+)*)$/i',
+            trim($property),
+        ) === 1;
     }
 
     /** Maximum nested CSS blocks inspected by the generated-CSS scanner. */

@@ -6,6 +6,7 @@ use Automattic\SiteBuild\GroundTint;
 use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
 use Automattic\SiteBuild\Llm;
+use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
@@ -81,6 +82,44 @@ function designdir_card_rows(array $rows): array
         static fn (string $row): bool => str_contains($row, 'card_style'),
     ));
 }
+
+test('design-direction persists and narrates an unexecutable ornament promise', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $llm->queueJson(['seeds' => designdir_seeds()]);
+    $authored = designdir_direction();
+    $authored['description'] = 'Delicate filigree runs along every band edge.';
+    $authored['device'] = 'none';
+    $llm->queueJson(['direction' => $authored]);
+
+    $sink = fopen('php://temp', 'w+');
+    Narrator::setStream($sink);
+    try {
+        (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    } finally {
+        Narrator::setStream(null);
+    }
+
+    $warnings = $project->readJson('warnings.json')['design-direction'] ?? [];
+    assert_eq(1, count($warnings), 'one defective sentence writes one durable row');
+    foreach ([
+        "file='designDirection.json'",
+        'path="description"',
+        'filigree',
+        'delivered=not executed',
+        'committed no device',
+    ] as $context) {
+        assert_contains($context, $warnings[0]);
+    }
+
+    rewind($sink);
+    assert_contains(
+        '[design-direction] warning: delivered through 1 generated-content degradation(s)',
+        (string) stream_get_contents($sink),
+        'the durable warning is also narrated live',
+    );
+    fclose($sink);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
 
 test('design-direction expands a picked seed into structured designDirection.json', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
@@ -1597,18 +1636,40 @@ test('legacy signature-device fields are dropped from the normalized direction',
     assert_true(!array_key_exists('signature_device_use', $direction['hero_blueprint']));
 });
 
-test('every cataloged hero recipe bears an image (the image-free poster is retired)', function () {
-    foreach (Automattic\SiteBuild\HeroComposition::RECIPES as $recipe) {
-        $meta = Automattic\SiteBuild\HeroComposition::metadata($recipe);
-        assert_true((int) $meta['min_images'] >= 1, "{$recipe} carries at least one image");
-    }
-    // Automatic selection therefore always lands on an image-bearing recipe.
+test('automatic hero selection keeps the image gate aligned with each catalog media budget (BIGR-885)', function () {
+    // type-manifesto reopened the imageless shape, so the old "every recipe
+    // bears an image" invariant is gone. The invariant that replaces it: the
+    // image gate always agrees with the selected recipe's own budget, so an
+    // unconstrained build never generates an orphan image and never leaves an
+    // image-bearing recipe without one.
+    $imageless = array_values(array_filter(
+        Automattic\SiteBuild\HeroComposition::RECIPES,
+        fn (string $recipe): bool
+            => (int) Automattic\SiteBuild\HeroComposition::metadata($recipe)['max_images'] === 0,
+    ));
+    assert_eq(['type-manifesto'], $imageless);
+
+    $selected = [];
     foreach (range(1, 16) as $i) {
         $w = [];
         $recipe = DesignDirectionStep::selectHeroRecipe([], "gate-site-{$i}", 'Committed seed', $w);
-        assert_true((int) Automattic\SiteBuild\HeroComposition::metadata($recipe)['min_images'] >= 1);
+        $meta = Automattic\SiteBuild\HeroComposition::metadata($recipe);
+        assert_eq(
+            (int) $meta['min_images'] >= 1,
+            Automattic\SiteBuild\HeroComposition::usesGeneratedImages($recipe),
+            $recipe,
+        );
+        assert_eq(
+            (int) $meta['min_images'] >= 1,
+            Automattic\SiteBuild\HeroComposition::usesGeneratedImages(
+                HeroBlueprint::defaultFor($recipe),
+            ),
+            $recipe,
+        );
         assert_eq([], $w);
+        $selected[$recipe] = true;
     }
+    assert_true(count($selected) > 1, 'unconstrained selection spreads across the catalog');
 });
 
 test('shapeFor returns only an explicit valid commitment', function () {

@@ -655,6 +655,11 @@ final class ContrastFix
             $doc->replaceClassTokenInOwnHtml($i, $oldClass, $newClass ?? '');
             return;
         }
+        // Core's save() omits the numbered class at the 50 default, but
+        // generated markup often spells it out anyway. Drop that redundant
+        // token first so the swap below cannot leave two numbered opacity
+        // classes on one span.
+        $doc->replaceClassTokenInOwnHtml($i, 'has-background-dim-50', '');
         if ($newClass !== null) {
             // Core's 50% default has only the generic token. Preserve it while
             // adding the numbered opacity token the new value requires.
