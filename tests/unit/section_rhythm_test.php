@@ -776,7 +776,7 @@ test('a shared seam keeps a bottom edge when the next section paints its own top
         ['slug' => 'overview', 'markup' => $plain, 'density' => 'spacious', 'background' => 'base'],
         ['slug' => 'archive', 'markup' => $ruled, 'density' => 'compact', 'background' => 'base'],
         ['slug' => 'closing', 'markup' => $plain, 'density' => 'standard', 'background' => 'base'],
-    ]);
+    ], null, 'hairline-rule');
 
     $overview = sr_root_attrs($result['markups'][0])['style']['spacing']['padding'];
     assert_eq('var:preset|spacing|xxl', $overview['top'], 'the section still owns its own top edge');
@@ -810,7 +810,7 @@ test('a top-edge rule that lives only in saved HTML still protects the seam abov
     $result = SectionRhythm::rewrite([
         ['slug' => 'overview', 'markup' => $plain, 'density' => 'standard', 'background' => 'contrast'],
         ['slug' => 'archive', 'markup' => $htmlOnly, 'density' => 'standard', 'background' => 'contrast'],
-    ]);
+    ], null, 'hairline-rule');
     assert_eq(
         'var:preset|spacing|xl',
         sr_root_attrs($result['markups'][0])['style']['spacing']['padding']['bottom'],
@@ -832,7 +832,7 @@ test('an opening hero above a ruled section takes the larger of the two floors',
     $result = SectionRhythm::rewrite([
         ['slug' => 'hero', 'markup' => $hero, 'density' => 'standard', 'background' => 'base'],
         ['slug' => 'story', 'markup' => $ruled, 'density' => 'spacious', 'background' => 'base'],
-    ]);
+    ], null, 'hairline-rule');
     assert_eq(
         'var:preset|spacing|xxl',
         sr_root_attrs($result['markups'][0])['style']['spacing']['padding']['bottom'],
@@ -844,7 +844,7 @@ test('an opening hero above a ruled section takes the larger of the two floors',
     $compact = SectionRhythm::rewrite([
         ['slug' => 'hero', 'markup' => $hero, 'density' => 'standard', 'background' => 'base'],
         ['slug' => 'story', 'markup' => $ruled, 'density' => 'compact', 'background' => 'base'],
-    ]);
+    ], null, 'hairline-rule');
     assert_eq(
         'var:preset|spacing|lg',
         sr_root_attrs($compact['markups'][0])['style']['spacing']['padding']['bottom'],
@@ -863,10 +863,163 @@ test('a rewritten ruled seam reaches a fixed point', function () {
         ['slug' => 'overview', 'markup' => $plain, 'density' => 'spacious', 'background' => 'base'],
         ['slug' => 'archive', 'markup' => $ruled, 'density' => 'compact', 'background' => 'base'],
     ];
-    $once = SectionRhythm::rewrite($entries);
+    $once = SectionRhythm::rewrite($entries, null, 'hairline-rule');
     $twice = SectionRhythm::rewrite([
         ['slug' => 'overview', 'markup' => $once['markups'][0], 'density' => 'spacious', 'background' => 'base'],
         ['slug' => 'archive', 'markup' => $once['markups'][1], 'density' => 'compact', 'background' => 'base'],
-    ]);
+    ], null, 'hairline-rule');
     assert_eq($once['markups'], $twice['markups'], 'the pass is idempotent');
+});
+
+test('an uncommitted device never widens a seam — motion-sanity will strip it', function () {
+    // Found in review. MotionSanityStep runs AFTER this pass and removes a
+    // `device--*` class the direction never committed, and FinalizeThemeStep
+    // only ships CSS for the committed device. Reading the authored class
+    // alone left a double gap on a seam whose rule was then deleted — and made
+    // ThemeValidator's re-run of this pass, which re-derives from the
+    // DELIVERED markup, report permanent "section root spacing drift".
+    $plain = sr_section(['layout' => ['type' => 'constrained']],
+        '<!-- wp:paragraph --><p>Body</p><!-- /wp:paragraph -->');
+    $ruled = sr_section([
+        'className' => 'device--hairline-rule',
+        'layout' => ['type' => 'constrained'],
+    ], '<!-- wp:paragraph --><p>Body</p><!-- /wp:paragraph -->');
+    $entries = [
+        ['slug' => 'overview', 'markup' => $plain, 'density' => 'spacious', 'background' => 'base'],
+        ['slug' => 'archive', 'markup' => $ruled, 'density' => 'compact', 'background' => 'base'],
+    ];
+
+    foreach ([null, 'none', 'stamp', 'section-numeral'] as $committed) {
+        $result = SectionRhythm::rewrite($entries, null, $committed);
+        assert_eq(
+            '0',
+            sr_root_attrs($result['markups'][0])['style']['spacing']['padding']['bottom'],
+            'no rule will paint, so the seam still collapses: ' . var_export($committed, true)
+        );
+    }
+});
+
+test('only the FIRST non-hero band claims the one-per-page device budget', function () {
+    // The same budget MotionSanityStep enforces: the hero never carries the
+    // device, and a second band that claims it is stripped. A seam above a
+    // band whose class will be removed must not be widened.
+    $plain = sr_section(['layout' => ['type' => 'constrained']],
+        '<!-- wp:paragraph --><p>Body</p><!-- /wp:paragraph -->');
+    $ruled = sr_section([
+        'className' => 'device--hairline-rule',
+        'layout' => ['type' => 'constrained'],
+    ], '<!-- wp:paragraph --><p>Body</p><!-- /wp:paragraph -->');
+
+    $result = SectionRhythm::rewrite([
+        ['slug' => 'hero', 'markup' => $plain, 'density' => 'standard', 'background' => 'base'],
+        ['slug' => 'one', 'markup' => $plain, 'density' => 'standard', 'background' => 'base'],
+        ['slug' => 'two', 'markup' => $ruled, 'density' => 'standard', 'background' => 'base'],
+        ['slug' => 'three', 'markup' => $ruled, 'density' => 'standard', 'background' => 'base'],
+    ], null, 'hairline-rule');
+
+    assert_eq(
+        'var:preset|spacing|xl',
+        sr_root_attrs($result['markups'][1])['style']['spacing']['padding']['bottom'],
+        "the seam above the band that KEEPS the device is widened"
+    );
+    assert_eq(
+        '0',
+        sr_root_attrs($result['markups'][2])['style']['spacing']['padding']['bottom'],
+        'the seam above the SECOND copy is not — motion-sanity strips that one'
+    );
+});
+
+test('a device on the page-opening hero never widens the seam above it', function () {
+    // MotionSanityStep: "the hero never carries the device".
+    $plain = sr_section(['layout' => ['type' => 'constrained']],
+        '<!-- wp:paragraph --><p>Body</p><!-- /wp:paragraph -->');
+    $ruledHero = sr_section([
+        'className' => 'hero-composition--editorial-split device--hairline-rule',
+        'layout' => ['type' => 'constrained'],
+    ], '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Headline</h1><!-- /wp:heading -->');
+
+    $result = SectionRhythm::rewrite([
+        ['slug' => 'hero', 'markup' => $ruledHero, 'density' => 'standard', 'background' => 'base'],
+        ['slug' => 'story', 'markup' => $plain, 'density' => 'standard', 'background' => 'base'],
+    ], null, 'hairline-rule');
+
+    // The hero keeps only its own BIGR-775 lg floor, not a rule-driven one.
+    assert_eq(
+        'var:preset|spacing|lg',
+        sr_root_attrs($result['markups'][0])['style']['spacing']['padding']['bottom'],
+        'the hero floor, and nothing added for a device that will be stripped'
+    );
+});
+
+test('a footer that paints its own top rule owns the seam above it too', function () {
+    // Found in review: the last-section-shares-with-the-footer path never
+    // consulted the device at all, so the identical defect against a footer
+    // rule was silently excluded. atlas3, portfolio2 and portfolio3 all ship a
+    // footer carrying this class.
+    $plain = sr_section(['layout' => ['type' => 'constrained']],
+        '<!-- wp:paragraph --><p>Body</p><!-- /wp:paragraph -->');
+    $ruledFooter = sr_section([
+        'className' => 'device--hairline-rule',
+        'style' => ['spacing' => ['padding' => ['top' => 'var:preset|spacing|xl']]],
+        'layout' => ['type' => 'constrained'],
+    ], '<!-- wp:paragraph --><p>Footer</p><!-- /wp:paragraph -->');
+
+    $entries = [
+        ['slug' => 'hero', 'markup' => $plain, 'density' => 'standard', 'background' => 'base'],
+        ['slug' => 'closing', 'markup' => $plain, 'density' => 'standard', 'background' => 'base'],
+    ];
+
+    $withRule = SectionRhythm::rewrite($entries, 'base', 'hairline-rule', $ruledFooter);
+    assert_eq(
+        'var:preset|spacing|xl',
+        sr_root_attrs($withRule['markups'][1])['style']['spacing']['padding']['bottom'],
+        'the last section keeps an edge above the footer rule'
+    );
+
+    // Without a footer rule the shared seam still collapses as before.
+    $plainFooter = SectionRhythm::rewrite($entries, 'base', 'hairline-rule', $plain);
+    assert_eq(
+        '0',
+        sr_root_attrs($plainFooter['markups'][1])['style']['spacing']['padding']['bottom'],
+        'nothing drawn at the footer seam, so it still collapses'
+    );
+
+    // And a section that claimed the budget first leaves none for the footer.
+    $ruledSection = sr_section([
+        'className' => 'device--hairline-rule',
+        'layout' => ['type' => 'constrained'],
+    ], '<!-- wp:paragraph --><p>Body</p><!-- /wp:paragraph -->');
+    $sectionWins = SectionRhythm::rewrite([
+        ['slug' => 'hero', 'markup' => $plain, 'density' => 'standard', 'background' => 'base'],
+        ['slug' => 'mid', 'markup' => $ruledSection, 'density' => 'standard', 'background' => 'base'],
+        ['slug' => 'closing', 'markup' => $plain, 'density' => 'standard', 'background' => 'base'],
+    ], 'base', 'hairline-rule', $ruledFooter);
+    assert_eq(
+        '0',
+        sr_root_attrs($sectionWins['markups'][2])['style']['spacing']['padding']['bottom'],
+        'the section claimed the budget, so the footer copy is stripped'
+    );
+});
+
+test('a device class on a NESTED element does not widen the seam', function () {
+    // Found in review: scanning every class="…" in the root's own HTML let a
+    // nested element leak its classes in. A rule painted inside the section
+    // sits inside that section's own top padding, not at the seam.
+    $plain = sr_section(['layout' => ['type' => 'constrained']],
+        '<!-- wp:paragraph --><p>Body</p><!-- /wp:paragraph -->');
+    $nested = BlockMarkup::serializeComment('group', ['layout' => ['type' => 'constrained']], false)
+        . '<div class="wp-block-group"><div class="inner device--hairline-rule">'
+        . '<!-- wp:paragraph --><p>Body</p><!-- /wp:paragraph -->'
+        . '</div></div><!-- /wp:group -->';
+
+    $result = SectionRhythm::rewrite([
+        ['slug' => 'overview', 'markup' => $plain, 'density' => 'standard', 'background' => 'base'],
+        ['slug' => 'archive', 'markup' => $nested, 'density' => 'standard', 'background' => 'base'],
+    ], null, 'hairline-rule');
+
+    assert_eq(
+        '0',
+        sr_root_attrs($result['markups'][0])['style']['spacing']['padding']['bottom'],
+        'the rule is not at the seam, so the seam still collapses'
+    );
 });

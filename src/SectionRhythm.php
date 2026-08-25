@@ -97,8 +97,12 @@ final class SectionRhythm
      *     }>
      * }
      */
-    public static function rewrite(array $entries, ?string $followingBackground = null): array
-    {
+    public static function rewrite(
+        array $entries,
+        ?string $followingBackground = null,
+        ?string $committedDevice = null,
+        ?string $footerMarkup = null,
+    ): array {
         if (!array_is_list($entries)) {
             throw new \InvalidArgumentException('section-rhythm: entries must be an ordered list');
         }
@@ -142,6 +146,20 @@ final class SectionRhythm
             throw new \InvalidArgumentException('section-rhythm: invalid following background');
         }
 
+        // Which band will actually PAINT a top-edge rule, if any.
+        //
+        // The authored class is not the answer: MotionSanityStep runs after
+        // this pass and strips `device--*` when the direction committed no
+        // device, when it is not the committed one, when it sits on the hero,
+        // or when a band already carries it — and FinalizeThemeStep only ships
+        // the CSS for the committed device. Reading the class alone left a
+        // double gap on a seam whose rule was later removed, and made
+        // ThemeValidator's re-run of this pass report permanent spacing drift
+        // (it re-derives from the DELIVERED markup, where the class is gone).
+        // Resolving the same first-band-wins budget here keeps the two passes
+        // in agreement and the whole pass at a fixed point.
+        $rulePainter = self::rulePainterIndex($normalized, $committedDevice, $footerMarkup);
+
         $markups = [];
         $notes = [];
         $degradations = [];
@@ -175,8 +193,13 @@ final class SectionRhythm
                 if ($i === 0 && self::isHeroRoot($entry['markup'])) {
                     $floors[] = 'lg';
                 }
-                if ($next !== null && self::paintsTopEdgeRule($next['markup'])) {
-                    $floors[] = self::DENSITY_PRESETS[$next['density']];
+                if ($rulePainter !== null && $rulePainter === $i + 1) {
+                    // The following band paints a line on its own top edge, so
+                    // the one seam gap is split in two and the half above the
+                    // line has no owner. Mirror that band's own top edge here.
+                    $floors[] = $next === null
+                        ? self::DENSITY_PRESETS[$entry['density']]
+                        : self::DENSITY_PRESETS[$next['density']];
                 }
                 $bottomFloor = self::largestPreset($floors);
             }
@@ -221,10 +244,7 @@ final class SectionRhythm
                 if ($sharedSeam) {
                     $owner = $next['label'] ?? 'the footer';
                     $note .= " (shared {$entry['background']} seam is owned by {$owner})";
-                    if ($bottomFloor !== null
-                        && $next !== null
-                        && self::paintsTopEdgeRule($next['markup'])
-                    ) {
+                    if ($bottomFloor !== null && $rulePainter === $i + 1) {
                         $note .= " (kept a {$bottomFloor} bottom edge because {$owner}"
                             . ' paints a rule on its own top edge)';
                     }
@@ -283,11 +303,53 @@ final class SectionRhythm
     }
 
     /**
-     * Whether a section root carries a device that paints a line on its own
-     * top edge. Both representations are read: this pass runs before
-     * fix-blocks, so a class can still live only in the saved HTML.
+     * The index of the one band that will actually paint a top-edge rule, or
+     * null when nothing will.
+     *
+     * Mirrors MotionSanityStep::enforceDeviceBudget(), which runs after this
+     * pass: a `device--*` class survives only when it IS the committed device,
+     * is not on the page-opening hero, and is the first band to claim the
+     * one-per-page budget. Chrome joins the front page's group after the
+     * sections, so a footer can only paint when no section claimed it first.
+     *
+     * `count($entries)` is returned for the footer, i.e. one past the last
+     * section, which is exactly the index the seam check compares against.
+     *
+     * @param list<array{markup:string,density:string,background:string,label:string}> $entries
      */
-    private static function paintsTopEdgeRule(string $markup): bool
+    private static function rulePainterIndex(
+        array $entries,
+        ?string $committedDevice,
+        ?string $footerMarkup,
+    ): ?int {
+        $class = Device::className($committedDevice);
+        if ($class === null || !in_array($class, self::TOP_EDGE_DEVICE_CLASSES, true)) {
+            return null;
+        }
+        foreach ($entries as $i => $entry) {
+            if ($i === 0) {
+                continue; // the hero never carries the device
+            }
+            if (self::rootCarriesClass($entry['markup'], $class)) {
+                return $i;
+            }
+        }
+        return $footerMarkup !== null && self::rootCarriesClass($footerMarkup, $class)
+            ? count($entries)
+            : null;
+    }
+
+    /**
+     * Whether a section's ROOT block carries one exact class token.
+     *
+     * Both representations are read, because this pass runs before fix-blocks
+     * and a class can still live only in the saved HTML. The root's own tag is
+     * resolved with MarkupScan rather than scanning every `class="…"` in the
+     * root's own HTML: a root whose leading content is raw HTML would
+     * otherwise leak a nested element's classes in, and a device painting
+     * inside the section is not a device painting at the seam.
+     */
+    private static function rootCarriesClass(string $markup, string $class): bool
     {
         try {
             $document = BlockMarkup::parse($markup);
@@ -298,13 +360,18 @@ final class SectionRhythm
         if ($root === null) {
             return false;
         }
-        $tokens = self::classTokens((string) (($document->attrs($root) ?? [])['className'] ?? ''));
-        if (preg_match_all('/\bclass\s*=\s*(["\'])(.*?)\1/is', $document->ownHtml($root), $matches) > 0) {
-            foreach ($matches[2] as $value) {
-                $tokens = array_merge($tokens, self::classTokens($value));
-            }
+        if (in_array($class, self::classTokens(
+            (string) (($document->attrs($root) ?? [])['className'] ?? '')
+        ), true)) {
+            return true;
         }
-        return array_intersect($tokens, self::TOP_EDGE_DEVICE_CLASSES) !== [];
+
+        $tagHtml = MarkupScan::wrapperTag(
+            $markup,
+            $document->openingOffset($root) + $document->openingLength($root),
+        );
+        $attribute = $tagHtml === null ? null : MarkupScan::tagAttribute($tagHtml, 'class');
+        return $attribute !== null && in_array($class, self::classTokens($attribute[0]), true);
     }
 
     /** @return list<string> */
