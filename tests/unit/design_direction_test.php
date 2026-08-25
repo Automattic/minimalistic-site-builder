@@ -6,6 +6,7 @@ use Automattic\SiteBuild\GroundTint;
 use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
 use Automattic\SiteBuild\Llm;
+use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
@@ -81,6 +82,44 @@ function designdir_card_rows(array $rows): array
         static fn (string $row): bool => str_contains($row, 'card_style'),
     ));
 }
+
+test('design-direction persists and narrates an unexecutable ornament promise', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $llm->queueJson(['seeds' => designdir_seeds()]);
+    $authored = designdir_direction();
+    $authored['description'] = 'Delicate filigree runs along every band edge.';
+    $authored['device'] = 'none';
+    $llm->queueJson(['direction' => $authored]);
+
+    $sink = fopen('php://temp', 'w+');
+    Narrator::setStream($sink);
+    try {
+        (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    } finally {
+        Narrator::setStream(null);
+    }
+
+    $warnings = $project->readJson('warnings.json')['design-direction'] ?? [];
+    assert_eq(1, count($warnings), 'one defective sentence writes one durable row');
+    foreach ([
+        "file='designDirection.json'",
+        'path="description"',
+        'filigree',
+        'delivered=not executed',
+        'committed no device',
+    ] as $context) {
+        assert_contains($context, $warnings[0]);
+    }
+
+    rewind($sink);
+    assert_contains(
+        '[design-direction] warning: delivered through 1 generated-content degradation(s)',
+        (string) stream_get_contents($sink),
+        'the durable warning is also narrated live',
+    );
+    fclose($sink);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
 
 test('design-direction expands a picked seed into structured designDirection.json', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
