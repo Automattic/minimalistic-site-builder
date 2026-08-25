@@ -11,6 +11,74 @@ use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\Steps\ThemeJsonStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
+use Automattic\SiteBuild\TypeTreatment;
+
+test('repairTypeTreatment owns heading case and tracking while preserving line height and siblings', function () {
+    $authored = ['styles' => [
+        'elements' => [
+            'heading' => ['typography' => [
+                'lineHeight' => '1.17',
+                'fontWeight' => '700',
+                'textTransform' => 'none',
+                'letterSpacing' => '-0.02em',
+            ]],
+            'h1' => [
+                'typography' => [
+                    'lineHeight' => '1.04',
+                    'fontSize' => 'var:preset|font-size|display',
+                    'textTransform' => 'lowercase',
+                    'letterSpacing' => '0.2em',
+                ],
+                '@media (max-width: 600px)' => ['typography' => ['letterSpacing' => '0']],
+            ],
+        ],
+        'blocks' => [
+            'core/heading' => ['typography' => [
+                'fontWeight' => '600',
+                'textTransform' => 'capitalize',
+            ]],
+        ],
+        'variations' => [
+            'poster' => ['elements' => [
+                'h2' => ['typography' => ['lineHeight' => '1.1', 'letterSpacing' => '-0.04em']],
+            ]],
+        ],
+    ]];
+
+    [$theme, $repairs] = ThemeJsonStep::repairTypeTreatment($authored, 'caps-tracked');
+    assert_eq([
+        'lineHeight' => '1.17',
+        'fontWeight' => '700',
+        'textTransform' => 'uppercase',
+        'letterSpacing' => '0.08em',
+    ], $theme['styles']['elements']['heading']['typography']);
+    assert_eq('1.04', $theme['styles']['elements']['h1']['typography']['lineHeight']);
+    assert_eq('var:preset|font-size|display', $theme['styles']['elements']['h1']['typography']['fontSize']);
+    assert_true(!isset($theme['styles']['elements']['h1']['typography']['textTransform']));
+    assert_true(!isset($theme['styles']['elements']['h1']['typography']['letterSpacing']));
+    assert_true(!isset($theme['styles']['elements']['h1']['@media (max-width: 600px)']['typography']));
+    assert_eq('600', $theme['styles']['blocks']['core/heading']['typography']['fontWeight']);
+    assert_true(!isset($theme['styles']['blocks']['core/heading']['typography']['textTransform']));
+    assert_eq(
+        ['lineHeight' => '1.1'],
+        $theme['styles']['variations']['poster']['elements']['h2']['typography'],
+    );
+    assert_true(count($repairs) >= 7);
+
+    [$fixed, $fixedRepairs] = ThemeJsonStep::repairTypeTreatment($theme, 'caps-tracked');
+    assert_eq($theme, $fixed);
+    assert_eq([], $fixedRepairs);
+});
+
+test('repairTypeTreatment is a no-op without an explicit commitment and repairs malformed base typography', function () {
+    $legacy = ['styles' => ['elements' => ['heading' => ['typography' => 'broken']]]];
+    assert_eq([$legacy, []], ThemeJsonStep::repairTypeTreatment($legacy, ''));
+
+    [$repaired, $repairs] = ThemeJsonStep::repairTypeTreatment($legacy, 'lowercase');
+    assert_eq(TypeTreatment::typography('lowercase'), $repaired['styles']['elements']['heading']['typography']);
+    assert_true(count($repairs) >= 3);
+    assert_contains('malformed typography container', implode(' ', $repairs));
+});
 
 test('repairShapeWiring installs every explicit corner language and leaves a missing commitment alone', function () {
     [$soft, $repairs] = ThemeJsonStep::repairShapeWiring([], 'soft');
@@ -308,6 +376,55 @@ test('repairShapeWiring isolates malformed radius containers with actionable rep
     [$fixed, $fixedWarnings] = ThemeJsonStep::repairShapeWiring($repaired, 'soft');
     assert_eq($repaired, $fixed);
     assert_eq([], $fixedWarnings, 'fixed point produces no warnings');
+});
+
+test('theme-json writes the committed type treatment and keeps the model line height', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tjtypetreatment_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'An archival technical journal']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project, overrides: ['type_treatment' => 'caps-tracked']);
+
+    $payload = valid_theme_payload();
+    $payload['styles']['elements']['heading']['typography'] = [
+        'fontWeight' => '700',
+        'lineHeight' => '1.19',
+        'textTransform' => 'none',
+        'letterSpacing' => '-0.02em',
+    ];
+    $payload['styles']['elements']['h1']['typography']['letterSpacing'] = '-0.04em';
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $theme = $project->readJson('theme/theme.json');
+    assert_eq('1.19', $theme['styles']['elements']['heading']['typography']['lineHeight']);
+    assert_eq('uppercase', $theme['styles']['elements']['heading']['typography']['textTransform']);
+    assert_eq('0.08em', $theme['styles']['elements']['heading']['typography']['letterSpacing']);
+    assert_true(!isset($theme['styles']['elements']['h1']['typography']['letterSpacing']));
+    $report = $project->readText('logs/theme-json-direction-bind.txt');
+    assert_contains('committed caps-tracked heading treatment', $report);
+    assert_contains('styles.elements.h1.typography.letterSpacing', $report);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json prompt delegates heading case and tracking to type treatment', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tjtypetreatment_prompt_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'An expressive craft studio']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project, overrides: ['type_treatment' => 'lowercase']);
+
+    $prompt = (new ThemeJsonStep(
+        new FakeLlm(),
+        new PromptRenderer(repo_path('prompts')),
+    ))->requests($project)['theme-json']['prompt'];
+
+    assert_contains('**Type treatment**: lowercase', $prompt);
+    assert_contains('relaxed 0.01em tracking', $prompt);
+    assert_contains('owns `textTransform` and `letterSpacing`', $prompt);
+    assert_contains('preserving every line-height choice', $prompt);
+    exec('rm -rf ' . escapeshellarg($tmp));
 });
 
 test('theme-json wires the direction-committed shape into the written theme', function () {

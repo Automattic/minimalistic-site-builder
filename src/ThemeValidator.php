@@ -1084,6 +1084,17 @@ final class ThemeValidator
         $theme = $project->exists('theme/theme.json')
             ? json_decode($project->readText('theme/theme.json'), true)
             : null;
+        $typeTreatment = Steps\DesignDirectionStep::typeTreatmentFor($project);
+        if (is_array($theme) && $typeTreatment !== null) {
+            [, $treatmentRepairs] = Steps\ThemeJsonStep::repairTypeTreatment(
+                $theme,
+                $typeTreatment,
+            );
+            foreach ($treatmentRepairs as $repair) {
+                $warnings[] = 'committed "' . $typeTreatment
+                    . '" type treatment drift: ' . $repair;
+            }
+        }
         $sizeBySlug = [];
         foreach ($theme['settings']['typography']['fontSizes'] ?? [] as $entry) {
             if (isset($entry['slug'], $entry['size'])) {

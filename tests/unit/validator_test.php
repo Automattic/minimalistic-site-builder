@@ -327,6 +327,33 @@ test('typography warnings flag hardcoded font sizes and an unused display preset
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('typography warnings verify the committed type treatment and per-level inheritance', function () {
+    [$project, $tmp] = validator_project();
+    seed_test_design_direction($project, overrides: ['type_treatment' => 'lowercase']);
+    [$theme] = ThemeJsonStep::repairTypeTreatment([
+        'version' => 3,
+        'styles' => ['elements' => ['heading' => ['typography' => ['lineHeight' => '1.2']]]],
+    ], 'lowercase');
+    $project->writeJson('theme/theme.json', $theme);
+
+    assert_true(
+        !str_contains(implode(' ', ThemeValidator::typographyWarnings($project)), 'type treatment drift'),
+        'the committed pair with inherited per-level headings passes',
+    );
+
+    $theme['styles']['elements']['heading']['typography']['letterSpacing'] = '-0.02em';
+    $theme['styles']['elements']['h2']['typography'] = [
+        'lineHeight' => '1.1',
+        'textTransform' => 'uppercase',
+    ];
+    $project->writeJson('theme/theme.json', $theme);
+    $warnings = implode(' ', ThemeValidator::typographyWarnings($project));
+    assert_contains('committed "lowercase" type treatment drift', $warnings);
+    assert_contains('styles.elements.heading.typography.letterSpacing', $warnings);
+    assert_contains('styles.elements.h2.typography.textTransform', $warnings);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('typography warnings flag long paragraphs at heading-scale presets', function () {
     [$project, $tmp] = validator_project();
     $project->writeJson('theme/theme.json', ['version' => 3, 'settings' => ['typography' => ['fontSizes' => [

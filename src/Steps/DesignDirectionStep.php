@@ -12,6 +12,7 @@ use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\FontCatalog;
 use Automattic\SiteBuild\FontMonoculture;
 use Automattic\SiteBuild\Surface;
+use Automattic\SiteBuild\TypeTreatment;
 use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\GroundTint;
 use Automattic\SiteBuild\HeroBlueprint;
@@ -35,9 +36,9 @@ use Automattic\SiteBuild\Warnings;
  * Input:  meta.json (the user prompt) + siteSpec.json (factual info).
  * Output: designDirection.json — the chosen direction as structured data:
  *         title + vivid description plus the explicit fields downstream steps
- *         execute instead of re-interpreting (palette hexes, type pairing,
- *         image grade, canvas/measure layout commitments, and a separately
- *         consumed structured front-page hero blueprint).
+ *         execute instead of re-interpreting (palette hexes, type pairing and
+ *         treatment, image grade, canvas/measure layout commitments, and a
+ *         separately consumed structured front-page hero blueprint).
  *
  * Two calls. First, a cheap seed call (small model, hot sampling) brainstorms
  * THREE concept seeds — each an object: an evocative title plus one vivid
@@ -357,6 +358,7 @@ final class DesignDirectionStep implements Step
             'image_grade'      => '',
             'canvas'           => $canvas,
             'measure'          => Measure::DEFAULT,
+            'type_treatment'   => TypeTreatment::DEFAULT,
             'card_style'       => 'flush',
             'shape'            => 'sharp',
             'surface'          => Surface::DEFAULT,
@@ -726,6 +728,14 @@ final class DesignDirectionStep implements Step
             $warnings,
             'invalid layout measure replaced by deterministic standard fallback',
         );
+        $typeTreatment = BoundedChoice::normalize(
+            $raw['type_treatment'] ?? null,
+            TypeTreatment::ALL,
+            TypeTreatment::DEFAULT,
+            'type_treatment',
+            $warnings,
+            'invalid heading treatment replaced by deterministic sentence fallback',
+        );
 
         $cardStyle = self::normalizeCardStyle($raw['card_style'] ?? null, $warnings);
         $surface = self::normalizeSurface($raw['surface'] ?? null, $warnings);
@@ -812,6 +822,7 @@ final class DesignDirectionStep implements Step
             // an accidental frame reads as a rendering bug, not a design choice.
             'canvas'           => $canvas,
             'measure'          => $measure,
+            'type_treatment'   => $typeTreatment,
             // Anything outside the bounded card constructions delivers the
             // flush default — inset media must be an explicit opt-in, never
             // the accidental look every site gets.
@@ -1178,6 +1189,13 @@ final class DesignDirectionStep implements Step
             $facts[] = '- **Type**: ' . implode('; ', $pair);
         }
 
+        $typeTreatment = TypeTreatment::explicit($direction['type_treatment'] ?? null);
+        if ($typeTreatment !== null) {
+            $facts[] = '- **Type treatment**: ' . $typeTreatment . ' — '
+                . TypeTreatment::meaning($typeTreatment)
+                . '. The build owns heading textTransform and letterSpacing; preserve its lineHeight.';
+        }
+
         // Render the canvas commitment with its executable meaning, so the
         // section/header prompts act on it instead of re-interpreting a bare
         // keyword. Directions persisted before the field existed carry none.
@@ -1524,6 +1542,15 @@ final class DesignDirectionStep implements Step
             $project->readJson(self::FILE)['density'] ?? null,
             self::DENSITIES,
         ) ?? 'measured';
+    }
+
+    /** The explicit heading case/tracking commitment, or null for a pre-field artifact. */
+    public static function typeTreatmentFor(Project $project): ?string
+    {
+        if (!$project->exists(self::FILE)) {
+            return null;
+        }
+        return TypeTreatment::explicit($project->readJson(self::FILE)['type_treatment'] ?? null);
     }
 
     /**
