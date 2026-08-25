@@ -779,6 +779,29 @@ test('normalize falls back to the direction own ground_tint when the seed commit
     assert_eq('violet', $direction['ground_tint']);
 });
 
+test('normalize warns actionably when an impossible tint must remain unresolved', function () {
+    $repairs = [];
+    $warnings = [];
+    $direction = DesignDirectionStep::normalize(
+        ['description' => 'x', 'palette' => ['base' => '#000000']],
+        'cinematic-safe-zone',
+        'an absolute-black warm ground',
+        $repairs,
+        $warnings,
+        'warm',
+        'dark',
+    );
+
+    assert_eq('#000000', $direction['palette']['base']);
+    assert_eq([], $repairs);
+    assert_contains("file='designDirection.json'", $warnings[0]);
+    assert_contains('path="palette.base"', $warnings[0]);
+    assert_contains('authored="#000000"', $warnings[0]);
+    assert_contains('delivered="#000000"', $warnings[0]);
+    assert_contains('ground_tint "warm" cannot be rendered', $warnings[0]);
+    assert_contains('disposition=', $warnings[0]);
+});
+
 test('normalize ignores a ground_tint outside the vocabulary', function () {
     $repairs = [];
     $warnings = [];

@@ -726,6 +726,11 @@ final class DesignDirectionStep implements Step
                     $repairs[] = 'designDirection.json: field palette.base authored '
                         . self::describe($authored) . ' delivered ' . self::describe($moved)
                         . '; disposition moved onto the committed "' . $groundTint . '" ground';
+                } else {
+                    $warnings[] = "file='designDirection.json'; path=\"palette.base\"; authored="
+                        . self::describe($authored) . '; delivered=' . self::describe($authored)
+                        . '; disposition=committed ground_tint "' . $groundTint
+                        . '" cannot be rendered at this luminance; retained authored value';
                 }
             }
         }
