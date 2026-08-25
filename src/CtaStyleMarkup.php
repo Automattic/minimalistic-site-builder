@@ -90,6 +90,17 @@ final class CtaStyleMarkup
 
             $className = is_string($attrs['className'] ?? null) ? $attrs['className'] : '';
             $tokens = preg_split('/\s+/', trim($className), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            foreach ($tokens as $token) {
+                if (!str_starts_with($token, 'wp-block-button__width-')) {
+                    continue;
+                }
+                $tokens = array_values(array_filter(
+                    $tokens,
+                    static fn (string $candidate): bool => $candidate !== $token,
+                ));
+                $changed = true;
+                self::record($changes, $path, 'className', $token, null, $style);
+            }
             foreach (self::VARIATIONS as $variation) {
                 $inAttrs = in_array($variation, $tokens, true);
                 $inHtml = self::ownHtmlHasClassToken($doc, $i, $variation);
