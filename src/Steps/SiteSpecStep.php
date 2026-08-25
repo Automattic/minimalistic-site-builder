@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\ContactFacts;
 use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
@@ -12,6 +13,7 @@ use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\Warnings;
 use Automattic\SiteBuild\WritingDirection;
 
 /**
@@ -59,9 +61,6 @@ final class SiteSpecStep implements Step
 
     /** A user-stated contact domain; empty is the no-contact-domain state. */
     private const EMAIL_DOMAIN = '/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/';
-
-    /** Extra keys whose values are contact facts, not identity or copy. */
-    private const CONTACT_KEY = '/(?:e-?mails?|phones?|telephones?|mobiles?|tels?|whatsapp|fax|address(?:es)?|streets?|urls?|websites?|instagram|twitter|facebook|linkedin|social)/i';
 
     /** Internal artifact basenames that generated page slugs must not claim. */
     private const RESERVED_PAGE_SLUGS = ['preview'];
@@ -353,23 +352,29 @@ final class SiteSpecStep implements Step
         $spec['subject_is_visual_work'] = ($spec['subject_is_visual_work'] ?? null) === true;
 
         // Empty email_domain is the no-contact-domain state; do not fill it from the slug.
-        $domain = strtolower(trim((string) ($spec['email_domain'] ?? '')));
+        $authoredDomain = $spec['email_domain'] ?? '';
+        $domain = strtolower(trim((string) $authoredDomain));
         if ($domain !== '' && preg_match(self::EMAIL_DOMAIN, $domain) !== 1) {
-            $warnings[] = "site spec \"email_domain\" is not a usable domain: {$domain}; "
-                . 'dropped rather than inventing one';
+            $warnings[] = "file='siteSpec.json'; path=\"email_domain\"; authored="
+                . Warnings::value($authoredDomain)
+                . '; delivered=""; disposition=dropped unusable domain rather than inventing one';
             $domain = '';
         } elseif ($domain !== '' && !$hostSupplied && !self::promptStatesDomain($prompt, $domain)) {
-            $warnings[] = 'site spec "email_domain" was not stated in the prompt; dropped';
+            $warnings[] = "file='siteSpec.json'; path=\"email_domain\"; authored="
+                . Warnings::value($authoredDomain)
+                . '; delivered=""; disposition=dropped because the prompt did not state it';
             $domain = '';
         } elseif ($domain !== '' && $hostSupplied && in_array('email_domain', $rawInvented, true)) {
-            $warnings[] = 'site spec "email_domain" was invented rather than stated; dropped';
+            $warnings[] = "file='siteSpec.json'; path=\"email_domain\"; authored="
+                . Warnings::value($authoredDomain)
+                . '; delivered=""; disposition=dropped because it was marked invented';
             $domain = '';
         }
         $spec['email_domain'] = $domain;
         $spec['invented'] = array_values(array_unique($invented));
 
         if (!$hostSupplied) {
-            $spec = self::scrubUngroundedContact($spec, $prompt, $warnings);
+            $spec = self::scrubUngroundedContact($spec, $prompt, $warnings, $fallbackName);
         }
 
         return $spec;
@@ -384,35 +389,73 @@ final class SiteSpecStep implements Step
      * @param list<string> $warnings
      * @return array<mixed>
      */
-    private static function scrubUngroundedContact(array $spec, string $prompt, array &$warnings): array
-    {
-        $reserved = [
-            'name' => true,
-            'slug' => true,
-            'title' => true,
-            'description' => true,
-            'site_type' => true,
-            'topic' => true,
-            'area' => true,
-            'audience' => true,
-            'language' => true,
-            'writing_direction' => true,
-            'persona_name' => true,
-            'email_domain' => true,
-            'invented' => true,
-            'visual_vibe' => true,
-            'subject_is_visual_work' => true,
-            'animation_request' => true,
-            'sections' => true,
-            'pages' => true,
-        ];
+    private static function scrubUngroundedContact(
+        array $spec,
+        string $prompt,
+        array &$warnings,
+        string $fallbackName,
+    ): array {
+        $ungroundedIdentityContact = static fn (string $value): array => array_values(array_filter(
+            ContactFacts::ungroundedInSource($value, $prompt),
+            // A domain-shaped identity such as Pets.com is a brand, not
+            // permission to publish an external URL. Other contact shapes are
+            // never valid invented identities.
+            static fn (array $candidate): bool => $candidate['type'] !== 'domain',
+        ));
+        $authoredName = is_string($spec['name'] ?? null) ? $spec['name'] : '';
+        if ($ungroundedIdentityContact($authoredName) !== []) {
+            $warnings[] = "file='siteSpec.json'; path=\"name\"; authored=" . Warnings::value($authoredName)
+                . '; delivered=' . Warnings::value($fallbackName)
+                . '; disposition=replaced contact-shaped invented identity with prompt-derived identity';
+            $spec['name'] = $fallbackName;
+            $authoredSlug = $spec['slug'] ?? '';
+            $spec['slug'] = ProjectStore::slugify($fallbackName);
+            if ($spec['slug'] !== $authoredSlug) {
+                $warnings[] = "file='siteSpec.json'; path=\"slug\"; authored=" . Warnings::value($authoredSlug)
+                    . '; delivered=' . Warnings::value($spec['slug'])
+                    . '; disposition=re-derived slug from the prompt-derived replacement identity';
+            }
+        }
+        $safeName = (string) ($spec['name'] ?? $fallbackName);
+
         foreach ($spec as $key => $value) {
-            if (isset($reserved[(string) $key])) {
+            // Identity is allowed to be model-authored and can legitimately be
+            // domain-shaped (a brand such as Pets.com). It is not a contact
+            // destination unless it appears under an explicitly contact-shaped
+            // parent. Every generated copy field and nested contact structure is
+            // still inspected below.
+            $key = (string) $key;
+            if (in_array($key, ['name', 'slug', 'email_domain'], true)) {
                 continue;
             }
-            $cleaned = self::scrubContactNode($value, (string) $key, $prompt, (string) $key, $warnings);
+            if (in_array($key, ['title', 'persona_name'], true) && is_string($value)) {
+                if ($ungroundedIdentityContact($value) !== []) {
+                    $delivered = $key === 'persona_name' ? '' : $safeName;
+                    $warnings[] = "file='siteSpec.json'; path=" . Warnings::value($key)
+                        . '; authored=' . Warnings::value($value)
+                        . '; delivered=' . Warnings::value($delivered)
+                        . '; disposition=replaced contact-shaped invented identity with prompt-derived identity';
+                    $spec[$key] = $delivered;
+                }
+                continue;
+            }
+            $cleaned = self::scrubContactNode(
+                $value,
+                $key,
+                $prompt,
+                $key,
+                $warnings,
+                ContactFacts::keyLooksContact($key),
+                ContactFacts::keyLooksAddress($key),
+                ContactFacts::keyLooksPhone($key),
+                ContactFacts::keyLooksEmail($key),
+            );
             if ($cleaned === null) {
-                unset($spec[$key]);
+                if (in_array($key, self::REQUIRED, true)) {
+                    $spec[$key] = '';
+                } else {
+                    unset($spec[$key]);
+                }
             } else {
                 $spec[$key] = $cleaned;
             }
@@ -429,65 +472,90 @@ final class SiteSpecStep implements Step
         string $prompt,
         string $path,
         array &$warnings,
+        bool $contactContext = false,
+        bool $addressContext = false,
+        bool $phoneContext = false,
+        bool $emailContext = false,
     ): mixed {
+        $contactContext = $contactContext || ContactFacts::keyLooksContact($key);
+        $addressContext = $addressContext || ContactFacts::keyLooksAddress($key);
+        $phoneContext = $phoneContext || ContactFacts::keyLooksPhone($key);
+        $emailContext = $emailContext || ContactFacts::keyLooksEmail($key);
         if (is_array($value)) {
+            $wasList = array_is_list($value);
             foreach ($value as $childKey => $child) {
                 $childPath = is_int($childKey) ? $path . '[]' : $path . '.' . $childKey;
-                $cleaned = self::scrubContactNode($child, (string) $childKey, $prompt, $childPath, $warnings);
+                $cleaned = self::scrubContactNode(
+                    $child,
+                    (string) $childKey,
+                    $prompt,
+                    $childPath,
+                    $warnings,
+                    $contactContext,
+                    $addressContext,
+                    $phoneContext,
+                    $emailContext,
+                );
                 if ($cleaned === null) {
                     unset($value[$childKey]);
                 } else {
                     $value[$childKey] = $cleaned;
                 }
             }
-            return $value === [] ? null : $value;
+            if ($value === []) {
+                return $contactContext ? null : [];
+            }
+            return $wasList ? array_values($value) : $value;
         }
-        if (!is_string($value)) {
+        if (!is_string($value) && !is_int($value) && !is_float($value)) {
             return $value;
         }
-        $text = trim($value);
-        if ($text === '' || !self::isContactShaped($key, $text)) {
+        $text = trim((string) $value);
+        if ($text === '') {
             return $value;
         }
-        if (self::promptContains($prompt, $text)) {
-            return $value;
-        }
-        $warnings[] = "site spec \"{$path}\" was not stated in the prompt; dropped";
-        return null;
-    }
 
-    private static function isContactShaped(string $key, string $value): bool
-    {
-        if (preg_match(self::CONTACT_KEY, $key) === 1) {
-            return true;
-        }
-        if (filter_var($value, FILTER_VALIDATE_EMAIL)) {
-            return true;
-        }
-        if (preg_match('#^https?://#i', $value) === 1) {
-            return true;
-        }
-        if (str_starts_with(strtolower($value), 'mailto:')
-            || str_starts_with(strtolower($value), 'tel:')
+        $candidates = ContactFacts::candidates($text);
+        $hasUngroundedToken = $candidates !== []
+            && ContactFacts::ungroundedInSource($text, $prompt) !== [];
+        $hasUngroundedExactDestination = ContactFacts::exactDestinationCandidates($text) !== []
+            && !ContactFacts::sourceStatesExactDestination($prompt, $text);
+        $hasMalformedStructuredEmail = $emailContext
+            && !ContactFacts::isExactEmail($text);
+        $lowerText = strtolower($text);
+        $phoneFact = str_starts_with($lowerText, 'tel:') ? substr($text, 4) : $text;
+        $hasUngroundedTelephoneDestination = str_starts_with($lowerText, 'tel:')
+            && (!$phoneContext || !ContactFacts::sourceStatesPhone($prompt, $phoneFact));
+        $hasUngroundedStructuredFact = $contactContext && (
+            $phoneContext
+                ? !ContactFacts::sourceStatesPhone($prompt, $phoneFact)
+                : ($addressContext
+                    ? !ContactFacts::sourceStatesExactPhrase($prompt, $text)
+                    : ($candidates === [] && !ContactFacts::sourceStatesFact($prompt, $text)))
+        );
+        if (!$hasUngroundedToken
+            && !$hasUngroundedExactDestination
+            && !$hasMalformedStructuredEmail
+            && !$hasUngroundedTelephoneDestination
+            && !$hasUngroundedStructuredFact
         ) {
-            return true;
+            return $value;
         }
-        return preg_match('/^\+?[0-9][0-9(). -]{6,}$/', $value) === 1;
+
+        // Required prose and page purposes keep their schema position as an
+        // explicit empty value. Optional facts and contaminated section hints
+        // are removed as their smallest independent unit.
+        $delivered = in_array($key, array_merge(self::REQUIRED, ['purpose']), true) ? '' : null;
+        $warnings[] = "file='siteSpec.json'; path=" . Warnings::value($path)
+            . '; authored=' . Warnings::value($value)
+            . '; delivered=' . ($delivered === null ? 'removed' : Warnings::value($delivered))
+            . '; disposition=dropped because the prompt did not state it';
+        return $delivered;
     }
 
     private static function promptStatesDomain(string $prompt, string $domain): bool
     {
-        return self::promptContains($prompt, $domain)
-            || self::promptContains($prompt, '@' . $domain);
-    }
-
-    private static function promptContains(string $prompt, string $needle): bool
-    {
-        $needle = trim($needle);
-        if ($needle === '' || trim($prompt) === '') {
-            return false;
-        }
-        return mb_stripos($prompt, $needle) !== false;
+        return ContactFacts::sourceStatesDomain($prompt, $domain);
     }
 
     /**

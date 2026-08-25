@@ -1126,7 +1126,7 @@ final class CssChecks
         if (preg_match('/^(?:--[^\s:;{}]+|-?[_a-zA-Z][-_a-zA-Z0-9]*)$/D', $property) !== 1) {
             return null;
         }
-        return strtolower($property);
+        return str_starts_with($property, '--') ? $property : strtolower($property);
     }
 
     /** Decode CSS identifier escapes without otherwise normalizing the token. */
@@ -1257,11 +1257,18 @@ final class CssChecks
     {
         for ($i = $quote + 1; $i < $end;) {
             if ($css[$i] === '\\') {
-                $i = min($end, $i + 2);
+                $i = min(
+                    $end,
+                    $i + (($css[$i + 1] ?? '') === "\r"
+                        && ($css[$i + 2] ?? '') === "\n" ? 3 : 2),
+                );
                 continue;
             }
             if ($css[$i] === $delimiter) {
                 return $i + 1;
+            }
+            if (str_contains("\r\n\f", $css[$i])) {
+                return $i;
             }
             ++$i;
         }
@@ -1302,7 +1309,8 @@ final class CssChecks
 
     private static function contextText(string $prelude): string
     {
-        return trim((string) preg_replace('/\s+/', ' ', self::withoutComments($prelude)));
+        $prelude = preg_replace('~/\*.*?\*/~s', ' ', $prelude) ?? $prelude;
+        return trim((string) preg_replace('/\s+/', ' ', $prelude));
     }
 
     /** @return list<string> */

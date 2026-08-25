@@ -7,6 +7,7 @@ use Automattic\BlocksEngine\PhpTransformer\ArtifactCompiler\ArtifactCompiler;
 use Automattic\BlocksEngine\PhpTransformer\Contract\TransformerResult;
 use Automattic\SiteBuild\DesignMarkupSanitizer;
 use Automattic\SiteBuild\FooterComposition;
+use Automattic\SiteBuild\GroundedContactMarkup;
 use Automattic\SiteBuild\HeroComposition;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
@@ -391,6 +392,20 @@ final class TransformSiteStep implements Step
             $outputs[(string) $fragment['output']] = rtrim($markup) . "\n";
         }
 
+        // The HTML design and any bounded repair response are model output.
+        // Validate the transformed receiving-side artifacts against the same
+        // canonical siteSpec boundary used by the blocks-first markup units.
+        self::scrubUngroundedContactOutputs(
+            $outputs,
+            $siteSpec,
+            $fragments,
+            $dropped,
+            $fallbackCodes,
+            $repairOutcomes,
+            $droppedFragments,
+            $warnings,
+        );
+
         $missingLandmarks = array_values(array_diff(['header', 'footer'], array_keys($chromeKeys)));
         $chromeNeedsGeneration = array_values(array_filter(
             ['header', 'footer'],
@@ -563,6 +578,7 @@ final class TransformSiteStep implements Step
         foreach ($outputs as $path => $content) {
             $project->writeText($path, $content);
         }
+        SectionsStep::reconcilePagePartFiles($project, $deliveredPages);
         $project->writeJson('pages.json', ['pages' => $deliveredPages]);
         // The HTML-first path has no in-flight above-fold contract (the
         // transformer produced the sections, not SectionsStep::run). Rebuild
@@ -1233,7 +1249,13 @@ final class TransformSiteStep implements Step
                     ? $this->headerUnit->finish($raw, $inputs[$area])
                     : $this->footerUnit->finish($raw, $inputs[$area]);
                 $markup = $result->markup;
-                array_push($notes, ...$result->warnings, ...$result->repairs);
+                // Deterministic unit repairs are successful delivery facts, not
+                // unresolved warnings. Only durable generated-content defects
+                // belong in this step's warnings.json rows.
+                array_push($notes, ...$result->warnings);
+                if (trim($markup) === '') {
+                    throw new \RuntimeException('contact grounding removed all generated shell markup');
+                }
             } catch (\RuntimeException $error) {
                 $markup = SectionsStep::fallbackChrome($area);
                 $notes[] = "missing {$area}: blocks shell output unusable; deterministic minimal shell delivered";
@@ -1258,4 +1280,63 @@ final class TransformSiteStep implements Step
             }
         }
     }
+
+    /**
+     * @param array<string,string>             $outputs
+     * @param array<mixed>                    $siteSpec
+     * @param array<string,array<string,mixed>> $fragments
+     * @param array<string,true>               $dropped
+     * @param list<string>                     $fallbackCodes
+     * @param list<array<string,mixed>>        $repairOutcomes
+     * @param list<array<string,mixed>>        $droppedFragments
+     * @param list<string>                     $warnings
+     */
+    private static function scrubUngroundedContactOutputs(
+        array &$outputs,
+        array $siteSpec,
+        array $fragments,
+        array &$dropped,
+        array &$fallbackCodes,
+        array &$repairOutcomes,
+        array &$droppedFragments,
+        array &$warnings,
+    ): void {
+        $fragmentByOutput = [];
+        foreach ($fragments as $key => $fragment) {
+            if (is_string($fragment['output'] ?? null)) {
+                $fragmentByOutput[(string) $fragment['output']] = (string) $key;
+            }
+        }
+        foreach ($outputs as $path => $content) {
+            $scrubbed = GroundedContactMarkup::scrub($content, $siteSpec, $path, $warnings);
+            if (trim($scrubbed) === '') {
+                unset($outputs[$path]);
+                $fragmentKey = $fragmentByOutput[$path] ?? null;
+                if ($fragmentKey === null || !isset($fragments[$fragmentKey])) {
+                    throw new \RuntimeException("transform-site: contact-empty output has no source fragment: {$path}");
+                }
+                $fragment = $fragments[$fragmentKey];
+                $drop = self::contextRow(
+                    source: (string) $fragment['source'],
+                    selector: (string) $fragment['selector'],
+                    diagnosticCode: 'ungrounded_contact_fact',
+                    authoredValue: $content,
+                    deliveredValue: 'removed',
+                    disposition: 'dropped',
+                );
+                $dropped[$fragmentKey] = true;
+                $fallbackCodes[] = 'ungrounded_contact_fact';
+                $repairOutcomes[] = $drop;
+                $droppedFragments[] = $drop;
+                $warnings[] = self::dropWarning(
+                    $fragment,
+                    $drop,
+                    'contact grounding removed every transformed block in the fragment',
+                );
+            } else {
+                $outputs[$path] = $scrubbed;
+            }
+        }
+    }
+
 }

@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\BlocksEngine\PhpTransformer\HtmlToBlocks\Style\CssSyntaxScanner;
 use Automattic\BlocksEngine\PhpTransformer\HtmlToBlocks\Style\CssSelectorMatcher;
 use Automattic\SiteBuild\CodeFences;
+use Automattic\SiteBuild\ContactFacts;
 use Automattic\SiteBuild\CssChecks;
 use Automattic\SiteBuild\CssContrastAdjuster;
 use Automattic\SiteBuild\CssContrastCheck;
@@ -310,6 +311,7 @@ CSS;
     {
         $reads = [
             'pages.json',
+            'siteSpec.json',
             'theme/theme.json',
             'theme/style.css',
             'designDirection.json',
@@ -354,6 +356,19 @@ CSS;
             $this->llm->complete($rendered, $this->withOptions(['log_label' => $this->id()]))
         );
         [$css] = CssChecks::dropTextWrapDeclarations($css);
+        $groundingWarnings = [];
+        $siteSpec = $project->exists('siteSpec.json') ? $project->readJson('siteSpec.json') : [];
+        $css = self::scrubChunk(
+            $css,
+            'theme/style.css page-styles appendix',
+            ContactFacts::candidateSetFromSpec($siteSpec),
+            $groundingWarnings,
+            self::deliveredMarkup($project),
+            $siteSpec,
+        );
+        if ($groundingWarnings !== []) {
+            $project->addWarnings($this->id(), $groundingWarnings);
+        }
 
         $problems = self::validate($css);
         if ($problems !== []) {
@@ -411,7 +426,7 @@ CSS;
         }
         $style = rtrim(self::withoutDeterministicStyles($project->readText('theme/style.css')))
             . "\n\n" . self::MARKER . "\n" . rtrim($css);
-        $project->writeText('theme/style.css', self::withWordWrapPolicy($style));
+        $project->writeText('theme/style.css', self::appendWordWrapPolicy($style));
         echo '  styled: ' . implode(', ', $used) . "\n";
     }
 
@@ -422,14 +437,20 @@ CSS;
         $authorRhythmChunks = [];
         $afterAuthorChunks = [];
         $warnings = [];
+        $siteSpec = $project->exists('siteSpec.json') ? $project->readJson('siteSpec.json') : [];
+        $allowedContactFacts = ContactFacts::candidateSetFromSpec($siteSpec);
         $sectionRootIds = self::sectionRoots($project, $warnings);
+        $markup = self::deliveredMarkup($project);
 
         if ($project->exists(TransformArtifacts::CARRIED_CSS_BEFORE_AUTHOR)) {
             $beforeAuthorCss = self::scrubAndNeutralizeChunk(
                 $project->readText(TransformArtifacts::CARRIED_CSS_BEFORE_AUTHOR),
                 TransformArtifacts::CARRIED_CSS_BEFORE_AUTHOR,
                 $sectionRootIds,
+                $allowedContactFacts,
                 $warnings,
+                $markup,
+                $siteSpec,
             );
             if ($beforeAuthorCss !== '') {
                 $beforeAuthorChunks[] = $beforeAuthorCss;
@@ -440,7 +461,10 @@ CSS;
             $project->readText(TransformArtifacts::SITE_CSS),
             TransformArtifacts::SITE_CSS,
             $sectionRootIds,
+            $allowedContactFacts,
             $warnings,
+            $markup,
+            $siteSpec,
         );
         if ($siteCss !== '') {
             $authorChunks[] = $siteCss;
@@ -459,7 +483,10 @@ CSS;
                     $pageCss,
                     $origin,
                     $sectionRootIds,
+                    $allowedContactFacts,
                     $warnings,
+                    $markup,
+                    $siteSpec,
                 );
                 if ($css === '') {
                     continue;
@@ -473,7 +500,10 @@ CSS;
                 $project->readText(TransformArtifacts::CARRIED_CSS_AFTER_AUTHOR),
                 TransformArtifacts::CARRIED_CSS_AFTER_AUTHOR,
                 $sectionRootIds,
+                $allowedContactFacts,
                 $warnings,
+                $markup,
+                $siteSpec,
             );
             if ($afterAuthorCss !== '') {
                 $afterAuthorChunks[] = $afterAuthorCss;
@@ -486,10 +516,6 @@ CSS;
             $sectionRootIds,
             $warnings,
         );
-        // This resumable deterministic pass owns the complete current set;
-        // replace stale receipts from prior tails instead of accumulating
-        // warnings about CSS bytes no longer delivered.
-        $project->replaceWarnings('page-styles', $warnings);
         $baseline = self::headingBaselineCss(array_values($carriedPages));
         $designChunks = array_merge(
             $beforeAuthorChunks,
@@ -503,8 +529,30 @@ CSS;
         if ($authoredWidthPin !== '') {
             $designChunks[] = $authoredWidthPin;
         }
-        $markup = self::deliveredMarkup($project);
         $design = implode("\n", $designChunks);
+        // Chunk-local scrubs cannot observe values that compose only after the
+        // final cascade is assembled (before/after fragments or a custom
+        // property declared by another source). Re-scrub the exact delivered
+        // design tail once, then retain the smallest declaration removals.
+        $finalAuthoredDesign = $design;
+        $finalGenerated = CssScrub::scrubGenerated($design, $allowedContactFacts, false, $markup);
+        $finalHiding = CssScrub::scrubContactHiding($finalGenerated['css'], $markup, $siteSpec);
+        $design = $finalHiding['css'];
+        foreach ([...$finalGenerated['removals'], ...$finalHiding['removals']] as $removal) {
+            $warnings[] = sprintf(
+                'source=theme/style.css merged design cascade; block_path=stylesheet selector %s; '
+                    . 'authored_value=%s; '
+                    . 'delivered_value=%s; disposition=%s',
+                self::warningValue(self::cssRemovalSelector($finalAuthoredDesign, $removal)),
+                self::warningValue($removal['authored_value']),
+                $removal['delivered_value'],
+                $removal['disposition'],
+            );
+        }
+        // This resumable deterministic pass owns the complete current set;
+        // replace stale receipts from prior tails instead of accumulating
+        // warnings about CSS bytes no longer delivered.
+        $project->replaceWarnings('page-styles', $warnings);
         // Deliberately NOT part of $design: this rule declares no color, and its
         // selector targets WordPress's render-time layout classes, which never
         // appear in design markup — so the contrast pass could only ever add an
@@ -573,17 +621,25 @@ CSS;
      */
     private static function withoutDeterministicStyles(string $style): string
     {
-        $offset = strpos($style, self::DETERMINISTIC_STYLE_MARKER);
-        if ($offset === false) {
+        $offsets = array_values(array_filter(
+            [strpos($style, self::MARKER), strpos($style, self::DETERMINISTIC_STYLE_MARKER)],
+            static fn (int|false $offset): bool => $offset !== false,
+        ));
+        if ($offsets === []) {
             return $style;
         }
-        return rtrim(substr($style, 0, $offset));
+        return rtrim(substr($style, 0, min($offsets)));
     }
 
     /** Replace the build-owned wrap policy without accumulating stale copies. */
     private static function withWordWrapPolicy(string $style): string
     {
-        $style = rtrim(self::withoutDeterministicStyles($style));
+        return self::appendWordWrapPolicy(self::withoutDeterministicStyles($style));
+    }
+
+    private static function appendWordWrapPolicy(string $style): string
+    {
+        $style = rtrim($style);
         return ($style === '' ? '' : $style . "\n\n") . self::WORD_WRAP_CSS . "\n";
     }
 
@@ -598,23 +654,53 @@ CSS;
     /**
      * @param list<string> $warnings
      */
-    private static function scrubChunk(string $css, string $source, array &$warnings): string
+    private static function scrubChunk(
+        string $css,
+        string $source,
+        array $allowedContactFacts,
+        array &$warnings,
+        string $markup,
+        array $siteSpec,
+    ): string
     {
-        $result = CssScrub::scrub($css);
+        $authoredCss = $css;
+        $result = CssScrub::scrubGenerated($css, $allowedContactFacts, false, $markup);
+        $contactHiding = CssScrub::scrubContactHiding($result['css'], $markup, $siteSpec);
+        $result['css'] = $contactHiding['css'];
+        array_push($result['removals'], ...$contactHiding['removals']);
         foreach ($result['removals'] as $removal) {
             $authored = json_encode(
                 $removal['authored_value'],
                 JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE,
             );
             $warnings[] = sprintf(
-                'source=%s; authored_value=%s; delivered_value=%s; disposition=%s',
+                'source=%s; block_path=stylesheet selector %s; '
+                    . 'authored_value=%s; delivered_value=%s; disposition=%s',
                 $source,
+                self::warningValue(self::cssRemovalSelector($authoredCss, $removal)),
                 $authored,
                 $removal['delivered_value'],
                 $removal['disposition'],
             );
         }
         return $result['css'];
+    }
+
+    /** @param array<string,mixed> $removal */
+    private static function cssRemovalSelector(string $css, array $removal): string
+    {
+        if (isset($removal['selector']) && is_string($removal['selector'])
+            && trim($removal['selector']) !== ''
+        ) {
+            return trim($removal['selector']);
+        }
+        $authored = (string) ($removal['authored_value'] ?? '');
+        foreach (CssChecks::scanDeclarations($css) as $declaration) {
+            if (rtrim($declaration['raw'], " \t\n\r\f;") === rtrim($authored, " \t\n\r\f;")) {
+                return trim($declaration['context']);
+            }
+        }
+        return ($removal['kind'] ?? null) === 'import' ? '@import' : '<declaration>';
     }
 
     /**
@@ -633,9 +719,19 @@ CSS;
         string $css,
         string $source,
         array $sectionRootIds,
+        array $allowedContactFacts,
         array &$warnings,
+        string $markup,
+        array $siteSpec,
     ): string {
-        $css = self::scrubChunk($css, $source, $warnings);
+        $css = self::scrubChunk(
+            $css,
+            $source,
+            $allowedContactFacts,
+            $warnings,
+            $markup,
+            $siteSpec,
+        );
         [$css] = CssChecks::dropTextWrapDeclarations($css);
         [$css] = CssChecks::dropHeadingWordSplitDeclarations($css);
         if ($css === '' || $sectionRootIds['roots'] === []) {

@@ -75,6 +75,14 @@ final class CardStyleContract
         'mark', 'marktext', 'selecteditem', 'selecteditemtext', 'visitedtext',
     ];
 
+    public static function isCssColorName(string $value): bool
+    {
+        $value = strtolower($value);
+        return in_array($value, self::CSS_COLOR_NAMES, true)
+            || in_array($value, self::CSS_SYSTEM_COLORS, true)
+            || in_array($value, ['currentcolor', 'transparent'], true);
+    }
+
     /**
      * @param null|callable(string):BlockMarkup $parser injectable only so the
      *        otherwise-total BlockMarkup parser's operational failure boundary

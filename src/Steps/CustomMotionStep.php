@@ -5,7 +5,9 @@ namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\CodeFences;
+use Automattic\SiteBuild\ContactFacts;
 use Automattic\SiteBuild\CssChecks;
+use Automattic\SiteBuild\CssScrub;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
 use Automattic\SiteBuild\Project;
@@ -84,6 +86,10 @@ final class CustomMotionStep implements Step
 
     public function run(Project $project): void
     {
+        $baseStyle = self::withoutCustomMotion($project->readText('theme/style.css'));
+        if ($baseStyle !== $project->readText('theme/style.css')) {
+            $project->writeText('theme/style.css', $baseStyle);
+        }
         $request = SiteSpecStep::animationRequestOf($project);
         if ($request === '') {
             echo "  no explicit animation request; skipped (no LLM call)\n";
@@ -138,6 +144,22 @@ final class CustomMotionStep implements Step
                 $dropped,
             ));
         }
+        $generatedResult = CssScrub::scrubGenerated(
+            $css,
+            ContactFacts::candidateSetFromSpec($project->readJson('siteSpec.json')),
+        );
+        $css = $generatedResult['css'];
+        $droppedGeneratedDeclarations = $generatedResult['removals'];
+        if ($droppedGeneratedDeclarations !== []) {
+            $project->addWarnings($this->id(), array_map(
+                static fn (array $removal): string =>
+                    "file='theme/style.css'; block='generated custom-motion CSS'; authored="
+                    . Warnings::value($removal['authored_value'])
+                    . '; delivered=removed; disposition=' . $removal['disposition']
+                    . ' before validating and appending the remaining motion CSS — see logs/' . self::LOG_FILE,
+                $droppedGeneratedDeclarations,
+            ));
+        }
         $problems = self::validate($css, $shapeTagged);
         $preValidationDropLog = implode('', [
             $droppedShapeDeclarations === []
@@ -148,6 +170,10 @@ final class CustomMotionStep implements Step
                 ? ''
                 : "\nPROFILE-OWNED MOTION DECLARATIONS REMOVED BEFORE VALIDATION:\n- "
                     . implode("\n- ", $droppedMotionDeclarations) . "\n",
+            $droppedGeneratedDeclarations === []
+                ? ''
+                : "\nUNSAFE GENERATED DECLARATIONS REMOVED BEFORE VALIDATION:\n- "
+                    . implode("\n- ", array_column($droppedGeneratedDeclarations, 'authored_value')) . "\n",
         ]);
         if ($problems !== []) {
             file_put_contents(
@@ -167,7 +193,9 @@ final class CustomMotionStep implements Step
             return;
         }
 
-        $droppedCount = count($droppedShapeDeclarations) + count($droppedMotionDeclarations);
+        $droppedCount = count($droppedShapeDeclarations)
+            + count($droppedMotionDeclarations)
+            + count($droppedGeneratedDeclarations);
         if ($droppedCount > 0) {
             file_put_contents(
                 $project->logPath(self::LOG_FILE),
@@ -182,11 +210,170 @@ final class CustomMotionStep implements Step
         // model that forgets it can't ship motion to users who opted out.
         $project->writeText(
             'theme/style.css',
-            rtrim($project->readText('theme/style.css'))
+            rtrim($baseStyle)
             . "\n\n" . self::MARKER
             . "\n@media screen and (prefers-reduced-motion: no-preference) {\n" . $css . "\n}\n"
         );
         echo "  custom-motion: implemented \"{$request}\"\n";
+    }
+
+    private static function withoutCustomMotion(string $style): string
+    {
+        $offset = self::ownedTailOffset($style);
+        return $offset === false ? $style : rtrim(substr($style, 0, $offset)) . "\n";
+    }
+
+    private static function ownedTailOffset(string $style): int|false
+    {
+        $state = self::cssState();
+        $depth = 0;
+        $length = strlen($style);
+        $header = self::MARKER
+            . "\n@media screen and (prefers-reduced-motion: no-preference) {\n";
+
+        for ($offset = 0; $offset < $length;) {
+            $topLevel = self::cssTopLevel($state);
+            if ($topLevel
+                && $depth === 0
+                && ($offset === 0 || substr($style, max(0, $offset - 2), 2) === "\n\n")
+                && str_starts_with(substr($style, $offset), $header)
+                && self::completeOwnedTail(substr($style, $offset))
+            ) {
+                return $offset;
+            }
+            if ($topLevel && $style[$offset] === '{') {
+                $depth++;
+            } elseif ($topLevel && $style[$offset] === '}') {
+                if ($depth === 0) {
+                    return false;
+                }
+                $depth--;
+            }
+            $next = self::cssConsume($style, $offset, $state);
+            if ($next === null) {
+                return false;
+            }
+            $offset = $next;
+        }
+        return false;
+    }
+
+    private static function completeOwnedTail(string $tail): bool
+    {
+        $state = self::cssState();
+        $depth = 0;
+        $opened = false;
+        $length = strlen($tail);
+        for ($offset = 0; $offset < $length;) {
+            $topLevel = self::cssTopLevel($state);
+            if ($topLevel && $tail[$offset] === '{') {
+                $depth++;
+                $opened = true;
+            } elseif ($topLevel && $tail[$offset] === '}') {
+                if ($depth === 0) {
+                    return false;
+                }
+                $depth--;
+                if ($opened && $depth === 0) {
+                    return trim(substr($tail, $offset + 1), " \t\n\r\f") === '';
+                }
+            }
+            $next = self::cssConsume($tail, $offset, $state);
+            if ($next === null) {
+                return false;
+            }
+            $offset = $next;
+        }
+        return false;
+    }
+
+    /** @return array{quote:string,comment:bool,parens:int,brackets:int} */
+    private static function cssState(): array
+    {
+        return ['quote' => '', 'comment' => false, 'parens' => 0, 'brackets' => 0];
+    }
+
+    /** @param array{quote:string,comment:bool,parens:int,brackets:int} $state */
+    private static function cssTopLevel(array $state): bool
+    {
+        return $state['quote'] === ''
+            && !$state['comment']
+            && $state['parens'] === 0
+            && $state['brackets'] === 0;
+    }
+
+    /** @param array{quote:string,comment:bool,parens:int,brackets:int} $state */
+    private static function cssConsume(string $css, int $offset, array &$state): ?int
+    {
+        $byte = $css[$offset];
+        $next = $css[$offset + 1] ?? '';
+        if ($state['comment']) {
+            if ($byte === '*' && $next === '/') {
+                $state['comment'] = false;
+                return $offset + 2;
+            }
+            return $offset + 1;
+        }
+        if ($state['quote'] !== '') {
+            if ($byte === '\\') {
+                return self::cssEscapeEnd($css, $offset);
+            }
+            if ($byte === $state['quote']) {
+                $state['quote'] = '';
+            }
+            return $offset + 1;
+        }
+        if ($byte === '/' && $next === '*') {
+            $state['comment'] = true;
+            return $offset + 2;
+        }
+        if ($byte === '"' || $byte === "'") {
+            $state['quote'] = $byte;
+            return $offset + 1;
+        }
+        if ($byte === '\\') {
+            return self::cssEscapeEnd($css, $offset);
+        }
+        if ($byte === '(') {
+            $state['parens']++;
+        } elseif ($byte === ')') {
+            if ($state['parens'] === 0) {
+                return null;
+            }
+            $state['parens']--;
+        } elseif ($byte === '[') {
+            $state['brackets']++;
+        } elseif ($byte === ']') {
+            if ($state['brackets'] === 0) {
+                return null;
+            }
+            $state['brackets']--;
+        }
+        return $offset + 1;
+    }
+
+    private static function cssEscapeEnd(string $css, int $offset): ?int
+    {
+        $length = strlen($css);
+        $offset++;
+        if ($offset >= $length) {
+            return null;
+        }
+        if (!ctype_xdigit($css[$offset])) {
+            return $css[$offset] === "\r" && ($css[$offset + 1] ?? '') === "\n"
+                ? $offset + 2
+                : $offset + 1;
+        }
+        $end = $offset;
+        while ($end < $length && $end < $offset + 6 && ctype_xdigit($css[$end])) {
+            $end++;
+        }
+        if ($end < $length && str_contains(" \t\n\r\f", $css[$end])) {
+            return $css[$end] === "\r" && ($css[$end + 1] ?? '') === "\n"
+                ? $end + 2
+                : $end + 1;
+        }
+        return $end;
     }
 
     /**

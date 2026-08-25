@@ -86,6 +86,7 @@ final class FooterUnit extends AbstractMarkupUnit
         if ($markup !== $before) {
             $repairs[] = self::repair('root-layout-constrained', $key);
         }
+        $markup = $this->scrubUngroundedContact($markup, $input, $key, $warnings);
         return new MarkupResult($markup, $repairs, $warnings);
     }
 

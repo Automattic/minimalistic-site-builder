@@ -13,6 +13,8 @@ use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\GeneratedJsonFallbackStep;
 use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\CssChecks;
+use Automattic\SiteBuild\CssScrub;
+use Automattic\SiteBuild\ContactFacts;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
 use Automattic\SiteBuild\Narrator;
@@ -513,6 +515,10 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             DesignDirectionStep::shapeFor($project) ?? '',
         );
         [$theme, $groupPaddingWarnings] = self::repairGroupBlockPadding($theme);
+        [$theme, $generatedCssWarnings] = self::scrubGeneratedCss(
+            $theme,
+            ContactFacts::candidateSetFromSpec($project->readJson('siteSpec.json')),
+        );
         $warnings = array_merge(
             $warnings,
             $layoutWarnings,
@@ -523,6 +529,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $scaffoldWarnings,
             $groupPaddingWarnings,
             $shapeWarnings,
+            $generatedCssWarnings,
         );
 
         $bindRepairs = array_merge($colorRepairs, $fontRepairs);
@@ -553,6 +560,42 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         }
 
         $project->writeJson('theme/theme.json', $theme);
+    }
+
+    /**
+     * Scrub every model-authored styles.*.css string before theme.json ships.
+     *
+     * @param array<mixed> $theme
+     * @param array<string,array<string,true>> $allowed
+     * @return array{0:array<mixed>,1:list<string>}
+     */
+    public static function scrubGeneratedCss(array $theme, array $allowed): array
+    {
+        if (!is_array($theme['styles'] ?? null)) {
+            return [$theme, []];
+        }
+        $warnings = [];
+        $walk = static function (array &$node, string $path) use (&$walk, &$warnings, $allowed): void {
+            foreach ($node as $key => &$value) {
+                $childPath = $path . '.' . (string) $key;
+                if ($key === 'css' && is_string($value)) {
+                    $result = CssScrub::scrubGenerated($value, $allowed, true);
+                    $value = $result['css'];
+                    foreach ($result['removals'] as $removal) {
+                        $warnings[] = "file='theme/theme.json'; path=" . Warnings::value($childPath) . '; authored='
+                            . Warnings::value($removal['authored_value'])
+                            . '; delivered=removed; disposition=' . $removal['disposition'];
+                    }
+                    continue;
+                }
+                if (is_array($value)) {
+                    $walk($value, $childPath);
+                }
+            }
+            unset($value);
+        };
+        $walk($theme['styles'], 'styles');
+        return [$theme, $warnings];
     }
 
     public function run(Project $project): void

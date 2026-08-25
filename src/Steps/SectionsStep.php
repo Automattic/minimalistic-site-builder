@@ -232,6 +232,10 @@ final class SectionsStep implements Step
                         : "the generation batch failed: {$batchFailure}");
                 }
                 $result = $job['unit']->finish($parts[$key], $job['input']);
+                array_push($warnings, ...$result->warnings);
+                if (trim($result->markup) === '') {
+                    throw new \RuntimeException('contact grounding removed all generated markup');
+                }
                 if (($job['opening'] ?? false) === true) {
                     self::assertOpeningRoot($result->markup, $key);
                 }
@@ -239,7 +243,6 @@ final class SectionsStep implements Step
                 array_push($repairs, ...$result->repairs);
                 array_push(
                     $warnings,
-                    ...$result->warnings,
                     ...self::batchWarnings($job['file'], $batch->notesFor($key)),
                 );
             } catch (\RuntimeException $e) {
@@ -348,6 +351,7 @@ final class SectionsStep implements Step
         foreach ($files as $rel => $markup) {
             $project->writeText('theme/' . $rel, $markup . "\n");
         }
+        self::reconcilePagePartFiles($project, $pages);
         $project->writeJson('pages.json', $plan);
         $project->writeJson('aboveFold.json', $delivery);
         $project->addWarnings($this->id(), $warnings);
@@ -403,6 +407,7 @@ final class SectionsStep implements Step
                 && isset($wanted[(string) $job['input']['page']['slug']]),
         );
         if ($jobs === []) {
+            self::reconcilePagePartFiles($project, $pages, array_keys($wanted));
             return $pages;
         }
         $requests = self::requestsFor($jobs);
@@ -425,6 +430,7 @@ final class SectionsStep implements Step
                         . 'delivered_value removed disposition dropped';
                 }
             }
+            self::reconcilePagePartFiles($project, [], array_keys($wanted));
             $project->addWarnings($this->id(), $warnings);
             return [];
         }
@@ -437,6 +443,10 @@ final class SectionsStep implements Step
                     throw new \RuntimeException('the batch returned no result');
                 }
                 $result = $job['unit']->finish($parts[$key], $job['input']);
+                array_push($warnings, ...$result->warnings);
+                if (trim($result->markup) === '') {
+                    throw new \RuntimeException('contact grounding removed all generated markup');
+                }
                 if (($job['opening'] ?? false) === true) {
                     self::assertOpeningRoot($result->markup, $key);
                 }
@@ -444,7 +454,6 @@ final class SectionsStep implements Step
                 array_push($repairs, ...$result->repairs);
                 array_push(
                     $warnings,
-                    ...$result->warnings,
                     ...self::batchWarnings($job['file'], $batch->notesFor($key)),
                 );
             } catch (\RuntimeException $e) {
@@ -469,6 +478,7 @@ final class SectionsStep implements Step
         foreach ($files as $rel => $markup) {
             $project->writeText('theme/' . $rel, $markup . "\n");
         }
+        self::reconcilePagePartFiles($project, $pages, array_keys($wanted));
         $project->addWarnings($this->id(), $warnings);
         return $pages;
     }
@@ -672,6 +682,78 @@ final class SectionsStep implements Step
             $parts[substr($rel, strlen('parts/'), -strlen('.html'))] = $markup;
         }
         return $parts;
+    }
+
+    /**
+     * Reconcile generator-owned page-part files with the final delivered plan.
+     * Unplanned files are moved outside the theme into a recoverable project
+     * quarantine. A scoped call is used by mixed HTML-first fallback so parts
+     * belonging to unrelated pages remain untouched.
+     *
+     * @param array<int,array<string,mixed>> $pages
+     * @param list<string>|null              $scopePageSlugs
+     */
+    public static function reconcilePagePartFiles(
+        Project $project,
+        array $pages,
+        ?array $scopePageSlugs = null,
+    ): void {
+        $expected = [];
+        foreach ($pages as $page) {
+            if (!is_array($page)) {
+                continue;
+            }
+            $pageSlug = (string) ($page['slug'] ?? '');
+            foreach ((array) ($page['sections'] ?? []) as $section) {
+                if (!is_array($section)) {
+                    continue;
+                }
+                $expected[self::partSlug($pageSlug, (string) ($section['slug'] ?? '')) . '.html'] = true;
+            }
+        }
+        $scopePrefixes = null;
+        if ($scopePageSlugs !== null) {
+            $scopePrefixes = [];
+            foreach ($scopePageSlugs as $slug) {
+                if ($slug !== '') {
+                    $scopePrefixes[] = 'page-' . $slug . '--';
+                }
+            }
+        }
+        foreach (glob($project->themePath('parts/page-*.html')) ?: [] as $path) {
+            $basename = basename($path);
+            if (isset($expected[$basename])) {
+                continue;
+            }
+            if ($scopePrefixes !== null) {
+                $inScope = false;
+                foreach ($scopePrefixes as $prefix) {
+                    if (str_starts_with($basename, $prefix)) {
+                        $inScope = true;
+                        break;
+                    }
+                }
+                if (!$inScope) {
+                    continue;
+                }
+            }
+            self::quarantinePagePart($project, $path, $basename);
+        }
+    }
+
+    private static function quarantinePagePart(Project $project, string $path, string $basename): void
+    {
+        $directory = $project->logPath('stale-parts');
+        if (!is_dir($directory) && !mkdir($directory, 0775, true) && !is_dir($directory)) {
+            throw new \RuntimeException("Could not create stale-part quarantine: {$directory}");
+        }
+        $target = $directory . '/' . $basename . '.stale';
+        for ($suffix = 2; file_exists($target); $suffix++) {
+            $target = $directory . '/' . $basename . ".stale.{$suffix}";
+        }
+        if (!@rename($path, $target)) {
+            throw new \RuntimeException("Could not quarantine unplanned generated page part: {$path}");
+        }
     }
 
     /**

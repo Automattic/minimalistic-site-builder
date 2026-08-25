@@ -2452,6 +2452,40 @@ test('theme-json run wires the scaffold into the written theme', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('theme-json scrubs generated CSS strings recursively and reaches a fixed point', function () {
+    $svg = '<svg xmlns="http://www.w3.org/2000/svg"><text>fake@example.com</text></svg>';
+    $theme = ['styles' => ['blocks' => ['core/group' => [
+        'css' => 'content:"fake@example.com";background-image:url(https://invented.example/p.png);'
+            . 'mask-image:url(data:image/svg+xml;base64,' . base64_encode($svg) . ');color:red',
+    ]]]];
+
+    [$scrubbed, $warnings] = ThemeJsonStep::scrubGeneratedCss($theme, []);
+    $css = $scrubbed['styles']['blocks']['core/group']['css'];
+
+    assert_eq('content:"fake@example.com";color:red', $css);
+    assert_eq(2, count($warnings));
+    assert_contains('path="styles.blocks.core/group.css"', implode("\n", $warnings));
+    assert_contains('delivered=removed', implode("\n", $warnings));
+    [$fixed, $fixedWarnings] = ThemeJsonStep::scrubGeneratedCss($scrubbed, []);
+    assert_eq($scrubbed, $fixed);
+    assert_eq([], $fixedWarnings);
+});
+
+test('theme-json CSS warning paths cannot spoof structured fields', function () {
+    $key = "x'; delivered=kept; disposition=spoof\npath='y";
+    $theme = ['styles' => [$key => ['css' => 'background-image:url(https://invented.example/p.png)']]];
+
+    [, $warnings] = ThemeJsonStep::scrubGeneratedCss($theme, []);
+
+    assert_eq(1, count($warnings));
+    assert_true(!str_contains($warnings[0], "\n"));
+    assert_contains(
+        'path="styles.x\'; delivered=kept; disposition=spoof\\npath=\'y.css"',
+        $warnings[0],
+    );
+    assert_contains('; delivered=removed; disposition=', $warnings[0]);
+});
+
 test('theme-json never fails on an empty model response', function () {
     $tmp = sys_get_temp_dir() . '/builder_tj_empty_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');

@@ -38,6 +38,12 @@ final class HtmlBlockContext
         'table', 'tt', 'u', 'ul', 'var',
     ];
 
+    /** HTML elements permitted to host a declarative shadow root. */
+    private const SHADOW_HOSTS = [
+        'article', 'aside', 'blockquote', 'body', 'div', 'footer', 'h1', 'h2',
+        'h3', 'h4', 'h5', 'h6', 'header', 'main', 'nav', 'p', 'section', 'span',
+    ];
+
     public static function delimiterView(string $html): string
     {
         $view = $html;
@@ -239,15 +245,21 @@ final class HtmlBlockContext
     /**
      * Rewrite each real opening tag using stateful HTML boundaries.
      *
-     * @param callable(string):string $rewrite
+     * @param callable(string,string,int):string $rewrite Receives the opening tag, browser namespace,
+     *                                                    and source byte offset.
      */
-    public static function rewriteOpeningTags(string $html, callable $rewrite): string
+    public static function rewriteOpeningTags(
+        string $html,
+        callable $rewrite,
+        bool $skipInertTemplates = false,
+    ): string
     {
         $length = strlen($html);
         $offset = 0;
         $keptFrom = 0;
         $out = '';
-        $foreign = [];
+        $foreignElements = [];
+        $htmlElements = [];
 
         while ($offset < $length) {
             $start = strpos($html, '<', $offset);
@@ -255,7 +267,11 @@ final class HtmlBlockContext
                 break;
             }
 
-            $specialEnd = self::specialMarkupEnd($html, $start, $foreign !== []);
+            $specialEnd = self::specialMarkupEnd(
+                $html,
+                $start,
+                self::childNamespace($foreignElements) !== 'html',
+            );
             if ($specialEnd !== null) {
                 $offset = max($specialEnd, $start + 1);
                 continue;
@@ -266,22 +282,200 @@ final class HtmlBlockContext
                 $offset = $start + 1;
                 continue;
             }
+            $tagText = substr($html, $start, $tag['end'] - $start);
+            $namespace = self::elementNamespace($foreignElements, $tag, $tagText);
+            if ($tag['closer'] && $namespace === 'html') {
+                self::trackHtmlElements($htmlElements, $tag);
+            }
+            if (!$tag['closer']
+                && $skipInertTemplates
+                && $namespace === 'html'
+                && $tag['name'] === 'template'
+                && !self::consumeDeclarativeShadowTemplate($tagText, $htmlElements)
+            ) {
+                $offset = self::opaqueElementEnd($html, $tag['name'], $tag['end']);
+                continue;
+            }
             if (!$tag['closer']) {
                 $out .= substr($html, $keptFrom, $start - $keptFrom);
-                $out .= $rewrite(substr($html, $start, $tag['end'] - $start));
+                $out .= $rewrite($tagText, $namespace, $start);
                 $keptFrom = $tag['end'];
             }
 
-            self::trackForeign($foreign, $tag);
+            self::trackForeignElements($foreignElements, $tag, $namespace, $tagText);
 
             // Tag-shaped text in raw-text bodies is not a child tag. Inside
             // foreign content there is no raw text, so those bodies are
             // scanned and their event handlers still stripped.
-            if (!$tag['closer'] && self::isRawText($tag['name'], $foreign !== [])) {
+            if (!$tag['closer'] && self::isRawText($tag['name'], $namespace !== 'html')) {
                 $offset = self::opaqueElementEnd($html, $tag['name'], $tag['end']);
             } else {
+                if ($namespace === 'html') {
+                    self::trackHtmlElements($htmlElements, $tag);
+                }
                 $offset = $tag['end'];
             }
+        }
+
+        return $out . substr($html, $keptFrom);
+    }
+
+    /**
+     * Return the character data a browser exposes from a markup fragment.
+     * RCDATA is text even when it looks like tags; inert and non-rendered
+     * element bodies contribute no delivered copy.
+     */
+    public static function textContent(string $html, bool $includeHidden = false): string
+    {
+        $length = strlen($html);
+        $offset = 0;
+        $keptFrom = 0;
+        $out = '';
+        $foreignElements = [];
+        $htmlElements = [];
+
+        while ($offset < $length) {
+            $start = strpos($html, '<', $offset);
+            if ($start === false) {
+                break;
+            }
+            $out .= substr($html, $keptFrom, $start - $keptFrom);
+
+            $childNamespace = self::childNamespace($foreignElements);
+            $specialEnd = self::specialMarkupEnd($html, $start, $childNamespace !== 'html');
+            if ($specialEnd !== null) {
+                if ($childNamespace !== 'html' && substr($html, $start, 9) === '<![CDATA[') {
+                    $closed = $specialEnd >= $start + 12
+                        && substr($html, $specialEnd - 3, 3) === ']]>';
+                    $contentEnd = $closed ? $specialEnd - 3 : $specialEnd;
+                    $out .= str_replace(
+                        '&',
+                        '&amp;',
+                        substr($html, $start + 9, $contentEnd - ($start + 9)),
+                    );
+                }
+                $offset = max($specialEnd, $start + 1);
+                $keptFrom = $offset;
+                continue;
+            }
+
+            $tag = self::tagAt($html, $start);
+            if ($tag === null) {
+                $out .= '<';
+                $offset = $start + 1;
+                $keptFrom = $offset;
+                continue;
+            }
+
+            $tagText = substr($html, $start, $tag['end'] - $start);
+            $namespace = self::elementNamespace($foreignElements, $tag, $tagText);
+            if ($tag['closer'] && $namespace === 'html') {
+                self::trackHtmlElements($htmlElements, $tag);
+            }
+            if (!$tag['closer'] && $namespace === 'html') {
+                $shadowTemplate = $tag['name'] === 'template'
+                    && self::consumeDeclarativeShadowTemplate($tagText, $htmlElements);
+                if (!$includeHidden && !$shadowTemplate && self::isActuallyHidden($tagText)) {
+                    $offset = self::isHtmlVoidElement($tag['name'])
+                        ? $tag['end']
+                        : self::opaqueElementEnd($html, $tag['name'], $tag['end']);
+                    $keptFrom = $offset;
+                    continue;
+                }
+                if (in_array($tag['name'], [
+                        'iframe', 'noembed', 'noframes', 'noscript', 'script', 'style',
+                    ], true)
+                ) {
+                    $offset = self::opaqueElementEnd($html, $tag['name'], $tag['end']);
+                    $keptFrom = $offset;
+                    continue;
+                }
+                if ($tag['name'] === 'template' && !$shadowTemplate) {
+                    $offset = self::opaqueElementEnd($html, $tag['name'], $tag['end']);
+                    $keptFrom = $offset;
+                    continue;
+                }
+                if (in_array($tag['name'], ['textarea', 'title', 'xmp'], true)) {
+                    $close = self::rawTextClosingTagAt($html, $tag['name'], $tag['end']);
+                    $contentEnd = $close['start'] ?? $length;
+                    $content = substr($html, $tag['end'], $contentEnd - $tag['end']);
+                    $out .= $tag['name'] === 'xmp' ? str_replace('&', '&amp;', $content) : $content;
+                    $offset = $close['end'] ?? $length;
+                    $keptFrom = $offset;
+                    continue;
+                }
+                if ($tag['name'] === 'plaintext') {
+                    $out .= str_replace('&', '&amp;', substr($html, $tag['end']));
+                    return $out;
+                }
+            }
+
+            self::trackForeignElements($foreignElements, $tag, $namespace, $tagText);
+            if ($namespace === 'html') {
+                self::trackHtmlElements($htmlElements, $tag);
+            }
+            $offset = $tag['end'];
+            $keptFrom = $offset;
+        }
+
+        return $out . substr($html, $keptFrom);
+    }
+
+    /** Remove HTML hidden subtrees, optionally including aria-hidden subtrees. */
+    public static function withoutHiddenSubtrees(
+        string $html,
+        bool $includeAriaHidden,
+        bool $includeHidden = true,
+    ): string
+    {
+        $length = strlen($html);
+        $offset = 0;
+        $keptFrom = 0;
+        $out = '';
+        $foreignElements = [];
+
+        while ($offset < $length) {
+            $start = strpos($html, '<', $offset);
+            if ($start === false) {
+                break;
+            }
+            $specialEnd = self::specialMarkupEnd(
+                $html,
+                $start,
+                self::childNamespace($foreignElements) !== 'html',
+            );
+            if ($specialEnd !== null) {
+                $offset = max($specialEnd, $start + 1);
+                continue;
+            }
+            $tag = self::tagAt($html, $start);
+            if ($tag === null) {
+                $offset = $start + 1;
+                continue;
+            }
+            $tagText = substr($html, $start, $tag['end'] - $start);
+            $namespace = self::elementNamespace($foreignElements, $tag, $tagText);
+            $hidden = $includeHidden
+                && !$tag['closer']
+                && $namespace === 'html'
+                && self::isActuallyHidden($tagText);
+            $ariaHidden = !$tag['closer']
+                && $includeAriaHidden
+                && (self::attributeValue($tagText, 'aria-hidden') === 'true'
+                    || self::hasAttribute($tagText, 'inert'));
+            if ($hidden || $ariaHidden) {
+                $end = $namespace === 'html' && self::isHtmlVoidElement($tag['name'])
+                    ? $tag['end']
+                    : self::opaqueElementEnd($html, $tag['name'], $tag['end']);
+                $out .= substr($html, $keptFrom, $start - $keptFrom);
+                $keptFrom = $end;
+                $offset = $end;
+                continue;
+            }
+            self::trackForeignElements($foreignElements, $tag, $namespace, $tagText);
+            $offset = !$tag['closer'] && self::isRawText($tag['name'], $namespace !== 'html')
+                ? self::opaqueElementEnd($html, $tag['name'], $tag['end'])
+                : $tag['end'];
         }
 
         return $out . substr($html, $keptFrom);
@@ -393,7 +587,7 @@ final class HtmlBlockContext
     }
 
     /**
-     * @return array{name:string,closer:bool,end:int,valid:bool,selfClosing:bool}|null
+     * @return array{name:string,closer:bool,start:int,end:int,valid:bool,selfClosing:bool}|null
      */
     private static function tagAt(string $html, int $start): ?array
     {
@@ -422,6 +616,7 @@ final class HtmlBlockContext
         return [
             'name'        => strtolower($tag[2]),
             'closer'      => $tag[1] === '/',
+            'start'       => $start,
             'end'         => $boundary['end'],
             'selfClosing' => $boundary['selfClosing'],
             'valid'       => $boundary['valid']
@@ -753,6 +948,241 @@ final class HtmlBlockContext
                 return;
             }
         }
+    }
+
+    /**
+     * @param list<array{name:string,namespace:string,htmlChildren:bool}> $foreignElements
+     */
+    private static function childNamespace(array $foreignElements): string
+    {
+        if ($foreignElements === []) {
+            return 'html';
+        }
+        $parent = $foreignElements[array_key_last($foreignElements)];
+        return $parent['htmlChildren'] ? 'html' : $parent['namespace'];
+    }
+
+    /**
+     * @param list<array{name:string,namespace:string,htmlChildren:bool}> $foreignElements
+     * @param array{name:string,closer:bool,selfClosing:bool} $tag
+     */
+    private static function elementNamespace(
+        array $foreignElements,
+        array $tag,
+        string $tagText,
+    ): string
+    {
+        if ($tag['closer']) {
+            for ($index = count($foreignElements) - 1; $index >= 0; $index--) {
+                if ($foreignElements[$index]['name'] === $tag['name']) {
+                    return $foreignElements[$index]['namespace'];
+                }
+            }
+            return 'html';
+        }
+        if ($foreignElements === []) {
+            return in_array($tag['name'], ['math', 'svg'], true) ? $tag['name'] : 'html';
+        }
+
+        $parent = $foreignElements[array_key_last($foreignElements)];
+        if ($parent['htmlChildren']) {
+            if ($parent['namespace'] === 'math'
+                && in_array($tag['name'], ['malignmark', 'mglyph'], true)
+            ) {
+                return 'math';
+            }
+            return in_array($tag['name'], ['math', 'svg'], true) ? $tag['name'] : 'html';
+        }
+        if ($parent['namespace'] === 'math'
+            && $parent['name'] === 'annotation-xml'
+            && $tag['name'] === 'svg'
+        ) {
+            return 'svg';
+        }
+        if (self::isForeignBreakout($tag['name'], $tagText)) {
+            return 'html';
+        }
+        return $parent['namespace'];
+    }
+
+    /**
+     * @param list<array{name:string,namespace:string,htmlChildren:bool}> $foreignElements
+     * @param array{name:string,closer:bool,selfClosing:bool} $tag
+     */
+    private static function trackForeignElements(
+        array &$foreignElements,
+        array $tag,
+        string $namespace,
+        string $tagText,
+    ): void {
+        if ($tag['closer']) {
+            for ($index = count($foreignElements) - 1; $index >= 0; $index--) {
+                if ($foreignElements[$index]['name'] === $tag['name']) {
+                    array_splice($foreignElements, $index);
+                    return;
+                }
+            }
+            return;
+        }
+        if ($namespace === 'html') {
+            $parent = $foreignElements === []
+                ? null
+                : $foreignElements[array_key_last($foreignElements)];
+            if ($parent !== null
+                && !$parent['htmlChildren']
+                && self::isForeignBreakout($tag['name'], $tagText)
+            ) {
+                $foreignElements = [];
+            }
+            return;
+        }
+        if ($tag['selfClosing']) {
+            return;
+        }
+
+        $htmlChildren = $namespace === 'svg'
+            && in_array($tag['name'], ['desc', 'foreignobject', 'title'], true);
+        if ($namespace === 'math') {
+            $htmlChildren = in_array($tag['name'], ['mi', 'mn', 'mo', 'ms', 'mtext'], true)
+                || ($tag['name'] === 'annotation-xml'
+                    && in_array(
+                        self::attributeValueExact($tagText, 'encoding'),
+                        ['application/xhtml+xml', 'text/html'],
+                        true,
+                    ));
+        }
+        $foreignElements[] = [
+            'name' => $tag['name'],
+            'namespace' => $namespace,
+            'htmlChildren' => $htmlChildren,
+        ];
+    }
+
+    private static function isForeignBreakout(string $name, string $tag): bool
+    {
+        return in_array($name, self::FOREIGN_BREAKOUT, true)
+            || ($name === 'font'
+                && (self::hasAttribute($tag, 'color')
+                    || self::hasAttribute($tag, 'face')
+                    || self::hasAttribute($tag, 'size')));
+    }
+
+    /** @param list<array{name:string,shadowConsumed:bool}> $elements */
+    private static function consumeDeclarativeShadowTemplate(string $tag, array &$elements): bool
+    {
+        if (!in_array(self::attributeValueExact($tag, 'shadowrootmode'), ['closed', 'open'], true)
+            || $elements === []
+        ) {
+            return false;
+        }
+        $index = array_key_last($elements);
+        $parent = $elements[$index];
+        if ($parent['shadowConsumed']
+            || (!in_array($parent['name'], self::SHADOW_HOSTS, true) && !str_contains($parent['name'], '-'))
+        ) {
+            return false;
+        }
+        $elements[$index]['shadowConsumed'] = true;
+        return true;
+    }
+
+    /**
+     * @param list<array{name:string,shadowConsumed:bool}> $elements
+     * @param array{name:string,closer:bool,selfClosing:bool} $tag
+     */
+    private static function trackHtmlElements(array &$elements, array $tag): void
+    {
+        if ($tag['closer']) {
+            for ($index = count($elements) - 1; $index >= 0; $index--) {
+                if ($elements[$index]['name'] === $tag['name']) {
+                    array_splice($elements, $index);
+                    return;
+                }
+            }
+            return;
+        }
+        // A slash on an HTML start tag is ignored; only void elements avoid
+        // becoming the lexical parent. Foreign self-closing tags are tracked
+        // separately by trackForeignElements().
+        if (!self::isHtmlVoidElement($tag['name'])) {
+            $elements[] = ['name' => $tag['name'], 'shadowConsumed' => false];
+        }
+    }
+
+    private static function isHtmlVoidElement(string $name): bool
+    {
+        return in_array($name, [
+            'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link',
+            'meta', 'source', 'track', 'wbr',
+        ], true);
+    }
+
+    /** The hidden attribute loses to an inline author display override. */
+    private static function isActuallyHidden(string $tag): bool
+    {
+        if (!self::hasAttribute($tag, 'hidden')) {
+            return false;
+        }
+        $style = self::attributeValue($tag, 'style');
+        if ($style === '') {
+            return true;
+        }
+        $display = null;
+        $important = false;
+        foreach (CssChecks::scanDeclarations($style, true) as $declaration) {
+            if (strtolower($declaration['property']) !== 'display') {
+                continue;
+            }
+            $candidateImportant = preg_match('/!important\s*$/iu', $declaration['value']) === 1;
+            if ($display !== null && $important && !$candidateImportant) {
+                continue;
+            }
+            $important = $candidateImportant;
+            $display = trim(preg_replace('/\s*!important\s*$/iu', '', $declaration['value'])
+                ?? $declaration['value']);
+        }
+        return $display === null || strtolower($display) === 'none';
+    }
+
+    private static function hasAttribute(string $tag, string $name): bool
+    {
+        foreach (MarkupSanitizer::openingTagAttributes($tag) as $attribute) {
+            if ($attribute['name'] === $name) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static function attributeValue(string $tag, string $name): string
+    {
+        foreach (MarkupSanitizer::openingTagAttributes($tag) as $attribute) {
+            if ($attribute['name'] !== $name || $attribute['valueStart'] === null) {
+                continue;
+            }
+            $value = substr(
+                $tag,
+                $attribute['valueStart'],
+                $attribute['valueEnd'] - $attribute['valueStart'],
+            );
+            return strtolower(trim(LinkTargets::decodeBrowserEntities($value)));
+        }
+        return '';
+    }
+
+    private static function attributeValueExact(string $tag, string $name): string
+    {
+        foreach (MarkupSanitizer::openingTagAttributes($tag) as $attribute) {
+            if ($attribute['name'] !== $name || $attribute['valueStart'] === null) {
+                continue;
+            }
+            return strtolower(LinkTargets::decodeBrowserEntities(substr(
+                $tag,
+                $attribute['valueStart'],
+                $attribute['valueEnd'] - $attribute['valueStart'],
+            )));
+        }
+        return '';
     }
 
     /** Whether an element's body is text rather than markup at this position. */

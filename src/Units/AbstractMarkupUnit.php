@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Units;
 
+use Automattic\SiteBuild\GroundedContactMarkup;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\PromptRenderer;
 
@@ -144,6 +145,32 @@ abstract class AbstractMarkupUnit implements MarkupUnit
             throw new \InvalidArgumentException("unit input '{$key}' must decode to an object");
         }
         return $decoded;
+    }
+
+    /**
+     * Apply the canonical siteSpec contact boundary to delivered model markup.
+     *
+     * @param list<string> $warnings
+     */
+    final protected function scrubUngroundedContact(
+        string $markup,
+        array $input,
+        string $key,
+        array &$warnings,
+    ): string {
+        // finish() is also the project-free delivery seam used by narrow
+        // contract tests and embedding hosts. A missing spec authorizes no
+        // contact facts; it must not turn generated-content degradation into
+        // an exception after the LLM call has already been paid for.
+        $siteSpec = array_key_exists('site_spec', $input)
+            ? $this->inputArrayOrJson($input, 'site_spec')
+            : [];
+        return GroundedContactMarkup::scrub(
+            $markup,
+            $siteSpec,
+            "theme/parts/{$key}.html",
+            $warnings,
+        );
     }
 
     /**

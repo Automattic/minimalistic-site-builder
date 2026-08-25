@@ -535,6 +535,27 @@ test('FooterUnit generates a constrained footer from self-contained input', func
     );
 });
 
+test('FooterUnit cannot deliver invented contact facts from generated markup', function () {
+    $input = template_part_unit_input();
+    $input['site_spec'] = ['name' => 'Grounded Bakery'];
+    $safe = '<!-- wp:paragraph --><p>Fresh bread daily.</p><!-- /wp:paragraph -->';
+    $invented = '<!-- wp:paragraph --><p><a href="mailto:fake@example.com">fake@example.com</a>'
+        . ' · +1 207 555 0199 · 24 Market Street</p><!-- /wp:paragraph -->';
+    $raw = '<!-- wp:group --><div class="wp-block-group">' . $safe . $invented
+        . '</div><!-- /wp:group -->';
+    $unit = new FooterUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+
+    $result = $unit->finish($raw, $input);
+
+    assert_contains($safe, $result->markup, 'the safe footer sibling survives');
+    foreach (['fake@example.com', '+1 207 555 0199', '24 Market Street'] as $fact) {
+        assert_true(!str_contains($result->markup, $fact), "invented footer fact {$fact} is absent");
+    }
+    assert_eq(1, count($result->warnings));
+    assert_contains('wp:group[0] > wp:paragraph[1]', $result->warnings[0]);
+    assert_contains('delivered=removed', $result->warnings[0]);
+});
+
 test('FooterUnit ignores hero-only blueprint and above-fold context', function () {
     $input = template_part_unit_input();
     $input['hero_blueprint'] = [

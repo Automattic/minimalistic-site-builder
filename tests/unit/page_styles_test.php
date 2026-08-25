@@ -382,6 +382,33 @@ test('run drops offending declarations and ships the rest of the appendix', func
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('page-styles removes ungrounded contact copy from generated CSS content', function () {
+    [$project, $tmp] = ps_project('builder_ps_contact_content_');
+    $project->writeText(
+        'theme/parts/section-work.html',
+        '<!-- wp:group {"className":"masonry-3"} --><div class="wp-block-group masonry-3"></div>'
+            . '<!-- /wp:group -->',
+    );
+    $project->writeJson('siteSpec.json', []);
+    $llm = new FakeLlm();
+    $llm->queueText(
+        '.masonry-3::before { content: "Call +1 212 555 0199"; display: block; }'
+            . '.masonry-3 [hidden] { display: block; color: inherit; }',
+    );
+
+    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $style = $project->readText('theme/style.css');
+    assert_true(!str_contains($style, '+1 212 555 0199'));
+    assert_eq(1, substr_count($style, 'display: block'), 'only the visible pseudo-element display survives');
+    assert_contains('.masonry-3 [hidden] {  color: inherit; }', $style);
+    $warnings = implode("\n", $project->readJson('warnings.json')['page-styles'] ?? []);
+    assert_contains('disposition=removed_ungrounded_contact', $warnings);
+    assert_contains('disposition=removed_hidden_state_reveal', $warnings);
+    assert_contains('authored_value=', $warnings);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('an unscoped rule is dropped, scoped rules survive, and the salvage summary says shipped not rejected', function () {
     [$project, $tmp] = ps_project('builder_ps_rule_salvage_');
     $project->writeText(
@@ -557,11 +584,35 @@ test('legacy mode ignores stale site CSS and keeps the recorded call trace and s
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('legacy rerun replaces its previous appendix before the deterministic tail', function () {
+    [$project, $tmp] = ps_project('builder_ps_rerun_appendix_');
+    $project->writeText(
+        'theme/parts/section-work.html',
+        '<!-- wp:group {"className":"overlap-up"} --><div class="wp-block-group overlap-up"></div>'
+            . '<!-- /wp:group -->',
+    );
+    $llm = new FakeLlm();
+    $llm->queueText('.overlap-up { margin-top: -4rem; }');
+    $llm->queueText('.overlap-up { margin-top: -2rem; }');
+    $step = new PageStylesStep($llm, new PromptRenderer(repo_path('prompts')));
+
+    $step->run($project);
+    $step->run($project);
+
+    $style = $project->readText('theme/style.css');
+    assert_eq(1, substr_count($style, 'generated per-design by the page-styles step'));
+    assert_true(!str_contains($style, '-4rem'), 'stale first appendix was removed');
+    assert_contains('-2rem', $style, 'second appendix shipped');
+    assert_eq(1, substr_count($style, 'Wrap at spaces only'));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('page-styles declares HTML-first design and delivered markup reads only when enabled', function () {
     $llm = new FakeLlm();
     $renderer = new PromptRenderer(repo_path('prompts'));
     $legacyReads = [
         'pages.json',
+        'siteSpec.json',
         'theme/theme.json',
         'theme/style.css',
         'designDirection.json',
@@ -629,6 +680,63 @@ test('site CSS path adjusts only the merged tail against delivered markup and re
     assert_eq($once, $project->readText('theme/style.css'), 'second run preserves final CSS bytes');
     assert_eq($warnings, $project->readJson('warnings.json')['css_contrast'] ?? [], 'warnings deduplicate');
     assert_eq([], $llm->calls, 'deterministic path makes zero LLM calls');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site CSS cannot hide a label that grounds a delivered control value', function () {
+    [$project, $tmp] = ps_project('builder_ps_contact_label_css_');
+    $project->writeText(TransformArtifacts::SITE_CSS, '.gone{display:none;color:inherit}');
+    $project->writeJson('siteSpec.json', []);
+    $project->writeJson('pages.json', ['pages' => [[
+        'slug' => 'home',
+        'front' => true,
+    ]]]);
+    $project->writeText('design/home.html', '<main>Source</main>');
+    $project->writeText(
+        'plugin/pages/home.html',
+        '<label class="gone" for="order-number">Order ID</label>'
+            . '<input id="order-number" type="number" value="2125550199">',
+    );
+
+    ps_html_first_step(new FakeLlm())->run($project);
+
+    $style = $project->readText('theme/style.css');
+    assert_true(!str_contains($style, 'display:none'));
+    assert_contains('.gone{color:inherit}', $style, 'unrelated declaration survives');
+    $warnings = implode("\n", ps_warning_rows($project, 'page-styles'));
+    assert_contains('disposition=removed_ungrounded_contact_hiding', $warnings);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('final site CSS scrub catches contact facts and hiding composed across chunks', function () {
+    [$project, $tmp] = ps_project('builder_ps_cross_chunk_contact_');
+    $project->writeText(
+        TransformArtifacts::CARRIED_CSS_BEFORE_AUTHOR,
+        '.x::before{content:"20755"}.gone{display:var(--hide);color:inherit}',
+    );
+    $project->writeText(
+        TransformArtifacts::SITE_CSS,
+        '.x::after{content:"50199"}:root{--hide:none}',
+    );
+    $project->writeJson('siteSpec.json', []);
+    $project->writeJson('pages.json', ['pages' => [['slug' => 'home', 'front' => true]]]);
+    $project->writeText('design/home.html', '<main>Source</main>');
+    $project->writeText(
+        'plugin/pages/home.html',
+        '<span class="x"></span><label class="gone" for="order-cross">Order ID</label>'
+            . '<input id="order-cross" type="number" value="2125550199">',
+    );
+
+    ps_html_first_step(new FakeLlm())->run($project);
+
+    $style = $project->readText('theme/style.css');
+    assert_true(!(str_contains($style, '20755') && str_contains($style, '50199')));
+    assert_true(!str_contains($style, 'display:var(--hide)'));
+    assert_contains('--hide:none', $style);
+    $warnings = implode("\n", ps_warning_rows($project, 'page-styles'));
+    assert_contains('removed_ungrounded_contact', $warnings);
+    assert_contains('removed_ungrounded_contact_hiding', $warnings);
+    assert_contains('block_path=stylesheet selector', $warnings);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -2272,7 +2380,7 @@ foreach (
         assert_true(is_string($authored));
         assert_eq(
             [
-                'source=design/site.css; authored_value=' . $authored
+                'source=design/site.css; block_path=stylesheet selector ".actual"; authored_value=' . $authored
                     . '; delivered_value=removed; disposition=removed_external_url',
             ],
             $project->readJson('warnings.json')['page-styles'] ?? [],
@@ -2307,7 +2415,7 @@ test('site CSS path still scrubs a real image-set function beside token lookalik
     assert_true(is_string($authored));
     assert_eq(
         [
-            'source=design/site.css; authored_value=' . $authored
+            'source=design/site.css; block_path=stylesheet selector ".actual"; authored_value=' . $authored
                 . '; delivered_value=removed; disposition=removed_external_url',
         ],
         $project->readJson('warnings.json')['page-styles'] ?? []
@@ -2537,7 +2645,7 @@ test('site CSS path recovers after a malformed string before a later remote imag
     $base = $project->readText('theme/style.css') . ps_wrap() . ps_table_reset() . ps_nested_landmark() . ps_baseline('home');
     $malformed = '.broken{--token:"unterminated' . "\n" . ';color:red}';
     $declaration = 'background-image:image-set("https://evil.example/after-bad-string.png" 1x);';
-    $safe = '.note::before{content:"https://x";display:block}';
+    $safe = '.note::before{content:"Sample";display:block}';
     $siteCss = $malformed . '.later{' . $declaration . 'display:grid}' . $safe;
     $project->writeText(TransformArtifacts::SITE_CSS, $siteCss);
     $project->writeJson('pages.json', ['pages' => [[
@@ -2567,7 +2675,7 @@ test('site CSS path recovers after a malformed string before a later remote imag
     assert_true(is_string($authored));
     assert_eq(
         [
-            'source=design/site.css; authored_value=' . $authored
+            'source=design/site.css; block_path=stylesheet selector ".later"; authored_value=' . $authored
                 . '; delivered_value=removed; disposition=removed_external_url',
         ],
         $project->readJson('warnings.json')['page-styles'] ?? [],
@@ -2607,7 +2715,7 @@ test('site CSS path removes an external image string in an EOF-truncated final d
     assert_true(is_string($authored));
     assert_eq(
         [
-            'source=design/site.css; authored_value=' . $authored
+            'source=design/site.css; block_path=stylesheet selector ".x"; authored_value=' . $authored
                 . '; delivered_value=removed; disposition=removed_external_url',
         ],
         $project->readJson('warnings.json')['page-styles'] ?? []

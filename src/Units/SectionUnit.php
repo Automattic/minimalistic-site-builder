@@ -129,6 +129,7 @@ final class SectionUnit extends AbstractPageSectionUnit
         $markup = $contract['markup'];
         array_push($repairs, ...$contract['repairs']);
         array_push($warnings, ...$contract['warnings']);
+        $markup = $this->scrubUngroundedContact($markup, $input, $this->key($input), $warnings);
         return new MarkupResult($markup, $repairs, $warnings);
     }
 

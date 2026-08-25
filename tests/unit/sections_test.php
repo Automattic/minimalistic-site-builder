@@ -1053,6 +1053,48 @@ test('sections keeps the assigned surface when generated footer markup is unusab
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('sections degrades when contact grounding removes an entire generated part', function () {
+    [$project, $tmp] = sections_fixture();
+    $project->writeText(
+        'theme/parts/page-home--about.html',
+        '<!-- wp:paragraph --><p>stale fake-section@example.com</p><!-- /wp:paragraph -->',
+    );
+    $project->writeText(
+        'theme/parts/page-home--legacy.html',
+        '<!-- wp:paragraph --><p>orphan fake@example.com</p><!-- /wp:paragraph -->',
+    );
+    $llm = new FakeLlm();
+    $llm->queueText('OK');
+    $llm->queueText('<!-- wp:group --><!-- wp:site-title /--><!-- /wp:group -->');
+    $llm->queueText(
+        '<!-- wp:group --><div class="wp-block-group">fake-footer@example.com</div><!-- /wp:group -->'
+    );
+    $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
+    $llm->queueText(
+        '<!-- wp:group --><div class="wp-block-group">'
+        . '<!-- wp:paragraph --><p>fake-section@example.com</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->'
+    );
+
+    (new SectionsStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $footer = $project->readText('theme/parts/footer.html');
+    assert_contains('wp:site-title', $footer, 'empty grounded footer receives deterministic chrome');
+    assert_true(!str_contains($footer, 'fake-footer@example.com'));
+    assert_true(!$project->exists('theme/parts/page-home--about.html'), 'empty grounded section is dropped');
+    assert_true(!$project->exists('theme/parts/page-home--legacy.html'), 'an orphaned generated page part is removed');
+    assert_eq(['hero'], array_column(
+        $project->readJson('pages.json')['pages'][0]['sections'],
+        'slug',
+    ));
+    $joined = implode("\n", $project->readJson('warnings.json')['sections'] ?? []);
+    assert_contains('fake-footer@example.com', $joined, 'removed authored footer value remains actionable');
+    assert_contains('fake-section@example.com', $joined, 'removed authored section value remains actionable');
+    assert_contains('delivered=deterministic minimal footer', $joined);
+    assert_contains('only the unusable section part was removed and pruned', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('fallback chrome relies on the template-part landmark instead of nesting one', function () {
     foreach (['header', 'footer'] as $key) {
         $markup = SectionsStep::fallbackChrome($key);

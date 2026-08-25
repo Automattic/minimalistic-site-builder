@@ -130,6 +130,7 @@ final class HeroUnit extends AbstractPageSectionUnit
             $warnings,
             ...HeroComposition::markupWarnings($markup, $context['recipe'], $key),
         );
+        $markup = $this->scrubUngroundedContact($markup, $input, $key, $warnings);
         return new MarkupResult($markup, $repairs, $warnings);
     }
 

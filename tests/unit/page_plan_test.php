@@ -262,6 +262,90 @@ test('PagePlanStep primary action validation preserves a valid exact visitor-fac
     ], true, $context, $mailWarnings)['destination']);
     assert_eq([], $mailWarnings);
 
+    $phoneWarnings = [];
+    assert_eq('tel:+54 11 5555 1234', PagePlanStep::normalizePrimaryAction([
+        'label' => 'Call us',
+        'intent' => 'Call the stated phone number.',
+        'destination' => 'tel:+54 11 5555 1234',
+    ], true, $context, $phoneWarnings)['destination'], 'phone formatting does not change its identity');
+    assert_eq([], $phoneWarnings);
+
+    $numericPhoneContext = PagePlanStep::primaryActionContext(
+        ['support_number' => 12075550199],
+        $pages,
+    );
+    $numericPhoneWarnings = [];
+    assert_eq('tel:12075550199', PagePlanStep::normalizePrimaryAction([
+        'label' => 'Call support',
+        'intent' => 'Call the stated numeric support number.',
+        'destination' => 'tel:12075550199',
+    ], true, $numericPhoneContext, $numericPhoneWarnings)['destination']);
+    assert_eq([], $numericPhoneWarnings, 'numeric structured phones authorize the exact CTA');
+
+    $nestedPhoneContext = PagePlanStep::primaryActionContext(
+        ['phone' => ['primary' => 12075550197]],
+        $pages,
+    );
+    $nestedPhoneWarnings = [];
+    assert_eq('tel:12075550197', PagePlanStep::normalizePrimaryAction([
+        'label' => 'Call the primary line',
+        'intent' => 'Call the stated nested phone number.',
+        'destination' => 'tel:12075550197',
+    ], true, $nestedPhoneContext, $nestedPhoneWarnings)['destination']);
+    assert_eq([], $nestedPhoneWarnings, 'nested phone context reaches compact leaves');
+
+    $unicodePhoneContext = PagePlanStep::primaryActionContext(
+        ['hotline' => '+١٢٠٧٥٥٥٠١٩٦'],
+        $pages,
+    );
+    $unicodePhoneWarnings = [];
+    assert_eq('tel:+١٢٠٧٥٥٥٠١٩٦', PagePlanStep::normalizePrimaryAction([
+        'label' => 'Call the hotline',
+        'intent' => 'Call the stated Unicode-digit hotline.',
+        'destination' => 'tel:+١٢٠٧٥٥٥٠١٩٦',
+    ], true, $unicodePhoneContext, $unicodePhoneWarnings)['destination']);
+    assert_eq([], $unicodePhoneWarnings);
+
+    foreach (["+1\u{202F}207\u{202F}555\u{202F}0199", "+1\u{00A0}207\u{00A0}555\u{00A0}0199"] as $spacedPhone) {
+        $spacedContext = PagePlanStep::primaryActionContext(['phone' => $spacedPhone], $pages);
+        $spacedWarnings = [];
+        assert_eq('tel:+1 207 555 0199', PagePlanStep::normalizePrimaryAction([
+            'label' => 'Call us',
+            'intent' => 'Call the exact stated phone despite presentation spaces.',
+            'destination' => 'tel:+1 207 555 0199',
+        ], true, $spacedContext, $spacedWarnings)['destination']);
+        assert_eq([], $spacedWarnings);
+    }
+
+    $extensionContext = PagePlanStep::primaryActionContext(
+        ['phone' => '+1 207 555 0199 ext 42'],
+        $pages,
+    );
+    $extensionWarnings = [];
+    assert_eq('tel:+12075550199;ext=42', PagePlanStep::normalizePrimaryAction([
+        'label' => 'Call extension 42',
+        'intent' => 'Call the exact stated extension.',
+        'destination' => 'tel:+12075550199;ext=42',
+    ], true, $extensionContext, $extensionWarnings)['destination']);
+    assert_eq([], $extensionWarnings);
+
+    $telFieldContext = PagePlanStep::primaryActionContext(['phone_uri' => 'tel:+12075550199'], $pages);
+    $telFieldWarnings = [];
+    assert_eq('tel:+1 207 555 0199', PagePlanStep::normalizePrimaryAction([
+        'label' => 'Call us',
+        'intent' => 'Use a tel URI from a phone-shaped spec field.',
+        'destination' => 'tel:+1 207 555 0199',
+    ], true, $telFieldContext, $telFieldWarnings)['destination']);
+    assert_eq([], $telFieldWarnings);
+
+    $emailCaseWarnings = [];
+    assert_eq(null, PagePlanStep::normalizePrimaryAction([
+        'label' => 'Write to us',
+        'intent' => 'Open a message to a differently cased local part.',
+        'destination' => 'mailto:Hello@example.com',
+    ], true, $context, $emailCaseWarnings), 'email local parts remain exact spec facts');
+    assert_eq(1, count($emailCaseWarnings));
+
     $domainMailWarnings = [];
     assert_eq(null, PagePlanStep::normalizePrimaryAction([
         'label' => 'Reserve by email',
@@ -270,6 +354,29 @@ test('PagePlanStep primary action validation preserves a valid exact visitor-fac
     ], true, $context, $domainMailWarnings), 'minting a local-part at email_domain is inventing an address');
     assert_eq(1, count($domainMailWarnings));
     assert_contains('spec-backed contact target', $domainMailWarnings[0]);
+});
+
+test('PagePlanStep does not authorize a telephone action from an arbitrary numeric field', function () {
+    $pages = PagePlanStep::flattenPages(plan_spec());
+    $context = PagePlanStep::primaryActionContext(['order_id' => 1234567890], $pages);
+    $warnings = [];
+
+    assert_eq(null, PagePlanStep::normalizePrimaryAction([
+        'label' => 'Call us',
+        'intent' => 'Call a number that the spec never identified as a phone.',
+        'destination' => 'tel:1234567890',
+    ], true, $context, $warnings, "pages[slug='home'].sections[0].primary_action"));
+    assert_eq(1, count($warnings));
+    assert_contains('spec-backed contact target', $warnings[0]);
+
+    $stringContext = PagePlanStep::primaryActionContext(['order_id' => 'tel:1234567890'], $pages);
+    $stringWarnings = [];
+    assert_eq(null, PagePlanStep::normalizePrimaryAction([
+        'label' => 'Call us',
+        'intent' => 'Do not trust a tel-shaped order identifier.',
+        'destination' => 'tel:1234567890',
+    ], true, $stringContext, $stringWarnings, "pages[slug='home'].sections[0].primary_action"));
+    assert_eq(1, count($stringWarnings));
 });
 
 test('PagePlanStep primary action validation nulls the whole invalid action with actionable context', function () {

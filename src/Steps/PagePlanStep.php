@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\ContactFacts;
 use Automattic\SiteBuild\FooterComposition;
 use Automattic\SiteBuild\FooterSectionIdentity;
 use Automattic\SiteBuild\GeneratedJsonException;
@@ -1483,47 +1484,56 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         }
 
         $contacts = [];
-        $walk = function (mixed $value, string $key = '') use (&$walk, &$contacts): void {
+        $walk = function (mixed $value, string $key = '', bool $phoneContext = false) use (&$walk, &$contacts): void {
+            $phoneContext = $phoneContext || ContactFacts::keyLooksPhone($key);
             if (is_array($value)) {
                 foreach ($value as $childKey => $child) {
-                    $walk($child, strtolower((string) $childKey));
+                    $walk($child, strtolower((string) $childKey), $phoneContext);
                 }
                 return;
             }
             if (!is_string($value)) {
-                return;
+                if ((is_int($value) || is_float($value)) && $phoneContext) {
+                    $value = (string) $value;
+                } else {
+                    return;
+                }
             }
 
             $value = trim($value);
             if ($value === '') {
                 return;
             }
-            if (preg_match('#^https?://#i', $value) && filter_var($value, FILTER_VALIDATE_URL)) {
-                $contacts[$value] = true;
+            if (preg_match('#^https?://#i', $value)) {
+                $canonical = ContactFacts::canonicalDestination($value);
+                if ($canonical !== null) {
+                    $contacts[$canonical] = true;
+                }
                 return;
             }
-            if (str_starts_with(strtolower($value), 'mailto:')
-                && filter_var(substr($value, 7), FILTER_VALIDATE_EMAIL)
-            ) {
-                $contacts[$value] = true;
+            if (str_starts_with(strtolower($value), 'mailto:')) {
+                $canonical = ContactFacts::canonicalDestination($value);
+                if ($canonical !== null) {
+                    $contacts[$canonical] = true;
+                }
                 return;
             }
-            if (str_starts_with(strtolower($value), 'tel:')
-                && preg_match('/^tel:\+?[0-9][0-9(). -]*$/i', $value)
-            ) {
-                $contacts[$value] = true;
+            if ($phoneContext && str_starts_with(strtolower($value), 'tel:')) {
+                $canonical = ContactFacts::canonicalDestination($value);
+                if ($canonical !== null) {
+                    $contacts[$canonical] = true;
+                }
                 return;
             }
-            if (filter_var($value, FILTER_VALIDATE_EMAIL)) {
-                $contacts['mailto:' . $value] = true;
+            $email = ContactFacts::canonicalDestination('mailto:' . $value);
+            if ($email !== null) {
+                $contacts[$email] = true;
                 return;
             }
-            if (preg_match('/(?:phone|telephone|mobile|tel|whatsapp)/', $key)
-                && preg_match('/^\+?[0-9][0-9(). -]*$/', $value)
-            ) {
-                $number = preg_replace('/[(). -]+/', '', $value) ?? '';
-                if ($number !== '') {
-                    $contacts['tel:' . $number] = true;
+            if ($phoneContext) {
+                $canonical = ContactFacts::canonicalDestination('tel:' . $value);
+                if ($canonical !== null) {
+                    $contacts[$canonical] = true;
                 }
             }
         };
@@ -1618,7 +1628,8 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         $contacts = is_array($context['contact_destinations'] ?? null)
             ? $context['contact_destinations']
             : [];
-        if (isset($contacts[$destination]) || in_array($destination, $contacts, true)) {
+        $canonicalContact = ContactFacts::canonicalDestination($destination);
+        if ($canonicalContact !== null && isset($contacts[$canonicalContact])) {
             return true;
         }
 
