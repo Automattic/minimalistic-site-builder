@@ -114,25 +114,22 @@ final class CtaStyleMarkup
             }
 
             $authoredWidth = $attrs['width'] ?? null;
-            $htmlWidths = [];
-            foreach ([25, 50, 75, 100] as $width) {
+            $htmlWidths = self::ownHtmlWidthClassValues($doc, $i);
+            foreach ($htmlWidths as $width) {
                 $token = 'wp-block-button__width-' . $width;
-                if (self::ownHtmlHasClassToken($doc, $i, $token)) {
-                    $htmlWidths[] = $width;
-                }
-                if ($style !== 'block' || $width !== 100) {
+                if ($style !== 'block' || $width !== '100') {
                     $doc->removeClassTokenInOwnHtml($i, $token);
                 }
             }
             if ($style === 'block') {
-                if (!in_array(100, $htmlWidths, true)) {
+                if (!in_array('100', $htmlWidths, true)) {
                     $doc->replaceClassTokenInOwnHtml(
                         $i,
                         'wp-block-button',
                         'wp-block-button wp-block-button__width-100',
                     );
                 }
-                if ($authoredWidth !== 100 || $htmlWidths !== [100]) {
+                if ($authoredWidth !== 100 || $htmlWidths !== ['100']) {
                     $attrs['width'] = 100;
                     $changed = true;
                     self::record($changes, $path, 'width', $authoredWidth, 100, $style);
@@ -264,6 +261,23 @@ final class CtaStyleMarkup
             }
         }
         return false;
+    }
+
+    /** @return list<string> exact suffixes of every saved width class token */
+    private static function ownHtmlWidthClassValues(BlockMarkup $doc, int $i): array
+    {
+        $values = [];
+        if (preg_match_all('/\bclass\s*=\s*(["\'])(.*?)\1/is', $doc->ownHtml($i), $matches) < 1) {
+            return [];
+        }
+        foreach ($matches[2] as $classValue) {
+            foreach (preg_split('/[\x20\t\r\n\f]+/', trim($classValue), -1, PREG_SPLIT_NO_EMPTY) ?: [] as $token) {
+                if (preg_match('/^wp-block-button__width-(.+)$/', $token, $width) === 1) {
+                    $values[$width[1]] = true;
+                }
+            }
+        }
+        return array_keys($values);
     }
 
     /** @param list<array<mixed>> $changes */

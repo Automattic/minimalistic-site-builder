@@ -160,6 +160,17 @@ test('CTA markup removes local construction and block style enforces full width'
     $nonBlockFixed = CtaStyleMarkup::normalize($nonBlock['markup'], 'outline');
     assert_eq($nonBlock['markup'], $nonBlockFixed['markup']);
     assert_eq([], $nonBlockFixed['changes']);
+
+    $unsupportedWidth = '<!-- wp:button {"width":33} -->'
+        . '<div class="wp-block-button wp-block-button__width-33">'
+        . '<a class="wp-block-button__link wp-element-button">Odd</a></div><!-- /wp:button -->';
+    $unsupportedBlock = CtaStyleMarkup::normalize($unsupportedWidth, 'block');
+    assert_contains('"width":100', $unsupportedBlock['markup']);
+    assert_contains('wp-block-button__width-100', $unsupportedBlock['markup']);
+    assert_true(!str_contains($unsupportedBlock['markup'], 'wp-block-button__width-33'));
+    $unsupportedOutline = CtaStyleMarkup::normalize($unsupportedWidth, 'outline');
+    assert_true(!str_contains($unsupportedOutline['markup'], '"width"'));
+    assert_true(!str_contains($unsupportedOutline['markup'], 'wp-block-button__width-33'));
 });
 
 test('FixBlocks CTA normalization isolates failed files and keeps healthy siblings repaired', function () {
