@@ -2923,3 +2923,23 @@ test('ua reassertion covers only tags with a UA block-end margin', function () {
     }
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('a fully-clipping clip-path is salvaged as ONE declaration, not the whole appendix', function () {
+    // Regression (BIGR-887): validate() reported the problem but the salvage
+    // pass had no arm for it, so the declaration survived, revalidation failed
+    // again, and the entire CSS appendix was dropped over one property.
+    foreach (['inset(0 0 100% 0)', 'circle(0)', 'inset(100%)'] as $value) {
+        [$salvaged, $rows] = PageStylesStep::dropOffendingDeclarations(
+            '.overlap-up{margin-top:-3.5rem;clip-path:' . $value . '}'
+        );
+        assert_eq('.overlap-up{margin-top:-3.5rem;}', $salvaged, $value);
+        assert_eq(1, count($rows), $value);
+        assert_contains('hides content', $rows[0]);
+    }
+
+    // A partial clip is authored intent and survives untouched.
+    $partial = '.overlap-up{margin-top:-3.5rem;clip-path:inset(0 0 40% 0)}';
+    [$kept, $none] = PageStylesStep::dropOffendingDeclarations($partial);
+    assert_eq($partial, $kept, 'byte-for-byte');
+    assert_eq([], $none);
+});

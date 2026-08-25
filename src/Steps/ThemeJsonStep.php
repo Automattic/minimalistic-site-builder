@@ -2042,15 +2042,30 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             foreach ($node as $key => $value) {
                 if ($key === 'css' && is_string($value)) {
                     [$repaired, $dropped] = CssChecks::dropMotionKitDeclarations($value);
-                    if ($dropped === []) {
-                        continue;
-                    }
-                    $node[$key] = $repaired;
                     foreach ($dropped as $declaration) {
                         $warnings[] = "theme/theme.json {$path}.css: authored declaration "
                             . Warnings::value($declaration)
                             . '; delivered removed; disposition removed custom CSS for a motion-kit class'
                             . ' — assets/motion/ owns those states and the JS driver reveals them';
+                    }
+                    // The committed profile owns every `--motion-*` value on
+                    // :root; a local override retunes the element and
+                    // everything under it. Both sibling steps already check
+                    // this and prompts/theme-json.md already promises the
+                    // build removes it — this is the missing half (BIGR-887).
+                    [$repaired, $overrides] = CssChecks::dropDeclarations(
+                        $repaired,
+                        static fn (array $declaration): bool =>
+                            str_starts_with(strtolower($declaration['property']), '--motion-'),
+                    );
+                    foreach ($overrides as $declaration) {
+                        $warnings[] = "theme/theme.json {$path}.css: authored declaration "
+                            . Warnings::value(trim($declaration['raw']))
+                            . '; delivered removed; disposition motion custom properties are owned by'
+                            . ' the committed profile and cannot be overridden';
+                    }
+                    if ($dropped !== [] || $overrides !== []) {
+                        $node[$key] = $repaired;
                     }
                     continue;
                 }

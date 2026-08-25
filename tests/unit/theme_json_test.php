@@ -3024,3 +3024,31 @@ test('applyPaletteFloor records unrepaired when a contrast floor cannot be met',
         $joined,
     ));
 });
+
+test('theme-json scaffold removes a --motion-* override, as the prompt promises', function () {
+    // Regression (BIGR-887): prompts/theme-json.md ends "Do not declare a
+    // --motion-* custom property either. The build removes any such
+    // declaration and records it as a delivered defect" — and nothing did.
+    // Both sibling steps (page-styles, custom-motion) already check it. The
+    // committed profile owns those values on :root; a local override retunes
+    // the element and everything under it.
+    [$theme, $warnings] = ThemeJsonStep::repairScaffold([
+        'styles' => ['css' => 'body{--motion-enter-duration:0s;--motion-distance:0px;color:inherit}'],
+    ]);
+
+    $css = $theme['styles']['css'];
+    assert_true(!str_contains($css, '--motion-enter-duration'), 'the override is gone');
+    assert_true(!str_contains($css, '--motion-distance'), 'both of them');
+    assert_contains('color:inherit', $css, 'the unrelated declaration survives');
+
+    assert_eq(2, count($warnings), 'one actionable row per removal');
+    foreach ($warnings as $warning) {
+        assert_contains('delivered removed', $warning);
+        assert_contains('owned by the committed profile', $warning);
+    }
+
+    // Idempotent.
+    [$again, $none] = ThemeJsonStep::repairScaffold($theme);
+    assert_eq($theme, $again);
+    assert_eq([], $none);
+});
