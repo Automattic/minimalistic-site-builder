@@ -13,6 +13,7 @@ use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\GeneratedJsonFallbackStep;
 use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\CssChecks;
+use Automattic\SiteBuild\PaletteFloor;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
 use Automattic\SiteBuild\Narrator;
@@ -524,6 +525,10 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $groupPaddingWarnings,
             $shapeWarnings,
         );
+
+        // Floors run on the palette about to be written, after every other repair.
+        [$theme, $floorWarnings] = self::applyPaletteFloor($theme);
+        $warnings = array_merge($warnings, $floorWarnings);
 
         $bindRepairs = array_merge($colorRepairs, $fontRepairs);
         $bindReport = ['Successful design-direction writebacks: ' . count($bindRepairs)];
@@ -1410,6 +1415,49 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             unset($theme['styles']['blocks']);
         }
 
+        return [$theme, $warnings];
+    }
+
+    /**
+     * Last pass on the delivered palette: WCAG / hue / chroma floors.
+     * Walks settings.color.palette the same way repairColors does. Pure.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>} theme, warnings
+     */
+    public static function applyPaletteFloor(array $theme): array
+    {
+        $palette = $theme['settings']['color']['palette'] ?? null;
+        if (!is_array($palette)) {
+            return [$theme, []];
+        }
+        $map = [];
+        foreach ($palette as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            $slug = is_string($entry['slug'] ?? null) ? trim($entry['slug']) : '';
+            if ($slug === '') {
+                continue;
+            }
+            $color = $entry['color'] ?? null;
+            if (!is_string($color) || ContrastMath::hexToRgb($color) === null) {
+                continue;
+            }
+            $map[$slug] = trim($color);
+        }
+        $warnings = [];
+        $fixed = PaletteFloor::repair($map, $warnings);
+        foreach ($theme['settings']['color']['palette'] as $i => $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            $slug = is_string($entry['slug'] ?? null) ? trim($entry['slug']) : '';
+            if ($slug === '' || !array_key_exists($slug, $fixed)) {
+                continue;
+            }
+            $theme['settings']['color']['palette'][$i]['color'] = $fixed[$slug];
+        }
         return [$theme, $warnings];
     }
 

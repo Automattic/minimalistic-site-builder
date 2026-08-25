@@ -2852,3 +2852,113 @@ test('theme-json scaffold does not assign core/quote a font size', function () {
         'an explicitly authored quote size survives',
     );
 });
+
+test('applyPaletteFloor repairs a V1 palette in theme.json list shape', function () {
+    $theme = [
+        'settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#131313', 'name' => 'Base'],
+            ['slug' => 'contrast', 'color' => '#EDE0CC', 'name' => 'Contrast'],
+            ['slug' => 'primary', 'color' => '#8E1F26', 'name' => 'Primary', 'origin' => 'v1'],
+            ['slug' => 'secondary', 'color' => '#A7C4A0', 'name' => 'Secondary'],
+            ['slug' => 'accent', 'color' => '#D98C3F', 'name' => 'Accent'],
+        ]]],
+    ];
+
+    [$out, $warnings] = ThemeJsonStep::applyPaletteFloor($theme);
+    $bySlug = array_column($out['settings']['color']['palette'], null, 'slug');
+
+    assert_true($bySlug['primary']['color'] !== '#8E1F26', 'primary changes');
+    assert_eq('#131313', $bySlug['base']['color'], 'base unchanged');
+    assert_eq('Primary', $bySlug['primary']['name'], 'name preserved');
+    assert_eq('v1', $bySlug['primary']['origin'], 'extra keys preserved');
+    assert_eq(
+        ['base', 'contrast', 'primary', 'secondary', 'accent'],
+        array_column($out['settings']['color']['palette'], 'slug'),
+        'order preserved',
+    );
+    $joined = implode(' ', $warnings);
+    assert_contains('authored=', $joined);
+    assert_contains('delivered=', $joined);
+    assert_contains('disposition=', $joined);
+    assert_contains('palette.primary', $joined);
+});
+
+test('theme-json write applies the palette floor to V1 hexes', function () {
+    with_project('builder_tj_floor_', function ($project): void {
+        $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
+        $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+        seed_test_design_direction($project);
+
+        $payload = valid_theme_payload();
+        $v1 = [
+            'base' => '#131313',
+            'contrast' => '#EDE0CC',
+            'primary' => '#8E1F26',
+            'secondary' => '#A7C4A0',
+            'accent' => '#D98C3F',
+        ];
+        foreach ($payload['settings']['color']['palette'] as &$entry) {
+            $slug = $entry['slug'] ?? '';
+            if (isset($v1[$slug])) {
+                $entry['color'] = $v1[$slug];
+            }
+        }
+        unset($entry);
+
+        $llm = new FakeLlm();
+        $llm->queueJson($payload);
+        quietly(fn () => (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project));
+
+        $bySlug = array_column(
+            $project->readJson('theme/theme.json')['settings']['color']['palette'],
+            'color',
+            'slug',
+        );
+        assert_true($bySlug['primary'] !== '#8E1F26', 'written primary left the failing V1 hex');
+        assert_eq('#131313', $bySlug['base'], 'base stays');
+        $joined = implode(' ', $project->readJson('warnings.json')['theme-json'] ?? []);
+        assert_contains('palette.primary', $joined);
+    });
+});
+
+test('applyPaletteFloor leaves a clean C1 palette unchanged', function () {
+    $theme = [
+        'settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#F7F4EE', 'name' => 'Base'],
+            ['slug' => 'contrast', 'color' => '#1B1B1B', 'name' => 'Contrast'],
+            ['slug' => 'primary', 'color' => '#7B2D26', 'name' => 'Primary'],
+            ['slug' => 'secondary', 'color' => '#3E5C4A', 'name' => 'Secondary'],
+            ['slug' => 'accent', 'color' => '#1F6F8B', 'name' => 'Accent'],
+        ]]],
+    ];
+    $before = $theme;
+
+    [$out, $warnings] = ThemeJsonStep::applyPaletteFloor($theme);
+
+    assert_eq([], $warnings);
+    assert_eq($before, $out, 'hexes unchanged');
+});
+
+test('applyPaletteFloor records unrepaired when a contrast floor cannot be met', function () {
+    $theme = [
+        'settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#808080', 'name' => 'Base'],
+            ['slug' => 'contrast', 'color' => '#AAAAAA', 'name' => 'Contrast'],
+            ['slug' => 'primary', 'color' => '#000000', 'name' => 'Primary'],
+            ['slug' => 'secondary', 'color' => '#000000', 'name' => 'Secondary'],
+            ['slug' => 'accent', 'color' => '#000000', 'name' => 'Accent'],
+        ]]],
+    ];
+
+    [$out, $warnings] = ThemeJsonStep::applyPaletteFloor($theme);
+    $bySlug = array_column($out['settings']['color']['palette'], 'color', 'slug');
+    assert_eq('#AAAAAA', $bySlug['contrast'], 'authored contrast kept');
+    $joined = implode(' ', $warnings);
+    assert_contains('path="palette.contrast"', $joined);
+    assert_contains('disposition=unrepaired', $joined);
+    assert_contains('best achieved', $joined);
+    assert_true(!str_contains($joined, 'path="palette.contrast"') || !preg_match(
+        '/path="palette\\.contrast"[^;]*;[^;]*; disposition=repaired/',
+        $joined,
+    ));
+});

@@ -1,0 +1,11 @@
+{
+    "id": "v5",
+    "label": "violation",
+    "palette": {
+        "base": "#12100E",
+        "contrast": "#EDE6DA",
+        "primary": "#C9A227",
+        "secondary": "#8A6F1E",
+        "accent": "#D4AF37"
+    }
+}
