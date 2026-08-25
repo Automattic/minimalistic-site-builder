@@ -129,6 +129,15 @@ final class SectionUnit extends AbstractPageSectionUnit
         $markup = $contract['markup'];
         array_push($repairs, ...$contract['repairs']);
         array_push($warnings, ...$contract['warnings']);
+        $section = $this->section($input);
+        $band = BandSurfaceContract::enforce(
+            $markup,
+            $this->sectionString($section, 'background'),
+            $this->key($input),
+        );
+        $markup = $band->markup;
+        array_push($repairs, ...$band->repairs);
+        array_push($warnings, ...$band->warnings);
         return new MarkupResult($markup, $repairs, $warnings);
     }
 

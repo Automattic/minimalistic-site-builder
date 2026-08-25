@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\AboveFoldContract;
+use Automattic\SiteBuild\BandColor;
 use Automattic\SiteBuild\CardStyle;
 use Automattic\SiteBuild\ConceptSeeds;
 use Automattic\SiteBuild\Device;
@@ -86,7 +87,7 @@ final class DesignDirectionStep implements Step
     private const REPORT_FILE = 'design-direction.txt';
 
     /** Palette roles a direction commits to — the same slugs theme.json requires. */
-    public const PALETTE_ROLES = ['base', 'contrast', 'primary', 'secondary', 'accent'];
+    public const PALETTE_ROLES = ['base', 'contrast', 'primary', 'secondary', 'accent', 'band'];
 
     /**
      * The corner languages a direction may commit to. `sharp` is the default
@@ -694,6 +695,20 @@ final class DesignDirectionStep implements Step
                     $repairs[] = 'designDirection.json: field palette.base authored '
                         . self::describe($authored) . ' delivered ' . self::describe($moved)
                         . '; disposition moved onto the committed "' . $groundTint . '" ground';
+                }
+            }
+        }
+
+        if (isset($palette['base'])) {
+            $authoredBand = $palette['band'] ?? null;
+            if (!is_string($authoredBand) || !BandColor::valid($palette['base'], $authoredBand)) {
+                $band = BandColor::fromBase($palette['base']);
+                if ($band !== null) {
+                    $palette['band'] = $band;
+                    $repairs[] = 'designDirection.json: field palette.band authored '
+                        . self::describe($authoredBand) . ' delivered ' . self::describe($band)
+                        . '; disposition derived a same-family surface 10 lightness points from base '
+                        . 'without crossing the page light/dark key';
                 }
             }
         }

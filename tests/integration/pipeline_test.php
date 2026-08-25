@@ -405,7 +405,12 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     assert_eq('2rem', $specialsRoot['style']['spacing']['padding']['right'], 'horizontal shorthand padding survives');
     assert_eq('auto', $specialsRoot['style']['spacing']['margin']['left'], 'horizontal shorthand margin survives');
     assert_eq('hover-lift', $specialsRoot['className'], 'the root overlap utility is stripped');
-    assert_contains('<div class="wp-block-group hover-lift"', $specialsHtml, 'the root wrapper loses overlap-up too');
+    assert_eq('band', $specialsRoot['backgroundColor'], 'the normalized tinted assignment resolves to its own surface role');
+    assert_contains(
+        '<div class="wp-block-group hover-lift has-band-background-color has-background"',
+        $specialsHtml,
+        'the root wrapper loses overlap-up while retaining its committed band surface',
+    );
     assert_contains('wp-block-group overlap-up', $specialsHtml, 'the nested overlap utility remains available');
     assert_true(!str_contains($specialsHtml, '12rem'), 'no orphaned model spacing survives the pipeline');
 

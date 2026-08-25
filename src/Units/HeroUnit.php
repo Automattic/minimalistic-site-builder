@@ -117,6 +117,14 @@ final class HeroUnit extends AbstractPageSectionUnit
             $warnings,
         );
         $markup = GeneratedMarkup::clampHeroTopPadding($markup, $key, $repairs);
+        $band = BandSurfaceContract::enforce(
+            $markup,
+            $this->sectionString($context['section'], 'background'),
+            $key,
+        );
+        $markup = $band->markup;
+        array_push($repairs, ...$band->repairs);
+        array_push($warnings, ...$band->warnings);
         $before = $markup;
         $markup = GeneratedMarkup::constrainedPart($markup);
         if ($markup !== $before) {
