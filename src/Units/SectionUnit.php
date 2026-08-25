@@ -17,7 +17,9 @@ use Automattic\SiteBuild\SectionComposition;
  * - page: slug/title/path of the page the section belongs to
  * - section: slug/title/role/type/purpose/content_notes plus the assigned
  *   layout_archetype/background/vertical_density/handoff. Role is required
- *   and must be one of hero/content/closing.
+ *   and must be one of hero/content/closing. The layout_archetype must be a
+ *   `SectionComposition` id: it selects the one prompt fragment this request
+ *   sees, and the `section-composition--<id>` root class the part delivers.
  * - neighbors: the preceding/following composition summary
  * - header_contract: the header-mode contract for hero-role sections (how the
  *   site header shares the first viewport with this section); '' otherwise
