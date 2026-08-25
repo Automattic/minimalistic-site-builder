@@ -2496,10 +2496,14 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         }
 
         // Solid's accent can be light or dark, so ContrastFixStep owns the
-        // exact readable label choice. Preserve an authored/repaired label and
-        // seed base only when no color exists for that later check to inspect.
+        // exact readable label choice. Preserve only a prior deterministic
+        // base/contrast result; arbitrary model colors are not part of the
+        // bounded construction and are replaced before that later check.
         if ($style === 'solid') {
-            $label = is_string($authoredLabel) && trim($authoredLabel) !== ''
+            $label = is_string($authoredLabel) && in_array($authoredLabel, [
+                'var:preset|color|base',
+                'var:preset|color|contrast',
+            ], true)
                 ? $authoredLabel
                 : 'var:preset|color|base';
             if (($button['color']['text'] ?? null) !== $label) {

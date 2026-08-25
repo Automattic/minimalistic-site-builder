@@ -81,6 +81,18 @@ test('CTA theme repair owns construction while preserving typography and shape r
     assert_eq($shaped, $afterShape, 'later shape wiring may reorder border keys but does not drift CTA');
     assert_eq([], $afterShapeRepairs, 'JSON object key order is not reported as CTA drift');
 
+    $rawSolid = ['styles' => ['elements' => ['button' => [
+        'color' => ['text' => '#fefefe'],
+    ]]]];
+    [$solidTheme] = ThemeJsonStep::repairCtaStyle($rawSolid, 'solid');
+    assert_eq(
+        'var:preset|color|base',
+        $solidTheme['styles']['elements']['button']['color']['text'],
+        'solid rejects an arbitrary model label color before contrast repair',
+    );
+    $solidTheme['styles']['elements']['button']['color']['text'] = 'var:preset|color|contrast';
+    [, $solidFixedRepairs] = ThemeJsonStep::repairCtaStyle($solidTheme, 'solid');
+    assert_eq([], $solidFixedRepairs, 'a deterministic contrast/base repair is retained');
 });
 
 test('theme-json production write binds the committed CTA construction', function () {
