@@ -758,3 +758,115 @@ test('the opening hero keeps a lg bottom floor on a shared seam; other seams sti
     );
     assert_contains('bottom=lg', implode("\n", $result['notes']));
 });
+
+test('a shared seam keeps a bottom edge when the next section paints its own top rule', function () {
+    // Regression (BIGR-882): portfolio2's "Twenty Years of Witness" collapsed
+    // its bottom edge to 0 onto a following base section carrying
+    // `device--hairline-rule`. That device is `box-shadow: inset 0 1px 0` on
+    // the section root, so the line paints exactly where the gap is zero and
+    // the last line of body copy sat flush against it.
+    $plain = sr_section(['layout' => ['type' => 'constrained']],
+        '<!-- wp:paragraph --><p>Body</p><!-- /wp:paragraph -->');
+    $ruled = sr_section([
+        'className' => 'device--hairline-rule',
+        'layout' => ['type' => 'constrained'],
+    ], '<!-- wp:paragraph --><p>Body</p><!-- /wp:paragraph -->');
+
+    $result = SectionRhythm::rewrite([
+        ['slug' => 'overview', 'markup' => $plain, 'density' => 'spacious', 'background' => 'base'],
+        ['slug' => 'archive', 'markup' => $ruled, 'density' => 'compact', 'background' => 'base'],
+        ['slug' => 'closing', 'markup' => $plain, 'density' => 'standard', 'background' => 'base'],
+    ]);
+
+    $overview = sr_root_attrs($result['markups'][0])['style']['spacing']['padding'];
+    assert_eq('var:preset|spacing|xxl', $overview['top'], 'the section still owns its own top edge');
+    assert_eq(
+        'var:preset|spacing|lg',
+        $overview['bottom'],
+        'the rule sits centred: this bottom edge mirrors the ruled section\'s own lg top'
+    );
+
+    // The ruled section itself has no rule below it, so its own shared seam
+    // still collapses — only the boundary that draws a line is protected.
+    assert_eq(
+        '0',
+        sr_root_attrs($result['markups'][1])['style']['spacing']['padding']['bottom'],
+        'a shared seam with nothing drawn on it still collapses to 0'
+    );
+    assert_contains('paints a rule on its own top edge', implode("\n", $result['notes']));
+});
+
+test('a top-edge rule that lives only in saved HTML still protects the seam above it', function () {
+    // section-rhythm runs before fix-blocks, so a class can still be present
+    // only in the block's saved HTML; the fixer rescues it into className
+    // later. Reading one representation would miss those.
+    $plain = sr_section(['layout' => ['type' => 'constrained']],
+        '<!-- wp:paragraph --><p>Body</p><!-- /wp:paragraph -->');
+    $htmlOnly = BlockMarkup::serializeComment('group', ['layout' => ['type' => 'constrained']], false)
+        . '<div class="wp-block-group device--hairline-rule">'
+        . '<!-- wp:paragraph --><p>Body</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->';
+
+    $result = SectionRhythm::rewrite([
+        ['slug' => 'overview', 'markup' => $plain, 'density' => 'standard', 'background' => 'contrast'],
+        ['slug' => 'archive', 'markup' => $htmlOnly, 'density' => 'standard', 'background' => 'contrast'],
+    ]);
+    assert_eq(
+        'var:preset|spacing|xl',
+        sr_root_attrs($result['markups'][0])['style']['spacing']['padding']['bottom'],
+        'the seam above an HTML-only rule keeps its edge'
+    );
+});
+
+test('an opening hero above a ruled section takes the larger of the two floors', function () {
+    $hero = sr_section([
+        'className' => 'hero-composition--editorial-split',
+        'layout' => ['type' => 'constrained'],
+    ], '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Split headline</h1><!-- /wp:heading -->');
+    $ruled = sr_section([
+        'className' => 'device--hairline-rule',
+        'layout' => ['type' => 'constrained'],
+    ], '<!-- wp:paragraph --><p>Body</p><!-- /wp:paragraph -->');
+
+    // The hero's own floor is lg; the ruled section's spacious top is xxl.
+    $result = SectionRhythm::rewrite([
+        ['slug' => 'hero', 'markup' => $hero, 'density' => 'standard', 'background' => 'base'],
+        ['slug' => 'story', 'markup' => $ruled, 'density' => 'spacious', 'background' => 'base'],
+    ]);
+    assert_eq(
+        'var:preset|spacing|xxl',
+        sr_root_attrs($result['markups'][0])['style']['spacing']['padding']['bottom'],
+        'the larger floor wins'
+    );
+
+    // And the other way round: a compact ruled section cannot lower the hero
+    // below the lg floor BIGR-775 gave it.
+    $compact = SectionRhythm::rewrite([
+        ['slug' => 'hero', 'markup' => $hero, 'density' => 'standard', 'background' => 'base'],
+        ['slug' => 'story', 'markup' => $ruled, 'density' => 'compact', 'background' => 'base'],
+    ]);
+    assert_eq(
+        'var:preset|spacing|lg',
+        sr_root_attrs($compact['markups'][0])['style']['spacing']['padding']['bottom'],
+        'the hero floor still holds'
+    );
+});
+
+test('a rewritten ruled seam reaches a fixed point', function () {
+    $plain = sr_section(['layout' => ['type' => 'constrained']],
+        '<!-- wp:paragraph --><p>Body</p><!-- /wp:paragraph -->');
+    $ruled = sr_section([
+        'className' => 'device--hairline-rule',
+        'layout' => ['type' => 'constrained'],
+    ], '<!-- wp:paragraph --><p>Body</p><!-- /wp:paragraph -->');
+    $entries = [
+        ['slug' => 'overview', 'markup' => $plain, 'density' => 'spacious', 'background' => 'base'],
+        ['slug' => 'archive', 'markup' => $ruled, 'density' => 'compact', 'background' => 'base'],
+    ];
+    $once = SectionRhythm::rewrite($entries);
+    $twice = SectionRhythm::rewrite([
+        ['slug' => 'overview', 'markup' => $once['markups'][0], 'density' => 'spacious', 'background' => 'base'],
+        ['slug' => 'archive', 'markup' => $once['markups'][1], 'density' => 'compact', 'background' => 'base'],
+    ]);
+    assert_eq($once['markups'], $twice['markups'], 'the pass is idempotent');
+});
