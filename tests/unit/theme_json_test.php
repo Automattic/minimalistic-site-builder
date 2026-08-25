@@ -2853,6 +2853,68 @@ test('theme-json scaffold does not assign core/quote a font size', function () {
     );
 });
 
+test('theme-json scaffold removes motion-kit custom CSS at every style depth', function () {
+    // Regression (BIGR-881): pulso2's theme.json styles.css redefined
+    // `.reveal-up` with a `clip-path: inset(0 0 100% 0)` resting state and a
+    // scroll-driven animation. The kit's `motion-skip` escape clears only
+    // `opacity` and `animation`, so the clip survived with nothing left to
+    // reveal it and the whole hero copy rendered as an empty band.
+    [$theme, $warnings] = ThemeJsonStep::repairScaffold([
+        'styles' => [
+            'css' => 'body{-webkit-font-smoothing:antialiased}'
+                . '@media (prefers-reduced-motion: no-preference){'
+                . '.reveal-up{opacity:0;clip-path:inset(0 0 100% 0);animation:nn-up 1s both}'
+                . '.text-measure{max-width:38rem}'
+                . '}',
+            'blocks' => ['core/group' => [
+                'css' => '.stagger-children>*{opacity:0}&{isolation:isolate}',
+            ]],
+            'elements' => ['h2' => [
+                'css' => '.hero-entrance &{transform:translateY(2rem)}',
+            ]],
+        ],
+    ]);
+
+    $root = $theme['styles']['css'];
+    assert_true(!str_contains($root, 'clip-path'), 'the hidden resting state is gone');
+    assert_true(!str_contains($root, 'animation:nn-up'), 'the generated animation is gone');
+    assert_true(str_contains($root, '.text-measure{max-width:38rem}'), 'a sibling rule survives');
+    assert_true(str_contains($root, 'body{-webkit-font-smoothing:antialiased}'), 'unrelated CSS survives');
+
+    assert_eq(
+        '.stagger-children>*{}&{isolation:isolate}',
+        $theme['styles']['blocks']['core/group']['css'],
+        'nested block CSS is repaired and its non-kit sibling declaration is kept',
+    );
+    assert_eq(
+        '.hero-entrance &{}',
+        $theme['styles']['elements']['h2']['css'],
+        'a kit class as an ANCESTOR is owned too, not only as the subject',
+    );
+
+    // Every removal is actionable and durable.
+    assert_eq(5, count($warnings), 'one warning per removed declaration');
+    foreach ($warnings as $warning) {
+        assert_contains('delivered removed', $warning);
+        assert_contains('motion-kit class', $warning);
+    }
+    assert_contains('styles.css: authored declaration', implode("\n", $warnings));
+    assert_contains('styles.blocks.core/group.css: authored declaration', implode("\n", $warnings));
+    assert_contains('styles.elements.h2.css: authored declaration', implode("\n", $warnings));
+
+    // A repair pass must reach a fixed point.
+    [$again, $noWarnings] = ThemeJsonStep::repairScaffold($theme);
+    assert_eq($theme, $again, 'idempotent');
+    assert_eq([], $noWarnings);
+});
+
+test('theme-json scaffold leaves custom CSS that names no motion class untouched', function () {
+    $css = '.text-measure{max-width:38rem}.overlap-up{margin-top:-3.5rem}';
+    [$theme, $warnings] = ThemeJsonStep::repairScaffold(['styles' => ['css' => $css]]);
+    assert_eq($css, $theme['styles']['css'], 'byte-for-byte');
+    assert_eq([], $warnings);
+});
+
 test('applyPaletteFloor repairs a V1 palette in theme.json list shape', function () {
     $theme = [
         'settings' => ['color' => ['palette' => [
