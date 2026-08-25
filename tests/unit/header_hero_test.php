@@ -1605,6 +1605,59 @@ test('a surviving overlay earns the clear resting state and raises a just-short 
     });
 });
 
+test('a redundant has-background-dim-50 still earns the clear resting state (BIGR-886)', function () {
+    // Core's save() omits the numbered class at its 50 default, but the model
+    // spells it out routinely and the two render at the same opacity:.5. The
+    // grant must read past that cosmetic spelling; treating it as
+    // untrustworthy paint left 12 of 22 cohort overlays behind the scrim bar.
+    with_project('builder_hh_redundant_dim_', function ($project) {
+        $pages = [[
+            'slug' => 'home', 'title' => 'Home', 'front' => true,
+            'sections' => [[
+                'slug' => 'hero',
+                'role' => 'hero',
+                'layout_archetype' => 'full-bleed-cover',
+                'background' => 'image',
+            ]],
+        ]];
+        $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+        $project->writeJson('theme/theme.json', hh_theme_json());
+        $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'calm']);
+        $project->writeJson('pages.json', ['pages' => $pages]);
+        hh_above_fold($project, $pages, 'cinematic-safe-zone');
+        $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
+        $project->writeText(
+            'theme/parts/page-home--hero.html',
+            '<!-- wp:group {"anchor":"hero","className":"hero-composition--cinematic-safe-zone hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
+                . '<div id="hero" class="wp-block-group hero-composition--cinematic-safe-zone hero-mobile--stack-media-first">'
+                . '<!-- wp:cover {"url":"theme:./assets/hero.jpg","align":"full","dimRatio":50,"overlayColor":"contrast"} -->'
+                . '<div class="wp-block-cover alignfull"><span aria-hidden="true" '
+                . 'class="wp-block-cover__background has-contrast-background-color '
+                . 'has-background-dim-50 has-background-dim"></span>'
+                . '<div class="wp-block-cover__inner-container"></div></div><!-- /wp:cover -->'
+                . '</div><!-- /wp:group -->',
+        );
+
+        putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
+        (new HeaderHeroStep())->run($project);
+
+        $artifact = $project->readJson(HeaderBehavior::FILE);
+        assert_eq(HeaderBehavior::OVERLAY_TO_SOLID, $artifact['behavior']);
+        assert_eq(HeaderBehavior::TREATMENT_TRANSPARENT, $artifact['topTreatment'], 'the proven overlay rests clear');
+        assert_contains('header-top-transparent', $project->readText('theme/parts/header.html'));
+
+        // The raise leaves exactly one numbered opacity class on the span:
+        // stacking the redundant 50 beside the new value would hand Core two
+        // competing opacity rules for the paint the grant just proved.
+        $hero = $project->readText('theme/parts/page-home--hero.html');
+        assert_contains('"dimRatio":60', $hero);
+        assert_contains('has-background-dim-60 has-background-dim', $hero);
+        assert_true(!str_contains($hero, 'has-background-dim-50'), 'the redundant 50 class must be gone');
+        assert_eq(1, substr_count($hero, 'has-background-dim-'));
+        assert_true(!$project->exists('warnings.json'), 'the earned clear state is warning-free');
+    });
+});
+
 test('competing cover paint keeps a surviving overlay behind its scrim veil (BIGR-778)', function () {
     with_project('builder_hh_competing_paint_', function ($project) {
         $pages = [[
