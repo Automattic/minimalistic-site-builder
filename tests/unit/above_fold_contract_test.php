@@ -364,6 +364,40 @@ test('overlay inspection accepts protected image and solid fallback roots but re
         'base',
     ), 'an exact protection-token mismatch is rejected for inverted palettes');
 
+    // Core's save() omits the numbered class at its 50 default, but both
+    // spellings resolve to the same opacity:.5 rule, so the redundant token
+    // generated markup often carries is a cosmetic spelling, not a reason to
+    // keep the overlay header's scrim. The one that really is untrustworthy —
+    // a numbered class naming a DIFFERENT dim than the attribute — is
+    // rejected above as $staleDimImage.
+    $redundantDimImage = str_replace(
+        'has-background-dim"',
+        'has-background-dim-50 has-background-dim"',
+        $image,
+    );
+    assert_true(AboveFoldPartFacts::supportsOverlay($redundantDimImage, 'image', 'contrast'));
+    assert_true(AboveFoldPartFacts::supportsClearOverlayTop($redundantDimImage, 'image', 'contrast'));
+    assert_eq(
+        50.0,
+        AboveFoldPartFacts::clearOverlayTopDimRatio($redundantDimImage, 'image', 'contrast'),
+    );
+    $mismatchedRedundantDimImage = str_replace(
+        'has-background-dim"',
+        'has-background-dim-60 has-background-dim"',
+        $image,
+    );
+    assert_true(!AboveFoldPartFacts::supportsClearOverlayTop(
+        $mismatchedRedundantDimImage,
+        'image',
+        'contrast',
+    ), 'a numbered dim class disagreeing with the attribute stays untrustworthy');
+    $missingNumberedDimImage = str_replace(' has-background-dim-60', '', $safeDimImage);
+    assert_true(!AboveFoldPartFacts::supportsClearOverlayTop(
+        $missingNumberedDimImage,
+        'image',
+        'contrast',
+    ), 'a non-default dim still requires the numbered class Core saves for it');
+
     $fallback = above_fold_solid_part('hero', 'contrast');
     assert_true(AboveFoldPartFacts::supportsOverlay($fallback, 'image', 'contrast'));
     assert_true(AboveFoldPartFacts::supportsClearOverlayTop($fallback, 'image', 'contrast'));

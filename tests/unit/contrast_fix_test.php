@@ -344,6 +344,22 @@ test('a dimRatio repair raised from the 50 default adds the numbered saved-HTML 
     assert_contains('has-background-dim-60 has-background-dim', $out);
 });
 
+test('a dimRatio repair raised from a redundant has-background-dim-50 leaves one numbered class', function () {
+    // Generated markup often spells out the numbered class Core's save()
+    // omits at its 50 default. The swap must clear it instead of stacking a
+    // second opacity class on the same span.
+    $src = '<!-- wp:cover {"dimRatio":50} -->'
+        . '<div class="wp-block-cover"><span aria-hidden="true" '
+        . 'class="wp-block-cover__background has-background-dim-50 has-background-dim"></span>'
+        . '<div class="wp-block-cover__inner-container"></div></div><!-- /wp:cover -->';
+    $doc = BlockMarkup::parse($src);
+    ContrastFix::swapDimClass($doc, 0, 50, 70);
+    $out = $doc->render();
+    assert_contains('has-background-dim-70 has-background-dim', $out);
+    assert_true(!str_contains($out, 'has-background-dim-50'), 'redundant 50 class must be gone');
+    assert_eq(1, substr_count($out, 'has-background-dim-'));
+});
+
 test('a dimRatio repair moved to the 50 default removes only the numbered class', function () {
     $src = '<!-- wp:cover {"dimRatio":40} -->'
         . '<div class="wp-block-cover"><span aria-hidden="true" '

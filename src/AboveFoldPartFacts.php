@@ -744,21 +744,24 @@ final class AboveFoldPartFacts
             $classes,
             static fn (string $class): bool => preg_match('/^has-background-dim-[0-9]+$/', $class) === 1,
         )));
-        if ($renderedDim === 50) {
-            if ($numbered !== []) {
-                return false;
-            }
-        } elseif ($numbered !== ["has-background-dim-{$renderedDim}"]) {
+        // Core omits the numbered class at its 50 default, but both spellings
+        // resolve to the same opacity:.5 rule, so a redundant
+        // has-background-dim-50 is a cosmetic non-canonical spelling, not
+        // evidence of untrustworthy paint. Accept it and keep rejecting a
+        // numbered class that names a DIFFERENT dim than the attribute: that
+        // one is stale and really does render an opacity we did not prove.
+        if ($numbered !== [] && $numbered !== ["has-background-dim-{$renderedDim}"]) {
+            return false;
+        }
+        if ($renderedDim !== 50 && $numbered === []) {
             return false;
         }
 
         $allowedClasses = [
             'wp-block-cover__background',
             'has-background-dim',
+            "has-background-dim-{$renderedDim}",
         ];
-        if ($renderedDim !== 50) {
-            $allowedClasses[] = "has-background-dim-{$renderedDim}";
-        }
         if (is_string($overlayColor) && $overlayColor !== '') {
             $allowedClasses[] = "has-{$protectionToken}-background-color";
         }
