@@ -3,6 +3,9 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Units;
 
+use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\SectionComposition;
+
 /**
  * Generate one page section from a self-contained input.
  *
@@ -68,12 +71,18 @@ final class SectionUnit extends AbstractPageSectionUnit
             }
         }
 
+        $archetype = $this->archetype($input);
         $composition = $this->renderer->render('section-composition.md', [
             'layout_archetype' => $compositionVars['layout_archetype'],
             'background'       => $compositionVars['background'],
             'vertical_density' => $compositionVars['vertical_density'],
             'handoff'          => $compositionVars['handoff'],
             'neighbors'        => $this->inputString($input, 'neighbors'),
+            'root_marker'      => SectionComposition::marker($archetype),
+            'composition_recipe' => $this->renderer->render(
+                SectionComposition::recipeTemplate($archetype),
+                []
+            ),
         ]);
 
         $request = $this->renderedRequest('section.md', $this->commonVars($input) + [
@@ -113,9 +122,19 @@ final class SectionUnit extends AbstractPageSectionUnit
     public function finish(string $raw, array $input): MarkupResult
     {
         $cardStyle = $this->cardStyle($input);
+        $archetype = $this->assignedArchetype($input);
         $warnings = [];
         $repairs = [];
         $markup = GeneratedMarkup::normalize($raw, $this->key($input), $warnings, $repairs);
+        if ($archetype !== null && self::hasOneGroupRoot($markup)) {
+            $markup = GeneratedMarkup::withRootClassMarker(
+                $markup,
+                SectionComposition::MARKER_PREFIX,
+                SectionComposition::marker($archetype),
+                $this->key($input),
+                $repairs
+            );
+        }
         $listThumb = ListThumbContract::enforce($markup, $this->key($input));
         $markup = $listThumb['markup'];
         array_push($repairs, ...$listThumb['repairs']);
@@ -129,7 +148,73 @@ final class SectionUnit extends AbstractPageSectionUnit
         $markup = $contract['markup'];
         array_push($repairs, ...$contract['repairs']);
         array_push($warnings, ...$contract['warnings']);
+        // Advisory only: the catalog reports a section that ignored its
+        // assignment and the build delivers the safe parseable markup anyway.
+        if ($archetype !== null) {
+            array_push(
+                $warnings,
+                ...SectionComposition::markupWarnings($markup, $archetype, $this->key($input)),
+            );
+        }
         return new MarkupResult($markup, $repairs, $warnings);
+    }
+
+    /**
+     * The catalog archetype assigned to this section, for `request()`, which
+     * cannot brief a recipe it does not have. A missing or unknown value is a
+     * RuntimeException so SectionsStep isolates the one bad section instead of
+     * ending a paid-for build; PagePlanStep already coerces every delivered
+     * plan value into the catalog before pages.json is written.
+     */
+    private function archetype(array $input): string
+    {
+        $section = $this->section($input);
+        $archetype = trim($this->sectionString($section, 'layout_archetype'));
+        if (!SectionComposition::isKnown($archetype)) {
+            $slug = trim($this->sectionString($section, 'slug'));
+            $pageSlug = trim($this->pageString($input, 'slug'));
+            throw new \RuntimeException(
+                "sections: page '{$pageSlug}' section '{$slug}' has unknown layout_archetype "
+                . "'{$archetype}' — use one of: " . implode(', ', SectionComposition::ARCHETYPES)
+            );
+        }
+        return $archetype;
+    }
+
+    /**
+     * The same archetype for `finish()`, or null when the caller assigned
+     * none. Delivery never throws over a plan field: `request()` is the
+     * boundary that demands the assignment, and an adapter that finishes
+     * markup it did not brief simply gets no marker and no catalog check.
+     * Nothing is lost, so no warning is recorded (AGENTS.md rung 2).
+     */
+    private function assignedArchetype(array $input): ?string
+    {
+        $section = $this->section($input);
+        $archetype = trim($this->sectionString($section, 'layout_archetype'));
+        return SectionComposition::isKnown($archetype) ? $archetype : null;
+    }
+
+    /**
+     * Whether the delivered markup already is one complete top-level wp:group.
+     *
+     * `GeneratedMarkup::withRootClassMarker()` would otherwise WRAP a
+     * multi-root or non-group part to create that root. That repair is a
+     * deliberate non-goal here: `SectionsStep::assertOpeningRoot()` still owns
+     * the root contract for a page opening, and wrapping would silently retire
+     * its reviewed fallback. A part that fails this gate keeps its authored
+     * bytes and draws the catalog's advisory root-marker warning instead.
+     */
+    private static function hasOneGroupRoot(string $markup): bool
+    {
+        $document = BlockMarkup::parse($markup);
+        $roots = array_values(array_filter(
+            $document->indices(),
+            static fn (int $index): bool => $document->parent($index) === null,
+        ));
+        return count($roots) === 1
+            && $document->name($roots[0]) === 'group'
+            && $document->endOffset($roots[0]) !== null;
     }
 
     private function cardStyle(array $input): string
