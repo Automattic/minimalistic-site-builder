@@ -60,8 +60,9 @@ final class SiteSpecStep implements Step
     /** A user-stated contact domain; empty is the no-contact-domain state. */
     private const EMAIL_DOMAIN = '/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/';
 
-    /** Extra keys whose values are contact facts, not identity or copy. */
-    private const CONTACT_KEY = '/(?<![a-z])(?:e-?mails?|phones?|telephones?|mobiles?|tels?|whatsapp|fax(?:es)?|address(?:es)?|streets?|urls?|websites?|instagram|twitter|facebook|linkedin|social)(?![a-z])/i';
+    /** Extra keys whose values are contact facts, not identity or copy. Matched
+     * against a key normalized by keyNamesContact(), so it needs no case flag. */
+    private const CONTACT_KEY = '/(?<![a-z])(?:e[-_]?mails?|phones?|telephones?|mobiles?|tels?|whats[-_]?app|fax(?:es)?|address(?:es)?|streets?|urls?|websites?|instagram|twitter|facebook|linkedin|social)(?![a-z])/';
 
     /** Internal artifact basenames that generated page slugs must not claim. */
     private const RESERVED_PAGE_SLUGS = ['preview'];
@@ -171,7 +172,8 @@ final class SiteSpecStep implements Step
         // rewrite, so grounding against that would let a contact detail refine
         // invented vouch for itself. `original_prompt` is absent only when no
         // refinement happened, and `prompt` is then the raw input.
-        $statedPrompt = (string) ($meta['original_prompt'] ?? $prompt);
+        $stated = $meta['original_prompt'] ?? null;
+        $statedPrompt = is_string($stated) && trim($stated) !== '' ? $stated : $prompt;
 
         $spec = self::normalize(
             $spec,
@@ -464,7 +466,7 @@ final class SiteSpecStep implements Step
         if (!is_string($value)) {
             // A phone emitted as a JSON number is still a phone, but only its key
             // can say so — a bare number carries no contact shape of its own.
-            if ((is_int($value) || is_float($value)) && preg_match(self::CONTACT_KEY, $key) === 1
+            if ((is_int($value) || is_float($value)) && self::keyNamesContact($key)
                 && !self::promptContains($statedPrompt, (string) $value)
             ) {
                 $warnings[] = "site spec \"{$path}\" was not stated in the prompt; dropped";
@@ -485,7 +487,7 @@ final class SiteSpecStep implements Step
 
     private static function isContactShaped(string $key, string $value): bool
     {
-        if (preg_match(self::CONTACT_KEY, $key) === 1) {
+        if (self::keyNamesContact($key)) {
             return true;
         }
         if (filter_var($value, FILTER_VALIDATE_EMAIL)) {
@@ -500,6 +502,18 @@ final class SiteSpecStep implements Step
             return true;
         }
         return preg_match('/^\+?[0-9][0-9(). -]{6,}$/', $value) === 1;
+    }
+
+    /**
+     * Whether the key names a contact fact. Generated JSON spells one key three
+     * ways — emailAddress, email_address, email — so the word boundaries the
+     * pattern needs (to keep `tel` out of `hotel`) are cut at a camelCase hump
+     * too, or every camelCase contact key reads as ordinary copy.
+     */
+    private static function keyNamesContact(string $key): bool
+    {
+        $words = strtolower((string) preg_replace('/(?<=[a-z0-9])(?=[A-Z])/', '_', $key));
+        return preg_match(self::CONTACT_KEY, $words) === 1;
     }
 
     private static function promptStatesDomain(string $prompt, string $domain): bool

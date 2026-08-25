@@ -847,3 +847,73 @@ test('site-spec keeps a numeric phone the prompt stated', function () {
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('site-spec scrubs contact facts under camelCase keys', function () {
+    // Generated JSON spells one key three ways. The word boundaries that keep
+    // `tel` out of `hotel` must cut at a camelCase hump too.
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    $llm->queueJson([
+        'name' => 'Harbor House',
+        'language' => 'en',
+        'emailAddress' => 'hello@harborhouse.com',
+        'phoneNumber' => 2075550100,
+        'streetAddress' => '24 Market Street',
+        'whatsApp' => '+1 207 555 0111',
+        'hotelName' => 'The Harbor',   // `tel` inside `hotel` is not a phone
+        'memberCount' => 1234567,      // a plain count is not a contact fact
+    ]);
+
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $spec = $project->readJson('siteSpec.json');
+    foreach (['emailAddress', 'phoneNumber', 'streetAddress', 'whatsApp'] as $key) {
+        assert_true(!isset($spec[$key]), "{$key} was stated nowhere and must be dropped");
+    }
+    assert_eq('The Harbor', $spec['hotelName'], 'a word merely containing `tel` is not a contact key');
+    assert_eq(1234567, $spec['memberCount']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec keeps camelCase contact facts the prompt stated', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    $meta = $project->readJson('meta.json');
+    $meta['prompt'] = 'A shop. Email hello@harborhouse.com or call +1 207 555 0100.';
+    $project->writeJson('meta.json', $meta);
+    $llm->queueJson([
+        'name' => 'Harbor House',
+        'language' => 'en',
+        'emailAddress' => 'hello@harborhouse.com',
+        'phoneNumber' => '+1 207 555 0100',
+    ]);
+
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $spec = $project->readJson('siteSpec.json');
+    assert_eq('hello@harborhouse.com', $spec['emailAddress']);
+    assert_eq('+1 207 555 0100', $spec['phoneNumber']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec falls back to the prompt when original_prompt is unusable', function () {
+    // A blank or non-string original_prompt must not ground everything to
+    // nothing — that would scrub every contact fact the real prompt states.
+    foreach (['' => 'blank', '   ' => 'whitespace', 0 => 'non-string'] as $bad => $label) {
+        [$project, $llm, $tmp] = make_sitespec_fixture();
+        $meta = $project->readJson('meta.json');
+        $meta['prompt'] = 'A bakery. Email hello@hearthandcrumb.com.';
+        $meta['original_prompt'] = $bad === 0 ? ['not', 'a', 'string'] : $bad;
+        $project->writeJson('meta.json', $meta);
+        $llm->queueJson(['name' => 'Hearth & Crumb', 'language' => 'en', 'email' => 'hello@hearthandcrumb.com']);
+
+        (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+        assert_eq(
+            'hello@hearthandcrumb.com',
+            $project->readJson('siteSpec.json')['email'] ?? null,
+            "a {$label} original_prompt must fall back to the prompt, not scrub everything",
+        );
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
