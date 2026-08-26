@@ -757,9 +757,13 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         }
 
         $settings = is_array($theme['settings'] ?? null) ? $theme['settings'] : [];
-        $authored = is_array($settings['layout'] ?? null)
-            && (($settings['layout'] ?? []) === [] || !array_is_list($settings['layout']))
-                ? $settings['layout']
+        // Keep the raw container for the warning: a malformed layout is dropped
+        // here before normalizeLayoutWidths can name it, so this row is the only
+        // place that authored value is still recorded.
+        $rawLayout = $settings['layout'] ?? null;
+        $authored = is_array($rawLayout)
+            && ($rawLayout === [] || !array_is_list($rawLayout))
+                ? $rawLayout
                 : null;
         $layout = $authored ?? [];
         $alreadyBound = array_key_exists('contentSize', $layout)
@@ -773,7 +777,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             return [$theme, []];
         }
         return [$theme, [
-            'theme/theme.json: settings.layout authored ' . Warnings::value($authored)
+            'theme/theme.json: settings.layout authored ' . Warnings::value($authored ?? $rawLayout)
                 . ' delivered committed "' . $measure . '" measure '
                 . Warnings::value($widths)
                 . '; disposition replaced model-authored widths with deterministic direction token',
