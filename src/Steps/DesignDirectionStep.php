@@ -7,6 +7,7 @@ use Automattic\SiteBuild\AboveFoldContract;
 use Automattic\SiteBuild\BandColor;
 use Automattic\SiteBuild\CardStyle;
 use Automattic\SiteBuild\ConceptSeeds;
+use Automattic\SiteBuild\CtaStyle;
 use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\DirectionExecutability;
 use Automattic\SiteBuild\Env;
@@ -27,6 +28,7 @@ use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\TypeScale;
 use Automattic\SiteBuild\BoundedChoice;
 use Automattic\SiteBuild\Warnings;
 
@@ -363,10 +365,12 @@ final class DesignDirectionStep implements Step
                 'body'    => self::emptyTypeSlot(),
                 'accent'  => self::emptyTypeSlot(),
             ],
+            'type_scale'       => TypeScale::DEFAULT,
             'image_grade'      => '',
             'canvas'           => $canvas,
             'measure'          => Measure::DEFAULT,
             'card_style'       => 'flush',
+            'cta_style'        => CtaStyle::DEFAULT,
             'shape'            => 'sharp',
             'surface'          => Surface::DEFAULT,
             'device'           => Device::DEFAULT,
@@ -753,6 +757,14 @@ final class DesignDirectionStep implements Step
         }
 
         $type = is_array($raw['type'] ?? null) ? $raw['type'] : [];
+        $typeScale = BoundedChoice::normalize(
+            $raw['type_scale'] ?? null,
+            TypeScale::ALL,
+            TypeScale::DEFAULT,
+            'type_scale',
+            $warnings,
+            'invalid modular scale replaced by deterministic classic fallback',
+        );
 
         HeroComposition::assertKnown($assignedRecipe);
 
@@ -780,6 +792,14 @@ final class DesignDirectionStep implements Step
         );
 
         $cardStyle = self::normalizeCardStyle($raw['card_style'] ?? null, $warnings);
+        $ctaStyle = BoundedChoice::normalize(
+            $raw['cta_style'] ?? null,
+            CtaStyle::ALL,
+            CtaStyle::DEFAULT,
+            'cta_style',
+            $warnings,
+            'invalid CTA construction replaced by deterministic solid fallback',
+        );
         $surface = self::normalizeSurface($raw['surface'] ?? null, $warnings);
         $device = self::normalizeDevice($raw['device'] ?? null, $warnings);
         $rhythm = self::normalizeRhythm($raw['rhythm'] ?? null, $warnings);
@@ -860,6 +880,7 @@ final class DesignDirectionStep implements Step
                 'body'    => self::normalizeTypeSlot($type['body'] ?? null, 'body', $warnings),
                 'accent'  => self::normalizeTypeSlot($type['accent'] ?? null, 'accent', $warnings),
             ],
+            'type_scale'       => $typeScale,
             'image_grade'      => trim((string) ($raw['image_grade'] ?? '')),
             // Anything that isn't an explicit "framed" commitment is full-bleed:
             // an accidental frame reads as a rendering bug, not a design choice.
@@ -869,6 +890,7 @@ final class DesignDirectionStep implements Step
             // flush default — inset media must be an explicit opt-in, never
             // the accidental look every site gets.
             'card_style'       => $cardStyle,
+            'cta_style'        => $ctaStyle,
             'shape'            => $shape,
             'surface'          => $surface,
             'device'           => $device,
@@ -1237,6 +1259,12 @@ final class DesignDirectionStep implements Step
             $facts[] = '- **Type**: ' . implode('; ', $pair);
         }
 
+        $typeScale = TypeScale::explicit($direction['type_scale'] ?? null);
+        if ($typeScale !== null) {
+            $facts[] = '- **Type scale**: ' . $typeScale . ' — '
+                . TypeScale::meaning($typeScale) . '. The build owns the six preset values.';
+        }
+
         // Render the canvas commitment with its executable meaning, so the
         // section/header prompts act on it instead of re-interpreting a bare
         // keyword. Directions persisted before the field existed carry none.
@@ -1269,6 +1297,13 @@ final class DesignDirectionStep implements Step
                 'borderless' => 'cards have no box at all; media above a plain text stack — use the `borderless` construction from the card anatomy',
             };
             $facts[] = "- **Card treatment**: {$cardStyle} — {$meaning}.";
+        }
+
+        $ctaStyle = CtaStyle::explicit($direction['cta_style'] ?? null);
+        if ($ctaStyle !== null) {
+            $facts[] = '- **CTA style**: ' . $ctaStyle . ' — ' . CtaStyle::meaning($ctaStyle)
+                . '. The build owns button fill, border, padding, interaction construction, and any arrow glyph;'
+                . ' do not restyle those per button.';
         }
 
         // The page plan reads these two and assigns its per-section archetype,
@@ -1583,6 +1618,24 @@ final class DesignDirectionStep implements Step
             $project->readJson(self::FILE)['density'] ?? null,
             self::DENSITIES,
         ) ?? 'measured';
+    }
+
+    /** The explicit modular type-scale commitment, or null when absent/garbled. */
+    public static function typeScaleFor(Project $project): ?string
+    {
+        if (!$project->exists(self::FILE)) {
+            return null;
+        }
+        return TypeScale::explicit($project->readJson(self::FILE)['type_scale'] ?? null);
+    }
+
+    /** The explicit site-wide CTA construction, or null for a pre-field artifact. */
+    public static function ctaStyleFor(Project $project): ?string
+    {
+        if (!$project->exists(self::FILE)) {
+            return null;
+        }
+        return CtaStyle::explicit($project->readJson(self::FILE)['cta_style'] ?? null);
     }
 
     /**
