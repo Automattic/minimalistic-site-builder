@@ -278,6 +278,7 @@ shot_test('theme-screenshot composes a palette poster when the build generated n
         'contrast'  => '#14213D',
         'accent'    => '#E5533C',
         'secondary' => '#8D99AE',
+        'band'      => '#F1DFC6',
     ]);
 
     quietly(fn () => (new ThemeScreenshotStep())->run($project));
@@ -293,7 +294,7 @@ shot_test('theme-screenshot composes a palette poster when the build generated n
     assert_color_near([253, 246, 236], screenshot_pixel($png, 600, 230), 2, 'headline bar');
     assert_color_near([229, 83, 60], screenshot_pixel($png, 200, 490), 2, 'button');
     assert_color_near([253, 246, 236], screenshot_pixel($png, 600, 600), 2, 'page background');
-    assert_color_near([141, 153, 174], screenshot_pixel($png, 200, 700), 2, 'card');
+    assert_color_near([241, 223, 198], screenshot_pixel($png, 200, 700), 2, 'band-surface card');
     // A build without images is a normal build, not a degraded one.
     assert_true(!$project->exists('warnings.json'), 'the poster path warns about nothing');
 });
