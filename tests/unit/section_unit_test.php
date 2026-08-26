@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\SectionComposition;
 use Automattic\SiteBuild\Tests\FakeLlm;
 use Automattic\SiteBuild\Units\SectionUnit;
 
@@ -65,7 +66,9 @@ test('section prompt keeps unbreakable contact tokens out of display type', func
 
 test('centered-stack prompts keep wrapping copy aligned to the writing-direction start', function () {
     $section = (string) file_get_contents(repo_path('prompts/section.md'));
-    $composition = (string) file_get_contents(repo_path('prompts/section-composition.md'));
+    $composition = (string) file_get_contents(
+        repo_path('prompts/section-compositions/centered-stack.md')
+    );
     $pagePlan = (string) file_get_contents(repo_path('prompts/page-plan.md'));
 
     assert_contains('center display type only', $section, 'short display lines may remain centered');
@@ -140,9 +143,14 @@ test('SectionUnit generates normalized markup from self-contained input', functi
 
     assert_true(!str_contains($markup, '```'), 'code fence removed');
     assert_contains('var:preset|spacing|xl', $markup, 'preset reference normalized');
+    assert_contains(
+        'section-composition--full-bleed-cover',
+        $markup,
+        'the delivered root carries the assigned archetype marker',
+    );
     assert_eq([], $result->warnings, 'semantics-preserving normalization is not a durable warning');
     assert_eq(
-        ['response-fence-removed', 'preset-reference-canonicalized'],
+        ['response-fence-removed', 'preset-reference-canonicalized', 'root-marker-normalized'],
         array_column($result->repairs, 'code')
     );
     assert_eq($result->toArray(), json_decode((string) json_encode($result), true));
@@ -150,8 +158,11 @@ test('SectionUnit generates normalized markup from self-contained input', functi
 
 test('SectionUnit deterministically normalizes list-thumb delivery', function () {
     $llm = new FakeLlm();
+    // The row sits under the section's one top-level group, as the section
+    // contract requires, so the archetype's root marker lands on that group.
     $llm->queueText(
-        '<!-- wp:columns {"className":"list-thumb-flush"} -->'
+        '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">'
+        . '<!-- wp:columns {"className":"list-thumb-flush"} -->'
         . '<div class="wp-block-columns list-thumb-flush">'
         . '<!-- wp:column {"width":"18%"} --><div class="wp-block-column" style="flex-basis:18%">'
         . '<!-- wp:image {"className":"card-media-thumb"} -->'
@@ -161,7 +172,8 @@ test('SectionUnit deterministically normalizes list-thumb delivery', function ()
         . '<!-- wp:heading {"level":3} --><h3 class="wp-block-heading">Item</h3><!-- /wp:heading -->'
         . '<!-- wp:paragraph --><p>One line.</p><!-- /wp:paragraph -->'
         . '</div><!-- /wp:column -->'
-        . '</div><!-- /wp:columns -->',
+        . '</div><!-- /wp:columns -->'
+        . '</div><!-- /wp:group -->',
     );
     $unit = new SectionUnit($llm, new PromptRenderer(repo_path('prompts')));
 
@@ -367,12 +379,18 @@ test('SectionUnit layered request loses only cache marker separators', function 
     $renderer = new PromptRenderer(repo_path('prompts'));
     $request = (new SectionUnit(new FakeLlm(), $renderer))->request($input);
 
+    $archetype = $input['section']['layout_archetype'];
     $composition = $renderer->render('section-composition.md', [
-        'layout_archetype' => $input['section']['layout_archetype'],
+        'layout_archetype' => $archetype,
         'background'       => $input['section']['background'],
         'vertical_density' => $input['section']['vertical_density'],
         'handoff'          => $input['section']['handoff'],
         'neighbors'        => $input['neighbors'],
+        'root_marker'      => SectionComposition::marker($archetype),
+        'composition_recipe' => $renderer->render(
+            SectionComposition::recipeTemplate($archetype),
+            []
+        ),
     ]);
     $rendered = $renderer->render('section.md', [
         'site_context'      => rtrim($renderer->render('site-context.md', [

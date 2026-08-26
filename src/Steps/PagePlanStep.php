@@ -11,10 +11,10 @@ use Automattic\SiteBuild\HeroComposition;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
 use Automattic\SiteBuild\Narrator;
-use Automattic\SiteBuild\PhotographySite;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\SectionComposition;
 use Automattic\SiteBuild\SectionRole;
 use Automattic\SiteBuild\StepDeclaration;
 
@@ -46,19 +46,14 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
 
     use LlmOptions;
 
-    /** Composition menu — must match the archetypes offered in page-plan.md. */
-    public const ARCHETYPES = [
-        'full-bleed-cover',
-        'asymmetric-split',
-        'centered-stack',
-        'offset-grid',
-        'mixed-width-editorial',
-        'equal-card-grid',
-        'list-with-thumbnails',
-    ];
+    /**
+     * Composition menu — must match the archetypes offered in page-plan.md.
+     * `SectionComposition` owns the catalog; this step owns the selection.
+     */
+    public const ARCHETYPES = SectionComposition::ARCHETYPES;
 
     /** Background treatments — must match page-plan.md. */
-    public const BACKGROUNDS = ['base', 'tinted', 'contrast', 'image'];
+    public const BACKGROUNDS = SectionComposition::BACKGROUNDS;
 
     /** Page-owned outer spacing roles — must match page-plan.md. */
     public const VERTICAL_DENSITIES = ['compact', 'standard', 'spacious'];
@@ -1980,7 +1975,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             // hero-only plan appends, so the appended tail takes the role.
             // Each inserted archetype avoids both neighbors so the adjacency
             // variety rule holds by construction.
-            $safeArchetypes = $allowOffsetGrid
+            $safeArchetypes = self::archetypeEligible('offset-grid', $allowOffsetGrid)
                 ? ['centered-stack', 'asymmetric-split', 'offset-grid']
                 : ['centered-stack', 'asymmetric-split', 'mixed-width-editorial'];
             $briefs = [
@@ -2520,10 +2515,10 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         // Neither of these is a safe landing spot for a value we are guessing:
         // a cover has its own interior-page rule and a grid has a cap.
         $excluded = ['full-bleed-cover', 'equal-card-grid'];
-        if (!$allowOffsetGrid) {
-            $excluded[] = 'offset-grid';
-        }
-        $candidates = array_values(array_diff(self::ARCHETYPES, $excluded));
+        $candidates = array_values(array_filter(
+            array_diff(self::ARCHETYPES, $excluded),
+            static fn (string $candidate): bool => self::archetypeEligible($candidate, $allowOffsetGrid),
+        ));
 
         $archetypes = array_map(
             fn (array $s) => trim((string) ($s['layout_archetype'] ?? '')),
@@ -2658,16 +2653,17 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             return self::pickArchetype($archetypes, $i, $allowOffsetGrid, ...$exclude);
         };
 
-        if (!$allowOffsetGrid) {
-            foreach ($archetypes as $i => $archetype) {
-                if ($archetype === 'offset-grid') {
-                    $exclude = ['offset-grid'];
-                    if (!$front && $i === 0) {
-                        $exclude[] = 'full-bleed-cover';
-                    }
-                    $archetypes[$i] = self::pickLevelRow($archetypes, (int) $i, ...$exclude);
-                }
+        foreach ($archetypes as $i => $archetype) {
+            if (!SectionComposition::isKnown($archetype)
+                || self::archetypeEligible($archetype, $allowOffsetGrid)
+            ) {
+                continue;
             }
+            $exclude = [$archetype];
+            if (!$front && $i === 0) {
+                $exclude[] = 'full-bleed-cover';
+            }
+            $archetypes[$i] = self::pickLevelRow($archetypes, (int) $i, ...$exclude);
         }
 
         // Interior-opening pass: normalize() rejects an interior page whose
@@ -2835,18 +2831,18 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         array &$warnings,
         string $pageSlug,
     ): array {
-        if ($allowOffsetGrid) {
-            return $sections;
-        }
         $archetypes = array_map(
             fn (array $s) => trim((string) ($s['layout_archetype'] ?? '')),
             $sections
         );
         foreach ($sections as $i => $section) {
-            if ($archetypes[$i] !== 'offset-grid') {
+            $authored = $archetypes[$i];
+            if (!SectionComposition::isKnown($authored)
+                || self::archetypeEligible($authored, $allowOffsetGrid)
+            ) {
                 continue;
             }
-            $exclude = ['offset-grid'];
+            $exclude = [$authored];
             if (!$front && $i === 0) {
                 $exclude[] = 'full-bleed-cover';
             }
@@ -2854,11 +2850,12 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             $archetypes[$i] = $replacement;
             $sections[$i]['layout_archetype'] = $replacement;
             $slug = trim((string) ($section['slug'] ?? '')) ?: "section-{$i}";
+            $reason = SectionComposition::ineligibleReason($authored);
             $warnings[] = self::valueLossWarning(
                 self::sectionPath($pageSlug, (int) $i) . '.layout_archetype',
-                'offset-grid',
+                $authored,
                 $replacement,
-                "replaced offset-grid for section '{$slug}' because staggered rows are reserved for photography and gallery sites",
+                "replaced {$authored} for section '{$slug}' because {$reason}",
             );
         }
         return $sections;
@@ -2906,7 +2903,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             if ($candidate === 'equal-card-grid') {
                 continue;
             }
-            if (!$allowOffsetGrid && $candidate === 'offset-grid') {
+            if (!self::archetypeEligible($candidate, $allowOffsetGrid)) {
                 continue;
             }
             if (in_array($candidate, $exclude, true)) {
@@ -2924,15 +2921,38 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     }
 
     /**
+     * Whether this build may use the archetypes the catalog gates. The gate
+     * itself lives in `SectionComposition`; this step only supplies the site
+     * facts the predicate reads.
+     *
      * @param array<mixed> $siteSpec
      */
     private static function allowOffsetGridFor(Project $project, array $siteSpec): bool
     {
         $meta = $project->exists('meta.json') ? $project->readJson('meta.json') : [];
-        return PhotographySite::matches(
-            $siteSpec,
-            (string) ($meta['prompt'] ?? ''),
+        return SectionComposition::eligible(
+            'offset-grid',
+            SectionComposition::siteContext($siteSpec, (string) ($meta['prompt'] ?? '')),
         );
+    }
+
+    /**
+     * The catalog's eligibility context for this page's plan. The flag this
+     * step plumbs is exactly "this build is a photography or gallery site",
+     * which is the one predicate input the catalog reads today.
+     *
+     * @return array<string,bool>
+     */
+    private static function eligibilityContext(bool $allowOffsetGrid): array
+    {
+        return [SectionComposition::CONTEXT_PHOTOGRAPHY_SITE => $allowOffsetGrid];
+    }
+
+    /** Whether one archetype is usable on a page carrying this gate flag. */
+    private static function archetypeEligible(string $archetype, bool $allowOffsetGrid): bool
+    {
+        return SectionComposition::isKnown($archetype)
+            && SectionComposition::eligible($archetype, self::eligibilityContext($allowOffsetGrid));
     }
 
     /**
@@ -3137,7 +3157,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             if ($candidate === 'equal-card-grid') {
                 continue;
             }
-            if (!$allowOffsetGrid && $candidate === 'offset-grid') {
+            if (!self::archetypeEligible($candidate, $allowOffsetGrid)) {
                 continue;
             }
             if (in_array($candidate, $exclude, true)) {

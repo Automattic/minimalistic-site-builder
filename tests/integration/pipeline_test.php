@@ -404,8 +404,16 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     assert_eq('var:preset|spacing|lg', $specialsRoot['style']['spacing']['padding']['top'], 'model root padding replaced by plan density');
     assert_eq('2rem', $specialsRoot['style']['spacing']['padding']['right'], 'horizontal shorthand padding survives');
     assert_eq('auto', $specialsRoot['style']['spacing']['margin']['left'], 'horizontal shorthand margin survives');
-    assert_eq('hover-lift', $specialsRoot['className'], 'the root overlap utility is stripped');
-    assert_contains('<div class="wp-block-group hover-lift"', $specialsHtml, 'the root wrapper loses overlap-up too');
+    assert_eq(
+        ['hover-lift', 'section-composition--equal-card-grid'],
+        preg_split('/\s+/', trim((string) $specialsRoot['className']), -1, PREG_SPLIT_NO_EMPTY),
+        'the root overlap utility is stripped and the archetype marker survives',
+    );
+    assert_contains(
+        '<div class="wp-block-group hover-lift section-composition--equal-card-grid"',
+        $specialsHtml,
+        'the root wrapper loses overlap-up too',
+    );
     assert_contains('wp-block-group overlap-up', $specialsHtml, 'the nested overlap utility remains available');
     assert_true(!str_contains($specialsHtml, '12rem'), 'no orphaned model spacing survives the pipeline');
 
