@@ -341,6 +341,30 @@ test('theme-json wires the direction-committed shape into the written theme', fu
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('theme-json wires the direction-committed depth preset into the written theme', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tjdepth_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A neon night market']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project, 'cinematic-safe-zone', ['depth' => 'glow']);
+
+    $payload = valid_theme_payload();
+    $payload['settings']['shadow']['presets'] = [
+        ['slug' => 'depth', 'name' => 'Drifted', 'shadow' => 'none'],
+    ];
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $presets = $project->readJson('theme/theme.json')['settings']['shadow']['presets'];
+    assert_eq('depth', $presets[0]['slug']);
+    assert_eq('Glow', $presets[0]['name']);
+    assert_contains('var(--wp--preset--color--primary)', $presets[0]['shadow']);
+    assert_contains('wired committed depth', $project->readText('logs/theme-json-depth.txt'));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('theme-json wires no image radius without a shape commitment', function () {
     $tmp = sys_get_temp_dir() . '/builder_tjnoshape_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
@@ -644,6 +668,34 @@ test('disableCoreDefaultPresets forces the flags even when the model re-enables 
     assert_eq('base', $theme['settings']['color']['palette'][0]['slug'], 'palette preserved');
     assert_eq(true, $theme['settings']['typography']['fluid'], 'other typography settings preserved');
     assert_true(!isset($theme['settings']['shadow']['defaultPresets']), 'core shadow presets stay enabled');
+});
+
+test('repairDepthPreset publishes one committed preset and preserves unrelated generated presets', function () {
+    $theme = ['settings' => ['shadow' => ['presets' => [
+        ['slug' => 'editorial-lift', 'name' => 'Editorial lift', 'shadow' => '0 1px 2px #0003'],
+        ['slug' => 'depth', 'name' => 'Drifted', 'shadow' => '0 99px red'],
+        ['slug' => 'DEPTH', 'name' => 'Duplicate', 'shadow' => 'none'],
+    ]]]];
+
+    [$repaired, $repairs] = ThemeJsonStep::repairDepthPreset($theme, 'hard-offset');
+    $presets = $repaired['settings']['shadow']['presets'];
+    assert_eq('editorial-lift', $presets[0]['slug']);
+    assert_eq('depth', $presets[1]['slug']);
+    assert_contains('0.55rem 0.55rem 0', $presets[1]['shadow']);
+    assert_eq(2, count($presets), 'duplicate depth slugs collapse to one');
+    assert_eq(1, count($repairs));
+    assert_contains('disposition', $repairs[0]);
+
+    [$fixed, $fixedPointRepairs] = ThemeJsonStep::repairDepthPreset($repaired, 'hard-offset');
+    assert_eq($repaired, $fixed);
+    assert_eq([], $fixedPointRepairs);
+});
+
+test('repairDepthPreset is a no-op without an explicit commitment', function () {
+    $theme = ['settings' => ['color' => ['palette' => []]]];
+    [$same, $repairs] = ThemeJsonStep::repairDepthPreset($theme, null);
+    assert_eq($theme, $same);
+    assert_eq([], $repairs);
 });
 
 test('normalizeSpacingSettings installs the canonical bounded responsive profile', function () {
@@ -1611,7 +1663,13 @@ function theme_json_preset(array $presets, string $slug): array
 test('theme-json declares every artifact it writes', function () {
     $step = new ThemeJsonStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
     assert_eq(
-        ['theme/theme.json', 'logs/theme-json-shape.txt', 'logs/theme-json-direction-bind.txt', 'warnings.json'],
+        [
+            'theme/theme.json',
+            'logs/theme-json-shape.txt',
+            'logs/theme-json-depth.txt',
+            'logs/theme-json-direction-bind.txt',
+            'warnings.json',
+        ],
         $step->declaration()->writes,
     );
 });

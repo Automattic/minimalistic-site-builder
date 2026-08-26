@@ -146,6 +146,7 @@ function item_pattern_unit_input(?string $pattern): array
             'layout_archetype' => 'centered-stack',
             'background' => 'base',
             'vertical_density' => 'compact',
+            'text_placement' => 'centered',
             'item_pattern' => $pattern,
             'handoff' => 'Sits between the hero and closing band.',
         ],

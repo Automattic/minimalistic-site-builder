@@ -132,6 +132,7 @@ function dp3_integration_section(string $slug, string $title, string $archetype)
         'layout_archetype' => $archetype,
         'background' => 'base',
         'vertical_density' => 'standard',
+        'text_placement' => 'left-column',
         'handoff' => "Connect {$title} to adjacent sections.",
     ];
 }

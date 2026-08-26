@@ -44,6 +44,7 @@ Return a single JSON object with this exact shape:
       "background": "one of: base, tinted, contrast, image",
       "vertical_density": "one of: compact, standard, spacious",
       "item_pattern": null,
+      "text_placement": "one of: left-column, centered, split, asymmetric-thirds",
       "handoff": "1 line: what visually sits immediately above and below this section (each neighbor's background + archetype), so the transitions are designed rather than accidental",
       "primary_action": null
     }
@@ -95,6 +96,15 @@ author improvises:
 - spacious — a deliberately slow, short text-led beat; ration this to the few
   moments where whitespace itself carries the composition
 
+Text placement controls the horizontal position of the section's readable copy
+stack, independently of the band's width and `layout_archetype`:
+- left-column — put the readable column on the wide band's leading edge
+- centered — center the copy column, but keep wrapping paragraphs start-aligned
+- split — make copy one side of an intentional two-zone composition; use the
+  section notes to name the occupied side and alternate sides when useful
+- asymmetric-thirds — offset copy into the second or third zone of a wide band;
+  name the exact zone in `content_notes` so the section author does not guess
+
 Rules:
 - LANGUAGE: every "title" and every copy point inside "content_notes" is written in {{language}} — section titles become on-page headings and the notes seed each section's copy, so a plan in the wrong language leaks into the page. "slug" and "type" are machine-facing identifiers and are ALWAYS plain English words in lowercase a-z ASCII, regardless of {{language}} — they are never rendered on the page.
 - IDENTITY: where the plan names the brand or the person, use the spec's `name` / `persona_name` exactly. Any planned email, phone, address, or URL must be an exact SITE SPEC value — never invent alternates, and never construct an address at `email_domain`.
@@ -110,10 +120,13 @@ Rules:
 - Variety is counted across the WHOLE page, not just between neighbors: no single layout_archetype may be used more than TWICE on a page of up to 8 sections (a third of the sections on longer pages). Alternating two archetypes down the page satisfies the adjacency rule and still produces a uniform page — it is rejected. A 6-section page needs at least three different compositions.
 - The DESIGN DIRECTION's **Rhythm** governs every archetype and background choice below — it is the site-level intent these per-section picks express, so read it FIRST and plan the page against it rather than assigning each section in isolation. `stacked` leans on centered-stack and lets type scale carry the page; `alternating` gives consecutive sections visibly different compositions (archetypes, not backgrounds — the background rule below still governs those); `offset` favours asymmetric-split, and offset-grid where this site is eligible for it, while avoiding centered-stack; `interrupted` places at least one "image" or "contrast" full-bleed band per page against an otherwise steady stack; `banded` spends the page's allowance of contrast/tinted bands rather than carrying the page on archetype changes; `gallery` favours grid and image-led bands over text-led ones. One archetype used for most of a page is a failed plan under every rhythm except `stacked`.
 - The DESIGN DIRECTION's **Density** biases vertical_density across the page. `airy` — spend both spacious pauses, and prefer `standard` over `compact` for everything else. `measured` — `standard` throughout, with a spacious pause only where the composition genuinely needs one. `dense` — prefer `compact` wherever the content supports it, and use at most one spacious pause. This is a bias, not an override: spacious stays an accent under every density, and the per-page caps below still hold.
+- The DESIGN DIRECTION's **Text placement** governs every per-section `text_placement` assignment below the page-opening hero. Read it as a site-level intent, the same way Rhythm governs per-section archetypes: `left-column` keeps most copy on the leading grid edge; `centered` centers most short/text-led stacks; `split` favors two-zone bands and alternates the occupied side where semantics allow; `asymmetric-thirds` uses the second and third zones of wide bands so successive text masses do not repeat one axis. A section may take a deliberate exception when its content or archetype demands it, but repeating `left-column` on every below-fold section fails every commitment except `left-column`. The section author still enforces readable measure; this field moves the column, never widens it.
+- `text_placement` remains REQUIRED on the first section because every section shares one schema. Echo the site-level commitment there, but do not use it to redesign the front-page hero: `hero_blueprint.text_anchor` and the locked hero projection remain that opening's authority. The placement becomes executable on the sections below it.
 - Plan the background rhythm deliberately: mostly "base" with 1-2 "contrast" or "image" bands placed for pacing (e.g. under the hero's fold and before the closing CTA) — never alternating stripes, and let the design direction's mood decide how heavy the dark/image bands feel.
 - "Mostly base" is not "all base". A page of 5 or more sections MUST carry at least one "contrast", "tinted" or "image" band — a plan where every section sits on the page background is rejected. This matters MORE on longer pages, not less: a 7-section page with no band is one unbroken scroll of the same colour, which is exactly where a reader loses their place.
 {{footer_surface_rule}}
 - Plan the width rhythm the same way: centered-stack sections give the page its content-width beats; grid and cover archetypes carry wide or full bands. A page where every band renders at the same width reads flat — alternate deliberately.
+- Plan horizontal copy rhythm independently from width rhythm. On a wide/full band, assign where its headline/intro column starts with `text_placement`; do not use full-width paragraphs as a shortcut. For `split` and `asymmetric-thirds`, state the occupied side/zone in `content_notes`, preserve reading order on mobile, and never invent filler copy or decorative empty text merely to balance the opposite zone.
 - Plan vertical density across the WHOLE page. Start from the resting value the **Density** commitment sets above, then use `compact` for tall/image-dense sections and `spacious` only for short sections where the design direction explicitly needs a pause. Never make a long gallery or information-heavy section spacious, never assign spacious to adjacent sections, and use it at most twice on the page.
 - Adjacent sections on the same guaranteed-continuous solid surface (`base` or `contrast`) share one seam budget: the deterministic rhythm pass removes the upper section's bottom padding and lets the lower section's top padding own that gap. Tinted gradients and image assets keep separate edges because two independently authored instances may differ. Write handoff prose with that distinction in mind rather than budgeting whitespace twice.
 - An "image" background wraps whatever archetype the section uses inside a full-bleed cover band; pairing it with "full-bleed-cover" is the classic image-led band (a natural hero choice, not a redundancy). Reserve "image" for the 1-2 sections where imagery should carry the band.

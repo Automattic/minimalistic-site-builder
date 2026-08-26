@@ -33,6 +33,7 @@ function section_unit_input(): array
             'background'       => 'image',
             'vertical_density' => 'standard',
             'item_pattern'     => null,
+            'text_placement'   => 'asymmetric-thirds',
             'handoff'          => 'UNIT-HANDOFF-SENTINEL',
 
         ],
@@ -81,6 +82,18 @@ test('centered-stack prompts keep wrapping copy aligned to the writing-direction
         assert_contains('left for LTR', $centeredStackContract);
         assert_contains('right for RTL', $centeredStackContract);
     }
+});
+
+test('section composition moves the assigned copy column without widening its measure', function () {
+    $prompt = section_unit_request_text(
+        (new SectionUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts'))))
+            ->request(section_unit_input()),
+    );
+
+    assert_contains('Text placement:   asymmetric-thirds', $prompt);
+    assert_contains('className:"copy-end"', $prompt);
+    assert_contains('contentSize', $prompt);
+    assert_contains('wide line', $prompt);
 });
 
 test('section prompt balances media rows without padding or detaching copy', function () {
@@ -406,6 +419,7 @@ test('SectionUnit layered request loses only cache marker separators', function 
         'layout_archetype' => $archetype,
         'background'       => $input['section']['background'],
         'vertical_density' => $input['section']['vertical_density'],
+        'text_placement'   => $input['section']['text_placement'],
         'handoff'          => $input['section']['handoff'],
         'neighbors'        => $input['neighbors'],
         'root_marker'      => SectionComposition::marker($archetype),

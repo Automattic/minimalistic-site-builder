@@ -589,6 +589,17 @@ test('centred copy keeps its own box beside a wide grid row', function () {
     assert_true(!str_contains($r['markup'], 'copy-flush'), 'centred copy is left alone');
 });
 
+test('an asymmetric-thirds trailing copy column keeps its authored grid edge and measure', function () {
+    $r = LayoutFixer::fix(
+        lf_band_with_grid('{"className":"copy-end","layout":{"type":"constrained"}}'),
+        LayoutFixer::ROLE_SECTION,
+        840.0,
+    );
+    assert_contains('"className":"copy-end"', $r['markup']);
+    assert_true(!str_contains($r['markup'], 'copy-flush'), 'the repair pass does not reverse trailing placement');
+    assert_true(!str_contains($r['markup'], '"contentSize"'), 'the theme measure remains authoritative');
+});
+
 test('copy centred by the top-level attribute is left alone too', function () {
     $copy = '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">'
         . '<!-- wp:heading {"textAlign":"center"} --><h2 class="wp-block-heading has-text-align-center">Why us</h2><!-- /wp:heading -->'
