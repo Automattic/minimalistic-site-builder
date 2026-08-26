@@ -218,6 +218,56 @@ test('validate rejects motion overrides even under an allowed layout selector', 
     assert_contains('profile-owned', implode('; ', $problems));
 });
 
+test('validate rejects a depth-variable redeclaration even under an allowed layout selector', function () {
+    $problems = PageStylesStep::validate(
+        ".overlap-up {\n    --wp--preset--shadow--depth: 0 0 9px var(--wp--preset--color--accent);\n    margin-top: -4rem;\n}"
+    );
+    assert_contains('build-owned', implode('; ', $problems));
+});
+
+test('dropOffendingDeclarations drops only the depth-variable redeclaration and keeps an innocent shadow', function () {
+    $css = ".overlap-up {\n"
+        . "    --wp--preset--shadow--depth: 0 0 9px var(--wp--preset--color--accent);\n"
+        . "    box-shadow: var(--wp--preset--shadow--natural);\n"
+        . "    margin-top: -4rem;\n"
+        . "}";
+    [$salvaged, $dropped] = PageStylesStep::dropOffendingDeclarations($css);
+
+    assert_eq(1, count($dropped), 'only the redeclaration is dropped');
+    assert_contains('build-owned', implode('; ', $dropped));
+    assert_true(!str_contains($salvaged, '--wp--preset--shadow--depth'), 'depth variable gone');
+    assert_contains('box-shadow: var(--wp--preset--shadow--natural)', $salvaged, 'innocent preset shadow survives');
+    assert_contains('margin-top: -4rem', $salvaged, 'sibling declarations survive');
+    assert_eq([], PageStylesStep::validate($salvaged), 'salvaged CSS validates clean');
+});
+
+test('run drops a generated depth-variable redeclaration with a durable warning and ships the rest', function () {
+    [$project, $tmp] = ps_project('builder_ps_depthvar_');
+    $project->writeText(
+        'theme/parts/section-work.html',
+        '<!-- wp:group {"className":"overlap-up"} --><div class="wp-block-group overlap-up"></div><!-- /wp:group -->'
+    );
+    $llm = new FakeLlm();
+    $llm->queueText(
+        ".overlap-up {\n"
+        . "    --wp--preset--shadow--depth: 0 0 9px var(--wp--preset--color--accent);\n"
+        . "    margin-top: -4rem;\n"
+        . "}"
+    );
+
+    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $style = $project->readText('theme/style.css');
+    assert_true(!str_contains($style, '--wp--preset--shadow--depth'), 'redeclaration does not ship');
+    assert_contains('margin-top: -4rem', $style, 'the rest of the appendix ships');
+    assert_contains(
+        '--wp--preset--shadow--depth',
+        implode("\n", ps_warning_rows($project, 'page-styles')),
+        'the drop is a durable actionable warning',
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('validate rejects corner setters and all resets only on owned image/button selectors', function () {
     foreach ([
         'border-radius',
@@ -271,6 +321,23 @@ test('shape scanning ignores declaration-looking text inside quoted and custom-p
     [$salvaged, $dropped] = PageStylesStep::dropOffendingDeclarations($css);
     assert_eq($css, $salvaged);
     assert_eq([], $dropped);
+});
+
+test('page styles drops CTA-owned construction but keeps row layout utilities', function () {
+    $css = '.cta-bottom .wp-block-button__link { background:var(--wp--preset--color--primary); '
+        . 'padding:2rem; transform:translateY(-2px); }'
+        . '.cta-bottom .wp-block-buttons { justify-content:center; margin-top:auto; }';
+    $problems = implode('; ', PageStylesStep::validate($css));
+    assert_contains('CTA-style-owned', $problems);
+
+    [$salvaged, $dropped] = PageStylesStep::dropOffendingDeclarations($css);
+    assert_true(!str_contains($salvaged, 'background:'));
+    assert_true(!str_contains($salvaged, 'padding:'));
+    assert_contains('transform:translateY(-2px)', $salvaged);
+    assert_contains('justify-content:center', $salvaged);
+    assert_contains('margin-top:auto', $salvaged);
+    assert_eq(2, count($dropped));
+    assert_contains('CTA-style-owned', implode('; ', $dropped));
 });
 
 test('validate rejects CSS that hides generated content', function () {
@@ -529,7 +596,7 @@ test('legacy mode ignores stale site CSS and keeps the recorded call trace and s
     assert_eq(0, $llm->completeBatchCalls, 'legacy path makes no batch call');
     assert_eq(1, count($llm->calls), 'legacy call trace count');
     assert_eq(
-        '4a5f81e61d66fcafbdc956d57cdc5a0e3e85c48b1d10f7c55e238c68c96acb14',
+        '17a2b6ca429ef7b76824c20f8821d92b0e289c6b3ed97773a7f05120bf69dac2',
         hash('sha256', $llm->calls[0]['prompt']),
         'legacy prompt bytes'
     );

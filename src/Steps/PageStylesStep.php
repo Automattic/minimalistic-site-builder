@@ -4087,6 +4087,13 @@ CSS;
         if (preg_match('/--motion-[\w-]+\s*:/i', $stripped) === 1) {
             $problems[] = 'motion custom properties are profile-owned and cannot be overridden';
         }
+        // The depth kit reads box-shadow through this variable; !important on
+        // the kit protects the property, not the variable, so a scoped
+        // redeclaration would silently change the committed depth for a
+        // subtree.
+        if (preg_match('/--wp--preset--shadow--depth\s*:/i', $stripped) === 1) {
+            $problems[] = 'the depth shadow preset variable is build-owned and cannot be redeclared';
+        }
         foreach (CssChecks::scanDeclarations($stripped) as $declaration) {
             if (self::declarationTargetsShape($declaration)
                 && CssChecks::isShapeAffectingDeclaration(
@@ -4095,6 +4102,15 @@ CSS;
                 )
             ) {
                 $problems[] = 'contained-image/button corner declarations are shape-owned by the design direction';
+                break;
+            }
+            if (self::declarationTargetsCta($declaration)
+                && CssChecks::isCtaAffectingDeclaration(
+                    $declaration['property'],
+                    $declaration['value'],
+                )
+            ) {
+                $problems[] = 'button construction declarations are CTA-style-owned by the design direction';
                 break;
             }
         }
@@ -4286,8 +4302,8 @@ CSS;
     /**
      * Salvage pass for CSS that failed validate(): remove each declaration
      * that carries a declaration-level offence (raw color literal, resource-
-     * loading function, --motion-* override, shape-owned corner radius,
-     * content-hiding value) and keep the rest. Only rule bodies are touched —
+     * loading function, --motion-* override, depth-variable redeclaration,
+     * shape-owned corner radius, content-hiding value) and keep the rest. Only rule bodies are touched —
      * selectors, @media preludes and brace structure pass through, so
      * structural problems deliberately survive into the re-validation and
      * still reject the whole appendix. A quote/comment/function-aware shared
@@ -4303,6 +4319,7 @@ CSS;
             $problem = self::declarationProblem(
                 $declaration['raw'],
                 self::declarationTargetsShape($declaration),
+                self::declarationTargetsCta($declaration),
             );
             if ($problem !== null) {
                 $problems[$declaration['start']] = $problem;
@@ -4329,7 +4346,11 @@ CSS;
      * validate(); anything unparsable is dropped too — the salvage pass fails
      * closed.
      */
-    private static function declarationProblem(string $declaration, bool $targetsShape = false): ?string
+    private static function declarationProblem(
+        string $declaration,
+        bool $targetsShape = false,
+        bool $targetsCta = false,
+    ): ?string
     {
         if (preg_match('/^\s*([-\w]+)\s*:\s*(\S[\s\S]*)$/', $declaration, $m) !== 1) {
             return 'not a single property: value declaration';
@@ -4339,8 +4360,14 @@ CSS;
         if (str_starts_with($property, '--motion-')) {
             return 'motion custom properties are profile-owned';
         }
+        if ($property === '--wp--preset--shadow--depth') {
+            return 'the depth shadow preset variable is build-owned';
+        }
         if ($targetsShape && CssChecks::isShapeAffectingDeclaration($property, $value)) {
             return 'contained-image/button corner is shape-owned by the design direction';
+        }
+        if ($targetsCta && CssChecks::isCtaAffectingDeclaration($property, $value)) {
+            return 'button construction is CTA-style-owned by the design direction';
         }
         if (preg_match('/#[0-9a-fA-F]{3,8}\b/', $value) === 1
             || preg_match('/\b(?:rgba?|hsla?)\s*\(/i', $value) === 1
@@ -4379,6 +4406,13 @@ CSS;
     {
         return $declaration['kind'] === 'style'
             && CssChecks::selectorTargetsShape($declaration['context']);
+    }
+
+    /** @param array{context:string,kind:string} $declaration */
+    private static function declarationTargetsCta(array $declaration): bool
+    {
+        return $declaration['kind'] === 'style'
+            && CssChecks::selectorTargetsCta($declaration['context']);
     }
 
     /** @return string[] */

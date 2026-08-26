@@ -8,8 +8,9 @@ namespace Automattic\SiteBuild;
  * way to execute.
  *
  * The direction is two things at once: a set of bounded structured fields the
- * pipeline executes literally (palette, type, surface, shape, device, rhythm,
- * density, card style, canvas, measure, type treatment, image grade, motion), and a prose narrative
+ * pipeline executes literally (palette, type, type treatment, CTA style,
+ * surface, shape, device, rhythm, density, text placement, card style, depth,
+ * canvas, measure, image grade, image crop, motion), and a prose narrative
  * that every downstream design and section prompt receives verbatim as the
  * authoritative brief.
  *

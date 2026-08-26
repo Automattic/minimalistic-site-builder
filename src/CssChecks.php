@@ -375,6 +375,58 @@ final class CssChecks
         return $opaque;
     }
 
+    /** Whether a declaration can replace the committed CTA construction. */
+    public static function isCtaAffectingDeclaration(string $property, string $value): bool
+    {
+        $property = strtolower(trim($property));
+        if ($property === '' || str_starts_with($property, '--')) {
+            return false;
+        }
+        if (preg_match(
+            '/^(?:color|background(?:-.+)?|border(?:-.+)?|padding(?:-.+)?|'
+                . '(?:min-|max-)?width|display|box-sizing|text-align|text-decoration(?:-.+)?|'
+                . 'text-underline-offset|gap|row-gap|column-gap|content)$/',
+            $property,
+        ) === 1) {
+            return true;
+        }
+        return $property === 'all' && self::isShapeAffectingDeclaration($property, $value);
+    }
+
+    /** Whether a selector's subject is a core button wrapper or rendered control. */
+    public static function selectorTargetsCta(string $selector): bool
+    {
+        return self::selectorTargetsCtaInternal($selector);
+    }
+
+    private static function selectorTargetsCtaInternal(string $selector): bool
+    {
+        foreach (self::splitSelectorList($selector) as $candidate) {
+            $compound = self::rightmostSelectorCompound($candidate);
+            if ($compound === '') {
+                continue;
+            }
+            [$plain, $functionalTarget] = self::withoutFunctionalPseudos(
+                $compound,
+                static fn (string $arguments): bool => self::selectorTargetsCtaInternal($arguments),
+            );
+            if ($functionalTarget) {
+                return true;
+            }
+            $plain = self::withoutSelectorAttributes($plain);
+            if (preg_match(
+                '/\.(?:wp-block-button|wp-block-button__link|wp-element-button)(?![-\w])/i',
+                $plain,
+            ) === 1) {
+                return true;
+            }
+            if (preg_match('/^(?:(?:\*|[-\w]+)\|)?button(?![-\w])/i', ltrim($plain)) === 1) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /**
      * Whether a selector's subject is one of the build-owned corner surfaces:
      * a core image/image element, the rendered button control, a cover
@@ -877,6 +929,69 @@ final class CssChecks
             $declarations,
             static function (array $declaration) use ($selectorOwned, $bareOwned, $ownedKeyframes): bool {
                 if (!self::isShapeAffectingDeclaration($declaration['property'], $declaration['value'])) {
+                    return false;
+                }
+                if ($declaration['kind'] !== 'keyframe') {
+                    return self::declarationScopeIsOwned($declaration, $selectorOwned, $bareOwned);
+                }
+                $name = self::keyframeNameOf($declaration);
+                return $name !== null && isset($ownedKeyframes[$name]);
+            },
+        ));
+    }
+
+    /**
+     * CTA-construction declarations in owned rules and in the local
+     * keyframes those rules reference. This mirrors the shape ownership walk
+     * so animation CSS cannot smuggle a construction override through a
+     * keyframe while unrelated keyframes remain byte-for-byte intact.
+     *
+     * @param callable(string):bool $selectorOwned
+     * @return list<array{property:string,value:string,raw:string,start:int,end:int,context:string,ancestors:list<string>,kind:string,structurallySafe:bool}>
+     */
+    public static function ctaAffectingDeclarations(
+        string $css,
+        callable $selectorOwned,
+        bool $bareDeclarationList = false,
+        bool $bareOwned = false,
+    ): array {
+        $declarations = self::scanDeclarations($css, $bareDeclarationList);
+        $definedKeyframes = [];
+        foreach ($declarations as $declaration) {
+            if ($declaration['kind'] !== 'keyframe') {
+                continue;
+            }
+            $name = self::keyframeNameOf($declaration);
+            if ($name !== null) {
+                $definedKeyframes[$name] = true;
+            }
+        }
+
+        $ownedKeyframes = [];
+        foreach ($declarations as $declaration) {
+            if ($declaration['kind'] === 'keyframe'
+                || !self::declarationScopeIsOwned($declaration, $selectorOwned, $bareOwned)
+                || preg_match('/^(?:-[a-z]+-)?animation(?:-name)?$/i', $declaration['property']) !== 1
+            ) {
+                continue;
+            }
+            $shorthand = preg_match('/^(?:-[a-z]+-)?animation$/i', $declaration['property']) === 1;
+            [$names, $opaque] = self::animationReferences($declaration['value'], $shorthand);
+            if ($opaque) {
+                $ownedKeyframes = $definedKeyframes;
+                continue;
+            }
+            foreach ($names as $name) {
+                if (isset($definedKeyframes[$name])) {
+                    $ownedKeyframes[$name] = true;
+                }
+            }
+        }
+
+        return array_values(array_filter(
+            $declarations,
+            static function (array $declaration) use ($selectorOwned, $bareOwned, $ownedKeyframes): bool {
+                if (!self::isCtaAffectingDeclaration($declaration['property'], $declaration['value'])) {
                     return false;
                 }
                 if ($declaration['kind'] !== 'keyframe') {

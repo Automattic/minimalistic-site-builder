@@ -69,6 +69,7 @@ test('normalize reads the page rhythm and density the direction commits to', fun
             'palette'     => ['base' => '#F4EBDA'],
             'rhythm'      => ' Interrupted ',
             'density'     => 'DENSE',
+            'text_placement' => ' Asymmetric-Thirds ',
         ],
         'cinematic-safe-zone',
         '',
@@ -77,6 +78,7 @@ test('normalize reads the page rhythm and density the direction commits to', fun
     );
     assert_eq('interrupted', $direction['rhythm'], 'rhythm is case and space insensitive');
     assert_eq('dense', $direction['density']);
+    assert_eq('asymmetric-thirds', $direction['text_placement']);
 
     foreach (DesignDirectionStep::RHYTHMS as $rhythm) {
         $read = DesignDirectionStep::normalize(
@@ -97,6 +99,7 @@ test('a direction that forgot the rhythm does not silently re-elect the uniform 
     );
     assert_eq('alternating', $direction['rhythm']);
     assert_eq('measured', $direction['density']);
+    assert_eq('left-column', $direction['text_placement']);
     assert_true($direction['rhythm'] !== 'stacked', 'the fallback is never the do-nothing value');
 });
 
@@ -122,6 +125,7 @@ test('format renders rhythm and density as executable facts the page plan can ac
         'palette'     => ['base' => '#1B2233'],
         'rhythm'      => 'interrupted',
         'density'     => 'dense',
+        'text_placement' => 'asymmetric-thirds',
     ]);
     assert_contains('**Rhythm**', $rendered);
     assert_contains('interrupted', $rendered);
@@ -129,10 +133,13 @@ test('format renders rhythm and density as executable facts the page plan can ac
     assert_contains('**Density**', $rendered);
     assert_contains('compact', $rendered, 'the density names the section value it maps to');
     assert_contains('lg/xl/xxl section-padding ramp', $rendered, 'the density names its build-owned execution');
+    assert_contains('**Text placement**', $rendered);
+    assert_contains('second or third zone', $rendered);
 
     $bare = DesignDirectionStep::format(['description' => 'x']);
     assert_true(!str_contains($bare, 'Rhythm'), 'an uncommitted rhythm states nothing');
     assert_true(!str_contains($bare, 'Density'), 'an uncommitted density states nothing');
+    assert_true(!str_contains($bare, 'Text placement'), 'an uncommitted placement states nothing');
 });
 
 test('densityFor reads only a valid persisted density and otherwise stays measured', function () {
@@ -153,7 +160,33 @@ test('the page plan is told to act on the rhythm and density facts', function ()
     $plan = (string) file_get_contents(repo_path('prompts/page-plan.md'));
     assert_contains('**Rhythm**', $plan, 'the planner is pointed at the rhythm commitment');
     assert_contains('**Density**', $plan, 'and at the density commitment');
+    assert_contains('**Text placement**', $plan, 'and at the horizontal placement commitment');
     foreach (DesignDirectionStep::RHYTHMS as $rhythm) {
         assert_contains('`' . $rhythm . '`', $plan, "the planner knows what {$rhythm} means");
     }
+});
+
+test('text placement is bounded and unsupported intent degrades loudly', function () {
+    foreach (DesignDirectionStep::TEXT_PLACEMENTS as $placement) {
+        $warnings = [];
+        $direction = DesignDirectionStep::normalize(
+            ['description' => 'x', 'palette' => ['base' => '#F4EBDA'], 'text_placement' => $placement],
+            'cinematic-safe-zone',
+            warnings: $warnings,
+        );
+        assert_eq($placement, $direction['text_placement']);
+        assert_true(
+            !str_contains(implode("\n", $warnings), 'text_placement'),
+            "{$placement} is not degraded",
+        );
+    }
+
+    $warnings = [];
+    $direction = DesignDirectionStep::normalize(
+        ['description' => 'x', 'palette' => ['base' => '#F4EBDA'], 'text_placement' => 'random-right'],
+        'cinematic-safe-zone',
+        warnings: $warnings,
+    );
+    assert_eq('left-column', $direction['text_placement']);
+    assert_contains('text_placement', implode("\n", $warnings));
 });
