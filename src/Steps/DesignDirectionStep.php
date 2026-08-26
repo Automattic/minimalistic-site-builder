@@ -8,6 +8,7 @@ use Automattic\SiteBuild\BandColor;
 use Automattic\SiteBuild\CardStyle;
 use Automattic\SiteBuild\ConceptSeeds;
 use Automattic\SiteBuild\CtaStyle;
+use Automattic\SiteBuild\Depth;
 use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\DirectionExecutability;
 use Automattic\SiteBuild\Env;
@@ -362,6 +363,7 @@ final class DesignDirectionStep implements Step
             'canvas'           => $canvas,
             'measure'          => Measure::DEFAULT,
             'card_style'       => 'flush',
+            'depth'            => Depth::DEFAULT,
             'cta_style'        => CtaStyle::DEFAULT,
             'shape'            => 'sharp',
             'surface'          => Surface::DEFAULT,
@@ -755,6 +757,7 @@ final class DesignDirectionStep implements Step
         );
 
         $cardStyle = self::normalizeCardStyle($raw['card_style'] ?? null, $warnings);
+        $depth = self::normalizeDepth($raw['depth'] ?? null, $warnings);
         $ctaStyle = BoundedChoice::normalize(
             $raw['cta_style'] ?? null,
             CtaStyle::ALL,
@@ -852,6 +855,7 @@ final class DesignDirectionStep implements Step
             // flush default — inset media must be an explicit opt-in, never
             // the accidental look every site gets.
             'card_style'       => $cardStyle,
+            'depth'            => $depth,
             'cta_style'        => $ctaStyle,
             'shape'            => $shape,
             'surface'          => $surface,
@@ -887,6 +891,25 @@ final class DesignDirectionStep implements Step
             'card_style',
             $warnings,
             'unsupported generated card treatment replaced by default',
+        );
+    }
+
+    /**
+     * Normalize the build-owned elevation contract. Flat is a fully authored
+     * visual choice as well as the safe behavior for a pre-field direction;
+     * an invalid non-empty model value remains durable-warning material.
+     *
+     * @param list<string> $warnings
+     */
+    public static function normalizeDepth(mixed $authored, array &$warnings = []): string
+    {
+        return BoundedChoice::normalize(
+            $authored,
+            Depth::ALL,
+            Depth::DEFAULT,
+            'depth',
+            $warnings,
+            'unsupported elevation treatment replaced by flat',
         );
     }
 
@@ -1297,6 +1320,17 @@ final class DesignDirectionStep implements Step
             } . '. The build derives the lg/xl/xxl section-padding ramp from this commitment.';
         }
 
+        $depth = Depth::explicit($direction['depth'] ?? null);
+        if ($depth !== null) {
+            $facts[] = '- **Depth**: ' . $depth . ' — ' . match ($depth) {
+                'flat'        => 'cards, contained images, contained covers, and media-text surfaces stay deliberately shadowless',
+                'soft'        => 'the build gives cards and contained media one restrained, diffuse lift',
+                'hard-offset' => 'the build gives cards and contained media one crisp poster-like offset plate',
+                'inset'       => 'the build presses cards and contained media into their surfaces with an inset edge and shade',
+                'glow'        => 'the build gives cards and contained media one primary-colored luminous halo',
+            } . '. Full-bleed media stays unelevated; do not add another shadow.';
+        }
+
         // Render the shape commitment with its executable meaning. The build
         // wires contained media (core/image, core/cover, the media half of
         // core/media-text) and button radii itself; this line keeps prompts
@@ -1562,6 +1596,15 @@ final class DesignDirectionStep implements Step
             return null;
         }
         return self::explicitShape($project->readJson(self::FILE)['shape'] ?? null);
+    }
+
+    /** Explicit committed depth, or null for a pre-field/garbled artifact. */
+    public static function depthFor(Project $project): ?string
+    {
+        if (!$project->exists(self::FILE)) {
+            return null;
+        }
+        return Depth::explicit($project->readJson(self::FILE)['depth'] ?? null);
     }
 
     /** The persisted page density, measured when absent or not a committed value. */

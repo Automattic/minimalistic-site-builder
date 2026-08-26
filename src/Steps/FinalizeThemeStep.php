@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\HeaderBehavior;
 use Automattic\SiteBuild\Narrator;
+use Automattic\SiteBuild\Depth;
 use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\OverlayKit;
 use Automattic\SiteBuild\Surface;
@@ -51,6 +52,9 @@ use Automattic\SiteBuild\Warnings;
  *           rounds contained media surfaces theme.json cannot reach — the
  *           media half of core/media-text and the core/cover canvas — while
  *           its selectors keep alignfull media square; `sharp` ships no kit.
+ *         - for an explicit depth commitment, writes and enqueues the
+ *           build-owned depth kit that consumes the matching `depth` shadow
+ *           preset on cards and contained media; full-bleed media stays flat.
  *         - for a committed page surface other than `none`, writes and
  *           enqueues the build-owned overlay (assets/surface/surface.css) that
  *           claims `body::before` as a fixed grain sheet; `none` prunes it.
@@ -107,6 +111,7 @@ final class FinalizeThemeStep implements Step
         // the fatal list), and discovering that halfway through would leave the
         // theme half-written — a pruned kit with no functions.php naming it.
         $shape = DesignDirectionStep::shapeFor($project);
+        $depth = DesignDirectionStep::depthFor($project);
         $surface = DesignDirectionStep::surfaceFor($project);
         $palette = self::paletteColors($project);
         $surfaceCss = Surface::kitCss($surface, $palette['base'], $palette['contrast']);
@@ -133,11 +138,15 @@ final class FinalizeThemeStep implements Step
         // Per kit, not `$overlays !== []`: the catalog-wide predicate would
         // report shape on a second kit's behalf as soon as one joins the list.
         $shapeShipped = self::writeOverlayKit($project, self::shapeKit(), ShapeMarkup::kitCss($shape), $headerWarnings);
+        $depthShipped = self::writeOverlayKit($project, self::depthKit(), Depth::kitCss($depth), $headerWarnings);
         $surfaceShipped = self::writeOverlayKit($project, self::surfaceKit(), $surfaceCss, $headerWarnings);
         $deviceShipped = self::writeOverlayKit($project, self::deviceKit(), Device::kitCss($device), $headerWarnings);
         $overlays = [];
         if ($shapeShipped) {
             $overlays[] = self::shapeKit();
+        }
+        if ($depthShipped) {
+            $overlays[] = self::depthKit();
         }
         if ($surfaceShipped) {
             $overlays[] = self::surfaceKit();
@@ -174,6 +183,9 @@ final class FinalizeThemeStep implements Step
         Narrator::write($shapeShipped
             ? "  shape: '{$shape}' corner kit enqueued\n"
             : '  shape: ' . ($shape ?? 'none committed') . " (kit not shipped)\n");
+        Narrator::write($depthShipped
+            ? "  depth: '{$depth}' surface kit enqueued\n"
+            : '  depth: ' . ($depth ?? 'none committed') . " (kit not shipped)\n");
     }
 
     /**
@@ -230,7 +242,7 @@ final class FinalizeThemeStep implements Step
      */
     public static function overlayKits(): array
     {
-        return [self::shapeKit(), self::surfaceKit(), self::deviceKit()];
+        return [self::shapeKit(), self::depthKit(), self::surfaceKit(), self::deviceKit()];
     }
 
     public static function surfaceKit(): OverlayKit
@@ -262,6 +274,16 @@ final class FinalizeThemeStep implements Step
             "// Committed corner language for contained media surfaces theme.json\n"
                 . "// cannot reach (media-text halves, contained covers). Loads after\n"
                 . '// generated style.css so the commitment outranks generated utilities.',
+        );
+    }
+
+    /** Card and contained-media elevation committed by design direction. */
+    public static function depthKit(): OverlayKit
+    {
+        return new OverlayKit(
+            'depth',
+            "// Committed card and contained-media depth. Loads after generated\n"
+                . '// style.css so one bounded treatment outranks generated shadows.',
         );
     }
 
