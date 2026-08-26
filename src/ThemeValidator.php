@@ -954,6 +954,28 @@ final class ThemeValidator
     public static function layoutWarnings(Project $project, bool $htmlFirst = false): array
     {
         $warnings = [];
+        $measure = Steps\DesignDirectionStep::measureFor($project);
+        $expectedWidths = $htmlFirst ? null : Measure::widths($measure);
+        if ($expectedWidths !== null && $project->exists('theme/theme.json')) {
+            $theme = $project->readJson('theme/theme.json');
+            $layout = $theme['settings']['layout'] ?? null;
+            // Read the pair by name: a strict === on arrays is key-order
+            // sensitive, and the model owns the order the widths were written in.
+            $delivered = null;
+            if (is_array($layout)) {
+                $delivered = [];
+                foreach (array_keys($expectedWidths) as $key) {
+                    if (array_key_exists($key, $layout)) {
+                        $delivered[$key] = $layout[$key];
+                    }
+                }
+            }
+            if ($delivered !== $expectedWidths) {
+                $warnings[] = 'theme.json settings.layout drifted from committed "' . $measure
+                    . '" measure: expected ' . Warnings::value($expectedWidths)
+                    . ', delivered ' . Warnings::value($delivered);
+            }
+        }
         $contentSize = Steps\FixBlocksStep::themeContentSize($project);
         $spacingSlugs = Steps\FixBlocksStep::themeSpacingSlugs($project);
         // The build's normalization consults the design's own stylesheet to

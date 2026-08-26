@@ -17,6 +17,7 @@ use Automattic\SiteBuild\CssChecks;
 use Automattic\SiteBuild\PaletteFloor;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
+use Automattic\SiteBuild\Measure;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
@@ -464,6 +465,10 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $theme,
             DesignDirectionStep::densityFor($project),
         );
+        [$theme, $measureRepairs] = self::applyMeasure(
+            $theme,
+            $this->htmlFirst ? null : DesignDirectionStep::measureFor($project),
+        );
         [$theme, $layoutWarnings] = self::normalizeLayoutWidths(
             $theme,
             $this->htmlFirst && $project->exists('design/site.css')
@@ -551,7 +556,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         [$theme, $floorWarnings] = self::applyPaletteFloor($theme);
         $warnings = array_merge($warnings, $floorWarnings);
 
-        $bindRepairs = array_merge($colorRepairs, $fontRepairs);
+        $bindRepairs = array_merge($colorRepairs, $fontRepairs, $measureRepairs);
         $bindReport = ['Successful design-direction writebacks: ' . count($bindRepairs)];
         foreach ($bindRepairs as $repair) {
             $bindReport[] = '- ' . $repair;
@@ -760,6 +765,48 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         }
 
         return [$theme, $warnings];
+    }
+
+    /**
+     * Replace model-authored widths with the committed block-first pair.
+     * A null commitment is a no-op for pre-field and HTML-first builds.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>}
+     */
+    public static function applyMeasure(array $theme, ?string $measure): array
+    {
+        $widths = Measure::widths($measure);
+        if ($widths === null) {
+            return [$theme, []];
+        }
+
+        $settings = is_array($theme['settings'] ?? null) ? $theme['settings'] : [];
+        // Keep the raw container for the warning: a malformed layout is dropped
+        // here before normalizeLayoutWidths can name it, so this row is the only
+        // place that authored value is still recorded.
+        $rawLayout = $settings['layout'] ?? null;
+        $authored = is_array($rawLayout)
+            && ($rawLayout === [] || !array_is_list($rawLayout))
+                ? $rawLayout
+                : null;
+        $layout = $authored ?? [];
+        $alreadyBound = array_key_exists('contentSize', $layout)
+            && array_key_exists('wideSize', $layout)
+            && $layout['contentSize'] === $widths['contentSize']
+            && $layout['wideSize'] === $widths['wideSize'];
+        $settings['layout'] = array_replace($layout, $widths);
+        $theme['settings'] = $settings;
+
+        if ($alreadyBound) {
+            return [$theme, []];
+        }
+        return [$theme, [
+            'theme/theme.json: settings.layout authored ' . Warnings::value($authored ?? $rawLayout)
+                . ' delivered committed "' . $measure . '" measure '
+                . Warnings::value($widths)
+                . '; disposition replaced model-authored widths with deterministic direction token',
+        ]];
     }
 
     /** @return array{contentSize?:string,wideSize?:string} */

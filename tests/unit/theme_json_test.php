@@ -2660,6 +2660,117 @@ test('repairShapeWiring repairs authored cover and media-text corner styles with
     }
 });
 
+test('committed measure replaces model widths exactly and reaches a fixed point', function () {
+    $authored = [
+        'settings' => [
+            'layout' => ['contentSize' => '860px', 'wideSize' => '1320px', 'allowEditing' => true],
+            'spacing' => ['blockGap' => true],
+        ],
+    ];
+
+    [$theme, $repairs] = ThemeJsonStep::applyMeasure($authored, 'full');
+    assert_eq(
+        ['contentSize' => '1040px', 'wideSize' => '1760px', 'allowEditing' => true],
+        $theme['settings']['layout'],
+    );
+    assert_eq(['blockGap' => true], $theme['settings']['spacing'], 'settings siblings survive');
+    assert_eq(1, count($repairs));
+    assert_contains('committed "full" measure', $repairs[0]);
+
+    [$fixed, $fixedRepairs] = ThemeJsonStep::applyMeasure($theme, 'full');
+    assert_eq($theme, $fixed);
+    assert_eq([], $fixedRepairs);
+});
+
+test('measure binding is a no-op when absent and repairs malformed layout containers', function () {
+    $legacy = ['settings' => ['layout' => ['contentSize' => '720px']]];
+    assert_eq([$legacy, []], ThemeJsonStep::applyMeasure($legacy, null));
+
+    foreach ([
+        ['settings' => 'broken'],
+        ['settings' => ['layout' => 'broken']],
+        ['settings' => ['layout' => ['wide']]],
+    ] as $theme) {
+        [$delivered, $repairs] = ThemeJsonStep::applyMeasure($theme, 'narrow');
+        assert_eq(
+            ['contentSize' => '640px', 'wideSize' => '1000px'],
+            $delivered['settings']['layout'],
+        );
+        assert_eq(1, count($repairs));
+    }
+});
+
+test('theme-json writes the block-first measure and records successful replacement', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_measure_write_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A screen-filling gallery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project, overrides: ['measure' => 'full']);
+
+    $llm = new FakeLlm();
+    $llm->queueJson(valid_theme_payload());
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    assert_eq(
+        ['contentSize' => '1040px', 'wideSize' => '1760px'],
+        $project->readJson('theme/theme.json')['settings']['layout'],
+    );
+    assert_contains(
+        'delivered committed "full" measure',
+        $project->readText('logs/theme-json-direction-bind.txt'),
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json keeps HTML-first design widths authoritative over measure', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_measure_html_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A screen-filling gallery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project, overrides: ['measure' => 'full']);
+    $project->writeText('design/site.css', ':root{--content-size:800px;--wide-size:1280px}');
+
+    $payload = valid_theme_payload();
+    $payload['settings']['layout'] = ['contentSize' => '860px', 'wideSize' => '1320px'];
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+    (new ThemeJsonStep(
+        $llm,
+        new PromptRenderer(repo_path('prompts')),
+        htmlFirst: true,
+    ))->run($project);
+
+    assert_eq(
+        ['contentSize' => '860px', 'wideSize' => '1280px'],
+        $project->readJson('theme/theme.json')['settings']['layout'],
+    );
+    assert_true(
+        !str_contains($project->readText('logs/theme-json-direction-bind.txt'), 'measure'),
+        'HTML-first width ownership does not report a measure replacement',
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json prompt delegates committed measure to the build', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_measure_prompt_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A framed poetry journal']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project, overrides: ['canvas' => 'framed', 'measure' => 'narrow']);
+
+    $prompt = (new ThemeJsonStep(
+        new FakeLlm(),
+        new PromptRenderer(repo_path('prompts')),
+    ))->requests($project)['theme-json']['prompt'];
+
+    assert_contains('**Measure**: narrow', $prompt);
+    assert_contains('visible frame edge below the full-bleed hero', $prompt);
+    assert_contains('Do not emit settings.layout.contentSize', $prompt);
+    assert_true(!str_contains($prompt, '800–900px'), 'the shared literal content window is gone');
+    assert_true(!str_contains($prompt, '1200–1400px'), 'the shared literal wide window is gone');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('W6 theme-json normalizes unitless layout widths', function () {
     $tmp = sys_get_temp_dir() . '/builder_tj_unitless_width_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
