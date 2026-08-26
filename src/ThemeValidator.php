@@ -1133,6 +1133,39 @@ final class ThemeValidator
         return $warnings;
     }
 
+    /** Verify the committed CTA construction and absence of local overrides. */
+    public static function ctaWarnings(Project $project): array
+    {
+        $style = Steps\DesignDirectionStep::ctaStyleFor($project);
+        if ($style === null) {
+            return [];
+        }
+
+        $warnings = [];
+        $theme = $project->exists('theme/theme.json')
+            ? json_decode($project->readText('theme/theme.json'), true)
+            : null;
+        if (is_array($theme)) {
+            [, $repairs] = Steps\ThemeJsonStep::repairCtaStyle($theme, $style);
+            foreach ($repairs as $repair) {
+                $warnings[] = 'committed "' . $style . '" CTA style drift: ' . $repair;
+            }
+        }
+
+        foreach ($project->markupFiles() as $file) {
+            $markup = (string) file_get_contents($file);
+            foreach (CtaStyleMarkup::normalize($markup, $style)['changes'] as $change) {
+                $warnings[] = 'committed "' . $style . '" CTA local override drift: file='
+                    . basename($file) . '; block=' . $change['blockPath']
+                    . '; property=' . $change['property']
+                    . '; authored=' . Warnings::value($change['authored'])
+                    . '; delivered=' . Warnings::value($change['delivered'])
+                    . '; disposition=' . $change['disposition'];
+            }
+        }
+        return $warnings;
+    }
+
     /**
      * Page-plan warnings: footer-like page sections that duplicate the
      * template footer, plus interior pages that open at homepage-hero scale.

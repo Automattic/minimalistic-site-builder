@@ -173,6 +173,15 @@ final class SectionUnit extends AbstractPageSectionUnit
         $markup = $contract['markup'];
         array_push($repairs, ...$contract['repairs']);
         array_push($warnings, ...$contract['warnings']);
+        $section = $this->section($input);
+        $band = BandSurfaceContract::enforce(
+            $markup,
+            $this->sectionString($section, 'background'),
+            $this->key($input),
+        );
+        $markup = $band->markup;
+        array_push($repairs, ...$band->repairs);
+        array_push($warnings, ...$band->warnings);
         // Advisory only: the catalog reports a section that ignored its
         // assignment and the build delivers the safe parseable markup anyway.
         if ($archetype !== null) {

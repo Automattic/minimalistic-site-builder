@@ -322,13 +322,21 @@ final class ContrastFixStep implements Step
             ) || $changed;
         }
 
-        // Button label on the button background.
-        $btnBgValue = $themeJson['styles']['elements']['button']['color']['background'] ?? null;
-        $btnBg = is_string($btnBgValue) ? self::resolve($palette, $btnBgValue) : null;
-        if ($btnBg !== null) {
+        // Button label on every opaque button background. Transparent CTA
+        // constructions use `inherit` and are covered by the rendered band's
+        // repaired text color; solid/outline/block interaction states each get
+        // their own explicit 4.5:1 check here.
+        foreach (['' => 'button text', ':hover' => 'button hover text',
+            ':focus' => 'button focus text', ':active' => 'button active text'] as $state => $label) {
+            $prefix = 'styles.elements.button' . ($state === '' ? '' : '.' . $state);
+            $btnBgValue = self::pathValue($themeJson, $prefix . '.color.background');
+            $btnBg = is_string($btnBgValue) ? self::resolve($palette, $btnBgValue) : null;
+            if ($btnBg === null) {
+                continue;
+            }
             $changed = $this->repairThemePair(
-                $themeJson, $palette, 'styles.elements.button.color.text',
-                'button text', $btnBg, ['base', 'contrast'], true,
+                $themeJson, $palette, $prefix . '.color.text',
+                $label, $btnBg, ['base', 'contrast'], true,
                 $report, $repaired, $warnings
             ) || $changed;
         }
@@ -405,6 +413,19 @@ final class ContrastFixStep implements Step
             $warnings++;
         }
         return true;
+    }
+
+    /** Read one dot-separated theme.json path without emitting notices. */
+    private static function pathValue(array $theme, string $path): mixed
+    {
+        $value = $theme;
+        foreach (explode('.', $path) as $key) {
+            if (!is_array($value) || !array_key_exists($key, $value)) {
+                return null;
+            }
+            $value = $value[$key];
+        }
+        return $value;
     }
 
     // ── theme.json readers (public: CoverContrastStep reuses them) ────────

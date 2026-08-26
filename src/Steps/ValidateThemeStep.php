@@ -88,6 +88,7 @@ final class ValidateThemeStep implements Step
             ThemeValidator::layoutWarnings($project, $this->htmlFirst),
             ThemeValidator::spacingWarnings($project),
             ThemeValidator::typographyWarnings($project),
+            ThemeValidator::ctaWarnings($project),
             ThemeValidator::planWarnings($project),
             ThemeValidator::aboveFoldWarnings($project),
             // The direction is a set of promises made before generation that
