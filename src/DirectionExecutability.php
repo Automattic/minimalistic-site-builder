@@ -9,9 +9,9 @@ namespace Automattic\SiteBuild;
  *
  * The direction is two things at once: a set of bounded structured fields the
  * pipeline executes literally (palette, type, surface, shape, device, rhythm,
- * density, card style, depth, canvas, image grade, motion), and a prose narrative
- * that every downstream design and section prompt receives verbatim as the
- * authoritative brief.
+ * density, card style, depth, canvas, measure, image grade, motion), and a
+ * prose narrative that every downstream design and section prompt receives
+ * verbatim as the authoritative brief.
  *
  * When the narrative promises something outside those fields, no step refuses
  * it and no step delivers it. tbilisi4 committed to "a quiet lattice of

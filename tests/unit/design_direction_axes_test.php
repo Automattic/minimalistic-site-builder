@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Steps\DesignDirectionStep;
 
 test('the chosen seed carries its two traditions into the expansion prompt', function () {
@@ -127,10 +128,24 @@ test('format renders rhythm and density as executable facts the page plan can ac
     assert_contains('full-bleed', $rendered, 'the rhythm states what to actually do');
     assert_contains('**Density**', $rendered);
     assert_contains('compact', $rendered, 'the density names the section value it maps to');
+    assert_contains('lg/xl/xxl section-padding ramp', $rendered, 'the density names its build-owned execution');
 
     $bare = DesignDirectionStep::format(['description' => 'x']);
     assert_true(!str_contains($bare, 'Rhythm'), 'an uncommitted rhythm states nothing');
     assert_true(!str_contains($bare, 'Density'), 'an uncommitted density states nothing');
+});
+
+test('densityFor reads only a valid persisted density and otherwise stays measured', function () {
+    $tmp = sys_get_temp_dir() . '/builder_density_for_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+
+    assert_eq('measured', DesignDirectionStep::densityFor($project));
+    $project->writeJson('designDirection.json', ['density' => ['airy']]);
+    assert_eq('measured', DesignDirectionStep::densityFor($project));
+    $project->writeJson('designDirection.json', ['density' => ' AIRY ']);
+    assert_eq('airy', DesignDirectionStep::densityFor($project));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
 });
 
 test('the page plan is told to act on the rhythm and density facts', function () {
