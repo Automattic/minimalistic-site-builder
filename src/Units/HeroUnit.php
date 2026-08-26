@@ -109,9 +109,6 @@ final class HeroUnit extends AbstractPageSectionUnit
         if ((string) $recipeMeta['layout_archetype'] === 'full-bleed-cover') {
             $markup = GeneratedMarkup::fullBleedCoverAlignment($markup, $key, $repairs);
         }
-        if (in_array('band-image', (array) $recipeMeta['media_modes'], true)) {
-            $markup = GeneratedMarkup::bandMediaAlignment($markup, $key, $repairs);
-        }
         $markup = GeneratedMarkup::centerHeroCopy(
             $markup,
             (string) ($context['blueprint']['text_anchor'] ?? ''),

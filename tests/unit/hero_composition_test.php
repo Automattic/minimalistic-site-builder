@@ -5,7 +5,7 @@ use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
 
 test('hero catalog entries own complete metadata, defaults, prompts, and unique hooks', function () {
-    assert_eq(7, count(HeroComposition::RECIPES));
+    assert_eq(6, count(HeroComposition::RECIPES));
     $hooks = [];
     foreach (HeroComposition::RECIPES as $recipe) {
         $meta = HeroComposition::metadata($recipe);
@@ -30,6 +30,20 @@ test('hero catalog entries own complete metadata, defaults, prompts, and unique 
         assert_true(in_array($default['mobile_transformation'], $meta['mobile_transformations'], true));
     }
     assert_eq(count($hooks), count(array_unique($hooks)), 'root hooks are unique');
+
+    // The reverse of the prompt check above (BIGR-905): a retired recipe must
+    // take its fragment with it. An orphan file is invisible to the loop, and
+    // the next author reads it as authoring guidance for a live recipe.
+    $templates = array_map(
+        static fn (string $recipe): string => HeroComposition::recipeTemplate($recipe),
+        HeroComposition::RECIPES,
+    );
+    foreach (glob(repo_path('prompts/hero-compositions/*.md')) ?: [] as $file) {
+        assert_true(
+            in_array('hero-compositions/' . basename($file), $templates, true),
+            basename($file) . ' belongs to a cataloged recipe',
+        );
+    }
 });
 
 test('hero compatibility filters objective caller constraints before selection', function () {
@@ -199,6 +213,33 @@ test('the retired diptych-editorial recipe is unknown to the catalog', function 
     assert_throws(fn () => HeroComposition::validateConstraints(['allowed_hero_media_modes' => ['diptych']]));
 });
 
+test('the retired stacked-headline-band recipe and its media mode are unknown (BIGR-905)', function () {
+    assert_true(!in_array('stacked-headline-band', HeroComposition::RECIPES, true));
+    assert_throws(fn () => HeroComposition::metadata('stacked-headline-band'));
+    assert_throws(fn () => HeroBlueprint::defaultFor('stacked-headline-band'));
+
+    // The recipe owned 'band-image' alone, so the mode retires with it. A
+    // caller that still asks for it is refused rather than silently served a
+    // recipe that composes its media some other way.
+    assert_true(!in_array('band-image', HeroComposition::MEDIA_MODES, true));
+    assert_true(!in_array('band-image', HeroComposition::IMAGE_MEDIA_MODES, true));
+    assert_true(!in_array('band-image', HeroBlueprint::MEDIA_MODES, true));
+    assert_throws(fn () => HeroComposition::validateConstraints([
+        'allowed_hero_media_modes' => ['band-image'],
+    ]));
+
+    // Every surviving recipe still selects, and every mode the catalog still
+    // names stays requestable.
+    foreach (HeroComposition::RECIPES as $recipe) {
+        foreach (HeroComposition::metadata($recipe)['media_modes'] as $mode) {
+            assert_true(
+                in_array($mode, HeroComposition::MEDIA_MODES, true),
+                "{$recipe} media mode {$mode} is still a requestable constraint",
+            );
+        }
+    }
+});
+
 test('hero recipe inspection keeps cover and aspect drift actionable at their exact boundary', function () {
     $copy = '<!-- wp:group {"className":"hero-composition__copy"} --><div class="wp-block-group hero-composition__copy">Copy</div><!-- /wp:group -->';
     $cover = '<!-- wp:cover {"className":"hero-composition__media"} --><div class="wp-block-cover hero-composition__media">'
@@ -218,123 +259,6 @@ test('hero recipe inspection keeps cover and aspect drift actionable at their ex
     assert_contains('recipe image aspect', $aspectWarnings[0]);
     assert_contains('portrait', $aspectWarnings[0]);
     assert_contains('landscape', $aspectWarnings[0]);
-});
-
-test('the band recipe is the only one selectable through media mode band-image (BIGR-885)', function () {
-    $pool = HeroComposition::compatible(['allowed_hero_media_modes' => ['band-image']]);
-    assert_eq(['stacked-headline-band'], $pool);
-    assert_eq(
-        'stacked-headline-band',
-        HeroComposition::select('band-site', 'A wide horizon under a short line.', [
-            'allowed_hero_media_modes' => ['band-image'],
-        ]),
-    );
-
-    $meta = HeroComposition::metadata('stacked-headline-band');
-    // The copy is the section's first element, so an overlay header would
-    // float over the headline instead of over media.
-    assert_eq(['stacked'], $meta['header_modes']);
-    // The copy sits on a solid surface; an 'image' surface would wrap the band
-    // in a cover and put the copy back over pixels.
-    assert_eq(['base', 'tinted', 'contrast'], $meta['backgrounds']);
-    assert_eq('mixed-width-editorial', $meta['layout_archetype']);
-
-    // The trap this recipe was written against: a media mode outside the
-    // hard-coded pair silently disarms image generation on both branches.
-    assert_true(HeroComposition::usesGeneratedImages('stacked-headline-band'));
-    assert_true(HeroComposition::usesGeneratedImages(
-        HeroBlueprint::defaultFor('stacked-headline-band')
-    ));
-    assert_true(!HeroComposition::usesGeneratedImages([
-        'recipe' => 'stacked-headline-band',
-        'media_mode' => 'none',
-    ]));
-
-    // The blueprint accepts the new mode and keeps the cover-only spatial
-    // fields at their non-cover values, so the default is a fixed point.
-    $repairs = [];
-    $normalized = HeroBlueprint::normalize(
-        HeroBlueprint::defaultFor('stacked-headline-band'),
-        'stacked-headline-band',
-        $repairs,
-    );
-    assert_eq('band-image', $normalized['media_mode']);
-    assert_eq('none', $normalized['focal_region']);
-    assert_eq('full', $normalized['text_safe_region']);
-    assert_eq([], $repairs);
-});
-
-test('the band recipe reports text over the band, a cover, and a short band (BIGR-885)', function () {
-    $copy = '<!-- wp:group {"className":"hero-composition__copy"} --><div class="wp-block-group hero-composition__copy">'
-        . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">A wide horizon</h1><!-- /wp:heading -->'
-        . '<!-- wp:paragraph --><p>One orienting line.</p><!-- /wp:paragraph -->'
-        . '</div><!-- /wp:group -->';
-    $band = '<!-- wp:image {"align":"full","className":"hero-composition__media"} -->'
-        . '<figure class="wp-block-image alignfull hero-composition__media">'
-        . '<img src="theme:./assets/band.jpg" alt="AI_IMAGE: A wide valley | wide band under the copy | photorealistic | landscape" />'
-        . '</figure><!-- /wp:image -->';
-    $valid = '<!-- wp:group --><div class="wp-block-group">' . $copy . $band . '</div><!-- /wp:group -->';
-    assert_eq([], HeroComposition::markupWarnings($valid, 'stacked-headline-band', 'page-home--hero'));
-
-    // The recipe's own objective failure: copy authored inside the band.
-    $overBand = '<!-- wp:group --><div class="wp-block-group">'
-        . '<!-- wp:group {"align":"full","className":"hero-composition__media"} -->'
-        . '<div class="wp-block-group alignfull hero-composition__media">'
-        . '<img src="theme:./assets/band.jpg" alt="AI_IMAGE: A wide valley | wide band | photorealistic | landscape" />'
-        . $copy . '</div><!-- /wp:group --></div><!-- /wp:group -->';
-    $warnings = HeroComposition::markupWarnings($overBand, 'stacked-headline-band', 'page-home--hero');
-    $overlaid = array_values(array_filter(
-        $warnings,
-        fn (string $w): bool => str_contains($w, 'band recipe text over media'),
-    ));
-    assert_eq(1, count($overlaid));
-    assert_contains('text_blocks_inside_media', $overlaid[0]);
-
-    // A cover is the other way copy lands on the photograph.
-    $covered = '<!-- wp:group --><div class="wp-block-group">' . $copy
-        . '<!-- wp:cover {"align":"full","className":"hero-composition__media"} -->'
-        . '<div class="wp-block-cover alignfull hero-composition__media">'
-        . '<img src="theme:./assets/band.jpg" alt="AI_IMAGE: A wide valley | wide band | photorealistic | landscape" />'
-        . '</div><!-- /wp:cover --></div><!-- /wp:group -->';
-    $warnings = HeroComposition::markupWarnings($covered, 'stacked-headline-band', 'page-home--hero');
-    assert_eq(1, count(array_filter(
-        $warnings,
-        fn (string $w): bool => str_contains($w, 'band recipe cover usage'),
-    )));
-
-    // A band capped below full width breaks the recipe's other promise.
-    $narrow = str_replace(
-        ['{"align":"full","className":"hero-composition__media"}', ' alignfull'],
-        ['{"className":"hero-composition__media"}', ''],
-        $valid,
-    );
-    $warnings = HeroComposition::markupWarnings($narrow, 'stacked-headline-band', 'page-home--hero');
-    assert_eq(1, count(array_filter(
-        $warnings,
-        fn (string $w): bool => str_contains($w, 'band recipe media width'),
-    )));
-
-    // A missing region hook stays actionable at its own boundary.
-    $noRegion = str_replace('hero-composition__media', 'band', $valid);
-    $warnings = HeroComposition::markupWarnings($noRegion, 'stacked-headline-band', 'page-home--hero');
-    assert_eq(1, count(array_filter(
-        $warnings,
-        fn (string $w): bool => str_contains($w, 'recipe band media region'),
-    )));
-
-    // A full-bleed band spans the viewport, so ultrawide fits it too.
-    $ultrawide = str_replace('| landscape', '| ultrawide', $valid);
-    assert_eq([], HeroComposition::markupWarnings($ultrawide, 'stacked-headline-band', 'page-home--hero'));
-
-    // A portrait band is the aspect the letterbox crop cannot serve.
-    $portrait = str_replace('| landscape', '| portrait', $valid);
-    $warnings = HeroComposition::markupWarnings($portrait, 'stacked-headline-band', 'page-home--hero');
-    $aspect = array_values(array_filter(
-        $warnings,
-        fn (string $w): bool => str_contains($w, 'recipe image aspect'),
-    ));
-    assert_eq(1, count($aspect));
-    assert_contains('landscape or ultrawide', $aspect[0]);
 });
 
 test('hero copy budget and headline punctuation overruns warn without hiding valid heroes (BIGR-775)', function () {
