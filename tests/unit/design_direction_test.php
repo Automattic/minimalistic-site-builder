@@ -12,6 +12,7 @@ use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\TypeTreatment;
 use Automattic\SiteBuild\Steps\DesignDirectionStep;
 use Automattic\SiteBuild\Steps\ThemeJsonStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
@@ -148,6 +149,7 @@ test('design-direction expands a picked seed into structured designDirection.jso
     assert_eq('soft', $written['depth']);
     assert_eq(Measure::DEFAULT, $written['measure']);
     assert_eq(TypeScale::DEFAULT, $written['type_scale']);
+    assert_eq(TypeTreatment::DEFAULT, $written['type_treatment']);
     assert_eq(CtaStyle::DEFAULT, $written['cta_style']);
     assert_true(!array_key_exists('signature_device', $written), 'signature_device field is gone');
     assert_true(in_array($written['hero_blueprint']['recipe'], HeroComposition::RECIPES, true));
@@ -169,7 +171,7 @@ test('design-direction expands a picked seed into structured designDirection.jso
     assert_contains('cozy neighborhood bakery', $llm->calls[1]['prompt']);
     assert_contains('Hearth & Crumb', $llm->calls[1]['prompt']);
     assert_contains('Seed ', $llm->calls[1]['prompt'], 'a seed reached the expansion prompt');
-    foreach (['palette', 'type', 'type_scale', 'image_grade', 'image_crop', 'canvas', 'measure', 'card_style', 'depth', 'cta_style', 'hero_blueprint'] as $field) {
+    foreach (['palette', 'type', 'type_scale', 'type_treatment', 'image_grade', 'image_crop', 'canvas', 'measure', 'card_style', 'depth', 'cta_style', 'hero_blueprint'] as $field) {
         assert_contains($field, $llm->calls[1]['prompt']);
     }
     assert_contains(
@@ -931,6 +933,41 @@ test('invalid measure degrades to standard with actionable evidence', function (
     }
 });
 
+test('normalize commits and renders one bounded type treatment', function () {
+    foreach (TypeTreatment::ALL as $treatment) {
+        $warnings = [];
+        $direction = DesignDirectionStep::normalize([
+            'description' => 'x',
+            'type_treatment' => strtoupper($treatment),
+            'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
+        ], 'cinematic-safe-zone', '', warnings: $warnings);
+
+        assert_eq($treatment, $direction['type_treatment']);
+        assert_eq([], $warnings);
+        $rendered = DesignDirectionStep::format($direction);
+        assert_contains('**Type treatment**: ' . $treatment, $rendered);
+        assert_contains(TypeTreatment::typography($treatment)['letterSpacing'], $rendered);
+        assert_contains('preserve its lineHeight', $rendered);
+    }
+});
+
+test('invalid type treatment degrades to sentence with actionable evidence', function () {
+    foreach (['small-caps', ['title'], true] as $authored) {
+        $warnings = [];
+        $direction = DesignDirectionStep::normalize([
+            'description' => 'x',
+            'type_treatment' => $authored,
+            'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
+        ], 'cinematic-safe-zone', '', warnings: $warnings);
+
+        assert_eq(TypeTreatment::DEFAULT, $direction['type_treatment']);
+        assert_eq(1, count($warnings));
+        assert_contains('field type_treatment', $warnings[0]);
+        assert_contains('delivered "sentence"', $warnings[0]);
+        assert_contains('disposition', $warnings[0]);
+    }
+});
+
 test('normalize commits a card style: bounded values pass through and missing defaults without warning', function () {
     assert_eq('framed', DesignDirectionStep::normalize(['description' => 'x', 'card_style' => ' Framed '], 'cinematic-safe-zone')['card_style']);
     assert_eq('overlap', DesignDirectionStep::normalize(['description' => 'x', 'card_style' => 'overlap'], 'cinematic-safe-zone')['card_style']);
@@ -1425,6 +1462,7 @@ test('fallbackDirection builds on the chosen seed, generic brief otherwise', fun
     $generic = DesignDirectionStep::fallbackDirection('', 'cinematic-safe-zone');
     assert_contains('bold', $generic['description']);
     assert_eq(Measure::DEFAULT, $generic['measure']);
+    assert_eq(TypeTreatment::DEFAULT, $generic['type_treatment']);
     assert_eq('calm', $generic['motion']);
     assert_eq('mixed', $generic['image_crop']);
     assert_eq('flat', $generic['depth']);
@@ -1921,6 +1959,19 @@ test('measureFor returns only an explicit valid persisted commitment', function 
     assert_eq(null, DesignDirectionStep::measureFor($project));
     $project->writeJson('designDirection.json', ['measure' => ' Full ']);
     assert_eq('full', DesignDirectionStep::measureFor($project));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('typeTreatmentFor returns only an explicit valid persisted commitment', function () {
+    $tmp = sys_get_temp_dir() . '/builder_ddtypetreatment_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+
+    assert_eq(null, DesignDirectionStep::typeTreatmentFor($project));
+    $project->writeJson('designDirection.json', ['type_treatment' => ['title']]);
+    assert_eq(null, DesignDirectionStep::typeTreatmentFor($project));
+    $project->writeJson('designDirection.json', ['type_treatment' => ' Caps-Tracked ']);
+    assert_eq('caps-tracked', DesignDirectionStep::typeTreatmentFor($project));
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
