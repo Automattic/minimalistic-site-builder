@@ -22,14 +22,7 @@ Make opinionated, specific design choices that genuinely fit this site's topic, 
 Design intelligence to encode as tokens:
 
 - **Typography — pick characterful fonts.** Pair a distinctive DISPLAY font (headings) with a refined BODY font. Avoid Inter, Roboto, Arial, Open Sans, system fonts, and don't default to Space Grotesk. Use fonts that genuinely fit the subject and era.
-- **Type size scale — six steps, each with a ROLE.** Encode the scale onto `settings.typography.fontSizes` using EXACTLY these slugs, so sections can target each role:
-    `caption` — 0.875rem. Metadata, labels, eyebrows, folio lines — never sentences the visitor is meant to read.
-    `body` — 1.0625–1.125rem. ALL running copy. A flat 1rem reads undersized next to the display steps — err toward 1.125rem.
-    `lead` — 1.25–1.4rem. The single standout line: hero subcopy, a one-sentence section intro.
-    `heading` — ~1.75rem. h3, card and item headings.
-    `section-title` — a gentle fluid clamp around 2.25–3rem. h2 / section titles.
-    `display` — the hero masthead: a fluid `clamp()` reaching roughly 5–7rem at desktop widths, sized to the FRONT-PAGE HERO BLUEPRINT's explicit headline register and line targets rather than the viewport alone. When its text anchor/topology places the headline inside a narrow column (half the page or less) or its register is restrained, follow it down — cap near 4.5rem, because a viewport-scaled headline in a ~450px column wraps to five broken lines, which reads far worse than a modest one. Otherwise do NOT cap it near 3.5–4rem — an undersized display headline on a full-width stage reads as timid.
-  Example: `0.875rem / 1.125rem / 1.375rem / 1.75rem / clamp(2.25rem, 3vw, 3rem) / clamp(3rem, 7vw, 6rem)`. Only caption and body are paragraph sizes (lead is for ONE short line per section); everything above is heading territory, and display exists for ONE hero/masthead moment per page.
+- **Type size scale is build-owned.** The DESIGN DIRECTION's committed **Type scale** deterministically supplies the six semantic presets (`caption`, `body`, `lead`, `heading`, `section-title`, `display`) from one body anchor and one modular ratio. Do not emit `settings.typography.fontSizes`, literal scale values, or a competing ratio. Sections consume those exact slugs; `display` remains the one hero/masthead moment, while `caption` and `body` are the paragraph sizes and `lead` is for one short standout line.
 - **Heading line height.** This remains a model-authored design choice. Choose 1.1–1.3; never below 1.0, and set it at `styles.elements.heading.typography.lineHeight` — the build supplies the body line-height but not this one, so headings inherit a body rhythm unless you set it.
 - **Color — dominant with sharp accents.** Commit to a cohesive palette; dominant colors with sharp accents outperform timid, evenly-distributed schemes. Keep `accent` RARE: CTAs/interaction only — never body text, large-area backgrounds, or decorative motifs. No hue is off-limits; what fails is the untreated version of one — a mid-tone hue on white with grey supporting text and no other commitment. Blues, violets and greens are as available as warm neutrals, and warm off-white is the palette this step drifts to on its own, so it needs a reason like any other choice.
 - **Band surface.** Declare the direction's exact sixth `band` slug. It is the only solid surface for planned `tinted` sections: same tint family and same light/dark side as `base`, with HSL lightness 6–14 points away. Never substitute `secondary` (a small-text role), a gradient, or a key-flipping pale/dark slab; the build writes the committed band back and repairs its relation to base.
@@ -65,7 +58,7 @@ Hard requirements — follow exactly so downstream templates can rely on the slu
 - settings.color.gradients: a small array of named gradient presets (slug + name + gradient) built from the palette, for section backgrounds/atmosphere.
 - settings.shadow.presets: a small array of named shadow presets (slug + name + shadow) sections can apply for depth.
 - settings.typography.fluid: true.
-- settings.typography.fontSizes: the 6-step scale above (each entry { "slug", "name", "size" }) using EXACTLY the slugs caption / body / lead / heading / section-title / display — sections reference the steps by these exact slugs.
+- Do not emit settings.typography.fontSizes; the build writes the committed six-step Type scale after this response (on HTML-first builds the carried design CSS remains authoritative for rendered type instead).
 - settings.typography.fontFamilies: an array with the heading and body slugs, plus an optional accent slug ONLY when the design-direction Type fact names `type.accent.family`:
     "heading" — a real, characterful Google font that fits the brand, as the FIRST token in the stack, then web-safe fallbacks
     "body"    — a real, refined Google font that fits the brand, as the FIRST token in the stack, then web-safe fallbacks

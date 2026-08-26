@@ -27,6 +27,7 @@ use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\TypeScale;
 use Automattic\SiteBuild\BoundedChoice;
 use Automattic\SiteBuild\Warnings;
 
@@ -356,6 +357,7 @@ final class DesignDirectionStep implements Step
                 'body'    => self::emptyTypeSlot(),
                 'accent'  => self::emptyTypeSlot(),
             ],
+            'type_scale'       => TypeScale::DEFAULT,
             'image_grade'      => '',
             'canvas'           => $canvas,
             'measure'          => Measure::DEFAULT,
@@ -718,6 +720,14 @@ final class DesignDirectionStep implements Step
         }
 
         $type = is_array($raw['type'] ?? null) ? $raw['type'] : [];
+        $typeScale = BoundedChoice::normalize(
+            $raw['type_scale'] ?? null,
+            TypeScale::ALL,
+            TypeScale::DEFAULT,
+            'type_scale',
+            $warnings,
+            'invalid modular scale replaced by deterministic classic fallback',
+        );
 
         HeroComposition::assertKnown($assignedRecipe);
 
@@ -832,6 +842,7 @@ final class DesignDirectionStep implements Step
                 'body'    => self::normalizeTypeSlot($type['body'] ?? null, 'body', $warnings),
                 'accent'  => self::normalizeTypeSlot($type['accent'] ?? null, 'accent', $warnings),
             ],
+            'type_scale'       => $typeScale,
             'image_grade'      => trim((string) ($raw['image_grade'] ?? '')),
             // Anything that isn't an explicit "framed" commitment is full-bleed:
             // an accidental frame reads as a rendering bug, not a design choice.
@@ -1204,6 +1215,12 @@ final class DesignDirectionStep implements Step
             $facts[] = '- **Type**: ' . implode('; ', $pair);
         }
 
+        $typeScale = TypeScale::explicit($direction['type_scale'] ?? null);
+        if ($typeScale !== null) {
+            $facts[] = '- **Type scale**: ' . $typeScale . ' — '
+                . TypeScale::meaning($typeScale) . '. The build owns the six preset values.';
+        }
+
         // Render the canvas commitment with its executable meaning, so the
         // section/header prompts act on it instead of re-interpreting a bare
         // keyword. Directions persisted before the field existed carry none.
@@ -1557,6 +1574,15 @@ final class DesignDirectionStep implements Step
             $project->readJson(self::FILE)['density'] ?? null,
             self::DENSITIES,
         ) ?? 'measured';
+    }
+
+    /** The explicit modular type-scale commitment, or null when absent/garbled. */
+    public static function typeScaleFor(Project $project): ?string
+    {
+        if (!$project->exists(self::FILE)) {
+            return null;
+        }
+        return TypeScale::explicit($project->readJson(self::FILE)['type_scale'] ?? null);
     }
 
     /** The explicit site-wide CTA construction, or null for a pre-field artifact. */

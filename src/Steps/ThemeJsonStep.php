@@ -25,6 +25,7 @@ use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\TypeScale;
 use Automattic\SiteBuild\Warnings;
 use Throwable;
 
@@ -132,25 +133,6 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         'accent'  => 'system-ui, sans-serif',
     ];
     /**
-     * The type scale the scaffold wires roles to. Every slug SCAFFOLD does
-     * reference must exist here, or it would leave a dangling
-     * var:preset|font-size|… — PresetReferences does scan theme.json's own
-     * strings and would report it, but as a build-time problem rather than a
-     * rendered site. `lead` is deliberately unreferenced by SCAFFOLD: it stays
-     * in the scale as an editor choice, but nothing is wired to it, because
-     * choosing which blocks are larger than body text is the design's call.
-     *
-     * @var list<array{slug: string, name: string, size: string}>
-     */
-    private const FONT_SIZE_PROFILE = [
-        ['slug' => 'caption', 'name' => 'Caption', 'size' => '0.875rem'],
-        ['slug' => 'body', 'name' => 'Body', 'size' => '1.125rem'],
-        ['slug' => 'lead', 'name' => 'Lead', 'size' => '1.375rem'],
-        ['slug' => 'heading', 'name' => 'Heading', 'size' => '1.75rem'],
-        ['slug' => 'section-title', 'name' => 'Section Title', 'size' => 'clamp(2.25rem, 3vw, 3rem)'],
-        ['slug' => 'display', 'name' => 'Display', 'size' => 'clamp(3rem, 7vw, 6rem)'],
-    ];
-    /**
      * Stable component spacing shared by every page density.
      *
      * xs is the tight intra-component text rhythm (an eyebrow/heading/line
@@ -189,8 +171,9 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     /**
      * Build-supplied wiring the model no longer writes. It maps presets to
      * roles and makes zero aesthetic choices — every value is a var:preset
-     * token whose actual color, family and size the model chose, so sites stay
-     * visually distinct. No borders, radii, shadows or decorative treatment.
+     * token whose actual color/family the model chose and whose type size the
+     * committed direction selected, so sites stay visually distinct. No
+     * borders, radii, shadows or decorative treatment.
      * (The direction-committed CTA and shape wiring are deliberate exceptions,
      * and execute explicit design commitments rather than making choices here.)
      *
@@ -528,6 +511,13 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         [$theme, $colorWarnings, $colorRepairs] = self::repairColors($theme, $preferred);
         $preferredType = is_array($direction['type'] ?? null) ? $direction['type'] : [];
         [$theme, $fontWarnings, $fontRepairs] = self::repairFonts($theme, $preferredType);
+        // Mirrors the applyMeasure gate above: on the HTML-first path the
+        // carried design CSS owns the rendered typography, so the committed
+        // ramp never displaces the sizes the design authored.
+        [$theme, $typeScaleRepairs] = self::applyTypeScale(
+            $theme,
+            $this->htmlFirst ? null : DesignDirectionStep::typeScaleFor($project),
+        );
         [$theme, $sizeWarnings] = self::repairFontSizes($theme);
 
         // Last: the scaffold references the preset slugs repaired above. The
@@ -563,7 +553,13 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         [$theme, $floorWarnings] = self::applyPaletteFloor($theme);
         $warnings = array_merge($warnings, $floorWarnings);
 
-        $bindRepairs = array_merge($colorRepairs, $fontRepairs, $measureRepairs, $ctaRepairs);
+        $bindRepairs = array_merge(
+            $colorRepairs,
+            $fontRepairs,
+            $measureRepairs,
+            $typeScaleRepairs,
+            $ctaRepairs,
+        );
         $bindReport = ['Successful design-direction writebacks: ' . count($bindRepairs)];
         foreach ($bindRepairs as $repair) {
             $bindReport[] = '- ' . $repair;
@@ -1996,6 +1992,10 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     {
         $warnings = [];
         $sizes = $theme['settings']['typography']['fontSizes'] ?? null;
+        // The prompt tells the model not to emit fontSizes, so a wholly absent
+        // array is compliance, not a defect: the deterministic fill below is
+        // the build honoring its own contract and needs no warning rows.
+        $authoredAbsent = $sizes === null;
         if (!is_array($sizes) || ($sizes !== [] && !array_is_list($sizes))) {
             if ($sizes !== null) {
                 $warnings[] = 'theme.json settings.typography.fontSizes: invalid container '
@@ -2044,17 +2044,57 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         }
 
         $slugs = array_column($entries, 'slug');
-        foreach (self::FONT_SIZE_PROFILE as $fallback) {
+        $fallbackProfile = TypeScale::fontSizes(TypeScale::DEFAULT) ?? [];
+        foreach ($fallbackProfile as $fallback) {
             if (in_array($fallback['slug'], $slugs, true)) {
                 continue;
             }
             $entries[] = $fallback;
-            $warnings[] = "theme.json fontSizes missing slug '{$fallback['slug']}'; "
-                . "filled with {$fallback['size']}";
+            if (!$authoredAbsent) {
+                $warnings[] = "theme.json fontSizes missing slug '{$fallback['slug']}'; "
+                    . "filled with {$fallback['size']}";
+            }
         }
 
         $theme['settings']['typography']['fontSizes'] = $entries;
         return [$theme, $warnings];
+    }
+
+    /**
+     * Replace every model-authored size with the committed modular ramp.
+     * Displacing an authored scale is repair-report evidence, never a
+     * warning: the authored scale was deliberately outside the model's
+     * ownership. Writing the ramp into an absent slot reports nothing,
+     * because nothing was replaced.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>}
+     */
+    public static function applyTypeScale(array $theme, ?string $scale): array
+    {
+        $profile = TypeScale::fontSizes($scale);
+        if ($profile === null) {
+            return [$theme, []];
+        }
+
+        $settings = is_array($theme['settings'] ?? null) ? $theme['settings'] : [];
+        $typography = is_array($settings['typography'] ?? null) ? $settings['typography'] : [];
+        $authored = $typography['fontSizes'] ?? null;
+        $theme['settings'] = $settings;
+        $theme['settings']['typography'] = $typography;
+        $theme['settings']['typography']['fontSizes'] = $profile;
+
+        // The prompt forbids the model to author sizes, so the normal case is
+        // an absent array: the build supplies the ramp and replaces nothing.
+        // A writeback line exists only when an authored scale was displaced.
+        if ($authored === null || $authored === $profile) {
+            return [$theme, []];
+        }
+        return [$theme, [
+            'theme/theme.json: settings.typography.fontSizes authored '
+                . Warnings::value($authored) . ' delivered committed "' . $scale
+                . '" modular scale; disposition replaced model-authored scale with deterministic direction token',
+        ]];
     }
 
     /**

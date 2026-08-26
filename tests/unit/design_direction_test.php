@@ -15,6 +15,7 @@ use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Steps\DesignDirectionStep;
 use Automattic\SiteBuild\Steps\ThemeJsonStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
+use Automattic\SiteBuild\TypeScale;
 
 /** @return array{0:Project,1:FakeLlm,2:string} */
 function make_designdir_fixture(): array
@@ -140,6 +141,7 @@ test('design-direction expands a picked seed into structured designDirection.jso
     assert_eq('warm kodachrome color, soft golden light', $written['image_grade']);
     assert_eq('framed', $written['card_style']);
     assert_eq(Measure::DEFAULT, $written['measure']);
+    assert_eq(TypeScale::DEFAULT, $written['type_scale']);
     assert_eq(CtaStyle::DEFAULT, $written['cta_style']);
     assert_true(!array_key_exists('signature_device', $written), 'signature_device field is gone');
     assert_true(in_array($written['hero_blueprint']['recipe'], HeroComposition::RECIPES, true));
@@ -161,7 +163,7 @@ test('design-direction expands a picked seed into structured designDirection.jso
     assert_contains('cozy neighborhood bakery', $llm->calls[1]['prompt']);
     assert_contains('Hearth & Crumb', $llm->calls[1]['prompt']);
     assert_contains('Seed ', $llm->calls[1]['prompt'], 'a seed reached the expansion prompt');
-    foreach (['palette', 'type', 'image_grade', 'canvas', 'measure', 'card_style', 'cta_style', 'hero_blueprint'] as $field) {
+    foreach (['palette', 'type', 'type_scale', 'image_grade', 'canvas', 'measure', 'card_style', 'cta_style', 'hero_blueprint'] as $field) {
         assert_contains($field, $llm->calls[1]['prompt']);
     }
     assert_contains(
@@ -1198,6 +1200,40 @@ test('format renders the shape commitment with its executable meaning', function
     assert_eq('Just prose.', DesignDirectionStep::format(['description' => 'Just prose.', 'shape' => ['round']]));
 });
 
+test('normalize commits and renders one bounded modular type scale', function () {
+    foreach (TypeScale::ALL as $scale) {
+        $warnings = [];
+        $direction = DesignDirectionStep::normalize([
+            'description' => 'x',
+            'type_scale' => strtoupper($scale),
+            'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
+        ], 'cinematic-safe-zone', '', warnings: $warnings);
+
+        assert_eq($scale, $direction['type_scale']);
+        assert_eq([], $warnings);
+        $formatted = DesignDirectionStep::format($direction);
+        assert_contains('**Type scale**: ' . $scale, $formatted);
+        assert_contains('The build owns the six preset values', $formatted);
+    }
+});
+
+test('invalid type scale degrades to classic with actionable evidence', function () {
+    foreach (['heroic', ['editorial'], true] as $authored) {
+        $warnings = [];
+        $direction = DesignDirectionStep::normalize([
+            'description' => 'x',
+            'type_scale' => $authored,
+            'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
+        ], 'cinematic-safe-zone', '', warnings: $warnings);
+
+        assert_eq(TypeScale::DEFAULT, $direction['type_scale']);
+        assert_eq(1, count($warnings));
+        assert_contains('field type_scale', $warnings[0]);
+        assert_contains('delivered "classic"', $warnings[0]);
+        assert_contains('disposition', $warnings[0]);
+    }
+});
+
 test('design-direction delivers the deterministic fallback when the model returns no usable direction', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
     $llm->queueJson(['seeds' => designdir_seeds()]);
@@ -1768,6 +1804,19 @@ test('measureFor returns only an explicit valid persisted commitment', function 
     assert_eq(null, DesignDirectionStep::measureFor($project));
     $project->writeJson('designDirection.json', ['measure' => ' Full ']);
     assert_eq('full', DesignDirectionStep::measureFor($project));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('typeScaleFor returns only an explicit valid commitment', function () {
+    $tmp = sys_get_temp_dir() . '/builder_ddtypescale_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+
+    assert_eq(null, DesignDirectionStep::typeScaleFor($project));
+    $project->writeJson('designDirection.json', ['type_scale' => ['editorial']]);
+    assert_eq(null, DesignDirectionStep::typeScaleFor($project));
+    $project->writeJson('designDirection.json', ['type_scale' => ' Dramatic ']);
+    assert_eq('dramatic', DesignDirectionStep::typeScaleFor($project));
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
