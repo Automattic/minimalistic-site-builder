@@ -67,18 +67,24 @@ final class Depth
             return null;
         }
         $shadow = self::PRESETS[$depth]['shadow'];
-        // An inset box-shadow on a replaced <img> paints beneath the image
-        // pixels and can disappear. A build-owned inner outline makes that
-        // same commitment visible on standalone image media without changing
-        // its crop or color treatment.
+        // An inset box-shadow can paint beneath replaced/background image
+        // pixels and disappear. A build-owned inner outline makes that same
+        // commitment visible on standalone image, Cover, and Media & Text
+        // surfaces without changing their crop or color treatment.
         $insetMedia = $depth === 'inset'
             ? <<<CSS
 
-                figure.wp-block-image:not(.alignfull) > img {
+                figure.wp-block-image:not(.alignfull) > img,
+                figure.wp-block-image:not(.alignfull) > a > img,
+                .wp-block-cover:not(.alignfull),
+                .wp-block-media-text:not(.alignfull) > .wp-block-media-text__media {
                     outline: 1px solid color-mix(in srgb, var(--wp--preset--color--contrast) 28%, transparent);
                     outline-offset: -0.5rem;
                 }
-                .wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap) > figure.wp-block-image:not(.alignfull) > img {
+                .wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap) > figure.wp-block-image:not(.alignfull) > img,
+                .wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap) > figure.wp-block-image:not(.alignfull) > a > img,
+                .wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap) > .wp-block-cover:not(.alignfull),
+                .wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap) > .wp-block-media-text:not(.alignfull) > .wp-block-media-text__media {
                     outline: none;
                 }
 
@@ -91,6 +97,7 @@ final class Depth
                keeps isolated finalize runs deterministic too. */
             .wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap),
             figure.wp-block-image:not(.alignfull) > img,
+            figure.wp-block-image:not(.alignfull) > a > img,
             .wp-block-cover:not(.alignfull),
             .wp-block-media-text:not(.alignfull) > .wp-block-media-text__media {
                 box-shadow: var(--wp--preset--shadow--depth, {$shadow}) !important;
@@ -99,6 +106,7 @@ final class Depth
             /* One elevated card is one surface: its direct media must not draw
                a second shadow. Borderless cards are absent on purpose. */
             .wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap) > figure.wp-block-image:not(.alignfull) > img,
+            .wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap) > figure.wp-block-image:not(.alignfull) > a > img,
             .wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap) > .wp-block-cover:not(.alignfull),
             .wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap) > .wp-block-media-text:not(.alignfull) > .wp-block-media-text__media {
                 box-shadow: none !important;

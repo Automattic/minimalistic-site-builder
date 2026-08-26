@@ -26,6 +26,7 @@ test('Depth kit executes the preset on cards and contained media without double-
         assert_contains('var(--wp--preset--shadow--depth,', $css);
         assert_contains('.card-style--flush', $css);
         assert_contains('figure.wp-block-image:not(.alignfull) > img', $css);
+        assert_contains('figure.wp-block-image:not(.alignfull) > a > img', $css, 'linked images receive depth too');
         assert_contains('.wp-block-cover:not(.alignfull)', $css);
         assert_contains('.wp-block-media-text:not(.alignfull)', $css);
         assert_contains('box-shadow: none !important', $css, 'direct card media gets no second shadow');
@@ -43,5 +44,8 @@ test('Depth inset remains visible on replaced image content', function () {
     $css = Depth::kitCss('inset');
     assert_contains('outline:', $css);
     assert_contains('outline-offset: -0.5rem', $css);
+    assert_contains('figure.wp-block-image:not(.alignfull) > a > img', $css, 'linked images retain the inner edge');
+    assert_contains('.wp-block-cover:not(.alignfull)', $css, 'cover pixels cannot hide the inner edge');
+    assert_contains('.wp-block-media-text:not(.alignfull) > .wp-block-media-text__media', $css, 'media-text pixels cannot hide the inner edge');
     assert_true(!str_contains(Depth::kitCss('soft'), 'outline-offset'), 'other modes add no inset edge');
 });
