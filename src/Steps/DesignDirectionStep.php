@@ -18,6 +18,7 @@ use Automattic\SiteBuild\GroundTint;
 use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
 use Automattic\SiteBuild\Llm;
+use Automattic\SiteBuild\Measure;
 use Automattic\SiteBuild\Motion;
 use Automattic\SiteBuild\LlmOptions;
 use Automattic\SiteBuild\Narrator;
@@ -36,8 +37,8 @@ use Automattic\SiteBuild\Warnings;
  * Output: designDirection.json — the chosen direction as structured data:
  *         title + vivid description plus the explicit fields downstream steps
  *         execute instead of re-interpreting (palette hexes, type pairing,
- *         image grade, and a separately consumed structured front-page hero
- *         blueprint).
+ *         image grade, canvas/measure layout commitments, and a separately
+ *         consumed structured front-page hero blueprint).
  *
  * Two calls. First, a cheap seed call (small model, hot sampling) brainstorms
  * THREE concept seeds — each an object: an evocative title plus one vivid
@@ -356,6 +357,7 @@ final class DesignDirectionStep implements Step
             ],
             'image_grade'      => '',
             'canvas'           => $canvas,
+            'measure'          => Measure::DEFAULT,
             'card_style'       => 'flush',
             'shape'            => 'sharp',
             'surface'          => Surface::DEFAULT,
@@ -731,6 +733,15 @@ final class DesignDirectionStep implements Step
                 . self::describe($raw['canvas']) . ' delivered "full-bleed"; disposition repaired invalid value';
         }
 
+        $measure = BoundedChoice::normalize(
+            $raw['measure'] ?? null,
+            Measure::ALL,
+            Measure::DEFAULT,
+            'measure',
+            $warnings,
+            'invalid layout measure replaced by deterministic standard fallback',
+        );
+
         $cardStyle = self::normalizeCardStyle($raw['card_style'] ?? null, $warnings);
         $surface = self::normalizeSurface($raw['surface'] ?? null, $warnings);
         $device = self::normalizeDevice($raw['device'] ?? null, $warnings);
@@ -815,6 +826,7 @@ final class DesignDirectionStep implements Step
             // Anything that isn't an explicit "framed" commitment is full-bleed:
             // an accidental frame reads as a rendering bug, not a design choice.
             'canvas'           => $canvas,
+            'measure'          => $measure,
             // Anything outside the bounded card constructions delivers the
             // flush default — inset media must be an explicit opt-in, never
             // the accidental look every site gets.
@@ -1191,6 +1203,15 @@ final class DesignDirectionStep implements Step
             $facts[] = '- **Canvas**: full-bleed — heroes, image bands and color bands may run edge-to-edge with `"align":"full"`.';
         }
 
+        $measure = Measure::explicit($direction['measure'] ?? null);
+        if ($measure !== null) {
+            $measureFact = '- **Measure**: ' . $measure . ' — ' . Measure::meaning($measure) . '.';
+            if ($canvas === 'framed') {
+                $measureFact .= ' The committed wideSize is the visible frame edge below the full-bleed hero.';
+            }
+            $facts[] = $measureFact;
+        }
+
         // Render the card commitment with its executable meaning: the section
         // prompt's card anatomy executes exactly the named construction, and
         // defaults to flush when a direction predates the field.
@@ -1238,7 +1259,7 @@ final class DesignDirectionStep implements Step
                 'measured' => 'an even, unhurried rhythm; standard throughout, with a spacious pause only where the composition needs one',
                 'dense'    => 'tightly packed; prefer compact wherever the content supports it and let content carry the page',
                 default    => 'the committed page density',
-            } . '.';
+            } . '. The build derives the lg/xl/xxl section-padding ramp from this commitment.';
         }
 
         // Render the shape commitment with its executable meaning. The build
@@ -1469,6 +1490,15 @@ final class DesignDirectionStep implements Step
         return strtolower(trim((string) ($project->readJson(self::FILE)['canvas'] ?? '')));
     }
 
+    /** The explicit content/wide layout commitment, or null for a pre-field artifact. */
+    public static function measureFor(Project $project): ?string
+    {
+        if (!$project->exists(self::FILE)) {
+            return null;
+        }
+        return Measure::explicit($project->readJson(self::FILE)['measure'] ?? null);
+    }
+
     /**
      * The committed motion profile, gating the motion-sanity strip and the
      * finalize-theme kit wiring. Fails closed: no direction, or one that
@@ -1497,6 +1527,18 @@ final class DesignDirectionStep implements Step
             return null;
         }
         return self::explicitShape($project->readJson(self::FILE)['shape'] ?? null);
+    }
+
+    /** The persisted page density, measured when absent or not a committed value. */
+    public static function densityFor(Project $project): string
+    {
+        if (!$project->exists(self::FILE)) {
+            return 'measured';
+        }
+        return BoundedChoice::explicit(
+            $project->readJson(self::FILE)['density'] ?? null,
+            self::DENSITIES,
+        ) ?? 'measured';
     }
 
     /**

@@ -1974,7 +1974,9 @@ test('PagePlanStep does not pad a thin front plan with offset-grid on non-photog
 
 test('page-plan and section-composition restrict offset-grid to photography sites', function () {
     $pagePlan = (string) file_get_contents(repo_path('prompts/page-plan.md'));
-    $composition = (string) file_get_contents(repo_path('prompts/section-composition.md'));
+    $composition = (string) file_get_contents(
+        repo_path('prompts/section-compositions/offset-grid.md')
+    );
     $section = (string) file_get_contents(repo_path('prompts/section.md'));
 
     foreach ([$pagePlan, $composition] as $prompt) {

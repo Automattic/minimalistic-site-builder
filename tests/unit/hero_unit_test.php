@@ -116,6 +116,7 @@ test('HeroUnit exposes one isolated assigned recipe behind the shared site layer
         'framed-portrait' => 'contained vertical foreground image',
         'focal-subject-stage' => 'singular subject as an opaque foreground content image',
         'layered-poster' => 'cover image beneath controlled block-built type',
+        'stacked-headline-band' => 'Stack the proposition above one full-width image band',
         'type-manifesto' => 'one imageless, type-led band',
     ];
 
