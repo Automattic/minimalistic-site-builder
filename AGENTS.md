@@ -87,7 +87,9 @@ Everything else — unknown or unreviewed block signatures, malformed block stru
 
 ## Posting screenshots / images in PR & issue comments
 
-Verification screenshots and other throwaway proof belong in **PR/issue comments, not committed to trunk or the PR branch** — they bloat git history. Only commit lightweight, reproducible fixtures (the HTML/script that regenerates the evidence), never the generated PNGs.
+Verification screenshots and other throwaway proof belong in **PR/issue comments, never in the repository or the PR branch**. This is a hard requirement: do not stage, commit, or push generated screenshots, recordings, visual diffs, or other review-only artifacts, even temporarily. Putting them on the PR branch and deleting them in a later commit still bloats git history.
+
+Create review evidence outside the worktree (for example, in a directory from `mktemp -d`). Before committing or pushing, inspect both the working tree and staged changes for generated image/video artifacts and unstage/move any review evidence found there. Only commit an image when it is an intentional product asset or a lightweight, reproducible test fixture required by the change; an artifact created merely to prove the PR works is not such an asset. Prefer committing the HTML/script/fixture that regenerates the proof, not its rendered output.
 
 GitHub has **no API or `gh` command to upload true comment attachments** — the `github.com/user-attachments/...` URLs are only produced by drag-and-drop in the web UI. To embed an image programmatically, host it in a **gist** (keeps the evidence entirely out of the repo) and reference its raw URL:
 
@@ -107,4 +109,4 @@ GitHub has **no API or `gh` command to upload true comment attachments** — the
    ```
 3. Post with `gh pr comment <n> --body "…"` (add `--edit-last` to update it), `gh issue comment <n> --body "…"`, or `gh pr edit <n> --body "…"`.
 
-If the user prefers genuine GitHub-hosted attachments, ask them to drag the images into the comment via the web UI instead.
+If gist creation or authentication is unavailable, do not fall back to committing the evidence. Post the textual verification and give the user the local artifact path, or ask them to upload it through the GitHub web UI. If the user prefers genuine GitHub-hosted attachments, ask them to drag the images into the comment via the web UI instead.
