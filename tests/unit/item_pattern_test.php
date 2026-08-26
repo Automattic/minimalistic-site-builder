@@ -32,6 +32,7 @@ test('item-pattern direction normalization is bounded, warned, and rendered', fu
         $warnings,
         static fn (string $warning): bool => str_contains($warning, 'item_pattern'),
     )));
+    assert_contains('**Measure**: standard', DesignDirectionStep::format($direction));
     assert_contains('**Item pattern**: spec-table', DesignDirectionStep::format($direction));
     assert_contains('label/value pairs', DesignDirectionStep::format($direction));
 
