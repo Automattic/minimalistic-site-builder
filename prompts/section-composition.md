@@ -2,6 +2,7 @@ ASSIGNED COMPOSITION (the page plan assigned every section its composition so th
   Layout archetype: {{layout_archetype}}
   Background:       {{background}}
   Vertical density: {{vertical_density}}
+  Text placement:   {{text_placement}}
   Seams:            {{handoff}}
   Neighbors' assignments (design your top and bottom edges against these):
 {{neighbors}}
@@ -31,6 +32,26 @@ Execute the assigned background:
 - tinted — the committed "band" backgroundColor on the top-level group; never "secondary" and never a gradient. The build enforces this exact surface after generation.
 - contrast — an inverted band: backgroundColor "contrast" with light text ("base" textColor) throughout.
 - image — a full-bleed image band: express the section as/inside a wp:cover with an AI_IMAGE background.
+
+Execute the assigned text placement without changing readable measure:
+- left-column — in a wide band, put the pure headline/intro stack in an
+  `align:"wide"` constrained group with `className:"copy-flush"`, so its
+  children begin on the leading grid edge and stop at the theme contentSize.
+- centered — center the constrained copy column; center short display lines
+  only and keep every wrapping paragraph start-aligned.
+- split — put the copy stack on the side named in SECTION Notes inside an
+  unequal two-zone columns/media-text composition. Do not invent filler for
+  the other side; use existing media, cards, facts, or intentional whitespace.
+- asymmetric-thirds — use one `align:"wide"` constrained pure-text group at
+  the unchanged theme measure. For the second zone, leave Core's normal
+  centered child margins in place; for the third zone add `className:"copy-end"`
+  so the build aligns that same-width copy mass to the trailing grid edge.
+  Never fake the offset with empty text blocks or a narrower `contentSize`.
+
+For every placement, the text stack stays constrained with no `contentSize` of
+its own. The assignment moves that column horizontally; it never turns body
+copy into a wide line. Grids, galleries, media, and cards retain the width the
+layout archetype assigned and do not go inside the pure-text wrapper.
 
 You may refine details within the archetype (column ratios, spacing, type scale), but do NOT swap the archetype or background — your neighbors were planned around them, and the seams described above only work if every section holds its assignment.
 If SECTION Notes mention a different layout or background, treat those layout/background words as stale planning context and reinterpret the same content inside the assigned archetype and background above.

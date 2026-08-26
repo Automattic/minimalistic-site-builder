@@ -404,6 +404,32 @@ test('finalize-theme ships palette tint and high-key image-treatment kits then p
     $rc = 0;
     exec('php -l ' . escapeshellarg($project->themePath('functions.php')) . ' 2>&1', $out, $rc);
     assert_eq(0, $rc, implode("\n", $out));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('finalize-theme ships a committed image-crop kit and prunes mixed', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    finalize_static_header($project);
+
+    $project->writeJson('designDirection.json', ['description' => 'x', 'image_crop' => 'panoramic']);
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+
+    $css = $project->readText('theme/assets/image-crop/image-crop.css');
+    assert_contains("Committed 'panoramic' image crop", $css);
+    assert_contains('.card-media img { aspect-ratio: 16 / 9', $css);
+    assert_contains('aspect-ratio: 21 / 9', $css);
+    $php = $project->readText('theme/functions.php');
+    assert_contains(
+        "wp_enqueue_style('forno-vero-image-crop', get_theme_file_uri('assets/image-crop/image-crop.css'), array('forno-vero-style')",
+        $php,
+    );
+    assert_contains("add_editor_style(array('style.css', 'assets/image-crop/image-crop.css'))", $php);
+
+    $project->writeJson('designDirection.json', ['description' => 'x', 'image_crop' => 'mixed']);
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+    assert_true(!$project->exists('theme/assets/image-crop/image-crop.css'));
+    assert_true(!str_contains($project->readText('theme/functions.php'), 'assets/image-crop/'));
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -435,6 +461,63 @@ test('finalize-theme applies duotone through Core block support without a CSS ap
     exec('php -l ' . escapeshellarg($project->themePath('functions.php')) . ' 2>&1', $out, $rc);
     assert_eq(0, $rc, implode("\n", $out));
 
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('finalize-theme ships the committed depth kit, including deliberate flat', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    finalize_static_header($project);
+
+    $project->writeJson('designDirection.json', ['description' => 'x', 'depth' => 'hard-offset']);
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+
+    $css = $project->readText('theme/assets/depth/depth.css');
+    assert_contains("Committed 'hard-offset' depth", $css);
+    assert_contains('0.55rem 0.55rem 0', $css);
+    assert_contains('var(--wp--preset--shadow--depth', $css);
+    $php = $project->readText('theme/functions.php');
+    assert_contains(
+        "wp_enqueue_style('forno-vero-depth', get_theme_file_uri('assets/depth/depth.css'), array('forno-vero-style')",
+        $php,
+    );
+    assert_contains("add_editor_style(array('style.css', 'assets/depth/depth.css'))", $php);
+
+    $project->writeJson('designDirection.json', ['description' => 'x', 'depth' => 'flat']);
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+    $flat = $project->readText('theme/assets/depth/depth.css');
+    assert_contains("Committed 'flat' depth", $flat);
+    assert_contains('var(--wp--preset--shadow--depth, none)', $flat);
+    assert_contains('assets/depth/depth.css', $project->readText('theme/functions.php'));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('finalize-theme does not invent image crop for a pre-field direction', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    $project->writeJson('designDirection.json', ['description' => 'x']);
+    $project->writeText('theme/assets/image-crop/image-crop.css', 'stale');
+    finalize_static_header($project);
+
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+
+    assert_true(!$project->exists('theme/assets/image-crop/image-crop.css'));
+    assert_true(!str_contains($project->readText('theme/functions.php'), 'assets/image-crop/'));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('finalize-theme does not invent depth for a pre-field direction and prunes stale bytes', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    $project->writeJson('designDirection.json', ['description' => 'x']);
+    $project->writeText('theme/assets/depth/depth.css', 'stale');
+    finalize_static_header($project);
+
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+
+    assert_true(!$project->exists('theme/assets/depth/depth.css'));
+    assert_true(!str_contains($project->readText('theme/functions.php'), 'assets/depth/'));
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

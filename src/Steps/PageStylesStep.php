@@ -4087,6 +4087,13 @@ CSS;
         if (preg_match('/--motion-[\w-]+\s*:/i', $stripped) === 1) {
             $problems[] = 'motion custom properties are profile-owned and cannot be overridden';
         }
+        // The depth kit reads box-shadow through this variable; !important on
+        // the kit protects the property, not the variable, so a scoped
+        // redeclaration would silently change the committed depth for a
+        // subtree.
+        if (preg_match('/--wp--preset--shadow--depth\s*:/i', $stripped) === 1) {
+            $problems[] = 'the depth shadow preset variable is build-owned and cannot be redeclared';
+        }
         foreach (CssChecks::scanDeclarations($stripped) as $declaration) {
             if (self::declarationTargetsShape($declaration)
                 && CssChecks::isShapeAffectingDeclaration(
@@ -4295,8 +4302,8 @@ CSS;
     /**
      * Salvage pass for CSS that failed validate(): remove each declaration
      * that carries a declaration-level offence (raw color literal, resource-
-     * loading function, --motion-* override, shape-owned corner radius,
-     * content-hiding value) and keep the rest. Only rule bodies are touched —
+     * loading function, --motion-* override, depth-variable redeclaration,
+     * shape-owned corner radius, content-hiding value) and keep the rest. Only rule bodies are touched —
      * selectors, @media preludes and brace structure pass through, so
      * structural problems deliberately survive into the re-validation and
      * still reject the whole appendix. A quote/comment/function-aware shared
@@ -4352,6 +4359,9 @@ CSS;
         $value = $m[2];
         if (str_starts_with($property, '--motion-')) {
             return 'motion custom properties are profile-owned';
+        }
+        if ($property === '--wp--preset--shadow--depth') {
+            return 'the depth shadow preset variable is build-owned';
         }
         if ($targetsShape && CssChecks::isShapeAffectingDeclaration($property, $value)) {
             return 'contained-image/button corner is shape-owned by the design direction';

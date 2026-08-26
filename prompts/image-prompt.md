@@ -2,6 +2,8 @@
 
 {{grade_clause}}
 
+{{crop_clause}}
+
 {{transparency_clause}}
 
 {{lettering_clause}}

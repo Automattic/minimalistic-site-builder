@@ -9,6 +9,7 @@ use Automattic\SiteBuild\BlockSerializer\Html\HtmlNode;
 use Automattic\SiteBuild\BlockSerializer\Html\Selector;
 use Automattic\SiteBuild\BoundedChoice;
 use Automattic\SiteBuild\CssTokenExtractor;
+use Automattic\SiteBuild\Depth;
 use Automattic\SiteBuild\FontCatalog;
 use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\GeneratedJsonFallbackStep;
@@ -322,6 +323,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
 
     private const REQ = 'theme-json';
     private const SHAPE_REPORT_FILE = 'theme-json-shape.txt';
+    private const DEPTH_REPORT_FILE = 'theme-json-depth.txt';
 
     /**
      * Applied direction writebacks. warnings.json is the list of defects the
@@ -363,6 +365,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             writes: [
                 'theme/theme.json',
                 'logs/' . self::SHAPE_REPORT_FILE,
+                'logs/' . self::DEPTH_REPORT_FILE,
                 'logs/' . self::BIND_REPORT_FILE,
                 'warnings.json',
             ],
@@ -537,6 +540,10 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $theme,
             DesignDirectionStep::shapeFor($project) ?? '',
         );
+        [$theme, $depthRepairs] = self::repairDepthPreset(
+            $theme,
+            DesignDirectionStep::depthFor($project),
+        );
         [$theme, $groupPaddingWarnings] = self::repairGroupBlockPadding($theme);
         $warnings = array_merge(
             $warnings,
@@ -586,6 +593,16 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         if ($shapeRepairs !== []) {
             Narrator::write('  [theme-json] repaired ' . count($shapeRepairs)
                 . " conflicting shape declaration(s); see logs/" . self::SHAPE_REPORT_FILE . "\n");
+        }
+
+        $depthReport = ['Successful deterministic depth preset repairs: ' . count($depthRepairs)];
+        foreach ($depthRepairs as $repair) {
+            $depthReport[] = '- ' . $repair;
+        }
+        $project->writeText('logs/' . self::DEPTH_REPORT_FILE, implode("\n", $depthReport) . "\n");
+        if ($depthRepairs !== []) {
+            Narrator::write('  [theme-json] wired the committed depth preset; see logs/'
+                . self::DEPTH_REPORT_FILE . "\n");
         }
 
         if ($warnings !== []) {
@@ -2512,6 +2529,74 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $node[$mapKey] = $map;
         }
         return true;
+    }
+
+    /**
+     * Publish the one build-owned shadow preset consumed by Depth::kitCss().
+     * Unrelated generated presets are left intact because removing one after
+     * generation could invalidate a reference in the same build. The prompt
+     * no longer asks the model to spend tokens inventing them. Duplicate or
+     * conflicting `depth` slugs collapse to the committed definition.
+     *
+     * A direction without an explicit commitment is a no-op, matching
+     * depthFor(): an isolated run must not invent a visual choice.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>} theme, successful repairs
+     */
+    public static function repairDepthPreset(array $theme, mixed $depth): array
+    {
+        $preset = Depth::preset($depth);
+        if ($preset === null) {
+            return [$theme, []];
+        }
+
+        $repairs = [];
+        if (!is_array($theme['settings'] ?? null)
+            || (($theme['settings'] ?? []) !== [] && array_is_list($theme['settings']))) {
+            $theme['settings'] = [];
+            $repairs[] = 'theme/theme.json settings authored malformed; delivered object for depth preset';
+        }
+        if (!is_array($theme['settings']['shadow'] ?? null)
+            || (($theme['settings']['shadow'] ?? []) !== [] && array_is_list($theme['settings']['shadow']))) {
+            $theme['settings']['shadow'] = [];
+            $repairs[] = 'theme/theme.json settings.shadow authored malformed; delivered object for depth preset';
+        }
+
+        $authored = $theme['settings']['shadow']['presets'] ?? [];
+        if (!is_array($authored) || ($authored !== [] && !array_is_list($authored))) {
+            $authored = [];
+            $repairs[] = 'theme/theme.json settings.shadow.presets authored malformed; delivered bounded preset list';
+        }
+
+        $delivered = [];
+        $inserted = false;
+        foreach ($authored as $entry) {
+            if (is_array($entry) && strtolower(trim((string) ($entry['slug'] ?? ''))) === 'depth') {
+                if (!$inserted) {
+                    $delivered[] = $preset;
+                    $inserted = true;
+                }
+                continue;
+            }
+            $delivered[] = $entry;
+        }
+        if (!$inserted) {
+            $delivered[] = $preset;
+        }
+        if ($delivered !== $authored) {
+            $repairs[] = 'theme/theme.json settings.shadow.presets.depth authored '
+                . Warnings::value(array_values(array_filter(
+                    $authored,
+                    static fn (mixed $entry): bool => is_array($entry)
+                        && strtolower(trim((string) ($entry['slug'] ?? ''))) === 'depth',
+                )))
+                . '; delivered ' . Warnings::value($preset)
+                . '; disposition wired committed depth and collapsed duplicate slug definitions';
+        }
+        $theme['settings']['shadow']['presets'] = $delivered;
+
+        return [$theme, $repairs];
     }
 
     /**

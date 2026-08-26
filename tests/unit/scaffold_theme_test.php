@@ -25,6 +25,7 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     // fixed 110px height letterboxed its square image at whatever ratio the
     // column width produced (BIGR-777).
     assert_contains('.card-media img', $css);
+    assert_contains('.feature-media img', $css);
     assert_contains('.card-media img { aspect-ratio: 3 / 2; height: auto; }', $css);
     assert_contains('.card-media-tall img { aspect-ratio: 4 / 5; height: auto; }', $css);
     assert_contains('.card-media-thumb img { aspect-ratio: 1 / 1; height: auto; }', $css);
@@ -36,6 +37,9 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     // through (the image block supports no textColor of its own, BIGR-784).
     assert_contains('.caption-text-base > figcaption { color: var(--wp--preset--color--base); }', $css);
     assert_contains('.caption-text-contrast > figcaption { color: var(--wp--preset--color--contrast); }', $css);
+    assert_contains('.wp-block-group.copy-end > * {', $css);
+    assert_contains('margin-inline-start: auto !important;', $css);
+    assert_contains('margin-inline-end: 0 !important;', $css);
 
     // Flush list-thumb rows: the zeroed row padding must beat generated inline
     // padding, the row clips the bleeding thumb under its border radius, and

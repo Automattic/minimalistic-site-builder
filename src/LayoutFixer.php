@@ -77,6 +77,9 @@ final class LayoutFixer
      */
     public const COPY_FLUSH_CLASS = 'copy-flush';
 
+    /** Authored trailing-edge placement for an unchanged readable measure. */
+    public const COPY_END_CLASS = 'copy-end';
+
     private const TEXT_STACK_BLOCKS = [
         'heading', 'paragraph', 'buttons', 'list', 'separator', 'spacer',
         'site-title', 'site-tagline',
@@ -1410,6 +1413,11 @@ final class LayoutFixer
      */
     private static function readsFromLeadingEdge(object $group): bool
     {
+        $className = $group->attrs->className ?? '';
+        $classes = is_string($className) ? (preg_split('/\s+/', trim($className)) ?: []) : [];
+        if (in_array(self::COPY_END_CLASS, $classes, true)) {
+            return false;
+        }
         foreach ($group->children as $child) {
             // Three channels carry the same decision. Generations reach for the
             // style.typography spelling almost exclusively, so a check of the
