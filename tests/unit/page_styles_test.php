@@ -273,6 +273,23 @@ test('shape scanning ignores declaration-looking text inside quoted and custom-p
     assert_eq([], $dropped);
 });
 
+test('page styles drops CTA-owned construction but keeps row layout utilities', function () {
+    $css = '.cta-bottom .wp-block-button__link { background:var(--wp--preset--color--primary); '
+        . 'padding:2rem; transform:translateY(-2px); }'
+        . '.cta-bottom .wp-block-buttons { justify-content:center; margin-top:auto; }';
+    $problems = implode('; ', PageStylesStep::validate($css));
+    assert_contains('CTA-style-owned', $problems);
+
+    [$salvaged, $dropped] = PageStylesStep::dropOffendingDeclarations($css);
+    assert_true(!str_contains($salvaged, 'background:'));
+    assert_true(!str_contains($salvaged, 'padding:'));
+    assert_contains('transform:translateY(-2px)', $salvaged);
+    assert_contains('justify-content:center', $salvaged);
+    assert_contains('margin-top:auto', $salvaged);
+    assert_eq(2, count($dropped));
+    assert_contains('CTA-style-owned', implode('; ', $dropped));
+});
+
 test('validate rejects CSS that hides generated content', function () {
     foreach ([
         ".masonry-3 > * {\n    opacity: 0;\n}",
@@ -529,7 +546,7 @@ test('legacy mode ignores stale site CSS and keeps the recorded call trace and s
     assert_eq(0, $llm->completeBatchCalls, 'legacy path makes no batch call');
     assert_eq(1, count($llm->calls), 'legacy call trace count');
     assert_eq(
-        'd47ffed9ca61b617fae355619161917d52d74bb4215c1e99d18a4ca7b4a94fea',
+        '0f31a0ba5edf175d8bb3a3b0c1ff22eb585fdcde7e694041528acc7334237579',
         hash('sha256', $llm->calls[0]['prompt']),
         'legacy prompt bytes'
     );

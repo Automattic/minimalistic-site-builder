@@ -4097,6 +4097,15 @@ CSS;
                 $problems[] = 'contained-image/button corner declarations are shape-owned by the design direction';
                 break;
             }
+            if (self::declarationTargetsCta($declaration)
+                && CssChecks::isCtaAffectingDeclaration(
+                    $declaration['property'],
+                    $declaration['value'],
+                )
+            ) {
+                $problems[] = 'button construction declarations are CTA-style-owned by the design direction';
+                break;
+            }
         }
         // Parse opacity values instead of pattern-matching literal zeros:
         // 0%, .0 and calc(0) hide content just as well as 0.
@@ -4303,6 +4312,7 @@ CSS;
             $problem = self::declarationProblem(
                 $declaration['raw'],
                 self::declarationTargetsShape($declaration),
+                self::declarationTargetsCta($declaration),
             );
             if ($problem !== null) {
                 $problems[$declaration['start']] = $problem;
@@ -4329,7 +4339,11 @@ CSS;
      * validate(); anything unparsable is dropped too — the salvage pass fails
      * closed.
      */
-    private static function declarationProblem(string $declaration, bool $targetsShape = false): ?string
+    private static function declarationProblem(
+        string $declaration,
+        bool $targetsShape = false,
+        bool $targetsCta = false,
+    ): ?string
     {
         if (preg_match('/^\s*([-\w]+)\s*:\s*(\S[\s\S]*)$/', $declaration, $m) !== 1) {
             return 'not a single property: value declaration';
@@ -4341,6 +4355,9 @@ CSS;
         }
         if ($targetsShape && CssChecks::isShapeAffectingDeclaration($property, $value)) {
             return 'contained-image/button corner is shape-owned by the design direction';
+        }
+        if ($targetsCta && CssChecks::isCtaAffectingDeclaration($property, $value)) {
+            return 'button construction is CTA-style-owned by the design direction';
         }
         if (preg_match('/#[0-9a-fA-F]{3,8}\b/', $value) === 1
             || preg_match('/\b(?:rgba?|hsla?)\s*\(/i', $value) === 1
@@ -4379,6 +4396,13 @@ CSS;
     {
         return $declaration['kind'] === 'style'
             && CssChecks::selectorTargetsShape($declaration['context']);
+    }
+
+    /** @param array{context:string,kind:string} $declaration */
+    private static function declarationTargetsCta(array $declaration): bool
+    {
+        return $declaration['kind'] === 'style'
+            && CssChecks::selectorTargetsCta($declaration['context']);
     }
 
     /** @return string[] */
