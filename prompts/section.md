@@ -16,7 +16,7 @@ Rules:
     quote — attributed testimonials or reviews at reading size, with a citation.
     gallery — photo grids with proper gutters; set `"columns"` (2–4) and it handles responsive wrapping. Better than hand-built image columns for photo-led sections.
 - Reference theme.json presets by slug:
-    colors via "backgroundColor" / "textColor" using slugs: base, contrast, primary, secondary, accent
+    colors via "backgroundColor" / "textColor" using slugs: base, contrast, primary, secondary, accent, band. `band` is a background surface only; never use it for text.
     fonts via "fontFamily" using slugs: heading, body, and `accent` only when the DESIGN DIRECTION Type fact includes an accent family (flavor names, prices, folio, numerals — never running copy)
     font sizes via "fontSize" using slugs: caption, body, lead, heading, section-title, display
   Example: <!-- wp:heading {"level":2,"fontFamily":"heading","textColor":"primary"} --><h2>…</h2><!-- /wp:heading --> — the build regenerates the corresponding WordPress classes.

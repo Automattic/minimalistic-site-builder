@@ -1802,7 +1802,7 @@ final class GeneratedMarkup
         $tokens = array_values(array_filter(
             array_unique($tokens),
             static fn (string $token): bool => $token !== 'has-text-color'
-                && preg_match('/^has-(?:base|contrast|primary|secondary|accent)-color$/', $token) !== 1,
+                && preg_match('/^has-(?:base|contrast|primary|secondary|accent|band)-color$/', $token) !== 1,
         ));
         $tokens[] = "has-{$color}-color";
         $tokens[] = 'has-text-color';

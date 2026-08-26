@@ -13,6 +13,7 @@ use Automattic\SiteBuild\Depth;
 use Automattic\SiteBuild\FontCatalog;
 use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\GeneratedJsonFallbackStep;
+use Automattic\SiteBuild\BandColor;
 use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\CssChecks;
 use Automattic\SiteBuild\PaletteFloor;
@@ -35,7 +36,7 @@ use Throwable;
  *         The model translates that direction into theme.json tokens.
  * Output: theme/theme.json — palette, typography, spacing, layout, element styles.
  *
- * Validates the structure the templates depend on (version 3, the five color
+ * Validates the structure the templates depend on (version 3, the six color
  * slugs, the heading/body font slugs, and an optional accent family) and
  * repairs drift deterministically: missing slugs are filled from the design
  * direction's committed values, then neutral defaults, and heading/body
@@ -53,7 +54,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
 {
     use LlmOptions;
 
-    private const REQUIRED_COLORS = ['base', 'contrast', 'primary', 'secondary', 'accent'];
+    private const REQUIRED_COLORS = ['base', 'contrast', 'primary', 'secondary', 'accent', 'band'];
 
     /**
      * The per-slug contrast floors against `base` that prompts/theme-json.md
@@ -109,6 +110,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         'primary'   => '#111111',
         'secondary' => '#444444',
         'accent'    => '#111111',
+        'band'      => '#E6E6E6',
     ];
 
     /**
@@ -1639,10 +1641,17 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $rawPreferred = $preferredHexes[$needed] ?? null;
             $preferred = is_string($rawPreferred) ? strtoupper(trim($rawPreferred)) : '';
             $fromDirection = preg_match('/^#[0-9A-F]{6}$/', $preferred) === 1 ? $preferred : null;
-            $neutral = self::FALLBACK_COLORS[$needed];
+            $neutral = $needed === 'band'
+                ? (BandColor::fromBase($deliveredBase) ?? self::FALLBACK_COLORS[$needed])
+                : self::FALLBACK_COLORS[$needed];
             if ($fromDirection === null || self::clearsFloor($needed, $fromDirection, $deliveredBase)) {
                 $hex = $fromDirection ?? $neutral;
-                $warnings[] = "theme.json palette missing slug '{$needed}'; filled with {$hex}";
+                if ($needed === 'band') {
+                    $repairs[] = "palette missing slug 'band': delivered {$hex}; disposition derived the "
+                        . 'committed large-area surface from base';
+                } else {
+                    $warnings[] = "theme.json palette missing slug '{$needed}'; filled with {$hex}";
+                }
             } else {
                 // Same floor the writeback above enforces, applied to the one
                 // other way a direction hex reaches the palette. There is no
@@ -1660,6 +1669,29 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                     . self::hueDriftNote($needed, $fromDirection, $hex);
             }
             $palette[] = ['slug' => $needed, 'color' => $hex, 'name' => ucfirst($needed)];
+        }
+
+        $baseIndex = null;
+        $bandIndex = null;
+        foreach ($palette as $index => $entry) {
+            if (($entry['slug'] ?? null) === 'base') {
+                $baseIndex = $index;
+            } elseif (($entry['slug'] ?? null) === 'band') {
+                $bandIndex = $index;
+            }
+        }
+        if ($baseIndex !== null && $bandIndex !== null) {
+            $base = (string) $palette[$baseIndex]['color'];
+            $band = (string) $palette[$bandIndex]['color'];
+            if (!BandColor::valid($base, $band)) {
+                $fixedBand = BandColor::fromBase($base);
+                if ($fixedBand !== null) {
+                    $palette[$bandIndex]['color'] = $fixedBand;
+                    $repairs[] = "palette slug 'band': authored {$band}; delivered {$fixedBand}; "
+                        . 'disposition enforced a same-family surface 10 lightness points from base '
+                        . 'without crossing the page light/dark key';
+                }
+            }
         }
         $theme['settings']['color']['palette'] = $palette;
         return [$theme, $warnings, $repairs];

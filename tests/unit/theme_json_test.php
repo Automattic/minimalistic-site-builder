@@ -512,7 +512,7 @@ test('theme-json delivers a deterministic base theme when repaired model JSON is
     $theme = $project->readJson('theme/theme.json');
     assert_eq(3, $theme['version']);
     assert_eq(
-        ['base', 'contrast', 'primary', 'secondary', 'accent'],
+        ['base', 'contrast', 'primary', 'secondary', 'accent', 'band'],
         array_column($theme['settings']['color']['palette'], 'slug'),
     );
     assert_true(!isset($theme['styles']['blocks']['core/image']['border']['radius']));
@@ -1145,6 +1145,7 @@ test('repairColors keeps a model hex the direction would make unreadable', funct
             ['slug' => 'primary', 'color' => '#111111', 'name' => 'Primary'],
             ['slug' => 'secondary', 'color' => '#555555', 'name' => 'Secondary'],
             ['slug' => 'accent', 'color' => '#B4541E', 'name' => 'Accent'],
+            ['slug' => 'band', 'color' => '#E6E6E6', 'name' => 'Band'],
         ]]]],
         $preferred,
     );
@@ -1172,6 +1173,7 @@ test('repairColors will not fill a missing slug with an unreadable direction hex
             ['slug' => 'contrast', 'color' => '#111111', 'name' => 'Contrast'],
             ['slug' => 'primary', 'color' => '#111111', 'name' => 'Primary'],
             ['slug' => 'accent', 'color' => '#B4541E', 'name' => 'Accent'],
+            ['slug' => 'band', 'color' => '#E6E6E6', 'name' => 'Band'],
         ]]]],
         ['secondary' => '#777777'],
     );
@@ -2593,7 +2595,7 @@ test('theme-json never fails on an empty model response', function () {
     $theme = $project->readJson('theme/theme.json');
     assert_eq(3, $theme['version']);
     assert_eq(
-        ['base', 'contrast', 'primary', 'secondary', 'accent'],
+        ['base', 'contrast', 'primary', 'secondary', 'accent', 'band'],
         array_column($theme['settings']['color']['palette'], 'slug'),
     );
     assert_eq(['heading', 'body'], array_column($theme['settings']['typography']['fontFamilies'], 'slug'));
