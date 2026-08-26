@@ -25,3 +25,15 @@ test('measure rejects absent and unsupported commitments without guessing', func
     }
     assert_eq('narrow', Measure::explicit(' Narrow '));
 });
+
+test('the widest committed reading column is derived from the catalog', function () {
+    // LayoutFixer's stand-down guard reads this instead of a literal, so a new
+    // catalog entry cannot fall outside it the way 960px and 1040px did.
+    assert_eq(1040.0, Measure::maxContentSizePx());
+
+    $widest = max(array_map(
+        static fn (string $m): float => (float) rtrim(Measure::widths($m)['contentSize'], 'px'),
+        Measure::ALL,
+    ));
+    assert_eq($widest, Measure::maxContentSizePx());
+});

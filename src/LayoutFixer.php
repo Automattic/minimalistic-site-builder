@@ -57,15 +57,6 @@ final class LayoutFixer
     private const COVER_MEASURE_FLOOR = 0.8;
 
     /**
-     * Above this the theme's contentSize is not itself a reading column:
-     * theme-json asks for 800-900px, but a viewport-fluid design preview
-     * derives it from the carrier instead and can land at the full 1366px
-     * reference viewport. Pinning copy to that reads worse than letting
-     * sections keep their own narrower measures, so the pass stands down.
-     */
-    private const READABLE_MEASURE_MAX = 900.0;
-
-    /**
      * What a pure text stack is made of. prompts/section.md reserves the
      * narrowed wrapper for these; anything else inside the group means the
      * measure belongs to a component, not to the section's reading column.
@@ -1289,7 +1280,12 @@ final class LayoutFixer
      */
     private static function normalizeTextMeasure(array $all, ?float $contentSize, array &$notes): void
     {
-        if ($contentSize === null || $contentSize > self::READABLE_MEASURE_MAX) {
+        // Above the widest committed measure, contentSize is not a reading column
+        // but a viewport-fluid derivation from the design carrier, up to the
+        // 1366px reference viewport; pinning copy to that reads worse than
+        // letting sections keep their own. Read from the catalog, not a literal,
+        // so a new committed width cannot fall outside this guard unnoticed.
+        if ($contentSize === null || $contentSize > Measure::maxContentSizePx()) {
             return;
         }
 

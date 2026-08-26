@@ -29,6 +29,19 @@ final class Measure
         return $measure === null ? null : self::WIDTHS[$measure];
     }
 
+    /**
+     * The widest committed reading column, in px. Deterministic passes use this
+     * to tell a committed measure from a viewport-fluid derived contentSize;
+     * deriving it from the catalog keeps a new entry inside the guard.
+     */
+    public static function maxContentSizePx(): float
+    {
+        return max(array_map(
+            static fn (array $pair): float => (float) rtrim($pair['contentSize'], 'px'),
+            self::WIDTHS,
+        ));
+    }
+
     public static function meaning(string $measure): string
     {
         return match ($measure) {

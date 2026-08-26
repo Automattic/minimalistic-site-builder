@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\LayoutFixer;
+use Automattic\SiteBuild\Measure;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\ThemeValidator;
 
@@ -498,6 +499,28 @@ test('a wrapper holding more than copy keeps its measure', function () {
         . '</div><!-- /wp:group -->';
     $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 840.0);
     assert_contains('"contentSize":"760px"', $r['markup']);
+});
+
+test('every committed measure normalizes a section text stack (BIGR-889)', function () {
+    // The measure token added 960px and 1040px reading columns. Both sit above
+    // the old fixed 900px ceiling, so this pass stood down on them and the
+    // BIGR-870 defect came back for two of the four committed measures.
+    $markup = '<!-- wp:group {"align":"full","layout":{"type":"constrained"}} --><div class="wp-block-group alignfull">'
+        . '<!-- wp:group {"layout":{"type":"constrained","contentSize":"720px"}} --><div class="wp-block-group">'
+        . '<!-- wp:heading --><h2 class="wp-block-heading">What we do</h2><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>Five core services.</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->';
+
+    foreach (Measure::ALL as $measure) {
+        $contentSize = (float) rtrim(Measure::widths($measure)['contentSize'], 'px');
+        $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, $contentSize);
+        assert_true(
+            !str_contains($r['markup'], '"contentSize":"720px"'),
+            "the {$measure} measure reads at the theme contentSize",
+        );
+        assert_contains('720px', implode(' ', $r['notes']));
+    }
 });
 
 test('a wide derived contentSize leaves section measures alone (BIGR-870)', function () {
