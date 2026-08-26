@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\GroundKey;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\PaletteReconciliation;
 use Automattic\SiteBuild\Project;
@@ -89,13 +90,50 @@ final class ReconcilePaletteStep implements Step
             }
         }
 
-        $project->addWarnings($this->id(), self::ambiguityWarnings($plan, $direction, $theme));
+        $project->addWarnings($this->id(), array_merge(
+            self::ambiguityWarnings($plan, $direction, $theme),
+            self::groundKeyWarnings($direction, $substitutions !== [] ? $reconciledDirection : $direction),
+        ));
 
         $slugs = count($substitutions);
         Narrator::write(
             "  palette: {$slugs} drifted color(s) resynced; "
             . ($directionEdits + $planEdits) . " planning value(s) rewritten\n"
         );
+    }
+
+    /**
+     * One actionable row when the resynced base contradicts the committed
+     * ground key.
+     *
+     * The direction's `ground_key` was enforced against the proposed base by
+     * design-direction, but theme-json may deliver a base on the other side
+     * of the luminance split, and this step then adopts that hex verbatim.
+     * The theme is already built, so nothing here can move the color; the
+     * contradiction is recorded and the build continues.
+     *
+     * @param array<array-key,mixed> $direction
+     * @param array<array-key,mixed> $reconciled
+     * @return list<string>
+     */
+    private static function groundKeyWarnings(array $direction, array $reconciled): array
+    {
+        $key = $direction['ground_key'] ?? null;
+        if (!is_string($key) || !in_array($key, GroundKey::ALL, true)) {
+            return [];
+        }
+        $proposed = PaletteReconciliation::directionPalette($direction)['base'] ?? null;
+        $delivered = PaletteReconciliation::directionPalette($reconciled)['base'] ?? null;
+        if (!is_string($delivered) || GroundKey::classify($delivered) === $key) {
+            return [];
+        }
+        return [
+            "file='designDirection.json'; block=\"palette.base\"; "
+            . 'authored=' . Warnings::value($proposed) . '; delivered=' . Warnings::value($delivered)
+            . "; disposition=theme-json delivered a base off the committed \"{$key}\" ground and the "
+            . 'planning palette now carries it; the theme is already built, so the contradiction is '
+            . 'recorded instead of repaired',
+        ];
     }
 
     /**
