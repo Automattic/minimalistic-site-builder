@@ -25,6 +25,7 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     // fixed 110px height letterboxed its square image at whatever ratio the
     // column width produced (BIGR-777).
     assert_contains('.card-media img', $css);
+    assert_contains('.feature-media img', $css);
     assert_contains('.card-media img { aspect-ratio: 3 / 2; height: auto; }', $css);
     assert_contains('.card-media-tall img { aspect-ratio: 4 / 5; height: auto; }', $css);
     assert_contains('.card-media-thumb img { aspect-ratio: 1 / 1; height: auto; }', $css);

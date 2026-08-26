@@ -380,6 +380,34 @@ test('compose injects the image grade as its own art-direction clause', function
     );
 });
 
+test('compose reads the site image crop as protected focal-area guidance', function () {
+    $out = ImagePromptComposer::compose(
+        'A sourdough loaf on a board',
+        'menu item card',
+        'photorealistic',
+        imageCrop: 'portrait',
+    );
+    assert_contains('Site-wide crop direction:', $out);
+    assert_contains('central portrait safe area', $out);
+
+    $mixed = ImagePromptComposer::compose(
+        'A sourdough loaf on a board',
+        'menu item card',
+        'photorealistic',
+        imageCrop: 'mixed',
+    );
+    assert_true(!str_contains($mixed, 'Site-wide crop direction:'), 'mixed keeps per-role composition');
+
+    $transparent = ImagePromptComposer::compose(
+        'A flour-dusted wheat stem',
+        'isolated accent',
+        'illustration',
+        transparent: true,
+        imageCrop: 'portrait',
+    );
+    assert_true(!str_contains($transparent, 'Site-wide crop direction:'), 'trimmed alpha assets ignore site crop');
+});
+
 test('compose omits the grade clause when no grade is given', function () {
     $out = ImagePromptComposer::compose('A sourdough loaf', 'menu item card', 'photorealistic', '', '');
     assert_true(!str_contains($out, 'Art direction'), 'no grade clause without a grade');

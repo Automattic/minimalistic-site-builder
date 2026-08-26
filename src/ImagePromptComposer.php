@@ -63,8 +63,10 @@ namespace Automattic\SiteBuild;
  * the template and the grade sits BEFORE the trailing guidance, that cap sheds the
  * sheddable context first and keeps the subject and grade intact.
  *
- * The aspect ratio is intentionally absent from this text — it is sent to the
- * endpoint as a structured parameter (GeminiImage::aspectRatio / buildBody).
+ * The request's exact aspect ratio remains a structured endpoint parameter.
+ * A bounded site-wide image-crop commitment may add composition guidance so
+ * independently generated subjects keep their focal content inside the same
+ * recurring frame shape without restating the numeric ratio in prose.
  */
 final class ImagePromptComposer
 {
@@ -88,6 +90,9 @@ final class ImagePromptComposer
      *        subject.
      * @param PromptRenderer|null $renderer    defaults to the package's prompts/ dir;
      *        injectable so the template lookup can be redirected in tests
+     * @param string             $imageCrop the bounded site-wide proportion
+     *        commitment; mixed/absent adds no textual steering because each
+     *        image role keeps its own authored ratio
      */
     public static function compose(
         string $subject,
@@ -96,7 +101,8 @@ final class ImagePromptComposer
         string $siteContext = '',
         string $imageGrade = '',
         bool $transparent = false,
-        ?PromptRenderer $renderer = null
+        ?PromptRenderer $renderer = null,
+        string $imageCrop = '',
     ): string {
         $renderer ??= new PromptRenderer(Package::promptsDir());
 
@@ -130,6 +136,11 @@ final class ImagePromptComposer
                 . ' background: perfectly flat and even, with no gradients, no vignette,'
                 . ' no glow, no shadows, no scenery and no backdrop of any kind.'
             : '';
+
+        // The structured ratio still owns the canvas. This site-wide clause
+        // only protects focal content for the recurring crop system, and is
+        // meaningless for transparent assets whose keyed canvas is trimmed.
+        $cropClause = $transparent ? '' : ImageCrop::promptClause($imageCrop);
 
         // A subject naming a text carrier gets a render instruction stating how
         // such surfaces appear (BIGR-781). Conditional: on a clean subject the
@@ -193,6 +204,7 @@ final class ImagePromptComposer
             'subject'             => $subject,
             'style_clause'        => $styleClause,
             'grade_clause'        => $gradeClause,
+            'crop_clause'         => $cropClause,
             'transparency_clause' => $transparencyClause,
             'lettering_clause'    => $letteringClause,
             'guidance'            => $guidance,
