@@ -414,8 +414,13 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
         preg_split('/\s+/', trim((string) $specialsRoot['className']), -1, PREG_SPLIT_NO_EMPTY),
         'the root overlap utility is stripped and the archetype marker survives',
     );
+    // No trailing quote: the closing-band-off-footer-surface floor may retint
+    // this closing section, and the retint's committed band surface appends
+    // has-band-* classes after the archetype marker. The footer pick hashes
+    // the whole direction text, so any new direction field can flip it; the
+    // assert_eq above already pins the authored className list exactly.
     assert_contains(
-        '<div class="wp-block-group hover-lift section-composition--equal-card-grid"',
+        '<div class="wp-block-group hover-lift section-composition--equal-card-grid',
         $specialsHtml,
         'the root wrapper loses overlap-up too',
     );
