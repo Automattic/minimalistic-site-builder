@@ -390,6 +390,22 @@ test('HeroUnit normalizes recipe and mobile root markers while preserving unrela
     assert_eq([], $second->warnings);
 });
 
+test('HeroUnit executes a tinted hero assignment with the committed band surface', function () {
+    $unit = new HeroUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    $raw = str_replace('alt=""', 'alt="AI_IMAGE: portrait subject | home hero | photorealistic | portrait"', hero_unit_root(
+        '<!-- wp:heading {"level":1} --><h1>Portrait hero</h1><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>Copy survives on its planned band.</p><!-- /wp:paragraph -->',
+    ));
+
+    $result = $unit->finish($raw, hero_unit_contract_input('framed-portrait', null));
+
+    assert_contains('"backgroundColor":"band"', $result->markup);
+    assert_contains('has-band-background-color', $result->markup);
+    assert_contains('Copy survives on its planned band.', $result->markup);
+    assert_true(in_array('tinted-band-surface-enforced', array_column($result->repairs, 'code'), true));
+    assert_eq([], $result->warnings);
+});
+
 test('HeroUnit wraps complete roots without changing their bytes and reaches a fixed point', function () {
     $unit = new HeroUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
     $input = hero_unit_contract_input('focal-subject-stage', null);
