@@ -55,6 +55,7 @@ function valid_theme_payload(): array
                 ['slug' => 'primary', 'color' => '#2f6b4f', 'name' => 'Primary'],
                 ['slug' => 'secondary', 'color' => '#4f6f48', 'name' => 'Secondary'],
                 ['slug' => 'accent', 'color' => '#8b5a2b', 'name' => 'Accent'],
+                ['slug' => 'band', 'color' => '#E6E6E6', 'name' => 'Band'],
             ]],
             'typography' => ['fontFamilies' => [
                 ['slug' => 'heading', 'fontFamily' => 'Fraunces, serif', 'name' => 'Heading'],

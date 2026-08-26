@@ -6,7 +6,7 @@ namespace Automattic\SiteBuild;
 /**
  * The palette slugs a design's own `header` rule asks for.
  *
- * A generated theme can only paint the header with one of five palette slugs,
+ * A generated theme can only paint the header with one of five header-capable palette slugs,
  * so an authored colour is honored when the palette already contains it and
  * ignored otherwise. The match is a recognition test, not a snap-to-nearest:
  * with five slugs something is always "nearest", so an unbounded nearest
