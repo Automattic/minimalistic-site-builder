@@ -19,6 +19,7 @@ use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\GroundTint;
 use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
+use Automattic\SiteBuild\ImageCrop;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\Measure;
 use Automattic\SiteBuild\Motion;
@@ -112,6 +113,9 @@ final class DesignDirectionStep implements Step
      * the dated inset-media card only appears when a direction opts into it.
      */
     public const CARD_STYLES = CardStyle::ALL;
+
+    /** Site-wide image proportion system for crop-role class hooks. */
+    public const IMAGE_CROPS = ImageCrop::ALL;
 
     /**
      * How the page's bands follow one another. The page plan already assigns a
@@ -360,6 +364,7 @@ final class DesignDirectionStep implements Step
             ],
             'type_scale'       => TypeScale::DEFAULT,
             'image_grade'      => '',
+            'image_crop'       => ImageCrop::DEFAULT,
             'canvas'           => $canvas,
             'measure'          => Measure::DEFAULT,
             'card_style'       => 'flush',
@@ -757,6 +762,7 @@ final class DesignDirectionStep implements Step
         );
 
         $cardStyle = self::normalizeCardStyle($raw['card_style'] ?? null, $warnings);
+        $imageCrop = self::normalizeImageCrop($raw['image_crop'] ?? null, $warnings);
         $depth = self::normalizeDepth($raw['depth'] ?? null, $warnings);
         $ctaStyle = BoundedChoice::normalize(
             $raw['cta_style'] ?? null,
@@ -847,6 +853,7 @@ final class DesignDirectionStep implements Step
             ],
             'type_scale'       => $typeScale,
             'image_grade'      => trim((string) ($raw['image_grade'] ?? '')),
+            'image_crop'       => $imageCrop,
             // Anything that isn't an explicit "framed" commitment is full-bleed:
             // an accidental frame reads as a rendering bug, not a design choice.
             'canvas'           => $canvas,
@@ -891,6 +898,25 @@ final class DesignDirectionStep implements Step
             'card_style',
             $warnings,
             'unsupported generated card treatment replaced by default',
+        );
+    }
+
+    /**
+     * Normalize the build-owned image proportion contract. Mixed preserves the
+     * established per-role ratios and is the safe behavior for a pre-field
+     * direction; invalid authored intent is durable-warning material.
+     *
+     * @param list<string> $warnings
+     */
+    public static function normalizeImageCrop(mixed $authored, array &$warnings = []): string
+    {
+        return BoundedChoice::normalize(
+            $authored,
+            ImageCrop::ALL,
+            ImageCrop::DEFAULT,
+            'image_crop',
+            $warnings,
+            'unsupported image proportion system replaced by mixed',
         );
     }
 
@@ -1386,6 +1412,17 @@ final class DesignDirectionStep implements Step
             $facts[] = "- **Motion**: {$motion} — {$meaning}." . ($note !== '' ? " Motion note: {$note}" : '');
         }
 
+        $imageCrop = ImageCrop::explicit($direction['image_crop'] ?? null);
+        if ($imageCrop !== null) {
+            $facts[] = '- **Image crop**: ' . $imageCrop . ' — ' . match ($imageCrop) {
+                'landscape' => 'the build makes ordinary cards 3:2, dominant cards and thumbs 4:3, and feature media 16:9',
+                'portrait'  => 'the build makes ordinary cards and feature media 4:5, dominant cards 2:3, and thumbs 3:4',
+                'square'    => 'the build makes every card, thumbnail, and feature-media crop 1:1',
+                'panoramic' => 'the build makes ordinary cards and thumbs 16:9, dominant cards 3:2, and feature media 21:9',
+                'mixed'     => 'the build keeps the established per-role system: ordinary cards 3:2, dominant cards 4:5, and thumbs 1:1',
+            } . '. Full-bleed media remains wide; use the documented crop role classes and do not author an aspect ratio.';
+        }
+
         $imageGrade = trim((string) ($direction['image_grade'] ?? ''));
         if ($imageGrade !== '') {
             $facts[] = "- **Image grade (all imagery)**: {$imageGrade}";
@@ -1543,6 +1580,15 @@ final class DesignDirectionStep implements Step
             return '';
         }
         return trim((string) ($project->readJson(self::FILE)['image_grade'] ?? ''));
+    }
+
+    /** Explicit committed image crop, or null for a pre-field/garbled artifact. */
+    public static function imageCropFor(Project $project): ?string
+    {
+        if (!$project->exists(self::FILE)) {
+            return null;
+        }
+        return ImageCrop::explicit($project->readJson(self::FILE)['image_crop'] ?? null);
     }
 
     /**
