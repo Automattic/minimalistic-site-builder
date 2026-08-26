@@ -1084,7 +1084,16 @@ final class ThemeValidator
         $theme = $project->exists('theme/theme.json')
             ? json_decode($project->readText('theme/theme.json'), true)
             : null;
-        $typeTreatment = Steps\DesignDirectionStep::typeTreatmentFor($project);
+        // readJson throws on a corrupt direction, and this is the last step of
+        // the build. DirectionFidelity::problems already degrades that same
+        // artifact to a warning rather than aborting the rest of validate-theme.
+        try {
+            $typeTreatment = Steps\DesignDirectionStep::typeTreatmentFor($project);
+        } catch (\Throwable $e) {
+            $typeTreatment = null;
+            $warnings[] = 'committed type treatment drift check skipped: '
+                . 'designDirection.json could not be read (' . $e->getMessage() . ')';
+        }
         if (is_array($theme) && $typeTreatment !== null) {
             [, $treatmentRepairs] = Steps\ThemeJsonStep::repairTypeTreatment(
                 $theme,
