@@ -88,7 +88,7 @@ final class ThemeScreenshot
         $base      = self::color($palette, 'base', [255, 255, 255]);
         $contrast  = self::color($palette, 'contrast', [17, 17, 17]);
         $accent    = self::color($palette, 'accent', $contrast);
-        $secondary = self::color($palette, 'secondary', $contrast);
+        $band      = self::color($palette, 'band', $base);
 
         // x, y, width, height, colour — page background first, then the hero
         // band, then what sits on top of each. Ordered back to front: the
@@ -100,9 +100,9 @@ final class ThemeScreenshot
             [120, 292, 460, 64, $base],   // headline, second line
             [120, 400, 540, 24, $base],   // subheading
             [120, 464, 220, 60, $accent], // button
-            [120, 640, 300, 180, $secondary],
-            [450, 640, 300, 180, $secondary],
-            [780, 640, 300, 180, $secondary],
+            [120, 640, 300, 180, $band],
+            [450, 640, 300, 180, $band],
+            [780, 640, 300, 180, $band],
         ];
 
         if (extension_loaded('imagick')) {
