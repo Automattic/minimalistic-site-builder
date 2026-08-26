@@ -340,6 +340,28 @@ test('page styles drops CTA-owned construction but keeps row layout utilities', 
     assert_contains('CTA-style-owned', implode('; ', $dropped));
 });
 
+test('page styles drops type-treatment-owned heading case/tracking but keeps sibling typography', function () {
+    $css = '.masonry-3 h2 { text-transform: uppercase; letter-spacing: 0.2em; line-height: 1.1; }'
+        . '.masonry-3 .wp-block-site-title { letter-spacing: 0.12em; font-weight: 700; }'
+        . '.masonry-3 .card { letter-spacing: 0.05em; }';
+    $problems = implode('; ', PageStylesStep::validate($css));
+    assert_contains('type-treatment-owned', $problems);
+
+    [$salvaged, $dropped] = PageStylesStep::dropOffendingDeclarations($css);
+    assert_true(!str_contains($salvaged, 'text-transform'));
+    assert_true(!str_contains($salvaged, 'letter-spacing: 0.2em'));
+    assert_true(!str_contains($salvaged, 'letter-spacing: 0.12em'));
+    assert_contains('line-height: 1.1', $salvaged);
+    assert_contains('font-weight: 700', $salvaged);
+    assert_contains('letter-spacing: 0.05em', $salvaged, 'non-heading tracking survives');
+    assert_eq(3, count($dropped));
+    assert_contains('type-treatment-owned', implode('; ', $dropped));
+
+    [$again, $droppedAgain] = PageStylesStep::dropOffendingDeclarations($salvaged);
+    assert_eq($salvaged, $again, 'salvage reaches a fixed point');
+    assert_eq([], $droppedAgain);
+});
+
 test('validate rejects CSS that hides generated content', function () {
     foreach ([
         ".masonry-3 > * {\n    opacity: 0;\n}",

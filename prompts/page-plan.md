@@ -43,6 +43,7 @@ Return a single JSON object with this exact shape:
       "layout_archetype": "one of: full-bleed-cover, asymmetric-split, centered-stack, offset-grid, mixed-width-editorial, equal-card-grid, list-with-thumbnails",
       "background": "one of: base, tinted, contrast, image",
       "vertical_density": "one of: compact, standard, spacious",
+      "item_pattern": null,
       "text_placement": "one of: left-column, centered, split, asymmetric-thirds",
       "handoff": "1 line: what visually sits immediately above and below this section (each neighbor's background + archetype), so the transitions are designed rather than accidental",
       "primary_action": null
@@ -77,6 +78,7 @@ Layout archetypes (pick the one that best serves each section's content):
 Section structure and types:
 - List sections in their intended page order. The builder derives each section's structural role from that order after generation, so do not return a `role` field.
 - `type` is an open-ended semantic label, always in English. Choose or invent the most specific short label for what the section actually contains; do not collapse a menu, timeline, case-study index, process, event calendar, or location guide into a generic bucket.
+- The site's committed repeated-item idiom is `{{item_pattern}}`. Set `item_pattern` to exactly `"{{item_pattern}}"` on every genuinely list-like section: menus, catalogs, schedules, programs, archives, pricing/features/services sets, technical facts, skills/genres/amenities, directories, teams, timelines, FAQs, and similar repeated collections. Set it to null on heroes, stories, single CTAs, quotes, galleries without textual items, and other non-list sections. Never choose a different idiom per section. Choose a layout archetype that can house the assigned idiom: `rule-row`, `index`, `spec-table`, and `tag-cluster` generally need a centered stack, asymmetric split, or mixed-width editorial region rather than an equal-card grid; `card` may use the card/grid archetypes.
 
 Background treatments:
 - base — the default page background

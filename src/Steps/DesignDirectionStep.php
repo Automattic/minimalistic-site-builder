@@ -15,12 +15,14 @@ use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\FontCatalog;
 use Automattic\SiteBuild\FontMonoculture;
 use Automattic\SiteBuild\Surface;
+use Automattic\SiteBuild\TypeTreatment;
 use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\GroundKey;
 use Automattic\SiteBuild\GroundTint;
 use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
 use Automattic\SiteBuild\ImageCrop;
+use Automattic\SiteBuild\ItemPattern;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\Measure;
 use Automattic\SiteBuild\Motion;
@@ -41,9 +43,10 @@ use Automattic\SiteBuild\Warnings;
  * Input:  meta.json (the user prompt) + siteSpec.json (factual info).
  * Output: designDirection.json — the chosen direction as structured data:
  *         title + vivid description plus the explicit fields downstream steps
- *         execute instead of re-interpreting (palette hexes, type pairing,
- *         image grade, canvas/measure layout commitments, and a separately
- *         consumed structured front-page hero blueprint).
+ *         execute instead of re-interpreting (palette hexes, type pairing and
+ *         treatment, image grade, canvas/measure layout commitments, the
+ *         repeated-item idiom, and a separately consumed structured front-page
+ *         hero blueprint).
  *
  * Two calls. First, a cheap seed call (small model, hot sampling) brainstorms
  * THREE concept seeds — each an object: an evocative title plus one vivid
@@ -114,6 +117,9 @@ final class DesignDirectionStep implements Step
      * the dated inset-media card only appears when a direction opts into it.
      */
     public const CARD_STYLES = CardStyle::ALL;
+
+    /** Repeated-item idioms the planner may assign to list-like sections. */
+    public const ITEM_PATTERNS = ItemPattern::ALL;
 
     /** Site-wide image proportion system for crop-role class hooks. */
     public const IMAGE_CROPS = ImageCrop::ALL;
@@ -382,7 +388,9 @@ final class DesignDirectionStep implements Step
             'image_crop'       => ImageCrop::DEFAULT,
             'canvas'           => $canvas,
             'measure'          => Measure::DEFAULT,
+            'type_treatment'   => TypeTreatment::DEFAULT,
             'card_style'       => 'flush',
+            'item_pattern'     => ItemPattern::DEFAULT,
             'depth'            => Depth::DEFAULT,
             'cta_style'        => CtaStyle::DEFAULT,
             'shape'            => 'sharp',
@@ -805,8 +813,17 @@ final class DesignDirectionStep implements Step
             $warnings,
             'invalid layout measure replaced by deterministic standard fallback',
         );
+        $typeTreatment = BoundedChoice::normalize(
+            $raw['type_treatment'] ?? null,
+            TypeTreatment::ALL,
+            TypeTreatment::DEFAULT,
+            'type_treatment',
+            $warnings,
+            'invalid heading treatment replaced by deterministic sentence fallback',
+        );
 
         $cardStyle = self::normalizeCardStyle($raw['card_style'] ?? null, $warnings);
+        $itemPattern = ItemPattern::normalize($raw['item_pattern'] ?? null, $warnings);
         $imageCrop = self::normalizeImageCrop($raw['image_crop'] ?? null, $warnings);
         $depth = self::normalizeDepth($raw['depth'] ?? null, $warnings);
         $ctaStyle = BoundedChoice::normalize(
@@ -905,10 +922,12 @@ final class DesignDirectionStep implements Step
             // an accidental frame reads as a rendering bug, not a design choice.
             'canvas'           => $canvas,
             'measure'          => $measure,
+            'type_treatment'   => $typeTreatment,
             // Anything outside the bounded card constructions delivers the
             // flush default — inset media must be an explicit opt-in, never
             // the accidental look every site gets.
             'card_style'       => $cardStyle,
+            'item_pattern'     => $itemPattern,
             'depth'            => $depth,
             'cta_style'        => $ctaStyle,
             'shape'            => $shape,
@@ -1339,6 +1358,13 @@ final class DesignDirectionStep implements Step
                 . TypeScale::meaning($typeScale) . '. The build owns the six preset values.';
         }
 
+        $typeTreatment = TypeTreatment::explicit($direction['type_treatment'] ?? null);
+        if ($typeTreatment !== null) {
+            $facts[] = '- **Type treatment**: ' . $typeTreatment . ' — '
+                . TypeTreatment::meaning($typeTreatment)
+                . '. The build owns heading textTransform and letterSpacing; preserve its lineHeight.';
+        }
+
         // Render the canvas commitment with its executable meaning, so the
         // section/header prompts act on it instead of re-interpreting a bare
         // keyword. Directions persisted before the field existed carry none.
@@ -1371,6 +1397,18 @@ final class DesignDirectionStep implements Step
                 'borderless' => 'cards have no box at all; media above a plain text stack — use the `borderless` construction from the card anatomy',
             };
             $facts[] = "- **Card treatment**: {$cardStyle} — {$meaning}.";
+        }
+
+        $itemPattern = ItemPattern::explicit($direction['item_pattern'] ?? null);
+        if ($itemPattern !== null) {
+            $meaning = match ($itemPattern) {
+                'card'        => 'list-like sections repeat discrete bounded cards',
+                'rule-row'    => 'list-like sections use compact name/detail rows joined by a purposeful hairline',
+                'index'       => 'list-like sections use a strong numbered or lettered scan column',
+                'spec-table'  => 'list-like sections align compact label/value pairs for comparison',
+                'tag-cluster' => 'list-like sections wrap short categorical labels as compact inline chips',
+            };
+            $facts[] = "- **Item pattern**: {$itemPattern} — {$meaning}.";
         }
 
         $ctaStyle = CtaStyle::explicit($direction['cta_style'] ?? null);
@@ -1651,6 +1689,19 @@ final class DesignDirectionStep implements Step
     }
 
     /**
+     * The authoritative repeated-item idiom, with the card default for a
+     * missing or pre-field direction. Callers persist any invalid-value
+     * warning at their own step boundary.
+     *
+     * @param list<string> $warnings
+     */
+    public static function itemPatternFor(Project $project, array &$warnings = []): string
+    {
+        $direction = self::dataFor($project);
+        return ItemPattern::normalize($direction['item_pattern'] ?? null, $warnings);
+    }
+
+    /**
      * The committed direction's image grade — the one-sentence photographic
      * treatment shared by ALL of the site's imagery, consumed verbatim by
      * GenerateImagesStep. Returns '' when no direction (or no grade) was
@@ -1764,6 +1815,15 @@ final class DesignDirectionStep implements Step
             return null;
         }
         return CtaStyle::explicit($project->readJson(self::FILE)['cta_style'] ?? null);
+    }
+
+    /** The explicit heading case/tracking commitment, or null for a pre-field artifact. */
+    public static function typeTreatmentFor(Project $project): ?string
+    {
+        if (!$project->exists(self::FILE)) {
+            return null;
+        }
+        return TypeTreatment::explicit($project->readJson(self::FILE)['type_treatment'] ?? null);
     }
 
     /**

@@ -27,6 +27,7 @@ use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\TypeScale;
+use Automattic\SiteBuild\TypeTreatment;
 use Automattic\SiteBuild\Warnings;
 use Throwable;
 
@@ -175,8 +176,9 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      * token whose actual color/family the model chose and whose type size the
      * committed direction selected, so sites stay visually distinct. No
      * borders, radii, shadows or decorative treatment.
-     * (The direction-committed CTA and shape wiring are deliberate exceptions,
-     * and execute explicit design commitments rather than making choices here.)
+     * (The direction-committed type treatment, CTA and shape wiring are
+     * deliberate exceptions, and execute explicit design commitments rather
+     * than making choices here.)
      *
      * Context-free block/caption text colors are deliberately absent:
      * ContrastFixStep evaluates rendered backgrounds but cannot see
@@ -524,13 +526,17 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         [$theme, $sizeWarnings] = self::repairFontSizes($theme);
 
         // Last: the scaffold references the preset slugs repaired above. The
-        // committed CTA construction and shape are then authoritative over
-        // their model-authored leaves.
+        // committed heading treatment, CTA construction and shape are then
+        // authoritative over their model-authored leaves.
         [$theme, $scaffoldWarnings] = self::repairScaffold($theme);
         if ($this->htmlFirst) {
             $theme = self::removeGeneratedControlTypography($theme);
         }
         [$theme, $accentCaptionWarnings] = self::repairAccentCaption($theme);
+        [$theme, $typeTreatmentRepairs] = self::repairTypeTreatment(
+            $theme,
+            DesignDirectionStep::typeTreatmentFor($project) ?? '',
+        );
         [$theme, $ctaRepairs] = self::repairCtaStyle(
             $theme,
             DesignDirectionStep::ctaStyleFor($project) ?? '',
@@ -565,6 +571,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $fontRepairs,
             $measureRepairs,
             $typeScaleRepairs,
+            $typeTreatmentRepairs,
             $ctaRepairs,
         );
         $bindReport = ['Successful design-direction writebacks: ' . count($bindRepairs)];
@@ -3007,6 +3014,244 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $delivered[$property] = $value;
         }
         return $delivered;
+    }
+
+    /**
+     * Execute the committed site-wide heading case/tracking language while
+     * preserving every other typography choice, especially lineHeight.
+     * Per-level, core/heading, core/post-title, core/site-title, variation,
+     * and responsive structured leaves are removed so the authoritative
+     * styles.elements.heading pair can inherit. A malformed styles.elements or
+     * styles.elements.heading node (scalar or list) is rebuilt so the pair
+     * always lands; each rebuild is recorded as a repair. A direction
+     * persisted before this field existed remains a complete no-op.
+     *
+     * Scope: this repair owns structured theme.json leaves only. Generated
+     * page CSS is guarded separately by PageStylesStep's declaration checks;
+     * wp:heading block ATTRIBUTES stay outside both guards as a documented
+     * boundary — prompts/section.md forbids them and SupportDomainGuard's
+     * reviewed typography domain deliberately keeps the keys available to
+     * other blocks.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>} theme, successful repair notes
+     */
+    public static function repairTypeTreatment(array $theme, string $treatment): array
+    {
+        $committed = TypeTreatment::typography($treatment);
+        if ($committed === null) {
+            return [$theme, []];
+        }
+
+        $repairs = [];
+        $styles = is_array($theme['styles'] ?? null)
+            && (($theme['styles'] ?? []) === [] || !array_is_list($theme['styles']))
+                ? $theme['styles']
+                : [];
+        $theme['styles'] = self::repairTypeTreatmentStyleNode(
+            $styles,
+            'styles',
+            null,
+            false,
+            $treatment,
+            $committed,
+            $repairs,
+        );
+        return [$theme, $repairs];
+    }
+
+    /**
+     * @param array<mixed> $node
+     * @param ?string $target heading | null
+     * @param array{textTransform:string,letterSpacing:string} $committed
+     * @param list<string> $repairs
+     * @return array<mixed>
+     */
+    private static function repairTypeTreatmentStyleNode(
+        array $node,
+        string $path,
+        ?string $target,
+        bool $authoritative,
+        string $treatment,
+        array $committed,
+        array &$repairs,
+    ): array {
+        if ($target === 'heading') {
+            $typography = $node['typography'] ?? null;
+            if ($authoritative) {
+                if (!is_array($typography)
+                    || ($typography !== [] && array_is_list($typography))
+                ) {
+                    if (array_key_exists('typography', $node)) {
+                        $repairs[] = "theme/theme.json {$path}.typography: authored "
+                            . Warnings::value($typography)
+                            . '; delivered object containing the committed heading treatment'
+                            . '; disposition replaced malformed typography container';
+                    }
+                    $typography = [];
+                }
+                foreach ($committed as $property => $value) {
+                    if (($typography[$property] ?? null) !== $value) {
+                        $repairs[] = "theme/theme.json {$path}.typography.{$property}: authored "
+                            . Warnings::value($typography[$property] ?? null)
+                            . ' delivered ' . Warnings::value($value)
+                            . "; disposition enforced committed {$treatment} heading treatment";
+                    }
+                    $typography[$property] = $value;
+                }
+                $node['typography'] = $typography;
+            } elseif (is_array($typography)
+                && ($typography === [] || !array_is_list($typography))
+            ) {
+                foreach (array_keys($committed) as $property) {
+                    if (!array_key_exists($property, $typography)) {
+                        continue;
+                    }
+                    $repairs[] = "theme/theme.json {$path}.typography.{$property}: authored "
+                        . Warnings::value($typography[$property])
+                        . '; delivered removed; disposition inherited the committed '
+                        . $treatment . ' heading treatment';
+                    unset($typography[$property]);
+                }
+                if ($typography === []) {
+                    unset($node['typography']);
+                } else {
+                    $node['typography'] = $typography;
+                }
+            }
+        }
+
+        $blocks = $node['blocks'] ?? null;
+        if (is_array($blocks) && ($blocks === [] || !array_is_list($blocks))) {
+            foreach ($blocks as $block => $child) {
+                if (!is_string($block)
+                    || !is_array($child)
+                    || ($child !== [] && array_is_list($child))
+                ) {
+                    continue;
+                }
+                $blocks[$block] = self::repairTypeTreatmentStyleNode(
+                    $child,
+                    $path . '.blocks.' . $block,
+                    in_array($block, ['core/heading', 'core/post-title', 'core/site-title'], true)
+                        ? 'heading'
+                        : null,
+                    false,
+                    $treatment,
+                    $committed,
+                    $repairs,
+                );
+            }
+            $node['blocks'] = $blocks;
+        }
+
+        $elements = $node['elements'] ?? null;
+        if (is_array($elements) && ($elements === [] || !array_is_list($elements))) {
+            foreach ($elements as $element => $child) {
+                if (!is_string($element)
+                    || !is_array($child)
+                    || ($child !== [] && array_is_list($child))
+                ) {
+                    continue;
+                }
+                $isHeading = in_array($element, ['heading', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'], true);
+                $childPath = $path . '.elements.' . $element;
+                $elements[$element] = self::repairTypeTreatmentStyleNode(
+                    $child,
+                    $childPath,
+                    $isHeading ? 'heading' : null,
+                    $childPath === 'styles.elements.heading',
+                    $treatment,
+                    $committed,
+                    $repairs,
+                );
+            }
+            $rootHeading = $elements['heading'] ?? null;
+            $rootHeadingMalformed = array_key_exists('heading', $elements)
+                && (!is_array($rootHeading)
+                    || ($rootHeading !== [] && array_is_list($rootHeading)));
+            if ($path === 'styles' && ($rootHeadingMalformed || !isset($elements['heading']))) {
+                if ($rootHeadingMalformed) {
+                    $repairs[] = 'theme/theme.json styles.elements.heading: authored '
+                        . Warnings::value($rootHeading)
+                        . '; delivered object containing the committed heading treatment'
+                        . '; disposition replaced malformed heading element';
+                }
+                $elements['heading'] = self::repairTypeTreatmentStyleNode(
+                    [],
+                    $path . '.elements.heading',
+                    'heading',
+                    true,
+                    $treatment,
+                    $committed,
+                    $repairs,
+                );
+            }
+            $node['elements'] = $elements;
+        } elseif ($path === 'styles') {
+            if (array_key_exists('elements', $node)) {
+                $repairs[] = 'theme/theme.json styles.elements: authored '
+                    . Warnings::value($node['elements'])
+                    . '; delivered object containing the committed heading treatment'
+                    . '; disposition replaced malformed elements container';
+            }
+            $node['elements'] = [
+                'heading' => self::repairTypeTreatmentStyleNode(
+                    [],
+                    'styles.elements.heading',
+                    'heading',
+                    true,
+                    $treatment,
+                    $committed,
+                    $repairs,
+                ),
+            ];
+        }
+
+        $variations = $node['variations'] ?? null;
+        if (is_array($variations) && ($variations === [] || !array_is_list($variations))) {
+            foreach ($variations as $variation => $child) {
+                if (!is_string($variation)
+                    || !is_array($child)
+                    || ($child !== [] && array_is_list($child))
+                ) {
+                    continue;
+                }
+                $variations[$variation] = self::repairTypeTreatmentStyleNode(
+                    $child,
+                    $path . '.variations.' . $variation,
+                    $target,
+                    false,
+                    $treatment,
+                    $committed,
+                    $repairs,
+                );
+            }
+            $node['variations'] = $variations;
+        }
+
+        foreach ($node as $state => $child) {
+            if (!is_string($state)
+                || (!str_starts_with($state, ':')
+                    && !str_starts_with($state, '@')
+                    && !in_array($state, ['mobile', 'tablet', 'desktop'], true))
+                || !is_array($child)
+                || ($child !== [] && array_is_list($child))
+            ) {
+                continue;
+            }
+            $node[$state] = self::repairTypeTreatmentStyleNode(
+                $child,
+                $path . '.' . $state,
+                $target,
+                false,
+                $treatment,
+                $committed,
+                $repairs,
+            );
+        }
+
+        return $node;
     }
 
     /**

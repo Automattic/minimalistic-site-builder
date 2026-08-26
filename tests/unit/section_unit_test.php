@@ -32,6 +32,7 @@ function section_unit_input(): array
             'layout_archetype' => 'full-bleed-cover',
             'background'       => 'image',
             'vertical_density' => 'standard',
+            'item_pattern'     => null,
             'text_placement'   => 'asymmetric-thirds',
             'handoff'          => 'UNIT-HANDOFF-SENTINEL',
 
@@ -446,6 +447,7 @@ test('SectionUnit layered request loses only cache marker separators', function 
         'section_purpose'   => $input['section']['purpose'],
         'content_notes'     => $input['section']['content_notes'],
         'composition'       => $composition,
+        'item_pattern_assignment' => 'ASSIGNED ITEM PATTERN: none — this section is not a repeated textual collection. Do not force its content into cards, ledger rows, an index, a specification table, or tag chips.',
         'header_contract'   => $input['header_contract'],
         'image_instructions' => $renderer->render('image-generation.md', []),
         'form_instructions'  => $renderer->render('no-forms.md', []),

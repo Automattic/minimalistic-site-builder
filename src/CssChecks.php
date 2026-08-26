@@ -393,6 +393,17 @@ final class CssChecks
         return $property === 'all' && self::isShapeAffectingDeclaration($property, $value);
     }
 
+    /**
+     * Whether a declaration can replace the committed heading case/tracking
+     * pair. Only the two type-treatment-owned properties count; every other
+     * heading typography choice (size, weight, line-height) stays authorable.
+     */
+    public static function isHeadingTreatmentDeclaration(string $property): bool
+    {
+        $property = strtolower(trim($property));
+        return $property === 'text-transform' || $property === 'letter-spacing';
+    }
+
     /** Whether a selector's subject is a core button wrapper or rendered control. */
     public static function selectorTargetsCta(string $selector): bool
     {
@@ -529,9 +540,9 @@ final class CssChecks
      */
     /**
      * Whether a selector's subject is a heading: h1–h6, `.wp-block-heading`,
-     * or `.wp-block-post-title`. Only the rightmost compound is considered, so
-     * `h1 + p` does not count as a heading rule. :is() and :where() keep their
-     * subject semantics and are walked.
+     * `.wp-block-post-title`, or `.wp-block-site-title`. Only the rightmost
+     * compound is considered, so `h1 + p` does not count as a heading rule.
+     * :is() and :where() keep their subject semantics and are walked.
      */
     public static function selectorTargetsHeading(string $selector): bool
     {
@@ -550,7 +561,7 @@ final class CssChecks
             }
             $plain = self::withoutSelectorAttributes($plain);
             if (preg_match(
-                '/(?<![-\\\\\w])\.(?:wp-block-heading|wp-block-post-title)(?![-\w])/i',
+                '/(?<![-\\\\\w])\.(?:wp-block-heading|wp-block-post-title|wp-block-site-title)(?![-\w])/i',
                 $plain,
             ) === 1) {
                 return true;
