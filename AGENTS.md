@@ -10,6 +10,12 @@ Issues for this repo are tracked in the Linear project **[Generated themes: repl
 - **Status:** move the Linear issue to *In Progress* when work starts; the PR merge closes it via the `Fixes` magic word.
 - **Linear MCP setup (one-time):** Linear's official MCP server is `https://mcp.linear.app/mcp` (HTTP transport, OAuth). In Claude Code: `claude mcp add --transport http --scope user linear https://mcp.linear.app/mcp`, then run `/mcp` in a fresh session and pick **Authenticate** — the OAuth step is interactive, so ask the user to complete it in the browser.
 
+## Git history and branch updates
+
+- **Never force-push.** Do not use `git push --force`, `git push --force-with-lease`, or any equivalent operation on this repository or its branches.
+- **Do not rebase feature branches.** Preserve published history instead of rewriting it.
+- **Update from trunk with a merge.** Fetch the remote, then merge `origin/trunk` into the feature branch (for example, `git fetch origin` followed by `git merge origin/trunk`). Resolve any conflicts in the merge commit and push normally.
+
 ## Backwards compatibility
 
 We don't need to plan for backwards compatibility. This is a green field project in an early dev stage — there are no external consumers or stored data to preserve, so prefer the cleanest design and feel free to make breaking changes without migration paths or compatibility shims.
