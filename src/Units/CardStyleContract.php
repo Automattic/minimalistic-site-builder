@@ -33,7 +33,7 @@ final class CardStyleContract
 
     private const MARKER_PREFIX = 'card-style--';
     private const DESTRUCTIVE_HOOKS = ['card-flush', 'overlap-up'];
-    private const REQUIRED_COLOR_SLUGS = ['base', 'contrast', 'primary', 'secondary', 'accent'];
+    private const REQUIRED_COLOR_SLUGS = ['base', 'contrast', 'primary', 'secondary', 'accent', 'band'];
     private const REQUIRED_SPACING_SLUGS = ['xs', 'sm', 'md', 'lg', 'xl', 'xxl'];
     private const CORE_SHADOW_SLUGS = ['natural', 'deep', 'sharp', 'outlined', 'crisp'];
     private const CSS_COLOR_NAMES = [

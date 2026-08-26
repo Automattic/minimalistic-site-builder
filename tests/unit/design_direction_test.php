@@ -190,9 +190,16 @@ test('design-direction persists an unmappable motion-note warning and reaches a 
 
     $written = $project->readJson('designDirection.json');
     assert_eq([], $written['motion_note']);
-    foreach (['title', 'palette', 'image_grade', 'card_style'] as $sibling) {
+    foreach (['title', 'image_grade', 'card_style'] as $sibling) {
         assert_eq($authored[$sibling], $written[$sibling], "{$sibling} survives motion-note removal");
     }
+    foreach ($authored['palette'] as $slug => $hex) {
+        assert_eq($hex, $written['palette'][$slug], "palette.{$slug} survives motion-note removal");
+    }
+    assert_true(\Automattic\SiteBuild\BandColor::valid(
+        $written['palette']['base'],
+        $written['palette']['band'],
+    ), 'the missing committed band is derived independently of motion-note removal');
     foreach (['heading', 'body'] as $face) {
         assert_eq($authored['type'][$face], $written['type'][$face], "type.{$face} survives motion-note removal");
     }
@@ -540,7 +547,13 @@ test('normalize keeps valid palette hexes, drops invalid ones, and requires a de
         ],
     ], 'cinematic-safe-zone');
     assert_eq('Forge & Flame', $direction['title']);
-    assert_eq(['base' => '#FDF6EC', 'primary' => '#8A5A2B'], $direction['palette']);
+    assert_eq('#FDF6EC', $direction['palette']['base']);
+    assert_eq('#8A5A2B', $direction['palette']['primary']);
+    assert_true(\Automattic\SiteBuild\BandColor::valid(
+        $direction['palette']['base'],
+        $direction['palette']['band'],
+    ));
+    assert_eq(['base', 'primary', 'band'], array_keys($direction['palette']));
     assert_eq('Spectral', $direction['type']['heading']['family']);
     assert_eq([900], $direction['type']['heading']['weights']);
     assert_eq('', $direction['type']['body']['family']);
@@ -698,7 +711,8 @@ test('normalize ignores a ground_key outside the vocabulary', function () {
     );
     assert_eq('', $direction['ground_key']);
     assert_eq('#F4EBDA', $direction['palette']['base']);
-    assert_eq([], $repairs);
+    assert_eq(1, count($repairs), 'the ignored ground_key causes no repair; only the missing band is derived');
+    assert_contains('palette.band', $repairs[0]);
 });
 
 test('normalize moves a base that drifted off the tint its seed committed', function () {
@@ -744,7 +758,12 @@ test('normalize leaves an earned warm ground exactly as authored', function () {
         'warm',
     );
     assert_eq('#F4EBDA', $direction['palette']['base']);
-    assert_eq([], $repairs, 'an honored commitment is not a repair');
+    assert_true(\Automattic\SiteBuild\BandColor::valid(
+        $direction['palette']['base'],
+        $direction['palette']['band'],
+    ));
+    assert_eq(1, count($repairs), 'the honored ground stays untouched; only its missing band is derived');
+    assert_contains('palette.band', $repairs[0]);
 });
 
 test('normalize enforces nothing when no tint was committed', function () {
@@ -759,7 +778,12 @@ test('normalize enforces nothing when no tint was committed', function () {
     );
     assert_eq('#F4EBDA', $direction['palette']['base'], 'nothing was committed, so nothing was violated');
     assert_eq('', $direction['ground_tint']);
-    assert_eq([], $repairs);
+    assert_true(\Automattic\SiteBuild\BandColor::valid(
+        $direction['palette']['base'],
+        $direction['palette']['band'],
+    ));
+    assert_eq(1, count($repairs), 'the independent band contract still derives its missing role');
+    assert_contains('palette.band', $repairs[0]);
 });
 
 test('normalize falls back to the direction own ground_tint when the seed committed none', function () {
@@ -795,7 +819,8 @@ test('normalize warns actionably when an impossible tint must remain unresolved'
     );
 
     assert_eq('#000000', $direction['palette']['base']);
-    assert_eq([], $repairs);
+    assert_eq(1, count($repairs), 'the unresolved tint causes no repair; only the missing band is derived');
+    assert_contains('palette.band', $repairs[0]);
     assert_contains("file='designDirection.json'", $warnings[0]);
     assert_contains('path="palette.base"', $warnings[0]);
     assert_contains('authored="#000000"', $warnings[0]);
