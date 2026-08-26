@@ -365,8 +365,8 @@ function html_first_unstyled_mark_count(string $markup, string $css): int
 
 test('--from resumes the deterministic tail against on-disk artifacts with no LLM', function () {
     $tmp = sys_get_temp_dir() . '/builder_html_first_resume_' . uniqid();
-    $previous = getenv('SITE_BUILD_HTML_FIRST');
-    putenv('SITE_BUILD_HTML_FIRST=1');
+    $previous = getenv('SITE_BUILD_GRAPH');
+    putenv('SITE_BUILD_GRAPH=html-first');
     try {
         $llm = new FakeLlm();
         html_first_queue_success($llm, html_first_site_spec([
@@ -414,8 +414,8 @@ test('--from resumes the deterministic tail against on-disk artifacts with no LL
         assert_eq($designBefore, html_first_design_html_hashes($project), 'design/*.html still unchanged after the repeat');
     } finally {
         $previous === false
-            ? putenv('SITE_BUILD_HTML_FIRST')
-            : putenv('SITE_BUILD_HTML_FIRST=' . $previous);
+            ? putenv('SITE_BUILD_GRAPH')
+            : putenv('SITE_BUILD_GRAPH=' . $previous);
         if (is_dir($tmp)) {
             exec('rm -rf ' . escapeshellarg($tmp));
         }
@@ -424,8 +424,8 @@ test('--from resumes the deterministic tail against on-disk artifacts with no LL
 
 test('G4 HTML-first output gives every transformer marker class matching final theme CSS', function () {
     $tmp = sys_get_temp_dir() . '/builder_html_first_' . uniqid();
-    $previous = getenv('SITE_BUILD_HTML_FIRST');
-    putenv('SITE_BUILD_HTML_FIRST=1');
+    $previous = getenv('SITE_BUILD_GRAPH');
+    putenv('SITE_BUILD_GRAPH=html-first');
     try {
         $llm = new FakeLlm();
         $homeBody = html_first_home_body();
@@ -548,8 +548,8 @@ test('G4 HTML-first output gives every transformer marker class matching final t
         assert_true(!$project->exists('theme/parts/page-home--hero.html'), 'assemble removes transient section parts');
     } finally {
         $previous === false
-            ? putenv('SITE_BUILD_HTML_FIRST')
-            : putenv('SITE_BUILD_HTML_FIRST=' . $previous);
+            ? putenv('SITE_BUILD_GRAPH')
+            : putenv('SITE_BUILD_GRAPH=' . $previous);
         if (is_dir($tmp)) {
             exec('rm -rf ' . escapeshellarg($tmp));
         }
@@ -558,9 +558,9 @@ test('G4 HTML-first output gives every transformer marker class matching final t
 
 test('G5 HTML-first build delivers only resolved header navigation destinations', function () {
     $tmp = sys_get_temp_dir() . '/builder_html_first_nav_links_' . uniqid();
-    $previous = getenv('SITE_BUILD_HTML_FIRST');
+    $previous = getenv('SITE_BUILD_GRAPH');
     $previousHeaderArchetype = getenv('HEADER_ARCHETYPE');
-    putenv('SITE_BUILD_HTML_FIRST=1');
+    putenv('SITE_BUILD_GRAPH=html-first');
     putenv('HEADER_ARCHETYPE=standard-row');
     try {
         $pages = [
@@ -623,8 +623,8 @@ test('G5 HTML-first build delivers only resolved header navigation destinations'
         assert_eq(0, $headerBareAnchorCount, 'shared header bare #anchor count');
     } finally {
         $previous === false
-            ? putenv('SITE_BUILD_HTML_FIRST')
-            : putenv('SITE_BUILD_HTML_FIRST=' . $previous);
+            ? putenv('SITE_BUILD_GRAPH')
+            : putenv('SITE_BUILD_GRAPH=' . $previous);
         $previousHeaderArchetype === false
             ? putenv('HEADER_ARCHETYPE')
             : putenv('HEADER_ARCHETYPE=' . $previousHeaderArchetype);
@@ -642,9 +642,9 @@ test('G5 HTML-first build delivers only resolved header navigation destinations'
  */
 test('G6 HTML-first build resolves a list-shaped header navigation too', function () {
     $tmp = sys_get_temp_dir() . '/builder_html_first_nav_links_' . uniqid();
-    $previous = getenv('SITE_BUILD_HTML_FIRST');
+    $previous = getenv('SITE_BUILD_GRAPH');
     $previousHeaderArchetype = getenv('HEADER_ARCHETYPE');
-    putenv('SITE_BUILD_HTML_FIRST=1');
+    putenv('SITE_BUILD_GRAPH=html-first');
     putenv('HEADER_ARCHETYPE=standard-row');
     try {
         $pages = [
@@ -714,8 +714,8 @@ test('G6 HTML-first build resolves a list-shaped header navigation too', functio
         assert_eq(0, $headerBareAnchorCount, 'shared header bare #anchor count');
     } finally {
         $previous === false
-            ? putenv('SITE_BUILD_HTML_FIRST')
-            : putenv('SITE_BUILD_HTML_FIRST=' . $previous);
+            ? putenv('SITE_BUILD_GRAPH')
+            : putenv('SITE_BUILD_GRAPH=' . $previous);
         $previousHeaderArchetype === false
             ? putenv('HEADER_ARCHETYPE')
             : putenv('HEADER_ARCHETYPE=' . $previousHeaderArchetype);
@@ -727,8 +727,8 @@ test('G6 HTML-first build resolves a list-shaped header navigation too', functio
 
 test('HTML-first multi-page build adopts one declared inset system in markup and delivered CSS', function () {
     $tmp = sys_get_temp_dir() . '/builder_html_first_foundation_insets_' . uniqid();
-    $previous = getenv('SITE_BUILD_HTML_FIRST');
-    putenv('SITE_BUILD_HTML_FIRST=1');
+    $previous = getenv('SITE_BUILD_GRAPH');
+    putenv('SITE_BUILD_GRAPH=html-first');
     try {
         $pages = [
             ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome visitors', 'children' => []],
@@ -853,8 +853,8 @@ test('HTML-first multi-page build adopts one declared inset system in markup and
         assert_eq([], ThemeValidator::layoutWarnings($project, true));
     } finally {
         $previous === false
-            ? putenv('SITE_BUILD_HTML_FIRST')
-            : putenv('SITE_BUILD_HTML_FIRST=' . $previous);
+            ? putenv('SITE_BUILD_GRAPH')
+            : putenv('SITE_BUILD_GRAPH=' . $previous);
         if (is_dir($tmp)) {
             exec('rm -rf ' . escapeshellarg($tmp));
         }

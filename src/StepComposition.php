@@ -50,12 +50,13 @@ use Automattic\SiteBuild\Steps\ValidateThemeStep;
  */
 final class StepComposition
 {
-    /** The env key that selects the HTML-first graph. Written by the CLI's --html-first / --blocks-first. */
-    public const HTML_FIRST_ENV = 'SITE_BUILD_HTML_FIRST';
+    /** The env key that selects the graph. Written by the CLI's --html-first / --blocks-first / --html-islands. */
+    public const GRAPH_ENV = Graph::ENV;
 
     /** Graph names recorded in meta.json, so a --from resume can run the graph that built the project. */
-    public const GRAPH_HTML_FIRST = 'html-first';
-    public const GRAPH_BLOCKS = 'blocks';
+    public const GRAPH_HTML_FIRST = Graph::HTML_FIRST;
+    public const GRAPH_BLOCKS = Graph::BLOCKS;
+    public const GRAPH_HTML_ISLANDS = Graph::HTML_ISLANDS;
 
     /** Artifacts produced before the runtime fallback enters the blocks tail. */
     private const BLOCKS_TAIL_SEEDS = [
@@ -83,8 +84,9 @@ final class StepComposition
 
     /**
      * The package default / CLI composition: the blocks graph, where the model
-     * authors block markup directly. The CLI's --html-first flag, or a
-     * SITE_BUILD_HTML_FIRST=1 env, selects the HTML-first graph instead.
+     * authors block markup directly. The CLI's --html-first flag, or
+     * SITE_BUILD_GRAPH=html-first, selects the HTML-first graph instead.
+     * SITE_BUILD_GRAPH=html-islands is recognized but not yet implemented.
      *
      * @param array<string, string> $models       step id => model id overrides
      * @param array<string, ?float> $temperatures step id => temperature overrides
@@ -97,61 +99,105 @@ final class StepComposition
         ?BlockFixer $blockFixer = null,
         ?FontFetcher $fontFetcher = null,
     ): self {
-        return self::htmlFirstSelected()
-            ? self::htmlFirst($llm, $renderer, $models, $temperatures, $blockFixer, $fontFetcher)
-            : self::blocks($llm, $renderer, $models, $temperatures, $blockFixer, $fontFetcher);
+        return match (self::selectedGraph()) {
+            self::GRAPH_HTML_FIRST => self::htmlFirst($llm, $renderer, $models, $temperatures, $blockFixer, $fontFetcher),
+            self::GRAPH_BLOCKS => self::blocks($llm, $renderer, $models, $temperatures, $blockFixer, $fontFetcher),
+            self::GRAPH_HTML_ISLANDS => throw new \RuntimeException(Graph::NOT_IMPLEMENTED),
+        };
     }
 
     /**
-     * Whether the caller opted into the HTML-first graph. Single owner of the
-     * env key so the facade's fallback wiring can't disagree with default().
-     * The CLI's --html-first / --blocks-first flags set that key, which is what
-     * makes an explicit flag beat a shell export or an .env line.
+     * The graph the caller selected. Single owner of the env key so the
+     * facade's fallback wiring can't disagree with default(). The CLI's
+     * --html-first / --blocks-first / --html-islands flags set that key, which
+     * is what makes an explicit flag beat a shell export or an .env line.
+     * Unset means blocks. An unknown value is an error, not blocks.
+     *
+     * @throws \InvalidArgumentException when SITE_BUILD_GRAPH is not a known name
      */
-    public static function htmlFirstSelected(): bool
+    public static function selectedGraph(): string
     {
-        return Env::get(self::HTML_FIRST_ENV) === '1';
+        $raw = Env::get(self::GRAPH_ENV);
+        if ($raw === null || $raw === '') {
+            return self::GRAPH_BLOCKS;
+        }
+        if (!in_array($raw, Graph::KNOWN, true)) {
+            throw new \InvalidArgumentException(sprintf(
+                "Unknown graph '%s'. Known: %s.",
+                $raw,
+                implode(', ', Graph::KNOWN),
+            ));
+        }
+        return $raw;
     }
 
-    /** The meta.json name for a graph. Null asks the current selection. */
-    public static function graphName(?bool $htmlFirst = null): string
+    /**
+     * The meta.json name for a graph. Null asks the current selection.
+     *
+     * @throws \InvalidArgumentException when $graph is not a known name
+     */
+    public static function graphName(?string $graph = null): string
     {
-        $htmlFirst ??= self::htmlFirstSelected();
-        return $htmlFirst ? self::GRAPH_HTML_FIRST : self::GRAPH_BLOCKS;
+        $graph ??= self::selectedGraph();
+        if (!in_array($graph, Graph::KNOWN, true)) {
+            throw new \InvalidArgumentException(sprintf(
+                "Unknown graph '%s'. Known: %s.",
+                $graph,
+                implode(', ', Graph::KNOWN),
+            ));
+        }
+        return $graph;
     }
 
     /**
      * The graph a --from resume must run: whatever built the project. A flag
      * contradicting the record is a mistake, not an override, because the
      * other graph's artifacts were never written. Null means there is nothing
-     * to honor — no record, or one this version doesn't recognize — so the
-     * caller's own selection stands.
+     * to honor — no record — so the caller's own selection stands.
      *
-     * @throws \InvalidArgumentException when the request contradicts the record
+     * An unknown or retired recorded name is an error naming that value, not
+     * null: null used to mean the caller's selection stands, which after a
+     * graph is retired would silently resume on a graph that never wrote its
+     * artifacts.
+     *
+     * @throws \InvalidArgumentException when the request contradicts the record,
+     *         or the recorded name is unknown
      */
-    public static function resumeHtmlFirst(?string $recordedGraph, ?bool $requested): ?bool
+    public static function resumeGraph(?string $recorded, ?string $requested): ?string
     {
-        if ($recordedGraph !== self::GRAPH_HTML_FIRST && $recordedGraph !== self::GRAPH_BLOCKS) {
+        if ($recorded === null || $recorded === '') {
             return null;
         }
-        $recorded = $recordedGraph === self::GRAPH_HTML_FIRST;
+        if (!in_array($recorded, Graph::KNOWN, true)) {
+            throw new \InvalidArgumentException(sprintf(
+                "project was built on the %s graph, which this version does not recognize. Known: %s.",
+                $recorded,
+                implode(', ', Graph::KNOWN),
+            ));
+        }
         if ($requested !== null && $requested !== $recorded) {
             throw new \InvalidArgumentException(sprintf(
                 "project was built on the %s graph, but --%s was passed. Resuming on a "
                 . "different graph reads artifacts that graph never wrote.\n"
                 . "Drop the flag to resume on %s.",
-                $recordedGraph,
-                $requested ? 'html-first' : 'blocks-first',
-                $recordedGraph,
+                $recorded,
+                self::graphFlag($requested),
+                $recorded,
             ));
         }
         return $recorded;
     }
 
+    /** The CLI flag that names a graph, for resume-refusal messages. */
+    private static function graphFlag(string $graph): string
+    {
+        return $graph === self::GRAPH_BLOCKS ? 'blocks-first' : $graph;
+    }
+
     /**
      * The HTML-first graph: the model authors an HTML+CSS design, and
      * transform-site converts it to block markup deterministically. Opt-in via
-     * --html-first or SITE_BUILD_HTML_FIRST=1. SiteBuilder wraps this graph
+     * --html-first or SITE_BUILD_GRAPH=html-first. SiteBuilder wraps this graph
      * with the currently dormant whole-build fallback; mixed-page degradation
      * is handled inside TransformSiteStep.
      *
@@ -468,7 +514,7 @@ final class StepComposition
             // the delivered theme (the in-graph ValidateThemeStep ran before
             // this phase rewrote covers and re-extracted patterns).
             new ExtractPatternsStep(),
-            new ValidateThemeStep(htmlFirst: $htmlFirst ?? self::htmlFirstSelected()),
+            new ValidateThemeStep(htmlFirst: $htmlFirst ?? (self::selectedGraph() === self::GRAPH_HTML_FIRST)),
         ];
     }
 
