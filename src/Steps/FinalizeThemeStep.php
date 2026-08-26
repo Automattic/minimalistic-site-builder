@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\HeaderBehavior;
 use Automattic\SiteBuild\ImageCrop;
 use Automattic\SiteBuild\Narrator;
+use Automattic\SiteBuild\Depth;
 use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\OverlayKit;
 use Automattic\SiteBuild\Surface;
@@ -55,6 +56,9 @@ use Automattic\SiteBuild\Warnings;
  *         - for a non-mixed image-crop commitment, writes and enqueues the
  *           build-owned crop kit that derives card, thumbnail, and feature
  *           media proportions from the one site-wide direction.
+ *         - for an explicit depth commitment, writes and enqueues the
+ *           build-owned depth kit that consumes the matching `depth` shadow
+ *           preset on cards and contained media; full-bleed media stays flat.
  *         - for a committed page surface other than `none`, writes and
  *           enqueues the build-owned overlay (assets/surface/surface.css) that
  *           claims `body::before` as a fixed grain sheet; `none` prunes it.
@@ -112,6 +116,7 @@ final class FinalizeThemeStep implements Step
         // theme half-written — a pruned kit with no functions.php naming it.
         $shape = DesignDirectionStep::shapeFor($project);
         $imageCrop = DesignDirectionStep::imageCropFor($project);
+        $depth = DesignDirectionStep::depthFor($project);
         $surface = DesignDirectionStep::surfaceFor($project);
         $palette = self::paletteColors($project);
         $surfaceCss = Surface::kitCss($surface, $palette['base'], $palette['contrast']);
@@ -139,6 +144,7 @@ final class FinalizeThemeStep implements Step
         // report shape on a second kit's behalf as soon as one joins the list.
         $shapeShipped = self::writeOverlayKit($project, self::shapeKit(), ShapeMarkup::kitCss($shape), $headerWarnings);
         $imageCropShipped = self::writeOverlayKit($project, self::imageCropKit(), ImageCrop::kitCss($imageCrop), $headerWarnings);
+        $depthShipped = self::writeOverlayKit($project, self::depthKit(), Depth::kitCss($depth), $headerWarnings);
         $surfaceShipped = self::writeOverlayKit($project, self::surfaceKit(), $surfaceCss, $headerWarnings);
         $deviceShipped = self::writeOverlayKit($project, self::deviceKit(), Device::kitCss($device), $headerWarnings);
         $overlays = [];
@@ -147,6 +153,9 @@ final class FinalizeThemeStep implements Step
         }
         if ($imageCropShipped) {
             $overlays[] = self::imageCropKit();
+        }
+        if ($depthShipped) {
+            $overlays[] = self::depthKit();
         }
         if ($surfaceShipped) {
             $overlays[] = self::surfaceKit();
@@ -186,6 +195,9 @@ final class FinalizeThemeStep implements Step
         Narrator::write($imageCropShipped
             ? "  image crop: '{$imageCrop}' proportion kit enqueued\n"
             : '  image crop: ' . ($imageCrop ?? 'none committed') . " (kit not shipped)\n");
+        Narrator::write($depthShipped
+            ? "  depth: '{$depth}' surface kit enqueued\n"
+            : '  depth: ' . ($depth ?? 'none committed') . " (kit not shipped)\n");
     }
 
     /**
@@ -242,7 +254,7 @@ final class FinalizeThemeStep implements Step
      */
     public static function overlayKits(): array
     {
-        return [self::shapeKit(), self::imageCropKit(), self::surfaceKit(), self::deviceKit()];
+        return [self::shapeKit(), self::imageCropKit(), self::depthKit(), self::surfaceKit(), self::deviceKit()];
     }
 
     public static function surfaceKit(): OverlayKit
@@ -284,6 +296,16 @@ final class FinalizeThemeStep implements Step
             'image-crop',
             "// Committed image proportion system. Loads after generated\n"
                 . '// style.css so crop-role hooks share one delivered ratio map.',
+        );
+    }
+
+    /** Card and contained-media elevation committed by design direction. */
+    public static function depthKit(): OverlayKit
+    {
+        return new OverlayKit(
+            'depth',
+            "// Committed card and contained-media depth. Loads after generated\n"
+                . '// style.css so one bounded treatment outranks generated shadows.',
         );
     }
 
