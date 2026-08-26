@@ -93,17 +93,26 @@ Everything else — unknown or unreviewed block signatures, malformed block stru
 
 ## Posting screenshots / images in PR & issue comments
 
-Verification screenshots and other throwaway proof belong in **PR/issue comments, not committed to trunk or the PR branch** — they bloat git history. Only commit lightweight, reproducible fixtures (the HTML/script that regenerates the evidence), never the generated PNGs.
+Verification screenshots and other throwaway proof belong in **PR/issue comments, never in the repository or the PR branch**. This is a hard requirement: do not stage, commit, or push generated screenshots, recordings, visual diffs, or other review-only artifacts, even temporarily. Putting them on the PR branch and deleting them in a later commit still bloats git history.
+
+Create review evidence outside the worktree (for example, in a directory from `mktemp -d`). Before committing or pushing, inspect both the working tree and staged changes for generated image/video artifacts and unstage/move any review evidence found there. Only commit an image when it is an intentional product asset or a lightweight, reproducible test fixture required by the change; an artifact created merely to prove the PR works is not such an asset. Prefer committing the HTML/script/fixture that regenerates the proof, not its rendered output.
 
 GitHub has **no API or `gh` command to upload true comment attachments** — the `github.com/user-attachments/...` URLs are only produced by drag-and-drop in the web UI. To embed an image programmatically, host it in a **gist** (keeps the evidence entirely out of the repo) and reference its raw URL:
 
 1. `gh gist create` rejects binary files, so seed the gist with a text file, then `git push` the image into it (gists are git repos). Gist raw URLs serve the correct `image/png` content-type, so they render inline in comments:
    ```bash
-   echo "# Evidence for #31" > README.md
-   id=$(basename "$(gh gist create README.md --desc 'Evidence for #31')")
-   git clone "https://gist.github.com/$id.git" /tmp/evgist
-   cp before.png after.png /tmp/evgist/
-   git -C /tmp/evgist add -A && git -C /tmp/evgist commit -qm "screenshots" && git -C /tmp/evgist push -q
+   set -euo pipefail
+   evidence_dir=$(mktemp -d)
+   # Generate or copy the screenshots to "$evidence_dir/before.png" and "$evidence_dir/after.png".
+   seed_file="$evidence_dir/README.md"
+   gist_dir="$evidence_dir/gist"
+   printf '%s\n' '# Evidence for #31' > "$seed_file"
+   id=$(basename "$(gh gist create "$seed_file" --desc 'Evidence for #31')")
+   git clone "https://gist.github.com/$id.git" "$gist_dir"
+   cp "$evidence_dir/before.png" "$evidence_dir/after.png" "$gist_dir/"
+   git -C "$gist_dir" add -A
+   git -C "$gist_dir" commit -qm "screenshots"
+   git -C "$gist_dir" push -q
    login=$(gh api user -q .login)
    echo "https://gist.githubusercontent.com/$login/$id/raw/before.png"
    ```
@@ -113,4 +122,4 @@ GitHub has **no API or `gh` command to upload true comment attachments** — the
    ```
 3. Post with `gh pr comment <n> --body "…"` (add `--edit-last` to update it), `gh issue comment <n> --body "…"`, or `gh pr edit <n> --body "…"`.
 
-If the user prefers genuine GitHub-hosted attachments, ask them to drag the images into the comment via the web UI instead.
+If gist creation or authentication is unavailable, do not fall back to committing the evidence. Post the textual verification and give the user the local artifact path, or ask them to upload it through the GitHub web UI. If the user prefers genuine GitHub-hosted attachments, ask them to drag the images into the comment via the web UI instead.
