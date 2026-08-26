@@ -364,6 +364,11 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
         $project->readText('plugin/pages/menu.html'),
         'the conflicting paragraph keeps its content through final validation',
     );
+    assert_contains(
+        'has-band-background-color',
+        $project->readText('plugin/pages/menu.html'),
+        'the planned tinted section is delivered on the committed band surface',
+    );
     $warnings = $project->readJson('warnings.json')['fix-blocks'] ?? [];
     assert_contains(
         'core/paragraph style "text-align" could not be preserved',
@@ -409,8 +414,12 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
         preg_split('/\s+/', trim((string) $specialsRoot['className']), -1, PREG_SPLIT_NO_EMPTY),
         'the root overlap utility is stripped and the archetype marker survives',
     );
+    // image_crop joins the footer archetype's seed, so this build closes on
+    // `editorial-colophon` (base) and the plan moves the closing band to
+    // `tinted` — which the band surface contract paints.
     assert_contains(
-        '<div class="wp-block-group hover-lift section-composition--equal-card-grid"',
+        '<div class="wp-block-group hover-lift section-composition--equal-card-grid'
+            . ' has-band-background-color has-background"',
         $specialsHtml,
         'the root wrapper loses overlap-up too',
     );
