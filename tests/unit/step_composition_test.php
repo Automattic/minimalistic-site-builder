@@ -386,6 +386,64 @@ test('SITE_BUILD_GRAPH=html-islands is recognized and refuses to build', functio
     }
 });
 
+test('leftover SITE_BUILD_HTML_FIRST without SITE_BUILD_GRAPH is refused by name', function () {
+    $previousGraph = getenv('SITE_BUILD_GRAPH');
+    $previousLegacy = getenv('SITE_BUILD_HTML_FIRST');
+    putenv('SITE_BUILD_GRAPH');
+    putenv('SITE_BUILD_HTML_FIRST=1');
+    try {
+        $e = assert_throws(static fn () => StepComposition::selectedGraph());
+        assert_true($e instanceof InvalidArgumentException, get_class($e));
+        assert_true(str_contains($e->getMessage(), 'SITE_BUILD_HTML_FIRST'), $e->getMessage());
+        assert_true(str_contains($e->getMessage(), 'SITE_BUILD_GRAPH'), $e->getMessage());
+        assert_true(str_contains($e->getMessage(), 'html-first'), $e->getMessage());
+    } finally {
+        $previousGraph === false
+            ? putenv('SITE_BUILD_GRAPH')
+            : putenv('SITE_BUILD_GRAPH=' . $previousGraph);
+        $previousLegacy === false
+            ? putenv('SITE_BUILD_HTML_FIRST')
+            : putenv('SITE_BUILD_HTML_FIRST=' . $previousLegacy);
+    }
+});
+
+test('leftover SITE_BUILD_HTML_FIRST=0 is still set, so it is refused too', function () {
+    $previousGraph = getenv('SITE_BUILD_GRAPH');
+    $previousLegacy = getenv('SITE_BUILD_HTML_FIRST');
+    putenv('SITE_BUILD_GRAPH');
+    putenv('SITE_BUILD_HTML_FIRST=0');
+    try {
+        $e = assert_throws(static fn () => StepComposition::selectedGraph());
+        assert_true($e instanceof InvalidArgumentException, get_class($e));
+        assert_true(str_contains($e->getMessage(), 'SITE_BUILD_HTML_FIRST'), $e->getMessage());
+        assert_true(str_contains($e->getMessage(), 'SITE_BUILD_GRAPH'), $e->getMessage());
+    } finally {
+        $previousGraph === false
+            ? putenv('SITE_BUILD_GRAPH')
+            : putenv('SITE_BUILD_GRAPH=' . $previousGraph);
+        $previousLegacy === false
+            ? putenv('SITE_BUILD_HTML_FIRST')
+            : putenv('SITE_BUILD_HTML_FIRST=' . $previousLegacy);
+    }
+});
+
+test('SITE_BUILD_GRAPH wins when a leftover SITE_BUILD_HTML_FIRST is also set', function () {
+    $previousGraph = getenv('SITE_BUILD_GRAPH');
+    $previousLegacy = getenv('SITE_BUILD_HTML_FIRST');
+    putenv('SITE_BUILD_GRAPH=blocks');
+    putenv('SITE_BUILD_HTML_FIRST=1');
+    try {
+        assert_eq('blocks', StepComposition::selectedGraph());
+    } finally {
+        $previousGraph === false
+            ? putenv('SITE_BUILD_GRAPH')
+            : putenv('SITE_BUILD_GRAPH=' . $previousGraph);
+        $previousLegacy === false
+            ? putenv('SITE_BUILD_HTML_FIRST')
+            : putenv('SITE_BUILD_HTML_FIRST=' . $previousLegacy);
+    }
+});
+
 test('an unknown SITE_BUILD_GRAPH value is refused by name', function () {
     $previous = getenv('SITE_BUILD_GRAPH');
     putenv('SITE_BUILD_GRAPH=not-a-graph');

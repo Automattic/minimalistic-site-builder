@@ -112,13 +112,24 @@ final class StepComposition
      * --html-first / --blocks-first / --html-islands flags set that key, which
      * is what makes an explicit flag beat a shell export or an .env line.
      * Unset means blocks. An unknown value is an error, not blocks.
+     * A leftover SITE_BUILD_HTML_FIRST with SITE_BUILD_GRAPH unset is an
+     * error naming both keys, not a silent fallback to blocks.
      *
-     * @throws \InvalidArgumentException when SITE_BUILD_GRAPH is not a known name
+     * @throws \InvalidArgumentException when SITE_BUILD_GRAPH is not a known name,
+     *         or SITE_BUILD_HTML_FIRST is set while SITE_BUILD_GRAPH is not
      */
     public static function selectedGraph(): string
     {
         $raw = Env::get(self::GRAPH_ENV);
         if ($raw === null || $raw === '') {
+            $legacy = Env::get('SITE_BUILD_HTML_FIRST');
+            if ($legacy !== null && $legacy !== '') {
+                throw new \InvalidArgumentException(
+                    'SITE_BUILD_HTML_FIRST is set but SITE_BUILD_GRAPH is not. '
+                    . 'Set SITE_BUILD_GRAPH=' . implode('|', Graph::KNOWN)
+                    . '; SITE_BUILD_HTML_FIRST is no longer read.'
+                );
+            }
             return self::GRAPH_BLOCKS;
         }
         if (!in_array($raw, Graph::KNOWN, true)) {
