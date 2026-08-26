@@ -3019,9 +3019,19 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     /**
      * Execute the committed site-wide heading case/tracking language while
      * preserving every other typography choice, especially lineHeight.
-     * Per-level, core/heading, variation, and responsive structured leaves are
-     * removed so the authoritative styles.elements.heading pair can inherit.
-     * A direction persisted before this field existed remains a complete no-op.
+     * Per-level, core/heading, core/post-title, core/site-title, variation,
+     * and responsive structured leaves are removed so the authoritative
+     * styles.elements.heading pair can inherit. A malformed styles.elements or
+     * styles.elements.heading node (scalar or list) is rebuilt so the pair
+     * always lands; each rebuild is recorded as a repair. A direction
+     * persisted before this field existed remains a complete no-op.
+     *
+     * Scope: this repair owns structured theme.json leaves only. Generated
+     * page CSS is guarded separately by PageStylesStep's declaration checks;
+     * wp:heading block ATTRIBUTES stay outside both guards as a documented
+     * boundary — prompts/section.md forbids them and SupportDomainGuard's
+     * reviewed typography domain deliberately keeps the keys available to
+     * other blocks.
      *
      * @param array<mixed> $theme
      * @return array{0:array<mixed>,1:list<string>} theme, successful repair notes
@@ -3123,7 +3133,9 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                 $blocks[$block] = self::repairTypeTreatmentStyleNode(
                     $child,
                     $path . '.blocks.' . $block,
-                    $block === 'core/heading' ? 'heading' : null,
+                    in_array($block, ['core/heading', 'core/post-title', 'core/site-title'], true)
+                        ? 'heading'
+                        : null,
                     false,
                     $treatment,
                     $committed,
@@ -3154,7 +3166,17 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                     $repairs,
                 );
             }
-            if ($path === 'styles' && !isset($elements['heading'])) {
+            $rootHeading = $elements['heading'] ?? null;
+            $rootHeadingMalformed = array_key_exists('heading', $elements)
+                && (!is_array($rootHeading)
+                    || ($rootHeading !== [] && array_is_list($rootHeading)));
+            if ($path === 'styles' && ($rootHeadingMalformed || !isset($elements['heading']))) {
+                if ($rootHeadingMalformed) {
+                    $repairs[] = 'theme/theme.json styles.elements.heading: authored '
+                        . Warnings::value($rootHeading)
+                        . '; delivered object containing the committed heading treatment'
+                        . '; disposition replaced malformed heading element';
+                }
                 $elements['heading'] = self::repairTypeTreatmentStyleNode(
                     [],
                     $path . '.elements.heading',
@@ -3167,6 +3189,12 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             }
             $node['elements'] = $elements;
         } elseif ($path === 'styles') {
+            if (array_key_exists('elements', $node)) {
+                $repairs[] = 'theme/theme.json styles.elements: authored '
+                    . Warnings::value($node['elements'])
+                    . '; delivered object containing the committed heading treatment'
+                    . '; disposition replaced malformed elements container';
+            }
             $node['elements'] = [
                 'heading' => self::repairTypeTreatmentStyleNode(
                     [],

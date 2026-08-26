@@ -70,6 +70,58 @@ test('repairTypeTreatment owns heading case and tracking while preserving line h
     assert_eq([], $fixedRepairs);
 });
 
+test('repairTypeTreatment rebuilds a malformed heading element instead of silently dropping the treatment', function () {
+    foreach (['oops', [['a' => 1]], 7] as $authored) {
+        [$theme, $repairs] = ThemeJsonStep::repairTypeTreatment(
+            ['styles' => ['elements' => ['heading' => $authored]]],
+            'caps-tight',
+        );
+        assert_eq(
+            TypeTreatment::typography('caps-tight'),
+            $theme['styles']['elements']['heading']['typography'],
+        );
+        assert_true(count($repairs) >= 3, 'malformed node replacement and pair installation are recorded');
+        assert_contains('replaced malformed heading element', implode(' ', $repairs));
+
+        [$fixed, $fixedRepairs] = ThemeJsonStep::repairTypeTreatment($theme, 'caps-tight');
+        assert_eq($theme, $fixed);
+        assert_eq([], $fixedRepairs);
+    }
+
+    [$theme, $repairs] = ThemeJsonStep::repairTypeTreatment(
+        ['styles' => ['elements' => 'broken']],
+        'caps-tight',
+    );
+    assert_eq(
+        TypeTreatment::typography('caps-tight'),
+        $theme['styles']['elements']['heading']['typography'],
+    );
+    assert_contains('replaced malformed elements container', implode(' ', $repairs));
+});
+
+test('repairTypeTreatment strips competing case/tracking from post-title and site-title blocks', function () {
+    [$theme, $repairs] = ThemeJsonStep::repairTypeTreatment(['styles' => ['blocks' => [
+        'core/post-title' => ['typography' => [
+            'textTransform' => 'lowercase',
+            'letterSpacing' => '0.2em',
+            'lineHeight' => '1.05',
+        ]],
+        'core/site-title' => ['typography' => [
+            'letterSpacing' => '0.3em',
+            'fontWeight' => '800',
+        ]],
+    ]]], 'caps-tight');
+
+    assert_eq(['lineHeight' => '1.05'], $theme['styles']['blocks']['core/post-title']['typography']);
+    assert_eq(['fontWeight' => '800'], $theme['styles']['blocks']['core/site-title']['typography']);
+    assert_contains('styles.blocks.core/post-title.typography.textTransform', implode(' ', $repairs));
+    assert_contains('styles.blocks.core/site-title.typography.letterSpacing', implode(' ', $repairs));
+
+    [$fixed, $fixedRepairs] = ThemeJsonStep::repairTypeTreatment($theme, 'caps-tight');
+    assert_eq($theme, $fixed);
+    assert_eq([], $fixedRepairs);
+});
+
 test('repairTypeTreatment is a no-op without an explicit commitment and repairs malformed base typography', function () {
     $legacy = ['styles' => ['elements' => ['heading' => ['typography' => 'broken']]]];
     assert_eq([$legacy, []], ThemeJsonStep::repairTypeTreatment($legacy, ''));
