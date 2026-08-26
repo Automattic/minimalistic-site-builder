@@ -591,7 +591,9 @@ final class HeroComposition
         }
 
         $images = self::imageFacts($markup);
-        // A recipe may accept more than one aspect, so every row is a list.
+        // Each row lists every aspect its recipe's media slot can serve, and a
+        // recipe with no fixed slot shape lists none. An empty row skips the
+        // check rather than accepting one arbitrary aspect as correct.
         $expectedAspects = match ($recipe) {
             'framed-portrait' => ['portrait'],
             'cinematic-safe-zone', 'layered-poster' => ['landscape'],

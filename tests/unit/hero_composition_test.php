@@ -30,6 +30,20 @@ test('hero catalog entries own complete metadata, defaults, prompts, and unique 
         assert_true(in_array($default['mobile_transformation'], $meta['mobile_transformations'], true));
     }
     assert_eq(count($hooks), count(array_unique($hooks)), 'root hooks are unique');
+
+    // The reverse of the prompt check above (BIGR-905): a retired recipe must
+    // take its fragment with it. An orphan file is invisible to the loop, and
+    // the next author reads it as authoring guidance for a live recipe.
+    $templates = array_map(
+        static fn (string $recipe): string => HeroComposition::recipeTemplate($recipe),
+        HeroComposition::RECIPES,
+    );
+    foreach (glob(repo_path('prompts/hero-compositions/*.md')) ?: [] as $file) {
+        assert_true(
+            in_array('hero-compositions/' . basename($file), $templates, true),
+            basename($file) . ' belongs to a cataloged recipe',
+        );
+    }
 });
 
 test('hero compatibility filters objective caller constraints before selection', function () {
