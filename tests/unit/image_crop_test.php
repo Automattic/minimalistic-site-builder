@@ -43,6 +43,19 @@ test('ImageCrop aligns generated source ratios with the committed target role', 
     assert_eq('16:9', ImageCrop::generationRatio(null, 'landscape', 'feature band'));
 });
 
+test('ImageCrop keeps every named background wide under a tall commitment', function () {
+    // The documented example context for a viewport-spanning band. Before the
+    // fix this matched only the feature words, and portrait/square requested
+    // a tall or square source canvas for a wide cover slot.
+    assert_eq('16:9', ImageCrop::generationRatio('portrait', 'landscape', 'background of a call-to-action band'));
+    assert_eq('16:9', ImageCrop::generationRatio('square', 'landscape', 'background of a call-to-action band'));
+    assert_eq('21:9', ImageCrop::generationRatio('panoramic', 'landscape', 'background of a call-to-action band'));
+
+    // A normal contained card context still follows the committed system.
+    assert_eq('4:5', ImageCrop::generationRatio('portrait', 'landscape', 'ambiance card in a dining room grid'));
+    assert_eq('1:1', ImageCrop::generationRatio('square', 'landscape', 'ambiance card in a dining room grid'));
+});
+
 test('ImageCrop prompt guidance protects focal content without restating mixed', function () {
     foreach (['landscape', 'portrait', 'square', 'panoramic'] as $crop) {
         assert_contains('Site-wide crop direction:', ImageCrop::promptClause($crop));

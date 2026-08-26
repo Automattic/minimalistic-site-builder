@@ -91,8 +91,11 @@ final class ImageCrop
             return $current;
         }
 
+        // Any context that names a background is a viewport-spanning slot:
+        // the documented examples include "background of a call-to-action
+        // band", which no role word alone would classify as full-frame.
         $fullFrame = $current === '21:9' || preg_match(
-            '/\b(?:full[- ](?:bleed|frame|width)|edge[- ]to[- ]edge|hero\s+(?:cover|background)|banner\s+background)\b/iu',
+            '/\b(?:full[- ](?:bleed|frame|width)|edge[- ]to[- ]edge|hero\s+cover|background)\b/iu',
             $pageContext,
         ) === 1;
         if ($fullFrame) {
