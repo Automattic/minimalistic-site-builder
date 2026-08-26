@@ -94,9 +94,12 @@ final class CtaStyle
             ],
             'underline' => [
                 'color' => $transparent,
-                'border' => [
-                    'bottom' => ['color' => 'currentColor', 'style' => 'solid', 'width' => '2px'],
-                ],
+                // The text-decoration below already draws the line. A
+                // border-bottom drew a second one under the padding box, and
+                // the shape-owned border.radius (never stripped) curved that
+                // bottom-only border into a trough. Pin the border off so the
+                // construction keeps exactly one line, whatever the shape.
+                'border' => ['color' => 'transparent', 'style' => 'solid', 'width' => '0'],
                 'typography' => ['textDecoration' => 'underline'],
                 'spacing' => ['padding' => $linkPadding],
                 'css' => 'text-underline-offset:0.25em;text-decoration-thickness:0.14em;',

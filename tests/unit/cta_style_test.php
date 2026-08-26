@@ -27,7 +27,12 @@ test('CTA style maps every bounded commitment to a distinct executable construct
 
     $underline = CtaStyle::themeStyle('underline');
     assert_eq('underline', $underline['typography']['textDecoration']);
-    assert_eq('2px', $underline['border']['bottom']['width']);
+    assert_contains('text-decoration-thickness', $underline['css']);
+    assert_eq('0', $underline['border']['width']);
+    assert_true(
+        !isset($underline['border']['bottom']),
+        'underline draws one line through text-decoration, never a second border rule',
+    );
 
     $ghost = CtaStyle::themeStyle('ghost-arrow');
     assert_contains('content:"→"', $ghost['css']);
@@ -121,6 +126,11 @@ test('theme-json production write binds the committed CTA construction', functio
     assert_eq('underline', $button['typography']['textDecoration']);
     assert_eq('650', $button['typography']['fontWeight']);
     assert_eq('0.5rem', $button['border']['radius']);
+    assert_eq('0', $button['border']['width']);
+    assert_true(
+        !isset($button['border']['bottom']),
+        'a soft shape cannot curve a bottom border the underline CTA no longer draws',
+    );
     assert_contains('committed underline CTA construction', $project->readText('logs/theme-json-direction-bind.txt'));
     exec('rm -rf ' . escapeshellarg($tmp));
 });
