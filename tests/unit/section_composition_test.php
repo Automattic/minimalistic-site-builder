@@ -88,6 +88,17 @@ test('every section catalog entry carries complete executable metadata', functio
         );
 
         assert_eq(
+            [],
+            array_diff($meta['requires_context'], SectionComposition::CONTEXT_KEYS),
+            "{$archetype} gates on published context keys only",
+        );
+        assert_true(
+            $meta['requires_context'] === [] || trim($meta['ineligible_reason']) !== '',
+            "{$archetype} explains why it can be ineligible — PagePlanStep interpolates "
+            . 'the reason into its replacement warning row',
+        );
+
+        assert_eq(
             'section-composition--' . $archetype,
             SectionComposition::marker($archetype),
             "{$archetype} owns its root class marker",

@@ -313,7 +313,9 @@ final class SectionComposition
 
         $rows = 0;
         foreach ($document->indices() as $index) {
-            if (in_array($document->name($index), ['columns', 'gallery', 'media-text'], true)) {
+            if (in_array($document->name($index), ['columns', 'gallery', 'media-text'], true)
+                || in_array('masonry-3', self::classTokens($document, $index), true)
+            ) {
                 $rows++;
             }
         }
@@ -321,14 +323,7 @@ final class SectionComposition
         $warnings = [];
         $marker = self::marker($archetype);
         $root = $document->topLevel();
-        $rootClasses = $root === null
-            ? []
-            : (preg_split(
-                '/\s+/',
-                trim((string) (($document->attrs($root) ?? [])['className'] ?? '')),
-                -1,
-                PREG_SPLIT_NO_EMPTY,
-            ) ?: []);
+        $rootClasses = $root === null ? [] : self::classTokens($document, $root);
         if (!in_array($marker, $rootClasses, true)) {
             $warnings[] = self::markupWarning(
                 $part,
@@ -366,6 +361,23 @@ final class SectionComposition
         }
 
         return $warnings;
+    }
+
+    /**
+     * The class tokens on one block. `masonry-3` is a row: the prompts prefer
+     * one masonry group over repeated wp:columns above six mixed-aspect items,
+     * so a band that took that advice still satisfies `requires_row`.
+     *
+     * @return list<string>
+     */
+    private static function classTokens(BlockMarkup $document, int $index): array
+    {
+        return preg_split(
+            '/\s+/',
+            trim((string) (($document->attrs($index) ?? [])['className'] ?? '')),
+            -1,
+            PREG_SPLIT_NO_EMPTY,
+        ) ?: [];
     }
 
     /** @param array<string,bool> $context */

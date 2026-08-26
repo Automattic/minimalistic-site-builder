@@ -164,9 +164,12 @@ final class SectionUnit extends AbstractPageSectionUnit
     /**
      * The catalog archetype assigned to this section, for `request()`, which
      * cannot brief a recipe it does not have. A missing or unknown value is a
-     * RuntimeException so SectionsStep isolates the one bad section instead of
-     * ending a paid-for build; PagePlanStep already coerces every delivered
-     * plan value into the catalog before pages.json is written.
+     * RuntimeException. Note this throw is NOT isolated per section:
+     * `SectionsStep::requestsFor()` builds every request before the per-part
+     * try/catch, so it ends the build. PagePlanStep coerces every delivered
+     * plan value into the catalog before pages.json is written, so the
+     * reachable case is a stale or hand-edited plan on a `--from=sections`
+     * resume.
      */
     private function archetype(array $input): string
     {
