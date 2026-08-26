@@ -31,8 +31,8 @@ function section_unit_input(): array
             'content_notes'    => 'UNIT-NOTES-SENTINEL',
             'layout_archetype' => 'full-bleed-cover',
             'background'       => 'image',
-        'vertical_density' => 'standard',
-        'item_pattern'     => null,
+            'vertical_density' => 'standard',
+            'item_pattern'     => null,
             'handoff'          => 'UNIT-HANDOFF-SENTINEL',
 
         ],
