@@ -99,13 +99,15 @@ final class ImageCrop
             return $crop === 'panoramic' ? '21:9' : '16:9';
         }
 
+        $thumb = preg_match('/\bthumb(?:nail)?\b/iu', $pageContext) === 1;
+        $tall = preg_match('/\b(?:dominant|tall)\b/iu', $pageContext) === 1;
         $feature = preg_match('/\b(?:feature|band|banner)\b/iu', $pageContext) === 1
-            && preg_match('/\b(?:card|thumbnail|grid|tile)\b/iu', $pageContext) !== 1;
+            && preg_match('/\b(?:card|thumb(?:nail)?|grid|tile)\b/iu', $pageContext) !== 1;
         return match ($crop) {
-            'landscape' => $feature ? '16:9' : '4:3',
-            'portrait'  => '3:4',
+            'landscape' => $feature ? '16:9' : (($thumb || $tall) ? '4:3' : '3:2'),
+            'portrait'  => $tall ? '2:3' : ($thumb ? '3:4' : '4:5'),
             'square'    => '1:1',
-            'panoramic' => $feature ? '21:9' : '16:9',
+            'panoramic' => $feature ? '21:9' : ($tall ? '3:2' : '16:9'),
         };
     }
 

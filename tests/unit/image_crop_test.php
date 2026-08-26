@@ -26,11 +26,16 @@ test('ImageCrop emits one deterministic ratio map per uniform commitment', funct
 });
 
 test('ImageCrop aligns generated source ratios with the committed target role', function () {
-    assert_eq('4:3', ImageCrop::generationRatio('landscape', 'square', 'product card in a grid'));
+    assert_eq('3:2', ImageCrop::generationRatio('landscape', 'square', 'product card in a grid'));
+    assert_eq('4:3', ImageCrop::generationRatio('landscape', 'square', 'small row thumbnail'));
+    assert_eq('4:3', ImageCrop::generationRatio('landscape', 'square', 'dominant card'));
     assert_eq('16:9', ImageCrop::generationRatio('landscape', 'square', 'wide feature band'));
-    assert_eq('3:4', ImageCrop::generationRatio('portrait', 'landscape', 'team member card'));
+    assert_eq('4:5', ImageCrop::generationRatio('portrait', 'landscape', 'team member card'));
+    assert_eq('3:4', ImageCrop::generationRatio('portrait', 'landscape', 'small row thumbnail'));
+    assert_eq('2:3', ImageCrop::generationRatio('portrait', 'landscape', 'dominant card'));
     assert_eq('1:1', ImageCrop::generationRatio('square', 'card-portrait', 'gallery tile'));
     assert_eq('16:9', ImageCrop::generationRatio('panoramic', 'square', 'festival card'));
+    assert_eq('3:2', ImageCrop::generationRatio('panoramic', 'square', 'dominant card'));
     assert_eq('21:9', ImageCrop::generationRatio('panoramic', 'landscape', 'wide feature band'));
     assert_eq('21:9', ImageCrop::generationRatio('panoramic', 'landscape', 'full-bleed hero background'));
     assert_eq('16:9', ImageCrop::generationRatio('portrait', 'portrait', 'full-bleed hero background'));

@@ -113,7 +113,7 @@ test('generate-images aligns source ratio and prompt composition with image_crop
 
     (new GenerateImagesStep($images))->run($project);
 
-    assert_eq('3:4', $images->calls[0]['opts']['aspect_ratio']);
+    assert_eq('4:5', $images->calls[0]['opts']['aspect_ratio']);
     assert_contains('Site-wide crop direction:', $images->calls[0]['prompt']);
     assert_contains('central portrait safe area', $images->calls[0]['prompt']);
 
