@@ -113,9 +113,6 @@ final class DesignDirectionStep implements Step
      */
     public const CARD_STYLES = CardStyle::ALL;
 
-    /** Site-wide elevation treatment for cards and contained media. */
-    public const DEPTHS = Depth::ALL;
-
     /**
      * How the page's bands follow one another. The page plan already assigns a
      * layout archetype and background per section, but with no site-level
