@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Units;
 
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\SectionComposition;
+use Automattic\SiteBuild\Steps\PagePlanStep;
 
 /**
  * Generate one page section from a self-contained input.
@@ -16,7 +17,7 @@ use Automattic\SiteBuild\SectionComposition;
  *   list-thumb rows also receive their non-stacking and tight-gap invariants
  * - page: slug/title/path of the page the section belongs to
  * - section: slug/title/role/type/purpose/content_notes plus the assigned
- *   layout_archetype/background/vertical_density/handoff. Role is required
+ *   layout_archetype/background/vertical_density/text_placement/handoff. Role is required
  *   and must be one of hero/content/closing. The layout_archetype must be a
  *   `SectionComposition` id: it selects the one prompt fragment this request
  *   sees, and the `section-composition--<id>` root class the part delivers.
@@ -48,7 +49,7 @@ final class SectionUnit extends AbstractPageSectionUnit
      *   page:array{slug:string,title?:string,path?:string},
      *   section:array{
      *     slug:string,role:string,title?:string,type?:string,purpose?:string,content_notes?:string,
-     *     layout_archetype:string,background:string,vertical_density:string,handoff:string
+     *     layout_archetype:string,background:string,vertical_density:string,text_placement:string,handoff:string
      *   },
      *   neighbors:string,
      *   header_contract:string,
@@ -72,12 +73,21 @@ final class SectionUnit extends AbstractPageSectionUnit
                 throw new \RuntimeException("sections: page '{$pageSlug}' section '{$slug}' is missing {$field} from page-plan");
             }
         }
+        $compositionVars['text_placement'] = strtolower(trim(
+            $this->sectionString($section, 'text_placement'),
+        ));
+        if (!in_array($compositionVars['text_placement'], PagePlanStep::TEXT_PLACEMENTS, true)) {
+            throw new \RuntimeException(
+                "sections: page '{$pageSlug}' section '{$slug}' has invalid text_placement from page-plan",
+            );
+        }
 
         $archetype = $this->archetype($input);
         $composition = $this->renderer->render('section-composition.md', [
             'layout_archetype' => $compositionVars['layout_archetype'],
             'background'       => $compositionVars['background'],
             'vertical_density' => $compositionVars['vertical_density'],
+            'text_placement'   => $compositionVars['text_placement'],
             'handoff'          => $compositionVars['handoff'],
             'neighbors'        => $this->inputString($input, 'neighbors'),
             'root_marker'      => SectionComposition::marker($archetype),

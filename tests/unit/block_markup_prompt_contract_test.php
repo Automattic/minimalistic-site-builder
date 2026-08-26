@@ -62,6 +62,7 @@ test('markup generation units share one output-only contract', function () {
                 'layout_archetype' => 'centered-stack',
                 'background' => 'base',
                 'vertical_density' => 'standard',
+                'text_placement' => 'left-column',
                 'handoff' => 'Between the header and the next section.',
             ],
             'neighbors' => 'Above: header. Below: content.',
