@@ -19,7 +19,6 @@ final class HeroComposition
         'framed-portrait',
         'focal-subject-stage',
         'layered-poster',
-        'stacked-headline-band',
         'type-manifesto',
     ];
 
@@ -27,7 +26,7 @@ final class HeroComposition
     // (BIGR-885), the first cataloged recipe that carries no image. It stays a
     // valid HeroBlueprint media_mode for the delivered value of a media-loss
     // degradation too, so an image-bearing recipe can still degrade to it.
-    public const MEDIA_MODES = ['none', 'cover-image', 'foreground-image', 'band-image'];
+    public const MEDIA_MODES = ['none', 'cover-image', 'foreground-image'];
 
     /**
      * The media modes that put real pixels on the page, so the build must
@@ -38,7 +37,7 @@ final class HeroComposition
      *
      * @var list<string>
      */
-    public const IMAGE_MEDIA_MODES = ['cover-image', 'foreground-image', 'band-image'];
+    public const IMAGE_MEDIA_MODES = ['cover-image', 'foreground-image'];
     public const COPY_CAPACITIES = ['compact', 'standard', 'expanded'];
     public const CANVASES = ['full-bleed', 'framed'];
 
@@ -192,51 +191,6 @@ final class HeroComposition
                 'focal_region' => 'end', 'text_safe_region' => 'start',
                 'height_profile' => 'immersive', 'cta_treatment' => 'prominent',
                 'mobile_transformation' => 'flatten-layers',
-            ],
-        ],
-        // BIGR-885: the catalog put copy either OVER a cover or BESIDE a
-        // constrained plate. This recipe stacks copy ABOVE a full-width image
-        // band, so no text ever meets a photograph. That makes it the only
-        // recipe with zero overlay-contrast risk, and the safest choice when
-        // the direction commits to a framed canvas.
-        'stacked-headline-band' => [
-            'canvases' => ['full-bleed', 'framed'],
-            'media_modes' => ['band-image'],
-            'min_images' => 1,
-            'max_images' => 1,
-            // Solid surfaces only. The copy sits on the surface, never on the
-            // image, so 'image' would contradict the recipe: the plan wraps an
-            // 'image' band in a wp:cover and puts the copy back over pixels.
-            'backgrounds' => ['base', 'tinted', 'contrast'],
-            'default_background' => 'base',
-            'fallback_background' => 'base',
-            // No overlay header: the section's first element is copy, so an
-            // overlay header would float over the headline, not over media.
-            'header_modes' => ['stacked'],
-            'copy_capacity' => 'standard',
-            'mobile_transformations' => ['stack-copy-first'],
-            // The recipe mixes one reading-measure copy stack with one
-            // full-width band, which is the width mix this archetype names.
-            // 'full-bleed-cover' is wrong twice over: it promises overlaid
-            // text, and both PagePlanStep and ThemeValidator special-case it.
-            'layout_archetype' => 'mixed-width-editorial',
-            'fallback_family' => 'typographic',
-            'root_hook' => '.hero-composition--stacked-headline-band',
-            'prompt' => 'hero-compositions/stacked-headline-band.md',
-            'headline_registers' => ['restrained', 'display'],
-            // The band must stay short: the headline, the standfirst, the
-            // action AND a meaningful share of the band share one viewport.
-            'height_profiles' => ['compact', 'standard'],
-            'defaults' => [
-                'media_mode' => 'band-image', 'headline_register' => 'display',
-                // The copy leads the section, so it is anchored to the top and
-                // to the reading edge. A vertically centered anchor would ask
-                // the deterministic pass to center copy that has no frame.
-                'text_anchor' => 'top-start',
-                'headline_line_target' => ['desktop' => [1, 2], 'mobile' => [2, 4]],
-                'focal_region' => 'none', 'text_safe_region' => 'full',
-                'height_profile' => 'compact', 'cta_treatment' => 'prominent',
-                'mobile_transformation' => 'stack-copy-first',
             ],
         ],
         // BIGR-885: the catalog's first imageless recipe. Type and negative
@@ -506,11 +460,6 @@ final class HeroComposition
         $mediaRegions = 0;
         $directCovers = 0;
         $covers = 0;
-        // BIGR-885: the band recipe promises copy ABOVE the image and a band
-        // that reaches both viewport edges. Both facts are objective, so they
-        // are counted here beside the media/copy region hooks.
-        $textInMedia = 0;
-        $fullWidthMedia = 0;
         foreach ($document->indices() as $index) {
             $name = $document->name($index);
             $attrs = $document->attrs($index) ?? [];
@@ -526,19 +475,8 @@ final class HeroComposition
             if (in_array('hero-composition__copy', $classes, true)) {
                 $copyRegions++;
             }
-            $isMediaRegion = in_array('hero-composition__media', $classes, true);
-            if ($isMediaRegion) {
+            if (in_array('hero-composition__media', $classes, true)) {
                 $mediaRegions++;
-            }
-            $inMedia = $isMediaRegion || self::hasAncestorClass($document, $index, 'hero-composition__media');
-            // The REGION itself must be full width. An `align:full` image
-            // inside a constrained wrapper still renders at the reading
-            // measure, because the wrapper caps it (audited: bindery-en).
-            if ($isMediaRegion && (string) ($attrs['align'] ?? '') === 'full') {
-                $fullWidthMedia++;
-            }
-            if ($inMedia && in_array($name, ['heading', 'paragraph', 'buttons'], true)) {
-                $textInMedia++;
             }
             if ($root !== null && $document->parent($index) === $root && $name === 'cover') {
                 $directCovers++;
@@ -600,16 +538,6 @@ final class HeroComposition
                 ['matching_regions' => $mediaRegions],
                 'safe parseable hero was retained; restore only the missing assigned foreground-media region hooks',
             );
-        } elseif (in_array('band-image', $mediaModes, true)
-            && $mediaRegions < $minImages
-        ) {
-            $warnings[] = self::markupWarning(
-                $part,
-                'recipe band media region',
-                ['required_class' => 'hero-composition__media', 'minimum' => $minImages],
-                ['matching_regions' => $mediaRegions],
-                'safe parseable hero was retained; restore only the missing assigned image-band region hook',
-            );
         }
         if (in_array('foreground-image', $mediaModes, true)
             && $covers > 0
@@ -621,39 +549,6 @@ final class HeroComposition
                 ['wp_cover_count' => $covers],
                 'safe parseable hero was retained; replace only the background cover with the assigned foreground-media block',
             );
-        }
-        // BIGR-885 objective failures for the band recipe. A wp:cover and any
-        // text inside the media region both put copy over the photograph,
-        // which is the one thing this recipe exists to prevent. A band that
-        // stops short of the viewport edge is the recipe's other failure.
-        if (in_array('band-image', $mediaModes, true)) {
-            if ($covers > 0) {
-                $warnings[] = self::markupWarning(
-                    $part,
-                    'band recipe cover usage',
-                    ['wp_cover_count' => 0, 'media_modes' => $mediaModes],
-                    ['wp_cover_count' => $covers],
-                    'safe parseable hero was retained; replace only the cover with a plain full-width image band under the copy',
-                );
-            }
-            if ($textInMedia > 0) {
-                $warnings[] = self::markupWarning(
-                    $part,
-                    'band recipe text over media',
-                    ['text_blocks_inside_media' => 0],
-                    ['text_blocks_inside_media' => $textInMedia],
-                    'safe parseable hero was retained; move only the copy blocks out of the image band and back above it',
-                );
-            }
-            if ($mediaRegions > 0 && $fullWidthMedia < 1) {
-                $warnings[] = self::markupWarning(
-                    $part,
-                    'band recipe media width',
-                    ['align' => 'full on the hero-composition__media block itself'],
-                    ['align' => 'the media region is capped below full width'],
-                    'safe parseable hero was retained; restore only the band alignment so the image reaches both viewport edges',
-                );
-            }
         }
         // BIGR-775 advisory copy-budget check: every hero holds at most the
         // headline plus ONE supporting paragraph (naturaleza9's three stacked
@@ -696,14 +591,10 @@ final class HeroComposition
         }
 
         $images = self::imageFacts($markup);
-        // BIGR-885: a recipe may accept more than one aspect. The band runs
-        // edge to edge, so `ultrawide` fits its letterbox crop as well as
-        // `landscape` does, and image-generation.md permits both for a band
-        // that spans the viewport.
+        // A recipe may accept more than one aspect, so every row is a list.
         $expectedAspects = match ($recipe) {
             'framed-portrait' => ['portrait'],
             'cinematic-safe-zone', 'layered-poster' => ['landscape'],
-            'stacked-headline-band' => ['landscape', 'ultrawide'],
             default => [],
         };
         if ($expectedAspects !== [] && $images !== []) {
