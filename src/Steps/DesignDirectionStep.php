@@ -16,6 +16,7 @@ use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\GroundTint;
 use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
+use Automattic\SiteBuild\ItemPattern;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\Measure;
 use Automattic\SiteBuild\Motion;
@@ -36,8 +37,8 @@ use Automattic\SiteBuild\Warnings;
  * Output: designDirection.json — the chosen direction as structured data:
  *         title + vivid description plus the explicit fields downstream steps
  *         execute instead of re-interpreting (palette hexes, type pairing,
- *         image grade, canvas/measure layout commitments, and a separately
- *         consumed structured front-page hero blueprint).
+ *         image grade, canvas/measure layout commitments, the repeated-item
+ *         idiom, and a separately consumed structured front-page hero blueprint).
  *
  * Two calls. First, a cheap seed call (small model, hot sampling) brainstorms
  * THREE concept seeds — each an object: an evocative title plus one vivid
@@ -108,6 +109,9 @@ final class DesignDirectionStep implements Step
      * the dated inset-media card only appears when a direction opts into it.
      */
     public const CARD_STYLES = CardStyle::ALL;
+
+    /** Repeated-item idioms the planner may assign to list-like sections. */
+    public const ITEM_PATTERNS = ItemPattern::ALL;
 
     /**
      * How the page's bands follow one another. The page plan already assigns a
@@ -358,6 +362,7 @@ final class DesignDirectionStep implements Step
             'canvas'           => $canvas,
             'measure'          => Measure::DEFAULT,
             'card_style'       => 'flush',
+            'item_pattern'     => ItemPattern::DEFAULT,
             'shape'            => 'sharp',
             'surface'          => Surface::DEFAULT,
             'device'           => Device::DEFAULT,
@@ -728,6 +733,7 @@ final class DesignDirectionStep implements Step
         );
 
         $cardStyle = self::normalizeCardStyle($raw['card_style'] ?? null, $warnings);
+        $itemPattern = ItemPattern::normalize($raw['item_pattern'] ?? null, $warnings);
         $surface = self::normalizeSurface($raw['surface'] ?? null, $warnings);
         $device = self::normalizeDevice($raw['device'] ?? null, $warnings);
         $rhythm = self::normalizeRhythm($raw['rhythm'] ?? null, $warnings);
@@ -816,6 +822,7 @@ final class DesignDirectionStep implements Step
             // flush default — inset media must be an explicit opt-in, never
             // the accidental look every site gets.
             'card_style'       => $cardStyle,
+            'item_pattern'     => $itemPattern,
             'shape'            => $shape,
             'surface'          => $surface,
             'device'           => $device,
@@ -1212,6 +1219,18 @@ final class DesignDirectionStep implements Step
             $facts[] = "- **Card treatment**: {$cardStyle} — {$meaning}.";
         }
 
+        $itemPattern = ItemPattern::explicit($direction['item_pattern'] ?? null);
+        if ($itemPattern !== null) {
+            $meaning = match ($itemPattern) {
+                'card'        => 'list-like sections repeat discrete bounded cards',
+                'rule-row'    => 'list-like sections use compact name/detail rows joined by a purposeful hairline',
+                'index'       => 'list-like sections use a strong numbered or lettered scan column',
+                'spec-table'  => 'list-like sections align compact label/value pairs for comparison',
+                'tag-cluster' => 'list-like sections wrap short categorical labels as compact inline chips',
+            };
+            $facts[] = "- **Item pattern**: {$itemPattern} — {$meaning}.";
+        }
+
         // The page plan reads these two and assigns its per-section archetype,
         // background and density against them. Stated as executable meaning
         // rather than a bare keyword for the same reason as canvas: a keyword
@@ -1444,6 +1463,19 @@ final class DesignDirectionStep implements Step
     {
         $direction = self::dataFor($project);
         return self::normalizeCardStyle($direction['card_style'] ?? null, $warnings);
+    }
+
+    /**
+     * The authoritative repeated-item idiom, with the card default for a
+     * missing or pre-field direction. Callers persist any invalid-value
+     * warning at their own step boundary.
+     *
+     * @param list<string> $warnings
+     */
+    public static function itemPatternFor(Project $project, array &$warnings = []): string
+    {
+        $direction = self::dataFor($project);
+        return ItemPattern::normalize($direction['item_pattern'] ?? null, $warnings);
     }
 
     /**

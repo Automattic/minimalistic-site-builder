@@ -8,6 +8,7 @@ use Automattic\SiteBuild\FooterSectionIdentity;
 use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\GeneratedJsonFallbackStep;
 use Automattic\SiteBuild\HeroComposition;
+use Automattic\SiteBuild\ItemPattern;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
 use Automattic\SiteBuild\Narrator;
@@ -28,7 +29,7 @@ use Automattic\SiteBuild\StepDeclaration;
  * Output: pages.json — { "footer_archetype": "<catalog id>", "pages": [ { slug, title, path, front, parent,
  *         menu_order, purpose, sections: [ { slug, title, role, type, purpose,
  *         content_notes, layout_archetype, background, vertical_density,
- *         handoff, primary_action } ] } ] }, a FLAT list in display order, parents before
+ *         item_pattern, handoff, primary_action } ] } ] }, a FLAT list in display order, parents before
  *         children; footer_archetype is the pick hashed at plan time so later
  *         direction rewrites cannot retarget the footer; warnings.json records every generated value removed or
  *         replaced by a deterministic fallback.
@@ -57,6 +58,16 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
 
     /** Page-owned outer spacing roles — must match page-plan.md. */
     public const VERTICAL_DENSITIES = ['compact', 'standard', 'spacious'];
+
+    /** Semantic type words that make an item-pattern assignment mandatory. */
+    private const LIST_LIKE_TYPES = [
+        'amenities', 'archive', 'articles', 'catalog', 'categories', 'collections',
+        'directory', 'events', 'faq', 'features', 'genres', 'index', 'ingredients',
+        'lineup', 'locations', 'menu', 'offerings', 'posts', 'pricing', 'process',
+        'products', 'program', 'projects', 'rooms', 'schedule', 'services', 'skills',
+        'specifications', 'steps', 'studies', 'team', 'testimonials', 'tiers',
+        'timeline', 'workshops',
+    ];
 
     /** The card grid is capped tighter than the others — it reads as filler in bulk. */
     private const MAX_EQUAL_CARD_GRIDS = 2;
@@ -196,6 +207,12 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             'layout_archetype' => ['type' => 'string', 'enum' => self::ARCHETYPES],
             'background'       => ['type' => 'string', 'enum' => self::BACKGROUNDS],
             'vertical_density' => ['type' => 'string', 'enum' => self::VERTICAL_DENSITIES],
+            'item_pattern'     => [
+                'anyOf' => [
+                    ['type' => 'null'],
+                    ['type' => 'string', 'enum' => ItemPattern::ALL],
+                ],
+            ],
             'handoff'          => ['type' => 'string'],
             'primary_action'   => [
                 'anyOf' => [
@@ -322,6 +339,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             'site_spec'        => $siteSpec,
             'language'         => SiteSpecStep::languageOf($project),
             'design_direction' => $designDirection,
+            'item_pattern'     => DesignDirectionStep::itemPatternFor($project),
             'site_pages'       => self::sitePagesList($sitePages ?? $pages),
             // One footer part renders below every page here, and these requests
             // fan out concurrently blind to each other — so this is the only
@@ -628,6 +646,16 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             }
         }
 
+        // The direction's item idiom is a site-wide commitment. The planner
+        // decides only WHETHER a section is list-like; once it assigns a
+        // pattern, the exact value cannot drift. Obvious list-like semantic
+        // types that omitted the field are repaired onto the same commitment.
+        $out = self::reconcileItemPatternAssignments(
+            $out,
+            DesignDirectionStep::itemPatternFor($project),
+            $successfulRepairs,
+        );
+
         // Anchors cannot be judged until every normal, repair, and fallback
         // path has produced its final page/section set. Recheck the sole
         // eligible action now and null it atomically when its target vanished.
@@ -720,6 +748,73 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     }
 
     /**
+     * Reconcile per-section assignments with the one site-wide commitment.
+     *
+     * A non-null planner value says the section is list-like. Its value is not
+     * another creative choice, so drift is repaired without a warning. The
+     * type vocabulary is open-ended, but the common catalog/list identities
+     * are objective enough to repair when the planner omitted its assignment.
+     *
+     * @param array<int,array<string,mixed>> $pages
+     * @param list<string> $repairs
+     * @return array<int,array<string,mixed>>
+     */
+    public static function reconcileItemPatternAssignments(
+        array $pages,
+        string $committed,
+        array &$repairs = [],
+    ): array {
+        ItemPattern::assertKnown($committed);
+        foreach ($pages as $pageIndex => $page) {
+            if (!is_array($page)) {
+                continue;
+            }
+            foreach ((array) ($page['sections'] ?? []) as $sectionIndex => $section) {
+                if (!is_array($section)) {
+                    continue;
+                }
+                $authored = $section['item_pattern'] ?? null;
+                $explicit = ItemPattern::explicit($authored);
+                $type = strtolower(trim((string) ($section['type'] ?? '')));
+                $listLike = self::isListLikeType($type);
+                if ($explicit === null && !$listLike) {
+                    $pages[$pageIndex]['sections'][$sectionIndex]['item_pattern'] = null;
+                    continue;
+                }
+                if ($explicit === $committed) {
+                    continue;
+                }
+                $pages[$pageIndex]['sections'][$sectionIndex]['item_pattern'] = $committed;
+                $slug = (string) ($page['slug'] ?? '');
+                $repairs[] = self::successfulRepair(
+                    self::sectionPath($slug, (int) $sectionIndex) . '.item_pattern',
+                    $authored,
+                    $committed,
+                    $explicit === null
+                        ? "assigned the committed item idiom to list-like section type '{$type}'"
+                        : 'restored the site-wide repeated-item commitment',
+                );
+            }
+        }
+        return $pages;
+    }
+
+    private static function isListLikeType(string $type): bool
+    {
+        $tokens = preg_split('/[^a-z0-9]+/', strtolower($type), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        foreach ($tokens as $token) {
+            $singular = str_ends_with($token, 's') ? substr($token, 0, -1) : $token;
+            foreach (self::LIST_LIKE_TYPES as $candidate) {
+                $candidateSingular = str_ends_with($candidate, 's') ? substr($candidate, 0, -1) : $candidate;
+                if ($token === $candidate || $singular === $candidateSingular) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
      * Normalize model results for a page SUBSET (HTML-first mixed fallback) and
      * return complete entries in the given order, without writing pages.json or
      * running the whole-site front/contract finalization. Subset pages are
@@ -773,6 +868,11 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             $page['sections'] = $sections;
             $out[] = $page;
         }
+        $out = self::reconcileItemPatternAssignments(
+            $out,
+            DesignDirectionStep::itemPatternFor($project),
+            $repairs,
+        );
         $project->addWarnings($this->id(), $warnings);
         return $out;
     }
@@ -1120,6 +1220,19 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 $errors[] = "page-plan: section '{$slug}' is missing 'handoff' — describe what sits immediately above and below it";
             }
 
+            $rawItemPattern = $section['item_pattern'] ?? null;
+            $itemPattern = null;
+            if ($rawItemPattern !== null) {
+                $itemPattern = is_string($rawItemPattern)
+                    ? strtolower(trim($rawItemPattern))
+                    : '';
+                if (!ItemPattern::isKnown($itemPattern)) {
+                    $errors[] = "page-plan: section '{$slug}' has invalid item_pattern "
+                        . self::warningValue($rawItemPattern) . ' — use null or one of: '
+                        . implode(', ', ItemPattern::ALL);
+                }
+            }
+
             $sectionPath = self::sectionPath($pageSlug, count($out)) . '.primary_action';
             $primaryAction = self::normalizePrimaryAction(
                 $section['primary_action'] ?? null,
@@ -1139,6 +1252,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 'layout_archetype' => $archetype,
                 'background'       => $background,
                 'vertical_density' => $verticalDensity,
+                'item_pattern'     => $itemPattern,
                 'handoff'          => $handoff,
                 'primary_action'   => $primaryAction,
             ];
@@ -2470,6 +2584,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 'layout_archetype' => $archetype,
                 'background'       => $background,
                 'vertical_density' => 'standard',
+                'item_pattern'     => null,
                 'handoff'          => 'Sits below the site header and above the site footer.',
                 'primary_action'   => null,
             ],
@@ -2568,6 +2683,17 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                     $density,
                     'standard',
                     "replaced unknown vertical density for section '{$slug}' with standard",
+                );
+            }
+
+            $itemPattern = $section['item_pattern'] ?? null;
+            if ($itemPattern !== null && ItemPattern::explicit($itemPattern) === null) {
+                $sections[$i]['item_pattern'] = null;
+                $warnings[] = self::valueLossWarning(
+                    self::sectionPath($pageSlug, (int) $i) . '.item_pattern',
+                    $itemPattern,
+                    null,
+                    "removed unknown repeated-item assignment for section '{$slug}'; the final site-wide reconciliation will assign the committed idiom when this semantic type is list-like",
                 );
             }
 

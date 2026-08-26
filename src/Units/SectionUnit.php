@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Units;
 
 use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\ItemPattern;
 use Automattic\SiteBuild\SectionComposition;
 
 /**
@@ -16,7 +17,8 @@ use Automattic\SiteBuild\SectionComposition;
  *   list-thumb rows also receive their non-stacking and tight-gap invariants
  * - page: slug/title/path of the page the section belongs to
  * - section: slug/title/role/type/purpose/content_notes plus the assigned
- *   layout_archetype/background/vertical_density/handoff. Role is required
+ *   layout_archetype/background/vertical_density/item_pattern/handoff. The
+ *   item pattern is null for non-list sections or one `ItemPattern` id. Role is required
  *   and must be one of hero/content/closing. The layout_archetype must be a
  *   `SectionComposition` id: it selects the one prompt fragment this request
  *   sees, and the `section-composition--<id>` root class the part delivers.
@@ -48,7 +50,7 @@ final class SectionUnit extends AbstractPageSectionUnit
      *   page:array{slug:string,title?:string,path?:string},
      *   section:array{
      *     slug:string,role:string,title?:string,type?:string,purpose?:string,content_notes?:string,
-     *     layout_archetype:string,background:string,vertical_density:string,handoff:string
+     *     layout_archetype:string,background:string,vertical_density:string,item_pattern:?string,handoff:string
      *   },
      *   neighbors:string,
      *   header_contract:string,
@@ -65,6 +67,7 @@ final class SectionUnit extends AbstractPageSectionUnit
         $slug = trim($this->sectionString($section, 'slug'));
         $pageSlug = trim($this->pageString($input, 'slug'));
         $role = $this->sectionRole($section);
+        $itemPattern = $this->itemPattern($input);
         $compositionVars = [];
         foreach (['layout_archetype', 'background', 'vertical_density', 'handoff'] as $field) {
             $compositionVars[$field] = $this->sectionString($section, $field);
@@ -99,6 +102,16 @@ final class SectionUnit extends AbstractPageSectionUnit
             'section_purpose'   => $this->sectionString($section, 'purpose'),
             'content_notes'     => $this->sectionString($section, 'content_notes'),
             'composition'       => $composition,
+            'item_pattern_assignment' => $itemPattern === null
+                ? 'ASSIGNED ITEM PATTERN: none — this section is not a repeated textual collection. Do not force its content into cards, ledger rows, an index, a specification table, or tag chips.'
+                : $this->renderer->render('item-pattern.md', [
+                    'item_pattern' => $itemPattern,
+                    'root_marker' => ItemPattern::marker($itemPattern),
+                    'item_pattern_recipe' => $this->renderer->render(
+                        ItemPattern::recipeTemplate($itemPattern),
+                        [],
+                    ),
+                ]),
             'header_contract'   => $this->inputString($input, 'header_contract'),
             'image_instructions' => $this->renderer->render('image-generation.md', []),
             'form_instructions'  => $this->renderer->render(
@@ -125,6 +138,7 @@ final class SectionUnit extends AbstractPageSectionUnit
     {
         $cardStyle = $this->cardStyle($input);
         $archetype = $this->assignedArchetype($input);
+        $itemPattern = $this->assignedItemPattern($input);
         $warnings = [];
         $repairs = [];
         $markup = GeneratedMarkup::normalize($raw, $this->key($input), $warnings, $repairs);
@@ -135,6 +149,15 @@ final class SectionUnit extends AbstractPageSectionUnit
                 SectionComposition::marker($archetype),
                 $this->key($input),
                 $repairs
+            );
+        }
+        if ($itemPattern !== null && self::hasOneGroupRoot($markup)) {
+            $markup = GeneratedMarkup::withRootClassMarker(
+                $markup,
+                ItemPattern::MARKER_PREFIX,
+                ItemPattern::marker($itemPattern),
+                $this->key($input),
+                $repairs,
             );
         }
         $listThumb = ListThumbContract::enforce($markup, $this->key($input));
@@ -156,6 +179,12 @@ final class SectionUnit extends AbstractPageSectionUnit
             array_push(
                 $warnings,
                 ...SectionComposition::markupWarnings($markup, $archetype, $this->key($input)),
+            );
+        }
+        if ($itemPattern !== null) {
+            array_push(
+                $warnings,
+                ...ItemPattern::markupWarnings($markup, $itemPattern, $this->key($input)),
             );
         }
         return new MarkupResult($markup, $repairs, $warnings);
@@ -198,6 +227,33 @@ final class SectionUnit extends AbstractPageSectionUnit
         $section = $this->section($input);
         $archetype = trim($this->sectionString($section, 'layout_archetype'));
         return SectionComposition::isKnown($archetype) ? $archetype : null;
+    }
+
+    /** The required planner value for request generation. */
+    private function itemPattern(array $input): ?string
+    {
+        $section = $this->section($input);
+        $raw = $section['item_pattern'] ?? null;
+        if ($raw === null) {
+            return null;
+        }
+        $pattern = is_string($raw) ? strtolower(trim($raw)) : '';
+        if (!ItemPattern::isKnown($pattern)) {
+            $slug = trim($this->sectionString($section, 'slug'));
+            $pageSlug = trim($this->pageString($input, 'slug'));
+            throw new \RuntimeException(
+                "sections: page '{$pageSlug}' section '{$slug}' has unknown item_pattern — use null or one of: "
+                . implode(', ', ItemPattern::ALL)
+            );
+        }
+        return $pattern;
+    }
+
+    /** Delivery stays non-fatal when an adapter finishes unbriefed markup. */
+    private function assignedItemPattern(array $input): ?string
+    {
+        $section = $this->section($input);
+        return ItemPattern::explicit($section['item_pattern'] ?? null);
     }
 
     /**

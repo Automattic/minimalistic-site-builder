@@ -146,6 +146,7 @@ function dp3_contract_planned_sections(array $sections): array
             'layout_archetype' => $section['layout_archetype'],
             'background' => $section['background'],
             'vertical_density' => $section['vertical_density'],
+            'item_pattern' => null,
             'handoff' => $section['handoff'],
             'primary_action' => null,
         ];
