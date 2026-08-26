@@ -224,6 +224,7 @@ test('sanitize neutralizes browser-decoded and unquoted executable URLs', functi
         '<img src=data:text/html,x>' => '<img src=#>',
         '<form action=vbscript:x></form>' => '<form action=#></form>',
         '<button formaction="javascript:x">x</button>' => '<button formaction="#">x</button>',
+        '<video poster="javascript:x"></video>' => '<video poster="#"></video>',
         '<svg><a xlink:href=data:text/html,x>x</a></svg>' => '<svg><a xlink:href=#>x</a></svg>',
         '<a =" /href=javascript:E()>x</a>' => '<a =" /href=#>x</a>',
     ];

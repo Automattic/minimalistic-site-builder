@@ -659,6 +659,73 @@ test('normalizeSpacingSettings installs the canonical bounded responsive profile
     ], $theme['settings']['spacing']['spacingSizes']);
 });
 
+test('normalizeSpacingSettings keeps component rhythm stable and scales every section role by density', function () {
+    $profiles = [];
+    foreach (['airy', 'measured', 'dense'] as $density) {
+        $profiles[$density] = ThemeJsonStep::normalizeSpacingSettings([], $density)
+            ['settings']['spacing']['spacingSizes'];
+    }
+
+    assert_eq(array_slice($profiles['measured'], 0, 3), array_slice($profiles['airy'], 0, 3));
+    assert_eq(array_slice($profiles['measured'], 0, 3), array_slice($profiles['dense'], 0, 3));
+    assert_eq([
+        'clamp(4rem, 6vw, 6rem)',
+        'clamp(5rem, 8vw, 9rem)',
+        'clamp(6rem, 10vw, 12rem)',
+    ], array_column(array_slice($profiles['airy'], 3), 'size'));
+    assert_eq([
+        'clamp(3rem, 4vw, 4rem)',
+        'clamp(4rem, 6vw, 6rem)',
+        'clamp(5rem, 7vw, 7rem)',
+    ], array_column(array_slice($profiles['measured'], 3), 'size'));
+    assert_eq([
+        'clamp(2.25rem, 3vw, 3rem)',
+        'clamp(3rem, 4.5vw, 4.5rem)',
+        'clamp(3.75rem, 5.5vw, 5.5rem)',
+    ], array_column(array_slice($profiles['dense'], 3), 'size'));
+
+    assert_eq($profiles['measured'], ThemeJsonStep::normalizeSpacingSettings([], 'unknown')
+        ['settings']['spacing']['spacingSizes']);
+});
+
+test('theme-json executes the persisted density when writing the spacing ramp', function () {
+    foreach (['airy' => 'clamp(6rem, 10vw, 12rem)', 'dense' => 'clamp(3.75rem, 5.5vw, 5.5rem)'] as $density => $xxl) {
+        $tmp = sys_get_temp_dir() . '/builder_tj_density_' . $density . '_' . uniqid();
+        $project = (new ProjectStore($tmp))->create('demo');
+        $project->writeJson('meta.json', ['prompt' => 'A density-aware design']);
+        $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+        seed_test_design_direction($project, overrides: ['density' => $density]);
+
+        $llm = new FakeLlm();
+        $llm->queueJson(valid_theme_payload());
+        (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+        $sizes = $project->readJson('theme/theme.json')['settings']['spacing']['spacingSizes'];
+        assert_eq($xxl, $sizes[5]['size'], "{$density} writes its xxl ceiling");
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('theme-json prompt delegates density-scaled spacing to the build', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_density_prompt_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'An airy sculpture gallery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project, overrides: ['density' => 'airy']);
+
+    $prompt = (new ThemeJsonStep(
+        new FakeLlm(),
+        new PromptRenderer(repo_path('prompts')),
+    ))->requests($project)['theme-json']['prompt'];
+
+    assert_contains('**Density**: airy', $prompt);
+    assert_contains('do not emit `spacingSizes`', $prompt);
+    assert_contains('lg/xl/xxl section-padding ramp', $prompt);
+    assert_true(!str_contains($prompt, 'clamp(4rem, 6vw, 6rem)'), 'the shared literal ramp is gone');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('normalizeSpacingSettings repairs malformed and oversized model output', function () {
     $theme = ThemeJsonStep::normalizeSpacingSettings([
         'settings' => [
@@ -689,28 +756,30 @@ test('normalizeSpacingSettings repairs malformed and oversized model output', fu
     assert_eq(6, count($theme['settings']['spacing']['spacingSizes']));
 });
 
-test('canonical spacing profile has monotonic fluid bounds', function () {
-    $theme = ThemeJsonStep::normalizeSpacingSettings([]);
-    $previousMin = 0.0;
-    $previousMax = 0.0;
+test('every density spacing profile has monotonic fluid bounds', function () {
+    foreach (['airy' => 12.0, 'measured' => 7.0, 'dense' => 5.5] as $density => $expectedMax) {
+        $theme = ThemeJsonStep::normalizeSpacingSettings([], $density);
+        $previousMin = 0.0;
+        $previousMax = 0.0;
 
-    foreach ($theme['settings']['spacing']['spacingSizes'] as $preset) {
-        $matched = preg_match(
-            '/^clamp\\(([0-9.]+)rem, [0-9.]+vw, ([0-9.]+)rem\\)$/',
-            $preset['size'],
-            $bounds
-        );
-        assert_eq(1, $matched, $preset['slug'] . ' is a responsive clamp');
-        $minimum = (float) $bounds[1];
-        $maximum = (float) $bounds[2];
-        assert_true($minimum > $previousMin, $preset['slug'] . ' minimum rises');
-        assert_true($maximum > $previousMax, $preset['slug'] . ' maximum rises');
-        assert_true($minimum <= $maximum, $preset['slug'] . ' bounds are ordered');
-        $previousMin = $minimum;
-        $previousMax = $maximum;
+        foreach ($theme['settings']['spacing']['spacingSizes'] as $preset) {
+            $matched = preg_match(
+                '/^clamp\\(([0-9.]+)rem, [0-9.]+vw, ([0-9.]+)rem\\)$/',
+                $preset['size'],
+                $bounds
+            );
+            assert_eq(1, $matched, "{$density} {$preset['slug']} is a responsive clamp");
+            $minimum = (float) $bounds[1];
+            $maximum = (float) $bounds[2];
+            assert_true($minimum > $previousMin, "{$density} {$preset['slug']} minimum rises");
+            assert_true($maximum > $previousMax, "{$density} {$preset['slug']} maximum rises");
+            assert_true($minimum <= $maximum, "{$density} {$preset['slug']} bounds are ordered");
+            $previousMin = $minimum;
+            $previousMax = $maximum;
+        }
+
+        assert_eq($expectedMax, $previousMax, "{$density} reaches its intended upper edge");
     }
-
-    assert_eq(7.0, $previousMax, 'largest edge is capped at 7rem');
 });
 
 test('theme-json fills a missing required color slug from the direction, then defaults', function () {
@@ -2102,6 +2171,54 @@ test('theme-json scaffold carries no decorative values', function () {
     }
 });
 
+test('theme-json scaffold removes unsupported text-wrap leaves and preserves typography siblings', function () {
+    $empty = ThemeJsonStep::applyScaffold([]);
+    assert_true(!array_key_exists('textWrap', $empty['styles']['typography']));
+
+    $overwritten = ThemeJsonStep::applyScaffold([
+        'styles' => [
+            'typography' => [
+                'fontFamily' => 'var:preset|font-family|body',
+                'textWrap' => 'balance',
+            ],
+            'elements' => ['h1' => [
+                'typography' => [
+                    'textWrapStyle' => 'balance',
+                    'fontWeight' => '700',
+                ],
+                'css' => 'text-wrap-mode: nowrap !important; font-style: italic;',
+            ]],
+            'css' => 'h1{text-wrap:nowrap!important;color:inherit}',
+            'blocks' => ['core/paragraph' => [
+                'css' => '&{text-wrap-style:balance;display:block}',
+            ]],
+        ],
+    ]);
+    assert_true(!array_key_exists('textWrap', $overwritten['styles']['typography']));
+    assert_true(!array_key_exists('textWrapStyle', $overwritten['styles']['elements']['h1']['typography']));
+    assert_eq(
+        'var:preset|font-family|body',
+        $overwritten['styles']['typography']['fontFamily'],
+        'unrelated typography siblings survive',
+    );
+    assert_eq('700', $overwritten['styles']['elements']['h1']['typography']['fontWeight']);
+    assert_eq('h1{color:inherit}', $overwritten['styles']['css']);
+    assert_eq(
+        '&{display:block}',
+        $overwritten['styles']['blocks']['core/paragraph']['css'],
+        'nested custom CSS keeps unrelated declarations',
+    );
+    assert_eq(
+        ' font-style: italic;',
+        $overwritten['styles']['elements']['h1']['css'],
+        'bare custom declaration lists are repaired too',
+    );
+
+    [$fixedPoint, $warnings] = ThemeJsonStep::repairScaffold($overwritten);
+    assert_eq($overwritten, $fixedPoint, 'unsupported-leaf repair reaches a fixed point');
+    assert_eq([], $warnings);
+});
+
 test('theme-json scaffold references only frozen preset slugs', function () {
     $json = json_encode(ThemeJsonStep::applyScaffold([]), JSON_THROW_ON_ERROR);
     preg_match_all('/var:preset\|([a-z-]+)\|([a-z0-9-]+)/', $json, $matches, PREG_SET_ORDER);
@@ -2155,6 +2272,7 @@ test('theme-json prompt carries authoritative tokens extracted from design CSS',
     assert_contains('#123456', $request['prompt']);
     assert_contains('"Source Sans 3", Arial, sans-serif', $request['prompt']);
     assert_contains('2rem', $request['prompt']);
+    assert_contains('or restate them in custom CSS', $request['prompt']);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -2542,6 +2660,117 @@ test('repairShapeWiring repairs authored cover and media-text corner styles with
     }
 });
 
+test('committed measure replaces model widths exactly and reaches a fixed point', function () {
+    $authored = [
+        'settings' => [
+            'layout' => ['contentSize' => '860px', 'wideSize' => '1320px', 'allowEditing' => true],
+            'spacing' => ['blockGap' => true],
+        ],
+    ];
+
+    [$theme, $repairs] = ThemeJsonStep::applyMeasure($authored, 'full');
+    assert_eq(
+        ['contentSize' => '1040px', 'wideSize' => '1760px', 'allowEditing' => true],
+        $theme['settings']['layout'],
+    );
+    assert_eq(['blockGap' => true], $theme['settings']['spacing'], 'settings siblings survive');
+    assert_eq(1, count($repairs));
+    assert_contains('committed "full" measure', $repairs[0]);
+
+    [$fixed, $fixedRepairs] = ThemeJsonStep::applyMeasure($theme, 'full');
+    assert_eq($theme, $fixed);
+    assert_eq([], $fixedRepairs);
+});
+
+test('measure binding is a no-op when absent and repairs malformed layout containers', function () {
+    $legacy = ['settings' => ['layout' => ['contentSize' => '720px']]];
+    assert_eq([$legacy, []], ThemeJsonStep::applyMeasure($legacy, null));
+
+    foreach ([
+        ['settings' => 'broken'],
+        ['settings' => ['layout' => 'broken']],
+        ['settings' => ['layout' => ['wide']]],
+    ] as $theme) {
+        [$delivered, $repairs] = ThemeJsonStep::applyMeasure($theme, 'narrow');
+        assert_eq(
+            ['contentSize' => '640px', 'wideSize' => '1000px'],
+            $delivered['settings']['layout'],
+        );
+        assert_eq(1, count($repairs));
+    }
+});
+
+test('theme-json writes the block-first measure and records successful replacement', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_measure_write_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A screen-filling gallery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project, overrides: ['measure' => 'full']);
+
+    $llm = new FakeLlm();
+    $llm->queueJson(valid_theme_payload());
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    assert_eq(
+        ['contentSize' => '1040px', 'wideSize' => '1760px'],
+        $project->readJson('theme/theme.json')['settings']['layout'],
+    );
+    assert_contains(
+        'delivered committed "full" measure',
+        $project->readText('logs/theme-json-direction-bind.txt'),
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json keeps HTML-first design widths authoritative over measure', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_measure_html_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A screen-filling gallery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project, overrides: ['measure' => 'full']);
+    $project->writeText('design/site.css', ':root{--content-size:800px;--wide-size:1280px}');
+
+    $payload = valid_theme_payload();
+    $payload['settings']['layout'] = ['contentSize' => '860px', 'wideSize' => '1320px'];
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+    (new ThemeJsonStep(
+        $llm,
+        new PromptRenderer(repo_path('prompts')),
+        htmlFirst: true,
+    ))->run($project);
+
+    assert_eq(
+        ['contentSize' => '860px', 'wideSize' => '1280px'],
+        $project->readJson('theme/theme.json')['settings']['layout'],
+    );
+    assert_true(
+        !str_contains($project->readText('logs/theme-json-direction-bind.txt'), 'measure'),
+        'HTML-first width ownership does not report a measure replacement',
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json prompt delegates committed measure to the build', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_measure_prompt_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A framed poetry journal']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project, overrides: ['canvas' => 'framed', 'measure' => 'narrow']);
+
+    $prompt = (new ThemeJsonStep(
+        new FakeLlm(),
+        new PromptRenderer(repo_path('prompts')),
+    ))->requests($project)['theme-json']['prompt'];
+
+    assert_contains('**Measure**: narrow', $prompt);
+    assert_contains('visible frame edge below the full-bleed hero', $prompt);
+    assert_contains('Do not emit settings.layout.contentSize', $prompt);
+    assert_true(!str_contains($prompt, '800–900px'), 'the shared literal content window is gone');
+    assert_true(!str_contains($prompt, '1200–1400px'), 'the shared literal wide window is gone');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('W6 theme-json normalizes unitless layout widths', function () {
     $tmp = sys_get_temp_dir() . '/builder_tj_unitless_width_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
@@ -2802,4 +3031,204 @@ test('theme-json scaffold does not assign core/quote a font size', function () {
         $authored['styles']['blocks']['core/quote']['typography']['fontSize'],
         'an explicitly authored quote size survives',
     );
+});
+
+test('theme-json scaffold removes motion-kit custom CSS at every style depth', function () {
+    // Regression (BIGR-881): pulso2's theme.json styles.css redefined
+    // `.reveal-up` with a `clip-path: inset(0 0 100% 0)` resting state and a
+    // scroll-driven animation. The kit's `motion-skip` escape clears only
+    // `opacity` and `animation`, so the clip survived with nothing left to
+    // reveal it and the whole hero copy rendered as an empty band.
+    [$theme, $warnings] = ThemeJsonStep::repairScaffold([
+        'styles' => [
+            'css' => 'body{-webkit-font-smoothing:antialiased}'
+                . '@media (prefers-reduced-motion: no-preference){'
+                . '.reveal-up{opacity:0;clip-path:inset(0 0 100% 0);animation:nn-up 1s both}'
+                . '.text-measure{max-width:38rem}'
+                . '}',
+            'blocks' => ['core/group' => [
+                'css' => '.stagger-children>*{opacity:0}&{isolation:isolate}',
+            ]],
+            'elements' => ['h2' => [
+                'css' => '.hero-entrance &{transform:translateY(2rem)}',
+            ]],
+        ],
+    ]);
+
+    $root = $theme['styles']['css'];
+    assert_true(!str_contains($root, 'clip-path'), 'the hidden resting state is gone');
+    assert_true(!str_contains($root, 'animation:nn-up'), 'the generated animation is gone');
+    assert_true(str_contains($root, '.text-measure{max-width:38rem}'), 'a sibling rule survives');
+    assert_true(str_contains($root, 'body{-webkit-font-smoothing:antialiased}'), 'unrelated CSS survives');
+
+    assert_eq(
+        '.stagger-children>*{}&{isolation:isolate}',
+        $theme['styles']['blocks']['core/group']['css'],
+        'nested block CSS is repaired and its non-kit sibling declaration is kept',
+    );
+    assert_eq(
+        '.hero-entrance &{}',
+        $theme['styles']['elements']['h2']['css'],
+        'a kit class as an ANCESTOR is owned too, not only as the subject',
+    );
+
+    // Every removal is actionable and durable.
+    assert_eq(5, count($warnings), 'one warning per removed declaration');
+    foreach ($warnings as $warning) {
+        assert_contains('delivered removed', $warning);
+        assert_contains('motion-kit class', $warning);
+    }
+    assert_contains('styles.css: authored declaration', implode("\n", $warnings));
+    assert_contains('styles.blocks.core/group.css: authored declaration', implode("\n", $warnings));
+    assert_contains('styles.elements.h2.css: authored declaration', implode("\n", $warnings));
+
+    // A repair pass must reach a fixed point.
+    [$again, $noWarnings] = ThemeJsonStep::repairScaffold($theme);
+    assert_eq($theme, $again, 'idempotent');
+    assert_eq([], $noWarnings);
+});
+
+test('theme-json scaffold leaves custom CSS that names no motion class untouched', function () {
+    $css = '.text-measure{max-width:38rem}.overlap-up{margin-top:-3.5rem}';
+    [$theme, $warnings] = ThemeJsonStep::repairScaffold(['styles' => ['css' => $css]]);
+    assert_eq($css, $theme['styles']['css'], 'byte-for-byte');
+    assert_eq([], $warnings);
+});
+
+test('applyPaletteFloor repairs a V1 palette in theme.json list shape', function () {
+    $theme = [
+        'settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#131313', 'name' => 'Base'],
+            ['slug' => 'contrast', 'color' => '#EDE0CC', 'name' => 'Contrast'],
+            ['slug' => 'primary', 'color' => '#8E1F26', 'name' => 'Primary', 'origin' => 'v1'],
+            ['slug' => 'secondary', 'color' => '#A7C4A0', 'name' => 'Secondary'],
+            ['slug' => 'accent', 'color' => '#D98C3F', 'name' => 'Accent'],
+        ]]],
+    ];
+
+    [$out, $warnings] = ThemeJsonStep::applyPaletteFloor($theme);
+    $bySlug = array_column($out['settings']['color']['palette'], null, 'slug');
+
+    assert_true($bySlug['primary']['color'] !== '#8E1F26', 'primary changes');
+    assert_eq('#131313', $bySlug['base']['color'], 'base unchanged');
+    assert_eq('Primary', $bySlug['primary']['name'], 'name preserved');
+    assert_eq('v1', $bySlug['primary']['origin'], 'extra keys preserved');
+    assert_eq(
+        ['base', 'contrast', 'primary', 'secondary', 'accent'],
+        array_column($out['settings']['color']['palette'], 'slug'),
+        'order preserved',
+    );
+    $joined = implode(' ', $warnings);
+    assert_contains('authored=', $joined);
+    assert_contains('delivered=', $joined);
+    assert_contains('disposition=', $joined);
+    assert_contains('palette.primary', $joined);
+});
+
+test('theme-json write applies the palette floor to V1 hexes', function () {
+    with_project('builder_tj_floor_', function ($project): void {
+        $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
+        $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+        seed_test_design_direction($project);
+
+        $payload = valid_theme_payload();
+        $v1 = [
+            'base' => '#131313',
+            'contrast' => '#EDE0CC',
+            'primary' => '#8E1F26',
+            'secondary' => '#A7C4A0',
+            'accent' => '#D98C3F',
+        ];
+        foreach ($payload['settings']['color']['palette'] as &$entry) {
+            $slug = $entry['slug'] ?? '';
+            if (isset($v1[$slug])) {
+                $entry['color'] = $v1[$slug];
+            }
+        }
+        unset($entry);
+
+        $llm = new FakeLlm();
+        $llm->queueJson($payload);
+        quietly(fn () => (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project));
+
+        $bySlug = array_column(
+            $project->readJson('theme/theme.json')['settings']['color']['palette'],
+            'color',
+            'slug',
+        );
+        assert_true($bySlug['primary'] !== '#8E1F26', 'written primary left the failing V1 hex');
+        assert_eq('#131313', $bySlug['base'], 'base stays');
+        $joined = implode(' ', $project->readJson('warnings.json')['theme-json'] ?? []);
+        assert_contains('palette.primary', $joined);
+    });
+});
+
+test('applyPaletteFloor leaves a clean C1 palette unchanged', function () {
+    $theme = [
+        'settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#F7F4EE', 'name' => 'Base'],
+            ['slug' => 'contrast', 'color' => '#1B1B1B', 'name' => 'Contrast'],
+            ['slug' => 'primary', 'color' => '#7B2D26', 'name' => 'Primary'],
+            ['slug' => 'secondary', 'color' => '#3E5C4A', 'name' => 'Secondary'],
+            ['slug' => 'accent', 'color' => '#1F6F8B', 'name' => 'Accent'],
+        ]]],
+    ];
+    $before = $theme;
+
+    [$out, $warnings] = ThemeJsonStep::applyPaletteFloor($theme);
+
+    assert_eq([], $warnings);
+    assert_eq($before, $out, 'hexes unchanged');
+});
+
+test('applyPaletteFloor records unrepaired when a contrast floor cannot be met', function () {
+    $theme = [
+        'settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#808080', 'name' => 'Base'],
+            ['slug' => 'contrast', 'color' => '#AAAAAA', 'name' => 'Contrast'],
+            ['slug' => 'primary', 'color' => '#000000', 'name' => 'Primary'],
+            ['slug' => 'secondary', 'color' => '#000000', 'name' => 'Secondary'],
+            ['slug' => 'accent', 'color' => '#000000', 'name' => 'Accent'],
+        ]]],
+    ];
+
+    [$out, $warnings] = ThemeJsonStep::applyPaletteFloor($theme);
+    $bySlug = array_column($out['settings']['color']['palette'], 'color', 'slug');
+    assert_eq('#AAAAAA', $bySlug['contrast'], 'authored contrast kept');
+    $joined = implode(' ', $warnings);
+    assert_contains('path="palette.contrast"', $joined);
+    assert_contains('disposition=unrepaired', $joined);
+    assert_contains('best achieved', $joined);
+    assert_true(!str_contains($joined, 'path="palette.contrast"') || !preg_match(
+        '/path="palette\\.contrast"[^;]*;[^;]*; disposition=repaired/',
+        $joined,
+    ));
+});
+
+test('theme-json scaffold removes a --motion-* override, as the prompt promises', function () {
+    // Regression (BIGR-887): prompts/theme-json.md ends "Do not declare a
+    // --motion-* custom property either. The build removes any such
+    // declaration and records it as a delivered defect" — and nothing did.
+    // Both sibling steps (page-styles, custom-motion) already check it. The
+    // committed profile owns those values on :root; a local override retunes
+    // the element and everything under it.
+    [$theme, $warnings] = ThemeJsonStep::repairScaffold([
+        'styles' => ['css' => 'body{--motion-enter-duration:0s;--motion-distance:0px;color:inherit}'],
+    ]);
+
+    $css = $theme['styles']['css'];
+    assert_true(!str_contains($css, '--motion-enter-duration'), 'the override is gone');
+    assert_true(!str_contains($css, '--motion-distance'), 'both of them');
+    assert_contains('color:inherit', $css, 'the unrelated declaration survives');
+
+    assert_eq(2, count($warnings), 'one actionable row per removal');
+    foreach ($warnings as $warning) {
+        assert_contains('delivered removed', $warning);
+        assert_contains('owned by the committed profile', $warning);
+    }
+
+    // Idempotent.
+    [$again, $none] = ThemeJsonStep::repairScaffold($theme);
+    assert_eq($theme, $again);
+    assert_eq([], $none);
 });

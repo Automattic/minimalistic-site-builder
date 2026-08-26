@@ -12,8 +12,8 @@
             "small": "gpt-5.4-mini"
         },
         "xai": {
-            "large": "grok-4.5",
-            "small": "grok-4.5"
+            "large": "grok-4.6",
+            "small": "grok-4.6"
         },
         "openrouter": {
             "large": "moonshotai/kimi-k3",

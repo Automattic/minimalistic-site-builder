@@ -21,7 +21,7 @@ namespace Automattic\SiteBuild;
 final class MarkupSanitizer
 {
     private const URL_ATTRIBUTES = [
-        'href', 'src', 'xlink:href', 'formaction', 'action',
+        'href', 'src', 'xlink:href', 'formaction', 'action', 'poster',
     ];
 
     /**

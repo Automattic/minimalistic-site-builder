@@ -264,7 +264,11 @@ test('ProcessPool and build-demos job spawn keep argv arrays', function (): void
     assert_contains("proc_open(\$job['argv'],", $pool, 'ProcessPool must pass the argv array directly');
 
     $demos = pp_compact_php(dirname(__DIR__, 2) . '/bin/build-demos.php');
-    assert_true(substr_count($demos, "'argv'=>[") >= 2, 'build and screenshot jobs need argv arrays');
+    // Two job batches: build inline, screenshot via a named builder so its
+    // option forwarding stays unit-testable. Both must carry an argv list.
+    $argvJobs = substr_count($demos, "'argv'=>[")
+        + substr_count($demos, "'argv'=>demo_screenshot_argv(");
+    assert_true($argvJobs >= 2, 'build and screenshot jobs need argv arrays');
     assert_true(!str_contains($demos, "'cmd'=>"), 'build-demos job path still constructs shell strings');
     assert_contains('ProcessPool::run($jobs,', $demos);
     assert_contains('ProcessPool::run($shotJobs,', $demos);

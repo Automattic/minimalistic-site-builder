@@ -16,6 +16,8 @@ Different hosts legitimately want different steps. That divergence is a feature,
 | Authoring | First-party hosts, including a future Studio Web | Write new steps in the host's own tree. |
 | Injection | Third parties such as agencies using a harness | Drive a build and interleave their own work at file checkpoints. |
 
+"Studio" in these documents means the first-party pipeline **host**; the local desktop app that runs preview sites is `StudioAppRunner`.
+
 Concrete divergences include:
 
 - WordPress.com can keep a lean first-party site-creation composition.

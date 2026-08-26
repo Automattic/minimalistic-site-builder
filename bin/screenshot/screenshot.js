@@ -24,6 +24,12 @@
  * Options:
  *   --width=<px>     Viewport width (default 1366, or SHOT_WIDTH).
  *   --no-scroll      Skip the lazy-load scroll/wait (reproduces the old bug).
+ *   --motion         Capture with prefers-reduced-motion: no-preference, i.e.
+ *                    the branch real visitors get. Off by default; see the
+ *                    reducedMotion note at the capture below. Trades the
+ *                    default's freedom from reveal races for that coverage;
+ *                    the capture visits every reveal target and waits for
+ *                    finite entrances before taking the full-page image.
  *   --chrome=<path>  Chrome/Chromium executable (or set CHROME/CHROME_BIN).
  *   --timeout=<ms>   Per-image load wait budget (default 15000).
  */
@@ -39,12 +45,14 @@ function parseArgs(argv) {
   const opts = {
     width: envWidth ?? 1366,
     scroll: true,
+    motion: false,
     timeout: 15000,
     chrome: process.env.CHROME || process.env.CHROME_BIN,
   };
   const positional = [];
   for (const a of argv) {
     if (a === '--no-scroll') opts.scroll = false;
+    else if (a === '--motion') opts.motion = true;
     else if (a.startsWith('--width=')) {
       opts.width = positiveInteger(a.slice(8));
       if (opts.width === null) throw new Error(`--width must be a positive integer: ${a}`);
@@ -165,12 +173,67 @@ async function waitForImages(page, timeout) {
   }, timeout);
 }
 
+/**
+ * Exercise every scroll-reveal target and wait for finite entrance animations
+ * to settle before a full-page motion capture. A full-page screenshot does not
+ * itself scroll the viewport, and the coarse lazy-load walk can jump over a
+ * short target's IntersectionObserver trigger. Capturing immediately after
+ * that walk produced evidence with random cards and whole sections still at
+ * opacity:0.
+ *
+ * This never adds reveal classes or changes authored CSS. A genuinely broken
+ * target therefore remains hidden in the screenshot; the helper only gives
+ * the site's own driver and animations enough viewport time to do their work.
+ */
+async function settleMotion(page, timeout) {
+  await page.evaluate(async (timeout) => {
+    const selector = [
+      '.reveal',
+      '.reveal-up',
+      '.reveal-fade',
+      '.reveal-scale',
+      '.stagger-children > *',
+    ].join(',');
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const targets = Array.from(document.querySelectorAll(selector));
+    const deadline = Date.now() + timeout;
+
+    for (const target of targets) {
+      target.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'auto' });
+      await sleep(80);
+    }
+
+    const root = document.documentElement;
+    while (Date.now() < deadline
+      && root.classList.contains('motion-js')
+      && targets.some((target) => target.classList.contains('motion-target')
+        && !target.classList.contains('is-visible'))) {
+      await sleep(50);
+    }
+
+    const remaining = Math.max(0, deadline - Date.now());
+    const finiteAnimations = document.getAnimations().filter((animation) => {
+      const timing = animation.effect && animation.effect.getTiming
+        ? animation.effect.getTiming()
+        : null;
+      return !timing || timing.iterations !== Infinity;
+    });
+    await Promise.race([
+      Promise.allSettled(finiteAnimations.map((animation) => animation.finished)),
+      sleep(remaining),
+    ]);
+
+    window.scrollTo(0, 0);
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  }, timeout);
+}
+
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
   if (!opts.url || !opts.out) {
     process.stderr.write(
       'Usage: node bin/screenshot/screenshot.js <url> <outfile.png> ' +
-      '[--width=1366] [--no-scroll] [--chrome=<path>] [--timeout=15000]\n');
+      '[--width=1366] [--no-scroll] [--motion] [--chrome=<path>] [--timeout=15000]\n');
     process.exit(1);
   }
 
@@ -180,13 +243,21 @@ async function main() {
     args: ['--no-sandbox', '--disable-gpu', '--hide-scrollbars'],
   });
   try {
-    // Emulate prefers-reduced-motion: the motion kit's accessibility contract
-    // (assets/motion/motion.css) serves reduced-motion visitors a fully
-    // static, fully visible page, so the capture can never race a scroll
-    // reveal and photograph opacity:0 sections or mid-flight transforms.
+    // Emulate prefers-reduced-motion by default: the motion kit's
+    // accessibility contract (assets/motion/motion.css) serves reduced-motion
+    // visitors a fully static, fully visible page, so the capture can never
+    // race a scroll reveal and photograph opacity:0 sections or mid-flight
+    // transforms.
+    //
+    // That default is also a blind spot. Every rule the kit and the generated
+    // CSS put inside `@media (prefers-reduced-motion: no-preference)` is
+    // switched OFF for the capture, so a defect that only exists in the branch
+    // real visitors get never reaches the evidence: pulso2 shipped a hero whose
+    // copy was clipped to nothing and photographed perfectly (BIGR-881). Pass
+    // --motion to capture the branch a default visitor actually sees.
     const page = await browser.newPage({
       viewport: { width: opts.width, height: 900 },
-      reducedMotion: 'reduce',
+      reducedMotion: opts.motion ? 'no-preference' : 'reduce',
     });
     await page.goto(opts.url, { waitUntil: 'networkidle', timeout: 60000 });
 
@@ -194,9 +265,16 @@ async function main() {
       await autoScroll(page);
       await waitForImages(page, opts.timeout);
     }
+    if (opts.motion && opts.scroll) {
+      await settleMotion(page, Math.max(4000, Math.min(opts.timeout, 10000)));
+    }
 
     await page.screenshot({ path: opts.out, fullPage: true });
-    process.stderr.write(`Saved ${opts.out}${opts.scroll ? '' : ' (lazy-load scroll skipped)'}\n`);
+    const notes = [
+      opts.scroll ? null : 'lazy-load scroll skipped',
+      opts.motion ? 'motion enabled' : null,
+    ].filter(Boolean);
+    process.stderr.write(`Saved ${opts.out}${notes.length ? ` (${notes.join('; ')})` : ''}\n`);
   } finally {
     await browser.close();
   }
@@ -209,4 +287,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { parseArgs };
+module.exports = { parseArgs, settleMotion };

@@ -6,16 +6,21 @@ use Automattic\SiteBuild\BlockFixers;
 use Automattic\SiteBuild\ConcurrentGroup;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Package;
+use Automattic\SiteBuild\PlaygroundRunner;
 use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\RunnerResolver;
+use Automattic\SiteBuild\SiteVerifier;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepComposition;
 use Automattic\SiteBuild\StepGraph;
+use Automattic\SiteBuild\StudioAppRunner;
+use Automattic\SiteBuild\StudioCli;
 use Automattic\SiteBuild\TransportUnavailable;
 
 /**
  * Build a site from a prompt.
  *
- *   php bin/build.php "A cozy neighborhood bakery" [--provider=openai] [--slug=my-slug] [--step=step-id] [--from=step-id] [--until=step-id] [--html-first|--blocks-first] [--multi-page] [--pages="Home, Menu, About"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=foreground-image] [--max-hero-images=1] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--use-jetpack-placeholders] [--port=9400] [--no-serve]
+ *   php bin/build.php "A cozy neighborhood bakery" [--provider=openai] [--slug=my-slug] [--step=step-id] [--from=step-id] [--until=step-id] [--html-first|--blocks-first] [--multi-page] [--pages="Home, Menu, About"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=cover-image,foreground-image,band-image] [--max-hero-images=1] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--use-jetpack-placeholders] [--runner=studio|playground] [--port=9400] [--no-serve]
  *   php bin/build.php --transport
  *   php bin/build.php --list-steps [--html-first|--blocks-first] [--slug=my-slug]
  *
@@ -100,6 +105,38 @@ use Automattic\SiteBuild\TransportUnavailable;
 
 require_once __DIR__ . '/../src/bootstrap.php';
 
+/**
+ * Count pattern manifest entries by their rendered kind.
+ *
+ * Version 1 manifests have no kind field and contain only sections. Explicit
+ * version 2 kinds keep their current meaning; malformed and unknown entries
+ * count as neither kind.
+ *
+ * @param list<mixed> $patternEntries
+ * @return array{sections:int,components:int}
+ */
+function build_pattern_kind_counts(array $patternEntries): array
+{
+    return [
+        'sections' => count(array_filter(
+            $patternEntries,
+            static fn (mixed $pattern): bool => is_array($pattern)
+                && (!array_key_exists('kind', $pattern) || $pattern['kind'] === 'section'),
+        )),
+        'components' => count(array_filter(
+            $patternEntries,
+            static fn (mixed $pattern): bool => is_array($pattern)
+                && ($pattern['kind'] ?? null) === 'component',
+        )),
+    ];
+}
+
+// Keep the pure counter directly testable without executing the CLI.
+$scriptFilename = $_SERVER['SCRIPT_FILENAME'] ?? null;
+if (!is_string($scriptFilename) || realpath($scriptFilename) !== __FILE__) {
+    return;
+}
+
 $args = parse_cli_args($argv, [
     '--slug'                     => 'value',
     '--provider'                 => 'value',
@@ -108,6 +145,7 @@ $args = parse_cli_args($argv, [
     '--from'                     => 'value',
     '--pages'                    => 'value',
     '--port'                     => 'value',
+    '--runner'                   => 'value',
     '--writing-direction'        => 'value',
     '--hero-canvas'              => 'value',
     '--hero-media-modes'         => 'value',
@@ -375,6 +413,22 @@ $normalizeStepId = static function (?string $id): ?string {
 $from = $normalizeStepId($from);
 $until = $normalizeStepId($until);
 
+$runnerFlag = isset($flags['--runner']) ? (string) $flags['--runner'] : null;
+$runnerFallback = false;
+try {
+    $runner = RunnerResolver::resolve(
+        $runnerFlag,
+        new StudioCli(),
+        static function (string $message) use (&$runnerFallback): void {
+            $runnerFallback = true;
+            Narrator::write($message . "\n");
+        }
+    );
+} catch (RuntimeException $e) {
+    Narrator::write($e->getMessage() . "\n");
+    exit(1);
+}
+
 if ($from !== null) {
     // Resume: the project was opened untouched above (no createProject, which
     // would re-seed meta.json and could clobber multi_page/design_constraints
@@ -483,6 +537,17 @@ if ($withImages) {
     $report->setImages($generated, $failed, count($specs));
 }
 
+if ($project->exists('patterns.json')) {
+    $patternManifest = $project->readJson('patterns.json');
+    $patternEntries = $patternManifest['patterns'] ?? [];
+    $patternCounts = build_pattern_kind_counts($patternEntries);
+    $report->setPatterns(
+        $patternCounts['sections'],
+        $patternCounts['components'],
+        count($patternManifest['dropped'] ?? []),
+    );
+}
+
 $usage = $llm->usageTotals();
 $report->setLlmTotals($usage['requests'], $usage['input_tokens'], $usage['output_tokens']);
 $report->setWallSeconds(microtime(true) - $wallStart);
@@ -505,7 +570,10 @@ $project->writeText('logs/project.log', $overview);
 
 // The same run as a machine-readable record, for comparing cost and model mix
 // across builds after the fact.
-$project->writeJson('build-stats.json', $report->stats(default_llm_model(), $models));
+$stats = $report->stats(default_llm_model(), $models);
+$stats['runner'] = $runner->name();
+$stats['runner_fallback'] = $runnerFallback;
+$project->writeJson('build-stats.json', $stats);
 
 echo "Output: {$project->path()}\n";
 
@@ -513,17 +581,70 @@ echo "Output: {$project->path()}\n";
 // build stopped early (--until) or the user opted out (--no-serve).
 if ($serve && $until === null) {
     echo "\nStarting preview…\n";
-    $cmd = 'php ' . escapeshellarg(repo_path('bin/playground.php')) . ' ' . escapeshellarg($project->slug());
-    if ($port !== null) {
-        $cmd .= ' --port=' . $port;
+    // Owned wholly by this run: a resumed build that reaches Studio must not
+    // keep the previous run's "fell back to Playground" receipt.
+    $project->replaceWarnings('site-runner', []);
+    $serveRunner = $runner;
+    if ($serveRunner->name() === 'playground') {
+        $serveRunner = new PlaygroundRunner($port ?? 9400);
+    } elseif ($port !== null) {
+        echo "--port applies to Playground only; ignored for Studio.\n";
     }
-    passthru($cmd, $exit);
-    exit($exit);
+    try {
+        $site = $serveRunner->start($project);
+    } catch (RuntimeException $e) {
+        // A Studio we chose ourselves is a preference, not a requirement: the
+        // build is already paid for, so drop to Playground rather than throw
+        // it away (AGENTS.md "fix, degrade, warn"). A runner the caller named still fails hard.
+        if ($serveRunner->name() !== 'studio' || RunnerResolver::requestedName($runnerFlag) !== null) {
+            Narrator::write($e->getMessage() . "\n");
+            exit(1);
+        }
+        Narrator::write("Studio preview failed: {$e->getMessage()}\n");
+        Narrator::write("Falling back to Playground…\n");
+        $project->replaceWarnings('site-runner', ['Studio preview failed; fell back to Playground: ' . $e->getMessage()]);
+        $serveRunner = new PlaygroundRunner($port ?? 9400);
+        $stats['runner'] = $serveRunner->name();
+        $stats['runner_fallback'] = true;
+        $project->writeJson('build-stats.json', $stats);
+        try {
+            $site = $serveRunner->start($project);
+        } catch (RuntimeException $playgroundFailure) {
+            Narrator::write($playgroundFailure->getMessage() . "\n");
+            exit(1);
+        }
+    }
+    // Post-build WP checks. Not a pipeline step: wpcom/Linux CI cannot boot
+    // Studio. Findings warn and the build still exits 0 (AGENTS.md "fix, degrade, warn").
+    if ($serveRunner->name() === 'studio' && $serveRunner instanceof StudioAppRunner) {
+        $findings = SiteVerifier::check(new StudioCli(), $serveRunner->siteDir($project->slug()));
+        $project->addWarnings('site-verifier', $findings);
+    }
+    echo "  url:    {$site->url}\n";
+    echo "  admin:  {$site->adminUrl}\n";
+    if ($site->persistent) {
+        echo "  still running — stop it with: php bin/serve.php {$project->slug()} --stop\n";
+        exit(0);
+    }
+    echo "  (first run downloads WordPress; Ctrl-C to stop)\n\n";
+    register_shutdown_function($site->stop);
+    if (function_exists('pcntl_async_signals') && function_exists('pcntl_signal')) {
+        pcntl_async_signals(true);
+        $halt = static function () use ($site): never {
+            ($site->stop)();
+            exit(0);
+        };
+        pcntl_signal(SIGINT, $halt);
+        pcntl_signal(SIGTERM, $halt);
+    }
+    while (true) {
+        sleep(1);
+    }
 }
 
 /** The one invocation summary, shared by every path that rejects the line. */
 function usage(): never
 {
-    Narrator::write("Usage: php bin/build.php \"<prompt>\" [--transport] [--list-steps] [--provider=anthropic|openai|xai|openrouter] [--slug=...] [--step=step-id] [--from=step-id] [--until=step-id] [--html-first|--blocks-first] [--multi-page] [--pages=\"Home, Menu, About\"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=cover-image,foreground-image] [--max-hero-images=1..2] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--use-jetpack-placeholders] [--port=9400] [--no-serve]\n");
+    Narrator::write("Usage: php bin/build.php \"<prompt>\" [--transport] [--list-steps] [--provider=anthropic|openai|xai|openrouter] [--slug=...] [--step=step-id] [--from=step-id] [--until=step-id] [--html-first|--blocks-first] [--multi-page] [--pages=\"Home, Menu, About\"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=cover-image,foreground-image,band-image] [--max-hero-images=1..2] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--use-jetpack-placeholders] [--runner=studio|playground] [--port=9400] [--no-serve]\n");
     exit(1);
 }

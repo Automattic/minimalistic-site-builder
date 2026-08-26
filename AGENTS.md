@@ -22,17 +22,17 @@ When an agent needs to create or resume a generated site, follow [the site-build
 
 Default blocks graph (`StepComposition::default()` → `StepComposition::blocks()`), where the model authors block markup directly:
 
-`scaffold-theme -> scaffold-plugin -> refine-prompt -> site-spec -> apply-identity -> design-direction -> (theme-json + page-plan, concurrent) -> reconcile-palette -> sections -> section-rhythm -> copy-dedupe -> collect-images -> normalize-layout -> header-hero -> contrast-fix -> motion-sanity -> fix-blocks -> assemble-pages -> page-styles -> custom-motion -> bundle-fonts -> fonts-php -> finalize-theme -> theme-screenshot -> validate-theme`
+`scaffold-theme -> scaffold-plugin -> refine-prompt -> site-spec -> apply-identity -> design-direction -> (theme-json + page-plan, concurrent) -> reconcile-palette -> sections -> section-rhythm -> copy-dedupe -> collect-images -> normalize-layout -> header-hero -> contrast-fix -> motion-sanity -> fix-blocks -> assemble-pages -> page-styles -> custom-motion -> bundle-fonts -> fonts-php -> extract-patterns -> finalize-theme -> theme-screenshot -> validate-theme`
 
 Image generation is slow and networked, so it is in neither graph. The steps that depend on the real pixels are named once, in `StepComposition::postImages()`, and every entry point runs that list after the graph:
 
-`generate-images -> theme-screenshot -> cover-contrast`
+`generate-images -> theme-screenshot -> cover-contrast -> extract-patterns -> validate-theme`
 
 A host that generates images must run that phase too. Mirroring only the graph ships a theme whose cover text was checked against images that did not exist yet, and whose preview card is the palette poster `theme-screenshot` drew in-pipeline rather than the site's own hero.
 
 Pass `--html-first` (or set `SITE_BUILD_HTML_FIRST=1`) for the HTML-first graph (`StepComposition::htmlFirst()`), where the model authors an HTML+CSS design that `transform-site` converts to blocks:
 
-`scaffold-theme -> scaffold-plugin -> refine-prompt -> site-spec -> apply-identity -> design-direction -> design-preview -> theme-json -> inner-pages-design -> splice-home-design -> assign-image-sources -> transform-site -> resolve-nav-links -> section-rhythm -> section-layout -> collect-images -> normalize-layout -> header-hero -> contrast-fix -> motion-sanity -> fix-blocks -> assemble-pages -> fix-pages -> page-styles -> custom-motion -> fonts-php -> finalize-theme -> theme-screenshot -> validate-theme`
+`scaffold-theme -> scaffold-plugin -> refine-prompt -> site-spec -> apply-identity -> design-direction -> design-preview -> theme-json -> inner-pages-design -> splice-home-design -> assign-image-sources -> transform-site -> resolve-nav-links -> section-rhythm -> section-layout -> collect-images -> normalize-layout -> header-hero -> contrast-fix -> motion-sanity -> fix-blocks -> assemble-pages -> fix-pages -> page-styles -> custom-motion -> fonts-php -> extract-patterns -> finalize-theme -> theme-screenshot -> validate-theme`
 
 On that path `theme-json` reads CSS-derived design tokens. `assign-image-sources` gives every design `<img>` the theme asset path the rest of the image pipeline generates into. `contrast-fix` and `motion-sanity` stay addressable but skip only in explicit HTML-first composition mode. `normalize-layout`, `fix-blocks`, and `validate-theme` skip the width rules that assume the theme owns page width — here the carried design CSS does. `page-styles` scrubs and merges generated CSS, then runs `CssContrastCheck` and applies safe tail-only adjustments against delivered markup. Stale `design/site.css` bytes never select pipeline behavior.
 
@@ -43,6 +43,17 @@ On that path `theme-json` reads CSS-derived design tokens. `assign-image-sources
 Only the HTML-first graph is wrapped in `FallbackBuildPipeline`; the default blocks graph generates no design document, so it is an unwrapped `Pipeline`. The wrapper's whole-build reroute is currently dormant: it only recognizes a `MalformedDesignException` from the retired `homepage-design` step, which no composition contains. Do not rely on it until that trigger is retargeted or removed.
 
 For mixed multi-page HTML-first builds, each `design/<slug>.failed` marker routes only that slug through scoped blocks-path page planning and section generation. Other pages and shared transformed chrome stay on the HTML-first path; `page-styles` ignores failed-page source HTML.
+
+## Site runner
+
+`bin/serve.php` boots a built site. Studio is the default when available (macOS/Windows desktop app); Playground is the failover for Linux and CI. Generated Studio sites live under `~/Studio` (`SITE_BUILD_STUDIO_ROOT` overrides). `--stop` / `--stop-all` / `--prune` always go to `StudioAppRunner` (persistent-site ops), never through `RunnerResolver`. `--prune` removes sites this checkout created (`marker.repo === repoPath`), not hand-made `~/Studio` dirs.
+
+- `--runner=studio|playground` (or `SITE_BUILD_RUNNER`) — flag, then env, then Studio if available, else Playground + warn. An auto-picked Studio that fails to boot also falls back (the build is already paid for); the downgrade lands in `warnings.json` under `site-runner`. A runner the caller named is never downgraded, available or not.
+- `StudioCli` runs every `studio` command with `/dev/null` on stdin. With a terminal there, `studio create` prompts for six options it was not given, and the prompts are invisible once stdout is a pipe — the command just waits. `StudioAppRunner::createSite()` passes all of them anyway, but `--domain` has no skip value, so the empty stdin is what makes it non-interactive.
+- `--port` / `--workers` — Playground only; on Studio one note is printed.
+- `php bin/serve.php <slug> --stop` — stop one persistent site.
+- `php bin/serve.php --stop-all` — stop every site this checkout created.
+- `php bin/serve.php --prune` — remove those sites.
 
 ## Generated-content validation: fix, degrade, warn — never crash the build
 

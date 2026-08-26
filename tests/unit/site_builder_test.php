@@ -27,7 +27,7 @@ test('SiteBuilder pipeline exposes the default blocks step order and stop ids', 
             // attribute repair can activate previously-inert color/motion
             // attributes, which those policy passes must be able to see.
             'collect-images', 'normalize-layout', 'header-hero', 'contrast-fix', 'motion-sanity', 'fix-blocks',
-            'assemble-pages', 'page-styles', 'custom-motion', 'bundle-fonts', 'fonts-php', 'finalize-theme', 'theme-screenshot', 'validate-theme',
+            'assemble-pages', 'page-styles', 'custom-motion', 'bundle-fonts', 'fonts-php', 'extract-patterns', 'finalize-theme', 'theme-screenshot', 'validate-theme',
         ], $builder->pipeline()->stepIds());
         assert_true(in_array('site-spec', $builder->pipeline()->stopIds(), true));
         assert_true(in_array('theme-json', $builder->pipeline()->stopIds(), true));
@@ -52,7 +52,7 @@ test('SITE_BUILD_HTML_FIRST=1 gives the HTML-first order with the blocks fallbac
             'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
             'design-preview', 'theme-json', 'inner-pages-design', 'splice-home-design', 'assign-image-sources', 'transform-site', 'resolve-nav-links', 'section-rhythm', 'section-layout',
             'collect-images', 'normalize-layout', 'header-hero', 'contrast-fix', 'motion-sanity', 'fix-blocks', 'assemble-pages', 'fix-pages', 'page-styles', 'custom-motion',
-            'fonts-php', 'finalize-theme', 'theme-screenshot', 'validate-theme',
+            'fonts-php', 'extract-patterns', 'finalize-theme', 'theme-screenshot', 'validate-theme',
         ], $pipeline->stepIds());
         // Only HTML-first has a design document that can fail, so only it is
         // wrapped for the runtime reroute onto the blocks tail.
@@ -240,7 +240,7 @@ test('SiteBuilder runs through site-spec via injected FakeLlm', function () {
         'site_type' => 'cafe', 'topic' => 'coffee', 'area' => 'cafe',
         'audience' => 'locals', 'visual_vibe' => 'warm',
         'language' => 'en', 'persona_name' => '',
-        'email_domain' => 'testcafe.example', 'invented' => ['name', 'email_domain'],
+        'email_domain' => 'testcafe.example', 'invented' => ['name'],
         'sections' => ['Hero', 'About'],
     ]);
 

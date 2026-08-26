@@ -116,24 +116,7 @@ final class PlaygroundArtifact
      */
     public static function offlineGuardStep(): array
     {
-        return [
-            'step' => 'writeFile',
-            'path' => '/wordpress/wp-content/mu-plugins/0-preview-offline.php',
-            'data' => <<<'PHP'
-                <?php
-                /**
-                 * The local Playground CLI cannot complete outbound requests.
-                 * Resolve oEmbeds to a plain link and fail any other WordPress
-                 * HTTP request fast so a render never pins a worker.
-                 */
-                add_filter( 'pre_oembed_result', function ( $result, $url ) {
-                    return '<a href="' . esc_url( $url ) . '">' . esc_html( $url ) . '</a>';
-                }, 10, 2 );
-                add_filter( 'pre_http_request', function () {
-                    return new WP_Error( 'http_request_failed', 'Outbound HTTP is disabled in the local Playground preview.' );
-                } );
-                PHP,
-        ];
+        return ['step' => 'writeFile', 'path' => SitePreset::OFFLINE_GUARD_PATH, 'data' => SitePreset::offlineGuardPhp()];
     }
 
     /** @return array<mixed> */
@@ -258,7 +241,7 @@ final class PlaygroundArtifact
      */
     public static function blogDescription(array $spec): string
     {
-        return trim((string) ($spec['tagline'] ?? ''));
+        return SitePreset::blogDescription($spec);
     }
 
     /**
@@ -270,38 +253,13 @@ final class PlaygroundArtifact
      */
     public static function siteOptions(Project $project): array
     {
-        $name = self::themeDisplayName($project);
-        $blogname = $name !== '' ? $name : $project->slug();
-        $blogdescription = '';
-
-        if ($project->exists('siteSpec.json')) {
-            try {
-                $spec = $project->readJson('siteSpec.json');
-            } catch (\RuntimeException) {
-                $spec = [];
-            }
-            $blogname = (string) ($spec['name'] ?? $blogname);
-            $blogdescription = self::blogDescription($spec);
-        }
-
-        return [
-            'blogname'        => $blogname,
-            'blogdescription' => $blogdescription,
-            // Pretty permalinks so the seeded page tree's paths (/menu/,
-            // /menu/breads/) resolve; WP rebuilds rewrite rules lazily and
-            // the content plugin flushes them on activation.
-            'permalink_structure' => '/%postname%/',
-        ];
+        return SitePreset::siteOptions($project);
     }
 
     /** Theme display name from the style.css header, or '' if absent. */
     public static function themeDisplayName(Project $project): string
     {
-        $style = $project->themePath('style.css');
-        if (preg_match('/Theme Name:\s*(.+)/', (string) file_get_contents($style), $m)) {
-            return trim($m[1]);
-        }
-        return '';
+        return SitePreset::themeDisplayName($project);
     }
 
     private static function assertAssetName(string $assetName): void

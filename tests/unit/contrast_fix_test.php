@@ -197,6 +197,77 @@ test('an authored hover that reads on the background is preserved by a link repa
     assert_contains('":hover":{"color":{"text":"var:preset|color|secondary"}}', $res['markup'], 'passing authored hover kept');
 });
 
+function maxwell_demo_palette(): array
+{
+    // The palette from the generation in BIGR-866. On the dark band the accent
+    // is 3.01:1 and on the muted band 1.07:1, while base reads at 15.30:1.
+    return [
+        'base'      => '#F2EDE4',
+        'contrast'  => '#14181C',
+        'primary'   => '#2E4A63',
+        'secondary' => '#4E6274',
+        'accent'    => '#9E4E07',
+    ];
+}
+
+test('an unreadable hover is repaired even when the resting link color reads', function () {
+    // BIGR-866: the generator paired a readable resting color with an accent
+    // hover it never checked. Nothing repaired the resting color, so before
+    // this the whole pair went out untouched and the hover vanished on hover.
+    $fix = new ContrastFix(maxwell_demo_palette(), [], 'var(--wp--preset--color--primary)');
+    $src = '<!-- wp:group {"backgroundColor":"contrast","style":{"elements":{"link":{"color":{"text":"var:preset|color|base"},":hover":{"color":{"text":"var:preset|color|accent"}}}}}} -->' . "\n"
+        . '<div class="wp-block-group has-contrast-background-color has-background has-link-color">'
+        . '<!-- wp:paragraph {"textColor":"base"} --><p><a href="mailto:x@y.z">write to us</a></p><!-- /wp:paragraph --></div>' . "\n"
+        . '<!-- /wp:group -->';
+    $res = $fix->process($src);
+    assert_eq(true, $res['changed']);
+    assert_contains('"link":{"color":{"text":"var:preset|color|base"}', $res['markup'], 'the reading resting color is kept');
+    assert_contains('":hover":{"color":{"text":"var:preset|color|base"}}', $res['markup'], 'accent hover falls back to the resting color');
+    assert_eq('link', $res['findings'][0]['kind']);
+    assert_contains('link hover accent', $res['findings'][0]['detail']);
+});
+
+test('a reading hover is left alone when the resting link color reads too', function () {
+    $fix = new ContrastFix(maxwell_demo_palette(), [], 'var(--wp--preset--color--primary)');
+    $src = '<!-- wp:group {"backgroundColor":"contrast","style":{"elements":{"link":{"color":{"text":"var:preset|color|base"},":hover":{"color":{"text":"var:preset|color|base"}}}}}} -->' . "\n"
+        . '<div class="wp-block-group has-contrast-background-color has-background has-link-color">'
+        . '<!-- wp:paragraph {"textColor":"base"} --><p><a href="mailto:x@y.z">write to us</a></p><!-- /wp:paragraph --></div>' . "\n"
+        . '<!-- /wp:group -->';
+    $res = $fix->process($src);
+    assert_eq(false, $res['changed']);
+    assert_eq([], $res['findings']);
+});
+
+test('a hover repair for a dark band leaves the ancestor that authored it alone', function () {
+    // The outer group declares the hover for the whole page; only the nested
+    // dark band fails on it. Repairing at the outer group would fix the band
+    // by making the hover invisible everywhere above it (accent reads at 5.08
+    // on base but only 3.01 on contrast), so the band is pinned instead.
+    $fix = new ContrastFix(maxwell_demo_palette(), [], 'var(--wp--preset--color--primary)');
+    $src = '<!-- wp:group {"style":{"elements":{"link":{"color":{"text":"var:preset|color|contrast"},":hover":{"color":{"text":"var:preset|color|accent"}}}}}} -->' . "\n"
+        . '<div class="wp-block-group has-link-color">'
+        . '<!-- wp:paragraph --><p><a href="#">on the light page</a></p><!-- /wp:paragraph -->' . "\n"
+        . '<!-- wp:group {"backgroundColor":"contrast","style":{"elements":{"link":{"color":{"text":"var:preset|color|base"}}}}} -->' . "\n"
+        . '<div class="wp-block-group has-contrast-background-color has-background has-link-color">'
+        . '<!-- wp:paragraph {"textColor":"base"} --><p><a href="#">on the dark band</a></p><!-- /wp:paragraph --></div>' . "\n"
+        . '<!-- /wp:group --></div>' . "\n"
+        . '<!-- /wp:group -->';
+    $res = $fix->process($src);
+    assert_eq(true, $res['changed']);
+    assert_contains(
+        '"link":{"color":{"text":"var:preset|color|contrast"},":hover":{"color":{"text":"var:preset|color|accent"}}}',
+        $res['markup'],
+        "the outer group's readable hover survives"
+    );
+    assert_contains(
+        '"link":{"color":{"text":"var:preset|color|base"},":hover":{"color":{"text":"var:preset|color|base"}}}',
+        $res['markup'],
+        'the dark band carries its own hover'
+    );
+    assert_eq(1, count($res['findings']));
+    assert_contains('link hover accent on contrast', $res['findings'][0]['detail']);
+});
+
 test('a quote cite is checked even when paragraphs carry the quote body', function () {
     // The paragraph is explicitly readable; the <cite> inherits the default
     // (dark) text and dies on the dark band. Old behavior recorded no row at
@@ -342,6 +413,22 @@ test('a dimRatio repair raised from the 50 default adds the numbered saved-HTML 
     ContrastFix::swapDimClass($doc, 0, 50, 60);
     $out = $doc->render();
     assert_contains('has-background-dim-60 has-background-dim', $out);
+});
+
+test('a dimRatio repair raised from a redundant has-background-dim-50 leaves one numbered class', function () {
+    // Generated markup often spells out the numbered class Core's save()
+    // omits at its 50 default. The swap must clear it instead of stacking a
+    // second opacity class on the same span.
+    $src = '<!-- wp:cover {"dimRatio":50} -->'
+        . '<div class="wp-block-cover"><span aria-hidden="true" '
+        . 'class="wp-block-cover__background has-background-dim-50 has-background-dim"></span>'
+        . '<div class="wp-block-cover__inner-container"></div></div><!-- /wp:cover -->';
+    $doc = BlockMarkup::parse($src);
+    ContrastFix::swapDimClass($doc, 0, 50, 70);
+    $out = $doc->render();
+    assert_contains('has-background-dim-70 has-background-dim', $out);
+    assert_true(!str_contains($out, 'has-background-dim-50'), 'redundant 50 class must be gone');
+    assert_eq(1, substr_count($out, 'has-background-dim-'));
 });
 
 test('a dimRatio repair moved to the 50 default removes only the numbered class', function () {

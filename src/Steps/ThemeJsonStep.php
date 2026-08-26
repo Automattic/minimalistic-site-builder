@@ -7,14 +7,17 @@ use Automattic\BlocksEngine\PhpTransformer\HtmlToBlocks\Style\CssValueSplitter;
 use Automattic\SiteBuild\BlockSerializer\Html\HtmlFragment;
 use Automattic\SiteBuild\BlockSerializer\Html\HtmlNode;
 use Automattic\SiteBuild\BlockSerializer\Html\Selector;
+use Automattic\SiteBuild\BoundedChoice;
 use Automattic\SiteBuild\CssTokenExtractor;
 use Automattic\SiteBuild\FontCatalog;
 use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\GeneratedJsonFallbackStep;
 use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\CssChecks;
+use Automattic\SiteBuild\PaletteFloor;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
+use Automattic\SiteBuild\Measure;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
@@ -145,23 +148,40 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         ['slug' => 'display', 'name' => 'Display', 'size' => 'clamp(3rem, 7vw, 6rem)'],
     ];
     /**
-     * One bounded spacing vocabulary for every generated site.
+     * Stable component spacing shared by every page density.
      *
      * xs is the tight intra-component text rhythm (an eyebrow/heading/line
      * stack inside one card or list row — BIGR-777). sm/md are component-level
-     * gaps. lg/xl/xxl are the compact, standard, and spacious section-padding
-     * choices. Their fluid ranges prevent the largest token from becoming
-     * fixed 128px padding on mobile or growing beyond 112px on wide screens.
-     *
      * @var list<array{slug: string, name: string, size: string}>
      */
-    private const SPACING_PROFILE = [
+    private const COMPONENT_SPACING_PROFILE = [
         ['slug' => 'xs', 'name' => 'Extra Small', 'size' => 'clamp(0.25rem, 0.5vw, 0.5rem)'],
         ['slug' => 'sm', 'name' => 'Small', 'size' => 'clamp(0.75rem, 1vw, 1rem)'],
         ['slug' => 'md', 'name' => 'Medium', 'size' => 'clamp(1.5rem, 2vw, 2rem)'],
-        ['slug' => 'lg', 'name' => 'Compact', 'size' => 'clamp(3rem, 4vw, 4rem)'],
-        ['slug' => 'xl', 'name' => 'Standard', 'size' => 'clamp(4rem, 6vw, 6rem)'],
-        ['slug' => 'xxl', 'name' => 'Spacious', 'size' => 'clamp(5rem, 7vw, 7rem)'],
+    ];
+
+    /**
+     * Density-owned section padding. lg/xl/xxl remain the compact, standard,
+     * and spacious semantic choices; only their physical breathing room moves.
+     *
+     * @var array<string,list<array{slug: string, name: string, size: string}>>
+     */
+    private const SECTION_SPACING_PROFILES = [
+        'airy' => [
+            ['slug' => 'lg', 'name' => 'Compact', 'size' => 'clamp(4rem, 6vw, 6rem)'],
+            ['slug' => 'xl', 'name' => 'Standard', 'size' => 'clamp(5rem, 8vw, 9rem)'],
+            ['slug' => 'xxl', 'name' => 'Spacious', 'size' => 'clamp(6rem, 10vw, 12rem)'],
+        ],
+        'measured' => [
+            ['slug' => 'lg', 'name' => 'Compact', 'size' => 'clamp(3rem, 4vw, 4rem)'],
+            ['slug' => 'xl', 'name' => 'Standard', 'size' => 'clamp(4rem, 6vw, 6rem)'],
+            ['slug' => 'xxl', 'name' => 'Spacious', 'size' => 'clamp(5rem, 7vw, 7rem)'],
+        ],
+        'dense' => [
+            ['slug' => 'lg', 'name' => 'Compact', 'size' => 'clamp(2.25rem, 3vw, 3rem)'],
+            ['slug' => 'xl', 'name' => 'Standard', 'size' => 'clamp(3rem, 4.5vw, 4.5rem)'],
+            ['slug' => 'xxl', 'name' => 'Spacious', 'size' => 'clamp(3.75rem, 5.5vw, 5.5rem)'],
+        ],
     ];
     /**
      * Build-supplied wiring the model no longer writes. It maps presets to
@@ -441,7 +461,14 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         $theme['$schema'] = 'https://schemas.wp.org/trunk/theme.json';
         $theme['version'] = 3;
         $theme = self::disableCoreDefaultPresets($theme);
-        $theme = self::normalizeSpacingSettings($theme);
+        $theme = self::normalizeSpacingSettings(
+            $theme,
+            DesignDirectionStep::densityFor($project),
+        );
+        [$theme, $measureRepairs] = self::applyMeasure(
+            $theme,
+            $this->htmlFirst ? null : DesignDirectionStep::measureFor($project),
+        );
         [$theme, $layoutWarnings] = self::normalizeLayoutWidths(
             $theme,
             $this->htmlFirst && $project->exists('design/site.css')
@@ -525,7 +552,11 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $shapeWarnings,
         );
 
-        $bindRepairs = array_merge($colorRepairs, $fontRepairs);
+        // Floors run on the palette about to be written, after every other repair.
+        [$theme, $floorWarnings] = self::applyPaletteFloor($theme);
+        $warnings = array_merge($warnings, $floorWarnings);
+
+        $bindRepairs = array_merge($colorRepairs, $fontRepairs, $measureRepairs);
         $bindReport = ['Successful design-direction writebacks: ' . count($bindRepairs)];
         foreach ($bindRepairs as $repair) {
             $bindReport[] = '- ' . $repair;
@@ -619,7 +650,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      * @param array<mixed> $theme
      * @return array<mixed>
      */
-    public static function normalizeSpacingSettings(array $theme): array
+    public static function normalizeSpacingSettings(array $theme, ?string $density = null): array
     {
         if (!isset($theme['settings']) || !is_array($theme['settings'])) {
             $theme['settings'] = [];
@@ -630,7 +661,11 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
 
         $theme['settings']['spacing']['blockGap'] = true;
         $theme['settings']['spacing']['defaultSpacingSizes'] = false;
-        $theme['settings']['spacing']['spacingSizes'] = self::SPACING_PROFILE;
+        $density = BoundedChoice::explicit($density, DesignDirectionStep::DENSITIES) ?? 'measured';
+        $theme['settings']['spacing']['spacingSizes'] = array_merge(
+            self::COMPONENT_SPACING_PROFILE,
+            self::SECTION_SPACING_PROFILES[$density],
+        );
 
         return $theme;
     }
@@ -730,6 +765,48 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         }
 
         return [$theme, $warnings];
+    }
+
+    /**
+     * Replace model-authored widths with the committed block-first pair.
+     * A null commitment is a no-op for pre-field and HTML-first builds.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>}
+     */
+    public static function applyMeasure(array $theme, ?string $measure): array
+    {
+        $widths = Measure::widths($measure);
+        if ($widths === null) {
+            return [$theme, []];
+        }
+
+        $settings = is_array($theme['settings'] ?? null) ? $theme['settings'] : [];
+        // Keep the raw container for the warning: a malformed layout is dropped
+        // here before normalizeLayoutWidths can name it, so this row is the only
+        // place that authored value is still recorded.
+        $rawLayout = $settings['layout'] ?? null;
+        $authored = is_array($rawLayout)
+            && ($rawLayout === [] || !array_is_list($rawLayout))
+                ? $rawLayout
+                : null;
+        $layout = $authored ?? [];
+        $alreadyBound = array_key_exists('contentSize', $layout)
+            && array_key_exists('wideSize', $layout)
+            && $layout['contentSize'] === $widths['contentSize']
+            && $layout['wideSize'] === $widths['wideSize'];
+        $settings['layout'] = array_replace($layout, $widths);
+        $theme['settings'] = $settings;
+
+        if ($alreadyBound) {
+            return [$theme, []];
+        }
+        return [$theme, [
+            'theme/theme.json: settings.layout authored ' . Warnings::value($authored ?? $rawLayout)
+                . ' delivered committed "' . $measure . '" measure '
+                . Warnings::value($widths)
+                . '; disposition replaced model-authored widths with deterministic direction token',
+        ]];
     }
 
     /** @return array{contentSize?:string,wideSize?:string} */
@@ -1414,6 +1491,49 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     }
 
     /**
+     * Last pass on the delivered palette: WCAG / hue / chroma floors.
+     * Walks settings.color.palette the same way repairColors does. Pure.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>} theme, warnings
+     */
+    public static function applyPaletteFloor(array $theme): array
+    {
+        $palette = $theme['settings']['color']['palette'] ?? null;
+        if (!is_array($palette)) {
+            return [$theme, []];
+        }
+        $map = [];
+        foreach ($palette as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            $slug = is_string($entry['slug'] ?? null) ? trim($entry['slug']) : '';
+            if ($slug === '') {
+                continue;
+            }
+            $color = $entry['color'] ?? null;
+            if (!is_string($color) || ContrastMath::hexToRgb($color) === null) {
+                continue;
+            }
+            $map[$slug] = trim($color);
+        }
+        $warnings = [];
+        $fixed = PaletteFloor::repair($map, $warnings);
+        foreach ($theme['settings']['color']['palette'] as $i => $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            $slug = is_string($entry['slug'] ?? null) ? trim($entry['slug']) : '';
+            if ($slug === '' || !array_key_exists($slug, $fixed)) {
+                continue;
+            }
+            $theme['settings']['color']['palette'][$i]['color'] = $fixed[$slug];
+        }
+        return [$theme, $warnings];
+    }
+
+    /**
      * Ensure every required palette slug exists, filling gaps from the design
      * direction's committed hexes and then the neutral fallbacks. Malformed
      * entries are removed at the smallest unit and recorded before a required
@@ -1950,7 +2070,119 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         [$theme, $shadowWarnings] = self::repairTextTargetShadows($theme);
         $shapeWarnings = [];
         $theme = self::mergeScaffoldDefaultsAtPath(self::SCAFFOLD, $theme, '', $shapeWarnings);
-        return [$theme, array_merge($colorWarnings, $shadowWarnings, $shapeWarnings)];
+        $theme = self::removeUnsupportedTextWrapProperties($theme);
+        [$theme, $motionWarnings] = self::removeMotionKitCustomCss($theme);
+        return [
+            $theme,
+            array_merge($colorWarnings, $shadowWarnings, $shapeWarnings, $motionWarnings),
+        ];
+    }
+
+    /**
+     * Remove custom-CSS declarations that redefine a motion-kit class.
+     *
+     * The motion kit is a closed system: `assets/motion/motion.css` owns every
+     * hidden and revealed state for `.reveal*`, `.stagger-children`,
+     * `.hero-entrance`, the ambient classes and the hover classes, and
+     * `assets/motion/motion.js` drives them. Both ship verbatim and are never
+     * LLM-generated. `prompts/page-styles.md` already forbids writing CSS for
+     * those classes, and PageStylesStep enforces it through its scoped-selector
+     * policy; theme.json custom CSS had neither the instruction nor the check.
+     *
+     * pulso2 shipped `.reveal-up { opacity: 0; transform: …; clip-path: inset(0
+     * 0 100% 0); animation: nn-reveal-up … view() }` in `styles.css`. The kit's
+     * `motion-skip` escape — applied to every target already above the fold —
+     * clears `opacity` and `animation` but deliberately leaves `transform`
+     * alone for authored hover effects, so the generated `clip-path` survived
+     * with nothing left to animate it away and the whole hero copy was clipped
+     * to nothing (BIGR-881).
+     *
+     * Every `css` string under `styles` is walked, at any depth, so a rule
+     * nested in a block or element style is repaired too.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>} theme, warnings
+     */
+    private static function removeMotionKitCustomCss(array $theme): array
+    {
+        if (!is_array($theme['styles'] ?? null)) {
+            return [$theme, []];
+        }
+
+        $warnings = [];
+        $remove = static function (array $node, string $path) use (&$remove, &$warnings): array {
+            foreach ($node as $key => $value) {
+                if ($key === 'css' && is_string($value)) {
+                    [$repaired, $dropped] = CssChecks::dropMotionKitDeclarations($value);
+                    foreach ($dropped as $declaration) {
+                        $warnings[] = "theme/theme.json {$path}.css: authored declaration "
+                            . Warnings::value($declaration)
+                            . '; delivered removed; disposition removed custom CSS for a motion-kit class'
+                            . ' — assets/motion/ owns those states and the JS driver reveals them';
+                    }
+                    // The committed profile owns every `--motion-*` value on
+                    // :root; a local override retunes the element and
+                    // everything under it. Both sibling steps already check
+                    // this and prompts/theme-json.md already promises the
+                    // build removes it — this is the missing half (BIGR-887).
+                    [$repaired, $overrides] = CssChecks::dropDeclarations(
+                        $repaired,
+                        static fn (array $declaration): bool =>
+                            str_starts_with(strtolower($declaration['property']), '--motion-'),
+                    );
+                    foreach ($overrides as $declaration) {
+                        $warnings[] = "theme/theme.json {$path}.css: authored declaration "
+                            . Warnings::value(trim($declaration['raw']))
+                            . '; delivered removed; disposition motion custom properties are owned by'
+                            . ' the committed profile and cannot be overridden';
+                    }
+                    if ($dropped !== [] || $overrides !== []) {
+                        $node[$key] = $repaired;
+                    }
+                    continue;
+                }
+                if (is_array($value)) {
+                    $node[$key] = $remove($value, $path . '.' . $key);
+                }
+            }
+            return $node;
+        };
+        $theme['styles'] = $remove($theme['styles'], 'styles');
+        return [$theme, $warnings];
+    }
+
+    /**
+     * theme.json v3 has no textWrap, textWrapStyle, or textWrapMode typography
+     * leaves. Remove generated copies at any style depth, including custom CSS
+     * strings; PageStylesStep owns the supported CSS policy for both generation
+     * graphs (BIGR-869).
+     *
+     * @param array<mixed> $theme
+     * @return array<mixed>
+     */
+    private static function removeUnsupportedTextWrapProperties(array $theme): array
+    {
+        if (!is_array($theme['styles'] ?? null)) {
+            return $theme;
+        }
+        $remove = static function (array $node) use (&$remove): array {
+            foreach ($node as $key => $value) {
+                if ($key === 'css' && is_string($value)) {
+                    [$node[$key]] = CssChecks::dropTextWrapDeclarations($value);
+                    continue;
+                }
+                if (in_array($key, ['textWrap', 'textWrapStyle', 'textWrapMode'], true)) {
+                    unset($node[$key]);
+                    continue;
+                }
+                if (is_array($value)) {
+                    $node[$key] = $remove($value);
+                }
+            }
+            return $node;
+        };
+        $theme['styles'] = $remove($theme['styles']);
+        return $theme;
     }
 
     /**

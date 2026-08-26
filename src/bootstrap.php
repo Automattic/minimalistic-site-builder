@@ -494,42 +494,16 @@ function playground_blueprint_path(string $slug, int $pid): string
     return sys_get_temp_dir() . "/playground-blueprint-{$slug}.{$pid}.json";
 }
 
-/**
- * The site URL from Playground's readiness line, or null until it appears.
- *
- * Playground prints this exact line once it is actually serving, and it carries
- * the real port (playground.php auto-bumps a busy one). Spawners rely on it
- * because the site's `/` answers 302, not 200 — polling for a 200 would never
- * succeed. Colour escapes are stripped first: the CLI wraps "Ready!" and the
- * URL in them when stdout is a TTY (and some envs force colour even when it
- * isn't, e.g. FORCE_COLOR), and they sit between the two, breaking the \s+
- * match. $log may be the whole log or a single streamed line.
- */
+// Wrapper: spawners still call this name; body lives on PlaygroundRunner.
 function playground_ready_url(string $log): ?string
 {
-    $plain = preg_replace('~\x1b\[[0-9;]*m~', '', $log) ?? $log;
-    if (!preg_match('~Ready!\s+WordPress is running on (http://127\.0\.0\.1:\d+)~', $plain, $m)) {
-        return null;
-    }
-    return $m[1] . '/';
+    return \Automattic\SiteBuild\PlaygroundRunner::readyUrl($log);
 }
 
-/**
- * Stop one Playground boot: the php wrapper, its Playground/node subtree, and
- * the reparented node server (once the launcher exits it reparents to init and
- * escapes the tree walk — but it keeps the blueprint path in its argv).
- */
+// Wrapper: spawners still call this name; body lives on PlaygroundRunner.
 function teardown_playground($proc, int $pid, string $blueprintPath): void
 {
-    if ($pid > 0) {
-        kill_tree($pid);
-    }
-    @exec('pkill -f ' . escapeshellarg(preg_quote($blueprintPath, '~')) . ' 2>/dev/null');
-    @unlink($blueprintPath);
-    if (is_resource($proc)) {
-        proc_terminate($proc);
-        proc_close($proc);
-    }
+    \Automattic\SiteBuild\PlaygroundRunner::teardown($proc, $pid, $blueprintPath);
 }
 
 /** Recursively SIGTERM a process and all its descendants (leaves first). */

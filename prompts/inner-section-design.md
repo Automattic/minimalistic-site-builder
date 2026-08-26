@@ -33,7 +33,7 @@ Use the full outline to understand this section's position, neighboring sections
 
 {{section_slug}}
 
-Write specific visitor-facing copy grounded in the site spec, page spec, and section spec. Keep copy consistent across the full page outline. Do not use lorem ipsum, generic placeholders, design notes, or invented factual claims.
+Write specific visitor-facing copy grounded in the site spec, page spec, and section spec. Keep copy consistent across the full page outline. Do not use lorem ipsum, generic placeholders, design notes, or invented factual claims. Never invent an email, street address, phone number, or URL.
 
 LANGUAGE: write ALL visitor-facing copy — headings, body text, captions, list items, labels, button text, image alt text — in {{language}}. Do NOT mix languages; the only exceptions are proper nouns and the spec's verbatim identity values.
 
@@ -60,6 +60,7 @@ Use `<button>` only for a real non-scripted action. Prefer an `<a>` link styled 
 - LINKS: when a button or link leads to another page of THIS site, use that page's path from SITE PAGES verbatim (e.g. `href="/menu/"`) — never a path that isn't in the list. A deep link to another page includes that owning page's path (e.g. `href="/page/#anchor"`). A bare `href="#anchor"` is valid only when that exact section ID exists in this page's full outline. Do not link the page to itself. An external link uses an exact URL supplied by the SITE SPEC; when none was supplied, omit the link or render its label as plain text. NEVER emit `href="#"`.
 
 Every image needs meaningful `alt` text written as a usable image-generation prompt: name subject, setting, composition, lighting, palette or grade, and framing. Keep readable words and brand names out of generated images; render them as HTML text.
+- Never put a `<figcaption>` on an image. Captions belong only to a genuine gallery of photographs, and even there they are optional — the surrounding copy carries the detail.
 
 ## Responsive contract
 

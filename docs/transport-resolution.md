@@ -2,7 +2,7 @@
 
 ## Declared, not detected
 
-Every step receives an `Llm`; no step chooses a provider, reads credentials, or looks for a coding-agent process. The entry point chooses one transport and injects that same object into `SiteBuilder`, which passes it throughout the selected composition. Models may vary by step, but the billing transport does not.
+A build can be triggered many ways — the CLI, Studio, or a request *from inside a coding agent* (Claude Code, Codex, OpenCode, pi.dev). "Studio" in these documents means the first-party pipeline **host**; the local desktop app that runs preview sites is `StudioAppRunner`. Something has to decide **which `Llm` to inject** into the pipeline, and therefore into every step. A step never chooses its transport; it calls the injected `$this->llm`. So correctness reduces to one thing: **the entry point resolves the right transport once and injects it everywhere.** `SiteBuilder` takes that single `Llm` in its constructor and hands it to every step and the `ConcurrentGroup`, so there is no per-step drift — the whole build shares one transport (only the *model* varies per step, via `StepDefaults` / model overrides).
 
 Environment fingerprints and process ancestry are fallback inputs to the CLI's declaration. They do not move transport selection into the library or into individual steps. An entry point that knows the intended transport should declare it with `SITE_BUILD_LLM` instead of relying on those fallbacks.
 

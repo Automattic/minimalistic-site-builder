@@ -12,9 +12,6 @@ namespace Automattic\SiteBuild;
  */
 final class ThemeValidator
 {
-    private const HTML_HREF_PATTERN =
-        '/\bhref\s*=\s*(?:(["\'])(.*?)\1|([^\s"\'=<>`]+))/is';
-
     private const HTML_SRC_PATTERN =
         '/\bsrc\s*=\s*(?:(["\'])(.*?)\1|([^\s"\'=<>`]+))/is';
 
@@ -61,8 +58,13 @@ final class ThemeValidator
         foreach (glob($project->pluginPath('pages') . '/*.html') ?: [] as $abs) {
             $checked[] = 'plugin/pages/' . basename($abs);
         }
+        foreach (glob($project->themePath('patterns') . '/*.php') ?: [] as $abs) {
+            $checked[] = 'theme/patterns/' . basename($abs);
+        }
 
-        foreach ($checked as $rel) {
+        $blockChecked = $checked;
+
+        foreach ($blockChecked as $rel) {
             if (!$project->exists($rel)) {
                 if (in_array($rel, $required, true)) {
                     $problems[] = "missing {$rel}";
@@ -429,7 +431,7 @@ final class ThemeValidator
         $root = rtrim($project->root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
         $known = self::recordedImageSources($project);
 
-        foreach ($project->markupFiles() as $file) {
+        foreach (self::interactionMarkupFiles($project) as $file) {
             $markup = (string) file_get_contents($file);
             $contexts = [];
             if (preg_match('/"(?:url|src)"\s*:\s*"\s*AI_IMAGE:/i', $markup)) {
@@ -606,6 +608,11 @@ final class ThemeValidator
                 $scan["plugin/pages/{$slug}.html"] = (string) $slug;
             }
         }
+        foreach (glob($project->themePath('patterns') . '/*.php') ?: [] as $abs) {
+            $rel = 'theme/patterns/' . basename($abs);
+            $scan[$rel] = $rel;
+            $anchors[$rel] = self::anchorsIn($project->readText($rel));
+        }
 
         $problems = [];
         foreach ($scan as $rel => $pageSlug) {
@@ -619,14 +626,16 @@ final class ThemeValidator
                 }
             }
 
-            // Destinations live both in the rendered href and in block-JSON
-            // "url" attributes (wp:navigation-link has no rendered HTML).
-            $links = self::hrefsIn($markup);
-            foreach (preg_match_all('/"url"\s*:\s*"([^"]*)"/', $markup, $m) ? $m[1] : [] as $url) {
-                $links[] = str_replace('\/', '/', $url);
-            }
+            // Destinations live in the rendered href and in block-JSON "url",
+            // "href", "textLinkHref", "src", and "poster" attributes.
+            $links = LinkTargets::allTargets($markup);
 
             foreach ($links as $href) {
+                $href = LinkTargets::normalizeTarget($href);
+                if (LinkTargets::isDangerousScheme($href)) {
+                    $problems[] = "{$rel}: link href carries a dangerous scheme";
+                    continue;
+                }
                 if ($href === '#') {
                     continue; // reported independently even when pages.json is unavailable
                 }
@@ -728,7 +737,7 @@ final class ThemeValidator
         $problems = [];
         $root = rtrim($project->root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
 
-        foreach ($project->markupFiles() as $file) {
+        foreach (self::interactionMarkupFiles($project) as $file) {
             $markup = (string) file_get_contents($file);
             $hrefs = self::hrefsIn($markup);
 
@@ -773,7 +782,22 @@ final class ThemeValidator
     /** @return list<string> */
     private static function hrefsIn(string $markup): array
     {
-        return self::htmlAttributeValues(self::HTML_HREF_PATTERN, $markup);
+        return LinkTargets::hrefsIn($markup);
+    }
+
+    /**
+     * Page, chrome, and generated pattern files. Link/image/placeholder scans
+     * share this set so a defect that only exists in theme/patterns/*.php is
+     * not invisible to the advisory validator.
+     *
+     * @return list<string> absolute paths
+     */
+    private static function interactionMarkupFiles(Project $project): array
+    {
+        return array_merge(
+            $project->markupFiles(),
+            glob($project->themePath('patterns') . '/*.php') ?: [],
+        );
     }
 
     /**
@@ -788,7 +812,7 @@ final class ThemeValidator
         $problems = [];
         $root = rtrim($project->root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
 
-        foreach ($project->markupFiles() as $file) {
+        foreach (self::interactionMarkupFiles($project) as $file) {
             $markup = (string) file_get_contents($file);
             $rel = str_starts_with($file, $root) ? substr($file, strlen($root)) : $file;
             $rel = str_replace(DIRECTORY_SEPARATOR, '/', $rel);
@@ -896,14 +920,7 @@ final class ThemeValidator
      */
     private static function anchorsIn(string $markup): array
     {
-        $set = [];
-        foreach (preg_match_all('/\bid="([^"]+)"/', $markup, $m) ? $m[1] : [] as $id) {
-            $set[$id] = true;
-        }
-        foreach (preg_match_all('/"anchor"\s*:\s*"([^"]+)"/', $markup, $m) ? $m[1] : [] as $id) {
-            $set[$id] = true;
-        }
-        return $set;
+        return LinkTargets::anchorsIn($markup);
     }
 
     /**
@@ -914,10 +931,7 @@ final class ThemeValidator
      */
     private static function isThemeAssetPath(string $path): bool
     {
-        if (str_contains($path, '/wp-content/themes/') && str_contains($path, '/assets/')) {
-            return true;
-        }
-        return (bool) preg_match('/\.(?:jpe?g|png|gif|webp|svg|css|js|woff2?|ttf|eot|ico)(?:$|\?)/i', $path);
+        return LinkTargets::isThemeAssetPath($path);
     }
 
     /** Page paths compared in one canonical form: leading + trailing slash. */
@@ -940,6 +954,28 @@ final class ThemeValidator
     public static function layoutWarnings(Project $project, bool $htmlFirst = false): array
     {
         $warnings = [];
+        $measure = Steps\DesignDirectionStep::measureFor($project);
+        $expectedWidths = $htmlFirst ? null : Measure::widths($measure);
+        if ($expectedWidths !== null && $project->exists('theme/theme.json')) {
+            $theme = $project->readJson('theme/theme.json');
+            $layout = $theme['settings']['layout'] ?? null;
+            // Read the pair by name: a strict === on arrays is key-order
+            // sensitive, and the model owns the order the widths were written in.
+            $delivered = null;
+            if (is_array($layout)) {
+                $delivered = [];
+                foreach (array_keys($expectedWidths) as $key) {
+                    if (array_key_exists($key, $layout)) {
+                        $delivered[$key] = $layout[$key];
+                    }
+                }
+            }
+            if ($delivered !== $expectedWidths) {
+                $warnings[] = 'theme.json settings.layout drifted from committed "' . $measure
+                    . '" measure: expected ' . Warnings::value($expectedWidths)
+                    . ', delivered ' . Warnings::value($delivered);
+            }
+        }
         $contentSize = Steps\FixBlocksStep::themeContentSize($project);
         $spacingSlugs = Steps\FixBlocksStep::themeSpacingSlugs($project);
         // The build's normalization consults the design's own stylesheet to
@@ -982,7 +1018,10 @@ final class ThemeValidator
         if ($project->exists('theme/theme.json')) {
             $theme = json_decode($project->readText('theme/theme.json'), true);
             if (is_array($theme)) {
-                $normalized = Steps\ThemeJsonStep::normalizeSpacingSettings($theme);
+                $normalized = Steps\ThemeJsonStep::normalizeSpacingSettings(
+                    $theme,
+                    Steps\DesignDirectionStep::densityFor($project),
+                );
                 if (($theme['settings']['spacing'] ?? null) !== ($normalized['settings']['spacing'] ?? null)) {
                     $warnings[] = 'theme.json settings.spacing drifted from the bounded canonical profile';
                 }
@@ -1012,7 +1051,12 @@ final class ThemeValidator
             foreach (Steps\SectionRhythmStep::pages($project) as $page) {
                 $slug = trim((string) ($page['slug'] ?? ''));
                 $entries = Steps\SectionRhythmStep::assembledEntries($project, $page);
-                $result = SectionRhythm::rewrite($entries, $footerSurface);
+                $result = SectionRhythm::rewrite(
+                    $entries,
+                    $footerSurface,
+                    Steps\DesignDirectionStep::deviceFor($project),
+                    Steps\SectionRhythmStep::footerMarkup($project),
+                );
                 foreach ($result['notes'] as $note) {
                     $warnings[] = "section root spacing drift (page '{$slug}'): " . $note;
                 }

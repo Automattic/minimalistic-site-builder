@@ -480,6 +480,9 @@ putenv('GOOGLE_VERTEX_API_TOKEN');
 \$loaded = \$vars->getValue();
 unset(\$loaded['GOOGLE_VERTEX_API_TOKEN']);
 \$vars->setValue(null, \$loaded);
+// build.php runs its CLI body only when it is the entry script. This wrapper
+// exists to run exactly that body with a doctored env, so it says so.
+\$_SERVER['SCRIPT_FILENAME'] = {$build};
 require {$build};
 PHP);
 
@@ -531,7 +534,7 @@ test('O-G6 --list-steps emits the blocks graph top-level ids and one concurrent 
     $manifest = stage5_list_steps(['--blocks-first']);
     $ids = array_column($manifest['steps'], 'id');
 
-    assert_eq(25, count($ids));
+    assert_eq(26, count($ids));
     assert_eq(stage5_expected_step_ids(false), $ids);
     assert_eq(1, count(array_keys($ids, 'theme-json+page-plan', true)));
     $group = $manifest['steps'][array_search('theme-json+page-plan', $ids, true)];
@@ -549,8 +552,8 @@ test('O-G7 --list-steps honors both graph flags and matches each graph stepIds',
 
     assert_eq('html-first', $html['graph']);
     assert_eq('blocks', $blocks['graph']);
-    assert_eq(29, count($htmlIds));
-    assert_eq(25, count($blocksIds));
+    assert_eq(30, count($htmlIds));
+    assert_eq(26, count($blocksIds));
     assert_eq(stage5_expected_step_ids(true), $htmlIds);
     assert_eq(stage5_expected_step_ids(false), $blocksIds);
     assert_true($htmlIds !== $blocksIds);

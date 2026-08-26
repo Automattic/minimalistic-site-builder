@@ -20,7 +20,7 @@ seeder imports into the media library on activation). The homepage is a seeded p
 ```bash
 cp .env.example .env
 # Text/code LLM (default Anthropic): ANTHROPIC_API_KEY
-# Or xAI Grok: LLM_PROVIDER=xai, XAI_API_KEY, LLM_MODEL=grok-4.5 (and per-step models)
+# Or xAI Grok: LLM_PROVIDER=xai, XAI_API_KEY, LLM_MODEL=grok-4.6 (and per-step models)
 # Or OpenRouter: LLM_PROVIDER=openrouter, OPENROUTER_API_KEY (models come from config/models.json)
 # Images (optional): GOOGLE_VERTEX_API_TOKEN
 
@@ -132,7 +132,7 @@ tier there — so switching providers needs no per-step configuration. Defaults:
 |----------|-------|-------|
 | `anthropic` (default) | `claude-opus-5` | `claude-haiku-4-5` |
 | `openai` | `gpt-5.5` | `gpt-5.4-mini` |
-| `xai` | `grok-4.5` | `grok-4.5` |
+| `xai` | `grok-4.6` | `grok-4.6` |
 | `openrouter` | `moonshotai/kimi-k3` | `moonshotai/kimi-k2.5:nitro` |
 
 Edit `config/models.json` to change those model ids. To override just one run or
@@ -177,6 +177,32 @@ already usable artifact. Operational failures such as unreadable inputs or
 failed writes remain fatal everywhere.
 Run the unit tests with `php tests/run.php`.
 
+## Preview a built site
+
+`php bin/serve.php <slug>` boots a built project. Studio is the default when
+the WordPress Studio desktop app is available (macOS and Windows only).
+Playground is the failover for Linux and CI. Generated Studio sites live
+under `~/Studio` and stay running after the command returns.
+
+```bash
+php bin/serve.php bakery
+php bin/serve.php bakery --runner=studio       # force Studio
+php bin/serve.php bakery --runner=playground   # force Playground
+php bin/serve.php bakery --stop                # stop one persistent site
+php bin/serve.php --stop-all                   # stop every site this checkout created
+php bin/serve.php --prune                      # remove those sites from ~/Studio
+```
+
+`--runner=studio|playground` (or `SITE_BUILD_RUNNER`) picks the runner: flag,
+then env, then Studio if available, else Playground with a warning. A Studio
+we picked ourselves also falls back when it fails to boot, so a finished build
+still gets a preview; the downgrade is recorded under `site-runner` in
+`warnings.json` and in `build-stats.json`. Naming a runner turns both cases
+into errors: `--runner=studio` never silently serves something else. `--port`
+and `--workers` apply to Playground only; on Studio one note is printed. Override the Studio workspace with `SITE_BUILD_STUDIO_ROOT`.
+`--prune` removes sites this checkout created (the ones whose marker records
+this repo path), not hand-made directories under `~/Studio`.
+
 ## Build the demo set
 
 `eval/theme-prompts.json` holds a persisted set of demo prompts. Build them all
@@ -213,9 +239,11 @@ php bin/build-demos.php --with-images --no-screenshot    # skip the screenshots
 php bin/build-demos.php --with-images --serve            # serve all sites afterward
 ```
 
-`--serve` boots every built site in Playground simultaneously after the batch —
-each on its own port — and prints all the URLs, so the whole demo set can be
-inspected side by side. A single Ctrl-C stops all the servers.
+`--serve` boots every built site after the batch and prints the URLs, so the
+whole demo set can be inspected side by side. Studio (the default when
+available) creates persistent sites under `~/Studio` and the command returns;
+stop them with `php bin/serve.php --stop-all`. Playground (Linux/CI failover)
+still binds each site on its own port, and a single Ctrl-C stops all the servers.
 
 Each build normally fires up to ~10 concurrent LLM requests. The OpenRouter
 profile caps that at four per site, so its default three-site batch reaches at

@@ -15,6 +15,7 @@ use Automattic\SiteBuild\HeroCopyBudget;
 use Automattic\SiteBuild\HeroFallback;
 use Automattic\SiteBuild\HeroHeadlineFit;
 use Automattic\SiteBuild\Narrator;
+use Automattic\SiteBuild\PlainText;
 use Automattic\SiteBuild\PlaygroundArtifact;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
@@ -64,10 +65,13 @@ use Automattic\SiteBuild\Warnings;
  *     in the header or footer nav is removed (wp:home-link, a navigation-link
  *     whose label is the front page title, a wp:page-list which always
  *     includes Home, or an HTML anchor with that label in the chrome). Inner pages stay.
- *  7. Nav collapse — WordPress's hamburger only engages below 600px, while
- *     an over-wide title/nav row wraps into a 2-3 row header across the
- *     whole tablet range. When the estimated single-row width exceeds the
- *     budget, the navigation gets `"overlayMenu":"always"`.
+ *  7. Nav overlay — the header menu is `"overlayMenu":"mobile"` (the
+ *     registered default): inline links on desktop, hamburger below the
+ *     raised 720px breakpoint. `"always"` is a hamburger at every width,
+ *     including a 1440px desktop, so it is lowered to mobile (BIGR-856).
+ *     An over-wide row is not rewritten to always; keep labels short in
+ *     the prompt instead. An estimate over ROW_BUDGET_PX is recorded as a
+ *     warning so the wrap is visible in the build report.
  *  8. Mobile menu — core renders NO hamburger at all for
  *     `"overlayMenu":"never"` (navigation.php returns the bare inner list
  *     instead of the responsive container), so a "never" header nav has no
@@ -107,7 +111,8 @@ final class HeaderHeroStep implements Step
 
     /**
      * The single-row width the header must fit (a ~1024px viewport minus
-     * gutters). Above it the nav collapses to a menu instead of wrapping.
+     * gutters). Above it the build records a warning; it no longer rewrites
+     * overlayMenu. Overlay-only copies are not charged against a desktop row.
      */
     public const ROW_BUDGET_PX = 1000;
 
@@ -389,10 +394,16 @@ final class HeaderHeroStep implements Step
             $writes[$heroRel] = $emptyActions['markup'];
             array_push($warnings, ...$emptyActions['warnings']);
 
-            // With the hero copy final, guarantee its longest headline word
-            // fits the measure its layout chain implies — the CSS mid-word
-            // break guard must stay dormant (BIGR-798).
-            $fit = HeroHeadlineFit::apply($writes[$heroRel], $theme);
+            // With the hero copy final, put the H1 at the masthead scale it
+            // was always meant to have (BIGR-883) and guarantee its longest
+            // word fits the measure its layout chain implies — the CSS
+            // mid-word break guard must stay dormant (BIGR-798).
+            $lineTarget = $delivery['viewport']['headline_line_target']['desktop'] ?? null;
+            $fit = HeroHeadlineFit::apply(
+                $writes[$heroRel],
+                $theme,
+                is_array($lineTarget) ? array_values($lineTarget) : null,
+            );
             $writes[$heroRel] = $fit['markup'];
             foreach ($fit['notes'] as $note) {
                 $report[] = "[{$heroRel}] {$note}";
@@ -660,6 +671,20 @@ final class HeaderHeroStep implements Step
         $notes = $home['notes'];
         $warnings = $home['warnings'];
 
+        // After the Home strip so a filled nav never reintroduces Home, and
+        // before consolidation copies items into the mobile overlay (BIGR-872).
+        $complete = HeaderNav::withCompleteInnerPages($markup, $pages, 'header', $siteName);
+        $markup = $complete['markup'];
+        array_push($notes, ...$complete['notes']);
+        array_push($warnings, ...$complete['warnings']);
+
+        // Completeness does not prove placement: a generated nav can contain
+        // every page while remaining a second row under the identity.
+        $row = HeaderNav::withSingleRowForArchetype($markup, $archetype);
+        $markup = $row['markup'];
+        array_push($notes, ...$row['notes']);
+        array_push($warnings, ...$row['warnings']);
+
         // Strictly after the Home strip: consolidation COPIES nav items, and a
         // copy taken first would carry a Home item — or a whole page-list the
         // strip is about to replace with inner-page links — into the collapsed
@@ -720,16 +745,12 @@ final class HeaderHeroStep implements Step
         }
 
         $width = self::estimatedRowWidth($doc, $siteName, $pageTitles);
-        $menuNav = self::mobileMenuNavIndex($doc);
-        if ($width > self::ROW_BUDGET_PX && $menuNav !== null) {
-            $attrs = $doc->attrs($menuNav) ?? [];
-            if (($attrs['overlayMenu'] ?? '') !== 'always') {
-                $attrs['overlayMenu'] = 'always';
-                $doc->setAttrs($menuNav, $attrs);
-                $notes[] = "navigation set to overlayMenu:always (estimated row width ~{$width}px "
-                    . 'exceeds the ' . self::ROW_BUDGET_PX . 'px budget; the core hamburger only '
-                    . 'engages below 600px, so an over-wide row wraps across the whole tablet range)';
-            }
+        if ($width > self::ROW_BUDGET_PX) {
+            $warnings[] = "file='theme/parts/header.html'; block='core/navigation'; "
+                . "authored=estimated row ~{$width}px; "
+                . 'delivered=inline overlayMenu:mobile; '
+                . 'disposition=over-wide header row left wrapping rather than collapsed to a desktop hamburger '
+                . '(budget ' . self::ROW_BUDGET_PX . 'px)';
         }
 
         $rendered = $doc->render();
@@ -2234,7 +2255,7 @@ final class HeaderHeroStep implements Step
      */
     private static function textTokens(string $html): array
     {
-        $text = html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $text = PlainText::fromMarkup($html);
         $text = mb_strtolower($text, 'UTF-8');
         return array_values(array_filter(
             preg_split('/[^\p{L}\p{N}]+/u', $text) ?: [],
@@ -2378,10 +2399,11 @@ final class HeaderHeroStep implements Step
      * Two authored shapes leave a phone with no usable menu. `"overlayMenu":
      * "never"` makes core skip the responsive container entirely — render()
      * returns the bare inner list, so there is no hamburger at any width and
-     * the nowrap title/nav row simply overruns the viewport. And a header
-     * carrying two navs (split-nav puts one on each side of the wordmark)
-     * collapses into TWO hamburgers flanking the title, each opening half
-     * the site.
+     * the nowrap title/nav row simply overruns the viewport. `"overlayMenu":
+     * "always"` is the opposite defect: a hamburger at every width, including
+     * desktop. And a header carrying two navs (split-nav puts one on each
+     * side of the wordmark) collapses into TWO hamburgers flanking the title,
+     * each opening half the site.
      *
      * The LAST nav in the document becomes the menu, so the toggle lands at
      * the end of the row: with the other navs hidden, a space-between header
@@ -2441,11 +2463,16 @@ final class HeaderHeroStep implements Step
         }
 
         $menuAttrs = $doc->attrs($menu) ?? [];
-        if (($menuAttrs['overlayMenu'] ?? '') === 'never') {
+        $overlay = (string) ($menuAttrs['overlayMenu'] ?? '');
+        if ($overlay === 'never' || $overlay === 'always') {
             $menuAttrs['overlayMenu'] = 'mobile';
             $doc->setAttrs($menu, $menuAttrs);
-            $notes[] = 'navigation overlayMenu:never raised to mobile (core renders no hamburger '
-                . 'at all for never, so the header had no collapsed state at any width)';
+            $notes[] = $overlay === 'never'
+                ? 'navigation overlayMenu:never raised to mobile (core renders no hamburger '
+                    . 'at all for never, so the header had no collapsed state at any width)'
+                : 'navigation overlayMenu:always lowered to mobile (always shows a hamburger '
+                    . 'at every width, including desktop; mobile keeps the inline desktop nav '
+                    . 'and the collapsed hamburger)';
         }
 
         $marked = 0;
@@ -2504,19 +2531,6 @@ final class HeaderHeroStep implements Step
             }
         }
         return $navs;
-    }
-
-    /**
-     * The nav that carries the collapsed menu: the last one in the header, so
-     * its toggle sits at the end of the row. Shared with the row-budget
-     * collapse below, which must target the same nav — pointing "always" at a
-     * wide-only nav would hang a hamburger on the half that is hidden exactly
-     * when a hamburger is wanted.
-     */
-    private static function mobileMenuNavIndex(BlockMarkup $doc): ?int
-    {
-        $navs = self::headerNavIndices($doc);
-        return $navs === [] ? null : $navs[count($navs) - 1];
     }
 
     /** Whether this nav already carries copies from an earlier consolidation. */
@@ -2602,7 +2616,7 @@ final class HeaderHeroStep implements Step
             }
             if ($name === 'navigation-link') {
                 $label = (string) ($attrs['label'] ?? '');
-                $labels[] = html_entity_decode(strip_tags($label), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                $labels[] = PlainText::fromMarkup($label);
             } elseif ($name === 'page-list') {
                 $hasPageList = true;
             } elseif ($name === 'site-title') {

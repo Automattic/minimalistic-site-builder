@@ -16,8 +16,9 @@ variant whose safe region remains authored.
   standfirst carry `"textAlign":"center"` (`has-text-align-center`), and the
   buttons row centers itself. Never pin the copy to a corner of the frame.
 - Restrained headline: the blueprint's register is `restrained` — the image
-  carries the impact, so the headline holds a heading-scale preset that fits
-  its own measure on one or two lines; never the `display` preset.
+  carries the impact, so keep the `display`-token headline concise enough for
+  its own measure on one or two lines. The deterministic headline-fit pass
+  bounds that token when the centered safe region is narrow.
 - Copy budget: the copy region is exactly one level-1 heading, at most ONE
   supporting paragraph, and at most one planned button. No further caption or
   credit lines.

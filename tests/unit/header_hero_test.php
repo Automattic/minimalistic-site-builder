@@ -300,7 +300,7 @@ test('a display-scale site title is lowered to heading, syncing the saved HTML',
     assert_eq([], $forced['notes']);
 });
 
-test('an over-wide nav row collapses to overlayMenu:always instead of wrapping', function () {
+test('an over-wide nav row keeps the inline desktop nav instead of overlayMenu:always', function () {
     $nav = '<!-- wp:navigation {"fontSize":"caption"} -->'
         . '<!-- wp:navigation-link {"label":"Programación"} /-->'
         . '<!-- wp:navigation-link {"label":"Instalaciones"} /-->'
@@ -314,8 +314,17 @@ test('an over-wide nav row collapses to overlayMenu:always instead of wrapping',
     $markup = hh_header('{"backgroundColor":"base","layout":{"type":"constrained"}}', '<!-- wp:site-title /-->' . $nav);
     $result = HeaderHeroStep::fixHeader($markup, AboveFoldContract::MODE_STACKED, 'Pulso Sur Centro Cultural');
 
-    assert_contains('"overlayMenu":"always"', $result['markup']);
-    assert_contains('overlayMenu:always', implode(' ', $result['notes']));
+    assert_true(
+        HeaderHeroStep::estimatedRowWidth(BlockMarkup::parse($markup), 'Pulso Sur Centro Cultural')
+            > HeaderHeroStep::ROW_BUDGET_PX,
+        'fixture must still be over the single-row budget so this pins the old always-collapse',
+    );
+    assert_true(
+        !str_contains($result['markup'], '"overlayMenu":"always"'),
+        'an over-wide row must not become a hamburger at desktop widths',
+    );
+    assert_eq($markup, $result['markup']);
+    assert_contains('over-wide header row', implode(' ', $result['warnings']));
 
     // A short three-item nav fits the row and is untouched.
     $short = hh_header(
@@ -326,6 +335,7 @@ test('an over-wide nav row collapses to overlayMenu:always instead of wrapping',
     );
     $fits = HeaderHeroStep::fixHeader($short, AboveFoldContract::MODE_STACKED, 'Demo');
     assert_eq($short, $fits['markup']);
+    assert_true(!str_contains(implode(' ', $fits['warnings']), 'over-wide header row'));
 });
 
 test('a page-list nav is measured by the site page titles', function () {
@@ -333,12 +343,26 @@ test('a page-list nav is measured by the site page titles', function () {
         '{"backgroundColor":"base","layout":{"type":"constrained"}}',
         '<!-- wp:site-title /--><!-- wp:navigation --><!-- wp:page-list /--><!-- /wp:navigation -->'
     );
+    $doc = BlockMarkup::parse($markup);
     $longTitles = ['Our Seasonal Tasting Menu', 'Private Dining and Events', 'Reservations and Contact', 'The Story of the House'];
+    assert_true(
+        HeaderHeroStep::estimatedRowWidth($doc, 'Demo', $longTitles) > HeaderHeroStep::ROW_BUDGET_PX,
+        'long page titles must charge the row so the estimate still has a job',
+    );
     $result = HeaderHeroStep::fixHeader($markup, AboveFoldContract::MODE_STACKED, 'Demo', $longTitles);
-    assert_contains('"overlayMenu":"always"', $result['markup']);
+    assert_true(
+        !str_contains($result['markup'], '"overlayMenu":"always"'),
+        'measuring a wide page-list must not collapse desktop to a hamburger',
+    );
+    assert_eq($markup, $result['markup']);
+    assert_contains('over-wide header row', implode(' ', $result['warnings']));
 
     $fits = HeaderHeroStep::fixHeader($markup, AboveFoldContract::MODE_STACKED, 'Demo', ['Menu', 'Visit']);
     assert_eq($markup, $fits['markup']);
+    assert_true(
+        HeaderHeroStep::estimatedRowWidth($doc, 'Demo', ['Menu', 'Visit']) <= HeaderHeroStep::ROW_BUDGET_PX,
+    );
+    assert_true(!str_contains(implode(' ', $fits['warnings']), 'over-wide header row'));
 });
 
 test('estimatedRowWidth charges a button its width plus the cluster gap', function () {
@@ -1706,6 +1730,59 @@ test('a surviving overlay earns the clear resting state and raises a just-short 
     });
 });
 
+test('a redundant has-background-dim-50 still earns the clear resting state (BIGR-886)', function () {
+    // Core's save() omits the numbered class at its 50 default, but the model
+    // spells it out routinely and the two render at the same opacity:.5. The
+    // grant must read past that cosmetic spelling; treating it as
+    // untrustworthy paint left 12 of 22 cohort overlays behind the scrim bar.
+    with_project('builder_hh_redundant_dim_', function ($project) {
+        $pages = [[
+            'slug' => 'home', 'title' => 'Home', 'front' => true,
+            'sections' => [[
+                'slug' => 'hero',
+                'role' => 'hero',
+                'layout_archetype' => 'full-bleed-cover',
+                'background' => 'image',
+            ]],
+        ]];
+        $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+        $project->writeJson('theme/theme.json', hh_theme_json());
+        $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'calm']);
+        $project->writeJson('pages.json', ['pages' => $pages]);
+        hh_above_fold($project, $pages, 'cinematic-safe-zone');
+        $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
+        $project->writeText(
+            'theme/parts/page-home--hero.html',
+            '<!-- wp:group {"anchor":"hero","className":"hero-composition--cinematic-safe-zone hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
+                . '<div id="hero" class="wp-block-group hero-composition--cinematic-safe-zone hero-mobile--stack-media-first">'
+                . '<!-- wp:cover {"url":"theme:./assets/hero.jpg","align":"full","dimRatio":50,"overlayColor":"contrast"} -->'
+                . '<div class="wp-block-cover alignfull"><span aria-hidden="true" '
+                . 'class="wp-block-cover__background has-contrast-background-color '
+                . 'has-background-dim-50 has-background-dim"></span>'
+                . '<div class="wp-block-cover__inner-container"></div></div><!-- /wp:cover -->'
+                . '</div><!-- /wp:group -->',
+        );
+
+        putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
+        (new HeaderHeroStep())->run($project);
+
+        $artifact = $project->readJson(HeaderBehavior::FILE);
+        assert_eq(HeaderBehavior::OVERLAY_TO_SOLID, $artifact['behavior']);
+        assert_eq(HeaderBehavior::TREATMENT_TRANSPARENT, $artifact['topTreatment'], 'the proven overlay rests clear');
+        assert_contains('header-top-transparent', $project->readText('theme/parts/header.html'));
+
+        // The raise leaves exactly one numbered opacity class on the span:
+        // stacking the redundant 50 beside the new value would hand Core two
+        // competing opacity rules for the paint the grant just proved.
+        $hero = $project->readText('theme/parts/page-home--hero.html');
+        assert_contains('"dimRatio":60', $hero);
+        assert_contains('has-background-dim-60 has-background-dim', $hero);
+        assert_true(!str_contains($hero, 'has-background-dim-50'), 'the redundant 50 class must be gone');
+        assert_eq(1, substr_count($hero, 'has-background-dim-'));
+        assert_true(!$project->exists('warnings.json'), 'the earned clear state is warning-free');
+    });
+});
+
 test('competing cover paint keeps a surviving overlay behind its scrim veil (BIGR-778)', function () {
     with_project('builder_hh_competing_paint_', function ($project) {
         $pages = [[
@@ -2187,8 +2264,28 @@ test('a header nav authored overlayMenu:never is raised to mobile', function () 
     assert_contains('overlayMenu:never raised to mobile', implode(' ', $result['notes']));
 });
 
+test('a header nav authored overlayMenu:always is lowered to mobile', function () {
+    // always paints a hamburger at every width, including a 1440px desktop.
+    // mobile is the core default: inline nav on desktop, hamburger below the
+    // breakpoint. BIGR-856.
+    $markup = hh_header(
+        '{"backgroundColor":"base","layout":{"type":"constrained"}}',
+        '<!-- wp:site-title /--><!-- wp:navigation {"overlayMenu":"always","fontSize":"caption"} -->'
+        . '<!-- wp:navigation-link {"label":"Menu"} /--><!-- wp:navigation-link {"label":"Visit"} /-->'
+        . '<!-- /wp:navigation -->',
+    );
+    $result = HeaderHeroStep::fixHeader($markup, AboveFoldContract::MODE_STACKED, 'Demo');
+
+    assert_eq([['mobile', '']], hh_nav_states($result['markup']));
+    assert_true(
+        !str_contains($result['markup'], '"overlayMenu":"always"'),
+        'no header menu nav may keep the value that is a hamburger on desktop',
+    );
+    assert_contains('overlayMenu:always lowered to mobile', implode(' ', $result['notes']));
+});
+
 test('a lone header nav that already collapses is left exactly as authored', function () {
-    foreach (['', '{"overlayMenu":"mobile"}', '{"overlayMenu":"always"}'] as $attrs) {
+    foreach (['', '{"overlayMenu":"mobile"}'] as $attrs) {
         $markup = hh_header(
             '{"backgroundColor":"base","layout":{"type":"constrained"}}',
             '<!-- wp:site-title /--><!-- wp:navigation ' . ($attrs !== '' ? $attrs . ' ' : '') . '-->'
@@ -2347,6 +2444,22 @@ test('a never-valued split nav is both raised and consolidated', function () {
         [['never', HeaderHeroStep::NAV_WIDE_ONLY_CLASS], ['mobile', '']],
         hh_nav_states($result['markup']),
     );
+});
+
+test('an always-valued split nav keeps one mobile hamburger, not two desktop ones', function () {
+    // Two overlayMenu:always halves would be two hamburgers on a desktop
+    // viewport. The trailing nav is the one menu (mobile); the leading half
+    // is wide-only and never, so desktop still shows both inline rows.
+    $result = HeaderHeroStep::fixHeader(
+        hh_split_nav_header('{"overlayMenu":"always"}', '{"overlayMenu":"always"}'),
+        AboveFoldContract::MODE_STACKED,
+        'Demo',
+    );
+    assert_eq(
+        [['never', HeaderHeroStep::NAV_WIDE_ONLY_CLASS], ['mobile', '']],
+        hh_nav_states($result['markup']),
+    );
+    assert_true(!str_contains($result['markup'], '"overlayMenu":"always"'));
 });
 
 test('overlay-only copies do not count against the single-row width budget', function () {
@@ -2551,4 +2664,12 @@ test('a three-nav header collapses to the one trailing menu', function () {
         ],
         hh_nav_items($result['markup']),
     );
+});
+
+test('the header prompt forbids overlayMenu always and never', function () {
+    $prompt = (string) file_get_contents(repo_path('prompts/header.md'));
+    assert_contains('NEVER write `"overlayMenu":"always"`', $prompt);
+    assert_contains('NEVER write `"overlayMenu":"never"`', $prompt);
+    assert_contains('inline links on desktop', $prompt);
+    assert_contains('exactly one hamburger on mobile', $prompt);
 });

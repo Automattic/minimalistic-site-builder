@@ -61,7 +61,7 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
         'topic' => 'artisan bread and pastries', 'area' => 'bakery',
         'audience' => 'neighborhood locals', 'visual_vibe' => 'warm and rustic',
         'language' => 'en', 'persona_name' => '',
-        'email_domain' => 'hearthandcrumb.com', 'invented' => ['name', 'email_domain'],
+        'email_domain' => 'hearthandcrumb.com', 'invented' => ['name'],
         'sections' => ['Hero', 'Specials', 'About'],
         'pages' => [
             ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome visitors and set the tone', 'children' => []],
@@ -80,7 +80,7 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
         'palette' => ['base' => '#FDF6EC', 'contrast' => '#2B2118', 'primary' => '#8A5A2B', 'secondary' => '#CC9988', 'accent' => '#E08A3C'],
         'type' => [
             'heading' => [
-                'family' => 'Fraunces',
+                'family' => 'Literata',
                 'weights' => [700, 900],
                 'italic' => false,
                 'axes' => [],
@@ -111,7 +111,7 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
                 ['slug' => 'accent', 'color' => '#e08a3c', 'name' => 'Accent'],
             ]],
             'typography' => ['fontFamilies' => [
-                ['slug' => 'heading', 'fontFamily' => 'Fraunces, serif', 'name' => 'Heading'],
+                ['slug' => 'heading', 'fontFamily' => 'Literata, serif', 'name' => 'Heading'],
                 ['slug' => 'body', 'fontFamily' => 'Source Sans 3, sans-serif', 'name' => 'Body'],
             ]],
         ],
@@ -257,10 +257,11 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     assert_eq('stacked', $headerBehavior['mode']);
     // The image-led home opening rules out a verifiable transparent start, but
     // the light base tint at GLASS_ALPHA stays readable under the dark
-    // foreground for any content, so the resolver grants a frosted top state;
-    // the scrolled tint cannot make the same guarantee and stays solid.
+    // foreground for any content, so the resolver grants a frosted top state.
+    // PaletteFloor then lifts the mid-tone accent/secondary onto the contrast
+    // floor; the scrolled tint now clears the same glass proof and ships frosted too.
     assert_eq('glass', $headerBehavior['topTreatment']);
-    assert_eq('solid', $headerBehavior['scrolledTreatment']);
+    assert_eq('glass', $headerBehavior['scrolledTreatment']);
     assert_true(in_array($headerBehavior['transition'], ['smooth', 'instant'], true));
     $headerPalette = array_column(
         $project->readJson('theme/theme.json')['settings']['color']['palette'],
@@ -291,9 +292,10 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     ] as $class) {
         assert_contains($class, $headerMarkup, "header carries canonical {$class} hook");
     }
-    assert_true(
-        !str_contains($headerMarkup, 'header-scrolled-glass'),
-        'a solid scrolled treatment ships no glass hook',
+    assert_contains(
+        'header-scrolled-glass',
+        $headerMarkup,
+        'a glass scrolled treatment ships the glass hook',
     );
     if ($headerBehavior['transition'] === 'instant') {
         assert_contains('header-transition-instant', $headerMarkup);
@@ -402,8 +404,16 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     assert_eq('var:preset|spacing|lg', $specialsRoot['style']['spacing']['padding']['top'], 'model root padding replaced by plan density');
     assert_eq('2rem', $specialsRoot['style']['spacing']['padding']['right'], 'horizontal shorthand padding survives');
     assert_eq('auto', $specialsRoot['style']['spacing']['margin']['left'], 'horizontal shorthand margin survives');
-    assert_eq('hover-lift', $specialsRoot['className'], 'the root overlap utility is stripped');
-    assert_contains('<div class="wp-block-group hover-lift"', $specialsHtml, 'the root wrapper loses overlap-up too');
+    assert_eq(
+        ['hover-lift', 'section-composition--equal-card-grid'],
+        preg_split('/\s+/', trim((string) $specialsRoot['className']), -1, PREG_SPLIT_NO_EMPTY),
+        'the root overlap utility is stripped and the archetype marker survives',
+    );
+    assert_contains(
+        '<div class="wp-block-group hover-lift section-composition--equal-card-grid"',
+        $specialsHtml,
+        'the root wrapper loses overlap-up too',
+    );
     assert_contains('wp-block-group overlap-up', $specialsHtml, 'the nested overlap utility remains available');
     assert_true(!str_contains($specialsHtml, '12rem'), 'no orphaned model spacing survives the pipeline');
 
@@ -452,7 +462,7 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     // in no markup, only in designDirection.json, yet their faces must ship.
     $bundledSrcs = implode(' ', $bundledFaces);
     assert_contains(
-        'fraunces-900',
+        'literata-900',
         $bundledSrcs,
         'direction-selected heading weight is bundled without explicit markup usage',
     );
@@ -477,7 +487,7 @@ test('pipeline step order is correct', function () {
         'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
         'theme-json+page-plan', 'reconcile-palette', 'sections', 'section-rhythm', 'copy-dedupe',
         'collect-images', 'normalize-layout', 'header-hero', 'contrast-fix', 'motion-sanity', 'fix-blocks', 'assemble-pages', 'page-styles', 'custom-motion',
-        'bundle-fonts', 'fonts-php', 'finalize-theme', 'theme-screenshot', 'validate-theme',
+        'bundle-fonts', 'fonts-php', 'extract-patterns', 'finalize-theme', 'theme-screenshot', 'validate-theme',
     ], $ids);
     exec('rm -rf ' . escapeshellarg($tmp));
 });

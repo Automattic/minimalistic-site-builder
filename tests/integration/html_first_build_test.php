@@ -42,7 +42,7 @@ function html_first_theme_payload(): array
                 ['slug' => 'accent', 'color' => '#e08a3c', 'name' => 'Accent'],
             ]],
             'typography' => ['fontFamilies' => [
-                ['slug' => 'heading', 'fontFamily' => 'Fraunces, serif', 'name' => 'Heading'],
+                ['slug' => 'heading', 'fontFamily' => 'Literata, serif', 'name' => 'Heading'],
                 ['slug' => 'body', 'fontFamily' => 'Source Sans 3, sans-serif', 'name' => 'Body'],
             ]],
         ],
@@ -65,7 +65,7 @@ function html_first_site_spec(array $pages): array
         'language' => 'en',
         'persona_name' => '',
         'email_domain' => 'hearthandcrumb.example',
-        'invented' => ['name', 'email_domain'],
+        'invented' => ['name'],
         'sections' => ['Hero', 'Story'],
         'pages' => $pages,
     ];
@@ -85,7 +85,7 @@ function html_first_direction(): array
             'accent' => '#E08A3C',
         ],
         'type' => [
-            'heading' => 'Fraunces 700',
+            'heading' => 'Literata 700',
             'body' => 'Source Sans 3 400/700',
         ],
         'image_grade' => 'warm documentary light',
@@ -115,10 +115,10 @@ function html_first_preview_document(string $marker = 'DESIGN-PREVIEW'): string
         . '<meta name="viewport" content="width=device-width, initial-scale=1">'
         . '<style>:root { --content-size: 800px; --wide-size: 1280px; }'
         . 'body { margin: 0; font-family: system-ui, sans-serif; }'
-        . '.site-header{display:flex;align-items:center;gap:1rem}.brand{font-weight:700;text-decoration:none}'
+        . '.site-header{display:flex;flex-direction:row;flex-wrap:nowrap;align-items:center;justify-content:space-between;gap:1rem}.brand{font-weight:700;text-decoration:none}'
         . '.maintenance-loop{display:grid}.maintenance-loop li > span{display:inline-block;width:10px;max-width:10px;height:10px;border-radius:50%;background:#e08a3c}</style>'
         . '</head><body><header class="site-header"><a class="brand" href="/">Hearth &amp; Crumb</a>'
-        . '<nav aria-label="Primary"><a href="/">Home</a></nav></header>'
+        . '<nav aria-label="Primary"></nav></header>'
         . '<main><section id="hero"><h1 class="has-display-font-size">' . $marker . '</h1>'
         . '<ul class="maintenance-loop"><li><span>Fresh daily</span></li></ul>'
         . '<img alt="AI_IMAGE: A baker sliding a sourdough loaf into a stone oven, viewed from counter height | homepage hero beside the primary headline | photorealistic | landscape">'
@@ -129,11 +129,10 @@ function html_first_nav_defect_preview_document(): string
 {
     return str_replace(
         '<header class="site-header"><a class="brand" href="/">Hearth &amp; Crumb</a>'
-            . '<nav aria-label="Primary"><a href="/">Home</a></nav></header>',
-        '<header><div class="header-shell"><nav aria-label="Primary">'
-            . '<a class="brand" href="#hero">Hearth &amp; Crumb</a>'
-            . '<a href="#hero">Home</a>'
-            . '<a href="#hero">About</a>'
+            . '<nav aria-label="Primary"></nav></header>',
+        '<header class="site-header"><a class="brand" href="/">Hearth &amp; Crumb</a>'
+            . '<div class="header-shell"><nav aria-label="Primary">'
+            . '<a href="/about/">About</a>'
             . '</nav></div></header>',
         html_first_preview_document('NAV-LINK-HERO'),
     );
@@ -150,12 +149,11 @@ function html_first_nav_list_preview_document(): string
 {
     return str_replace(
         '<header class="site-header"><a class="brand" href="/">Hearth &amp; Crumb</a>'
-            . '<nav aria-label="Primary"><a href="/">Home</a></nav></header>',
-        '<header><div class="header-shell"><nav aria-label="Primary">'
-            . '<a class="brand" href="#hero">Hearth &amp; Crumb</a>'
+            . '<nav aria-label="Primary"></nav></header>',
+        '<header class="site-header"><a class="brand" href="/">Hearth &amp; Crumb</a>'
+            . '<div class="header-shell"><nav aria-label="Primary">'
             . '<ul class="navlinks">'
-            . '<li><a class="is-current" href="#hero" aria-current="page">Home</a></li>'
-            . '<li><a href="#hero">About</a></li>'
+            . '<li><a href="/about/">About</a></li>'
             . '</ul>'
             . '</nav></div></header>',
         html_first_preview_document('NAV-LINK-HERO'),
@@ -188,13 +186,15 @@ function html_first_foundation_preview_document(): string
         . '<style>'
         . ':root{--content-size:800px;--wide-size:1280px;}'
         . 'body{margin:0;font-family:system-ui,sans-serif}'
+        . 'header{display:flex;flex-direction:row;flex-wrap:nowrap;align-items:center;justify-content:space-between}'
         . '#hero{padding:4rem clamp(1.25rem,5vw,4.5rem) 6rem}'
         . '#story{padding-inline:3rem}'
         . '#about-intro{padding-left:4rem;padding-right:4rem;padding-top:2rem;padding-bottom:3rem}'
         . '#about-values{padding:2rem 5rem}'
         . '#about-intro .about-copy{padding:0 1.75rem}'
         . '</style></head>'
-        . '<body><header><nav aria-label="Primary"><a href="/">Home</a></nav></header>'
+        . '<body><header><a class="brand" href="/">Hearth &amp; Crumb</a>'
+        . '<nav aria-label="Primary"><a href="/about/">About</a></nav></header>'
         . '<main><section id="hero"><h1 class="has-display-font-size">FOUNDATION-HERO</h1>'
         . '<img alt="AI_IMAGE: A baker sliding a sourdough loaf into a stone oven, viewed from counter height | homepage hero beside the primary headline | photorealistic | landscape">'
         . '</section></main></body></html>';
@@ -593,7 +593,12 @@ test('G5 HTML-first build delivers only resolved header navigation destinations'
         $builder->pipeline()->runThrough($project);
 
         $header = $project->readText('theme/parts/header.html');
-        assert_contains('"url":"/"', $header, 'brand link inherits the front page root');
+        assert_true(
+            str_contains($header, '"url":"/"')
+                || str_contains($header, 'href="/"')
+                || str_contains($header, 'wp:site-title'),
+            'identity remains a front-page link or the home-linking site-title block',
+        );
         assert_true(
             !str_contains($header, '#hero'),
             'shared nav keeps no front-page placeholder, bare or path-prefixed',
@@ -673,10 +678,8 @@ test('G6 HTML-first build resolves a list-shaped header navigation too', functio
 
         $header = $project->readText('theme/parts/header.html');
         assert_contains('Hearth', $header, 'brand identity stays as the home link');
-        // Every MENU destination is resolved. The brand anchor is hoisted out of
-        // the menu into its own block and still resolves to `/#hero` rather than
-        // `/` — a separate resolver behaviour for raw anchors, and the reason this
-        // guard names menu destinations instead of scanning the whole part.
+        // Every menu destination is resolved. The identity is already outside
+        // the menu, as DesignPreview now requires.
         preg_match_all('/"url":"([^"]*)"/', $header, $psMenuUrls);
         assert_eq(
             [],

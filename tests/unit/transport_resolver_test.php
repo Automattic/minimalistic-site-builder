@@ -1532,9 +1532,9 @@ test('W17 grok-cli implies xAI models for transport and steps', function (): voi
         assert_true(is_array($details), $output);
         assert_eq('Automattic\\SiteBuild\\GrokCliLlm', $details['class']);
         assert_eq('xai', $details['provider']);
-        assert_eq('grok-4.5', $details['model']);
+        assert_eq('grok-4.6', $details['model']);
         assert_eq($details['model'], $details['default']);
-        assert_eq(['grok-4.5'], array_values(array_unique($details['steps'])));
+        assert_eq(['grok-4.6'], array_values(array_unique($details['steps'])));
     });
 });
 
@@ -1595,7 +1595,7 @@ test('W18 coherent grok provider alias and grok harness pairing proceeds', funct
         assert_true(is_array($details), $output);
         assert_eq('Automattic\\SiteBuild\\GrokCliLlm', $details['class']);
         assert_eq('xai', $details['provider']);
-        assert_eq('grok-4.5', $details['model']);
+        assert_eq('grok-4.6', $details['model']);
         assert_true(!file_exists($binary . '.count'));
     });
 });

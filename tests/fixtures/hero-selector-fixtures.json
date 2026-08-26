@@ -127,6 +127,35 @@
       ]
     },
     {
+      "id": "standard-band",
+      "stable_identifier": "reading-room",
+      "concept_seed": "A short proposition rests over one long horizon.",
+      "constraints": {
+        "hero_canvas": "framed",
+        "allowed_hero_media_modes": [
+          "band-image"
+        ],
+        "max_hero_images": 1,
+        "hero_copy_capacity": "standard"
+      },
+      "eligible": [
+        "stacked-headline-band"
+      ]
+    },
+    {
+      "id": "imageless-manifesto",
+      "stable_identifier": "stated-position",
+      "concept_seed": "One stated position holds the field with no photograph.",
+      "constraints": {
+        "allowed_hero_media_modes": [
+          "none"
+        ]
+      },
+      "eligible": [
+        "type-manifesto"
+      ]
+    },
+    {
       "id": "horizon-rail",
       "stable_identifier": "corpus-seed-1",
       "concept_seed": "A contained vertical subject.",

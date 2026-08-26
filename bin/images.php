@@ -36,11 +36,22 @@ $project = $store->open($slug);
 
 echo "Generating images for '{$project->slug()}'\n";
 
+// This entry point did not build the project, so the env selector says nothing
+// about which graph did — meta.json's record does, and the transform report
+// (written only by the HTML-first pipeline) is the fallback for a project built
+// before that record existed. Both the collector and postImages' closing
+// re-validation apply rules that differ per graph, so they read one answer.
+$meta = $project->exists('meta.json') ? $project->readJson('meta.json') : [];
+$recordedGraph = $meta['graph'] ?? null;
+$htmlFirst = StepComposition::resumeHtmlFirst(
+    is_string($recordedGraph) ? $recordedGraph : null,
+    null,
+) ?? $project->exists(TransformArtifacts::REPORT);
+
 // Use the durable record from the pipeline; only collect if it's absent.
 if (!$project->exists('images.json')) {
-    // The transform report is only written by the HTML-first pipeline, and it
-    // is what tells the collector to read prose alts as image subjects.
-    (new CollectImagesStep(htmlFirst: $project->exists(TransformArtifacts::REPORT)))->run($project);
+    // HTML-first is what tells the collector to read prose alts as image subjects.
+    (new CollectImagesStep(htmlFirst: $htmlFirst))->run($project);
 }
 $specs = $project->readJson('images.json');
 $pending = array_filter($specs, static fn ($img) => ($img['status'] ?? 'pending') !== 'completed');
@@ -60,7 +71,7 @@ try {
 // — has to run here too, or a project that got its images this way keeps the
 // placeholders the pipeline left behind.
 $start = microtime(true);
-foreach (StepComposition::postImages(make_generate_images_step($llm)) as $step) {
+foreach (StepComposition::postImages(make_generate_images_step($llm), htmlFirst: $htmlFirst) as $step) {
     $step->run($project);
 }
 printf("  done in %.1fs\n", microtime(true) - $start);

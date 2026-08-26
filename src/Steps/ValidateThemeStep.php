@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\ContrastMath;
+use Automattic\SiteBuild\DesignFloor;
 use Automattic\SiteBuild\DirectionFidelity;
 use Automattic\SiteBuild\HeaderBehavior;
 use Automattic\SiteBuild\Narrator;
@@ -21,7 +22,7 @@ use Automattic\SiteBuild\ThemeValidator;
  *
  * Not a gate: by the time this runs the theme is fully built, and rejecting
  * it over a residual defect would leave the user with no site at all. Every
- * problem is recorded in warnings.json (see Project::addWarnings) and the
+ * problem is recorded in warnings.json (see Project::replaceWarnings) and the
  * theme is delivered anyway.
  */
 final class ValidateThemeStep implements Step
@@ -68,6 +69,7 @@ final class ValidateThemeStep implements Step
                 'theme/parts/footer.html',
                 'theme/parts/*',
                 'theme/templates/*',
+                'theme/patterns/*',
                 'plugin/pages/*',
                 'plugin/pages.json',
                 'designDirection.json',
@@ -95,11 +97,19 @@ final class ValidateThemeStep implements Step
             PresetReferences::problems($project),
             self::styleElementProblems($project),
             self::headerBehaviorProblems($project),
+            self::designFloorProblems($project),
         );
         $problems = array_values(array_unique($problems));
 
+        // postImages runs this step a second time, after cover-contrast and
+        // extract-patterns have rewritten the very bytes the in-graph run
+        // judged. This pass re-checks all of them, so it owns the step's rows
+        // outright: merging would keep a residual on record that the final
+        // theme no longer has, and clearing on an empty set is what makes the
+        // "passed" log below true.
+        $project->replaceWarnings($this->id(), $problems);
+
         if ($problems !== []) {
-            $project->addWarnings($this->id(), $problems);
             $report = 'Final theme validation found ' . count($problems)
                 . " problem(s); theme delivered anyway, problems recorded in warnings.json:\n- "
                 . implode("\n- ", $problems) . "\n";
@@ -111,6 +121,34 @@ final class ValidateThemeStep implements Step
 
         $project->writeText('logs/' . self::LOG_FILE, "Final theme validation passed.\n");
         Narrator::write("  final theme validation passed\n");
+    }
+
+    /**
+     * Advisory design-floor scan of assembled plugin pages and theme.json.
+     * Report only — never mutates generated markup. Findings are warnings,
+     * never build failures.
+     *
+     * @return list<string>
+     */
+    private static function designFloorProblems(Project $project): array
+    {
+        $theme = [];
+        if ($project->exists('theme/theme.json')) {
+            $decoded = json_decode($project->readText('theme/theme.json'), true);
+            $theme = is_array($decoded) ? $decoded : [];
+        }
+
+        $problems = [];
+        foreach (glob($project->pluginPath('pages') . '/*.html') ?: [] as $abs) {
+            $rel = 'plugin/pages/' . basename($abs);
+            foreach (DesignFloor::check($project->readText($rel), []) as $finding) {
+                $problems[] = DesignFloor::warningRow($rel, $finding);
+            }
+        }
+        foreach (DesignFloor::check('', $theme) as $finding) {
+            $problems[] = DesignFloor::warningRow('theme/theme.json', $finding);
+        }
+        return $problems;
     }
 
     /**

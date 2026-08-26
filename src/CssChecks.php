@@ -46,8 +46,8 @@ final class CssChecks
     }
 
     /**
-     * display:none / visibility:hidden anywhere in the CSS — generated
-     * content must stay visible.
+     * display:none / visibility:hidden / a clip-path that clips everything
+     * away, anywhere in the CSS — generated content must stay visible.
      *
      * @return string[]
      */
@@ -60,7 +60,271 @@ final class CssChecks
         if (preg_match('/(?<![-\w])visibility\s*:\s*hidden(?:\s*!important)?\s*(?=;|}|$)/i', $css) === 1) {
             $problems[] = 'visibility:hidden hides generated content';
         }
+        // Scoped to rules OUTSIDE @keyframes, exactly like the opacity check
+        // the two callers run alongside this one. A `from { clip-path: inset(0
+        // 0 100% 0) }` is the canonical wipe-in and a `from { clip-path:
+        // circle(0) }` the canonical iris-in — both are legal entrances that
+        // END visible, and rejecting them killed the user's one explicit
+        // animation request outright (BIGR-887). A `forwards`/`both` fill
+        // parking an element in a hidden LAST keyframe is a real defect, and
+        // this exemption is why CustomMotionStep's non-start-keyframe walk
+        // has to check `clip-path` there alongside `opacity`.
+        $seen = [];
+        foreach (self::scanDeclarations($css) as $declaration) {
+            if ($declaration['kind'] === 'keyframe'
+                || strtolower(trim($declaration['property'])) !== 'clip-path'
+            ) {
+                continue;
+            }
+            $value = trim($declaration['value']);
+            if (!self::clipsEverythingAway($value) || isset($seen[$value])) {
+                continue;
+            }
+            $seen[$value] = true;
+            $problems[] = 'clip-path clips generated content away entirely: ' . $value;
+        }
         return $problems;
+    }
+
+    /**
+     * Whether a `clip-path` value leaves no visible area at all.
+     *
+     * This exists because a hidden resting state does not have to be spelled
+     * `opacity: 0`. pulso2 shipped a hero whose copy was
+     * `clip-path: inset(0 0 100% 0)` — fully readable to every visibility
+     * check we had, and completely invisible on screen (BIGR-881).
+     *
+     * Deliberately narrow: only shapes that are provably empty from their
+     * literal value are reported. A partial `inset(50% 0 0 0)`, a `var()`, and
+     * a `polygon()` (whose area needs real geometry) are left to the author.
+     */
+    private static function clipsEverythingAway(string $value): bool
+    {
+        $value = trim(self::withoutComments($value));
+        $value = trim((string) preg_replace('/\s*!\s*important\s*$/i', '', $value));
+
+        // inset(): opposite edges that meet or cross leave zero area. The
+        // round <radius> tail never adds area back, so it is dropped first.
+        if (preg_match('/^inset\(\s*([^)]*?)\s*(?:round\b[^)]*)?\)$/i', $value, $inset) === 1) {
+            $parts = preg_split('/[\s,]+/', trim($inset[1]), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            $sides = match (count($parts)) {
+                1       => [$parts[0], $parts[0], $parts[0], $parts[0]],
+                2       => [$parts[0], $parts[1], $parts[0], $parts[1]],
+                3       => [$parts[0], $parts[1], $parts[2], $parts[1]],
+                4       => $parts,
+                default => null,
+            };
+            if ($sides === null) {
+                return false;
+            }
+            [$top, $right, $bottom, $left] = array_map(self::insetPercentage(...), $sides);
+            foreach ([[$top, $bottom], [$left, $right]] as [$near, $far]) {
+                if ($near !== null && $far !== null && $near + $far >= 100.0) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // A zero-radius circle()/ellipse() has no area either.
+        if (preg_match('/^(?:circle|ellipse)\(\s*([^)]*?)\s*(?:at\b[^)]*)?\)$/i', $value, $round) === 1) {
+            $radii = preg_split('/[\s,]+/', trim($round[1]), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            if ($radii === []) {
+                return false;
+            }
+            foreach ($radii as $radius) {
+                if (preg_match('/^0*(?:\.0+)?(?:%|[a-z]+)?$/i', $radius) !== 1) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * One inset() side as a percentage of the box, or null when it cannot be
+     * compared without layout. A non-percentage length is only comparable at
+     * zero, which never closes the box on its own.
+     */
+    private static function insetPercentage(string $side): ?float
+    {
+        if (preg_match('/^([+-]?(?:\d+(?:\.\d*)?|\.\d+))%$/', $side, $match) === 1) {
+            return (float) $match[1];
+        }
+        if (preg_match('/^[+-]?(?:0+(?:\.0*)?|\.0+)(?:[a-z]+)?$/i', $side) === 1) {
+            return 0.0;
+        }
+        return null;
+    }
+
+    /**
+     * Whether a selector names a motion-kit class ANYWHERE in it — as the
+     * subject, as an ancestor, or inside a functional pseudo.
+     *
+     * Unlike the shape policy, which asks what a rule styles, this asks what a
+     * rule touches. `.stagger-children > *` styles a bare universal subject and
+     * still redefines kit choreography, so the subject compound alone is the
+     * wrong unit here.
+     *
+     * Quoted strings and attribute values are removed first so `[data-x=".reveal"]`
+     * is not read as a class.
+     */
+    public static function selectorNamesMotionClass(string $selector): bool
+    {
+        $plain = (string) preg_replace(
+            ['~/\*.*?\*/~s', '/"(?:\\\\.|[^"\\\\])*"/s', "/'(?:\\\\.|[^'\\\\])*'/s", '/\[[^\]]*\]/s'],
+            ' ',
+            $selector,
+        );
+        if (preg_match_all('/(?<!\\\\)\.(-?[_a-zA-Z][\w-]*)/', $plain, $classes) === 0) {
+            return false;
+        }
+        foreach ($classes[1] as $class) {
+            if (Motion::looksLikeMotionClass($class)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Drop every declaration whose own rule, or any rule nesting it, names a
+     * motion-kit class.
+     *
+     * The kit's CSS and its JS driver are one system: `motion.js` registers
+     * targets and flips `.is-visible`, and `motion.css` owns every hidden and
+     * revealed state, including the `motion-skip` escape it applies to content
+     * already above the fold. Generated CSS that redefines a kit class only
+     * ever half-wins — `motion-skip` clears `opacity` and `animation`, so a
+     * generated `clip-path`/`transform` hidden state survives with nothing left
+     * to reveal it, and the content never appears (BIGR-881).
+     *
+     * Two removal widths, cut at the smallest unit that isolates the defect
+     * (escalation ladder, rung 3):
+     *
+     * - The rule's SUBJECT is a kit class (`.reveal-up`, `.stagger-children >
+     *   *`) — it is styling the kit element itself, so every declaration goes.
+     * - Only an ANCESTOR is a kit class (`.hero-entrance h1`) — the rule
+     *   styles something else that merely lives inside a kit element, so only
+     *   the properties that can fight the kit's choreography go, plus any
+     *   declaration whose VALUE hides outright. `display` is judged by value
+     *   and not by name: `display: none` under a kit ancestor is the BIGR-881
+     *   shape and nothing else in the theme.json path would catch it, while
+     *   `display: flex` is ordinary layout. `.hero-entrance h1 {
+     *   letter-spacing: -0.03em; max-width: 18ch }` is ordinary design intent
+     *   and used to be deleted whole (BIGR-887).
+     *
+     * Removal is per declaration, so an emptied kit rule stays in place as
+     * inert bytes rather than forcing a structural rewrite of the surrounding
+     * CSS. Keyframes the removed declarations referenced are left alone: with
+     * no rule naming them they render nothing.
+     *
+     * @return array{0:string,1:list<string>} repaired CSS and dropped declarations
+     */
+    public static function dropMotionKitDeclarations(
+        string $css,
+        bool $bareDeclarationList = false,
+    ): array {
+        [$repaired, $dropped] = self::dropDeclarations(
+            $css,
+            static function (array $declaration): bool {
+                if ($declaration['kind'] !== 'style') {
+                    return false;
+                }
+                if (self::selectorTargetsMotionElement($declaration['context'])) {
+                    return true;
+                }
+                foreach ([$declaration['context'], ...$declaration['ancestors']] as $selector) {
+                    if (self::selectorNamesMotionClass(
+                        self::withoutExcludedOrRelationalArguments($selector),
+                    )) {
+                        return self::isMotionCapableProperty($declaration['property'])
+                            || self::hiddenContentProblems(
+                                'a{' . $declaration['property'] . ':' . $declaration['value'] . '}'
+                            ) !== [];
+                    }
+                }
+                return false;
+            },
+            $bareDeclarationList,
+        );
+        return [
+            $repaired,
+            array_map(static fn (array $declaration): string => trim($declaration['raw']), $dropped),
+        ];
+    }
+
+    /**
+     * Whether a selector styles a motion-kit ELEMENT itself, rather than
+     * something that merely lives inside one.
+     *
+     * Only the rightmost (subject) compound counts, so `.hero-entrance h1`
+     * styles an h1 and not the entrance. `:not()` arguments are stripped
+     * first: `.card:not(.reveal-up)` deliberately EXCLUDES kit elements, so
+     * reading its name there had it removed as if it targeted them.
+     *
+     * `.stagger-children > *` is included on purpose even though its subject
+     * is the universal selector: motion.js registers those direct children as
+     * targets, so that selector IS the kit's own.
+     */
+    public static function selectorTargetsMotionElement(string $selector): bool
+    {
+        foreach (self::splitSelectorList($selector) as $candidate) {
+            $compound = self::rightmostSelectorCompound($candidate);
+            if ($compound === '') {
+                continue;
+            }
+            // Drop negation/relational arguments — they name what is excluded.
+            $subject = self::withoutExcludedOrRelationalArguments($compound);
+            if (self::selectorNamesMotionClass($subject)) {
+                return true;
+            }
+            // The kit registers `.stagger-children > *` itself.
+            $head = trim(substr($candidate, 0, strlen($candidate) - strlen($compound)));
+            if ($head !== ''
+                && preg_match('/(?:>|\s)$/', $head) === 1
+                && preg_match('/(?<![\w-])stagger-children(?![\w-])/i', $head) === 1
+                && preg_match('/^\*(?:$|[:\[])/', trim($compound)) === 1
+            ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Remove class references that do not describe the selected element.
+     * `:not(.reveal-up)` explicitly excludes that kit class, while
+     * `:has(.reveal-up)` selects its container. Neither makes the subject (or
+     * an ancestor subject) part of the motion kit.
+     */
+    private static function withoutExcludedOrRelationalArguments(string $selector): string
+    {
+        return (string) preg_replace(
+            '/:(?:not|has)\((?:[^()]*|\([^()]*\))*\)/i',
+            '',
+            $selector,
+        );
+    }
+
+    /**
+     * Whether a property can hide an element at rest or compete with the
+     * motion kit's own choreography.
+     *
+     * The narrow cut for a rule that only sits INSIDE a kit element. Anything
+     * outside this list — colour, spacing, type, borders — cannot produce the
+     * BIGR-881 failure and is ordinary design intent.
+     */
+    public static function isMotionCapableProperty(string $property): bool
+    {
+        return preg_match(
+            '/^(?:-[a-z]+-)?(?:opacity|visibility|clip-path|clip|filter|backdrop-filter'
+            . '|will-change|transform(?:-[a-z]+)?|translate|rotate|scale|perspective(?:-[a-z]+)?'
+            . '|animation(?:-[a-z]+)*|transition(?:-[a-z]+)*|offset(?:-[a-z]+)*)$/i',
+            trim($property),
+        ) === 1;
     }
 
     /** Maximum nested CSS blocks inspected by the generated-CSS scanner. */
@@ -265,10 +529,43 @@ final class CssChecks
         ], true);
     }
 
+    /** Whether a declaration overrides the build-owned text-wrap policy. */
+    public static function isTextWrapProperty(string $property): bool
+    {
+        return in_array(strtolower($property), [
+            'text-wrap',
+            'text-wrap-style',
+            'text-wrap-mode',
+        ], true);
+    }
+
     /**
-     * Drop wrap/hyphen declarations whose selector subject is a heading.
-     * Body copy and non-heading siblings keep their authored wrap. Keyframe
-     * steps are left alone.
+     * Drop every generated text-wrap declaration. PageStylesStep supplies one
+     * deterministic policy after this repair, so direct paragraph selectors,
+     * broad selectors, longhands, priorities, and keyframes cannot take
+     * ownership back.
+     *
+     * @return array{0:string,1:list<string>} repaired CSS and dropped declarations
+     */
+    public static function dropTextWrapDeclarations(string $css): array
+    {
+        [$repaired, $dropped] = self::dropDeclarations(
+            $css,
+            static fn (array $declaration): bool => self::isTextWrapProperty(
+                $declaration['property'],
+            ),
+            self::looksLikeDeclarationList($css),
+        );
+        return [
+            $repaired,
+            array_map(static fn (array $declaration): string => trim($declaration['raw']), $dropped),
+        ];
+    }
+
+    /**
+     * Drop word-splitting declarations whose selector subject is a heading.
+     * Body copy and non-heading siblings keep their authored behavior.
+     * Keyframe steps are left alone.
      *
      * @return array{0:string,1:list<string>} repaired CSS and dropped declarations
      */

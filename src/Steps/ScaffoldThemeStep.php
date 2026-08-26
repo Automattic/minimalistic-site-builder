@@ -131,6 +131,15 @@ final class ScaffoldThemeStep implements Step
         .caption-text-base > figcaption { color: var(--wp--preset--color--base); }
         .caption-text-contrast > figcaption { color: var(--wp--preset--color--contrast); }
 
+        /* A section's copy stack widened to sit on the same edge as the grid
+           row below it (LayoutFixer marks it "copy-flush"). The group stays
+           constrained, so core still caps these children at contentSize; all
+           this undoes is core's auto side margins, which would centre that
+           cap in the wider box and leave the text floating again. */
+        .wp-block-group.copy-flush > * {
+            margin-inline-start: 0 !important;
+            margin-inline-end: auto !important;
+        }
         /* Equal-height, equal-width card rows (sections opt in via className="equal-cards"). */
         .equal-cards > .wp-block-column {
             display: flex;
@@ -495,6 +504,37 @@ final class ScaffoldThemeStep implements Step
         .hero-composition--layered-poster {
             overflow: hidden;
         }
+        /* stacked-headline-band stacks the copy ABOVE a full-width image band
+           (BIGR-885). The band is cropped to a letterbox ratio and capped
+           against the viewport, because the headline, the support line, the
+           action AND a meaningful share of the band share one first viewport.
+           An uncapped 16:9 image at full width is taller than half the
+           desktop viewport on its own and pushes the band out of the fold.
+           `max-width: none` is the fallback for a band a generator wrapped in
+           a constrained group: HeroUnit repairs that wrapper to align:full,
+           and this keeps a wrapper it could not reach off the reading
+           measure. */
+        .hero-composition--stacked-headline-band .hero-composition__media {
+            max-width: none;
+        }
+        .hero-composition--stacked-headline-band .hero-composition__media img {
+            display: block;
+            width: 100%;
+            aspect-ratio: 21 / 9;
+            max-height: 52vh;
+            object-fit: cover;
+        }
+        /* type-manifesto carries no image (BIGR-885), so the offset between the
+           wide headline and the narrower standfirst IS the composition. The
+           constrained layout centers every child of the copy region, and that
+           rule and this one have equal specificity, so the offset needs
+           !important to survive it. Logical properties keep the step on the
+           trailing side under both writing directions. */
+        .hero-composition--type-manifesto .hero-composition__standfirst {
+            max-width: 32rem !important;
+            margin-inline-start: auto !important;
+            margin-inline-end: 0 !important;
+        }
         /* Hero headlines wrap whole words (BIGR-864). `hyphens: auto` was
            here to prefer a language break over a mid-word snap, but it
            hyphenates at EVERY line-break opportunity, not only the impossible
@@ -596,6 +636,20 @@ final class ScaffoldThemeStep implements Step
             }
             .hero-mobile--retain-media-overlay .hero-composition__copy {
                 max-width: min(88%, 32rem);
+            }
+            /* The band recipe already stacks on desktop, so its mobile
+               transformation is the crop, not the order: a 21:9 band at phone
+               width is a 160px sliver that reads as a rule, not a picture.
+               Trade width for height and keep the same cap on the fold. */
+            .hero-composition--stacked-headline-band .hero-composition__media img {
+                aspect-ratio: 3 / 2;
+                max-height: 44vh;
+            }
+            /* One narrow screen cannot hold both a wide headline and an offset
+               column, so the standfirst returns to the reading edge. */
+            .hero-composition--type-manifesto .hero-composition__standfirst {
+                max-width: none !important;
+                margin-inline-start: 0 !important;
             }
         }
 

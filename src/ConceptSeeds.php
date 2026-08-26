@@ -26,8 +26,36 @@ final class ConceptSeeds
     /** Whether the world is built up from light or down from dark. */
     public const GROUNDS = ['light', 'dark'];
 
-    /** The design tradition the seed speaks in. */
-    public const REGISTERS = ['heritage', 'modernist', 'editorial', 'expressive', 'utilitarian'];
+    /**
+     * The design tradition the seed speaks in.
+     *
+     * `utilitarian` is deliberately absent (BIGR-871): the pick is uniform, and
+     * a no-frills world winning a fifth of the time made underwhelming sites
+     * out of briefs that never asked for one. It lives in EXTRA_REGISTERS, so a
+     * brief that names it still gets it. `art-deco` and `brutalist` moved the
+     * other way — they are real traditions a designer would propose unprompted,
+     * and holding them back was costing variety the list is here to supply.
+     */
+    public const REGISTERS = [
+        'heritage', 'modernist', 'editorial', 'expressive',
+        'art-deco', 'brutalist', 'poster', 'noir',
+        'archival', 'craft', 'retro-futurist', 'pop',
+        'organic', 'technical',
+    ];
+
+    /**
+     * The letterform tradition the seed sets its lettering in.
+     *
+     * Kept apart from `register` because one axis carrying both mood and type
+     * is why quiet moods kept landing on the same few quiet faces: across 128
+     * audited builds, 128 sites drew on 13 heading families and five of them
+     * accounted for over half. Naming the tradition separately lets a calm
+     * concept still be set in a Didone.
+     */
+    public const TYPE_REGISTERS = [
+        'grotesque', 'didone', 'slab', 'humanist', 'geometric',
+        'transitional', 'condensed', 'mono', 'script', 'display-serif',
+    ];
 
     /** Which part of the color wheel the accent family comes from. */
     public const ACCENTS = ['warm', 'cool', 'earth', 'jewel', 'neutral'];
@@ -48,10 +76,9 @@ final class ConceptSeeds
      * @var array<string,list<string>>
      */
     private const EXTRA_REGISTERS = [
-        'brutalist' => ['brutalist', 'brutalism'],
-        'luxury'    => ['luxury', 'luxurious', 'luxe'],
-        'playful'   => ['playful', 'whimsical'],
-        'art-deco'  => ['art-deco', 'art deco', 'artdeco'],
+        'luxury'      => ['luxury', 'luxurious', 'luxe'],
+        'playful'     => ['playful', 'whimsical'],
+        'utilitarian' => ['utilitarian', 'no-frills', 'practical', 'functional', 'workmanlike'],
     ];
 
     /**
@@ -64,7 +91,7 @@ final class ConceptSeeds
     ];
 
     /**
-     * Coerce one raw seed into `{text, ground, register, accent, tint}`.
+     * Coerce one raw seed into `{text, ground, register, accent, tint, type_register}`.
      *
      * The prompt asks for an object; a bare string (the older shape, and what
      * a small model falls back to under load) still parses, with no
@@ -77,7 +104,7 @@ final class ConceptSeeds
      *
      * @param mixed $raw
      * @param array{registers?:list<string>,accents?:list<string>} $locked
-     * @return array{text:string,ground:?string,register:?string,accent:?string,tint:?string}|null
+     * @return array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string}|null
      */
     public static function normalize($raw, array $locked = []): ?array
     {
@@ -85,7 +112,14 @@ final class ConceptSeeds
             $text = trim($raw);
             return $text === ''
                 ? null
-                : ['text' => $text, 'ground' => null, 'register' => null, 'accent' => null, 'tint' => null];
+                : [
+                    'text'          => $text,
+                    'ground'        => null,
+                    'register'      => null,
+                    'accent'        => null,
+                    'tint'          => null,
+                    'type_register' => null,
+                ];
         }
         if (!is_array($raw)) {
             return null;
@@ -109,11 +143,12 @@ final class ConceptSeeds
             ...($locked['accents'] ?? []),
         ]));
         return [
-            'text'     => $text,
-            'ground'   => self::axis($raw['ground'] ?? null, self::GROUNDS),
-            'register' => self::axis($raw['register'] ?? null, $registers),
-            'accent'   => self::axis($raw['accent'] ?? null, $accents),
-            'tint'     => self::axis($raw['tint'] ?? null, self::TINTS),
+            'text'          => $text,
+            'ground'        => self::axis($raw['ground'] ?? null, self::GROUNDS),
+            'register'      => self::axis($raw['register'] ?? null, $registers),
+            'accent'        => self::axis($raw['accent'] ?? null, $accents),
+            'tint'          => self::axis($raw['tint'] ?? null, self::TINTS),
+            'type_register' => self::axis($raw['type_register'] ?? null, self::TYPE_REGISTERS),
         ];
     }
 
@@ -168,7 +203,13 @@ final class ConceptSeeds
      * triple: an unstated axis is not evidence of sameness. Byte-identical
      * text still is, because the pick lands on the sentence.
      *
-     * @param array{text:string,ground:?string,register:?string,accent:?string,tint:?string} $seed
+     * `tint` and `type_register` stay out of the key on purpose. Each extra
+     * coordinate makes two seeds look distinct more easily and so quietly
+     * weakens the collapse guard — and two seeds in one world, differing only
+     * in how the ground leans or which face sets the headline, are still one
+     * world.
+     *
+     * @param array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string} $seed
      */
     public static function axisKey(array $seed): ?string
     {
@@ -192,9 +233,9 @@ final class ConceptSeeds
      * the spread keeps collapsing is visible in the build's warnings instead of
      * only in the sameness of the finished sites.
      *
-     * @param list<array{text:string,ground:?string,register:?string,accent:?string,tint:?string}> $seeds
+     * @param list<array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string}> $seeds
      * @param list<string> $warnings
-     * @return list<array{text:string,ground:?string,register:?string,accent:?string,tint:?string}>
+     * @return list<array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string}>
      */
     public static function distinct(array $seeds, array &$warnings = []): array
     {
@@ -259,7 +300,7 @@ final class ConceptSeeds
      * misspelling `ground` on two of three is not exotic, and "every seed is
      * light-grounded" must not be derived from a single vote.
      *
-     * @param list<array{text:string,ground:?string,register:?string,accent:?string,tint:?string}> $seeds
+     * @param list<array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string}> $seeds
      */
     public static function sharedGround(array $seeds): ?string
     {

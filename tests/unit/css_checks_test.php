@@ -478,17 +478,33 @@ test('selectorTargetsHeading matches heading subjects and ignores descendant com
 });
 
 test('dropHeadingWordSplitDeclarations removes wrap/hyphen properties only from heading subjects', function () {
-    $css = '.hero h1 { overflow-wrap: anywhere; word-break: break-all; hyphens: auto; font-size: 5rem; } '
+    $css = '.hero h1 { overflow-wrap: anywhere; word-break: break-all; hyphens: auto; text-wrap: wrap; font-size: 5rem; } '
         . 'h1 + p { overflow-wrap: break-word; color: inherit; } '
-        . 'p { -webkit-hyphens: auto; }';
+        . 'p { -webkit-hyphens: auto; text-wrap: pretty; }';
     [$repaired, $dropped] = CssChecks::dropHeadingWordSplitDeclarations($css);
-    assert_eq(3, count($dropped), 'three heading wrap declarations dropped');
+    assert_eq(3, count($dropped), 'three heading word-splitting declarations dropped');
     assert_contains('font-size: 5rem', $repaired);
     assert_contains('h1 + p { overflow-wrap: break-word; color: inherit; }', $repaired);
-    assert_contains('p { -webkit-hyphens: auto; }', $repaired);
+    assert_contains('p { -webkit-hyphens: auto; text-wrap: pretty; }', $repaired);
     assert_true(!str_contains($repaired, 'anywhere'));
     assert_true(!str_contains($repaired, 'break-all'));
     assert_true(!str_contains($repaired, 'hyphens: auto; font-size'));
+    assert_contains('text-wrap: wrap', $repaired, 'text-wrap ownership is a separate global repair');
+});
+
+test('dropTextWrapDeclarations removes build-owned wrap properties from every style selector', function () {
+    $css = 'p { text-wrap: nowrap !important; color: inherit; } '
+        . '.hero > * { text-wrap-style: balance; display: block; } '
+        . 'body { text-wrap-mode: nowrap; hyphens: auto; } '
+        . '@keyframes settle { from { text-wrap-mode: nowrap; opacity: 0; } }';
+
+    [$repaired, $dropped] = CssChecks::dropTextWrapDeclarations($css);
+
+    assert_eq(4, count($dropped), 'all authored text-wrap declarations are dropped');
+    assert_true(!str_contains($repaired, 'p { text-wrap'), 'direct paragraph override removed');
+    assert_true(!str_contains($repaired, 'text-wrap-style'), 'shorthand companion removed');
+    assert_contains('body {  hyphens: auto; }', $repaired, 'unrelated body wrap behavior survives');
+    assert_contains('from {  opacity: 0; }', $repaired, 'unrelated keyframe declarations survive');
 });
 
 test('declarationScopeAtViewport refuses to decide anything a width comparison cannot settle', function () {
@@ -517,5 +533,249 @@ test('declarationScopeAtViewport refuses to decide anything a width comparison c
             CssChecks::declarationScopeAtViewport($ancestors, 1366.0),
             implode(' / ', $ancestors),
         );
+    }
+});
+
+test('hiddenContentProblems catches a clip-path that leaves no visible area', function () {
+    // Regression (BIGR-881): pulso2's hero copy shipped
+    // `clip-path: inset(0 0 100% 0)`. Every visibility check we had read the
+    // element as visible; on screen it was clipped to nothing.
+    foreach ([
+        'inset(0 0 100% 0)',
+        'inset(100% 0 0 0)',
+        'inset(0 100% 0 0)',
+        'inset(60% 0 40% 0)',
+        'inset(100%)',
+        'inset(0 0 100% 0 round 4px)',
+        'circle(0)',
+        'circle(0%)',
+        'ellipse(0 0 at center)',
+    ] as $value) {
+        assert_eq(
+            ['clip-path clips generated content away entirely: ' . $value],
+            CssChecks::hiddenContentProblems(".a { clip-path: {$value}; }"),
+            "hides: {$value}"
+        );
+    }
+});
+
+test('hiddenContentProblems leaves a clip-path that still shows something', function () {
+    foreach ([
+        'inset(0 0 0 0)',
+        'inset(0)',
+        'inset(50% 0 0 0)',
+        'inset(0 0 99.9% 0)',
+        'inset(0 0 4rem 0)',
+        'circle(50%)',
+        'circle(12px at center)',
+        'polygon(0 0, 100% 0, 100% 100%)',
+        'var(--clip)',
+        'none',
+    ] as $value) {
+        assert_eq(
+            [],
+            CssChecks::hiddenContentProblems(".a { clip-path: {$value}; }"),
+            "visible: {$value}"
+        );
+    }
+});
+
+test('selectorNamesMotionClass reads the whole selector, not just its subject', function () {
+    foreach ([
+        '.reveal-up',
+        '.stagger-children > *',
+        '.stagger-children > *:nth-child(2)',
+        '.gradient-shift',
+        '.hero-entrance .card',
+        '.wp-block-group:is(.reveal-fade, .card)',
+        '.reveal-left',       // an invented variant the kit ships no CSS for
+        '.is-visible',        // the JS-owned state class
+    ] as $selector) {
+        assert_true(CssChecks::selectorNamesMotionClass($selector), "kit selector: {$selector}");
+    }
+
+    foreach ([
+        '.text-measure',
+        '.overlap-up',
+        '.wp-block-cover__inner-container',
+        '.card[data-motion=".reveal-up"]',   // an attribute value is not a class
+        '.card::after',
+        'h1',
+    ] as $selector) {
+        assert_true(!CssChecks::selectorNamesMotionClass($selector), "ordinary selector: {$selector}");
+    }
+});
+
+test('dropMotionKitDeclarations removes only kit rules and leaves every other byte', function () {
+    // The exact shape pulso2 shipped, trimmed to two rules plus a neighbour.
+    $css = 'body{-webkit-font-smoothing:antialiased}'
+        . '.device--hairline-rule{border-top:1px solid currentColor}'
+        . '@media (prefers-reduced-motion: no-preference){'
+        . '.reveal-up{opacity:0;transform:translate3d(0,2.75rem,0);clip-path:inset(0 0 100% 0);'
+        . 'animation:nn-reveal-up 1.15s ease both;animation-timeline:view()}'
+        . '.stagger-children>*:nth-child(2){animation-delay:.09s}'
+        . '.text-measure{max-width:38rem}'
+        . '}'
+        . '@keyframes nn-reveal-up{to{opacity:1;clip-path:inset(0 0 0 0)}}';
+
+    [$repaired, $dropped] = CssChecks::dropMotionKitDeclarations($css);
+
+    assert_eq([
+        'opacity:0',
+        'transform:translate3d(0,2.75rem,0)',
+        'clip-path:inset(0 0 100% 0)',
+        'animation:nn-reveal-up 1.15s ease both',
+        'animation-timeline:view()',
+        'animation-delay:.09s',
+    ], $dropped);
+
+    // Emptied kit rules stay as inert bytes; everything else is untouched,
+    // including the now-unreferenced keyframe, which renders nothing.
+    assert_eq(
+        'body{-webkit-font-smoothing:antialiased}'
+        . '.device--hairline-rule{border-top:1px solid currentColor}'
+        . '@media (prefers-reduced-motion: no-preference){'
+        . '.reveal-up{}'
+        . '.stagger-children>*:nth-child(2){}'
+        . '.text-measure{max-width:38rem}'
+        . '}'
+        . '@keyframes nn-reveal-up{to{opacity:1;clip-path:inset(0 0 0 0)}}',
+        $repaired
+    );
+
+    // Idempotent: a repair pass must reach a fixed point.
+    [$again, $droppedAgain] = CssChecks::dropMotionKitDeclarations($repaired);
+    assert_eq($repaired, $again);
+    assert_eq([], $droppedAgain);
+});
+
+test('dropMotionKitDeclarations leaves CSS that names no motion class alone', function () {
+    $css = '.text-measure{max-width:38rem}.overlap-up{margin-top:-3.5rem}';
+    [$repaired, $dropped] = CssChecks::dropMotionKitDeclarations($css);
+    assert_eq($css, $repaired, 'byte-for-byte');
+    assert_eq([], $dropped);
+});
+
+test('a clip-path entrance inside @keyframes is legal, a hidden resting state is not', function () {
+    // Regression (BIGR-887): the check scanned the whole stylesheet with no
+    // context, so a wipe-in and an iris-in — the two canonical clip-path
+    // entrances — were reported as hidden content. The opacity check the two
+    // callers run alongside this one is keyframe-aware for exactly this
+    // reason: a hidden START state is legal, a hidden REST state is not.
+    foreach ([
+        '@keyframes custom-motion-wipe{from{clip-path:inset(0 0 100% 0)}to{clip-path:inset(0 0 0 0)}}',
+        '@keyframes custom-motion-iris{from{clip-path:circle(0)}to{clip-path:circle(75%)}}',
+        '@keyframes custom-motion-x{0%{clip-path:inset(100% 0 0 0)}100%{clip-path:inset(0)}}',
+    ] as $css) {
+        assert_eq([], CssChecks::hiddenContentProblems($css), $css);
+    }
+
+    // Outside keyframes it is still a defect.
+    assert_eq(
+        ['clip-path clips generated content away entirely: inset(0 0 100% 0)'],
+        CssChecks::hiddenContentProblems('.reveal-up{clip-path:inset(0 0 100% 0)}')
+    );
+    // And a rule beside a legal keyframe is still judged.
+    assert_eq(
+        ['clip-path clips generated content away entirely: circle(0)'],
+        CssChecks::hiddenContentProblems(
+            '@keyframes custom-motion-iris{from{clip-path:circle(0)}to{clip-path:circle(75%)}}'
+            . '.custom-motion{clip-path:circle(0)}'
+        )
+    );
+});
+
+test('one repeated clip-path value is reported once', function () {
+    assert_eq(
+        1,
+        count(CssChecks::hiddenContentProblems(
+            '.a{clip-path:inset(0 0 100% 0)}.b{clip-path:inset(0 0 100% 0)}'
+        ))
+    );
+});
+
+test('a kit class as an ANCESTOR removes only what can hide or animate', function () {
+    // Regression (BIGR-887): the scrub deleted the whole declaration set of
+    // any rule with a kit class anywhere in its selector, so ordinary design
+    // intent on an element that merely lives inside a kit element was
+    // silently removed. Rung 3 asks for the smallest cut.
+    [$out, $dropped] = CssChecks::dropMotionKitDeclarations(
+        '.hero-entrance h1{letter-spacing:-0.03em;max-width:18ch;opacity:0;transform:translateY(2rem)}'
+    );
+    assert_eq(['opacity:0', 'transform:translateY(2rem)'], $dropped, 'only the motion-capable half');
+    assert_contains('letter-spacing:-0.03em', $out, 'the type survives');
+    assert_contains('max-width:18ch', $out, 'and the layout');
+
+    // The rule's SUBJECT being a kit class still removes everything: it is
+    // styling the kit element itself.
+    [, $all] = CssChecks::dropMotionKitDeclarations('.reveal-up{opacity:0;color:red}');
+    assert_eq(['opacity:0', 'color:red'], $all);
+
+    // motion.js registers `.stagger-children > *` itself, so that IS the kit.
+    [, $stagger] = CssChecks::dropMotionKitDeclarations('.stagger-children>*{opacity:0;margin-block:0}');
+    assert_eq(['opacity:0', 'margin-block:0'], $stagger);
+});
+
+test('excluded and relational kit references do not make the selected element kit-owned', function () {
+    // `.card:not(.reveal-up)` deliberately excludes kit elements.
+    [$out, $dropped] = CssChecks::dropMotionKitDeclarations('.card:not(.reveal-up){border:1px solid}');
+    assert_eq([], $dropped);
+    assert_eq('.card:not(.reveal-up){border:1px solid}', $out, 'byte-for-byte');
+
+    $excluded = '.card:not(.reveal-up){opacity:0}';
+    [$excludedOut, $excludedDrops] = CssChecks::dropMotionKitDeclarations($excluded);
+    assert_eq([], $excludedDrops, ':not() names what this selector cannot target');
+    assert_eq($excluded, $excludedOut, 'byte-for-byte');
+
+    $relational = '.shell:has(.reveal-up) .card{opacity:0}';
+    [$relationalOut, $relationalDrops] = CssChecks::dropMotionKitDeclarations($relational);
+    assert_eq([], $relationalDrops, ':has() selects a container, not the kit descendant');
+    assert_eq($relational, $relationalOut, 'byte-for-byte');
+});
+
+test('a kit ancestor loses a declaration that hides, judged by value not by name', function () {
+    // The scrub's only caller is ThemeJsonStep, whose custom CSS never reaches
+    // hiddenContentProblems(). Narrowing the ancestor cut to motion-capable
+    // properties must not drop `display: none` out of every guard at once.
+    foreach (['display:none', 'visibility:hidden', 'clip-path:inset(0 0 100% 0)'] as $declaration) {
+        [$out, $dropped] = CssChecks::dropMotionKitDeclarations(
+            '.hero-entrance h1{letter-spacing:-0.03em;' . $declaration . '}'
+        );
+        assert_eq([$declaration], $dropped, $declaration);
+        assert_contains('letter-spacing:-0.03em', $out, 'the type still survives');
+    }
+
+    // And `display` is judged by VALUE: naming the property outright would
+    // delete ordinary layout under any kit ancestor, which is the over-reach
+    // this branch exists to stop.
+    foreach ([
+        '.hero-entrance .row{display:flex;gap:1rem}',
+        '.hero-entrance .grid{display:grid}',
+        '.hero-entrance h1{display:block}',
+        '.hero-entrance .perf{content-visibility:auto}',
+    ] as $css) {
+        [$kept, $none] = CssChecks::dropMotionKitDeclarations($css);
+        assert_eq($css, $kept, 'byte-for-byte: ' . $css);
+        assert_eq([], $none, $css);
+    }
+});
+
+test('isMotionCapableProperty separates choreography from ordinary design', function () {
+    foreach ([
+        'opacity', 'visibility', 'clip-path', 'filter', 'backdrop-filter', 'will-change',
+        'transform', 'transform-origin', 'translate', 'rotate', 'scale',
+        'animation', 'animation-name', 'animation-timeline', 'transition', 'transition-delay',
+        '-webkit-transform',
+    ] as $property) {
+        assert_true(CssChecks::isMotionCapableProperty($property), $property);
+    }
+    // `display` belongs here and not above: the ancestor cut judges it by
+    // value, so `display: flex` survives and `display: none` does not.
+    foreach ([
+        'color', 'background-color', 'letter-spacing', 'max-width', 'margin-block',
+        'border', 'font-size', 'padding', 'gap', 'transformation', 'displays',
+        'display', 'content-visibility',
+    ] as $property) {
+        assert_true(!CssChecks::isMotionCapableProperty($property), $property);
     }
 });

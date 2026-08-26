@@ -1,0 +1,11 @@
+{
+    "id": "c3",
+    "label": "clean",
+    "palette": {
+        "base": "#FFFDF9",
+        "contrast": "#14181C",
+        "primary": "#2E4A63",
+        "secondary": "#4E6274",
+        "accent": "#9E4E07"
+    }
+}

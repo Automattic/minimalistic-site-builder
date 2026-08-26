@@ -64,6 +64,20 @@ use Automattic\SiteBuild\ProjectStore;
 
 require_once __DIR__ . '/../src/bootstrap.php';
 
+// Playground's find_free_port() probes ports without reserving them and scans
+// up to 50 past the requested one, so concurrent children whose scan windows
+// overlap can converge on the SAME free port and race to bind it (the losers
+// die with EADDRINUSE). Spacing the per-site base ports by that same scan
+// range keeps the windows disjoint, so no two children can collide.
+const PORT_STRIDE = 50;
+// File-scope functions below stay registered when this file is required as a
+// library (tests). Skip the CLI body unless we are the entry script.
+$siteBuildDemosIsMain = isset($argv[0]) && is_string($argv[0])
+    && ($argv0 = realpath($argv[0])) !== false
+    && $argv0 === realpath(__FILE__);
+
+if ($siteBuildDemosIsMain) {
+
 $args = parse_cli_args($argv, [
     '--with-images'  => 'bool',
     '--html-first'   => 'bool',
@@ -77,10 +91,11 @@ $args = parse_cli_args($argv, [
     '--file'         => 'value',
     '--serve'        => 'toggle',
     '--screenshot'   => 'toggle',
+    '--motion'       => 'bool',
 ]);
 if ($args['unknown'] !== null) {
     fwrite(STDERR, "Unknown argument: {$args['unknown']}\n");
-    fwrite(STDERR, "Usage: php bin/build-demos.php [--html-first|--blocks-first] [--multi-page] [--pages=\"Home, Menu, About\"] [--with-images] [--only=<slug>] [--provider=anthropic|openai|xai|openrouter] [--parallel=<n>] [--no-screenshot] [--serve] [--port=9400] [--no-serve] [--file=<path>]\n");
+    fwrite(STDERR, "Usage: php bin/build-demos.php [--html-first|--blocks-first] [--multi-page] [--pages=\"Home, Menu, About\"] [--with-images] [--only=<slug>] [--provider=anthropic|openai|xai|openrouter] [--parallel=<n>] [--no-screenshot] [--motion] [--serve] [--port=9400] [--no-serve] [--file=<path>]\n");
     exit(1);
 }
 $flags = $args['flags'];
@@ -92,6 +107,7 @@ $pagesArg = $flags['--pages'] ?? null;
 $only = $flags['--only'] ?? null;
 $serve = $flags['--serve'] ?? false;
 $screenshot = $flags['--screenshot'] ?? true;
+$shotMotion = $flags['--motion'] ?? false;
 // 0 = provider-aware default (all entries; OpenRouter <= 3)
 $parallel = isset($flags['--parallel']) ? max(1, (int) $flags['--parallel']) : 0;
 $port = (int) ($flags['--port'] ?? 9400);
@@ -244,12 +260,6 @@ foreach ($jobs as $i => $job) {
     ];
 }
 
-// Playground's find_free_port() probes ports without reserving them and scans
-// up to 50 past the requested one, so concurrent children whose scan windows
-// overlap can converge on the SAME free port and race to bind it (the losers
-// die with EADDRINUSE). Spacing the per-site base ports by that same scan
-// range keeps the windows disjoint, so no two children can collide.
-const PORT_STRIDE = 50;
 
 // Capture a full-page screenshot of each home page as visual testing evidence
 // (projects/<slug>/logs/home.png). Each child boots its site headless in
@@ -262,13 +272,12 @@ if ($screenshot && $built !== []) {
     foreach ($built as $i => $b) {
         $shotJobs[] = [
             'slug' => $b['slug'],
-            'argv' => [
-                'php',
-                repo_path('bin/screenshot.php'),
+            'argv' => demo_screenshot_argv(
                 $b['slug'],
-                '--port=' . ($port + $i * PORT_STRIDE),
-                '--out=' . $b['path'] . '/logs/home.png',
-            ],
+                $b['path'] . '/logs/home.png',
+                $port + $i * PORT_STRIDE,
+                $shotMotion
+            ),
             'cwd' => repo_path(),
         ];
     }
@@ -319,6 +328,27 @@ if ($serve && $built !== []) {
 }
 
 exit($exitCode);
+
+}
+
+/**
+ * Build one screenshot child argv; pure so option forwarding is testable.
+ * These go to ProcessPool as an argv list, never a shell string, so each
+ * element is passed through verbatim and needs no quoting.
+ *
+ * @return list<string>
+ */
+function demo_screenshot_argv(string $slug, string $out, int $port, bool $motion): array
+{
+    return [
+        'php',
+        repo_path('bin/screenshot.php'),
+        $slug,
+        '--port=' . $port,
+        '--out=' . $out,
+        ...($motion ? ['--motion'] : []),
+    ];
+}
 
 /** Prefix every non-terminal line without inventing output after a trailing newline. */
 function prefix_child_lines(string $slug, string $output): string

@@ -225,3 +225,289 @@ test('the pinned serializer emits the fitted size and drops the !important prese
         'attr stays canonical',
     );
 });
+
+// ── Masthead promotion (BIGR-883) ───────────────────────────────────────────
+// lumen3/atlas3/pulso3 all shipped their hero h1 at `section-title`, the same
+// preset every section h2 below it uses, so the first screen read as a caption
+// over a photograph. `display` exists for the masthead and nothing else.
+
+/** A theme whose display and section-title presets are both resolvable. */
+function hhf_scale_theme(array $overrides = []): array
+{
+    return array_replace_recursive([
+        'settings' => [
+            'layout' => ['contentSize' => '840px'],
+            'typography' => ['fontSizes' => [
+                ['slug' => 'body', 'size' => '1.125rem'],
+                ['slug' => 'section-title', 'size' => 'clamp(2.25rem, 3vw, 3rem)'],
+                ['slug' => 'display', 'size' => 'clamp(3rem, 6.4vw, 5.75rem)'],
+            ]],
+        ],
+    ], $overrides);
+}
+
+/** A hero copy group holding one h1 at the given preset. */
+function hhf_scale_hero(string $headline, string $preset = 'section-title'): string
+{
+    $attr = $preset === '' ? '' : ',"fontSize":"' . $preset . '"';
+    $class = $preset === '' ? '' : ' has-' . $preset . '-font-size';
+    return '<!-- wp:group {"className":"hero-composition__copy","layout":{"type":"constrained","contentSize":"720px"}} -->'
+        . '<div class="wp-block-group hero-composition__copy">'
+        . '<!-- wp:heading {"level":1' . $attr . '} -->'
+        . '<h1 class="wp-block-heading' . $class . '">' . $headline . '</h1>'
+        . '<!-- /wp:heading --></div>'
+        . '<!-- /wp:group -->';
+}
+
+test('a hero h1 below the masthead preset is promoted to display', function () {
+    $r = HeroHeadlineFit::apply(
+        hhf_scale_hero('Glass Given a Second Life as Light'),
+        hhf_scale_theme(),
+        [1, 2],
+    );
+
+    assert_true(!str_contains($r['markup'], '"fontSize":"section-title"'), 'the section preset is gone');
+    // Block comments escape `--`, so the CSS form is only readable once the
+    // serializer has regenerated the saved HTML — which is what fix-blocks
+    // does right after this step.
+    $out = (new Serializer())->transform($r['markup'])->html;
+    assert_contains('font-size:min(var(--wp--preset--font-size--display)', $out, 'display carries the size');
+    // The preset CLASS must go with the preset attr: core renders
+    // `.has-section-title-font-size` with !important, which would beat the
+    // pinned inline size and silently keep the old scale.
+    assert_true(!str_contains($out, 'has-section-title-font-size'), 'the stale preset class is gone too');
+    assert_contains('promoted to the display preset', implode("\n", $r['notes']));
+});
+
+test('promotion respects the blueprint desktop line target', function () {
+    $headline = 'Glass Given a Second Life as Light';
+
+    // A 2-line target in a 720px measure cannot take the full display max.
+    $tight = HeroHeadlineFit::apply(hhf_scale_hero($headline), hhf_scale_theme(), [1, 2]);
+    $tightHtml = (new Serializer())->transform($tight['markup'])->html;
+    assert_true(
+        preg_match('/min\(var\(--wp--preset--font-size--display\), (\d+)px\)/', $tightHtml, $m) === 1,
+        'a bounded promotion pins a cap'
+    );
+    $cap = (int) $m[1];
+    assert_true($cap > 48, "the cap {$cap}px must beat the section-title maximum of 48px");
+    assert_true($cap < 92, "the cap {$cap}px must sit under the display maximum of 92px");
+
+    // A roomier target lets the headline run larger.
+    $loose = HeroHeadlineFit::apply(hhf_scale_hero($headline), hhf_scale_theme(), [1, 4]);
+    $looseHtml = (new Serializer())->transform($loose['markup'])->html;
+    preg_match('/min\(var\(--wp--preset--font-size--display\), (\d+)px\)/', $looseHtml, $m2);
+    assert_true(
+        $loose['markup'] === $tight['markup'] || (int) ($m2[1] ?? 999) > $cap,
+        'a looser line target never produces a SMALLER headline'
+    );
+
+    // With no target at all the plain preset ships; only the word fit bounds it.
+    $none = HeroHeadlineFit::apply(hhf_scale_hero('Light'), hhf_scale_theme(), null);
+    assert_contains('"fontSize":"display"', $none['markup'], 'no target means the plain preset');
+});
+
+test('promotion leaves a heading that already clears the masthead bar', function () {
+    // Already at display: nothing to raise.
+    $atDisplay = hhf_scale_hero('Two Nights of Electronic Dreams', 'display');
+    assert_eq(
+        $atDisplay,
+        HeroHeadlineFit::apply($atDisplay, hhf_scale_theme(), [1, 3])['markup'],
+        'byte-identical'
+    );
+
+    // An explicit authored size is an author's decision, not a model default.
+    $pinned = '<!-- wp:group {"className":"hero-composition__copy","layout":{"type":"constrained","contentSize":"720px"}} -->'
+        . '<div class="wp-block-group hero-composition__copy">'
+        . '<!-- wp:heading {"level":1,"style":{"typography":{"fontSize":"5rem"}}} -->'
+        . '<h1 class="wp-block-heading">Held At Five Rem</h1>'
+        . '<!-- /wp:heading --></div><!-- /wp:group -->';
+    assert_eq($pinned, HeroHeadlineFit::apply($pinned, hhf_scale_theme(), [1, 3])['markup'], 'byte-identical');
+});
+
+test('promotion never makes the headline smaller than the model chose', function () {
+    // A very long headline in a 1-line target would compute a cap far below
+    // the section-title preset it already has. Promoting there would be a
+    // demotion wearing the display preset's name, so the pass declines.
+    $long = hhf_scale_hero(
+        'An Extraordinarily Long Masthead Sentence That Cannot Possibly Fit On One Single Line'
+    );
+    assert_eq($long, HeroHeadlineFit::apply($long, hhf_scale_theme(), [1, 1])['markup'], 'byte-identical');
+});
+
+test('a below-display masthead still gets the impossible-word hyphenation escape', function () {
+    // Review regression: promotion used to return before the ordinary word-fit
+    // loop, but that loop only visits display headings. The original
+    // section-title heading therefore kept overflowing with no escape at all.
+    $markup = str_replace(
+        '"contentSize":"720px"',
+        '"contentSize":"320px"',
+        hhf_scale_hero('Rechtsschutzversicherungen'),
+    );
+    $first = HeroHeadlineFit::apply($markup, hhf_scale_theme(), [1, 2]);
+
+    assert_contains('"fontSize":"section-title"', $first['markup'], 'the safer existing scale survives');
+    assert_contains('"className":"headline-hyphenate"', $first['markup'], 'hyphenation is opted in');
+    assert_contains('opted into hyphenation', implode("\n", $first['notes']));
+
+    $second = HeroHeadlineFit::apply($first['markup'], hhf_scale_theme(), [1, 2]);
+    assert_eq($first['markup'], $second['markup'], 'fixed point');
+    assert_eq([], $second['notes'], 'and silent on the second pass');
+});
+
+test('promotion only ever touches the page masthead h1', function () {
+    // A section heading in the hero keeps its own scale.
+    $withH2 = '<!-- wp:group {"className":"hero-composition__copy","layout":{"type":"constrained","contentSize":"720px"}} -->'
+        . '<div class="wp-block-group hero-composition__copy">'
+        . '<!-- wp:heading {"level":2,"fontSize":"section-title"} -->'
+        . '<h2 class="wp-block-heading has-section-title-font-size">A Section Heading</h2>'
+        . '<!-- /wp:heading --></div><!-- /wp:group -->';
+    assert_eq($withH2, HeroHeadlineFit::apply($withH2, hhf_scale_theme(), [1, 2])['markup'], 'byte-identical');
+});
+
+test('promotion reaches a fixed point', function () {
+    $theme = hhf_scale_theme();
+    $once = HeroHeadlineFit::apply(hhf_scale_hero('Glass Given a Second Life as Light'), $theme, [1, 2]);
+    $twice = HeroHeadlineFit::apply($once['markup'], $theme, [1, 2]);
+    assert_eq($once['markup'], $twice['markup'], 'idempotent');
+    assert_eq([], $twice['notes'], 'and silent on the second pass');
+});
+
+test('promotion is bounded by the WORD fit, not only the line target', function () {
+    // Blocker found in review: promotion writes an explicit size, and the
+    // word-fit loop deliberately skips any heading that has one — so a
+    // promoted heading was never word-checked at all. "Transcontinental" in a
+    // 720px measure fits no size above 74px, but the line target alone pinned
+    // 83px. Hero headings are `overflow-wrap: normal`, and
+    // .hero-composition--layered-poster clips overflow, so that ships a
+    // masthead with its first word cut off at the column edge.
+    $r = HeroHeadlineFit::apply(
+        hhf_scale_hero('Transcontinental Ambition Rebuilt'),
+        hhf_scale_theme(),
+        [1, 2],
+    );
+    $out = (new Serializer())->transform($r['markup'])->html;
+    assert_true(
+        preg_match('/min\(var\(--wp--preset--font-size--display\), (\d+)px\)/', $out, $m) === 1,
+        'the heading is pinned'
+    );
+    $cap = (int) $m[1];
+
+    // The same headline entered at `display` goes through the word fit alone.
+    $wordOnly = HeroHeadlineFit::apply(
+        hhf_scale_hero('Transcontinental Ambition Rebuilt', 'display'),
+        hhf_scale_theme(),
+        [1, 2],
+    );
+    preg_match(
+        '/min\(var\(--wp--preset--font-size--display\), (\d+)px\)/',
+        (new Serializer())->transform($wordOnly['markup'])->html,
+        $w,
+    );
+    assert_eq(
+        (int) $w[1],
+        $cap,
+        'a promoted heading is bounded exactly as tightly as a display one'
+    );
+    assert_contains("so 'Transcontinental' fits the measure", implode("\n", $r['notes']));
+});
+
+test('promotion strips a stale preset class that lives only in the saved HTML', function () {
+    // Found in review. `fix-blocks` runs AFTER header-hero and rescues a class
+    // that has no matching attr, so keying the removal off the attr left
+    // `.has-section-title-font-size` — which core renders with !important —
+    // beating the inline pin. The headline then still renders at the section
+    // scale and BIGR-883 is not fixed at all.
+    $classOnly = '<!-- wp:group {"className":"hero-composition__copy","layout":{"type":"constrained","contentSize":"720px"}} -->'
+        . '<div class="wp-block-group hero-composition__copy">'
+        . '<!-- wp:heading {"level":1} -->'
+        . '<h1 class="wp-block-heading has-section-title-font-size">Glass Given a Second Life</h1>'
+        . '<!-- /wp:heading --></div><!-- /wp:group -->';
+
+    $out = (new Serializer())->transform(
+        HeroHeadlineFit::apply($classOnly, hhf_scale_theme(), [1, 2])['markup']
+    )->html;
+    assert_true(!str_contains($out, 'has-section-title-font-size'), 'the stale class is gone');
+    assert_true(
+        substr_count($out, '-font-size') <= 1,
+        'and no two conflicting preset classes survive together'
+    );
+});
+
+test('promotion declines when the headline cannot be measured or is empty', function () {
+    $theme = hhf_scale_theme();
+
+    // No resolvable measure anywhere in the chain: promoting would ship an
+    // unbounded display headline that neither bound has checked.
+    $noMeasure = '<!-- wp:group {"className":"hero-composition__copy","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group hero-composition__copy">'
+        . '<!-- wp:heading {"level":1,"fontSize":"section-title"} -->'
+        . '<h1 class="wp-block-heading has-section-title-font-size">Glass Given a Second Life</h1>'
+        . '<!-- /wp:heading --></div><!-- /wp:group -->';
+    $unitless = hhf_scale_theme(['settings' => ['layout' => ['contentSize' => '60vw']]]);
+    assert_eq($noMeasure, HeroHeadlineFit::apply($noMeasure, $unitless, [1, 2])['markup'], 'byte-identical');
+
+    // An empty headline has no scale worth promoting, and must not emit a note.
+    $empty = hhf_scale_hero('   ');
+    $r = HeroHeadlineFit::apply($empty, $theme, [1, 2]);
+    assert_eq($empty, $r['markup'], 'byte-identical');
+    assert_eq([], $r['notes'], 'and silent');
+});
+
+test('a malformed line target still bounds the headline', function () {
+    // Found in review: reading only [1] let `[2]` and `{}` fall through to an
+    // unbounded display preset.
+    foreach ([[2], ['max' => 2]] as $target) {
+        $out = (new Serializer())->transform(
+            HeroHeadlineFit::apply(
+                hhf_scale_hero('Glass Given a Second Life as Light'),
+                hhf_scale_theme(),
+                array_values($target),
+            )['markup']
+        )->html;
+        assert_true(
+            preg_match('/min\(var\(--wp--preset--font-size--display\), \d+px\)/', $out) === 1,
+            'the only number supplied is still used as the bound'
+        );
+    }
+});
+
+test('an extreme generated display maximum cannot become an unbounded search', function () {
+    $theme = hhf_scale_theme();
+    $theme['settings']['typography']['fontSizes'][2]['size'] = '1000000000px';
+
+    $out = (new Serializer())->transform(
+        HeroHeadlineFit::apply(
+            hhf_scale_hero('Glass Given a Second Life as Light'),
+            $theme,
+            [1, 2],
+        )['markup']
+    )->html;
+    assert_true(
+        preg_match('/min\(var\(--wp--preset--font-size--display\), (\d+)px\)/', $out, $m) === 1,
+        'the hostile maximum is reduced to a finite cap',
+    );
+    assert_true((int) $m[1] < 1000, 'the cap comes from the measure, not the hostile preset maximum');
+});
+
+test('a scalar style attr degrades instead of taking the build down', function () {
+    // Reading through a scalar is safe (`??` yields null); WRITING through it is
+    // a TypeError, and nothing between HeaderHeroStep and the CLI catches it.
+    // The promotion pass added the second write site, on the path this feature
+    // exists to trigger. FooterMarkup already repairs the same malformed shape.
+    foreach (['"style":"color:red"', '"style":{"typography":"big"}'] as $malformed) {
+        $markup = '<!-- wp:group {"className":"hero-composition__copy","layout":{"type":"constrained","contentSize":"720px"}} -->'
+            . '<div class="wp-block-group hero-composition__copy">'
+            . '<!-- wp:heading {"level":1,"fontSize":"section-title",' . $malformed . '} -->' . "\n"
+            . '<h1 class="wp-block-heading has-section-title-font-size">Glass Given a Second Life as Light</h1>'
+            . '<!-- /wp:heading --></div><!-- /wp:group -->';
+
+        $r = HeroHeadlineFit::apply($markup, hhf_scale_theme(), [1, 2]);
+        assert_contains('promoted to the display preset', implode("\n", $r['notes']));
+        assert_contains(
+            'font-size:min(var(--wp--preset--font-size--display)',
+            (new Serializer())->transform($r['markup'])->html,
+            'and the pin still lands'
+        );
+    }
+});

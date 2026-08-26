@@ -53,7 +53,7 @@ function dp3_integration_site_spec(): array
         'language' => 'en',
         'persona_name' => '',
         'email_domain' => 'northstar.example',
-        'invented' => ['name', 'email_domain'],
+        'invented' => ['name'],
         'sections' => ['Hero', 'Selected work'],
         'pages' => [
             ['slug' => 'home', 'title' => 'Home', 'purpose' => 'Welcome clients', 'children' => []],
@@ -111,8 +111,10 @@ function dp3_integration_preview(): string
         . '<meta name="viewport" content="width=device-width, initial-scale=1">'
         . '<style>:root{--content-size:800px;--wide-size:1280px;--ink:#192126;--paper:#f7f4ed}'
         . 'body{margin:0;color:var(--ink);background:var(--paper);font-family:Arial,sans-serif}'
+        . 'header{display:flex;flex-direction:row;flex-wrap:nowrap;align-items:center;justify-content:space-between}'
         . 'h1,h2{font-family:Georgia,serif}</style></head><body>'
-        . '<header><nav aria-label="Primary"><a href="/">Home</a></nav></header>'
+        . '<header><a class="brand" href="/">Northstar Studio</a>'
+        . '<nav aria-label="Primary"><a href="/about/">About</a></nav></header>'
         . '<main><section id="hero"><h1 class="has-display-font-size">NORTHSTAR-HERO</h1>'
         . '<img alt="AI_IMAGE: Designers reviewing print layouts on a long studio table | homepage hero beside editorial headline | photorealistic | landscape">'
         . '</section></main></body></html>';

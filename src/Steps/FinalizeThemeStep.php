@@ -43,6 +43,9 @@ use Automattic\SiteBuild\Warnings;
  *           resolved behavior, even when site motion is `none`; static headers
  *           prune the whole kit. The script is head-loaded so its fixed-overlay
  *           enhancement scope is present before paint.
+ *         - registers the theme's generated section and component patterns
+ *           under theme-scoped categories whose label comes from the delivered
+ *           theme header (or a deterministic project-slug fallback).
  *         - for a rounded shape commitment (`soft`/`round`), writes and
  *           enqueues the build-owned shape kit (assets/shape/shape.css) that
  *           rounds contained media surfaces theme.json cannot reach — the
@@ -100,7 +103,7 @@ final class FinalizeThemeStep implements Step
     public function run(Project $project): void
     {
         // Every read that can fail happens before the first write. A corrupt
-        // theme.json is fatal (AGENTS.md:53 puts a corrupt required artifact in
+        // theme.json is fatal (AGENTS.md "fix, degrade, warn" puts a corrupt required artifact in
         // the fatal list), and discovering that halfway through would leave the
         // theme half-written — a pruned kit with no functions.php naming it.
         $shape = DesignDirectionStep::shapeFor($project);
@@ -148,7 +151,13 @@ final class FinalizeThemeStep implements Step
         }
         $project->writeText(
             'theme/functions.php',
-            self::functionsPhp($project->slug(), $motion, $header, $overlays),
+            self::functionsPhp(
+                $project->slug(),
+                self::patternCategoryLabel($project),
+                $motion,
+                $header,
+                $overlays,
+            ),
         );
         Narrator::write($motion === null
             ? "  motion: none (kit not shipped)\n"
@@ -440,12 +449,15 @@ final class FinalizeThemeStep implements Step
      */
     private static function functionsPhp(
         string $slug,
+        string $patternCategoryLabel,
         ?string $motion,
         bool $header,
         array $overlays = [],
     ): string {
         $slug = ProjectStore::slugify($slug);
         $scopePrefix = PageScope::CLASS_PREFIX;
+        $patternSectionsLabel = var_export($patternCategoryLabel . ' sections', true);
+        $patternComponentsLabel = var_export($patternCategoryLabel . ' components', true);
 
         $motionEnqueues = '';
         $styleDeps = 'array()';
@@ -513,6 +525,13 @@ final class FinalizeThemeStep implements Step
                 {$editorStyles}
             });
 
+            register_block_pattern_category('{$slug}-sections', array(
+                'label' => {$patternSectionsLabel},
+            ));
+            register_block_pattern_category('{$slug}-components', array(
+                'label' => {$patternComponentsLabel},
+            ));
+
             // Carried design CSS is authored one page at a time; page-styles scopes
             // each page's chunk to this class, so the front end has to publish it.
             add_filter('body_class', function (\$classes) {
@@ -533,5 +552,21 @@ final class FinalizeThemeStep implements Step
             }
 
             PHP;
+    }
+
+    /** Shared label for the generated pattern categories. */
+    private static function patternCategoryLabel(Project $project): string
+    {
+        if ($project->exists('theme/style.css')) {
+            $style = $project->readText('theme/style.css');
+            if (preg_match('/^[ \t*]*Theme Name:[ \t]*(.*)$/mi', $style, $match) === 1) {
+                $label = trim($match[1]);
+                if ($label !== '') {
+                    return $label;
+                }
+            }
+        }
+
+        return ucwords(str_replace('-', ' ', ProjectStore::slugify($project->slug())));
     }
 }

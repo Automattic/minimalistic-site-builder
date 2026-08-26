@@ -6,6 +6,8 @@ use Automattic\SiteBuild\GroundTint;
 use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
 use Automattic\SiteBuild\Llm;
+use Automattic\SiteBuild\Measure;
+use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
@@ -40,7 +42,7 @@ function designdir_type(): array
 {
     return [
         'heading' => [
-            'family' => 'Fraunces',
+            'family' => 'Spectral',
             'weights' => [700, 900],
             'italic' => false,
             'axes' => ['opsz' => ['min' => 9, 'max' => 144]],
@@ -82,6 +84,44 @@ function designdir_card_rows(array $rows): array
     ));
 }
 
+test('design-direction persists and narrates an unexecutable ornament promise', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $llm->queueJson(['seeds' => designdir_seeds()]);
+    $authored = designdir_direction();
+    $authored['description'] = 'Delicate filigree runs along every band edge.';
+    $authored['device'] = 'none';
+    $llm->queueJson(['direction' => $authored]);
+
+    $sink = fopen('php://temp', 'w+');
+    Narrator::setStream($sink);
+    try {
+        (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    } finally {
+        Narrator::setStream(null);
+    }
+
+    $warnings = $project->readJson('warnings.json')['design-direction'] ?? [];
+    assert_eq(1, count($warnings), 'one defective sentence writes one durable row');
+    foreach ([
+        "file='designDirection.json'",
+        'path="description"',
+        'filigree',
+        'delivered=not executed',
+        'committed no device',
+    ] as $context) {
+        assert_contains($context, $warnings[0]);
+    }
+
+    rewind($sink);
+    assert_contains(
+        '[design-direction] warning: delivered through 1 generated-content degradation(s)',
+        (string) stream_get_contents($sink),
+        'the durable warning is also narrated live',
+    );
+    fclose($sink);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('design-direction expands a picked seed into structured designDirection.json', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
     $llm->queueJson(['seeds' => designdir_seeds()]);
@@ -94,10 +134,11 @@ test('design-direction expands a picked seed into structured designDirection.jso
     $written = $project->readJson('designDirection.json');
     assert_eq('Hearth & Grain', $written['title']);
     assert_eq('#FDF6EC', $written['palette']['base']);
-    assert_eq('Fraunces', $written['type']['heading']['family']);
+    assert_eq('Spectral', $written['type']['heading']['family']);
     assert_eq([700, 900], $written['type']['heading']['weights']);
     assert_eq('warm kodachrome color, soft golden light', $written['image_grade']);
     assert_eq('framed', $written['card_style']);
+    assert_eq(Measure::DEFAULT, $written['measure']);
     assert_true(!array_key_exists('signature_device', $written), 'signature_device field is gone');
     assert_true(in_array($written['hero_blueprint']['recipe'], HeroComposition::RECIPES, true));
     assert_contains('Seed ', $written['concept_seed']);
@@ -118,7 +159,7 @@ test('design-direction expands a picked seed into structured designDirection.jso
     assert_contains('cozy neighborhood bakery', $llm->calls[1]['prompt']);
     assert_contains('Hearth & Crumb', $llm->calls[1]['prompt']);
     assert_contains('Seed ', $llm->calls[1]['prompt'], 'a seed reached the expansion prompt');
-    foreach (['palette', 'type', 'image_grade', 'card_style', 'hero_blueprint'] as $field) {
+    foreach (['palette', 'type', 'image_grade', 'canvas', 'measure', 'card_style', 'hero_blueprint'] as $field) {
         assert_contains($field, $llm->calls[1]['prompt']);
     }
     assert_contains(
@@ -489,7 +530,7 @@ test('normalize keeps valid palette hexes, drops invalid ones, and requires a de
         ],
         'type'        => [
             'heading' => [
-                'family' => 'Fraunces',
+                'family' => 'Spectral',
                 'weights' => [900],
                 'italic' => false,
                 'axes' => [],
@@ -499,7 +540,7 @@ test('normalize keeps valid palette hexes, drops invalid ones, and requires a de
     ], 'cinematic-safe-zone');
     assert_eq('Forge & Flame', $direction['title']);
     assert_eq(['base' => '#FDF6EC', 'primary' => '#8A5A2B'], $direction['palette']);
-    assert_eq('Fraunces', $direction['type']['heading']['family']);
+    assert_eq('Spectral', $direction['type']['heading']['family']);
     assert_eq([900], $direction['type']['heading']['weights']);
     assert_eq('', $direction['type']['body']['family']);
     assert_eq('', $direction['image_grade']);
@@ -540,6 +581,7 @@ test('the seed and expansion prompts ask for the ground tint, and ban treatments
     $direction = $renderer->render('design-direction.md', [
         'user_prompt' => 'a bakery', 'site_spec' => '{}', 'seed' => 'Seed',
         'hero_composition' => '', 'ground_tint' => 'violet',
+        'register' => 'editorial', 'type_register' => 'didone',
     ]);
     assert_contains('ground_tint', $direction, 'the expansion commits the field the build enforces');
     assert_contains('violet', $direction, 'and is told which family the seed chose');
@@ -675,7 +717,7 @@ test('design-direction persists structured typography and warns when an axis is 
     $direction = designdir_direction();
     $direction['type'] = [
         'heading' => [
-            'family' => 'Fraunces',
+            'family' => 'Spectral',
             'weights' => [700, 900],
             'italic' => false,
             'axes' => ['opsz' => ['min' => 9, 'max' => 144]],
@@ -694,7 +736,7 @@ test('design-direction persists structured typography and warns when an axis is 
     (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
 
     $written = $project->readJson('designDirection.json');
-    assert_eq('Fraunces', $written['type']['heading']['family']);
+    assert_eq('Spectral', $written['type']['heading']['family']);
     assert_eq([700, 900], $written['type']['heading']['weights']);
     assert_eq(['opsz' => ['min' => 9, 'max' => 144]], $written['type']['heading']['axes']);
     assert_eq(true, $written['type']['body']['italic']);
@@ -742,7 +784,7 @@ test('format renders the narrative plus the structured fact list', function () {
         'palette'          => ['base' => '#F4F1EA', 'accent' => '#C33F2E'],
         'type'             => [
             'heading' => [
-                'family' => 'Fraunces',
+                'family' => 'Spectral',
                 'weights' => [900],
                 'italic' => false,
                 'axes' => [],
@@ -762,7 +804,7 @@ test('format renders the narrative plus the structured fact list', function () {
     ]);
     assert_contains('# Archivo Silencioso', $text);
     assert_contains('base #F4F1EA', $text);
-    assert_contains('heading — Fraunces; weights 900; body — Source Sans 3; weights 400', $text);
+    assert_contains('heading — Spectral; weights 900; body — Source Sans 3; weights 400', $text);
     assert_contains('monochrome documentary', $text);
     assert_true(!str_contains($text, 'editorial-split'), 'general format excludes hero recipe');
     assert_true(!str_contains($text, 'must stay hidden'), 'general format excludes concept seed');
@@ -776,7 +818,7 @@ test('format renders structured typography without losing its design character',
         'description' => 'Print-led warmth.',
         'type' => [
             'heading' => [
-                'family' => 'Fraunces',
+                'family' => 'Spectral',
                 'weights' => [700, 900],
                 'italic' => false,
                 'axes' => ['opsz' => ['min' => 9.0, 'max' => 144.0]],
@@ -792,7 +834,7 @@ test('format renders structured typography without losing its design character',
         ],
     ]);
 
-    assert_contains('heading — Fraunces; weights 700/900; opsz 9..144; swaggering display serif', $text);
+    assert_contains('heading — Spectral; weights 700/900; opsz 9..144; swaggering display serif', $text);
     assert_contains('body — Source Serif 4; weights 400/600; true italics; warm editorial text', $text);
 });
 
@@ -813,6 +855,47 @@ test('format renders the canvas commitment with its executable meaning', functio
 
     // Directions persisted before the field existed carry no canvas fact.
     assert_eq('Just prose.', DesignDirectionStep::format(['description' => 'Just prose.']));
+});
+
+test('normalize commits and renders one bounded measure with framed-canvas meaning', function () {
+    foreach (Measure::ALL as $measure) {
+        $warnings = [];
+        $direction = DesignDirectionStep::normalize([
+            'description' => 'x',
+            'canvas' => $measure === 'narrow' ? 'framed' : 'full-bleed',
+            'measure' => strtoupper($measure),
+            'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
+        ], 'cinematic-safe-zone', '', warnings: $warnings);
+
+        assert_eq($measure, $direction['measure']);
+        assert_eq([], $warnings);
+        assert_contains('**Measure**: ' . $measure, DesignDirectionStep::format($direction));
+    }
+
+    $framed = DesignDirectionStep::format([
+        'description' => 'x',
+        'canvas' => 'framed',
+        'measure' => 'narrow',
+    ]);
+    assert_contains('640px reading column inside a 1000px wide stage', $framed);
+    assert_contains('visible frame edge below the full-bleed hero', $framed);
+});
+
+test('invalid measure degrades to standard with actionable evidence', function () {
+    foreach (['panoramic', ['wide'], true] as $authored) {
+        $warnings = [];
+        $direction = DesignDirectionStep::normalize([
+            'description' => 'x',
+            'measure' => $authored,
+            'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
+        ], 'cinematic-safe-zone', '', warnings: $warnings);
+
+        assert_eq(Measure::DEFAULT, $direction['measure']);
+        assert_eq(1, count($warnings));
+        assert_contains('field measure', $warnings[0]);
+        assert_contains('delivered "standard"', $warnings[0]);
+        assert_contains('disposition', $warnings[0]);
+    }
 });
 
 test('normalize commits a card style: bounded values pass through and missing defaults without warning', function () {
@@ -1180,6 +1263,7 @@ test('fallbackDirection builds on the chosen seed, generic brief otherwise', fun
 
     $generic = DesignDirectionStep::fallbackDirection('', 'cinematic-safe-zone');
     assert_contains('bold', $generic['description']);
+    assert_eq(Measure::DEFAULT, $generic['measure']);
     assert_eq('calm', $generic['motion']);
 });
 
@@ -1266,7 +1350,7 @@ test('theme-json injects the design direction into its prompt', function () {
         'palette'     => ['base' => '#FDF6EC'],
         'type'        => [
             'heading' => [
-                'family' => 'Fraunces',
+                'family' => 'Spectral',
                 'weights' => [900],
                 'italic' => false,
                 'axes' => [],
@@ -1292,7 +1376,7 @@ test('theme-json injects the design direction into its prompt', function () {
     assert_contains('Editorial-magazine', $llm->calls[0]['prompt']);
     assert_contains('base #FDF6EC', $llm->calls[0]['prompt'], 'structured palette reaches the theme prompt');
     assert_contains(
-        'heading — Fraunces; weights 900',
+        'heading — Spectral; weights 900',
         $llm->calls[0]['prompt'],
         'structured type reaches the theme prompt',
     );
@@ -1596,18 +1680,40 @@ test('legacy signature-device fields are dropped from the normalized direction',
     assert_true(!array_key_exists('signature_device_use', $direction['hero_blueprint']));
 });
 
-test('every cataloged hero recipe bears an image (the image-free poster is retired)', function () {
-    foreach (Automattic\SiteBuild\HeroComposition::RECIPES as $recipe) {
-        $meta = Automattic\SiteBuild\HeroComposition::metadata($recipe);
-        assert_true((int) $meta['min_images'] >= 1, "{$recipe} carries at least one image");
-    }
-    // Automatic selection therefore always lands on an image-bearing recipe.
+test('automatic hero selection keeps the image gate aligned with each catalog media budget (BIGR-885)', function () {
+    // type-manifesto reopened the imageless shape, so the old "every recipe
+    // bears an image" invariant is gone. The invariant that replaces it: the
+    // image gate always agrees with the selected recipe's own budget, so an
+    // unconstrained build never generates an orphan image and never leaves an
+    // image-bearing recipe without one.
+    $imageless = array_values(array_filter(
+        Automattic\SiteBuild\HeroComposition::RECIPES,
+        fn (string $recipe): bool
+            => (int) Automattic\SiteBuild\HeroComposition::metadata($recipe)['max_images'] === 0,
+    ));
+    assert_eq(['type-manifesto'], $imageless);
+
+    $selected = [];
     foreach (range(1, 16) as $i) {
         $w = [];
         $recipe = DesignDirectionStep::selectHeroRecipe([], "gate-site-{$i}", 'Committed seed', $w);
-        assert_true((int) Automattic\SiteBuild\HeroComposition::metadata($recipe)['min_images'] >= 1);
+        $meta = Automattic\SiteBuild\HeroComposition::metadata($recipe);
+        assert_eq(
+            (int) $meta['min_images'] >= 1,
+            Automattic\SiteBuild\HeroComposition::usesGeneratedImages($recipe),
+            $recipe,
+        );
+        assert_eq(
+            (int) $meta['min_images'] >= 1,
+            Automattic\SiteBuild\HeroComposition::usesGeneratedImages(
+                HeroBlueprint::defaultFor($recipe),
+            ),
+            $recipe,
+        );
         assert_eq([], $w);
+        $selected[$recipe] = true;
     }
+    assert_true(count($selected) > 1, 'unconstrained selection spreads across the catalog');
 });
 
 test('shapeFor returns only an explicit valid commitment', function () {
@@ -1624,6 +1730,19 @@ test('shapeFor returns only an explicit valid commitment', function () {
 
     $project->writeJson('designDirection.json', ['description' => 'x', 'shape' => ' Round ']);
     assert_eq('round', DesignDirectionStep::shapeFor($project));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('measureFor returns only an explicit valid persisted commitment', function () {
+    $tmp = sys_get_temp_dir() . '/builder_ddmeasure_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+
+    assert_eq(null, DesignDirectionStep::measureFor($project));
+    $project->writeJson('designDirection.json', ['measure' => ['wide']]);
+    assert_eq(null, DesignDirectionStep::measureFor($project));
+    $project->writeJson('designDirection.json', ['measure' => ' Full ']);
+    assert_eq('full', DesignDirectionStep::measureFor($project));
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

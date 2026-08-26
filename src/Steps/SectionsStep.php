@@ -30,6 +30,7 @@ use Automattic\SiteBuild\Units\HeaderUnit;
 use Automattic\SiteBuild\Units\HeroUnit;
 use Automattic\SiteBuild\Units\MarkupUnit;
 use Automattic\SiteBuild\Units\SectionUnit;
+use Automattic\SiteBuild\FormPlaceholder;
 use Automattic\SiteBuild\Warnings;
 
 /**
@@ -77,12 +78,29 @@ final class SectionsStep implements Step
         return SectionUnit::partKey($pageSlug, $sectionSlug);
     }
 
-    /** {{nav_rule}} for header.md when the site has inner pages to list. */
-    private const NAV_RULE_MULTI = '- Navigation: NEVER include the homepage in `wp:navigation`. `wp:site-title` and'
-        . ' `wp:site-logo` already link home — a Home item is redundant. Do NOT use `<!-- wp:page-list /-->`'
+    /**
+     * {{nav_rule}} for header.md when the site has inner pages to list.
+     *
+     * Completeness is owned by every archetype: a header that omits an inner
+     * page is the BIGR-872 defect regardless of shape. The row-shape half is
+     * NOT universal — centered-masthead stacks the wordmark over the nav and
+     * split-nav puts links on both sides by catalog definition, so those two
+     * take the completeness clause alone. Forbidding their own form in the
+     * same prompt that assigns it is a contradiction the model resolves at
+     * random.
+     */
+    private const NAV_RULE_COMPLETE = '- Navigation: NEVER include the homepage in `wp:navigation`. `wp:site-title`'
+        . ' and `wp:site-logo` already link home — a Home item is redundant. Do NOT use `<!-- wp:page-list /-->`'
         . ' (it lists every page, including Home) and do NOT emit `wp:home-link`. Hand-author'
-        . ' `wp:navigation-link` entries for SITE PAGES except the front page (split-nav splits those'
-        . ' same inner pages across the two navs).';
+        . ' `wp:navigation-link` entries for EVERY SITE PAGES entry except the front page — omitting any inner page'
+        . ' is forbidden.';
+
+    /** Appended to {{nav_rule}} for the archetypes whose form is a single row. */
+    private const NAV_RULE_ROW = ' Keep identity and navigation on one horizontal row (identity start, nav end).'
+        . ' NEVER split links onto both sides of the wordmark. NEVER stack the wordmark above the nav.';
+
+    /** Archetypes whose catalog form is deliberately not a single row. */
+    private const NAV_SHAPE_EXEMPT = ['centered-masthead', 'split-nav'];
 
     /** {{nav_rule}} when the site is the homepage alone — a page-list would render one self-referential "Home" link. */
     private const NAV_RULE_SINGLE = '- Navigation: this site is ONE page, so a page-list would render a single'
@@ -98,9 +116,14 @@ final class SectionsStep implements Step
      * Public so host adapters (e.g. wpcom queue phase) share the same source of
      * truth as jobs() — do not re-mirror the private constants.
      */
-    public static function navRuleFor(int $pageCount): string
+    public static function navRuleFor(int $pageCount, string $archetype = ''): string
     {
-        return $pageCount > 1 ? self::NAV_RULE_MULTI : self::NAV_RULE_SINGLE;
+        if ($pageCount <= 1) {
+            return self::NAV_RULE_SINGLE;
+        }
+        return in_array($archetype, self::NAV_SHAPE_EXEMPT, true)
+            ? self::NAV_RULE_COMPLETE
+            : self::NAV_RULE_COMPLETE . self::NAV_RULE_ROW;
     }
 
     /** {{nav_rule}} text for footer generation given how many pages the plan has. */
@@ -317,6 +340,9 @@ final class SectionsStep implements Step
             }
         }
         $pages = self::synchronizePrimaryAction($pages, $initialContract, $delivery, $warnings);
+        if (self::formPlaceholders($project)) {
+            $files = self::ensureContactFormPlaceholders($pages, $files, $warnings);
+        }
         array_push($warnings, ...AboveFoldContract::warningRows($delivery));
         $plan['pages'] = $pages;
         foreach ($files as $rel => $markup) {
@@ -509,7 +535,8 @@ final class SectionsStep implements Step
     /**
      * A deterministic minimal chrome part delivered when the generated
      * header/footer markup is unusable: a constrained group carrying the site
-     * title, so templates referencing the part render something coherent.
+     * title, so templates referencing the part render something coherent. The
+     * header keeps its identity in a wide flex row that HeaderNav can complete.
      */
     public static function fallbackChrome(
         string $key,
@@ -563,11 +590,31 @@ final class SectionsStep implements Step
         $siteTitleJson = $siteTitleAttrs === []
             ? ''
             : ' ' . json_encode($siteTitleAttrs, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        $siteTitle = '<!-- wp:site-title' . $siteTitleJson . ' /-->';
+        $content = $siteTitle;
+        if ($key === 'header') {
+            // Keep the viewport-wide surface constrained, then give identity
+            // and the navigation inserted later one non-wrapping wide row.
+            $rowAttrs = json_encode([
+                'align' => 'wide',
+                'layout' => [
+                    'type' => 'flex',
+                    'flexWrap' => 'nowrap',
+                    'justifyContent' => 'space-between',
+                    'verticalAlignment' => 'center',
+                ],
+            ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            if (!is_string($rowAttrs)) {
+                throw new \RuntimeException('could not encode deterministic header fallback row');
+            }
+            $content = '<!-- wp:group ' . $rowAttrs . ' -->' . "\n"
+                . '<div class="wp-block-group alignwide">' . $siteTitle . '</div>' . "\n"
+                . '<!-- /wp:group -->';
+        }
 
         return '<!-- wp:group ' . $json . ' -->' . "\n"
             . '<div class="' . implode(' ', $classes) . '" style="padding-top:var(--wp--preset--spacing--md);'
-            . 'padding-bottom:var(--wp--preset--spacing--md)"><!-- wp:site-title'
-            . $siteTitleJson . ' /--></div>' . "\n"
+            . 'padding-bottom:var(--wp--preset--spacing--md)">' . $content . '</div>' . "\n"
             . '<!-- /wp:group -->';
     }
 
@@ -1048,7 +1095,7 @@ final class SectionsStep implements Step
                 'input' => $common + [
                     'outline'    => self::outline($frontSections),
                     'hero_brief' => self::heroBrief($frontSections),
-                    'nav_rule'   => self::navRuleFor(count($pages)),
+                    'nav_rule'   => self::navRuleFor(count($pages), (string) $contract['header']['archetype']),
                     'above_fold_contract' => $contract,
                     'header_behavior' => HeaderBehavior::promptContract($headerBehavior),
                 ],
@@ -1110,6 +1157,113 @@ final class SectionsStep implements Step
         }
 
         return ['jobs' => $jobs, 'contract' => $contract];
+    }
+
+    /**
+     * A contact page with a form backend must carry one JP_FORM placeholder.
+     * When every generated section omitted it, splice the default spec into
+     * the best remaining part so the host still has something to substitute
+     * (BIGR-858).
+     *
+     * @param array<int,array<string,mixed>> $pages
+     * @param array<string,string> $files relative theme path => markup
+     * @param list<string> $warnings
+     * @return array<string,string>
+     */
+    public static function ensureContactFormPlaceholders(
+        array $pages,
+        array $files,
+        array &$warnings = [],
+    ): array {
+        foreach ($pages as $page) {
+            if (!is_array($page) || !PagePlanStep::isContactLikePage($page)) {
+                continue;
+            }
+            $pageSlug = (string) ($page['slug'] ?? '');
+            $rels = [];
+            foreach ((array) ($page['sections'] ?? []) as $section) {
+                if (!is_array($section)) {
+                    continue;
+                }
+                $rel = 'parts/' . self::partSlug($pageSlug, (string) ($section['slug'] ?? '')) . '.html';
+                if (isset($files[$rel])) {
+                    $rels[] = ['rel' => $rel, 'section' => $section];
+                }
+            }
+            if ($rels === []) {
+                continue;
+            }
+            $hasForm = false;
+            foreach ($rels as $row) {
+                if (FormPlaceholder::find($files[$row['rel']]) !== []) {
+                    $hasForm = true;
+                    break;
+                }
+            }
+            if ($hasForm) {
+                continue;
+            }
+            $target = $rels[0];
+            $best = -1;
+            foreach ($rels as $row) {
+                $score = 0;
+                $blob = strtolower(implode(' ', [
+                    (string) ($row['section']['slug'] ?? ''),
+                    (string) ($row['section']['type'] ?? ''),
+                    (string) ($row['section']['purpose'] ?? ''),
+                ]));
+                if (str_contains($blob, 'contact') || str_contains($blob, 'form')) {
+                    $score += 2;
+                }
+                $role = (string) ($row['section']['role'] ?? '');
+                if ($role === SectionRole::CONTENT) {
+                    $score += 1;
+                }
+                if ($score > $best) {
+                    $best = $score;
+                    $target = $row;
+                }
+            }
+            $files[$target['rel']] = self::injectPlaceholderInsideSection(
+                $files[$target['rel']],
+                FormPlaceholder::defaultContactMarkup(),
+            );
+            $warnings[] = "file='theme/{$target['rel']}'; block='jetpack-form-placeholder'; "
+                . 'authored=missing JP_FORM on contact page; delivered=default contact placeholder; '
+                . 'disposition=injected so the host can substitute a real form';
+        }
+        return $files;
+    }
+
+    /**
+     * Place a placeholder inside the section's top-level group, just before
+     * that group's wrapping closer, so it stays one root and inherits the
+     * band. Files that are not a single group get it appended instead.
+     */
+    private static function injectPlaceholderInsideSection(string $markup, string $block): string
+    {
+        $block = rtrim($block);
+        $doc = BlockMarkup::parse($markup);
+        $roots = [];
+        foreach ($doc->indices() as $i) {
+            if ($doc->parent($i) === null) {
+                $roots[] = $i;
+            }
+        }
+        if (count($roots) !== 1
+            || $doc->name($roots[0]) !== 'group'
+            || $doc->isVoid($roots[0])
+            || !$doc->isStructurallySafe($roots[0])
+        ) {
+            return rtrim($markup) . "\n" . $block . "\n";
+        }
+        $root = $roots[0];
+        $openEnd = $doc->openingOffset($root) + $doc->openingLength($root);
+        $closeStart = $doc->innerEndOffset($root);
+        $inner = substr($markup, $openEnd, $closeStart - $openEnd);
+        $divClose = strrpos($inner, '</div>');
+        $at = $divClose === false ? $closeStart : $openEnd + $divClose;
+        return substr($markup, 0, $at) . "\n" . $block . "\n" . substr($markup, $at);
     }
 
     /**
