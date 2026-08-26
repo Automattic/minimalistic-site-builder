@@ -27,7 +27,7 @@ use Automattic\SiteBuild\StepDeclaration;
  * Input:  meta.json (user prompt) + siteSpec.json (with its `pages` tree).
  * Output: pages.json — { "footer_archetype": "<catalog id>", "pages": [ { slug, title, path, front, parent,
  *         menu_order, purpose, sections: [ { slug, title, role, type, purpose,
- *         content_notes, layout_archetype, background, vertical_density,
+ *         content_notes, layout_archetype, background, vertical_density, text_placement,
  *         handoff, primary_action } ] } ] }, a FLAT list in display order, parents before
  *         children; footer_archetype is the pick hashed at plan time so later
  *         direction rewrites cannot retarget the footer; warnings.json records every generated value removed or
@@ -57,6 +57,9 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
 
     /** Page-owned outer spacing roles — must match page-plan.md. */
     public const VERTICAL_DENSITIES = ['compact', 'standard', 'spacious'];
+
+    /** Per-section copy positions assigned against the site-level intent. */
+    public const TEXT_PLACEMENTS = DesignDirectionStep::TEXT_PLACEMENTS;
 
     /** The card grid is capped tighter than the others — it reads as filler in bulk. */
     private const MAX_EQUAL_CARD_GRIDS = 2;
@@ -196,6 +199,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             'layout_archetype' => ['type' => 'string', 'enum' => self::ARCHETYPES],
             'background'       => ['type' => 'string', 'enum' => self::BACKGROUNDS],
             'vertical_density' => ['type' => 'string', 'enum' => self::VERTICAL_DENSITIES],
+            'text_placement'   => ['type' => 'string', 'enum' => self::TEXT_PLACEMENTS],
             'handoff'          => ['type' => 'string'],
             'primary_action'   => [
                 'anyOf' => [
@@ -864,7 +868,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             . 'corrected list top-to-bottom against every rule before returning — a repair that introduces a NEW '
             . 'violation is rejected too. If the front-page context locks the FIRST section, preserve it exactly '
             . 'and change the conflicting following section. '
-            . 'If you change a section\'s layout_archetype, background, vertical_density, or position, also update its content_notes, '
+            . 'If you change a section\'s layout_archetype, background, vertical_density, text_placement, or position, also update its content_notes, '
             . 'handoff, and any affected neighbor handoffs so the prose matches the corrected assignment. '
             . 'Keep only fields that are still semantically consistent exactly as planned.';
     }
@@ -1029,7 +1033,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      * Validate one page's section list and force unique, file-safe slugs.
      * The structural role is stamped deterministically from each section's
      * position rather than trusted to model output. Art-direction fields
-     * (layout_archetype, background, vertical_density, handoff) are strict:
+     * (layout_archetype, background, vertical_density, text_placement, handoff) are strict:
      * unknown values, a missing handoff, adjacent duplicate archetypes, too
      * many card grids, or an interior page opening at homepage-cover scale
      * are collected and thrown together in ONE message, so the single repair
@@ -1115,6 +1119,11 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 $errors[] = "page-plan: section '{$slug}' is content-dense ({$type}, {$archetype}) — "
                     . "use vertical_density 'compact' or 'standard', not 'spacious'";
             }
+            $textPlacement = trim((string) ($section['text_placement'] ?? ''));
+            if (!in_array($textPlacement, self::TEXT_PLACEMENTS, true)) {
+                $errors[] = "page-plan: section '{$slug}' has invalid text_placement '{$textPlacement}' — use one of: "
+                    . implode(', ', self::TEXT_PLACEMENTS);
+            }
             $handoff = trim((string) ($section['handoff'] ?? ''));
             if ($handoff === '') {
                 $errors[] = "page-plan: section '{$slug}' is missing 'handoff' — describe what sits immediately above and below it";
@@ -1139,6 +1148,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 'layout_archetype' => $archetype,
                 'background'       => $background,
                 'vertical_density' => $verticalDensity,
+                'text_placement'   => $textPlacement,
                 'handoff'          => $handoff,
                 'primary_action'   => $primaryAction,
             ];
@@ -2018,6 +2028,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 $inserted[] = $brief + [
                     'layout_archetype' => $archetype,
                     'vertical_density' => 'standard',
+                    'text_placement'   => 'left-column',
                     'primary_action'   => null,
                 ];
             }
@@ -2470,6 +2481,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 'layout_archetype' => $archetype,
                 'background'       => $background,
                 'vertical_density' => 'standard',
+                'text_placement'   => 'left-column',
                 'handoff'          => 'Sits below the site header and above the site footer.',
                 'primary_action'   => null,
             ],
@@ -2568,6 +2580,17 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                     $density,
                     'standard',
                     "replaced unknown vertical density for section '{$slug}' with standard",
+                );
+            }
+
+            $textPlacement = trim((string) ($section['text_placement'] ?? ''));
+            if (!in_array($textPlacement, self::TEXT_PLACEMENTS, true)) {
+                $sections[$i]['text_placement'] = 'left-column';
+                $warnings[] = self::valueLossWarning(
+                    self::sectionPath($pageSlug, (int) $i) . '.text_placement',
+                    $textPlacement,
+                    'left-column',
+                    "replaced unknown text placement for section '{$slug}' with the safe leading column",
                 );
             }
 

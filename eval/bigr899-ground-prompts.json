@@ -1,0 +1,18 @@
+{
+  "$comment": "BIGR-899 visual evidence prompts. One prompt should land on a dark ground, one on a light ground.",
+  "version": 1,
+  "prompts": [
+    {
+      "id": "nocturne",
+      "slug": "nocturne",
+      "site_type": "business",
+      "prompt": "Create a website for \"Nocturne\", an underground jazz and electronic music club in Berlin. The club opens at midnight, lives in a former power substation, and books experimental late-night acts. The mood is dim, smoky, and after-hours."
+    },
+    {
+      "id": "morningloaf",
+      "slug": "morningloaf",
+      "site_type": "business",
+      "prompt": "Create a website for \"Morning Loaf\", a sunlit neighborhood bakery in Copenhagen. We bake sourdough bread and cardamom buns every morning, serve filter coffee, and sell flour and starter kits. The mood is airy, floury, and bright."
+    }
+  ]
+}

@@ -41,6 +41,9 @@ function sections_page(string $slug, array $sections, array $overrides = []): ar
         if (is_array($section) && !array_key_exists('primary_action', $section)) {
             $section['primary_action'] = null;
         }
+        if (is_array($section) && !array_key_exists('text_placement', $section)) {
+            $section['text_placement'] = 'left-column';
+        }
         return $section;
     }, $sections);
     return array_merge([

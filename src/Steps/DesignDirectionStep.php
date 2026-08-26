@@ -8,6 +8,7 @@ use Automattic\SiteBuild\BandColor;
 use Automattic\SiteBuild\CardStyle;
 use Automattic\SiteBuild\ConceptSeeds;
 use Automattic\SiteBuild\CtaStyle;
+use Automattic\SiteBuild\Depth;
 use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\DirectionExecutability;
 use Automattic\SiteBuild\Env;
@@ -19,6 +20,7 @@ use Automattic\SiteBuild\GroundKey;
 use Automattic\SiteBuild\GroundTint;
 use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
+use Automattic\SiteBuild\ImageCrop;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\Measure;
 use Automattic\SiteBuild\Motion;
@@ -113,6 +115,9 @@ final class DesignDirectionStep implements Step
      */
     public const CARD_STYLES = CardStyle::ALL;
 
+    /** Site-wide image proportion system for crop-role class hooks. */
+    public const IMAGE_CROPS = ImageCrop::ALL;
+
     /**
      * How the page's bands follow one another. The page plan already assigns a
      * layout archetype and background per section, but with no site-level
@@ -130,6 +135,13 @@ final class DesignDirectionStep implements Step
      * commitment gives that per-section choice something to express.
      */
     public const DENSITIES = ['airy', 'measured', 'dense'];
+
+    /**
+     * Site-level horizontal intent for text below page-opening heroes. The
+     * page planner turns this bias into one explicit placement per section;
+     * section authors move the readable column without widening its measure.
+     */
+    public const TEXT_PLACEMENTS = ['left-column', 'centered', 'split', 'asymmetric-thirds'];
 
     public function __construct(
         private Llm $llm,
@@ -367,15 +379,18 @@ final class DesignDirectionStep implements Step
             ],
             'type_scale'       => TypeScale::DEFAULT,
             'image_grade'      => '',
+            'image_crop'       => ImageCrop::DEFAULT,
             'canvas'           => $canvas,
             'measure'          => Measure::DEFAULT,
             'card_style'       => 'flush',
+            'depth'            => Depth::DEFAULT,
             'cta_style'        => CtaStyle::DEFAULT,
             'shape'            => 'sharp',
             'surface'          => Surface::DEFAULT,
             'device'           => Device::DEFAULT,
             'rhythm'           => 'alternating',
             'density'          => 'measured',
+            'text_placement'    => 'left-column',
             'motion'           => Motion::DEFAULT_PROFILE,
             'motion_note'      => [],
             'concept_seed'     => $seed,
@@ -792,6 +807,8 @@ final class DesignDirectionStep implements Step
         );
 
         $cardStyle = self::normalizeCardStyle($raw['card_style'] ?? null, $warnings);
+        $imageCrop = self::normalizeImageCrop($raw['image_crop'] ?? null, $warnings);
+        $depth = self::normalizeDepth($raw['depth'] ?? null, $warnings);
         $ctaStyle = BoundedChoice::normalize(
             $raw['cta_style'] ?? null,
             CtaStyle::ALL,
@@ -804,6 +821,7 @@ final class DesignDirectionStep implements Step
         $device = self::normalizeDevice($raw['device'] ?? null, $warnings);
         $rhythm = self::normalizeRhythm($raw['rhythm'] ?? null, $warnings);
         $density = self::normalizeDensity($raw['density'] ?? null, $warnings);
+        $textPlacement = self::normalizeTextPlacement($raw['text_placement'] ?? null, $warnings);
 
         $motion = self::motionProfile($raw['motion'] ?? null);
         $rawMotion = is_string($raw['motion'] ?? null)
@@ -882,6 +900,7 @@ final class DesignDirectionStep implements Step
             ],
             'type_scale'       => $typeScale,
             'image_grade'      => trim((string) ($raw['image_grade'] ?? '')),
+            'image_crop'       => $imageCrop,
             // Anything that isn't an explicit "framed" commitment is full-bleed:
             // an accidental frame reads as a rendering bug, not a design choice.
             'canvas'           => $canvas,
@@ -890,6 +909,7 @@ final class DesignDirectionStep implements Step
             // flush default — inset media must be an explicit opt-in, never
             // the accidental look every site gets.
             'card_style'       => $cardStyle,
+            'depth'            => $depth,
             'cta_style'        => $ctaStyle,
             'shape'            => $shape,
             'surface'          => $surface,
@@ -898,6 +918,7 @@ final class DesignDirectionStep implements Step
             // RHYTHMS / DENSITIES for why the rhythm default is not `stacked`.
             'rhythm'           => $rhythm,
             'density'          => $density,
+            'text_placement'   => $textPlacement,
             // The motion profile is a fixed list (the kit ships exactly these);
             // anything unrecognized falls back to the default so every build
             // commits to ONE profile the downstream steps can gate on.
@@ -925,6 +946,44 @@ final class DesignDirectionStep implements Step
             'card_style',
             $warnings,
             'unsupported generated card treatment replaced by default',
+        );
+    }
+
+    /**
+     * Normalize the build-owned image proportion contract. Mixed preserves the
+     * established per-role ratios and is the safe behavior for a pre-field
+     * direction; invalid authored intent is durable-warning material.
+     *
+     * @param list<string> $warnings
+     */
+    public static function normalizeImageCrop(mixed $authored, array &$warnings = []): string
+    {
+        return BoundedChoice::normalize(
+            $authored,
+            ImageCrop::ALL,
+            ImageCrop::DEFAULT,
+            'image_crop',
+            $warnings,
+            'unsupported image proportion system replaced by mixed',
+        );
+    }
+
+    /**
+     * Normalize the build-owned elevation contract. Flat is a fully authored
+     * visual choice as well as the safe behavior for a pre-field direction;
+     * an invalid non-empty model value remains durable-warning material.
+     *
+     * @param list<string> $warnings
+     */
+    public static function normalizeDepth(mixed $authored, array &$warnings = []): string
+    {
+        return BoundedChoice::normalize(
+            $authored,
+            Depth::ALL,
+            Depth::DEFAULT,
+            'depth',
+            $warnings,
+            'unsupported elevation treatment replaced by flat',
         );
     }
 
@@ -1001,6 +1060,21 @@ final class DesignDirectionStep implements Step
             'density',
             $warnings,
             'unsupported generated page density replaced by default',
+        );
+    }
+
+    /**
+     * @param list<string> $warnings
+     */
+    public static function normalizeTextPlacement(mixed $authored, array &$warnings = []): string
+    {
+        return BoundedChoice::normalize(
+            $authored,
+            self::TEXT_PLACEMENTS,
+            'left-column',
+            'text_placement',
+            $warnings,
+            'unsupported horizontal text placement replaced by left-column',
         );
     }
 
@@ -1341,6 +1415,31 @@ final class DesignDirectionStep implements Step
             } . '. The build derives the lg/xl/xxl section-padding ramp from this commitment.';
         }
 
+        $textPlacement = BoundedChoice::explicit(
+            $direction['text_placement'] ?? null,
+            self::TEXT_PLACEMENTS,
+        );
+        if ($textPlacement !== null) {
+            $facts[] = '- **Text placement**: ' . $textPlacement . ' — ' . match ($textPlacement) {
+                'left-column' => 'below page-opening heroes, place readable copy on the wide band\'s leading column rather than auto-centering every stack',
+                'centered' => 'below page-opening heroes, center the readable copy column as a composition while keeping wrapped paragraphs start-aligned',
+                'split' => 'below page-opening heroes, make copy one side of an intentional two-zone composition and alternate the occupied side where the page flow supports it',
+                'asymmetric-thirds' => 'below page-opening heroes, offset readable copy into the second or third zone of wide bands instead of repeating the leading edge',
+                default => 'the committed horizontal intent',
+            } . '. The page plan assigns each section its own placement against this intent; move the column, never widen its readable measure.';
+        }
+
+        $depth = Depth::explicit($direction['depth'] ?? null);
+        if ($depth !== null) {
+            $facts[] = '- **Depth**: ' . $depth . ' — ' . match ($depth) {
+                'flat'        => 'cards, contained images, contained covers, and media-text surfaces stay deliberately shadowless',
+                'soft'        => 'the build gives cards and contained media one restrained, diffuse lift',
+                'hard-offset' => 'the build gives cards and contained media one crisp poster-like offset plate',
+                'inset'       => 'the build presses cards and contained media into their surfaces with an inset edge and shade',
+                'glow'        => 'the build gives cards and contained media one primary-colored luminous halo',
+            } . '. Full-bleed media stays unelevated; do not add another shadow.';
+        }
+
         // Render the shape commitment with its executable meaning. The build
         // wires contained media (core/image, core/cover, the media half of
         // core/media-text) and button radii itself; this line keeps prompts
@@ -1394,6 +1493,17 @@ final class DesignDirectionStep implements Step
             };
             $note = self::formatMotionNote($direction['motion_note'] ?? null);
             $facts[] = "- **Motion**: {$motion} — {$meaning}." . ($note !== '' ? " Motion note: {$note}" : '');
+        }
+
+        $imageCrop = ImageCrop::explicit($direction['image_crop'] ?? null);
+        if ($imageCrop !== null) {
+            $facts[] = '- **Image crop**: ' . $imageCrop . ' — ' . match ($imageCrop) {
+                'landscape' => 'the build makes ordinary cards 3:2, dominant cards and thumbs 4:3, and feature media 16:9',
+                'portrait'  => 'the build makes ordinary cards and feature media 4:5, dominant cards 2:3, and thumbs 3:4',
+                'square'    => 'the build makes every card, thumbnail, and feature-media crop 1:1',
+                'panoramic' => 'the build makes ordinary cards and thumbs 16:9, dominant cards 3:2, and feature media 21:9',
+                'mixed'     => 'the build keeps the established per-role system: ordinary cards 3:2, dominant cards 4:5, and thumbs 1:1',
+            } . '. Full-bleed media remains wide; use the documented crop role classes and do not author an aspect ratio.';
         }
 
         $imageGrade = trim((string) ($direction['image_grade'] ?? ''));
@@ -1555,6 +1665,15 @@ final class DesignDirectionStep implements Step
         return trim((string) ($project->readJson(self::FILE)['image_grade'] ?? ''));
     }
 
+    /** Explicit committed image crop, or null for a pre-field/garbled artifact. */
+    public static function imageCropFor(Project $project): ?string
+    {
+        if (!$project->exists(self::FILE)) {
+            return null;
+        }
+        return ImageCrop::explicit($project->readJson(self::FILE)['image_crop'] ?? null);
+    }
+
     /**
      * The committed direction's canvas ("full-bleed" or "framed"), or '' when
      * no direction was persisted. A framed canvas keeps a mat of page
@@ -1606,6 +1725,15 @@ final class DesignDirectionStep implements Step
             return null;
         }
         return self::explicitShape($project->readJson(self::FILE)['shape'] ?? null);
+    }
+
+    /** Explicit committed depth, or null for a pre-field/garbled artifact. */
+    public static function depthFor(Project $project): ?string
+    {
+        if (!$project->exists(self::FILE)) {
+            return null;
+        }
+        return Depth::explicit($project->readJson(self::FILE)['depth'] ?? null);
     }
 
     /** The persisted page density, measured when absent or not a committed value. */

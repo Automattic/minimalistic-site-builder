@@ -34,6 +34,8 @@ The filename is extracted from the `src` attribute automatically. Keep `subject`
 - `card-landscape`: 4:3 ratio — contained landscape slots: product cards, blog thumbnails, feature images in columns
 - `card-portrait`: 3:4 ratio — the natural portrait-card shape: team headshots, tall product cards, framed insets. Prefer this over `portrait` for anything rendered as a card or inside a column — 9:16 is usually too tall for those slots.
 
+When the DESIGN DIRECTION includes an **Image crop** fact, make the structured aspect-ratio agree with it: `landscape` uses `card-landscape` for contained cards and `landscape` for feature media; `portrait` uses `card-portrait`; `square` uses `square`; `panoramic` uses `landscape` for contained cards and `ultrawide` for feature bands; `mixed` keeps the role-specific choices above. A full-bleed hero/background remains `landscape` or `ultrawide` under every site-wide crop, because a viewport banner cannot use a vertical source safely.
+
 A full-bleed hero/cover BACKGROUND image MUST be `landscape` or `ultrawide` — never `square`, `portrait`, or a card ratio — so it fills the wide banner without being cropped. This applies only to the background: a `framed` or foreground image inside the hero (e.g. a portrait shot in a contained frame, or a second image layered over the background) picks whatever aspect ratio fits its own slot. Generally, match each image's aspect ratio to the shape of the slot it fills so it is not cropped toward an unintended shape.
 
 **Grid and row consistency:**

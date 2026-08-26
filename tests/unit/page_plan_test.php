@@ -26,6 +26,7 @@ function plan_section(array $overrides = []): array
         'layout_archetype' => 'full-bleed-cover',
         'background'       => 'image',
         'vertical_density' => 'standard',
+        'text_placement'   => 'left-column',
         'handoff'          => 'Sits between the site header above and the base-background about split below.',
         'primary_action'   => null,
     ], $overrides);
@@ -73,6 +74,7 @@ test('PagePlanStep::jsonSchema constrains the complete section shape', function 
         'layout_archetype',
         'background',
         'vertical_density',
+        'text_placement',
         'handoff',
         'primary_action',
     ];
@@ -95,6 +97,7 @@ test('PagePlanStep::jsonSchema constrains the complete section shape', function 
     assert_true(!array_key_exists('role', $item['properties']), 'role is derived after generation, not requested from the model');
     assert_eq(PagePlanStep::ARCHETYPES, $item['properties']['layout_archetype']['enum']);
     assert_eq(PagePlanStep::BACKGROUNDS, $item['properties']['background']['enum']);
+    assert_eq(PagePlanStep::TEXT_PLACEMENTS, $item['properties']['text_placement']['enum']);
 });
 
 test('PagePlanStep::normalize forces unique, file-safe slugs and fills defaults', function () {
@@ -109,6 +112,33 @@ test('PagePlanStep::normalize forces unique, file-safe slugs and fills defaults'
     assert_eq(['hero', 'our-story', 'hero-2'], $slugs);
     assert_eq('hero', $sections[0]['type'], 'type preserved');
     assert_eq(['hero', 'content', 'closing'], array_column($sections, 'role'), 'roles derived after invalid entries are skipped');
+});
+
+test('page plan commits one bounded text placement per section and repairs malformed output', function () {
+    $sections = PagePlanStep::normalize([
+        plan_section(['text_placement' => 'asymmetric-thirds']),
+        plan_section([
+            'slug' => 'story',
+            'layout_archetype' => 'asymmetric-split',
+            'background' => 'base',
+            'text_placement' => 'split',
+        ]),
+    ]);
+    assert_eq(['asymmetric-thirds', 'split'], array_column($sections, 'text_placement'));
+
+    assert_throws(function () {
+        PagePlanStep::normalize([plan_section(['text_placement' => 'somewhere'])]);
+    }, 'invalid text_placement');
+
+    $warnings = [];
+    $repaired = PagePlanStep::repairFields(
+        [plan_section(['text_placement' => 'somewhere'])],
+        $warnings,
+        'home',
+    );
+    assert_eq('left-column', $repaired[0]['text_placement']);
+    assert_contains("pages[slug='home'].sections[0].text_placement", $warnings[0]);
+    assert_contains('delivered="left-column"', $warnings[0]);
 });
 
 test('PagePlanStep::normalize preserves a novel free-form type', function () {
