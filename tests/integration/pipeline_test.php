@@ -118,16 +118,16 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     ]);
     // page-plan home (json) — ordered list of the front page's sections
     $llm->queueJson(['sections' => [
-        ['slug' => 'hero', 'title' => 'Hero', 'role' => 'hero', 'type' => 'immersive-welcome', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the contrast overview split below.', 'primary_action' => null],
+        ['slug' => 'hero', 'title' => 'Hero', 'role' => 'hero', 'type' => 'immersive-welcome', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'text_placement' => 'left-column', 'handoff' => 'Between the site header above and the contrast overview split below.', 'primary_action' => null],
         // A third planned section keeps the front plan above the deterministic
         // thin-plan padding threshold, so parts map 1:1 to the queued texts.
-        ['slug' => 'overview', 'title' => 'Overview', 'role' => 'content', 'type' => 'bakery-story', 'layout_archetype' => 'asymmetric-split', 'background' => 'contrast', 'vertical_density' => 'standard', 'handoff' => 'Between the image hero above and the base specials grid below.', 'primary_action' => null],
-        ['slug' => 'specials', 'title' => 'Specials', 'role' => 'closing', 'type' => 'seasonal-specials', 'layout_archetype' => 'equal-card-grid', 'background' => 'base', 'vertical_density' => 'compact', 'handoff' => 'Between the contrast overview split above and the footer below.', 'primary_action' => null],
+        ['slug' => 'overview', 'title' => 'Overview', 'role' => 'content', 'type' => 'bakery-story', 'layout_archetype' => 'asymmetric-split', 'background' => 'contrast', 'vertical_density' => 'standard', 'text_placement' => 'split', 'handoff' => 'Between the image hero above and the base specials grid below.', 'primary_action' => null],
+        ['slug' => 'specials', 'title' => 'Specials', 'role' => 'closing', 'type' => 'seasonal-specials', 'layout_archetype' => 'equal-card-grid', 'background' => 'base', 'vertical_density' => 'compact', 'text_placement' => 'centered', 'handoff' => 'Between the contrast overview split above and the footer below.', 'primary_action' => null],
     ]]);
     // page-plan menu (json) — the interior page's sections
     $llm->queueJson(['sections' => [
-        ['slug' => 'menu-hero', 'title' => 'Our Menu', 'role' => 'hero', 'type' => 'menu-introduction', 'layout_archetype' => 'centered-stack', 'background' => 'tinted', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the base bread list below.', 'primary_action' => null],
-        ['slug' => 'breads', 'title' => 'Breads', 'role' => 'closing', 'type' => 'bread-catalog', 'layout_archetype' => 'list-with-thumbnails', 'background' => 'base', 'vertical_density' => 'compact', 'handoff' => 'Between the tinted page hero above and the footer below.', 'primary_action' => null],
+        ['slug' => 'menu-hero', 'title' => 'Our Menu', 'role' => 'hero', 'type' => 'menu-introduction', 'layout_archetype' => 'centered-stack', 'background' => 'tinted', 'vertical_density' => 'standard', 'text_placement' => 'centered', 'handoff' => 'Between the site header above and the base bread list below.', 'primary_action' => null],
+        ['slug' => 'breads', 'title' => 'Breads', 'role' => 'closing', 'type' => 'bread-catalog', 'layout_archetype' => 'list-with-thumbnails', 'background' => 'base', 'vertical_density' => 'compact', 'text_placement' => 'left-column', 'handoff' => 'Between the tinted page hero above and the footer below.', 'primary_action' => null],
     ]]);
     // sections (raw markup) — disposable cache probe, then header, footer,
     // home's parts, and menu's parts in requests() order
