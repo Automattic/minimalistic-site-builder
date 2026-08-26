@@ -32,6 +32,31 @@ test('validator passes a well-formed theme', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('layout warnings verify block-first measure and exempt HTML-first design widths', function () {
+    [$project, $tmp] = validator_project();
+    seed_test_design_direction($project, overrides: ['measure' => 'narrow']);
+    [$theme] = ThemeJsonStep::applyMeasure(['version' => 3], 'narrow');
+    $theme['settings']['layout']['allowEditing'] = true;
+    $project->writeJson('theme/theme.json', $theme);
+
+    assert_true(
+        !str_contains(implode(' ', ThemeValidator::layoutWarnings($project)), 'committed "narrow" measure'),
+        'the committed pair passes',
+    );
+
+    [$drifted] = ThemeJsonStep::applyMeasure(['version' => 3], 'standard');
+    $project->writeJson('theme/theme.json', $drifted);
+    assert_contains(
+        'committed "narrow" measure',
+        implode(' ', ThemeValidator::layoutWarnings($project)),
+    );
+    assert_true(
+        !str_contains(implode(' ', ThemeValidator::layoutWarnings($project, true)), 'committed "narrow" measure'),
+        'HTML-first design widths are exempt',
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 /** @return array{0:\Automattic\SiteBuild\Project,1:string} */
 function validator_above_fold_project(): array
 {
@@ -902,6 +927,27 @@ test('spacing warnings detect theme-profile and section-root rhythm drift', func
     $project->writeJson('theme/theme.json', $theme);
     $joined = implode(' ', ThemeValidator::spacingWarnings($project));
     assert_contains('bounded canonical profile', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('spacing warnings validate against the persisted density profile', function () {
+    [$project, $tmp] = validator_project();
+    seed_test_design_direction($project, overrides: ['density' => 'airy']);
+    $project->writeJson(
+        'theme/theme.json',
+        ThemeJsonStep::normalizeSpacingSettings(['version' => 3], 'airy'),
+    );
+
+    assert_eq([], ThemeValidator::spacingWarnings($project));
+
+    $project->writeJson(
+        'theme/theme.json',
+        ThemeJsonStep::normalizeSpacingSettings(['version' => 3], 'measured'),
+    );
+    assert_contains(
+        'bounded canonical profile',
+        implode(' ', ThemeValidator::spacingWarnings($project)),
+    );
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

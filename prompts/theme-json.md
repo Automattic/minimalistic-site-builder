@@ -38,7 +38,7 @@ Design intelligence to encode as tokens:
     `secondary` on `base` ≥ 4.5:1 (it colors captions and metadata — SMALL text, which needs MORE contrast, not less; "muted" must come from size and letterspacing, not from a mid-tone hex)
     `base` on `accent` (or `primary` if buttons use it) ≥ 4.5:1 (button labels)
   Mid-tone `secondary`/`accent` hexes (relative luminance ~0.2–0.4) fail against BOTH light and dark backgrounds — push each palette color decisively light or decisively dark.
-- **Layout widths.** `contentSize` 800–900px (comfortable reading — NOT 640), `wideSize` 1200–1400px.
+- **Layout widths are build-owned.** The DESIGN DIRECTION's committed **Measure** supplies the paired `contentSize` and `wideSize` on the block-first path. Do not emit competing widths. On HTML-first builds, carried design CSS remains authoritative instead.
 - **Shape.** When the DESIGN DIRECTION carries a **Shape** fact, the build executes it as one authoritative corner language for contained media and buttons: `sharp` removes the `core/image` radius and gives buttons `0`; `soft` gives both `0.5rem`; `round` gives `core/image` `1.25rem` and buttons `9999px`; contained `core/cover` and `core/media-text` media pick up the same committed radius from a build-owned stylesheet. Never restate or reset any build-owned radius in a theme.json `css` string or structured style that targets `core/image` media, buttons, `core/cover`, or `core/media-text`: this includes `all`, `styles.blocks["core/button"]`, nested `elements.button`, block variations, and responsive or interaction states. Generic card/group geometry is outside this commitment and may keep a site-specific radius; express it with that component's structured block style instead of broad custom CSS that also reaches images or buttons. Without a Shape fact, make no media- or button-radius choice at all.
 - **Atmosphere.** Where it fits the direction, prefer gradient meshes, layered transparencies and dramatic shadows over flat solids; decorative borders are NOT an atmosphere tool. Expose these so sections can use them: define a few `settings.color.gradients` (give slugs derived from your palette) and a couple of `settings.shadow.presets` the sections can reference. Shadow presets style media, cards, and cover surfaces — never text: do not design presets meant for headings or copy (misregistration/echo offsets, text outlines); on a text block a box-shadow renders as stray bars and the build strips it.
 
@@ -52,7 +52,7 @@ Hard requirements — follow exactly so downstream templates can rely on the slu
 
 - Top-level: "$schema": "https://schemas.wp.org/trunk/theme.json", "version": 3.
 - WordPress core's default presets are DISABLED in every generated theme: the build forces `settings.color.defaultPalette`, `settings.color.defaultGradients`, `settings.color.defaultDuotone`, `settings.typography.defaultFontSizes`, and `settings.spacing.defaultSpacingSizes` to `false` (only core SHADOW presets remain available). The slugs YOU declare below are the only presets that exist at runtime — never reference a core default slug (e.g. color "white"/"black", fontSize "large", a core gradient or duotone name), and do not set those flags to `true`.
-- settings.layout: set "contentSize" (800–900px) and "wideSize" (1200–1400px).
+- Do not emit settings.layout.contentSize or settings.layout.wideSize; the build writes the committed Measure pair (or derives the HTML-first design widths) after this response.
 - settings.color.palette: an array with EXACTLY these five slugs, each a valid #RRGGBB hex you choose:
     "base"      = page background (body text on it must meet the CONTRAST REQUIREMENTS above)
     "contrast"  = body text color (≥ 7:1 against base)
@@ -71,14 +71,7 @@ Hard requirements — follow exactly so downstream templates can rely on the slu
   Each entry: { "fontFamily": "<stack>", "name": "...", "slug": "..." }.
   Pick REAL Google Fonts families spelled exactly (e.g. "Cormorant Garamond", "Source Serif 4", "Oswald", "Caveat") — the build enqueues them from Google Fonts automatically by name, so no fontFace/src is needed here. Just make the FIRST family in each stack the exact Google font name.
   Do not invent a fourth family. Without an accent Type fact, include EXACTLY heading and body.
-- settings.spacing: set `"blockGap": true` and include EXACTLY this bounded, responsive `spacingSizes` profile (the build normalizes it deterministically, so do not rename or rescale it):
-    `xs` — Extra Small — `clamp(0.25rem, 0.5vw, 0.5rem)`
-    `sm` — Small — `clamp(0.75rem, 1vw, 1rem)`
-    `md` — Medium — `clamp(1.5rem, 2vw, 2rem)`
-    `lg` — Compact — `clamp(3rem, 4vw, 4rem)`
-    `xl` — Standard — `clamp(4rem, 6vw, 6rem)`
-    `xxl` — Spacious — `clamp(5rem, 7vw, 7rem)`
-  Use xs for the tight typographic rhythm inside one component (an eyebrow/heading/line stack in a card or list row), sm/md for component gaps, and lg/xl/xxl for compact/standard/spacious section padding. Never replace these with fixed large values: the fluid bounds keep mobile padding proportional and cap a spacious desktop edge at 7rem.
+- settings.spacing: set `"blockGap": true`, but do not emit `spacingSizes`. The build supplies the bounded responsive `xs` / `sm` / `md` / `lg` / `xl` / `xxl` profile after this response. `xs`–`md` stay fixed for predictable component rhythm; the DESIGN DIRECTION's committed **Density** deterministically scales `lg` / `xl` / `xxl`, which remain the compact / standard / spacious section-padding roles. Do not invent, rename, or numerically rescale these presets.
 - styles.spacing.blockGap: a default vertical rhythm between sibling blocks, from the spacing scale (e.g. "var:preset|spacing|md") — a null blockGap makes WordPress skip ALL frontend block-gap CSS while the editor still previews it, so the two render different spacing.
 - NEVER set top/bottom padding in `styles.blocks["core/group"].spacing.padding`. Group is a recursive layout primitive, so that global selector pads every nested structural wrapper and compounds section-scale spacing inside headers, cards, and sections. Put vertical padding on the explicit section/component block that owns it; a deterministic page pass owns section-root rhythm.
 - styles.elements.button: background = accent (or primary), text = whichever of base/contrast reads ≥ 4.5:1 on that background, with padding but no borderRadius (the build owns it when Shape is committed). Also define the button's `:hover` state here (e.g. a decisively darkened/lightened background, or swap background↔text, keeping label contrast ≥ 4.5:1) — theme.json is the ONLY place button hover styling exists; per-block hover attributes in section markup do not work and must never be written there.

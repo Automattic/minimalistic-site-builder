@@ -659,6 +659,73 @@ test('normalizeSpacingSettings installs the canonical bounded responsive profile
     ], $theme['settings']['spacing']['spacingSizes']);
 });
 
+test('normalizeSpacingSettings keeps component rhythm stable and scales every section role by density', function () {
+    $profiles = [];
+    foreach (['airy', 'measured', 'dense'] as $density) {
+        $profiles[$density] = ThemeJsonStep::normalizeSpacingSettings([], $density)
+            ['settings']['spacing']['spacingSizes'];
+    }
+
+    assert_eq(array_slice($profiles['measured'], 0, 3), array_slice($profiles['airy'], 0, 3));
+    assert_eq(array_slice($profiles['measured'], 0, 3), array_slice($profiles['dense'], 0, 3));
+    assert_eq([
+        'clamp(4rem, 6vw, 6rem)',
+        'clamp(5rem, 8vw, 9rem)',
+        'clamp(6rem, 10vw, 12rem)',
+    ], array_column(array_slice($profiles['airy'], 3), 'size'));
+    assert_eq([
+        'clamp(3rem, 4vw, 4rem)',
+        'clamp(4rem, 6vw, 6rem)',
+        'clamp(5rem, 7vw, 7rem)',
+    ], array_column(array_slice($profiles['measured'], 3), 'size'));
+    assert_eq([
+        'clamp(2.25rem, 3vw, 3rem)',
+        'clamp(3rem, 4.5vw, 4.5rem)',
+        'clamp(3.75rem, 5.5vw, 5.5rem)',
+    ], array_column(array_slice($profiles['dense'], 3), 'size'));
+
+    assert_eq($profiles['measured'], ThemeJsonStep::normalizeSpacingSettings([], 'unknown')
+        ['settings']['spacing']['spacingSizes']);
+});
+
+test('theme-json executes the persisted density when writing the spacing ramp', function () {
+    foreach (['airy' => 'clamp(6rem, 10vw, 12rem)', 'dense' => 'clamp(3.75rem, 5.5vw, 5.5rem)'] as $density => $xxl) {
+        $tmp = sys_get_temp_dir() . '/builder_tj_density_' . $density . '_' . uniqid();
+        $project = (new ProjectStore($tmp))->create('demo');
+        $project->writeJson('meta.json', ['prompt' => 'A density-aware design']);
+        $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+        seed_test_design_direction($project, overrides: ['density' => $density]);
+
+        $llm = new FakeLlm();
+        $llm->queueJson(valid_theme_payload());
+        (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+        $sizes = $project->readJson('theme/theme.json')['settings']['spacing']['spacingSizes'];
+        assert_eq($xxl, $sizes[5]['size'], "{$density} writes its xxl ceiling");
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('theme-json prompt delegates density-scaled spacing to the build', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_density_prompt_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'An airy sculpture gallery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project, overrides: ['density' => 'airy']);
+
+    $prompt = (new ThemeJsonStep(
+        new FakeLlm(),
+        new PromptRenderer(repo_path('prompts')),
+    ))->requests($project)['theme-json']['prompt'];
+
+    assert_contains('**Density**: airy', $prompt);
+    assert_contains('do not emit `spacingSizes`', $prompt);
+    assert_contains('lg/xl/xxl section-padding ramp', $prompt);
+    assert_true(!str_contains($prompt, 'clamp(4rem, 6vw, 6rem)'), 'the shared literal ramp is gone');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('normalizeSpacingSettings repairs malformed and oversized model output', function () {
     $theme = ThemeJsonStep::normalizeSpacingSettings([
         'settings' => [
@@ -689,28 +756,30 @@ test('normalizeSpacingSettings repairs malformed and oversized model output', fu
     assert_eq(6, count($theme['settings']['spacing']['spacingSizes']));
 });
 
-test('canonical spacing profile has monotonic fluid bounds', function () {
-    $theme = ThemeJsonStep::normalizeSpacingSettings([]);
-    $previousMin = 0.0;
-    $previousMax = 0.0;
+test('every density spacing profile has monotonic fluid bounds', function () {
+    foreach (['airy' => 12.0, 'measured' => 7.0, 'dense' => 5.5] as $density => $expectedMax) {
+        $theme = ThemeJsonStep::normalizeSpacingSettings([], $density);
+        $previousMin = 0.0;
+        $previousMax = 0.0;
 
-    foreach ($theme['settings']['spacing']['spacingSizes'] as $preset) {
-        $matched = preg_match(
-            '/^clamp\\(([0-9.]+)rem, [0-9.]+vw, ([0-9.]+)rem\\)$/',
-            $preset['size'],
-            $bounds
-        );
-        assert_eq(1, $matched, $preset['slug'] . ' is a responsive clamp');
-        $minimum = (float) $bounds[1];
-        $maximum = (float) $bounds[2];
-        assert_true($minimum > $previousMin, $preset['slug'] . ' minimum rises');
-        assert_true($maximum > $previousMax, $preset['slug'] . ' maximum rises');
-        assert_true($minimum <= $maximum, $preset['slug'] . ' bounds are ordered');
-        $previousMin = $minimum;
-        $previousMax = $maximum;
+        foreach ($theme['settings']['spacing']['spacingSizes'] as $preset) {
+            $matched = preg_match(
+                '/^clamp\\(([0-9.]+)rem, [0-9.]+vw, ([0-9.]+)rem\\)$/',
+                $preset['size'],
+                $bounds
+            );
+            assert_eq(1, $matched, "{$density} {$preset['slug']} is a responsive clamp");
+            $minimum = (float) $bounds[1];
+            $maximum = (float) $bounds[2];
+            assert_true($minimum > $previousMin, "{$density} {$preset['slug']} minimum rises");
+            assert_true($maximum > $previousMax, "{$density} {$preset['slug']} maximum rises");
+            assert_true($minimum <= $maximum, "{$density} {$preset['slug']} bounds are ordered");
+            $previousMin = $minimum;
+            $previousMax = $maximum;
+        }
+
+        assert_eq($expectedMax, $previousMax, "{$density} reaches its intended upper edge");
     }
-
-    assert_eq(7.0, $previousMax, 'largest edge is capped at 7rem');
 });
 
 test('theme-json fills a missing required color slug from the direction, then defaults', function () {
@@ -2589,6 +2658,117 @@ test('repairShapeWiring repairs authored cover and media-text corner styles with
         assert_eq([], $fixedRepairs, "fixed point reports nothing for {$shape}");
         assert_eq([], $fixedWarnings);
     }
+});
+
+test('committed measure replaces model widths exactly and reaches a fixed point', function () {
+    $authored = [
+        'settings' => [
+            'layout' => ['contentSize' => '860px', 'wideSize' => '1320px', 'allowEditing' => true],
+            'spacing' => ['blockGap' => true],
+        ],
+    ];
+
+    [$theme, $repairs] = ThemeJsonStep::applyMeasure($authored, 'full');
+    assert_eq(
+        ['contentSize' => '1040px', 'wideSize' => '1760px', 'allowEditing' => true],
+        $theme['settings']['layout'],
+    );
+    assert_eq(['blockGap' => true], $theme['settings']['spacing'], 'settings siblings survive');
+    assert_eq(1, count($repairs));
+    assert_contains('committed "full" measure', $repairs[0]);
+
+    [$fixed, $fixedRepairs] = ThemeJsonStep::applyMeasure($theme, 'full');
+    assert_eq($theme, $fixed);
+    assert_eq([], $fixedRepairs);
+});
+
+test('measure binding is a no-op when absent and repairs malformed layout containers', function () {
+    $legacy = ['settings' => ['layout' => ['contentSize' => '720px']]];
+    assert_eq([$legacy, []], ThemeJsonStep::applyMeasure($legacy, null));
+
+    foreach ([
+        ['settings' => 'broken'],
+        ['settings' => ['layout' => 'broken']],
+        ['settings' => ['layout' => ['wide']]],
+    ] as $theme) {
+        [$delivered, $repairs] = ThemeJsonStep::applyMeasure($theme, 'narrow');
+        assert_eq(
+            ['contentSize' => '640px', 'wideSize' => '1000px'],
+            $delivered['settings']['layout'],
+        );
+        assert_eq(1, count($repairs));
+    }
+});
+
+test('theme-json writes the block-first measure and records successful replacement', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_measure_write_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A screen-filling gallery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project, overrides: ['measure' => 'full']);
+
+    $llm = new FakeLlm();
+    $llm->queueJson(valid_theme_payload());
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    assert_eq(
+        ['contentSize' => '1040px', 'wideSize' => '1760px'],
+        $project->readJson('theme/theme.json')['settings']['layout'],
+    );
+    assert_contains(
+        'delivered committed "full" measure',
+        $project->readText('logs/theme-json-direction-bind.txt'),
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json keeps HTML-first design widths authoritative over measure', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_measure_html_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A screen-filling gallery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project, overrides: ['measure' => 'full']);
+    $project->writeText('design/site.css', ':root{--content-size:800px;--wide-size:1280px}');
+
+    $payload = valid_theme_payload();
+    $payload['settings']['layout'] = ['contentSize' => '860px', 'wideSize' => '1320px'];
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+    (new ThemeJsonStep(
+        $llm,
+        new PromptRenderer(repo_path('prompts')),
+        htmlFirst: true,
+    ))->run($project);
+
+    assert_eq(
+        ['contentSize' => '860px', 'wideSize' => '1280px'],
+        $project->readJson('theme/theme.json')['settings']['layout'],
+    );
+    assert_true(
+        !str_contains($project->readText('logs/theme-json-direction-bind.txt'), 'measure'),
+        'HTML-first width ownership does not report a measure replacement',
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json prompt delegates committed measure to the build', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_measure_prompt_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A framed poetry journal']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project, overrides: ['canvas' => 'framed', 'measure' => 'narrow']);
+
+    $prompt = (new ThemeJsonStep(
+        new FakeLlm(),
+        new PromptRenderer(repo_path('prompts')),
+    ))->requests($project)['theme-json']['prompt'];
+
+    assert_contains('**Measure**: narrow', $prompt);
+    assert_contains('visible frame edge below the full-bleed hero', $prompt);
+    assert_contains('Do not emit settings.layout.contentSize', $prompt);
+    assert_true(!str_contains($prompt, '800–900px'), 'the shared literal content window is gone');
+    assert_true(!str_contains($prompt, '1200–1400px'), 'the shared literal wide window is gone');
+    exec('rm -rf ' . escapeshellarg($tmp));
 });
 
 test('W6 theme-json normalizes unitless layout widths', function () {

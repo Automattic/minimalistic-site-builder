@@ -7,6 +7,7 @@ use Automattic\SiteBuild\GroundTint;
 use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
 use Automattic\SiteBuild\Llm;
+use Automattic\SiteBuild\Measure;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
@@ -138,6 +139,7 @@ test('design-direction expands a picked seed into structured designDirection.jso
     assert_eq([700, 900], $written['type']['heading']['weights']);
     assert_eq('warm kodachrome color, soft golden light', $written['image_grade']);
     assert_eq('framed', $written['card_style']);
+    assert_eq(Measure::DEFAULT, $written['measure']);
     assert_true(!array_key_exists('signature_device', $written), 'signature_device field is gone');
     assert_true(in_array($written['hero_blueprint']['recipe'], HeroComposition::RECIPES, true));
     assert_contains('Seed ', $written['concept_seed']);
@@ -158,7 +160,7 @@ test('design-direction expands a picked seed into structured designDirection.jso
     assert_contains('cozy neighborhood bakery', $llm->calls[1]['prompt']);
     assert_contains('Hearth & Crumb', $llm->calls[1]['prompt']);
     assert_contains('Seed ', $llm->calls[1]['prompt'], 'a seed reached the expansion prompt');
-    foreach (['palette', 'type', 'image_grade', 'card_style', 'hero_blueprint'] as $field) {
+    foreach (['palette', 'type', 'image_grade', 'canvas', 'measure', 'card_style', 'hero_blueprint'] as $field) {
         assert_contains($field, $llm->calls[1]['prompt']);
     }
     assert_contains(
@@ -962,6 +964,47 @@ test('format renders the canvas commitment with its executable meaning', functio
     assert_eq('Just prose.', DesignDirectionStep::format(['description' => 'Just prose.']));
 });
 
+test('normalize commits and renders one bounded measure with framed-canvas meaning', function () {
+    foreach (Measure::ALL as $measure) {
+        $warnings = [];
+        $direction = DesignDirectionStep::normalize([
+            'description' => 'x',
+            'canvas' => $measure === 'narrow' ? 'framed' : 'full-bleed',
+            'measure' => strtoupper($measure),
+            'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
+        ], 'cinematic-safe-zone', '', warnings: $warnings);
+
+        assert_eq($measure, $direction['measure']);
+        assert_eq([], $warnings);
+        assert_contains('**Measure**: ' . $measure, DesignDirectionStep::format($direction));
+    }
+
+    $framed = DesignDirectionStep::format([
+        'description' => 'x',
+        'canvas' => 'framed',
+        'measure' => 'narrow',
+    ]);
+    assert_contains('640px reading column inside a 1000px wide stage', $framed);
+    assert_contains('visible frame edge below the full-bleed hero', $framed);
+});
+
+test('invalid measure degrades to standard with actionable evidence', function () {
+    foreach (['panoramic', ['wide'], true] as $authored) {
+        $warnings = [];
+        $direction = DesignDirectionStep::normalize([
+            'description' => 'x',
+            'measure' => $authored,
+            'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
+        ], 'cinematic-safe-zone', '', warnings: $warnings);
+
+        assert_eq(Measure::DEFAULT, $direction['measure']);
+        assert_eq(1, count($warnings));
+        assert_contains('field measure', $warnings[0]);
+        assert_contains('delivered "standard"', $warnings[0]);
+        assert_contains('disposition', $warnings[0]);
+    }
+});
+
 test('normalize commits a card style: bounded values pass through and missing defaults without warning', function () {
     assert_eq('framed', DesignDirectionStep::normalize(['description' => 'x', 'card_style' => ' Framed '], 'cinematic-safe-zone')['card_style']);
     assert_eq('overlap', DesignDirectionStep::normalize(['description' => 'x', 'card_style' => 'overlap'], 'cinematic-safe-zone')['card_style']);
@@ -1327,6 +1370,7 @@ test('fallbackDirection builds on the chosen seed, generic brief otherwise', fun
 
     $generic = DesignDirectionStep::fallbackDirection('', 'cinematic-safe-zone');
     assert_contains('bold', $generic['description']);
+    assert_eq(Measure::DEFAULT, $generic['measure']);
     assert_eq('calm', $generic['motion']);
 });
 
@@ -1793,6 +1837,19 @@ test('shapeFor returns only an explicit valid commitment', function () {
 
     $project->writeJson('designDirection.json', ['description' => 'x', 'shape' => ' Round ']);
     assert_eq('round', DesignDirectionStep::shapeFor($project));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('measureFor returns only an explicit valid persisted commitment', function () {
+    $tmp = sys_get_temp_dir() . '/builder_ddmeasure_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+
+    assert_eq(null, DesignDirectionStep::measureFor($project));
+    $project->writeJson('designDirection.json', ['measure' => ['wide']]);
+    assert_eq(null, DesignDirectionStep::measureFor($project));
+    $project->writeJson('designDirection.json', ['measure' => ' Full ']);
+    assert_eq('full', DesignDirectionStep::measureFor($project));
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
