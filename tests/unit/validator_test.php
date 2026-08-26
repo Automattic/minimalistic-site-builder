@@ -327,6 +327,36 @@ test('typography warnings flag hardcoded font sizes and an unused display preset
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('CTA warnings verify theme binding and local override inheritance', function () {
+    [$project, $tmp] = validator_project();
+    seed_test_design_direction($project, overrides: ['cta_style' => 'outline']);
+    [$theme] = ThemeJsonStep::repairCtaStyle([
+        'version' => 3,
+        'styles' => ['elements' => ['button' => ['typography' => ['fontWeight' => '700']]]],
+    ], 'outline');
+    $project->writeJson('theme/theme.json', $theme);
+    $project->writeText(
+        'theme/parts/section-cta.html',
+        '<!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link wp-element-button">Go</a></div><!-- /wp:button -->',
+    );
+    assert_eq([], ThemeValidator::ctaWarnings($project));
+
+    $theme['styles']['elements']['button']['border']['width'] = '1px';
+    $project->writeJson('theme/theme.json', $theme);
+    $project->writeText(
+        'theme/parts/section-cta.html',
+        '<!-- wp:button {"backgroundColor":"accent"} --><div class="wp-block-button">'
+            . '<a class="wp-block-button__link has-accent-background-color has-background wp-element-button">Go</a>'
+            . '</div><!-- /wp:button -->',
+    );
+    $warnings = implode(' ', ThemeValidator::ctaWarnings($project));
+    assert_contains('committed "outline" CTA style drift', $warnings);
+    assert_contains('styles.elements.button.border.width', $warnings);
+    assert_contains('CTA local override drift', $warnings);
+    assert_contains('backgroundColor', $warnings);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('typography warnings flag long paragraphs at heading-scale presets', function () {
     [$project, $tmp] = validator_project();
     $project->writeJson('theme/theme.json', ['version' => 3, 'settings' => ['typography' => ['fontSizes' => [
