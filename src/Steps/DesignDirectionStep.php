@@ -15,7 +15,9 @@ use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\FontCatalog;
 use Automattic\SiteBuild\FontMonoculture;
 use Automattic\SiteBuild\Surface;
+use Automattic\SiteBuild\TypeTreatment;
 use Automattic\SiteBuild\GeneratedJsonException;
+use Automattic\SiteBuild\GroundKey;
 use Automattic\SiteBuild\GroundTint;
 use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
@@ -42,9 +44,10 @@ use Automattic\SiteBuild\Warnings;
  * Input:  meta.json (the user prompt) + siteSpec.json (factual info).
  * Output: designDirection.json — the chosen direction as structured data:
  *         title + vivid description plus the explicit fields downstream steps
- *         execute instead of re-interpreting (palette hexes, type pairing,
- *         image grade, canvas/measure layout commitments, the repeated-item
- *         idiom, and a separately consumed structured front-page hero blueprint).
+ *         execute instead of re-interpreting (palette hexes, type pairing and
+ *         treatment, image grade, canvas/measure layout commitments, the
+ *         repeated-item idiom, and a separately consumed structured front-page
+ *         hero blueprint).
  *
  * Two calls. First, a cheap seed call (small model, hot sampling) brainstorms
  * THREE concept seeds — each an object: an evocative title plus one vivid
@@ -205,6 +208,7 @@ final class DesignDirectionStep implements Step
         $warnings = [];
         [
             'text'          => $seed,
+            'ground'        => $seedGround,
             'tint'          => $seedTint,
             'register'      => $seedRegister,
             'type_register' => $seedTypeRegister,
@@ -232,6 +236,10 @@ final class DesignDirectionStep implements Step
             'user_prompt' => $prompt,
             'site_spec'   => $spec,
             'seed'        => $seed,
+            // Empty when a degraded seed committed no light/dark coordinate.
+            'ground_key'  => $seedGround === ''
+                ? 'not committed by the seed — choose one and say which'
+                : $seedGround,
             // Empty when the seed round degraded and committed no ground; the
             // prompt then asks for the field without naming a family, and
             // normalize() enforces the direction's own answer instead.
@@ -266,6 +274,7 @@ final class DesignDirectionStep implements Step
             $repairs,
             $warnings,
             $seedTint,
+            $seedGround,
         );
         if ($direction === null) {
             // A build without a committed direction still works — every
@@ -371,6 +380,7 @@ final class DesignDirectionStep implements Step
             'title'            => '',
             'description'      => $description,
             'palette'          => [],
+            'ground_key'       => '',
             'ground_tint'      => '',
             'type'             => [
                 'heading' => self::emptyTypeSlot(),
@@ -383,6 +393,7 @@ final class DesignDirectionStep implements Step
             'image_crop'       => ImageCrop::DEFAULT,
             'canvas'           => $canvas,
             'measure'          => Measure::DEFAULT,
+            'type_treatment'   => TypeTreatment::DEFAULT,
             'card_style'       => 'flush',
             'item_pattern'     => ItemPattern::DEFAULT,
             'depth'            => Depth::DEFAULT,
@@ -417,7 +428,7 @@ final class DesignDirectionStep implements Step
      * sampling.
      *
      * @param list<string> $warnings
-     * @return array{text:string,tint:string,register:string,type_register:string}
+     * @return array{text:string,ground:string,tint:string,register:string,type_register:string}
      */
     private function chooseSeed(string $brief, string $spec, array &$warnings = []): array
     {
@@ -466,7 +477,13 @@ final class DesignDirectionStep implements Step
         }
 
         if ($seeds === []) {
-            return ['text' => self::SEED_FALLBACK, 'tint' => '', 'register' => '', 'type_register' => ''];
+            return [
+                'text' => self::SEED_FALLBACK,
+                'ground' => '',
+                'tint' => '',
+                'register' => '',
+                'type_register' => '',
+            ];
         }
         $pool = ConceptSeeds::distinct($seeds, $warnings);
         $sharedGround = ConceptSeeds::sharedGround($pool);
@@ -501,12 +518,13 @@ final class DesignDirectionStep implements Step
      * than bookkeeping.
      *
      * @param array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string} $seed
-     * @return array{text:string,tint:string,register:string,type_register:string}
+     * @return array{text:string,ground:string,tint:string,register:string,type_register:string}
      */
     private static function chosen(array $seed): array
     {
         return [
             'text'          => $seed['text'],
+            'ground'        => $seed['ground'] ?? '',
             'tint'          => $seed['tint'] ?? '',
             'register'      => $seed['register'] ?? '',
             'type_register' => $seed['type_register'] ?? '',
@@ -687,6 +705,7 @@ final class DesignDirectionStep implements Step
         array &$repairs = [],
         array &$warnings = [],
         string $conceptTint = '',
+        string $conceptGround = '',
     ): ?array {
         if (!is_array($raw)) {
             return null;
@@ -709,12 +728,28 @@ final class DesignDirectionStep implements Step
             }
         }
 
-        // The ground the concept committed to, preferring the seed's own
-        // coordinate over the direction's restatement of it — the seed is the
-        // creative commitment, the direction is what drifted from it. A base
-        // outside that family is moved into it at equal relative luminance,
-        // so every contrast floor stated against this color still holds. An
-        // uncommitted tint enforces nothing: nothing was violated.
+        // The seed's light/dark coordinate is authoritative over the
+        // expansion's restatement. Move only palette.base across the shared
+        // luminance boundary; the later palette floor repairs contrast pairs.
+        // A degraded seed may leave the coordinate to the expansion instead.
+        $groundKey = BoundedChoice::explicit($conceptGround, GroundKey::ALL)
+            ?? BoundedChoice::explicit($raw['ground_key'] ?? null, GroundKey::ALL);
+        if ($groundKey !== null && isset($palette['base'])) {
+            $authored = $palette['base'];
+            if (GroundKey::classify($authored) !== $groundKey) {
+                $moved = GroundKey::move($authored, $groundKey);
+                if ($moved !== null) {
+                    $palette['base'] = $moved;
+                    $repairs[] = 'designDirection.json: field palette.base authored '
+                        . self::describe($authored) . ' delivered ' . self::describe($moved)
+                        . '; disposition moved onto the committed "' . $groundKey . '" ground';
+                }
+            }
+        }
+
+        // The tint is the orthogonal hue coordinate. Apply it after the
+        // luminance repair so retint() preserves the committed light/dark key
+        // as it rotates the ground into the seed's family.
         $groundTint = BoundedChoice::explicit($conceptTint, GroundTint::ALL)
             ?? BoundedChoice::explicit($raw['ground_tint'] ?? null, GroundTint::ALL);
         if ($groundTint !== null && isset($palette['base'])) {
@@ -726,6 +761,11 @@ final class DesignDirectionStep implements Step
                     $repairs[] = 'designDirection.json: field palette.base authored '
                         . self::describe($authored) . ' delivered ' . self::describe($moved)
                         . '; disposition moved onto the committed "' . $groundTint . '" ground';
+                } else {
+                    $warnings[] = "file='designDirection.json'; path=\"palette.base\"; authored="
+                        . self::describe($authored) . '; delivered=' . self::describe($authored)
+                        . '; disposition=committed ground_tint "' . $groundTint
+                        . '" cannot be rendered at this luminance; retained authored value';
                 }
             }
         }
@@ -777,6 +817,14 @@ final class DesignDirectionStep implements Step
             'measure',
             $warnings,
             'invalid layout measure replaced by deterministic standard fallback',
+        );
+        $typeTreatment = BoundedChoice::normalize(
+            $raw['type_treatment'] ?? null,
+            TypeTreatment::ALL,
+            TypeTreatment::DEFAULT,
+            'type_treatment',
+            $warnings,
+            'invalid heading treatment replaced by deterministic sentence fallback',
         );
 
         $cardStyle = self::normalizeCardStyle($raw['card_style'] ?? null, $warnings);
@@ -866,6 +914,7 @@ final class DesignDirectionStep implements Step
             'title'            => trim((string) ($raw['title'] ?? '')),
             'description'      => $description,
             'palette'          => $palette,
+            'ground_key'       => $groundKey ?? '',
             'ground_tint'      => $groundTint ?? '',
             'type'             => [
                 'heading' => self::normalizeTypeSlot($type['heading'] ?? null, 'heading', $warnings),
@@ -880,6 +929,7 @@ final class DesignDirectionStep implements Step
             // an accidental frame reads as a rendering bug, not a design choice.
             'canvas'           => $canvas,
             'measure'          => $measure,
+            'type_treatment'   => $typeTreatment,
             // Anything outside the bounded card constructions delivers the
             // flush default — inset media must be an explicit opt-in, never
             // the accidental look every site gets.
@@ -1279,6 +1329,12 @@ final class DesignDirectionStep implements Step
             $facts[] = '- **Palette**: ' . implode(' · ', $swatches);
         }
 
+        $groundKey = BoundedChoice::explicit($direction['ground_key'] ?? null, GroundKey::ALL);
+        if ($groundKey !== null) {
+            $facts[] = '- **Ground key**: ' . $groundKey
+                . ' — keep the page background on this side of the light/dark luminance split.';
+        }
+
         // Stated alongside the hexes because downstream steps re-pick colors
         // from this block; without it they only see a base hex and read the
         // family back out of it, which is how a committed ground drifts.
@@ -1325,6 +1381,13 @@ final class DesignDirectionStep implements Step
         if ($typeScale !== null) {
             $facts[] = '- **Type scale**: ' . $typeScale . ' — '
                 . TypeScale::meaning($typeScale) . '. The build owns the six preset values.';
+        }
+
+        $typeTreatment = TypeTreatment::explicit($direction['type_treatment'] ?? null);
+        if ($typeTreatment !== null) {
+            $facts[] = '- **Type treatment**: ' . $typeTreatment . ' — '
+                . TypeTreatment::meaning($typeTreatment)
+                . '. The build owns heading textTransform and letterSpacing; preserve its lineHeight.';
         }
 
         // Render the canvas commitment with its executable meaning, so the
@@ -1796,6 +1859,15 @@ final class DesignDirectionStep implements Step
             return null;
         }
         return CtaStyle::explicit($project->readJson(self::FILE)['cta_style'] ?? null);
+    }
+
+    /** The explicit heading case/tracking commitment, or null for a pre-field artifact. */
+    public static function typeTreatmentFor(Project $project): ?string
+    {
+        if (!$project->exists(self::FILE)) {
+            return null;
+        }
+        return TypeTreatment::explicit($project->readJson(self::FILE)['type_treatment'] ?? null);
     }
 
     /**

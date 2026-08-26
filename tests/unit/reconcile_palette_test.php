@@ -152,6 +152,69 @@ test('a proposed color the theme moved to another slug is kept and warned about'
     });
 });
 
+test('a resynced base that crosses the committed ground key is warned about, not repaired', function () {
+    with_project('builder_palette_ground_contradiction_', function ($project): void {
+        $proposed = [
+            'base' => '#1E1714',
+            'contrast' => '#EDE0CC',
+            'primary' => '#A6432A',
+            'secondary' => '#6E6A45',
+            'accent' => '#C79A3E',
+        ];
+        $direction = palette_direction($proposed);
+        $direction['ground_key'] = 'dark';
+        $project->writeJson('designDirection.json', $direction);
+        $project->writeJson('pages.json', palette_pages($proposed));
+        // theme-json delivered a light base against the checked dark key.
+        $project->writeJson('theme/theme.json', palette_theme(
+            ['base' => '#F4EBDA'] + $proposed,
+        ));
+
+        quietly(fn () => (new ReconcilePaletteStep())->run($project));
+
+        $reconciled = $project->readJson('designDirection.json');
+        assert_eq('#F4EBDA', $reconciled['palette']['base'], 'the delivered base still wins the resync');
+        assert_eq('dark', $reconciled['ground_key'], 'the committed key is kept as the record of the contract');
+
+        $warnings = $project->readJson('warnings.json')['reconcile-palette'] ?? [];
+        assert_eq(1, count($warnings));
+        assert_contains("file='designDirection.json'", $warnings[0]);
+        assert_contains('block="palette.base"', $warnings[0]);
+        assert_contains('authored="#1E1714"', $warnings[0]);
+        assert_contains('delivered="#F4EBDA"', $warnings[0]);
+        assert_contains('off the committed "dark" ground', $warnings[0]);
+        assert_contains('disposition=', $warnings[0]);
+    });
+});
+
+test('a resynced base that stays on the committed ground key warns nothing', function () {
+    with_project('builder_palette_ground_agree_', function ($project): void {
+        $proposed = [
+            'base' => '#1E1714',
+            'contrast' => '#EDE0CC',
+            'primary' => '#A6432A',
+            'secondary' => '#6E6A45',
+            'accent' => '#C79A3E',
+        ];
+        $direction = palette_direction($proposed);
+        $direction['ground_key'] = 'dark';
+        $project->writeJson('designDirection.json', $direction);
+        $project->writeJson('pages.json', palette_pages($proposed));
+        // theme-json authored its own base, but it stays on the dark side.
+        $project->writeJson('theme/theme.json', palette_theme(
+            ['base' => '#241A2E'] + $proposed,
+        ));
+
+        quietly(fn () => (new ReconcilePaletteStep())->run($project));
+
+        assert_eq('#241A2E', $project->readJson('designDirection.json')['palette']['base']);
+        assert_true(
+            !$project->exists('warnings.json'),
+            'a resync that honors the committed ground is lossless and silent',
+        );
+    });
+});
+
 test('a matching palette leaves both artifacts byte-for-byte alone', function () {
     with_project('builder_palette_noop_', function ($project): void {
         $palette = [

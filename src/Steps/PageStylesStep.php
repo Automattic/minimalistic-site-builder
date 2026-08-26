@@ -4123,6 +4123,12 @@ CSS;
                 $problems[] = 'image filter/blend/opacity declarations are treatment-owned by the design direction';
                 break;
             }
+            if (self::declarationTargetsHeading($declaration)
+                && CssChecks::isHeadingTreatmentDeclaration($declaration['property'])
+            ) {
+                $problems[] = 'heading case/tracking declarations are type-treatment-owned by the design direction';
+                break;
+            }
         }
         // Parse opacity values instead of pattern-matching literal zeros:
         // 0%, .0 and calc(0) hide content just as well as 0.
@@ -4314,6 +4320,7 @@ CSS;
      * that carries a declaration-level offence (raw color literal, resource-
      * loading function, --motion-* override, depth-variable redeclaration,
      * shape-owned corner radius, treatment-owned image filter/blend/opacity,
+     * type-treatment-owned heading case/tracking,
      * content-hiding value) and keep the rest. Only rule bodies are touched —
      * selectors, @media preludes and brace structure pass through, so
      * structural problems deliberately survive into the re-validation and
@@ -4332,6 +4339,7 @@ CSS;
                 self::declarationTargetsShape($declaration),
                 self::declarationTargetsCta($declaration),
                 self::declarationTargetsImageTreatment($declaration),
+                self::declarationTargetsHeading($declaration),
             );
             if ($problem !== null) {
                 $problems[$declaration['start']] = $problem;
@@ -4363,6 +4371,7 @@ CSS;
         bool $targetsShape = false,
         bool $targetsCta = false,
         bool $targetsImageTreatment = false,
+        bool $targetsHeading = false,
     ): ?string
     {
         if (preg_match('/^\s*([-\w]+)\s*:\s*(\S[\s\S]*)$/', $declaration, $m) !== 1) {
@@ -4386,6 +4395,9 @@ CSS;
             && CssChecks::isImageTreatmentAffectingDeclaration($property, $value, opacityOwned: true)
         ) {
             return 'image filter/blend/opacity is treatment-owned by the design direction';
+        }
+        if ($targetsHeading && CssChecks::isHeadingTreatmentDeclaration($property)) {
+            return 'heading case/tracking is type-treatment-owned by the design direction';
         }
         if (preg_match('/#[0-9a-fA-F]{3,8}\b/', $value) === 1
             || preg_match('/\b(?:rgba?|hsla?)\s*\(/i', $value) === 1
@@ -4438,6 +4450,13 @@ CSS;
     {
         return $declaration['kind'] === 'style'
             && CssChecks::selectorTargetsImageTreatment($declaration['context']);
+    }
+
+    /** @param array{context:string,kind:string} $declaration */
+    private static function declarationTargetsHeading(array $declaration): bool
+    {
+        return $declaration['kind'] === 'style'
+            && CssChecks::selectorTargetsHeading($declaration['context']);
     }
 
     /** @return string[] */
