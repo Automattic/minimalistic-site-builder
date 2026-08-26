@@ -26,16 +26,18 @@ namespace Automattic\SiteBuild;
 final class GeminiImage
 {
     /**
-     * Aspect-ratio values the builder generates with. Gemini accepts more
-     * shapes (2:3, 4:5, …), but those are near-duplicates of the card ratios
-     * and every extra option widens the spec-writer's chance of mixing ratios
-     * within one grid — so the menu stays at these six and arbitrary requested
-     * ratios are clamped to the nearest one.
+     * Aspect-ratio values the builder generates with. The prompt vocabulary
+     * stays deliberately small, while deterministic direction execution also
+     * uses the exact 2:3, 3:2, and 4:5 canvases needed by the committed crop
+     * system. Arbitrary requested ratios are clamped to the nearest entry.
      */
     private const SUPPORTED_ASPECT_RATIOS = [
         '1:1'  => 1.0,
+        '2:3'  => 2 / 3,
         '3:4'  => 3 / 4,
         '4:3'  => 4 / 3,
+        '3:2'  => 3 / 2,
+        '4:5'  => 4 / 5,
         '9:16' => 9 / 16,
         '16:9' => 16 / 9,
         '21:9' => 21 / 9,
