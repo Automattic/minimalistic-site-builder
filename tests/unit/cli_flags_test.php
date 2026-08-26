@@ -204,23 +204,16 @@ test('--html-islands with another graph flag is refused', function () {
     );
 });
 
-test('leftover SITE_BUILD_HTML_FIRST without SITE_BUILD_GRAPH is refused', function () {
-    $command = 'SITE_BUILD_HTML_FIRST=' . escapeshellarg('1')
-        . ' SITE_BUILD_GRAPH=' . escapeshellarg('')
-        . ' ANTHROPIC_API_KEY=' . escapeshellarg('test-key') . ' '
-        . php_child_command(repo_path('bin/build.php'), [
-            'demo',
-            '--provider=anthropic',
-            '--no-serve',
-        ]);
-    $output = [];
-    $exit = 0;
-    exec($command . ' 2>&1', $output, $exit);
-    $text = implode("\n", $output);
-
-    assert_eq(1, $exit, $text);
-    assert_true(str_contains($text, 'SITE_BUILD_HTML_FIRST'), $text);
-    assert_true(str_contains($text, 'SITE_BUILD_GRAPH'), $text);
+test('leftover SITE_BUILD_HTML_FIRST is ignored when SITE_BUILD_GRAPH is pinned', function () {
+    // Empty process SITE_BUILD_GRAPH is not unset: Env::get falls back to .env
+    // (site_builder_test.php:17-19). Pin the new key so leftover cannot leak.
+    $ids = build_cli_graph_ids([], [
+        'SITE_BUILD_HTML_FIRST' => '1',
+        'SITE_BUILD_GRAPH' => 'blocks',
+    ]);
+    $seen = implode(',', $ids);
+    assert_true(in_array('sections', $ids, true), $seen);
+    assert_true(!in_array('transform-site', $ids, true), $seen);
 });
 
 test('--html-islands is refused as not yet implemented', function () {

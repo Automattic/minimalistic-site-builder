@@ -153,6 +153,8 @@ final class SiteBuilder
         $writingDirection = $writingDirection === null
             ? null
             : WritingDirection::validate($writingDirection);
+        // Validate before claiming a directory, same as every other input.
+        $resolvedGraph = StepComposition::graphName($graph);
 
         // A supplied spec is self-contained by default: unless the caller
         // explicitly forces one page, retain whatever page tree it carries.
@@ -172,7 +174,7 @@ final class SiteBuilder
             // A --from resume reads this to run the graph that built the project.
             // Hosts driving a fixed composition must pass $graph; the default
             // reads the same selector pipeline() does.
-            'graph'            => StepComposition::graphName($graph),
+            'graph'            => $resolvedGraph,
         ];
         if ($pages !== []) {
             $seed['pages'] = array_values($pages);

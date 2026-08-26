@@ -103,6 +103,7 @@ final class StepComposition
             self::GRAPH_HTML_FIRST => self::htmlFirst($llm, $renderer, $models, $temperatures, $blockFixer, $fontFetcher),
             self::GRAPH_BLOCKS => self::blocks($llm, $renderer, $models, $temperatures, $blockFixer, $fontFetcher),
             self::GRAPH_HTML_ISLANDS => throw new \RuntimeException(Graph::NOT_IMPLEMENTED),
+            default => throw new \RuntimeException(Graph::NOT_IMPLEMENTED),
         };
     }
 
@@ -172,10 +173,17 @@ final class StepComposition
      * artifacts.
      *
      * @throws \InvalidArgumentException when the request contradicts the record,
-     *         or the recorded name is unknown
+     *         the recorded name is unknown, or the requested name is unknown
      */
     public static function resumeGraph(?string $recorded, ?string $requested): ?string
     {
+        if ($requested !== null && !in_array($requested, Graph::KNOWN, true)) {
+            throw new \InvalidArgumentException(sprintf(
+                "Unknown graph '%s'. Known: %s.",
+                $requested,
+                implode(', ', Graph::KNOWN),
+            ));
+        }
         if ($recorded === null || $recorded === '') {
             return null;
         }

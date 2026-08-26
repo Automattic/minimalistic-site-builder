@@ -306,6 +306,13 @@ test('SiteBuilder invalid structured inputs fail before creating a project direc
         writingDirection: 'auto',
     ));
     assert_true(!is_dir($tmp . '/invalid-direction'));
+
+    assert_throws(fn () => $builder->createProject(
+        'a test cafe',
+        'invalid-graph',
+        graph: 'not-a-graph',
+    ));
+    assert_true(!is_dir($tmp . '/invalid-graph'));
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

@@ -43,10 +43,17 @@ echo "Generating images for '{$project->slug()}'\n";
 // re-validation apply rules that differ per graph, so they read one answer.
 $meta = $project->exists('meta.json') ? $project->readJson('meta.json') : [];
 $recordedGraph = $meta['graph'] ?? null;
-$graph = StepComposition::resumeGraph(
-    is_string($recordedGraph) ? $recordedGraph : null,
-    null,
-);
+try {
+    $graph = StepComposition::resumeGraph(
+        is_string($recordedGraph) ? $recordedGraph : null,
+        null,
+    );
+} catch (InvalidArgumentException $e) {
+    // Unknown or retired record (html-first after it leaves Graph::KNOWN).
+    // This entry point is not a --from resume: fall back to the transform
+    // report, which only the HTML-first pipeline writes.
+    $graph = null;
+}
 $htmlFirst = ($graph ?? ($project->exists(TransformArtifacts::REPORT)
     ? StepComposition::GRAPH_HTML_FIRST
     : StepComposition::GRAPH_BLOCKS)) === StepComposition::GRAPH_HTML_FIRST;

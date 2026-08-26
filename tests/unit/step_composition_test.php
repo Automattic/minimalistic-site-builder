@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\BlockFixer;
+use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\Pipeline;
 use Automattic\SiteBuild\Project;
@@ -29,6 +30,49 @@ function composition_deps(): array
         'renderer' => new PromptRenderer(Package::promptsDir()),
         'blockFixer' => $fixer,
     ];
+}
+
+/**
+ * Isolate SITE_BUILD_GRAPH / SITE_BUILD_HTML_FIRST from process env AND the
+ * .env map Env::get falls back to. Clearing the process key alone is not
+ * unset — site_builder_test.php:17-19 documents that trap.
+ *
+ * @param ?string $graph  null drops SITE_BUILD_GRAPH; a name pins it
+ * @param ?string $legacy null drops SITE_BUILD_HTML_FIRST; a value pins it
+ */
+function with_isolated_graph_env(?string $graph, ?string $legacy, callable $fn): void
+{
+    $previousGraph = getenv('SITE_BUILD_GRAPH');
+    $previousLegacy = getenv('SITE_BUILD_HTML_FIRST');
+    $prop = new ReflectionProperty(Env::class, 'vars');
+    $savedMap = $prop->getValue();
+    $map = $savedMap;
+    try {
+        if ($graph === null) {
+            putenv('SITE_BUILD_GRAPH');
+            unset($map['SITE_BUILD_GRAPH']);
+        } else {
+            putenv('SITE_BUILD_GRAPH=' . $graph);
+            $map['SITE_BUILD_GRAPH'] = $graph;
+        }
+        if ($legacy === null) {
+            putenv('SITE_BUILD_HTML_FIRST');
+            unset($map['SITE_BUILD_HTML_FIRST']);
+        } else {
+            putenv('SITE_BUILD_HTML_FIRST=' . $legacy);
+            $map['SITE_BUILD_HTML_FIRST'] = $legacy;
+        }
+        $prop->setValue(null, $map);
+        $fn();
+    } finally {
+        $prop->setValue(null, $savedMap);
+        $previousGraph === false
+            ? putenv('SITE_BUILD_GRAPH')
+            : putenv('SITE_BUILD_GRAPH=' . $previousGraph);
+        $previousLegacy === false
+            ? putenv('SITE_BUILD_HTML_FIRST')
+            : putenv('SITE_BUILD_HTML_FIRST=' . $previousLegacy);
+    }
 }
 
 test('postImages names the phase every image entry point has to run', function () {
@@ -89,6 +133,8 @@ test('images CLI reads the graph off the project instead of the env selector', f
     $source = (string) file_get_contents(dirname(__DIR__, 2) . '/bin/images.php');
     assert_contains('StepComposition::resumeGraph(', $source);
     assert_contains('htmlFirst: $htmlFirst', $source);
+    assert_contains('TransformArtifacts::REPORT', $source);
+    assert_contains('catch (InvalidArgumentException', $source);
     assert_true(
         !str_contains($source, 'selectedGraph'),
         'the entry point that did not build the project never asks the env selector',
@@ -366,6 +412,13 @@ test('an unknown recorded graph is refused by name, not treated as the caller\'s
     assert_true(str_contains($e->getMessage(), 'some-future-graph'), $e->getMessage());
 });
 
+test('an unknown requested graph is refused by the request name, not blamed on the record', function () {
+    $e = assert_throws(static fn () => StepComposition::resumeGraph('blocks', 'htmlfirst'));
+    assert_true($e instanceof InvalidArgumentException, get_class($e));
+    assert_true(str_contains($e->getMessage(), 'htmlfirst'), $e->getMessage());
+    assert_true(!str_contains($e->getMessage(), 'built on the blocks graph'), $e->getMessage());
+});
+
 test('SITE_BUILD_GRAPH=html-islands is recognized and refuses to build', function () {
     $previous = getenv('SITE_BUILD_GRAPH');
     putenv('SITE_BUILD_GRAPH=html-islands');
@@ -387,61 +440,28 @@ test('SITE_BUILD_GRAPH=html-islands is recognized and refuses to build', functio
 });
 
 test('leftover SITE_BUILD_HTML_FIRST without SITE_BUILD_GRAPH is refused by name', function () {
-    $previousGraph = getenv('SITE_BUILD_GRAPH');
-    $previousLegacy = getenv('SITE_BUILD_HTML_FIRST');
-    putenv('SITE_BUILD_GRAPH');
-    putenv('SITE_BUILD_HTML_FIRST=1');
-    try {
+    with_isolated_graph_env(null, '1', static function (): void {
         $e = assert_throws(static fn () => StepComposition::selectedGraph());
         assert_true($e instanceof InvalidArgumentException, get_class($e));
         assert_true(str_contains($e->getMessage(), 'SITE_BUILD_HTML_FIRST'), $e->getMessage());
         assert_true(str_contains($e->getMessage(), 'SITE_BUILD_GRAPH'), $e->getMessage());
         assert_true(str_contains($e->getMessage(), 'html-first'), $e->getMessage());
-    } finally {
-        $previousGraph === false
-            ? putenv('SITE_BUILD_GRAPH')
-            : putenv('SITE_BUILD_GRAPH=' . $previousGraph);
-        $previousLegacy === false
-            ? putenv('SITE_BUILD_HTML_FIRST')
-            : putenv('SITE_BUILD_HTML_FIRST=' . $previousLegacy);
-    }
+    });
 });
 
 test('leftover SITE_BUILD_HTML_FIRST=0 is still set, so it is refused too', function () {
-    $previousGraph = getenv('SITE_BUILD_GRAPH');
-    $previousLegacy = getenv('SITE_BUILD_HTML_FIRST');
-    putenv('SITE_BUILD_GRAPH');
-    putenv('SITE_BUILD_HTML_FIRST=0');
-    try {
+    with_isolated_graph_env(null, '0', static function (): void {
         $e = assert_throws(static fn () => StepComposition::selectedGraph());
         assert_true($e instanceof InvalidArgumentException, get_class($e));
         assert_true(str_contains($e->getMessage(), 'SITE_BUILD_HTML_FIRST'), $e->getMessage());
         assert_true(str_contains($e->getMessage(), 'SITE_BUILD_GRAPH'), $e->getMessage());
-    } finally {
-        $previousGraph === false
-            ? putenv('SITE_BUILD_GRAPH')
-            : putenv('SITE_BUILD_GRAPH=' . $previousGraph);
-        $previousLegacy === false
-            ? putenv('SITE_BUILD_HTML_FIRST')
-            : putenv('SITE_BUILD_HTML_FIRST=' . $previousLegacy);
-    }
+    });
 });
 
 test('SITE_BUILD_GRAPH wins when a leftover SITE_BUILD_HTML_FIRST is also set', function () {
-    $previousGraph = getenv('SITE_BUILD_GRAPH');
-    $previousLegacy = getenv('SITE_BUILD_HTML_FIRST');
-    putenv('SITE_BUILD_GRAPH=blocks');
-    putenv('SITE_BUILD_HTML_FIRST=1');
-    try {
+    with_isolated_graph_env('blocks', '1', static function (): void {
         assert_eq('blocks', StepComposition::selectedGraph());
-    } finally {
-        $previousGraph === false
-            ? putenv('SITE_BUILD_GRAPH')
-            : putenv('SITE_BUILD_GRAPH=' . $previousGraph);
-        $previousLegacy === false
-            ? putenv('SITE_BUILD_HTML_FIRST')
-            : putenv('SITE_BUILD_HTML_FIRST=' . $previousLegacy);
-    }
+    });
 });
 
 test('an unknown SITE_BUILD_GRAPH value is refused by name', function () {
