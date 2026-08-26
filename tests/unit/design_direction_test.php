@@ -70,6 +70,7 @@ function designdir_direction(): array
         ],
         'type'             => designdir_type(),
         'image_grade'      => 'warm kodachrome color, soft golden light',
+        'image_crop'       => 'portrait',
         'card_style'       => 'framed',
         'hero_blueprint'   => HeroBlueprint::defaultFor('editorial-split'),
     ];
@@ -137,6 +138,7 @@ test('design-direction expands a picked seed into structured designDirection.jso
     assert_eq('Spectral', $written['type']['heading']['family']);
     assert_eq([700, 900], $written['type']['heading']['weights']);
     assert_eq('warm kodachrome color, soft golden light', $written['image_grade']);
+    assert_eq('portrait', $written['image_crop']);
     assert_eq('framed', $written['card_style']);
     assert_eq(Measure::DEFAULT, $written['measure']);
     assert_true(!array_key_exists('signature_device', $written), 'signature_device field is gone');
@@ -159,7 +161,7 @@ test('design-direction expands a picked seed into structured designDirection.jso
     assert_contains('cozy neighborhood bakery', $llm->calls[1]['prompt']);
     assert_contains('Hearth & Crumb', $llm->calls[1]['prompt']);
     assert_contains('Seed ', $llm->calls[1]['prompt'], 'a seed reached the expansion prompt');
-    foreach (['palette', 'type', 'image_grade', 'canvas', 'measure', 'card_style', 'hero_blueprint'] as $field) {
+    foreach (['palette', 'type', 'image_grade', 'image_crop', 'canvas', 'measure', 'card_style', 'hero_blueprint'] as $field) {
         assert_contains($field, $llm->calls[1]['prompt']);
     }
     assert_contains(
@@ -189,7 +191,7 @@ test('design-direction persists an unmappable motion-note warning and reaches a 
 
     $written = $project->readJson('designDirection.json');
     assert_eq([], $written['motion_note']);
-    foreach (['title', 'palette', 'image_grade', 'card_style'] as $sibling) {
+    foreach (['title', 'palette', 'image_grade', 'image_crop', 'card_style'] as $sibling) {
         assert_eq($authored[$sibling], $written[$sibling], "{$sibling} survives motion-note removal");
     }
     foreach (['heading', 'body'] as $face) {
@@ -1060,6 +1062,53 @@ test('format renders the card treatment with its executable meaning', function (
     assert_eq('Just prose.', DesignDirectionStep::format(['description' => 'Just prose.']));
 });
 
+test('normalize commits every bounded image crop and warns on an unsupported system', function () {
+    $base = [
+        'description' => 'x',
+        'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
+    ];
+    foreach (['landscape', 'portrait', 'square', 'panoramic', 'mixed'] as $crop) {
+        $warnings = [];
+        $direction = DesignDirectionStep::normalize(
+            $base + ['image_crop' => strtoupper($crop)],
+            'cinematic-safe-zone',
+            '',
+            warnings: $warnings,
+        );
+        assert_eq($crop, $direction['image_crop']);
+        assert_eq([], $warnings, $crop);
+    }
+
+    $warnings = [];
+    $direction = DesignDirectionStep::normalize(
+        $base + ['image_crop' => 'cinemascope-ish'],
+        'cinematic-safe-zone',
+        '',
+        warnings: $warnings,
+    );
+    assert_eq('mixed', $direction['image_crop']);
+    assert_contains('field image_crop', $warnings[0]);
+    assert_contains('authored "cinemascope-ish"', $warnings[0]);
+    assert_contains('delivered "mixed"', $warnings[0]);
+    assert_contains('disposition ', $warnings[0]);
+});
+
+test('format renders image crop as an executable ratio contract', function () {
+    foreach ([
+        'landscape' => 'ordinary cards 3:2',
+        'portrait' => 'ordinary cards and feature media 4:5',
+        'square' => 'feature-media crop 1:1',
+        'panoramic' => 'feature media 21:9',
+        'mixed' => 'established per-role system',
+    ] as $crop => $meaning) {
+        $rendered = DesignDirectionStep::format(['description' => 'x', 'image_crop' => $crop]);
+        assert_contains("**Image crop**: {$crop}", $rendered);
+        assert_contains($meaning, $rendered);
+        assert_contains('do not author an aspect ratio', $rendered);
+    }
+    assert_eq('Just prose.', DesignDirectionStep::format(['description' => 'Just prose.']));
+});
+
 test('normalize commits a shape while valid normalization and a missing field stay silent', function () {
     $base = [
         'description' => 'x',
@@ -1265,6 +1314,7 @@ test('fallbackDirection builds on the chosen seed, generic brief otherwise', fun
     assert_contains('bold', $generic['description']);
     assert_eq(Measure::DEFAULT, $generic['measure']);
     assert_eq('calm', $generic['motion']);
+    assert_eq('mixed', $generic['image_crop']);
 });
 
 test('design-direction throws when meta prompt missing', function () {
@@ -1743,6 +1793,21 @@ test('measureFor returns only an explicit valid persisted commitment', function 
     assert_eq(null, DesignDirectionStep::measureFor($project));
     $project->writeJson('designDirection.json', ['measure' => ' Full ']);
     assert_eq('full', DesignDirectionStep::measureFor($project));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('imageCropFor returns only an explicit valid commitment', function () {
+    $tmp = sys_get_temp_dir() . '/builder_ddcrop_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+
+    assert_eq(null, DesignDirectionStep::imageCropFor($project));
+    $project->writeJson('designDirection.json', ['description' => 'x']);
+    assert_eq(null, DesignDirectionStep::imageCropFor($project), 'pre-field direction stays uncommitted');
+    $project->writeJson('designDirection.json', ['description' => 'x', 'image_crop' => ['portrait']]);
+    assert_eq(null, DesignDirectionStep::imageCropFor($project), 'garbled value is not guessed');
+    $project->writeJson('designDirection.json', ['description' => 'x', 'image_crop' => ' Panoramic ']);
+    assert_eq('panoramic', DesignDirectionStep::imageCropFor($project));
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

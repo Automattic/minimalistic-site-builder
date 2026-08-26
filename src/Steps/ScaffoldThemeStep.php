@@ -112,7 +112,8 @@ final class ScaffoldThemeStep implements Step
            produced and left it floating in taller rows (BIGR-777). */
         .card-media img,
         .card-media-tall img,
-        .card-media-thumb img {
+        .card-media-thumb img,
+        .feature-media img {
             width: 100%;
             object-fit: cover;
             display: block;
