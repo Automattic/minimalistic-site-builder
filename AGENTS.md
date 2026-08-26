@@ -95,11 +95,18 @@ GitHub has **no API or `gh` command to upload true comment attachments** — the
 
 1. `gh gist create` rejects binary files, so seed the gist with a text file, then `git push` the image into it (gists are git repos). Gist raw URLs serve the correct `image/png` content-type, so they render inline in comments:
    ```bash
-   echo "# Evidence for #31" > README.md
-   id=$(basename "$(gh gist create README.md --desc 'Evidence for #31')")
-   git clone "https://gist.github.com/$id.git" /tmp/evgist
-   cp before.png after.png /tmp/evgist/
-   git -C /tmp/evgist add -A && git -C /tmp/evgist commit -qm "screenshots" && git -C /tmp/evgist push -q
+   set -euo pipefail
+   evidence_dir=$(mktemp -d)
+   # Generate or copy the screenshots to "$evidence_dir/before.png" and "$evidence_dir/after.png".
+   seed_file="$evidence_dir/README.md"
+   gist_dir="$evidence_dir/gist"
+   printf '%s\n' '# Evidence for #31' > "$seed_file"
+   id=$(basename "$(gh gist create "$seed_file" --desc 'Evidence for #31')")
+   git clone "https://gist.github.com/$id.git" "$gist_dir"
+   cp "$evidence_dir/before.png" "$evidence_dir/after.png" "$gist_dir/"
+   git -C "$gist_dir" add -A
+   git -C "$gist_dir" commit -qm "screenshots"
+   git -C "$gist_dir" push -q
    login=$(gh api user -q .login)
    echo "https://gist.githubusercontent.com/$login/$id/raw/before.png"
    ```
