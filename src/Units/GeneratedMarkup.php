@@ -3137,6 +3137,175 @@ final class GeneratedMarkup
     }
 
     /**
+     * Force a band recipe's image band to span the full viewport width.
+     *
+     * stacked-headline-band (BIGR-885) stacks the copy above ONE full-width
+     * image band. Models wrap that band in a constrained group, and a
+     * constrained wrapper caps its `alignfull` image at the reading measure —
+     * the band then stops short of both viewport edges (audited: bindery-en,
+     * 840px of 1366px). Every block that carries `hero-composition__media`,
+     * and every image inside one, is upgraded to `"align":"full"`.
+     * Attribute-only edit per the shared convention (fix-blocks re-serializes
+     * the saved HTML's alignfull class from the attrs); the stale alignwide
+     * class token is removed here so re-serialization cannot resurrect it.
+     *
+     * The band image's own crop is dropped for the same reason the width is
+     * forced: core/image's aspectRatio+scale serialize to an INLINE style,
+     * and an inline declaration outranks the recipe stylesheet however
+     * specific its selector is — so a model-chosen ratio silently replaces
+     * the letterbox crop, and on mobile it deletes this recipe's only
+     * transformation. Measured across the corpus: 50 of 377 image blocks
+     * carry the pair, and never one without the other.
+     *
+     * @param list<array<string,mixed>> $repairs
+     */
+    public static function bandMediaAlignment(string $markup, string $part, array &$repairs = []): string
+    {
+        $document = BlockMarkup::parse($markup);
+        $regions = [];
+        foreach ($document->indices() as $index) {
+            $classes = self::classTokens((string) (($document->attrs($index) ?? [])['className'] ?? ''));
+            if (in_array('hero-composition__media', $classes, true)) {
+                $regions[] = $index;
+            }
+        }
+        if ($regions === []) {
+            return $markup;
+        }
+
+        $upgraded = 0;
+        $uncropped = 0;
+        foreach ($document->indices() as $index) {
+            $isRegion = in_array($index, $regions, true);
+            $insideRegion = false;
+            for ($parent = $document->parent($index); $parent !== null; $parent = $document->parent($parent)) {
+                if (in_array($parent, $regions, true)) {
+                    $insideRegion = true;
+                    break;
+                }
+            }
+            // The prompt puts the media hook on the wp:image itself, so the
+            // band image is as often the region as it is a child of one.
+            $isBandImage = $document->name($index) === 'image' && ($isRegion || $insideRegion);
+            if (!$isRegion && !$isBandImage) {
+                continue;
+            }
+            $attrs = $document->attrs($index) ?? [];
+            $authored = $attrs;
+            // Deliberately NOT behind the align check below: a band already
+            // marked align:full can still carry its own competing crop.
+            $stripCrop = $isBandImage
+                && (array_key_exists('aspectRatio', $attrs) || array_key_exists('scale', $attrs));
+            if ($stripCrop) {
+                unset($attrs['aspectRatio'], $attrs['scale']);
+            }
+            $widen = (string) ($attrs['align'] ?? '') !== 'full';
+            if ($widen) {
+                $attrs['align'] = 'full';
+            }
+            if ($attrs === $authored) {
+                continue;
+            }
+            $document->setAttrs($index, $attrs);
+            // One splice carries both own-HTML cleanups. A class-token edit
+            // and a splice on the SAME node overlap, and the class edit wins
+            // by rewriting the whole own range from the original source —
+            // taking the splice and the block's closing delimiter with it.
+            $spliced = $stripCrop && self::rewriteBandImageHtml($document, $index, $widen);
+            if ($widen && !$spliced) {
+                $document->removeClassTokenInOwnHtml($index, 'alignwide');
+            }
+            if ($widen) {
+                $upgraded++;
+            }
+            if ($stripCrop) {
+                $uncropped++;
+            }
+        }
+        if ($upgraded === 0 && $uncropped === 0) {
+            return $markup;
+        }
+        if ($upgraded > 0) {
+            $repairs[] = [
+                'code' => 'hero-band-alignment',
+                'part' => $part,
+                'authored' => "{$upgraded} image-band block(s) capped below full width",
+                'delivered' => 'align:full edge-to-edge (the band recipe promises a band that reaches both viewport edges)',
+                'disposition' => 'repaired',
+            ];
+        }
+        if ($uncropped > 0) {
+            $repairs[] = [
+                'code' => 'hero-band-crop',
+                'part' => $part,
+                'authored' => "{$uncropped} image-band block(s) carrying an inline aspect-ratio",
+                'delivered' => 'crop returned to the reviewed stylesheet (letterbox on desktop, the taller mobile re-crop)',
+                'disposition' => 'repaired',
+            ];
+        }
+        return $document->render();
+    }
+
+    /**
+     * Rewrite one band image's saved HTML: drop the aspect-ratio/object-fit
+     * pair WordPress serializes from core/image's aspectRatio+scale, and the
+     * stale alignwide token when the block was widened in the same pass.
+     * Removing the attrs alone leaves those declarations in the saved HTML,
+     * where they keep outranking the stylesheet until something re-serializes
+     * the block. Returns whether anything was spliced.
+     */
+    private static function rewriteBandImageHtml(
+        BlockMarkup $document,
+        int $index,
+        bool $dropAlignWide,
+    ): bool {
+        $authored = $document->ownHtml($index);
+        $delivered = preg_replace_callback(
+            '~\s+style\s*=\s*"([^"]*)"~i',
+            static function (array $match): string {
+                $kept = [];
+                foreach (explode(';', $match[1]) as $declaration) {
+                    $declaration = trim($declaration);
+                    if ($declaration === '') {
+                        continue;
+                    }
+                    $property = strtolower(trim(explode(':', $declaration, 2)[0]));
+                    if (in_array($property, ['aspect-ratio', 'object-fit'], true)) {
+                        continue;
+                    }
+                    $kept[] = $declaration;
+                }
+                return $kept === [] ? '' : ' style="' . implode(';', $kept) . '"';
+            },
+            $authored,
+        );
+        if (!is_string($delivered)) {
+            return false;
+        }
+        if ($dropAlignWide) {
+            $delivered = preg_replace_callback(
+                '~\s+class\s*=\s*"([^"]*)"~i',
+                static function (array $match): string {
+                    $kept = array_values(array_filter(
+                        self::classTokens($match[1]),
+                        static fn (string $token): bool => $token !== 'alignwide',
+                    ));
+                    return $kept === [] ? '' : ' class="' . implode(' ', $kept) . '"';
+                },
+                $delivered,
+            );
+            if (!is_string($delivered)) {
+                return false;
+            }
+        }
+        if ($delivered === $authored) {
+            return false;
+        }
+        $document->spliceOwnHtml($index, 0, strlen($authored), $delivered);
+        return true;
+    }
+
+    /**
      * Retain non-overlapping outermost source spans.
      *
      * Structurally safe block ranges are disjoint or nested. The defensive

@@ -1178,11 +1178,20 @@ test('sections retains deterministically repaired block grammar and reports the 
     $llm->queueText('<!-- wp:group --><!-- wp:site-title /--><!-- /wp:group -->');
     $llm->queueText('<!-- wp:group --><!-- wp:paragraph --><p>(c)</p><!-- /wp:paragraph --><!-- /wp:group -->');
     $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
+    // The split really is two columns, so the archetype's own advisory check
+    // stays quiet and the assertion below judges only the grammar repair.
     $llm->queueText(
         '<!-- wp:group {"anchor":"about","layout":{"type":"constrained"}} -->'
         . '<div>'
+        . '<!-- wp:columns --><div class="wp-block-columns">'
+        . '<!-- wp:column {"width":"40%"} --><div class="wp-block-column">'
         . '<!-- wp:paragraph {"backgroundColor":"secondary","style":{"spacing":{"padding":{"top":"var:preset|spacing|sm"}}} -->'
         . '<p>About survives.</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:column -->'
+        . '<!-- wp:column {"width":"60%"} --><div class="wp-block-column">'
+        . '<!-- wp:paragraph --><p>Beside it.</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:column -->'
+        . '</div><!-- /wp:columns -->'
         . '</div><!-- /wp:group -->',
     );
 

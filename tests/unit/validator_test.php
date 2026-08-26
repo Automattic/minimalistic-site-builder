@@ -930,6 +930,27 @@ test('spacing warnings detect theme-profile and section-root rhythm drift', func
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('spacing warnings validate against the persisted density profile', function () {
+    [$project, $tmp] = validator_project();
+    seed_test_design_direction($project, overrides: ['density' => 'airy']);
+    $project->writeJson(
+        'theme/theme.json',
+        ThemeJsonStep::normalizeSpacingSettings(['version' => 3], 'airy'),
+    );
+
+    assert_eq([], ThemeValidator::spacingWarnings($project));
+
+    $project->writeJson(
+        'theme/theme.json',
+        ThemeJsonStep::normalizeSpacingSettings(['version' => 3], 'measured'),
+    );
+    assert_contains(
+        'bounded canonical profile',
+        implode(' ', ThemeValidator::spacingWarnings($project)),
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('spacing warnings report residual global Group vertical padding actionably', function () {
     [$project, $tmp] = validator_project();
     $theme = ThemeJsonStep::normalizeSpacingSettings(['version' => 3]);

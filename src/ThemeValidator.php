@@ -1018,7 +1018,10 @@ final class ThemeValidator
         if ($project->exists('theme/theme.json')) {
             $theme = json_decode($project->readText('theme/theme.json'), true);
             if (is_array($theme)) {
-                $normalized = Steps\ThemeJsonStep::normalizeSpacingSettings($theme);
+                $normalized = Steps\ThemeJsonStep::normalizeSpacingSettings(
+                    $theme,
+                    Steps\DesignDirectionStep::densityFor($project),
+                );
                 if (($theme['settings']['spacing'] ?? null) !== ($normalized['settings']['spacing'] ?? null)) {
                     $warnings[] = 'theme.json settings.spacing drifted from the bounded canonical profile';
                 }
