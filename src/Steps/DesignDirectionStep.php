@@ -21,6 +21,7 @@ use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
 use Automattic\SiteBuild\ImageTreatment;
 use Automattic\SiteBuild\ImageCrop;
+use Automattic\SiteBuild\ItemPattern;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\Measure;
 use Automattic\SiteBuild\Motion;
@@ -42,8 +43,8 @@ use Automattic\SiteBuild\Warnings;
  * Output: designDirection.json — the chosen direction as structured data:
  *         title + vivid description plus the explicit fields downstream steps
  *         execute instead of re-interpreting (palette hexes, type pairing,
- *         image grade, canvas/measure layout commitments, and a separately
- *         consumed structured front-page hero blueprint).
+ *         image grade, canvas/measure layout commitments, the repeated-item
+ *         idiom, and a separately consumed structured front-page hero blueprint).
  *
  * Two calls. First, a cheap seed call (small model, hot sampling) brainstorms
  * THREE concept seeds — each an object: an evocative title plus one vivid
@@ -117,6 +118,9 @@ final class DesignDirectionStep implements Step
 
     /** Render-time treatments tying delivered photos to the committed palette. */
     public const IMAGE_TREATMENTS = ImageTreatment::ALL;
+
+    /** Repeated-item idioms the planner may assign to list-like sections. */
+    public const ITEM_PATTERNS = ItemPattern::ALL;
 
     /** Site-wide image proportion system for crop-role class hooks. */
     public const IMAGE_CROPS = ImageCrop::ALL;
@@ -380,6 +384,7 @@ final class DesignDirectionStep implements Step
             'canvas'           => $canvas,
             'measure'          => Measure::DEFAULT,
             'card_style'       => 'flush',
+            'item_pattern'     => ItemPattern::DEFAULT,
             'depth'            => Depth::DEFAULT,
             'cta_style'        => CtaStyle::DEFAULT,
             'shape'            => 'sharp',
@@ -776,6 +781,7 @@ final class DesignDirectionStep implements Step
 
         $cardStyle = self::normalizeCardStyle($raw['card_style'] ?? null, $warnings);
         $imageTreatment = self::normalizeImageTreatment($raw['image_treatment'] ?? null, $warnings);
+        $itemPattern = ItemPattern::normalize($raw['item_pattern'] ?? null, $warnings);
         $imageCrop = self::normalizeImageCrop($raw['image_crop'] ?? null, $warnings);
         $depth = self::normalizeDepth($raw['depth'] ?? null, $warnings);
         $ctaStyle = BoundedChoice::normalize(
@@ -878,6 +884,7 @@ final class DesignDirectionStep implements Step
             // flush default — inset media must be an explicit opt-in, never
             // the accidental look every site gets.
             'card_style'       => $cardStyle,
+            'item_pattern'     => $itemPattern,
             'depth'            => $depth,
             'cta_style'        => $ctaStyle,
             'shape'            => $shape,
@@ -1354,6 +1361,18 @@ final class DesignDirectionStep implements Step
             $facts[] = "- **Card treatment**: {$cardStyle} — {$meaning}.";
         }
 
+        $itemPattern = ItemPattern::explicit($direction['item_pattern'] ?? null);
+        if ($itemPattern !== null) {
+            $meaning = match ($itemPattern) {
+                'card'        => 'list-like sections repeat discrete bounded cards',
+                'rule-row'    => 'list-like sections use compact name/detail rows joined by a purposeful hairline',
+                'index'       => 'list-like sections use a strong numbered or lettered scan column',
+                'spec-table'  => 'list-like sections align compact label/value pairs for comparison',
+                'tag-cluster' => 'list-like sections wrap short categorical labels as compact inline chips',
+            };
+            $facts[] = "- **Item pattern**: {$itemPattern} — {$meaning}.";
+        }
+
         $ctaStyle = CtaStyle::explicit($direction['cta_style'] ?? null);
         if ($ctaStyle !== null) {
             $facts[] = '- **CTA style**: ' . $ctaStyle . ' — ' . CtaStyle::meaning($ctaStyle)
@@ -1639,6 +1658,19 @@ final class DesignDirectionStep implements Step
     {
         $direction = self::dataFor($project);
         return self::normalizeCardStyle($direction['card_style'] ?? null, $warnings);
+    }
+
+    /**
+     * The authoritative repeated-item idiom, with the card default for a
+     * missing or pre-field direction. Callers persist any invalid-value
+     * warning at their own step boundary.
+     *
+     * @param list<string> $warnings
+     */
+    public static function itemPatternFor(Project $project, array &$warnings = []): string
+    {
+        $direction = self::dataFor($project);
+        return ItemPattern::normalize($direction['item_pattern'] ?? null, $warnings);
     }
 
     /**

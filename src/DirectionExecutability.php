@@ -9,7 +9,7 @@ namespace Automattic\SiteBuild;
  *
  * The direction is two things at once: a set of bounded structured fields the
  * pipeline executes literally (palette, type, CTA style, surface, shape,
- * device, rhythm, density, text placement, card style, depth, canvas, measure,
+ * device, rhythm, density, text placement, card style, item pattern, depth, canvas, measure,
  * image grade, image crop, image treatment, motion), and a prose narrative that every downstream design and
  * section prompt receives verbatim as the authoritative brief.
  *

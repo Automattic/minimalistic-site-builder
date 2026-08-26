@@ -163,6 +163,8 @@ SECTION TO BUILD:
 
 {{composition}}
 
+{{item_pattern_assignment}}
+
 {{header_contract}}
 
 - Wrap the whole section in a single top-level <!-- wp:group --> that ALWAYS declares `"layout":{"type":"constrained"}` — including when the band is `"align":"full"` (a full-bleed band is align:full PLUS constrained layout). A top-level group with no "layout" attribute is flow layout: its children render edge-to-edge at the viewport with no page gutter, which reads as broken. Give that group the section's anchor — `"anchor":"{{section_slug}}"` in its JSON attributes; the build restores the matching wrapper `id` — so navigation and buttons can deep-link it (href="#{{section_slug}}" within the page, href="{{page_path}}#{{section_slug}}" from other pages — a deep link always carries the owning page's path, since a bare "#anchor" only resolves on the page that renders it).
