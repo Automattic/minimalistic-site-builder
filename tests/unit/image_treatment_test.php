@@ -49,6 +49,14 @@ test('ImageTreatment emits bounded palette tint and high-key kits only', functio
     assert_contains('!important', $highKey);
 
     assert_eq(null, ImageTreatment::kitCss('natural'));
-    assert_eq(null, ImageTreatment::kitCss('duotone'));
     assert_eq(null, ImageTreatment::kitCss('unknown'));
+});
+
+test('ImageTreatment duotone kit covers only the unsupported media-text half through the preset property', function () {
+    $css = ImageTreatment::kitCss('duotone');
+    assert_contains('.wp-block-media-text__media img', $css);
+    assert_contains('var(--wp--preset--duotone--' . ImageTreatment::PRESET_SLUG . ', none)', $css);
+    assert_true(!str_contains($css, '.wp-block-image'), 'image blocks stay on Core block support');
+    assert_true(!str_contains($css, '.wp-block-cover'), 'cover blocks stay on Core block support');
+    assert_true(!str_contains($css, 'grayscale'), 'no CSS approximation of the duotone map');
 });

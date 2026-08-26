@@ -52,13 +52,16 @@ final class ImageTreatment
     /**
      * Build-owned CSS for treatments WordPress block support cannot express
      * globally. Duotone is applied through render_block_data so Core emits its
-     * own SVG filter; natural ships no stylesheet.
+     * own SVG filter, plus one companion rule for the media-text media half —
+     * Core's media-text block has no duotone support, so the attribute route
+     * cannot reach it. Natural ships no stylesheet.
      *
      * @param array<string,mixed> $palette
      */
     public static function kitCss(mixed $raw, array $palette = []): ?string
     {
         return match (self::explicit($raw)) {
+            'duotone' => self::duotoneCompanionCss(),
             'tinted-overlay' => self::tintedOverlayCss(self::tintColor($palette)),
             'high-key-bw' => self::highKeyCss(),
             default => null,
@@ -106,6 +109,28 @@ final class ImageTreatment
             :where(figure.card-media, figure.card-media-tall, figure.card-media-thumb) > figcaption {
                 position: relative;
                 z-index: 2;
+            }
+
+            CSS;
+    }
+
+    /**
+     * Core has no duotone block support for core/media-text, so its media
+     * image reads the same preset through the custom property WordPress
+     * prints for the in-use committed preset. On a page where no image or
+     * cover block uses the preset, the property is absent and the fallback
+     * leaves the media-text image natural — a safe degradation, never an
+     * off-palette second treatment.
+     */
+    private static function duotoneCompanionCss(): string
+    {
+        $preset = self::PRESET_SLUG;
+        return <<<CSS
+            /* Committed duotone for the media-text media half. Core applies
+               the preset to image/cover blocks through block support; this
+               companion rule reuses the same rendered SVG filter. */
+            .wp-block-media-text__media img {
+                filter: var(--wp--preset--duotone--{$preset}, none);
             }
 
             CSS;

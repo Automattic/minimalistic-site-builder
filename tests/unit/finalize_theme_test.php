@@ -450,12 +450,22 @@ test('finalize-theme applies duotone through Core block support without a CSS ap
 
     quietly(fn () => (new FinalizeThemeStep())->run($project));
 
-    assert_true(!$project->exists('theme/assets/image-treatment/image-treatment.css'));
+    $css = $project->readText('theme/assets/image-treatment/image-treatment.css');
+    assert_contains('.wp-block-media-text__media img', $css);
+    assert_contains('var(--wp--preset--duotone--site-image-treatment, none)', $css);
     $php = $project->readText('theme/functions.php');
     assert_contains("add_filter('render_block_data'", $php);
-    assert_contains("array('core/image', 'core/cover', 'core/media-text')", $php);
+    assert_contains("array('core/image', 'core/cover')", $php);
+    assert_true(
+        !str_contains($php, "'core/media-text'"),
+        'the inject hook skips the block Core cannot duotone; the companion kit covers it',
+    );
     assert_contains("'var:preset|duotone|site-image-treatment'", $php);
-    assert_true(!str_contains($php, 'forno-vero-image-treatment'), 'duotone needs no approximation stylesheet');
+    assert_contains(
+        "wp_enqueue_style('forno-vero-image-treatment'",
+        $php,
+        'the media-text companion kit is enqueued',
+    );
     $out = [];
     $rc = 0;
     exec('php -l ' . escapeshellarg($project->themePath('functions.php')) . ' 2>&1', $out, $rc);

@@ -4113,6 +4113,16 @@ CSS;
                 $problems[] = 'button construction declarations are CTA-style-owned by the design direction';
                 break;
             }
+            if (self::declarationTargetsImageTreatment($declaration)
+                && CssChecks::isImageTreatmentAffectingDeclaration(
+                    $declaration['property'],
+                    $declaration['value'],
+                    opacityOwned: true,
+                )
+            ) {
+                $problems[] = 'image filter/blend/opacity declarations are treatment-owned by the design direction';
+                break;
+            }
         }
         // Parse opacity values instead of pattern-matching literal zeros:
         // 0%, .0 and calc(0) hide content just as well as 0.
@@ -4303,7 +4313,8 @@ CSS;
      * Salvage pass for CSS that failed validate(): remove each declaration
      * that carries a declaration-level offence (raw color literal, resource-
      * loading function, --motion-* override, depth-variable redeclaration,
-     * shape-owned corner radius, content-hiding value) and keep the rest. Only rule bodies are touched —
+     * shape-owned corner radius, treatment-owned image filter/blend/opacity,
+     * content-hiding value) and keep the rest. Only rule bodies are touched —
      * selectors, @media preludes and brace structure pass through, so
      * structural problems deliberately survive into the re-validation and
      * still reject the whole appendix. A quote/comment/function-aware shared
@@ -4320,6 +4331,7 @@ CSS;
                 $declaration['raw'],
                 self::declarationTargetsShape($declaration),
                 self::declarationTargetsCta($declaration),
+                self::declarationTargetsImageTreatment($declaration),
             );
             if ($problem !== null) {
                 $problems[$declaration['start']] = $problem;
@@ -4350,6 +4362,7 @@ CSS;
         string $declaration,
         bool $targetsShape = false,
         bool $targetsCta = false,
+        bool $targetsImageTreatment = false,
     ): ?string
     {
         if (preg_match('/^\s*([-\w]+)\s*:\s*(\S[\s\S]*)$/', $declaration, $m) !== 1) {
@@ -4368,6 +4381,11 @@ CSS;
         }
         if ($targetsCta && CssChecks::isCtaAffectingDeclaration($property, $value)) {
             return 'button construction is CTA-style-owned by the design direction';
+        }
+        if ($targetsImageTreatment
+            && CssChecks::isImageTreatmentAffectingDeclaration($property, $value, opacityOwned: true)
+        ) {
+            return 'image filter/blend/opacity is treatment-owned by the design direction';
         }
         if (preg_match('/#[0-9a-fA-F]{3,8}\b/', $value) === 1
             || preg_match('/\b(?:rgba?|hsla?)\s*\(/i', $value) === 1
@@ -4413,6 +4431,13 @@ CSS;
     {
         return $declaration['kind'] === 'style'
             && CssChecks::selectorTargetsCta($declaration['context']);
+    }
+
+    /** @param array{context:string,kind:string} $declaration */
+    private static function declarationTargetsImageTreatment(array $declaration): bool
+    {
+        return $declaration['kind'] === 'style'
+            && CssChecks::selectorTargetsImageTreatment($declaration['context']);
     }
 
     /** @return string[] */

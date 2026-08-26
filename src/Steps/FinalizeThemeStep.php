@@ -209,7 +209,8 @@ final class FinalizeThemeStep implements Step
             ? "  shape: '{$shape}' corner kit enqueued\n"
             : '  shape: ' . ($shape ?? 'none committed') . " (kit not shipped)\n");
         Narrator::write(ImageTreatment::usesDuotone($imageTreatment)
-            ? "  image treatment: 'duotone' preset applied through Core block support\n"
+            ? "  image treatment: 'duotone' preset applied through Core block support"
+                . ($imageTreatmentShipped ? '; media-text companion kit enqueued' : '') . "\n"
             : ($imageTreatmentShipped
                 ? "  image treatment: '{$imageTreatment}' render kit enqueued\n"
                 : '  image treatment: ' . ($imageTreatment ?? 'none committed') . " (kit not shipped)\n"));
@@ -591,8 +592,11 @@ final class FinalizeThemeStep implements Step
 
             // Apply the committed theme duotone through Core block support so
             // WordPress emits the matching SVG filter and scopes it per block.
+            // core/media-text has no duotone block support; the enqueued
+            // image-treatment kit covers its media half through the preset's
+            // custom property instead.
             add_filter('render_block_data', function (\$parsed_block) {
-                \$targets = array('core/image', 'core/cover', 'core/media-text');
+                \$targets = array('core/image', 'core/cover');
                 if (!is_array(\$parsed_block) || !in_array(\$parsed_block['blockName'] ?? '', \$targets, true)) {
                     return \$parsed_block;
                 }

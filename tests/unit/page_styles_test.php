@@ -340,6 +340,54 @@ test('page styles drops CTA-owned construction but keeps row layout utilities', 
     assert_contains('CTA-style-owned', implode('; ', $dropped));
 });
 
+test('page styles drops treatment-owned image finish but keeps layout and captions on treated surfaces', function () {
+    $css = '.masonry-3 .card-media img { filter: sepia(1); mix-blend-mode: multiply; width: 100%; }'
+        . '.masonry-3 .card-media { opacity: 0.8; margin: 0; }'
+        . '.masonry-3 .card-media figcaption { opacity: 0.7; }';
+    $problems = implode('; ', PageStylesStep::validate($css));
+    assert_contains('treatment-owned', $problems);
+
+    [$salvaged, $dropped] = PageStylesStep::dropOffendingDeclarations($css);
+    assert_true(!str_contains($salvaged, 'filter: sepia(1)'), 'local filter is dropped');
+    assert_true(!str_contains($salvaged, 'mix-blend-mode'), 'blend mode is dropped');
+    assert_true(!str_contains($salvaged, 'opacity: 0.8'), 'surface opacity is dropped');
+    assert_contains('width: 100%', $salvaged, 'layout on the treated surface survives');
+    assert_contains('margin: 0', $salvaged, 'sibling declarations survive');
+    assert_contains('opacity: 0.7', $salvaged, 'caption opacity is not the treated layer');
+    assert_eq(3, count($dropped));
+    assert_contains('treatment-owned', implode('; ', $dropped));
+    assert_eq([], PageStylesStep::validate($salvaged), 'salvaged CSS validates clean');
+});
+
+test('run drops a generated treatment-owned filter with a durable warning and ships the rest', function () {
+    [$project, $tmp] = ps_project('builder_ps_treatfilter_');
+    $project->writeText(
+        'theme/parts/section-work.html',
+        '<!-- wp:group {"className":"overlap-up"} --><div class="wp-block-group overlap-up">'
+        . '<figure class="wp-block-image card-media"><img src="x.jpg"/></figure>'
+        . '</div><!-- /wp:group -->'
+    );
+    $llm = new FakeLlm();
+    $llm->queueText(
+        ".overlap-up .card-media img {\n"
+        . "    filter: sepia(1);\n"
+        . "    width: 100%;\n"
+        . "}"
+    );
+
+    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $style = $project->readText('theme/style.css');
+    assert_true(!str_contains($style, 'sepia'), 'the local filter does not ship');
+    assert_contains('width: 100%', $style, 'the rest of the appendix ships');
+    assert_contains(
+        'filter',
+        implode("\n", ps_warning_rows($project, 'page-styles')),
+        'the drop is a durable actionable warning',
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('validate rejects CSS that hides generated content', function () {
     foreach ([
         ".masonry-3 > * {\n    opacity: 0;\n}",

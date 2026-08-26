@@ -393,6 +393,104 @@ final class CssChecks
         return $property === 'all' && self::isShapeAffectingDeclaration($property, $value);
     }
 
+    /**
+     * Whether one declaration can change the committed render-time image
+     * treatment on a treatment-owned surface. `filter` (with vendor
+     * prefixes) and `mix-blend-mode` always can; `opacity` only when the
+     * caller marks it treatment-owned (the page-styles contract does, the
+     * custom-motion contract does not — motion legitimately fades); a
+     * CSS-wide `all` reset can per the shape-reset rules. Custom properties
+     * never match.
+     */
+    public static function isImageTreatmentAffectingDeclaration(
+        string $property,
+        string $value,
+        bool $opacityOwned = false,
+    ): bool {
+        $property = strtolower(trim($property));
+        if ($property === '' || str_starts_with($property, '--')) {
+            return false;
+        }
+        if (preg_match('/^(?:-[a-z]+-)?(?:filter|mix-blend-mode)$/', $property) === 1) {
+            return true;
+        }
+        if ($opacityOwned && $property === 'opacity') {
+            return true;
+        }
+        return $property === 'all' && self::isShapeAffectingDeclaration($property, $value);
+    }
+
+    /**
+     * The treatment-owned surfaces: contained-image blocks, gallery, cover
+     * layers, the media-text media half, and the card-media crop hooks.
+     */
+    private const IMAGE_TREATMENT_CLASS_PATTERN =
+        '/\.(?:wp-block-image|wp-block-gallery'
+        . '|wp-block-cover(?:__(?:background|image-background|video-background))?'
+        . '|wp-block-media-text__media'
+        . '|card-media(?:-tall|-thumb)?)(?![-\w])/i';
+
+    /**
+     * Whether a selector's subject is a treatment-owned image surface or one
+     * of its image/pseudo layers. A subject compound naming an owned class
+     * (including its own ::before/::after layer) is owned directly; an `img`,
+     * `picture`, or pseudo-element subject is owned when an ancestor compound
+     * of the same complex selector names an owned class. A generic descendant
+     * (`.card-media figcaption`) stays unowned — captions are not the treated
+     * layer.
+     */
+    public static function selectorTargetsImageTreatment(string $selector): bool
+    {
+        foreach (self::splitSelectorList($selector) as $candidate) {
+            $compound = self::rightmostSelectorCompound($candidate);
+            if ($compound === '') {
+                continue;
+            }
+            [$plain, $functionalTarget] = self::withoutFunctionalPseudos(
+                $compound,
+                static fn (string $arguments): bool => self::selectorTargetsImageTreatment($arguments),
+            );
+            if ($functionalTarget) {
+                return true;
+            }
+            $plain = self::withoutSelectorAttributes($plain);
+            if (preg_match(self::IMAGE_TREATMENT_CLASS_PATTERN, $plain) === 1) {
+                return true;
+            }
+            $subjectIsLayer =
+                preg_match('/^(?:(?:\*|[-\w]+)\|)?(?:img|picture)(?![-\w])/i', ltrim($plain)) === 1
+                || preg_match('/(?<!\\\\)::?(?:before|after)(?![-\w])/i', $plain) === 1;
+            if ($subjectIsLayer
+                && preg_match(self::IMAGE_TREATMENT_CLASS_PATTERN, $candidate) === 1
+            ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Whether a selector's subject is an image element or a pseudo-element
+     * layer — the parts of a tagged block the render-time treatment paints.
+     */
+    public static function selectorSubjectIsImageLayer(string $selector): bool
+    {
+        foreach (self::splitSelectorList($selector) as $candidate) {
+            $compound = self::rightmostSelectorCompound($candidate);
+            if ($compound === '') {
+                continue;
+            }
+            [$plain] = self::withoutFunctionalPseudos($compound);
+            $plain = self::withoutSelectorAttributes($plain);
+            if (preg_match('/^(?:(?:\*|[-\w]+)\|)?(?:img|picture)(?![-\w])/i', ltrim($plain)) === 1
+                || preg_match('/(?<!\\\\)::?(?:before|after)(?![-\w])/i', $plain) === 1
+            ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** Whether a selector's subject is a core button wrapper or rendered control. */
     public static function selectorTargetsCta(string $selector): bool
     {
@@ -992,6 +1090,80 @@ final class CssChecks
             $declarations,
             static function (array $declaration) use ($selectorOwned, $bareOwned, $ownedKeyframes): bool {
                 if (!self::isCtaAffectingDeclaration($declaration['property'], $declaration['value'])) {
+                    return false;
+                }
+                if ($declaration['kind'] !== 'keyframe') {
+                    return self::declarationScopeIsOwned($declaration, $selectorOwned, $bareOwned);
+                }
+                $name = self::keyframeNameOf($declaration);
+                return $name !== null && isset($ownedKeyframes[$name]);
+            },
+        ));
+    }
+
+    /**
+     * Treatment-owned image-finish declarations in owned rules and in the
+     * local keyframes those rules reference. This mirrors the shape and CTA
+     * ownership walks so animation CSS cannot smuggle a `filter` or
+     * `mix-blend-mode` onto a treated surface through a keyframe while
+     * unrelated keyframes remain byte-for-byte intact.
+     *
+     * @param callable(string):bool $selectorOwned
+     * @return list<array{property:string,value:string,raw:string,start:int,end:int,context:string,ancestors:list<string>,kind:string,structurallySafe:bool}>
+     */
+    public static function imageTreatmentAffectingDeclarations(
+        string $css,
+        callable $selectorOwned,
+        bool $opacityOwned = false,
+        bool $bareDeclarationList = false,
+        bool $bareOwned = false,
+    ): array {
+        $declarations = self::scanDeclarations($css, $bareDeclarationList);
+        $definedKeyframes = [];
+        foreach ($declarations as $declaration) {
+            if ($declaration['kind'] !== 'keyframe') {
+                continue;
+            }
+            $name = self::keyframeNameOf($declaration);
+            if ($name !== null) {
+                $definedKeyframes[$name] = true;
+            }
+        }
+
+        $ownedKeyframes = [];
+        foreach ($declarations as $declaration) {
+            if ($declaration['kind'] === 'keyframe'
+                || !self::declarationScopeIsOwned($declaration, $selectorOwned, $bareOwned)
+                || preg_match('/^(?:-[a-z]+-)?animation(?:-name)?$/i', $declaration['property']) !== 1
+            ) {
+                continue;
+            }
+            $shorthand = preg_match('/^(?:-[a-z]+-)?animation$/i', $declaration['property']) === 1;
+            [$names, $opaque] = self::animationReferences($declaration['value'], $shorthand);
+            if ($opaque) {
+                $ownedKeyframes = $definedKeyframes;
+                continue;
+            }
+            foreach ($names as $name) {
+                if (isset($definedKeyframes[$name])) {
+                    $ownedKeyframes[$name] = true;
+                }
+            }
+        }
+
+        return array_values(array_filter(
+            $declarations,
+            static function (array $declaration) use (
+                $selectorOwned,
+                $bareOwned,
+                $ownedKeyframes,
+                $opacityOwned,
+            ): bool {
+                if (!self::isImageTreatmentAffectingDeclaration(
+                    $declaration['property'],
+                    $declaration['value'],
+                    $opacityOwned,
+                )) {
                     return false;
                 }
                 if ($declaration['kind'] !== 'keyframe') {
