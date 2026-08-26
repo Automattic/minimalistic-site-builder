@@ -15,6 +15,7 @@ HARD RULES — the output is machine-validated. An unscoped rule or offending de
 - No `@import`, no `url()`, no `@keyframes`, no `@font-face` — only plain style rules and `@media` blocks. Never write CSS for the motion classes (`reveal`, `reveal-up`, `reveal-fade`, `reveal-scale`, `stagger-children`, `hero-entrance`, `ken-burns`, `gradient-shift`, `ambient-drift`, `hover-lift`, `hover-reveal`) — their CSS plus profile-owned keyframes and timing ship statically with the theme.
 - Never declare a `--motion-*` custom property, even inside an allowed layout selector; the committed profile owns those values.
 - The design direction owns contained-media and button corners. Rules that target `.wp-block-image`, its `img`, `.wp-block-button__link`, `.wp-element-button`, `button`, `.wp-block-cover` (or its background layers), or `.wp-block-media-text` / `.wp-block-media-text__media` must not declare `border-radius`, a physical/logical/vendor corner-radius longhand, or a CSS-wide `all` reset. Radius on the utility's generic group/card wrapper is allowed when it genuinely belongs to that component.
+- Render-time image treatment is build-owned. Rules targeting `.wp-block-image`, `.wp-block-gallery`, `.wp-block-cover`, `.wp-block-media-text__media`, `.card-media`, `.card-media-tall`, `.card-media-thumb`, or their image/pseudo layers must not declare `filter`, `mix-blend-mode`, `opacity`, or a CSS-wide `all` reset.
 - Under 80 lines total.
 
 Output ONLY the CSS — no markdown fences, no prose, no HTML.

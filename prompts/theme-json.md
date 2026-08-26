@@ -52,6 +52,7 @@ Hard requirements — follow exactly so downstream templates can rely on the slu
 
 - Top-level: "$schema": "https://schemas.wp.org/trunk/theme.json", "version": 3.
 - WordPress core's default presets are DISABLED in every generated theme: the build forces `settings.color.defaultPalette`, `settings.color.defaultGradients`, `settings.color.defaultDuotone`, `settings.typography.defaultFontSizes`, and `settings.spacing.defaultSpacingSizes` to `false` (only core SHADOW presets remain available). The slugs YOU declare below are the only presets that exist at runtime — never reference a core default slug (e.g. color "white"/"black", fontSize "large", a core gradient or duotone name), and do not set those flags to `true`.
+- The **Image treatment** fact is build-owned. Do not define `settings.color.duotone`, do not put a duotone/filter in block styles, and do not emulate the treatment with opacity or blend-mode styling; the build derives the one palette preset and render behavior after your palette is repaired.
 - Do not emit settings.layout.contentSize or settings.layout.wideSize; the build writes the committed Measure pair (or derives the HTML-first design widths) after this response.
 - settings.color.palette: an array with EXACTLY these five slugs, each a valid #RRGGBB hex you choose:
     "base"      = page background (body text on it must meet the CONTRAST REQUIREMENTS above)

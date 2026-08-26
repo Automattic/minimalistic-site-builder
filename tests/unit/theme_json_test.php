@@ -402,6 +402,31 @@ test('theme-json writes valid theme.json and forces version 3', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('theme-json derives the committed duotone preset after palette repair', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tjtreatment_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A monochrome archive']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project, overrides: ['image_treatment' => 'duotone']);
+
+    $payload = valid_theme_payload();
+    $payload['settings']['color']['duotone'] = [[
+        'slug' => 'model-authored',
+        'name' => 'Model authored',
+        'colors' => ['#123456', '#abcdef'],
+    ]];
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $presets = $project->readJson('theme/theme.json')['settings']['color']['duotone'];
+    assert_eq(1, count($presets));
+    assert_eq('site-image-treatment', $presets[0]['slug']);
+    assert_eq(['#111', '#FFF'], $presets[0]['colors']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('theme-json deterministically enforces the direction font families', function () {
     $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');

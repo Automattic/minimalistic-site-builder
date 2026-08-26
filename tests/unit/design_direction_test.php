@@ -70,6 +70,7 @@ function designdir_direction(): array
         ],
         'type'             => designdir_type(),
         'image_grade'      => 'warm kodachrome color, soft golden light',
+        'image_treatment'  => 'tinted-overlay',
         'card_style'       => 'framed',
         'hero_blueprint'   => HeroBlueprint::defaultFor('editorial-split'),
     ];
@@ -137,6 +138,7 @@ test('design-direction expands a picked seed into structured designDirection.jso
     assert_eq('Spectral', $written['type']['heading']['family']);
     assert_eq([700, 900], $written['type']['heading']['weights']);
     assert_eq('warm kodachrome color, soft golden light', $written['image_grade']);
+    assert_eq('tinted-overlay', $written['image_treatment']);
     assert_eq('framed', $written['card_style']);
     assert_eq(Measure::DEFAULT, $written['measure']);
     assert_true(!array_key_exists('signature_device', $written), 'signature_device field is gone');
@@ -159,7 +161,7 @@ test('design-direction expands a picked seed into structured designDirection.jso
     assert_contains('cozy neighborhood bakery', $llm->calls[1]['prompt']);
     assert_contains('Hearth & Crumb', $llm->calls[1]['prompt']);
     assert_contains('Seed ', $llm->calls[1]['prompt'], 'a seed reached the expansion prompt');
-    foreach (['palette', 'type', 'image_grade', 'canvas', 'measure', 'card_style', 'hero_blueprint'] as $field) {
+    foreach (['palette', 'type', 'image_grade', 'image_treatment', 'canvas', 'measure', 'card_style', 'hero_blueprint'] as $field) {
         assert_contains($field, $llm->calls[1]['prompt']);
     }
     assert_contains(
@@ -189,7 +191,7 @@ test('design-direction persists an unmappable motion-note warning and reaches a 
 
     $written = $project->readJson('designDirection.json');
     assert_eq([], $written['motion_note']);
-    foreach (['title', 'palette', 'image_grade', 'card_style'] as $sibling) {
+    foreach (['title', 'palette', 'image_grade', 'image_treatment', 'card_style'] as $sibling) {
         assert_eq($authored[$sibling], $written[$sibling], "{$sibling} survives motion-note removal");
     }
     foreach (['heading', 'body'] as $face) {
@@ -1060,6 +1062,38 @@ test('format renders the card treatment with its executable meaning', function (
     assert_eq('Just prose.', DesignDirectionStep::format(['description' => 'Just prose.']));
 });
 
+test('normalize and format commit one bounded render-time image treatment', function () {
+    $base = [
+        'description' => 'x',
+        'image_grade' => 'monochrome documentary, lifted highlights, fine grain',
+        'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
+    ];
+    foreach (['natural', 'duotone', 'tinted-overlay', 'high-key-bw'] as $treatment) {
+        $warnings = [];
+        $direction = DesignDirectionStep::normalize(
+            $base + ['image_treatment' => strtoupper($treatment)],
+            'cinematic-safe-zone',
+            warnings: $warnings,
+        );
+        assert_eq($treatment, $direction['image_treatment']);
+        assert_eq([], $warnings);
+        $formatted = DesignDirectionStep::format($direction);
+        assert_contains("**Image treatment**: {$treatment}", $formatted);
+        assert_contains('Do not author a local duotone', $formatted);
+    }
+
+    $warnings = [];
+    $direction = DesignDirectionStep::normalize(
+        $base + ['image_treatment' => 'sepia-ish'],
+        'cinematic-safe-zone',
+        warnings: $warnings,
+    );
+    assert_eq('natural', $direction['image_treatment']);
+    assert_contains('field image_treatment', $warnings[0]);
+    assert_contains('authored "sepia-ish"', $warnings[0]);
+    assert_contains('delivered "natural"', $warnings[0]);
+});
+
 test('normalize commits a shape while valid normalization and a missing field stay silent', function () {
     $base = [
         'description' => 'x',
@@ -1265,6 +1299,7 @@ test('fallbackDirection builds on the chosen seed, generic brief otherwise', fun
     assert_contains('bold', $generic['description']);
     assert_eq(Measure::DEFAULT, $generic['measure']);
     assert_eq('calm', $generic['motion']);
+    assert_eq('natural', $generic['image_treatment']);
 });
 
 test('design-direction throws when meta prompt missing', function () {
@@ -1743,6 +1778,21 @@ test('measureFor returns only an explicit valid persisted commitment', function 
     assert_eq(null, DesignDirectionStep::measureFor($project));
     $project->writeJson('designDirection.json', ['measure' => ' Full ']);
     assert_eq('full', DesignDirectionStep::measureFor($project));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('imageTreatmentFor returns only an explicit valid commitment', function () {
+    $tmp = sys_get_temp_dir() . '/builder_ddtreatment_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+
+    assert_eq(null, DesignDirectionStep::imageTreatmentFor($project));
+    $project->writeJson('designDirection.json', ['description' => 'x']);
+    assert_eq(null, DesignDirectionStep::imageTreatmentFor($project), 'pre-field direction stays uncommitted');
+    $project->writeJson('designDirection.json', ['description' => 'x', 'image_treatment' => ['duotone']]);
+    assert_eq(null, DesignDirectionStep::imageTreatmentFor($project), 'garbled value is not guessed');
+    $project->writeJson('designDirection.json', ['description' => 'x', 'image_treatment' => ' Duotone ']);
+    assert_eq('duotone', DesignDirectionStep::imageTreatmentFor($project));
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

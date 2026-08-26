@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\HeaderBehavior;
+use Automattic\SiteBuild\ImageTreatment;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\OverlayKit;
@@ -51,6 +52,9 @@ use Automattic\SiteBuild\Warnings;
  *           rounds contained media surfaces theme.json cannot reach — the
  *           media half of core/media-text and the core/cover canvas — while
  *           its selectors keep alignfull media square; `sharp` ships no kit.
+ *         - executes the render-time image treatment: a tinted/high-key CSS
+ *           kit where appropriate, or a render_block_data adapter that lets
+ *           Core apply the one committed duotone preset to content imagery.
  *         - for a committed page surface other than `none`, writes and
  *           enqueues the build-owned overlay (assets/surface/surface.css) that
  *           claims `body::before` as a fixed grain sheet; `none` prunes it.
@@ -107,8 +111,10 @@ final class FinalizeThemeStep implements Step
         // the fatal list), and discovering that halfway through would leave the
         // theme half-written — a pruned kit with no functions.php naming it.
         $shape = DesignDirectionStep::shapeFor($project);
+        $imageTreatment = DesignDirectionStep::imageTreatmentFor($project);
         $surface = DesignDirectionStep::surfaceFor($project);
         $palette = self::paletteColors($project);
+        $imageTreatmentCss = ImageTreatment::kitCss($imageTreatment, $palette);
         $surfaceCss = Surface::kitCss($surface, $palette['base'], $palette['contrast']);
 
         $profile = DesignDirectionStep::motionProfileFor($project);
@@ -133,11 +139,20 @@ final class FinalizeThemeStep implements Step
         // Per kit, not `$overlays !== []`: the catalog-wide predicate would
         // report shape on a second kit's behalf as soon as one joins the list.
         $shapeShipped = self::writeOverlayKit($project, self::shapeKit(), ShapeMarkup::kitCss($shape), $headerWarnings);
+        $imageTreatmentShipped = self::writeOverlayKit(
+            $project,
+            self::imageTreatmentKit(),
+            $imageTreatmentCss,
+            $headerWarnings,
+        );
         $surfaceShipped = self::writeOverlayKit($project, self::surfaceKit(), $surfaceCss, $headerWarnings);
         $deviceShipped = self::writeOverlayKit($project, self::deviceKit(), Device::kitCss($device), $headerWarnings);
         $overlays = [];
         if ($shapeShipped) {
             $overlays[] = self::shapeKit();
+        }
+        if ($imageTreatmentShipped) {
+            $overlays[] = self::imageTreatmentKit();
         }
         if ($surfaceShipped) {
             $overlays[] = self::surfaceKit();
@@ -157,6 +172,7 @@ final class FinalizeThemeStep implements Step
                 $motion,
                 $header,
                 $overlays,
+                $imageTreatment,
             ),
         );
         Narrator::write($motion === null
@@ -174,6 +190,11 @@ final class FinalizeThemeStep implements Step
         Narrator::write($shapeShipped
             ? "  shape: '{$shape}' corner kit enqueued\n"
             : '  shape: ' . ($shape ?? 'none committed') . " (kit not shipped)\n");
+        Narrator::write(ImageTreatment::usesDuotone($imageTreatment)
+            ? "  image treatment: 'duotone' preset applied through Core block support\n"
+            : ($imageTreatmentShipped
+                ? "  image treatment: '{$imageTreatment}' render kit enqueued\n"
+                : '  image treatment: ' . ($imageTreatment ?? 'none committed') . " (kit not shipped)\n"));
     }
 
     /**
@@ -200,11 +221,11 @@ final class FinalizeThemeStep implements Step
     /**
      * Page-background and body-text hexes from the delivered theme.
      *
-     * @return array{base:?string, contrast:?string}
+     * @return array{base:?string, contrast:?string, primary:?string}
      */
     private static function paletteColors(Project $project): array
     {
-        $out = ['base' => null, 'contrast' => null];
+        $out = ['base' => null, 'contrast' => null, 'primary' => null];
         if (!$project->exists('theme/theme.json')) {
             return $out;
         }
@@ -213,7 +234,7 @@ final class FinalizeThemeStep implements Step
                 continue;
             }
             $slug = $entry['slug'] ?? '';
-            if ($slug === 'base' || $slug === 'contrast') {
+            if ($slug === 'base' || $slug === 'contrast' || $slug === 'primary') {
                 $out[$slug] = $entry['color'];
             }
         }
@@ -230,7 +251,7 @@ final class FinalizeThemeStep implements Step
      */
     public static function overlayKits(): array
     {
-        return [self::shapeKit(), self::surfaceKit(), self::deviceKit()];
+        return [self::shapeKit(), self::imageTreatmentKit(), self::surfaceKit(), self::deviceKit()];
     }
 
     public static function surfaceKit(): OverlayKit
@@ -262,6 +283,16 @@ final class FinalizeThemeStep implements Step
             "// Committed corner language for contained media surfaces theme.json\n"
                 . "// cannot reach (media-text halves, contained covers). Loads after\n"
                 . '// generated style.css so the commitment outranks generated utilities.',
+        );
+    }
+
+    /** Palette-bound render-time treatment for delivered content imagery. */
+    public static function imageTreatmentKit(): OverlayKit
+    {
+        return new OverlayKit(
+            'image-treatment',
+            "// Committed render-time image treatment. Loads after generated\n"
+                . '// style.css so local utilities cannot undo the site-wide choice.',
         );
     }
 
@@ -453,6 +484,7 @@ final class FinalizeThemeStep implements Step
         ?string $motion,
         bool $header,
         array $overlays = [],
+        ?string $imageTreatment = null,
     ): string {
         $slug = ProjectStore::slugify($slug);
         $scopePrefix = PageScope::CLASS_PREFIX;
@@ -507,6 +539,63 @@ final class FinalizeThemeStep implements Step
             PHP;
         }
 
+        $imageTreatmentHook = '';
+        if (ImageTreatment::usesDuotone($imageTreatment)) {
+            $preset = ImageTreatment::PRESET_SLUG;
+            $imageTreatmentHook = <<<PHP
+
+
+            // Apply the committed theme duotone through Core block support so
+            // WordPress emits the matching SVG filter and scopes it per block.
+            add_filter('render_block_data', function (\$parsed_block) {
+                \$targets = array('core/image', 'core/cover', 'core/media-text');
+                if (!is_array(\$parsed_block) || !in_array(\$parsed_block['blockName'] ?? '', \$targets, true)) {
+                    return \$parsed_block;
+                }
+                if (!isset(\$parsed_block['attrs']) || !is_array(\$parsed_block['attrs'])) {
+                    \$parsed_block['attrs'] = array();
+                }
+                if (!isset(\$parsed_block['attrs']['style']) || !is_array(\$parsed_block['attrs']['style'])) {
+                    \$parsed_block['attrs']['style'] = array();
+                }
+                if (!isset(\$parsed_block['attrs']['style']['color']) || !is_array(\$parsed_block['attrs']['style']['color'])) {
+                    \$parsed_block['attrs']['style']['color'] = array();
+                }
+                \$parsed_block['attrs']['style']['color']['duotone'] = 'var:preset|duotone|{$preset}';
+                if (isset(\$parsed_block['attrs']['style']['filter']) && is_array(\$parsed_block['attrs']['style']['filter'])) {
+                    unset(\$parsed_block['attrs']['style']['filter']['duotone']);
+                }
+                return \$parsed_block;
+            }, 8);
+            PHP;
+        } elseif (ImageTreatment::explicit($imageTreatment) !== null) {
+            $imageTreatmentHook = <<<'PHP'
+
+
+            // Natural/tint/high-key treatments reject generated per-block
+            // duotones so one local attribute cannot defeat the site contract.
+            add_filter('render_block_data', function ($parsed_block) {
+                $targets = array('core/image', 'core/cover', 'core/media-text');
+                if (!is_array($parsed_block) || !in_array($parsed_block['blockName'] ?? '', $targets, true)) {
+                    return $parsed_block;
+                }
+                if (!isset($parsed_block['attrs']) || !is_array($parsed_block['attrs'])) {
+                    return $parsed_block;
+                }
+                if (!isset($parsed_block['attrs']['style']) || !is_array($parsed_block['attrs']['style'])) {
+                    return $parsed_block;
+                }
+                if (isset($parsed_block['attrs']['style']['color']) && is_array($parsed_block['attrs']['style']['color'])) {
+                    unset($parsed_block['attrs']['style']['color']['duotone']);
+                }
+                if (isset($parsed_block['attrs']['style']['filter']) && is_array($parsed_block['attrs']['style']['filter'])) {
+                    unset($parsed_block['attrs']['style']['filter']['duotone']);
+                }
+                return $parsed_block;
+            }, 8);
+            PHP;
+        }
+
         return <<<PHP
             <?php
             /**
@@ -545,6 +634,8 @@ final class FinalizeThemeStep implements Step
                 }
                 return \$classes;
             });
+
+            {$imageTreatmentHook}
 
             // Google Fonts loading lives in its own generated module.
             if (is_readable(__DIR__ . '/fonts.php')) {
