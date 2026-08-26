@@ -364,6 +364,11 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
         $project->readText('plugin/pages/menu.html'),
         'the conflicting paragraph keeps its content through final validation',
     );
+    assert_contains(
+        'has-band-background-color',
+        $project->readText('plugin/pages/menu.html'),
+        'the planned tinted section is delivered on the committed band surface',
+    );
     $warnings = $project->readJson('warnings.json')['fix-blocks'] ?? [];
     assert_contains(
         'core/paragraph style "text-align" could not be preserved',

@@ -29,7 +29,7 @@ Band-width rhythm: match row width to band width. In a `"align":"wide"` or `"ali
 
 Execute the assigned background:
 - base — the default page background; no backgroundColor on the section's top-level group.
-- tinted — a subtle tint: "secondary" backgroundColor or a soft gradient preset on the top-level group.
+- tinted — the committed "band" backgroundColor on the top-level group; never "secondary" and never a gradient. The build enforces this exact surface after generation.
 - contrast — an inverted band: backgroundColor "contrast" with light text ("base" textColor) throughout.
 - image — a full-bleed image band: express the section as/inside a wp:cover with an AI_IMAGE background.
 

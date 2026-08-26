@@ -80,7 +80,7 @@ Section structure and types:
 
 Background treatments:
 - base — the default page background
-- tinted — a subtle tint (secondary color or soft gradient preset)
+- tinted — the committed `band` palette surface; never `secondary` and never a gradient
 - contrast — a dark inverted band (contrast background, light text)
 - image — a full-bleed image band
 

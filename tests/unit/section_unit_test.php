@@ -199,6 +199,27 @@ test('SectionUnit deterministically normalizes list-thumb delivery', function ()
     assert_eq([], $result->warnings);
 });
 
+test('SectionUnit executes a tinted plan with the committed band surface', function () {
+    $llm = new FakeLlm();
+    $llm->queueText(
+        '<!-- wp:group {"backgroundColor":"secondary"} -->'
+        . '<div class="wp-block-group has-secondary-background-color has-background">'
+        . '<!-- wp:paragraph --><p>Band content survives.</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->',
+    );
+    $input = section_unit_input();
+    $input['section']['background'] = 'tinted';
+    $unit = new SectionUnit($llm, new PromptRenderer(repo_path('prompts')));
+
+    $first = $unit->generate($input);
+    assert_contains('"backgroundColor":"band"', $first->markup);
+    assert_contains('has-band-background-color', $first->markup);
+    assert_true(!str_contains($first->markup, 'secondary-background'));
+    assert_contains('Band content survives.', $first->markup);
+    assert_true(in_array('tinted-band-surface-enforced', array_column($first->repairs, 'code'), true));
+    assert_eq([], $first->warnings);
+});
+
 test('SectionUnit rejects a response without block markup', function () {
     $llm = new FakeLlm();
     $llm->queueText('plain text');
