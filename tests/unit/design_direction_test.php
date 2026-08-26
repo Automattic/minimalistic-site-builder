@@ -70,6 +70,7 @@ function designdir_direction(): array
         ],
         'type'             => designdir_type(),
         'image_grade'      => 'warm kodachrome color, soft golden light',
+        'text_placement'   => 'asymmetric-thirds',
         'card_style'       => 'framed',
         'hero_blueprint'   => HeroBlueprint::defaultFor('editorial-split'),
     ];
@@ -137,6 +138,7 @@ test('design-direction expands a picked seed into structured designDirection.jso
     assert_eq('Spectral', $written['type']['heading']['family']);
     assert_eq([700, 900], $written['type']['heading']['weights']);
     assert_eq('warm kodachrome color, soft golden light', $written['image_grade']);
+    assert_eq('asymmetric-thirds', $written['text_placement']);
     assert_eq('framed', $written['card_style']);
     assert_eq(Measure::DEFAULT, $written['measure']);
     assert_true(!array_key_exists('signature_device', $written), 'signature_device field is gone');

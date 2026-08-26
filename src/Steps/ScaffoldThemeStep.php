@@ -140,6 +140,13 @@ final class ScaffoldThemeStep implements Step
             margin-inline-start: 0 !important;
             margin-inline-end: auto !important;
         }
+        /* The same readable cap, placed on the wide band's trailing edge for
+           an asymmetric-thirds assignment. LayoutFixer respects this authored
+           hook instead of replacing it with copy-flush. */
+        .wp-block-group.copy-end > * {
+            margin-inline-start: auto !important;
+            margin-inline-end: 0 !important;
+        }
         /* Equal-height, equal-width card rows (sections opt in via className="equal-cards"). */
         .equal-cards > .wp-block-column {
             display: flex;

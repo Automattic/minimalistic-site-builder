@@ -36,6 +36,9 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     // through (the image block supports no textColor of its own, BIGR-784).
     assert_contains('.caption-text-base > figcaption { color: var(--wp--preset--color--base); }', $css);
     assert_contains('.caption-text-contrast > figcaption { color: var(--wp--preset--color--contrast); }', $css);
+    assert_contains('.wp-block-group.copy-end > * {', $css);
+    assert_contains('margin-inline-start: auto !important;', $css);
+    assert_contains('margin-inline-end: 0 !important;', $css);
 
     // Flush list-thumb rows: the zeroed row padding must beat generated inline
     // padding, the row clips the bleeding thumb under its border radius, and

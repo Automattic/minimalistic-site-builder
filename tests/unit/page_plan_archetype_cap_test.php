@@ -15,6 +15,7 @@ function cap_section(string $slug, string $archetype, string $density = 'standar
         'layout_archetype' => $archetype,
         'background'       => 'base',
         'vertical_density' => $density,
+        'text_placement'   => 'left-column',
         'handoff'          => 'Sits between its neighbors.',
         'primary_action'   => null,
     ];

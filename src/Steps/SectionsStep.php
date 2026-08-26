@@ -1431,11 +1431,13 @@ final class SectionsStep implements Step
         $archetype = trim((string) ($section['layout_archetype'] ?? ''));
         $background = trim((string) ($section['background'] ?? ''));
         $density = trim((string) ($section['vertical_density'] ?? ''));
-        if ($archetype === '' && $background === '' && $density === '') {
+        $textPlacement = trim((string) ($section['text_placement'] ?? ''));
+        if ($archetype === '' && $background === '' && $density === '' && $textPlacement === '') {
             return '';
         }
         $assignment = trim($archetype . ($background !== '' ? " on {$background} background" : ''));
-        return trim($assignment . ($density !== '' ? ", {$density} vertical density" : ''));
+        $assignment = trim($assignment . ($density !== '' ? ", {$density} vertical density" : ''));
+        return trim($assignment . ($textPlacement !== '' ? ", {$textPlacement} text placement" : ''));
     }
 
     /**
@@ -1499,6 +1501,7 @@ final class SectionsStep implements Step
                 'layout_archetype' => 'Layout archetype',
                 'background' => 'Background',
                 'vertical_density' => 'Vertical density',
+                'text_placement' => 'Text placement',
                 'handoff' => 'Planned handoff',
             ] as $key => $label
         ) {

@@ -428,6 +428,7 @@ final class TransformSiteStep implements Step
                     'layout_archetype' => 'mixed-width-editorial',
                     'background' => 'base',
                     'vertical_density' => 'standard',
+                    'text_placement' => 'left-column',
                     'handoff' => '',
                 ];
             }
@@ -451,6 +452,7 @@ final class TransformSiteStep implements Step
                     'layout_archetype' => 'mixed-width-editorial',
                     'background' => 'base',
                     'vertical_density' => 'standard',
+                    'text_placement' => 'left-column',
                     'handoff' => '',
                     'role' => SectionRole::HERO,
                 ];

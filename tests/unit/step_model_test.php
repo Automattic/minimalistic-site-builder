@@ -97,7 +97,12 @@ test('page-plan passes the configured model into every request', function () {
     [$project, $tmp] = sm_project('builder_sm_sp_');
     $project->writeJson('siteSpec.json', ['name' => 'Demo', 'sections' => ['Hero']]);
     $llm = new FakeLlm();
-    $llm->queueJson(['sections' => [['slug' => 'hero', 'title' => 'Hero', 'role' => 'hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Between the header above and the footer below.']]]);
+    $llm->queueJson(['sections' => [[
+        'slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'purpose' => 'Welcome visitors',
+        'content_notes' => 'Introduce the site.', 'layout_archetype' => 'full-bleed-cover',
+        'background' => 'image', 'vertical_density' => 'standard', 'text_placement' => 'left-column',
+        'handoff' => 'Between the header above and the footer below.', 'primary_action' => null,
+    ]]]);
     $renderer = new PromptRenderer(repo_path('prompts'));
 
     (new PagePlanStep($llm, $renderer, 'claude-haiku-4-5'))->run($project);
