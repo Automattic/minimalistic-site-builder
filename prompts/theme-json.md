@@ -57,7 +57,7 @@ Hard requirements — follow exactly so downstream templates can rely on the slu
 - settings.color.gradients: a small array of named gradient presets (slug + name + gradient) built from the palette, for section backgrounds/atmosphere.
 - settings.shadow.presets: a small array of named shadow presets (slug + name + shadow) sections can apply for depth.
 - settings.typography.fluid: true.
-- Do not emit settings.typography.fontSizes; the build writes the committed six-step Type scale after this response.
+- Do not emit settings.typography.fontSizes; the build writes the committed six-step Type scale after this response (on HTML-first builds the carried design CSS remains authoritative for rendered type instead).
 - settings.typography.fontFamilies: an array with the heading and body slugs, plus an optional accent slug ONLY when the design-direction Type fact names `type.accent.family`:
     "heading" — a real, characterful Google font that fits the brand, as the FIRST token in the stack, then web-safe fallbacks
     "body"    — a real, refined Google font that fits the brand, as the FIRST token in the stack, then web-safe fallbacks

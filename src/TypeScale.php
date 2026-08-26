@@ -10,7 +10,8 @@ namespace Automattic\SiteBuild;
  * through lead, heading, section-title and display. Caption follows the inverse
  * ratio but never drops below 0.75rem, the design floor for visitor-visible
  * metadata. The two upper steps remain fluid; their desktop maxima are the
- * exact modular-scale values.
+ * exact modular-scale values, and each keeps its own floor above the fixed
+ * heading step so h3 < h2 < h1 stays visible at every viewport width.
  */
 final class TypeScale
 {
@@ -19,6 +20,17 @@ final class TypeScale
 
     private const BODY_REM = 1.0;
     private const CAPTION_FLOOR_REM = 0.75;
+
+    /**
+     * Minimum size of each fluid step, as a multiple of the fixed heading
+     * step. A shared floor at the heading value renders h1, h2 and h3 at one
+     * identical size on narrow viewports, so each fluid step keeps its own
+     * floor: section-title bottoms out 25% above heading, display 55% above.
+     * Both floors are capped at the step's own modular maximum, so a
+     * restrained ramp never inverts its floor and its ceiling.
+     */
+    private const SECTION_FLOOR_OVER_HEADING = 1.25;
+    private const DISPLAY_FLOOR_OVER_HEADING = 1.55;
 
     /** @var array<string,float> fourth roots of the intended display/body ratio */
     private const RATIOS = [
@@ -63,6 +75,8 @@ final class TypeScale
         $heading = $body * ($ratio ** 2);
         $section = $body * ($ratio ** 3);
         $display = $body * ($ratio ** 4);
+        $sectionFloor = min($heading * self::SECTION_FLOOR_OVER_HEADING, $section);
+        $displayFloor = min($heading * self::DISPLAY_FLOOR_OVER_HEADING, $display);
         $viewport = self::VIEWPORT_TERMS[$scale];
 
         return [
@@ -73,13 +87,13 @@ final class TypeScale
             [
                 'slug' => 'section-title',
                 'name' => 'Section Title',
-                'size' => 'clamp(' . self::rem($heading) . ', ' . $viewport['section'] . ', '
+                'size' => 'clamp(' . self::rem($sectionFloor) . ', ' . $viewport['section'] . ', '
                     . self::rem($section) . ')',
             ],
             [
                 'slug' => 'display',
                 'name' => 'Display',
-                'size' => 'clamp(' . self::rem($heading) . ', ' . $viewport['display'] . ', '
+                'size' => 'clamp(' . self::rem($displayFloor) . ', ' . $viewport['display'] . ', '
                     . self::rem($display) . ')',
             ],
         ];

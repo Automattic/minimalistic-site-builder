@@ -511,9 +511,12 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         [$theme, $colorWarnings, $colorRepairs] = self::repairColors($theme, $preferred);
         $preferredType = is_array($direction['type'] ?? null) ? $direction['type'] : [];
         [$theme, $fontWarnings, $fontRepairs] = self::repairFonts($theme, $preferredType);
+        // Mirrors the applyMeasure gate above: on the HTML-first path the
+        // carried design CSS owns the rendered typography, so the committed
+        // ramp never displaces the sizes the design authored.
         [$theme, $typeScaleRepairs] = self::applyTypeScale(
             $theme,
-            DesignDirectionStep::typeScaleFor($project),
+            $this->htmlFirst ? null : DesignDirectionStep::typeScaleFor($project),
         );
         [$theme, $sizeWarnings] = self::repairFontSizes($theme);
 
@@ -1978,6 +1981,10 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     {
         $warnings = [];
         $sizes = $theme['settings']['typography']['fontSizes'] ?? null;
+        // The prompt tells the model not to emit fontSizes, so a wholly absent
+        // array is compliance, not a defect: the deterministic fill below is
+        // the build honoring its own contract and needs no warning rows.
+        $authoredAbsent = $sizes === null;
         if (!is_array($sizes) || ($sizes !== [] && !array_is_list($sizes))) {
             if ($sizes !== null) {
                 $warnings[] = 'theme.json settings.typography.fontSizes: invalid container '
@@ -2032,8 +2039,10 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                 continue;
             }
             $entries[] = $fallback;
-            $warnings[] = "theme.json fontSizes missing slug '{$fallback['slug']}'; "
-                . "filled with {$fallback['size']}";
+            if (!$authoredAbsent) {
+                $warnings[] = "theme.json fontSizes missing slug '{$fallback['slug']}'; "
+                    . "filled with {$fallback['size']}";
+            }
         }
 
         $theme['settings']['typography']['fontSizes'] = $entries;
@@ -2042,8 +2051,10 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
 
     /**
      * Replace every model-authored size with the committed modular ramp.
-     * Successful execution is repair-report evidence, never a warning: the
-     * authored scale was deliberately outside the model's ownership.
+     * Displacing an authored scale is repair-report evidence, never a
+     * warning: the authored scale was deliberately outside the model's
+     * ownership. Writing the ramp into an absent slot reports nothing,
+     * because nothing was replaced.
      *
      * @param array<mixed> $theme
      * @return array{0:array<mixed>,1:list<string>}
@@ -2062,7 +2073,10 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         $theme['settings']['typography'] = $typography;
         $theme['settings']['typography']['fontSizes'] = $profile;
 
-        if ($authored === $profile) {
+        // The prompt forbids the model to author sizes, so the normal case is
+        // an absent array: the build supplies the ramp and replaces nothing.
+        // A writeback line exists only when an authored scale was displaced.
+        if ($authored === null || $authored === $profile) {
             return [$theme, []];
         }
         return [$theme, [
