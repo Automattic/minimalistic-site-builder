@@ -9,6 +9,27 @@ final class CtaStyle
     public const ALL = ['solid', 'outline', 'underline', 'ghost-arrow', 'block'];
     public const DEFAULT = 'solid';
 
+    /**
+     * Build-owned wrapper rule for the `block` construction, shipped in the
+     * theme.json top-level `styles.css` (theme.json has no structured path to
+     * the wp-block-button wrapper).
+     *
+     * Why it exists: current WordPress sizes a width-classed button in a
+     * VERTICAL wp:buttons container with
+     * `.wp-block-buttons.is-vertical > .wp-block-button[class*=wp-block-button__width]
+     * { width: calc(var(--wp--block-button--width) * 1%) }`. Only the block's
+     * `width` support attribute emits that custom property, and the frozen
+     * serializer canonicalizes `block` delivery to the width-100 class alone
+     * (no attribute). The unresolved var() makes the declaration invalid at
+     * computed-value time, it computes to `unset`, and it still wins the
+     * cascade over the horizontal `width: 100%` rule — so the wrapper
+     * collapses to content width. This equal-specificity rule loads after the
+     * block-library stylesheet and wins the source-order tie. Horizontal
+     * containers never hit the var() rule and need no help.
+     */
+    public const BLOCK_VERTICAL_WRAPPER_CSS =
+        '.wp-block-buttons.is-vertical > .wp-block-button.wp-block-button__width-100{width:100%;}';
+
     public static function explicit(mixed $value): ?string
     {
         return BoundedChoice::explicit($value, self::ALL);

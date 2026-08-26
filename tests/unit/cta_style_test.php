@@ -190,6 +190,52 @@ test('CTA markup removes local construction and block style enforces full width'
     assert_contains('class="wp-block-button__link wp-element-button"', $repositioned['markup']);
 });
 
+test('block CTA in a vertical buttons container ships the wrapper width rule', function () {
+    // Current WordPress sizes a width-classed button in a vertical wp:buttons
+    // container from var(--wp--block-button--width); only the removed `width`
+    // attribute emits that custom property, so without this rule the wrapper
+    // collapses to content width there.
+    $vertical = '<!-- wp:buttons {"layout":{"type":"flex","orientation":"vertical",'
+        . '"justifyContent":"center"}} -->'
+        . '<div class="wp-block-buttons">'
+        . '<!-- wp:button {"width":100} -->'
+        . '<div class="wp-block-button"><a class="wp-block-button__link wp-element-button">Reserve</a></div>'
+        . '<!-- /wp:button --></div><!-- /wp:buttons -->';
+    $normalized = CtaStyleMarkup::normalize($vertical, 'block');
+    $doc = BlockMarkup::parse($normalized['markup']);
+    assert_eq('wp-block-button__width-100', $doc->attrs(1)['className']);
+    assert_true(!isset($doc->attrs(1)['width']), 'the width attribute never survives block delivery');
+    assert_contains('class="wp-block-button wp-block-button__width-100"', $normalized['markup']);
+
+    // The theme repair ships the vertical-container wrapper rule exactly once.
+    [$theme, $repairs] = ThemeJsonStep::repairCtaStyle(['version' => 3], 'block');
+    assert_eq(CtaStyle::BLOCK_VERTICAL_WRAPPER_CSS, $theme['styles']['css']);
+    assert_true($repairs !== [], 'the shipped rule is a recorded repair');
+    [$fixed, $fixedRepairs] = ThemeJsonStep::repairCtaStyle($theme, 'block');
+    assert_eq($theme, $fixed, 'the wrapper rule reaches a fixed point');
+    assert_eq([], $fixedRepairs);
+
+    // Authored root CSS survives with the rule appended after it.
+    [$appended] = ThemeJsonStep::repairCtaStyle(
+        ['version' => 3, 'styles' => ['css' => '.site-note{color:inherit;}']],
+        'block',
+    );
+    assert_eq(
+        ".site-note{color:inherit;}\n" . CtaStyle::BLOCK_VERTICAL_WRAPPER_CSS,
+        $appended['styles']['css'],
+    );
+
+    // A changed commitment removes the stale rule instead of shipping it.
+    [$outline] = ThemeJsonStep::repairCtaStyle($appended, 'outline');
+    assert_eq('.site-note{color:inherit;}', $outline['styles']['css']);
+    [$outlineOnly] = ThemeJsonStep::repairCtaStyle($theme, 'outline');
+    assert_true(!isset($outlineOnly['styles']['css']), 'an all-build-owned styles.css is removed with the rule');
+
+    // Non-block styles never introduce the rule.
+    [$solid] = ThemeJsonStep::repairCtaStyle(['version' => 3], 'solid');
+    assert_true(!isset($solid['styles']['css']));
+});
+
 test('FixBlocks CTA normalization isolates failed files and keeps healthy siblings repaired', function () {
     with_temp_dir('cta-style-rollback-', function (string $tmp): void {
         $project = new Project($tmp);
