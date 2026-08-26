@@ -340,6 +340,54 @@ test('page styles drops CTA-owned construction but keeps row layout utilities', 
     assert_contains('CTA-style-owned', implode('; ', $dropped));
 });
 
+test('page styles drops treatment-owned image finish but keeps layout and captions on treated surfaces', function () {
+    $css = '.masonry-3 .card-media img { filter: sepia(1); mix-blend-mode: multiply; width: 100%; }'
+        . '.masonry-3 .card-media { opacity: 0.8; margin: 0; }'
+        . '.masonry-3 .card-media figcaption { opacity: 0.7; }';
+    $problems = implode('; ', PageStylesStep::validate($css));
+    assert_contains('treatment-owned', $problems);
+
+    [$salvaged, $dropped] = PageStylesStep::dropOffendingDeclarations($css);
+    assert_true(!str_contains($salvaged, 'filter: sepia(1)'), 'local filter is dropped');
+    assert_true(!str_contains($salvaged, 'mix-blend-mode'), 'blend mode is dropped');
+    assert_true(!str_contains($salvaged, 'opacity: 0.8'), 'surface opacity is dropped');
+    assert_contains('width: 100%', $salvaged, 'layout on the treated surface survives');
+    assert_contains('margin: 0', $salvaged, 'sibling declarations survive');
+    assert_contains('opacity: 0.7', $salvaged, 'caption opacity is not the treated layer');
+    assert_eq(3, count($dropped));
+    assert_contains('treatment-owned', implode('; ', $dropped));
+    assert_eq([], PageStylesStep::validate($salvaged), 'salvaged CSS validates clean');
+});
+
+test('run drops a generated treatment-owned filter with a durable warning and ships the rest', function () {
+    [$project, $tmp] = ps_project('builder_ps_treatfilter_');
+    $project->writeText(
+        'theme/parts/section-work.html',
+        '<!-- wp:group {"className":"overlap-up"} --><div class="wp-block-group overlap-up">'
+        . '<figure class="wp-block-image card-media"><img src="x.jpg"/></figure>'
+        . '</div><!-- /wp:group -->'
+    );
+    $llm = new FakeLlm();
+    $llm->queueText(
+        ".overlap-up .card-media img {\n"
+        . "    filter: sepia(1);\n"
+        . "    width: 100%;\n"
+        . "}"
+    );
+
+    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $style = $project->readText('theme/style.css');
+    assert_true(!str_contains($style, 'sepia'), 'the local filter does not ship');
+    assert_contains('width: 100%', $style, 'the rest of the appendix ships');
+    assert_contains(
+        'filter',
+        implode("\n", ps_warning_rows($project, 'page-styles')),
+        'the drop is a durable actionable warning',
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('page styles drops type-treatment-owned heading case/tracking but keeps sibling typography', function () {
     $css = '.masonry-3 h2 { text-transform: uppercase; letter-spacing: 0.2em; line-height: 1.1; }'
         . '.masonry-3 .wp-block-site-title { letter-spacing: 0.12em; font-weight: 700; }'
@@ -618,7 +666,7 @@ test('legacy mode ignores stale site CSS and keeps the recorded call trace and s
     assert_eq(0, $llm->completeBatchCalls, 'legacy path makes no batch call');
     assert_eq(1, count($llm->calls), 'legacy call trace count');
     assert_eq(
-        '17a2b6ca429ef7b76824c20f8821d92b0e289c6b3ed97773a7f05120bf69dac2',
+        '0c444b9ad39563b081eb7679b4c36def91f9df2855e4a1ba5e563db74f3c46eb',
         hash('sha256', $llm->calls[0]['prompt']),
         'legacy prompt bytes'
     );

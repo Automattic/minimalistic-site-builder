@@ -105,6 +105,7 @@ final class CustomMotionStep implements Step
         }
         $shapeTagged = self::hasShapeTaggedElement($project);
         $ctaTagged = self::hasCtaTaggedElement($project);
+        $imageTagged = self::hasImageTaggedElement($project);
 
         $rendered = $this->renderer->render('custom-motion.md', [
             'animation_request' => $request,
@@ -121,11 +122,13 @@ final class CustomMotionStep implements Step
         // keyframes, before applying the rest of the CSS policy below.
         [$css, $droppedShapeDeclarations] = self::dropShapeOwnedDeclarations($css, $shapeTagged);
         [$css, $droppedCtaDeclarations] = self::dropCtaOwnedDeclarations($css, $ctaTagged);
+        [$css, $droppedTreatmentDeclarations] = self::dropImageTreatmentOwnedDeclarations($css, $imageTagged);
         [$css, $droppedMotionDeclarations] = self::dropProfileOwnedMotionDeclarations($css);
         foreach (
             [
                 'shape-owned corner' => $droppedShapeDeclarations,
                 'CTA-owned construction' => $droppedCtaDeclarations,
+                'treatment-owned image finish' => $droppedTreatmentDeclarations,
                 'profile-owned motion custom property' => $droppedMotionDeclarations,
             ] as $kind => $dropped
         ) {
@@ -141,7 +144,7 @@ final class CustomMotionStep implements Step
                 $dropped,
             ));
         }
-        $problems = self::validate($css, $shapeTagged, $ctaTagged);
+        $problems = self::validate($css, $shapeTagged, $ctaTagged, $imageTagged);
         $preValidationDropLog = implode('', [
             $droppedShapeDeclarations === []
                 ? ''
@@ -151,6 +154,10 @@ final class CustomMotionStep implements Step
                 ? ''
                 : "\nCTA-OWNED DECLARATIONS REMOVED BEFORE VALIDATION:\n- "
                     . implode("\n- ", $droppedCtaDeclarations) . "\n",
+            $droppedTreatmentDeclarations === []
+                ? ''
+                : "\nTREATMENT-OWNED DECLARATIONS REMOVED BEFORE VALIDATION:\n- "
+                    . implode("\n- ", $droppedTreatmentDeclarations) . "\n",
             $droppedMotionDeclarations === []
                 ? ''
                 : "\nPROFILE-OWNED MOTION DECLARATIONS REMOVED BEFORE VALIDATION:\n- "
@@ -176,6 +183,7 @@ final class CustomMotionStep implements Step
 
         $droppedCount = count($droppedShapeDeclarations)
             + count($droppedCtaDeclarations)
+            + count($droppedTreatmentDeclarations)
             + count($droppedMotionDeclarations);
         if ($droppedCount > 0) {
             file_put_contents(
@@ -257,6 +265,33 @@ final class CustomMotionStep implements Step
         return false;
     }
 
+    /** Whether the custom-motion class is attached to a treatment-owned image block. */
+    public static function hasImageTaggedElement(Project $project): bool
+    {
+        $token = '(?<![\w-])' . self::CLASS_NAME . '(?![\w-])';
+        $owned = ['core/image', 'core/gallery', 'core/cover', 'core/media-text'];
+        foreach ($project->themeFiles() as $rel) {
+            $doc = BlockMarkup::parse($project->readText('theme/' . $rel));
+            foreach ($doc->indices() as $i) {
+                $name = $doc->name($i);
+                $name = str_contains($name, '/') ? $name : 'core/' . $name;
+                if (!in_array($name, $owned, true)) {
+                    continue;
+                }
+                $attrs = $doc->attrs($i);
+                $className = is_array($attrs) && is_string($attrs['className'] ?? null)
+                    ? $attrs['className']
+                    : '';
+                if (preg_match('/' . $token . '/', $className) === 1
+                    || preg_match('/\bclass\s*=\s*(["\'])[^"\']*' . $token . '[^"\']*\1/i', $doc->ownHtml($i)) === 1
+                ) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     /** Whether the custom-motion class is attached to a core/button block. */
     public static function hasCtaTaggedElement(Project $project): bool
     {
@@ -298,6 +333,7 @@ final class CustomMotionStep implements Step
         string $css,
         bool $shapeTagged = false,
         bool $ctaTagged = false,
+        bool $imageTagged = false,
     ): array
     {
         $css = trim($css);
@@ -341,6 +377,10 @@ final class CustomMotionStep implements Step
         }
         foreach (self::ctaOwnedDeclarations($stripped, $ctaTagged) as $declaration) {
             $problems[] = 'CTA-owned button construction declaration is not allowed: '
+                . trim($declaration['raw']);
+        }
+        foreach (self::imageTreatmentOwnedDeclarations($stripped, $imageTagged) as $declaration) {
+            $problems[] = 'treatment-owned image finish declaration is not allowed: '
                 . trim($declaration['raw']);
         }
 
@@ -455,6 +495,29 @@ final class CustomMotionStep implements Step
     }
 
     /**
+     * Remove only declarations that can change the committed render-time
+     * image treatment (`filter`, `mix-blend-mode`, or a CSS-wide `all` reset
+     * on a treated surface). Referenced keyframes are followed so an image
+     * animation cannot restore a local filter mid-flight. Opacity stays
+     * available here — fades are legitimate motion.
+     *
+     * @return array{0:string,1:list<string>} repaired CSS and dropped declarations
+     */
+    public static function dropImageTreatmentOwnedDeclarations(string $css, bool $imageTagged = false): array
+    {
+        $owned = self::imageTreatmentOwnedDeclarations($css, $imageTagged);
+        $ownedStarts = array_fill_keys(array_column($owned, 'start'), true);
+        [$repaired, $dropped] = CssChecks::dropDeclarations(
+            $css,
+            static fn (array $declaration): bool => isset($ownedStarts[$declaration['start']]),
+        );
+        return [
+            $repaired,
+            array_map(static fn (array $declaration): string => trim($declaration['raw']), $dropped),
+        ];
+    }
+
+    /**
      * Remove only `--motion-*` custom properties. The committed profile owns
      * those values on `:root`; a local override retunes the element and
      * everything under it. Selectors, at-rules, and every other declaration
@@ -498,6 +561,23 @@ final class CustomMotionStep implements Step
             $css,
             static fn (string $selector): bool => CssChecks::selectorTargetsCta($selector)
                 || ($ctaTagged && self::selectorTargetsCustomMotionRoot($selector)),
+        );
+    }
+
+    /**
+     * @return list<array{property:string,value:string,raw:string,start:int,end:int,
+     *     context:string,ancestors:list<string>,kind:string}>
+     */
+    private static function imageTreatmentOwnedDeclarations(string $css, bool $imageTagged): array
+    {
+        return CssChecks::imageTreatmentAffectingDeclarations(
+            $css,
+            static fn (string $selector): bool => CssChecks::selectorTargetsImageTreatment($selector)
+                || ($imageTagged && (
+                    self::selectorTargetsCustomMotionRoot($selector)
+                    || (preg_match('/\.' . self::CLASS_NAME . '(?![\w-])/', $selector) === 1
+                        && CssChecks::selectorSubjectIsImageLayer($selector))
+                )),
         );
     }
 

@@ -21,6 +21,7 @@ use Automattic\SiteBuild\GroundKey;
 use Automattic\SiteBuild\GroundTint;
 use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
+use Automattic\SiteBuild\ImageTreatment;
 use Automattic\SiteBuild\ImageCrop;
 use Automattic\SiteBuild\ItemPattern;
 use Automattic\SiteBuild\Llm;
@@ -117,6 +118,9 @@ final class DesignDirectionStep implements Step
      * the dated inset-media card only appears when a direction opts into it.
      */
     public const CARD_STYLES = CardStyle::ALL;
+
+    /** Render-time treatments tying delivered photos to the committed palette. */
+    public const IMAGE_TREATMENTS = ImageTreatment::ALL;
 
     /** Repeated-item idioms the planner may assign to list-like sections. */
     public const ITEM_PATTERNS = ItemPattern::ALL;
@@ -385,6 +389,7 @@ final class DesignDirectionStep implements Step
             ],
             'type_scale'       => TypeScale::DEFAULT,
             'image_grade'      => '',
+            'image_treatment'  => ImageTreatment::DEFAULT,
             'image_crop'       => ImageCrop::DEFAULT,
             'canvas'           => $canvas,
             'measure'          => Measure::DEFAULT,
@@ -823,6 +828,7 @@ final class DesignDirectionStep implements Step
         );
 
         $cardStyle = self::normalizeCardStyle($raw['card_style'] ?? null, $warnings);
+        $imageTreatment = self::normalizeImageTreatment($raw['image_treatment'] ?? null, $warnings);
         $itemPattern = ItemPattern::normalize($raw['item_pattern'] ?? null, $warnings);
         $imageCrop = self::normalizeImageCrop($raw['image_crop'] ?? null, $warnings);
         $depth = self::normalizeDepth($raw['depth'] ?? null, $warnings);
@@ -917,6 +923,7 @@ final class DesignDirectionStep implements Step
             ],
             'type_scale'       => $typeScale,
             'image_grade'      => trim((string) ($raw['image_grade'] ?? '')),
+            'image_treatment'  => $imageTreatment,
             'image_crop'       => $imageCrop,
             // Anything that isn't an explicit "framed" commitment is full-bleed:
             // an accidental frame reads as a rendering bug, not a design choice.
@@ -965,6 +972,24 @@ final class DesignDirectionStep implements Step
             'card_style',
             $warnings,
             'unsupported generated card treatment replaced by default',
+        );
+    }
+
+    /**
+     * Normalize the build-owned render-time image treatment. Natural is the
+     * honest fallback: an accidental filter changes every delivered photo.
+     *
+     * @param list<string> $warnings
+     */
+    public static function normalizeImageTreatment(mixed $authored, array &$warnings = []): string
+    {
+        return BoundedChoice::normalize(
+            $authored,
+            ImageTreatment::ALL,
+            ImageTreatment::DEFAULT,
+            'image_treatment',
+            $warnings,
+            'unsupported render-time image treatment replaced by natural',
         );
     }
 
@@ -1549,6 +1574,16 @@ final class DesignDirectionStep implements Step
             $facts[] = "- **Image grade (all imagery)**: {$imageGrade}";
         }
 
+        $imageTreatment = ImageTreatment::explicit($direction['image_treatment'] ?? null);
+        if ($imageTreatment !== null) {
+            $facts[] = '- **Image treatment**: ' . $imageTreatment . ' — ' . match ($imageTreatment) {
+                'natural' => 'the build leaves delivered image pixels untreated',
+                'duotone' => 'the build maps content-image shadows and highlights onto the delivered contrast/base palette pair',
+                'tinted-overlay' => 'the build places one low-opacity primary-color tint above Cover and card media pixels but below their copy',
+                'high-key-bw' => 'the build forces content imagery into a bright, low-contrast grayscale treatment',
+            } . '. Do not author a local duotone, filter, blend mode, or image overlay.';
+        }
+
         return $head . ($facts === [] ? '' : "\n\n" . implode("\n", $facts));
     }
 
@@ -1714,6 +1749,15 @@ final class DesignDirectionStep implements Step
             return '';
         }
         return trim((string) ($project->readJson(self::FILE)['image_grade'] ?? ''));
+    }
+
+    /** Explicit committed render-time image treatment, or null for pre-field artifacts. */
+    public static function imageTreatmentFor(Project $project): ?string
+    {
+        if (!$project->exists(self::FILE)) {
+            return null;
+        }
+        return ImageTreatment::explicit($project->readJson(self::FILE)['image_treatment'] ?? null);
     }
 
     /** Explicit committed image crop, or null for a pre-field/garbled artifact. */

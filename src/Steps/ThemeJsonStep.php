@@ -13,6 +13,7 @@ use Automattic\SiteBuild\Depth;
 use Automattic\SiteBuild\FontCatalog;
 use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\GeneratedJsonFallbackStep;
+use Automattic\SiteBuild\ImageTreatment;
 use Automattic\SiteBuild\BandColor;
 use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\CssChecks;
@@ -565,6 +566,13 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         // Floors run on the palette about to be written, after every other repair.
         [$theme, $floorWarnings] = self::applyPaletteFloor($theme);
         $warnings = array_merge($warnings, $floorWarnings);
+
+        // The bounded render-time treatment owns the duotone catalog after
+        // palette repair/floors, so its preset uses the colors that ship.
+        $theme = ImageTreatment::applyThemeJson(
+            $theme,
+            $direction['image_treatment'] ?? null,
+        );
 
         $bindRepairs = array_merge(
             $colorRepairs,

@@ -357,6 +357,56 @@ test('finalize-theme ships no shape kit for sharp and prunes a stale one', funct
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('finalize-theme ships palette tint and high-key image-treatment kits then prunes natural', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fin_treatment_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    finalize_static_header($project);
+    $project->writeJson('theme/theme.json', ['settings' => ['color' => ['palette' => [
+        ['slug' => 'base', 'color' => '#D5DCE0'],
+        ['slug' => 'contrast', 'color' => '#17191C'],
+        ['slug' => 'primary', 'color' => '#8C3B2A'],
+    ]]]]);
+
+    $project->writeJson('designDirection.json', [
+        'description' => 'x',
+        'image_treatment' => 'tinted-overlay',
+    ]);
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+    $css = $project->readText('theme/assets/image-treatment/image-treatment.css');
+    assert_contains('background: #8C3B2A', $css);
+    assert_contains('figure.card-media', $css);
+    $php = $project->readText('theme/functions.php');
+    assert_contains(
+        "wp_enqueue_style('forno-vero-image-treatment', get_theme_file_uri('assets/image-treatment/image-treatment.css'), array('forno-vero-style')",
+        $php,
+    );
+    assert_contains("add_editor_style(array('style.css', 'assets/image-treatment/image-treatment.css'))", $php);
+
+    $project->writeJson('designDirection.json', [
+        'description' => 'x',
+        'image_treatment' => 'high-key-bw',
+    ]);
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+    $css = $project->readText('theme/assets/image-treatment/image-treatment.css');
+    assert_contains('grayscale(1)', $css);
+    assert_contains('brightness(1.12)', $css);
+
+    $project->writeJson('designDirection.json', [
+        'description' => 'x',
+        'image_treatment' => 'natural',
+    ]);
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+    assert_true(!$project->exists('theme/assets/image-treatment/image-treatment.css'), 'natural prunes stale treatment');
+    $naturalPhp = $project->readText('theme/functions.php');
+    assert_true(!str_contains($naturalPhp, 'forno-vero-image-treatment'), 'natural omits kit enqueue');
+    assert_contains("unset(\$parsed_block['attrs']['style']['color']['duotone'])", $naturalPhp);
+    $out = [];
+    $rc = 0;
+    exec('php -l ' . escapeshellarg($project->themePath('functions.php')) . ' 2>&1', $out, $rc);
+    assert_eq(0, $rc, implode("\n", $out));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('finalize-theme ships a committed image-crop kit and prunes mixed', function () {
     $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
     $project = (new ProjectStore($tmp))->create('Forno Vero');
@@ -380,6 +430,46 @@ test('finalize-theme ships a committed image-crop kit and prunes mixed', functio
     quietly(fn () => (new FinalizeThemeStep())->run($project));
     assert_true(!$project->exists('theme/assets/image-crop/image-crop.css'));
     assert_true(!str_contains($project->readText('theme/functions.php'), 'assets/image-crop/'));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('finalize-theme applies duotone through Core block support without a CSS approximation', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fin_duotone_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    finalize_static_header($project);
+    $project->writeJson('theme/theme.json', ['settings' => ['color' => ['palette' => [
+        ['slug' => 'base', 'color' => '#F4F0E8'],
+        ['slug' => 'contrast', 'color' => '#151515'],
+        ['slug' => 'primary', 'color' => '#8C3B2A'],
+    ]]]]);
+    $project->writeJson('designDirection.json', [
+        'description' => 'x',
+        'image_treatment' => 'duotone',
+    ]);
+
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+
+    $css = $project->readText('theme/assets/image-treatment/image-treatment.css');
+    assert_contains('.wp-block-media-text__media img', $css);
+    assert_contains('var(--wp--preset--duotone--site-image-treatment, none)', $css);
+    $php = $project->readText('theme/functions.php');
+    assert_contains("add_filter('render_block_data'", $php);
+    assert_contains("array('core/image', 'core/cover')", $php);
+    assert_true(
+        !str_contains($php, "'core/media-text'"),
+        'the inject hook skips the block Core cannot duotone; the companion kit covers it',
+    );
+    assert_contains("'var:preset|duotone|site-image-treatment'", $php);
+    assert_contains(
+        "wp_enqueue_style('forno-vero-image-treatment'",
+        $php,
+        'the media-text companion kit is enqueued',
+    );
+    $out = [];
+    $rc = 0;
+    exec('php -l ' . escapeshellarg($project->themePath('functions.php')) . ' 2>&1', $out, $rc);
+    assert_eq(0, $rc, implode("\n", $out));
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

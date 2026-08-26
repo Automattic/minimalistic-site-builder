@@ -158,6 +158,51 @@ test('custom-motion CTA ownership does not apply to a tagged non-button wrapper'
     );
 });
 
+test('custom-motion drops treatment-owned image finish from a tagged image and its keyframes', function () {
+    $css = ".custom-motion {\n"
+        . "    filter: sepia(1);\n"
+        . "    animation: custom-motion-drift 2s both;\n"
+        . "    transform: translateY(0);\n"
+        . "    opacity: 0.9;\n"
+        . "}\n"
+        . ".custom-motion img {\n"
+        . "    mix-blend-mode: multiply;\n"
+        . "}\n"
+        . "@keyframes custom-motion-drift {\n"
+        . "    from { filter: blur(4px); transform: scale(.98); }\n"
+        . "    to { transform: scale(1); }\n"
+        . "}\n"
+        . "@keyframes custom-motion-card { from { filter: none; } to { filter: none; } }";
+
+    [$repaired, $dropped] = CustomMotionStep::dropImageTreatmentOwnedDeclarations($css, true);
+
+    assert_eq(3, count($dropped), 'direct and referenced-keyframe finish is dropped');
+    assert_true(!str_contains($repaired, 'filter: sepia(1)'));
+    assert_true(!str_contains($repaired, 'mix-blend-mode'));
+    assert_true(!str_contains($repaired, 'filter: blur(4px)'));
+    assert_contains('transform: scale(.98)', $repaired, 'motion survives');
+    assert_contains('opacity: 0.9', $repaired, 'fades stay legitimate motion vocabulary');
+    assert_contains('filter: none', $repaired, 'unreferenced keyframe survives untouched');
+    assert_eq([], CustomMotionStep::validate($repaired, false, false, true));
+});
+
+test('custom-motion treatment ownership does not apply to a tagged non-image wrapper', function () {
+    $css = '.custom-motion { filter: brightness(1.05); transform: none; }';
+    assert_eq([], CustomMotionStep::validate($css, false, false, false));
+    assert_eq([$css, []], CustomMotionStep::dropImageTreatmentOwnedDeclarations($css, false));
+    assert_contains(
+        'treatment-owned image finish',
+        implode('; ', CustomMotionStep::validate($css, false, false, true)),
+    );
+    assert_contains(
+        'treatment-owned image finish',
+        implode('; ', CustomMotionStep::validate(
+            '.custom-motion .card-media img { mix-blend-mode: screen; }',
+        )),
+        'a rule naming a treated surface is owned even without a tagged image',
+    );
+});
+
 test('custom-motion drops only profile-owned motion tokens and preserves the animation', function () {
     $css = ".custom-motion {\n"
         . "    --motion-hover-duration: 180ms;\n"

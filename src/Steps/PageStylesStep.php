@@ -4113,6 +4113,16 @@ CSS;
                 $problems[] = 'button construction declarations are CTA-style-owned by the design direction';
                 break;
             }
+            if (self::declarationTargetsImageTreatment($declaration)
+                && CssChecks::isImageTreatmentAffectingDeclaration(
+                    $declaration['property'],
+                    $declaration['value'],
+                    opacityOwned: true,
+                )
+            ) {
+                $problems[] = 'image filter/blend/opacity declarations are treatment-owned by the design direction';
+                break;
+            }
             if (self::declarationTargetsHeading($declaration)
                 && CssChecks::isHeadingTreatmentDeclaration($declaration['property'])
             ) {
@@ -4309,7 +4319,8 @@ CSS;
      * Salvage pass for CSS that failed validate(): remove each declaration
      * that carries a declaration-level offence (raw color literal, resource-
      * loading function, --motion-* override, depth-variable redeclaration,
-     * shape-owned corner radius, type-treatment-owned heading case/tracking,
+     * shape-owned corner radius, treatment-owned image filter/blend/opacity,
+     * type-treatment-owned heading case/tracking,
      * content-hiding value) and keep the rest. Only rule bodies are touched —
      * selectors, @media preludes and brace structure pass through, so
      * structural problems deliberately survive into the re-validation and
@@ -4327,6 +4338,7 @@ CSS;
                 $declaration['raw'],
                 self::declarationTargetsShape($declaration),
                 self::declarationTargetsCta($declaration),
+                self::declarationTargetsImageTreatment($declaration),
                 self::declarationTargetsHeading($declaration),
             );
             if ($problem !== null) {
@@ -4358,6 +4370,7 @@ CSS;
         string $declaration,
         bool $targetsShape = false,
         bool $targetsCta = false,
+        bool $targetsImageTreatment = false,
         bool $targetsHeading = false,
     ): ?string
     {
@@ -4377,6 +4390,11 @@ CSS;
         }
         if ($targetsCta && CssChecks::isCtaAffectingDeclaration($property, $value)) {
             return 'button construction is CTA-style-owned by the design direction';
+        }
+        if ($targetsImageTreatment
+            && CssChecks::isImageTreatmentAffectingDeclaration($property, $value, opacityOwned: true)
+        ) {
+            return 'image filter/blend/opacity is treatment-owned by the design direction';
         }
         if ($targetsHeading && CssChecks::isHeadingTreatmentDeclaration($property)) {
             return 'heading case/tracking is type-treatment-owned by the design direction';
@@ -4425,6 +4443,13 @@ CSS;
     {
         return $declaration['kind'] === 'style'
             && CssChecks::selectorTargetsCta($declaration['context']);
+    }
+
+    /** @param array{context:string,kind:string} $declaration */
+    private static function declarationTargetsImageTreatment(array $declaration): bool
+    {
+        return $declaration['kind'] === 'style'
+            && CssChecks::selectorTargetsImageTreatment($declaration['context']);
     }
 
     /** @param array{context:string,kind:string} $declaration */
