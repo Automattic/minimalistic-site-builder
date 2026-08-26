@@ -53,7 +53,7 @@ foreach (SITES as $slug => $prompt) {
     echo "\n=== {$slug} ===\n";
     try {
         $project = $builder->createProject($prompt, $slug);
-    } catch (InvalidArgumentException $e) {
+    } catch (Throwable $e) {
         echo "  ERROR: {$e->getMessage()}\n";
         $results[$slug] = [
             'prompt'   => $prompt,
@@ -63,7 +63,10 @@ foreach (SITES as $slug => $prompt) {
             'error'    => $e->getMessage(),
             'problems' => ['build failed before validation'],
             'warnings' => [],
-            'metrics'  => [],
+            'metrics'  => [
+                'pages'          => 0,
+                'content_blocks' => 0,
+            ],
         ];
         continue;
     }

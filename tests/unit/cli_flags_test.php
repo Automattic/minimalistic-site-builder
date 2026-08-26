@@ -205,8 +205,6 @@ test('--html-islands with another graph flag is refused', function () {
 });
 
 test('leftover SITE_BUILD_HTML_FIRST is ignored when SITE_BUILD_GRAPH is pinned', function () {
-    // Empty process SITE_BUILD_GRAPH is not unset: Env::get falls back to .env
-    // (site_builder_test.php:17-19). Pin the new key so leftover cannot leak.
     $ids = build_cli_graph_ids([], [
         'SITE_BUILD_HTML_FIRST' => '1',
         'SITE_BUILD_GRAPH' => 'blocks',
@@ -214,6 +212,49 @@ test('leftover SITE_BUILD_HTML_FIRST is ignored when SITE_BUILD_GRAPH is pinned'
     $seen = implode(',', $ids);
     assert_true(in_array('sections', $ids, true), $seen);
     assert_true(!in_array('transform-site', $ids, true), $seen);
+});
+
+test('leftover SITE_BUILD_HTML_FIRST without SITE_BUILD_GRAPH is refused', function () {
+    // bootstrap.php loads the repo .env by path, not cwd. A child whose cwd
+    // has no .env still inherits that map unless we drop SITE_BUILD_GRAPH
+    // from it after bootstrap, which is what "unset" means (site_builder_test.php:17-19).
+    $tmp = sys_get_temp_dir() . '/d2-leftover-cli-' . uniqid();
+    mkdir($tmp, 0700, true);
+    file_put_contents($tmp . '/.env', '');
+    $driver = $tmp . '/run.php';
+    $bootstrap = repo_path('src/bootstrap.php');
+    $build = repo_path('bin/build.php');
+    file_put_contents($driver, '<?php
+declare(strict_types=1);
+require_once ' . var_export($bootstrap, true) . ';
+$prop = new ReflectionProperty(Automattic\\SiteBuild\\Env::class, "vars");
+$map = $prop->getValue();
+unset($map["SITE_BUILD_GRAPH"]);
+$prop->setValue(null, $map);
+putenv("SITE_BUILD_GRAPH");
+putenv("SITE_BUILD_HTML_FIRST=1");
+chdir(' . var_export($tmp, true) . ');
+$_SERVER["SCRIPT_FILENAME"] = ' . var_export($build, true) . ';
+$argv = [' . var_export($build, true) . ', "demo", "--provider=anthropic", "--no-serve"];
+$_SERVER["argv"] = $argv;
+$_SERVER["argc"] = count($argv);
+require ' . var_export($build, true) . ';
+');
+
+    try {
+        $command = 'ANTHROPIC_API_KEY=' . escapeshellarg('test-key') . ' '
+            . php_child_command($driver);
+        $output = [];
+        $exit = 0;
+        exec($command . ' 2>&1', $output, $exit);
+        $text = implode("\n", $output);
+
+        assert_eq(1, $exit, $text);
+        assert_true(str_contains($text, 'SITE_BUILD_HTML_FIRST'), $text);
+        assert_true(str_contains($text, 'SITE_BUILD_GRAPH'), $text);
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
 });
 
 test('--html-islands is refused as not yet implemented', function () {

@@ -3,7 +3,10 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\BlockFixer;
 use Automattic\SiteBuild\Env;
+use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Package;
+use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\TransformArtifacts;
 use Automattic\SiteBuild\Pipeline;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
@@ -133,12 +136,47 @@ test('images CLI reads the graph off the project instead of the env selector', f
     $source = (string) file_get_contents(dirname(__DIR__, 2) . '/bin/images.php');
     assert_contains('StepComposition::resumeGraph(', $source);
     assert_contains('htmlFirst: $htmlFirst', $source);
-    assert_contains('TransformArtifacts::REPORT', $source);
-    assert_contains('catch (InvalidArgumentException', $source);
     assert_true(
         !str_contains($source, 'selectedGraph'),
         'the entry point that did not build the project never asks the env selector',
     );
+});
+
+test('images CLI falls back to the transform report on an unknown recorded graph and narrates it', function () {
+    require_once dirname(__DIR__, 2) . '/bin/images.php';
+
+    $tmp = sys_get_temp_dir() . '/builder_images_graph_' . uniqid();
+    $store = new ProjectStore($tmp);
+    $project = $store->create('future');
+    $project->writeJson('meta.json', [
+        'prompt' => 'a bakery',
+        'graph'  => 'some-future-graph',
+    ]);
+
+    $sink = fopen('php://temp', 'w+');
+    Narrator::setStream($sink);
+    try {
+        assert_eq(false, images_html_first_from_project($project), 'no report → blocks rules');
+        rewind($sink);
+        $absent = (string) stream_get_contents($sink);
+        assert_true(str_contains($absent, 'some-future-graph'), $absent);
+
+        $project->writeJson(TransformArtifacts::REPORT, [
+            'fallback_codes'    => [],
+            'repair_outcomes'   => [],
+            'dropped_fragments' => [],
+        ]);
+        ftruncate($sink, 0);
+        rewind($sink);
+        assert_eq(true, images_html_first_from_project($project), 'report present → HTML-first rules');
+        rewind($sink);
+        $present = (string) stream_get_contents($sink);
+        assert_true(str_contains($present, 'some-future-graph'), $present);
+    } finally {
+        Narrator::reset();
+        fclose($sink);
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
 });
 
 test('StepComposition htmlFirst matches the HTML-first step order and validates', function () {

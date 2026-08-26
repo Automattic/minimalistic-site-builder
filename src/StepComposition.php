@@ -99,11 +99,12 @@ final class StepComposition
         ?BlockFixer $blockFixer = null,
         ?FontFetcher $fontFetcher = null,
     ): self {
-        return match (self::selectedGraph()) {
+        $graph = self::selectedGraph();
+        return match ($graph) {
             self::GRAPH_HTML_FIRST => self::htmlFirst($llm, $renderer, $models, $temperatures, $blockFixer, $fontFetcher),
             self::GRAPH_BLOCKS => self::blocks($llm, $renderer, $models, $temperatures, $blockFixer, $fontFetcher),
             self::GRAPH_HTML_ISLANDS => throw new \RuntimeException(Graph::NOT_IMPLEMENTED),
-            default => throw new \RuntimeException(Graph::NOT_IMPLEMENTED),
+            default => throw new \RuntimeException($graph . ' graph is not yet implemented'),
         };
     }
 

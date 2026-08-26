@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\Narrator;
+use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\StepComposition;
 use Automattic\SiteBuild\Steps\CollectImagesStep;
@@ -24,6 +26,40 @@ use Automattic\SiteBuild\TransformArtifacts;
 
 require_once __DIR__ . '/../src/bootstrap.php';
 
+/**
+ * Which graph's image rules this project should finish under.
+ *
+ * This entry point did not build the project, so the env selector says nothing
+ * about which graph did — meta.json's record does, and the transform report
+ * (written only by the HTML-first pipeline) is the fallback for a project built
+ * before that record existed, or whose recorded name this version does not
+ * recognize. An unknown record is narrated so a newer graph never silently
+ * falls through to blocks and drops images.
+ */
+function images_html_first_from_project(Project $project): bool
+{
+    $meta = $project->exists('meta.json') ? $project->readJson('meta.json') : [];
+    $recordedGraph = $meta['graph'] ?? null;
+    try {
+        $graph = StepComposition::resumeGraph(
+            is_string($recordedGraph) ? $recordedGraph : null,
+            null,
+        );
+    } catch (InvalidArgumentException $e) {
+        Narrator::write($e->getMessage() . "\n");
+        $graph = null;
+    }
+
+    return ($graph ?? ($project->exists(TransformArtifacts::REPORT)
+        ? StepComposition::GRAPH_HTML_FIRST
+        : StepComposition::GRAPH_BLOCKS)) === StepComposition::GRAPH_HTML_FIRST;
+}
+
+$scriptFilename = $_SERVER['SCRIPT_FILENAME'] ?? null;
+if (!is_string($scriptFilename) || realpath($scriptFilename) !== __FILE__) {
+    return;
+}
+
 $slug = $argv[1] ?? null;
 if ($slug === null || trim($slug) === '') {
     fwrite(STDERR, "Usage: php bin/images.php <slug>\n");
@@ -36,27 +72,7 @@ $project = $store->open($slug);
 
 echo "Generating images for '{$project->slug()}'\n";
 
-// This entry point did not build the project, so the env selector says nothing
-// about which graph did — meta.json's record does, and the transform report
-// (written only by the HTML-first pipeline) is the fallback for a project built
-// before that record existed. Both the collector and postImages' closing
-// re-validation apply rules that differ per graph, so they read one answer.
-$meta = $project->exists('meta.json') ? $project->readJson('meta.json') : [];
-$recordedGraph = $meta['graph'] ?? null;
-try {
-    $graph = StepComposition::resumeGraph(
-        is_string($recordedGraph) ? $recordedGraph : null,
-        null,
-    );
-} catch (InvalidArgumentException $e) {
-    // Unknown or retired record (html-first after it leaves Graph::KNOWN).
-    // This entry point is not a --from resume: fall back to the transform
-    // report, which only the HTML-first pipeline writes.
-    $graph = null;
-}
-$htmlFirst = ($graph ?? ($project->exists(TransformArtifacts::REPORT)
-    ? StepComposition::GRAPH_HTML_FIRST
-    : StepComposition::GRAPH_BLOCKS)) === StepComposition::GRAPH_HTML_FIRST;
+$htmlFirst = images_html_first_from_project($project);
 
 // Use the durable record from the pipeline; only collect if it's absent.
 if (!$project->exists('images.json')) {
