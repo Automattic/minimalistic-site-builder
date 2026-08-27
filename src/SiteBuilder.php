@@ -48,6 +48,14 @@ final class SiteBuilder
             return new Pipeline($composition->steps(), $composition->seeds());
         }
 
+        // The tree graph has no design document and no fallback wrapper; its
+        // optional image client is host wiring, so a host that generates
+        // images builds the composition itself and passes it in.
+        if (StepComposition::selectedGraph() === StepComposition::GRAPH_TREE) {
+            $composition = StepComposition::tree(llm: $this->llm, models: $this->models);
+            return new Pipeline($composition->steps(), $composition->seeds());
+        }
+
         $renderer = new PromptRenderer($this->promptsDir);
         $composition = StepComposition::default(
             llm: $this->llm,

@@ -24,20 +24,29 @@ use Automattic\SiteBuild\Steps\MotionSanityStep;
 use Automattic\SiteBuild\Steps\NormalizeLayoutStep;
 use Automattic\SiteBuild\Steps\PagePlanStep;
 use Automattic\SiteBuild\Steps\PageStylesStep;
+use Automattic\SiteBuild\Steps\ReadInstanceStep;
 use Automattic\SiteBuild\Steps\ReconcilePaletteStep;
 use Automattic\SiteBuild\Steps\RefinePromptStep;
 use Automattic\SiteBuild\Steps\ResolveNavLinksStep;
+use Automattic\SiteBuild\Steps\SandboxStep;
 use Automattic\SiteBuild\Steps\ScaffoldPluginStep;
 use Automattic\SiteBuild\Steps\ScaffoldThemeStep;
 use Automattic\SiteBuild\Steps\SectionCopyDedupeStep;
 use Automattic\SiteBuild\Steps\SectionLayoutStep;
 use Automattic\SiteBuild\Steps\SectionRhythmStep;
 use Automattic\SiteBuild\Steps\SectionsStep;
+use Automattic\SiteBuild\Steps\SectionTreesStep;
 use Automattic\SiteBuild\Steps\SiteSpecStep;
 use Automattic\SiteBuild\Steps\SpliceHomeDesignStep;
 use Automattic\SiteBuild\Steps\ThemeJsonStep;
 use Automattic\SiteBuild\Steps\ThemeScreenshotStep;
 use Automattic\SiteBuild\Steps\TransformSiteStep;
+use Automattic\SiteBuild\Steps\TreeBriefStep;
+use Automattic\SiteBuild\Steps\TreeImagesStep;
+use Automattic\SiteBuild\Steps\TreePublishStep;
+use Automattic\SiteBuild\Steps\TreeRepairStep;
+use Automattic\SiteBuild\Steps\TreeTokensStep;
+use Automattic\SiteBuild\Steps\TreeVerifyStep;
 use Automattic\SiteBuild\Steps\ValidateThemeStep;
 
 /**
@@ -53,9 +62,18 @@ final class StepComposition
     /** The env key that selects the HTML-first graph. Written by the CLI's --html-first / --blocks-first. */
     public const HTML_FIRST_ENV = 'SITE_BUILD_HTML_FIRST';
 
+    /**
+     * The named graph selector: 'tree' | 'html-first' | 'blocks'. Written by
+     * the CLI's --tree (and readable directly by hosts). When unset, the
+     * legacy boolean HTML_FIRST_ENV decides between the two original graphs,
+     * so existing callers keep working unchanged.
+     */
+    public const GRAPH_ENV = 'SITE_BUILD_GRAPH';
+
     /** Graph names recorded in meta.json, so a --from resume can run the graph that built the project. */
     public const GRAPH_HTML_FIRST = 'html-first';
     public const GRAPH_BLOCKS = 'blocks';
+    public const GRAPH_TREE = 'tree';
 
     /** Artifacts produced before the runtime fallback enters the blocks tail. */
     private const BLOCKS_TAIL_SEEDS = [
@@ -97,9 +115,24 @@ final class StepComposition
         ?BlockFixer $blockFixer = null,
         ?FontFetcher $fontFetcher = null,
     ): self {
-        return self::htmlFirstSelected()
-            ? self::htmlFirst($llm, $renderer, $models, $temperatures, $blockFixer, $fontFetcher)
-            : self::blocks($llm, $renderer, $models, $temperatures, $blockFixer, $fontFetcher);
+        return match (self::selectedGraph()) {
+            self::GRAPH_TREE       => self::tree($llm, $models),
+            self::GRAPH_HTML_FIRST => self::htmlFirst($llm, $renderer, $models, $temperatures, $blockFixer, $fontFetcher),
+            default                => self::blocks($llm, $renderer, $models, $temperatures, $blockFixer, $fontFetcher),
+        };
+    }
+
+    /**
+     * The graph the environment currently selects. SITE_BUILD_GRAPH (a graph
+     * name) wins; the legacy SITE_BUILD_HTML_FIRST boolean decides otherwise.
+     */
+    public static function selectedGraph(): string
+    {
+        $named = (string) Env::get(self::GRAPH_ENV, '');
+        if (in_array($named, [self::GRAPH_TREE, self::GRAPH_HTML_FIRST, self::GRAPH_BLOCKS], true)) {
+            return $named;
+        }
+        return self::htmlFirstSelected() ? self::GRAPH_HTML_FIRST : self::GRAPH_BLOCKS;
     }
 
     /**
@@ -113,11 +146,47 @@ final class StepComposition
         return Env::get(self::HTML_FIRST_ENV) === '1';
     }
 
-    /** The meta.json name for a graph. Null asks the current selection. */
+    /**
+     * The meta.json name for a graph. Null asks the current selection
+     * (which may be the tree graph); an explicit boolean keeps the legacy
+     * two-graph contract for hosts that pass one.
+     */
     public static function graphName(?bool $htmlFirst = null): string
     {
-        $htmlFirst ??= self::htmlFirstSelected();
+        if ($htmlFirst === null) {
+            return self::selectedGraph();
+        }
         return $htmlFirst ? self::GRAPH_HTML_FIRST : self::GRAPH_BLOCKS;
+    }
+
+    /**
+     * The graph a resume must run, by name: whatever built the project. A
+     * requested graph contradicting the record is a mistake, not an
+     * override — the other graph's artifacts were never written. Null means
+     * there is nothing to honor (no record, or one this version doesn't
+     * recognize), so the caller's own selection stands.
+     *
+     * @throws \InvalidArgumentException when the request contradicts the record
+     */
+    public static function resumeGraph(?string $recordedGraph, ?string $requestedGraph): ?string
+    {
+        $known = [self::GRAPH_TREE, self::GRAPH_HTML_FIRST, self::GRAPH_BLOCKS];
+        if (!in_array($recordedGraph, $known, true)) {
+            return null;
+        }
+        if ($requestedGraph !== null && $requestedGraph !== $recordedGraph) {
+            // Name the flag the caller actually typed, --blocks-first included.
+            $flag = $requestedGraph === self::GRAPH_BLOCKS ? 'blocks-first' : $requestedGraph;
+            throw new \InvalidArgumentException(sprintf(
+                "project was built on the %s graph, but --%s was passed. Resuming on a "
+                . "different graph reads artifacts that graph never wrote.\n"
+                . "Drop the flag to resume on %s.",
+                $recordedGraph,
+                $flag,
+                $recordedGraph,
+            ));
+        }
+        return $recordedGraph;
     }
 
     /**
@@ -398,6 +467,45 @@ final class StepComposition
             // Last chance to catch contract drift introduced by serialization or
             // later append-only steps before the project is reported as complete.
             new ValidateThemeStep(),
+        ]);
+    }
+
+    /**
+     * The tree graph (the x-pipeline brochure port): the model authors JSON
+     * block trees against a live Playground sandbox; the sandbox's own
+     * wp.blocks compiles and judges them; design tokens land as user-origin
+     * global styles; pages publish to the sandbox. No custom theme is
+     * generated — the sandbox keeps the WordPress default theme — and no
+     * custom blocks or schema packages exist in this lane.
+     *
+     * Selected via --tree (SITE_BUILD_GRAPH=tree). The image pass is a
+     * first-class step but a no-op unless meta.json records tree_images
+     * (the CLI's --with-images); placeholders — 1×1 pixels carrying each
+     * image intent — ship otherwise.
+     *
+     * @param array<string, string> $models       task/step id => model id overrides
+     * @param array<string, ?float> $temperatures task/step id => temperature overrides
+     */
+    public static function tree(
+        Llm $llm,
+        array $models = [],
+        array $temperatures = [],
+        ?ImageClient $imageClient = null,
+        ?int $sandboxPort = null,
+    ): self {
+        $models = array_merge(StepDefaults::models(), $models);
+        $temps = $temperatures;
+
+        return new self([
+            new SandboxStep($sandboxPort),
+            new TreeBriefStep($llm, $models['brief'] ?? null, $temps['brief'] ?? null),
+            new ReadInstanceStep(),
+            new TreeTokensStep($llm, $models['tokens'] ?? null, $temps['tokens'] ?? null),
+            new SectionTreesStep($llm, $models['section-trees'] ?? null, $temps['section-trees'] ?? null),
+            new TreeRepairStep($llm, $models['tree-repair'] ?? null, $temps['tree-repair'] ?? null),
+            new TreePublishStep(),
+            new TreeImagesStep($imageClient),
+            new TreeVerifyStep(),
         ]);
     }
 

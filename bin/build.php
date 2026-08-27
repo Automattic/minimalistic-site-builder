@@ -14,17 +14,24 @@ use Automattic\SiteBuild\StudioCli;
 /**
  * Build a site from a prompt.
  *
- *   php bin/build.php "A cozy neighborhood bakery" [--provider=openai] [--slug=my-slug] [--from=step-id] [--until=step-id] [--html-first|--blocks-first] [--multi-page] [--pages="Home, Menu, About"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=cover-image,foreground-image] [--max-hero-images=1] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--use-jetpack-placeholders] [--runner=studio|playground] [--port=9400] [--no-serve]
+ *   php bin/build.php "A cozy neighborhood bakery" [--provider=openai] [--slug=my-slug] [--from=step-id] [--until=step-id] [--tree|--html-first|--blocks-first] [--multi-page] [--pages="Home, Menu, About"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=cover-image,foreground-image] [--max-hero-images=1] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--use-jetpack-placeholders] [--runner=studio|playground] [--port=9400] [--no-serve]
  *
  * --provider=<anthropic|openai|xai|openrouter> picks the model set (config/models.json):
  * each step runs on that provider's large/small tier. Per-step LLM_MODEL_<STEP>
  * env overrides still win. Unset falls back to LLM_PROVIDER / the config default.
  *
- * --html-first / --blocks-first pick the pipeline graph. HTML-first has the model
- * author an HTML+CSS design that transform-site converts to block markup;
- * blocks-first has it author block markup directly. Either flag overrides
- * SITE_BUILD_HTML_FIRST from the shell or .env. With neither, that env var
- * decides, and unset still means blocks-first.
+ * --tree / --html-first / --blocks-first pick the pipeline graph. HTML-first
+ * has the model author an HTML+CSS design that transform-site converts to
+ * block markup; blocks-first has it author block markup directly. The tree
+ * graph (the x-pipeline brochure port) has the model author JSON block trees
+ * against a live Playground sandbox: the sandbox's own wp.blocks compiles and
+ * judges every tree, design tokens land as global styles on the default
+ * theme, and pages publish straight to the sandbox — which stays running
+ * after the build as the finished site. A tree build makes no custom theme;
+ * `--with-images` generates real images in-graph (without it, each image
+ * slot ships a 1x1 placeholder pixel carrying its written image intent).
+ * Flags override SITE_BUILD_GRAPH / SITE_BUILD_HTML_FIRST from the shell or
+ * .env. With none, those env vars decide, and unset still means blocks-first.
  *
  * The graph is recorded in meta.json, so --from resumes on whatever built the
  * project without being told again. A flag contradicting that record is refused
@@ -134,6 +141,7 @@ $args = parse_cli_args($argv, [
     '--hero-copy-capacity'       => 'value',
     '--html-first'               => 'bool',
     '--blocks-first'             => 'bool',
+    '--tree'                     => 'bool',
     '--with-images'              => 'bool',
     '--use-jetpack-placeholders' => 'bool',
     '--multi-page'               => 'bool',
@@ -150,6 +158,7 @@ $until = $flags['--until'] ?? null;
 $from = $flags['--from'] ?? null;
 $htmlFirst = $flags['--html-first'] ?? false;
 $blocksFirst = $flags['--blocks-first'] ?? false;
+$treeGraph = $flags['--tree'] ?? false;
 $withImages = $flags['--with-images'] ?? false;
 $formPlaceholders = $flags['--use-jetpack-placeholders'] ?? false;
 $multiPage = $flags['--multi-page'] ?? false;
@@ -218,16 +227,23 @@ if ($provider !== null) {
     putenv("LLM_PROVIDER={$provider}");
 }
 
-// --html-first / --blocks-first pick the pipeline graph by setting the env key
-// StepComposition::htmlFirstSelected() owns, the same way --provider sets
-// LLM_PROVIDER. Setting it unconditionally is what makes the flag beat an
-// exported SITE_BUILD_HTML_FIRST or an .env line; with no flag the env decides.
+// --tree / --html-first / --blocks-first pick the pipeline graph by setting
+// the env keys StepComposition::selectedGraph() owns, the same way --provider
+// sets LLM_PROVIDER. Setting them unconditionally is what makes a flag beat a
+// shell export or an .env line; with no flag the env decides.
 if ($htmlFirst && $blocksFirst) {
     Narrator::write("--html-first and --blocks-first are mutually exclusive; pass one.\n");
     exit(1);
 }
-if ($htmlFirst || $blocksFirst) {
+if ($treeGraph && ($htmlFirst || $blocksFirst)) {
+    Narrator::write("--tree is mutually exclusive with --html-first / --blocks-first; pass one graph flag.\n");
+    exit(1);
+}
+if ($treeGraph) {
+    putenv(StepComposition::GRAPH_ENV . '=' . StepComposition::GRAPH_TREE);
+} elseif ($htmlFirst || $blocksFirst) {
     putenv(StepComposition::HTML_FIRST_ENV . '=' . ($htmlFirst ? '1' : '0'));
+    putenv(StepComposition::GRAPH_ENV . '=' . ($htmlFirst ? StepComposition::GRAPH_HTML_FIRST : StepComposition::GRAPH_BLOCKS));
 }
 
 $llm = make_llm();
@@ -247,22 +263,43 @@ if ($from !== null) {
     }
     $meta = $project->exists('meta.json') ? $project->readJson('meta.json') : [];
     $recordedGraph = $meta['graph'] ?? null;
+    $requestedGraph = $treeGraph ? StepComposition::GRAPH_TREE
+        : ($htmlFirst ? StepComposition::GRAPH_HTML_FIRST
+            : ($blocksFirst ? StepComposition::GRAPH_BLOCKS : null));
     try {
-        $resumeHtmlFirst = StepComposition::resumeHtmlFirst(
+        $resumeGraph = StepComposition::resumeGraph(
             is_string($recordedGraph) ? $recordedGraph : null,
-            $htmlFirst || $blocksFirst ? $htmlFirst : null,
+            $requestedGraph,
         );
     } catch (InvalidArgumentException $e) {
         Narrator::write("--from: {$e->getMessage()}\n");
         exit(1);
     }
     // Null means nothing was recorded to honor, so the flag/env choice stands.
-    if ($resumeHtmlFirst !== null) {
-        putenv(StepComposition::HTML_FIRST_ENV . '=' . ($resumeHtmlFirst ? '1' : '0'));
+    if ($resumeGraph !== null) {
+        putenv(StepComposition::GRAPH_ENV . '=' . $resumeGraph);
+        if ($resumeGraph !== StepComposition::GRAPH_TREE) {
+            putenv(StepComposition::HTML_FIRST_ENV . '=' . ($resumeGraph === StepComposition::GRAPH_HTML_FIRST ? '1' : '0'));
+        }
     }
 }
 
-$pipeline = $builder->pipeline();
+$isTree = StepComposition::selectedGraph() === StepComposition::GRAPH_TREE;
+
+// The tree graph builds against a live sandbox, and its opt-in image pass
+// needs the image transport, which is host wiring — so the CLI assembles the
+// composition itself and hands it over.
+if ($isTree) {
+    $treeComposition = StepComposition::tree(
+        llm: $llm,
+        models: step_models(),
+        imageClient: $withImages ? make_image_client() : null,
+        sandboxPort: $port,
+    );
+    $pipeline = $builder->pipeline($treeComposition);
+} else {
+    $pipeline = $builder->pipeline();
+}
 
 // step id => model, for the model column (see BuildReport::modelLabel).
 $models = step_models();
@@ -286,18 +323,21 @@ if ($from !== null && !in_array($from, $pipeline->stopIds(), true)) {
 
 $runnerFlag = isset($flags['--runner']) ? (string) $flags['--runner'] : null;
 $runnerFallback = false;
-try {
-    $runner = RunnerResolver::resolve(
-        $runnerFlag,
-        new StudioCli(),
-        static function (string $message) use (&$runnerFallback): void {
-            $runnerFallback = true;
-            Narrator::write($message . "\n");
-        }
-    );
-} catch (RuntimeException $e) {
-    Narrator::write($e->getMessage() . "\n");
-    exit(1);
+$runner = null;
+if (!$isTree) {
+    try {
+        $runner = RunnerResolver::resolve(
+            $runnerFlag,
+            new StudioCli(),
+            static function (string $message) use (&$runnerFallback): void {
+                $runnerFallback = true;
+                Narrator::write($message . "\n");
+            }
+        );
+    } catch (RuntimeException $e) {
+        Narrator::write($e->getMessage() . "\n");
+        exit(1);
+    }
 }
 
 if ($from !== null) {
@@ -325,6 +365,12 @@ if ($from !== null) {
         Narrator::write($e->getMessage() . "\n");
         exit(1);
     }
+}
+
+// The tree graph's image pass reads meta.json, so --with-images is recorded
+// there (a resume passing the flag turns images on for the remaining steps).
+if ($isTree && $withImages) {
+    $project->writeJson('meta.json', array_merge($project->readJson('meta.json'), ['tree_images' => true]));
 }
 
 echo ($from !== null ? "Resuming '{$project->slug()}' from {$from}\n" : "Building '{$project->slug()}'\n");
@@ -386,7 +432,8 @@ try {
 
 // Image generation is opt-in: slow and networked, so it runs only on request
 // and only for a full build (skipped when --until stops the pipeline early).
-if ($withImages && $until === null) {
+// The tree graph runs its own in-graph image step instead of this phase.
+if (!$isTree && $withImages && $until === null) {
     // Image generation goes through the Vertex proxy, not the LLM — its only
     // model use is the Llm rewriting safety-filtered prompts (small tier) and
     // regenerating. The tally comes from images.json below.
@@ -441,11 +488,30 @@ $project->writeText('logs/project.log', $overview);
 // The same run as a machine-readable record, for comparing cost and model mix
 // across builds after the fact.
 $stats = $report->stats(default_llm_model(), $models);
-$stats['runner'] = $runner->name();
+$stats['runner'] = $runner !== null ? $runner->name() : 'sandbox';
 $stats['runner_fallback'] = $runnerFallback;
 $project->writeJson('build-stats.json', $stats);
 
 echo "Output: {$project->path()}\n";
+
+// The tree graph built INTO its sandbox — that Playground is the site, it is
+// already running, and it stays up after this process exits.
+if ($isTree) {
+    if ($project->exists('sandbox.json')) {
+        $sandboxRecord = $project->readJson('sandbox.json');
+        echo "\nThe sandbox IS the site, and it is still running:\n";
+        echo "  url:        {$sandboxRecord['url']}\n";
+        echo "  admin:      {$sandboxRecord['url']}wp-admin/\n";
+    }
+    if ($project->exists('report.md')) {
+        echo "  report:     {$project->path('report.md')}\n";
+    }
+    if ($project->exists('screenshot.png')) {
+        echo "  screenshot: {$project->path('screenshot.png')}\n";
+    }
+    echo "  stop it with: php bin/sandbox.php {$project->slug()} --stop\n";
+    exit(0);
+}
 
 // Boot the site in WordPress Playground and print the URL. Skipped when the
 // build stopped early (--until) or the user opted out (--no-serve).
@@ -515,6 +581,6 @@ if ($serve && $until === null) {
 /** The one invocation summary, shared by every path that rejects the line. */
 function usage(): never
 {
-    Narrator::write("Usage: php bin/build.php \"<prompt>\" [--provider=anthropic|openai|xai|openrouter] [--slug=...] [--from=step-id] [--until=step-id] [--html-first|--blocks-first] [--multi-page] [--pages=\"Home, Menu, About\"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=cover-image,foreground-image] [--max-hero-images=1..2] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--use-jetpack-placeholders] [--runner=studio|playground] [--port=9400] [--no-serve]\n");
+    Narrator::write("Usage: php bin/build.php \"<prompt>\" [--provider=anthropic|openai|xai|openrouter] [--slug=...] [--from=step-id] [--until=step-id] [--tree|--html-first|--blocks-first] [--multi-page] [--pages=\"Home, Menu, About\"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=cover-image,foreground-image] [--max-hero-images=1..2] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--use-jetpack-placeholders] [--runner=studio|playground] [--port=9400] [--no-serve]\n");
     exit(1);
 }

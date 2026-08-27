@@ -51,6 +51,7 @@ php bin/build.php "A cozy neighborhood bakery" --with-images   # also generate i
 php bin/build.php "A cozy neighborhood bakery" --provider=openai   # build on GPT-5.x instead of Claude
 php bin/build.php "A cozy neighborhood bakery" --html-first     # author an HTML+CSS design, then convert it to blocks
 php bin/build.php "A cozy neighborhood bakery" --blocks-first   # author block markup directly (the default)
+php bin/build.php "A cozy neighborhood bakery" --tree           # author JSON block trees against a live sandbox (the x-pipeline brochure port)
 php bin/build.php "A cozy neighborhood bakery" --multi-page    # let the site plan inner pages beyond the homepage
 php bin/build.php "A cozy neighborhood bakery" --multi-page --pages="Home, Menu, About, Visit"   # fix the page list yourself (first = homepage)
 php bin/build.php "A Persian poetry archive" --writing-direction=rtl --hero-canvas=framed --hero-media-modes=none,foreground-image --max-hero-images=1
@@ -67,6 +68,31 @@ is an explicit caller override; otherwise the site language determines logical
 direction. The selected recipe and normalized blueprint are persisted in
 `designDirection.json`, while `aboveFold.json` records the two-phase shared
 header/hero/page-opening contract.
+
+### The tree graph (`--tree`)
+
+The tree graph builds differently from the other two: instead of generating a
+custom theme offline, it boots a disposable WordPress Playground **sandbox**
+(with the `sandbox/companion/` plugin mounted), has the model author every
+section as a JSON block tree, validates each tree against the sandbox's real
+block registry, compiles it through the site's own `wp.blocks` JavaScript in
+headless Chrome (`bin/sandbox/`), applies design tokens as global styles on
+the default theme, and publishes the pages straight into the sandbox — which
+stays running after the build as the finished site. Needs `npm ci` (for
+Playground + the browser drivers) and a system Chrome.
+
+```bash
+php bin/build.php "A cozy neighborhood bakery" --tree                 # image slots ship as 1×1 placeholder pixels carrying their intents
+php bin/build.php "A cozy neighborhood bakery" --tree --with-images   # generate real images in-graph and swap them in
+php bin/sandbox.php <slug>            # is the project's sandbox still up?
+php bin/sandbox.php <slug> --stop     # stop it (the WordPress is ephemeral; artifacts stay on disk)
+```
+
+The run's artifacts live in `projects/<slug>/`: `brief.json` (the whole plan),
+`tokens.json`, `trees/*.json` (every section with its gate verdict),
+`pages/*.html` (the compiled markup that was published), `verify.json`
+(measured heading/band/contrast/image checks), `report.md`, `screenshot.png`,
+and `logs/tree-ledger.jsonl` (one line per metered model call).
 
 ### Embedding with an existing site spec
 
