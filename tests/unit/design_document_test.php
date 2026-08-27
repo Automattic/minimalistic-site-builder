@@ -150,3 +150,100 @@ test('a wrapper-only main is still located, so the splitter can descend', functi
     assert_true($main !== null, 'wrapper-only main must still be found');
     assert_eq('div', strtolower($main->firstElementChild->nodeName));
 });
+
+/**
+ * ROUND 2 — added by the architect after an independent review showed the
+ * contract above was incomplete. The rules below are copied from the guards
+ * this class is meant to consolidate, not from recollection:
+ *   SpliceHomeDesignStep.php:286-306 — exactly one <main>, exactly one
+ *     top-level footer (parent === null), and NO footer under a footer or
+ *     address ancestor.
+ *   InnerPagesDesignStep.php:1343-1356 — same, plus mainCount > 1 rejects.
+ * The first round tested only footer-in-main, which is one third of the rule,
+ * so the guard regressed while the tests stayed green.
+ */
+
+test('footer() ignores a footer nested in an address element', function () {
+    // aae0f1c rejected footer-in-address explicitly. Round 1 missed it.
+    $doc = DesignDocument::parse(dd_page(
+        '<main><section>s</section></main>'
+        . '<address><footer>attribution</footer></address><footer>REAL</footer>'
+    ));
+    $footer = $doc->footer();
+    assert_true($footer !== null, 'the real footer must be found');
+    assert_eq('REAL', trim($footer->textContent), 'a footer under <address> is not the site footer');
+});
+
+test('footer() ignores a footer nested in another footer', function () {
+    $doc = DesignDocument::parse(dd_page(
+        '<main><section>s</section></main>'
+        . '<footer>outer<footer>inner attribution</footer></footer>'
+    ));
+    $footer = $doc->footer();
+    assert_true($footer !== null, 'the outer footer is the site footer');
+    assert_contains('outer', $footer->textContent);
+    assert_true(
+        strtolower($footer->parentNode->nodeName) === 'body',
+        'the returned footer must be a direct child of body'
+    );
+});
+
+test('header() ignores a header nested in a non-main wrapper', function () {
+    // Rejecting only descendants of <main> is not "top level".
+    $doc = DesignDocument::parse(dd_page(
+        '<div class="wrap"><section><header>section head</header></section></div>'
+        . '<header class="site">REAL</header><main><section>s</section></main>'
+    ));
+    $header = $doc->header();
+    assert_true($header !== null, 'the site header must be found');
+    assert_eq('REAL', trim($header->textContent), 'a header inside a wrapper is not the site header');
+});
+
+test('main() fails closed when the document has more than one main', function () {
+    // Both prior guards reject this outright. Returning the first silently
+    // drops the second page body.
+    $errors = [];
+    $doc = DesignDocument::parse(dd_page(
+        '<main><section>A</section></main><main><section>B</section></main>'
+    ), $errors);
+    assert_true($doc !== null, 'the document still parses');
+    assert_eq(null, $doc->main(), 'more than one main must not resolve to the first');
+    assert_true($errors !== [], 'more than one main must be reported as structural');
+});
+
+test('main() does not return a main nested inside a wrapper', function () {
+    $doc = DesignDocument::parse(dd_page('<div class="wrap"><main><section>s</section></main></div>'));
+    assert_eq(null, $doc->main(), 'a main that is not a page root is not the page main');
+});
+
+test('a truncated document is reported as structurally damaged', function () {
+    // max_tokens truncation is this repo's most-hit generation failure. libxml
+    // auto-closes at EOF without raising anything, so a code-only check passes
+    // a half-page as healthy.
+    $errors = [];
+    $truncated = "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n"
+        . "<title>t</title>\n</head>\n<body>\n<main><section id=\"hero\"><h1>Hi</h1><p>lorem ips";
+    DesignDocument::parse($truncated, $errors);
+    assert_true($errors !== [], 'a document that ends mid-content must be reported');
+});
+
+test('sanitizedHtml strips a PHP processing instruction in the body and warns', function () {
+    // Design markup reaches theme patterns/*.php. A <?php run in the body is
+    // executable there, and document-level PI stripping never sees it.
+    $warnings = [];
+    $doc = DesignDocument::parse(dd_page(
+        '<main><section id="x"><?php echo $evil; ?><p>a</p></section></main>'
+    ));
+    $out = $doc->sanitizedHtml($doc->main()->firstElementChild, 'design/home.html', 'section x', $warnings);
+    assert_true(!str_contains($out, '<?php'), $out);
+    assert_true(!str_contains($out, '<?'), $out);
+    assert_true($warnings !== [], 'stripping executable markup must warn');
+});
+
+test('parse populates structuralErrors even when it returns null', function () {
+    // A caller logging why it degraded must not get null plus an empty list.
+    $errors = [];
+    $doc = DesignDocument::parse('', $errors);
+    assert_eq(null, $doc);
+    assert_true($errors !== [], 'a refused document must say why');
+});
