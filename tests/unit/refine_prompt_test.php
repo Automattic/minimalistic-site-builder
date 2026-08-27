@@ -90,7 +90,7 @@ test('refine-prompt preserves caller-owned hero constraints and writing directio
             'max_hero_images' => 1,
             'hero_copy_capacity' => 'standard',
         ];
-        $meta['hero_assignment'] = ['source' => 'batch', 'requested_recipe' => 'framed-portrait'];
+        $meta['hero_assignment'] = ['source' => 'batch', 'requested_recipe' => 'foreground-split'];
         $project->writeJson('meta.json', $meta);
         $llm = new FakeLlm();
         $llm->queueText('A refined Arabic architecture archive brief.');

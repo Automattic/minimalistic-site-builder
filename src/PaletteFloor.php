@@ -98,7 +98,6 @@ final class PaletteFloor
         }
 
         $primary = self::hexOf($palette, 'primary');
-        $accent = self::hexOf($palette, 'accent');
         if ($primary !== null && $accent !== null) {
             $cPrimary = self::chroma($primary);
             $cAccent = self::chroma($accent);
