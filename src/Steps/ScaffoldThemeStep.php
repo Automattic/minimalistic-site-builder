@@ -546,6 +546,14 @@ final class ScaffoldThemeStep implements Step
             flex-direction: column;
             gap: 0;
         }
+        /* A constrained cover caps its inner children at contentSize, which
+           puts the panel back in the middle of the band with raw image beside
+           it. The panel and the copy strip own the full width; whatever they
+           hold keeps the reading measure through their own layout. */
+        .hero-composition--knockout-type > .wp-block-cover > .wp-block-cover__inner-container > * {
+            max-inline-size: none;
+            inline-size: 100%;
+        }
         .hero-composition--knockout-type .hero-knockout {
             flex: 1 1 auto;
             display: flex;
