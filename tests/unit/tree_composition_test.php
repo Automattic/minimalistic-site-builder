@@ -74,3 +74,23 @@ test('the tree graph declares warnings.json on every step that can warn', functi
         }
     }
 });
+
+test('brief palette roles outside the enum are coerced, never fatal', function () {
+    $brief = ['palette' => [
+        ['name' => 'Ground', 'color' => '#f4ede1', 'role' => 'background'],
+        ['name' => 'Roast', 'color' => '#2e2620', 'role' => 'contrast'],
+        ['name' => 'Glow', 'color' => '#b5622a', 'role' => 'Highlight'],
+        ['name' => 'Odd', 'color' => '#123456', 'role' => 'mystery'],
+    ]];
+    $notes = [];
+    $out = \Automattic\SiteBuild\Steps\TreeBriefStep::coercePaletteRoles($brief, $notes);
+    assert_eq('background', $out['palette'][0]['role'], 'valid roles pass untouched');
+    assert_eq('text', $out['palette'][1]['role'], 'contrast means the ink');
+    assert_eq('accent', $out['palette'][2]['role'], 'synonyms match case-insensitively');
+    assert_eq('other', $out['palette'][3]['role'], 'unknown roles land on the catch-all');
+    assert_eq(3, count($notes), 'each coercion is recorded');
+    // The coerced palette now passes the real schema's enum.
+    $schema = json_decode((string) file_get_contents(dirname(__DIR__, 2) . '/schemas/tree/brief.schema.json'), true);
+    $issues = \Automattic\SiteBuild\TreeGraph\Schema::validate($schema['properties']['palette'], $out['palette']);
+    assert_eq([], $issues);
+});

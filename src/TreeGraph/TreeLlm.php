@@ -100,9 +100,19 @@ final class TreeLlm
             $prompt = self::retryPrompt($basePrompt, $lastIssues);
         }
 
+        // The issues ride in the MESSAGE, not only in extra: a CLI run surfaces
+        // exceptions by message alone, and a contract failure the user cannot
+        // see is undebuggable (field lesson: two silent brief failures).
+        $summary = implode(' | ', array_map(
+            static fn (array $i): string => trim((string) ($i['path'] ?? '') . ' ' . (string) ($i['message'] ?? '')),
+            array_slice($lastIssues, 0, 4),
+        ));
+        if (count($lastIssues) > 4) {
+            $summary .= ' | … and ' . (count($lastIssues) - 4) . ' more';
+        }
         throw new TreeGraphException(
             'contract_failed',
-            "task {$taskType}:{$label} failed its contract after {$maxAttempts} attempt(s)",
+            "task {$taskType}:{$label} failed its contract after {$maxAttempts} attempt(s): {$summary}",
             'The artifact is dead unless the repair stage saves it; diagnostics are attached.',
             ['task_type' => $taskType, 'label' => $label, 'issues' => $lastIssues],
         );

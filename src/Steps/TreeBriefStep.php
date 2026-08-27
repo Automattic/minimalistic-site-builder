@@ -46,6 +46,27 @@ final class TreeBriefStep implements Step
         set beautifully).
         NOTE;
 
+    /** The palette-role enum the brief schema accepts. */
+    private const PALETTE_ROLES = ['primary', 'secondary', 'accent', 'background', 'surface', 'text', 'muted', 'border', 'other'];
+
+    /**
+     * Near-miss role names the model reaches for (the downstream vocabulary
+     * talks about base/contrast bands, so "contrast" as a palette role is the
+     * recurring one) mapped onto the enum they mean. Everything else outside
+     * the enum coerces to "other": roles only HELP band resolution, so an
+     * unknown one carries no information worth failing a call over — and
+     * cross-checks still catch a plan whose accent/surface bands have no
+     * expressible palette entry.
+     */
+    private const ROLE_SYNONYMS = [
+        'contrast'  => 'text',
+        'ink'       => 'text',
+        'base'      => 'background',
+        'ground'    => 'background',
+        'highlight' => 'accent',
+        'neutral'   => 'muted',
+    ];
+
     public function __construct(
         private readonly Llm $llm,
         private readonly ?string $model = null,
@@ -68,9 +89,46 @@ final class TreeBriefStep implements Step
             id: $this->id(),
             label: $this->label(),
             reads: ['meta.json'],
-            writes: ['brief.json', 'budget.json'],
+            writes: ['brief.json', 'budget.json', 'warnings.json'],
             concurrent: false,
         );
+    }
+
+    /**
+     * Coerce every palette role outside the schema enum onto the value it
+     * means (ROLE_SYNONYMS), or "other". Pure; notes accumulate one line per
+     * distinct coercion for warnings.json.
+     *
+     * @param array<string,mixed> $brief
+     * @param list<string> $notes
+     * @return array<string,mixed>
+     */
+    public static function coercePaletteRoles(array $brief, array &$notes): array
+    {
+        if (!isset($brief['palette']) || !is_array($brief['palette'])) {
+            return $brief;
+        }
+        foreach ($brief['palette'] as $index => $entry) {
+            if (!is_array($entry) || !isset($entry['role']) || !is_string($entry['role'])) {
+                continue;
+            }
+            $role = strtolower(trim($entry['role']));
+            if (in_array($role, self::PALETTE_ROLES, true)) {
+                if ($role !== $entry['role']) {
+                    $brief['palette'][$index]['role'] = $role;
+                }
+                continue;
+            }
+            $coerced = self::ROLE_SYNONYMS[$role] ?? 'other';
+            $brief['palette'][$index]['role'] = $coerced;
+            $notes[] = sprintf(
+                'brief palette "%s": role "%s" is not in the schema enum; coerced to "%s"',
+                (string) ($entry['name'] ?? $entry['color'] ?? $index),
+                $entry['role'],
+                $coerced,
+            );
+        }
+        return $brief;
     }
 
     public function run(Project $project): void
@@ -102,6 +160,7 @@ final class TreeBriefStep implements Step
         }
 
         $lane = TreeLlm::forProject($this->llm, $project, $this->model === null ? [] : ['brief' => $this->model], ['brief' => $this->temperature]);
+        $roleNotes = [];
         $brief = $lane->generate(
             'brief',
             'brief',
@@ -119,13 +178,25 @@ final class TreeBriefStep implements Step
                 )),
                 'style_pin_note'  => Styles::renderPinNote($pins),
             ],
-            static fn (array $v): array => array_merge(
-                Schema::validate($schema, $v),
-                BriefChecks::crossChecks($v),
-                Styles::styleChecks($v, $styles, $pins),
-                BriefChecks::brochureChecks($v),
-            ),
+            static function (array $v) use ($schema, $styles, $pins, &$roleNotes): array {
+                // Rung 1 before the gate: a near-miss palette role is
+                // mechanically fixable, so it must never burn the one metered
+                // schema retry (an older model once repeated role "contrast"
+                // straight past the retry's exact correction).
+                $v = self::coercePaletteRoles($v, $roleNotes);
+                return array_merge(
+                    Schema::validate($schema, $v),
+                    BriefChecks::crossChecks($v),
+                    Styles::styleChecks($v, $styles, $pins),
+                    BriefChecks::brochureChecks($v),
+                );
+            },
         );
+        $brief = self::coercePaletteRoles($brief, $roleNotes);
+        if ($roleNotes !== []) {
+            $project->addWarnings($this->id(), array_values(array_unique($roleNotes)));
+            Narrator::write('  ' . count(array_unique($roleNotes)) . " palette role(s) coerced onto the schema enum (recorded in warnings.json)\n");
+        }
 
         $project->writeJson('brief.json', $brief);
         if (isset($brief['style']['artistic'], $brief['style']['ui'])) {
