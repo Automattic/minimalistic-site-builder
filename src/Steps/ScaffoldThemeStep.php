@@ -522,21 +522,29 @@ final class ScaffoldThemeStep implements Step
 
            An unstamped panel keeps its solid colour and its authored text
            colour: no knockout, but a legible hero. */
+        /* !important, deliberately: the generator pads its cover through an
+           inline style, which no class hook can outrank, and this recipe's
+           panel must reach every edge of the band. */
         .hero-composition--knockout-type > .wp-block-cover {
             isolation: isolate;
-            padding: 0;
+            padding: 0 !important;
+            display: grid !important;
+            grid-template-rows: 1fr;
+            grid-template-columns: 100%;
+            align-content: stretch;
         }
         /* The panel has to reach every edge of the band. Core constrains the
            cover's inner container to contentSize and pads the cover, which
            leaves the photograph showing in a frame around the panel — and this
            composition promises the image appears in the letters and nowhere
            else. The first audited cohort shipped exactly that frame. */
-        .hero-composition--knockout-type .wp-block-cover__inner-container {
+        .hero-composition--knockout-type > .wp-block-cover > .wp-block-cover__inner-container {
             max-inline-size: none;
             inline-size: 100%;
             block-size: 100%;
             display: flex;
             flex-direction: column;
+            gap: 0;
         }
         .hero-composition--knockout-type .hero-knockout {
             flex: 1 1 auto;
