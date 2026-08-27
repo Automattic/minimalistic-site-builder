@@ -42,6 +42,36 @@ function palette_floor_fixtures(): array
     return $out;
 }
 
+
+/** One HSL triple as a hex, for sweeping the hue circle in rotation tests. */
+function palette_floor_rotation_hex(float $hue, float $saturation, float $lightness): string
+{
+    $hue = fmod(fmod($hue, 360.0) + 360.0, 360.0);
+    $chroma = (1 - abs(2 * $lightness - 1)) * $saturation;
+    $second = $chroma * (1 - abs(fmod($hue / 60.0, 2.0) - 1));
+    $base = $lightness - $chroma / 2;
+    [$r, $g, $b] = match ((int) floor($hue / 60.0) % 6) {
+        0       => [$chroma, $second, 0.0],
+        1       => [$second, $chroma, 0.0],
+        2       => [0.0, $chroma, $second],
+        3       => [0.0, $second, $chroma],
+        4       => [$second, 0.0, $chroma],
+        default => [$chroma, 0.0, $second],
+    };
+    return sprintf(
+        '#%02X%02X%02X',
+        (int) round(($r + $base) * 255),
+        (int) round(($g + $base) * 255),
+        (int) round(($b + $base) * 255),
+    );
+}
+
+/** Hue lost to 8-bit rounding when the rotation writes its target back. */
+function palette_floor_rounding_slack(): float
+{
+    return 1.5;
+}
+
 /**
  * @param list<array<string,mixed>> $findings
  * @return array<string,mixed>|null
@@ -158,7 +188,10 @@ test('repair() of a palette with contrast, hue-separation, and chroma-ceiling cl
     assert_true($out['primary'] !== $palette['primary']);
     assert_true($out['accent'] !== $palette['accent']);
     assert_true(PaletteFloor::ratio($out['primary'], $out['base']) >= PaletteFloor::ROLE_ON_BASE);
-    assert_true(PaletteFloor::hueDistance($out['primary'], $out['accent']) >= 39.0);
+    assert_true(
+        PaletteFloor::hueDistance($out['primary'], $out['accent'])
+            >= PaletteFloor::HUE_SEPARATION - palette_floor_rounding_slack(),
+    );
     assert_true(PaletteFloor::chroma($out['accent']) <= PaletteFloor::CHROMA_CEILING);
     assert_true($warnings !== []);
 });
@@ -231,7 +264,10 @@ test('repair() rotates V3 accent off primary and leaves primary unchanged', func
     assert_eq($authoredPrimary, $out['primary']);
     assert_true($out['accent'] !== $authoredAccent);
     $dist = PaletteFloor::hueDistance($out['primary'], $out['accent']);
-    assert_true($dist !== null && $dist >= 39.0, "V3 hue distance after repair {$dist}");
+    assert_true(
+        $dist !== null && $dist >= PaletteFloor::HUE_SEPARATION - palette_floor_rounding_slack(),
+        "V3 hue distance after repair {$dist}",
+    );
 });
 
 test('repair() of V4 accent lands at least 39 degrees from primary', function () {
@@ -242,8 +278,12 @@ test('repair() of V4 accent lands at least 39 degrees from primary', function ()
     assert_eq($authoredPrimary, $out['primary']);
     assert_true($out['accent'] !== $palette['accent']);
     $dist = PaletteFloor::hueDistance($out['primary'], $out['accent']);
-    // 8-bit rounding can land a hair under 40.
-    assert_true($dist !== null && $dist >= 39.0, "V4 hue distance after repair {$dist}");
+    // Relative to the constant, not a literal: the rotation target is a design
+    // choice (BIGR-943) and only the delivered separation is the contract.
+    assert_true(
+        $dist !== null && $dist >= PaletteFloor::HUE_SEPARATION - palette_floor_rounding_slack(),
+        "V4 hue distance after repair {$dist}",
+    );
 });
 
 test('repair() does not rotate a low-chroma pair inside 25 degrees', function () {
@@ -587,3 +627,91 @@ test('repair() never claims repaired while check() still reports that role and c
     }
 });
 
+
+test('the hue rotation clears the too-close line without overshooting it (BIGR-943)', function () {
+    // The rotation exists to clear HUE_TOO_CLOSE. Overshooting it moves the
+    // delivered accent further from the hue the model chose for no gain, and
+    // for a warm primary it lands in the 50-70 band where a saturated color
+    // reads as acid yellow.
+    assert_true(
+        PaletteFloor::HUE_SEPARATION > PaletteFloor::HUE_TOO_CLOSE,
+        'the rotation target must clear the line it exists to clear',
+    );
+    assert_true(
+        PaletteFloor::HUE_SEPARATION - PaletteFloor::HUE_TOO_CLOSE <= 10.0,
+        'the rotation must not overshoot the line by more than 10 degrees',
+    );
+
+    // The recorded hearth2 build: terracotta primary, burnt-orange accent
+    // 7 degrees away. It must still be separated, and must NOT land in the
+    // yellow band it landed in at a 40 degree target (#DDCB1A, hue 54.3).
+    $palette = [
+        'base' => '#E8D3B0',
+        'contrast' => '#2B1D12',
+        'primary' => '#8C3A20',
+        'secondary' => '#6B4C2A',
+        'accent' => '#C05617',
+    ];
+    $warnings = [];
+    $out = PaletteFloor::repair($palette, $warnings);
+    $delivered = $out['accent'];
+    $hue = PaletteFloor::hue($delivered);
+    assert_true($hue !== null, 'the delivered accent is measurable');
+    assert_true(
+        $hue < 50.0,
+        sprintf('the warm accent landed in the yellow band at hue %.1f (%s)', $hue, $delivered),
+    );
+    // Still a real separation, and still legal by check().
+    assert_true(
+        PaletteFloor::hueDistance($delivered, $out['primary']) >= PaletteFloor::HUE_TOO_CLOSE,
+        'the delivered accent still clears the too-close line',
+    );
+    assert_eq([], array_values(array_filter(
+        PaletteFloor::check($out),
+        static fn (array $f): bool => $f['role'] === 'accent',
+    )));
+    // And an ink still labels the fill, so the CTA stays readable.
+    assert_true(
+        max(
+            PaletteFloor::ratio($delivered, $out['base']) ?? 0.0,
+            PaletteFloor::ratio($delivered, $out['contrast']) ?? 0.0,
+        ) >= PaletteFloor::LABEL_ON_ACCENT,
+        'an ink still reads on the rotated fill',
+    );
+});
+
+test('8-bit rounding never drags a rotated accent back under the too-close line (BIGR-943)', function () {
+    // The cushion between HUE_SEPARATION and HUE_TOO_CLOSE has to absorb the
+    // hue drift that rounding to 8-bit channels introduces. Sweep the hue
+    // circle at several lightness/saturation pairs and hold the delivered
+    // separation above the line.
+    $worst = 360.0;
+    foreach (range(0, 357, 9) as $primaryHue) {
+        foreach ([0.3, 0.5, 0.7] as $lightness) {
+            foreach ([0.35, 0.65, 0.95] as $saturation) {
+                $primary = palette_floor_rotation_hex((float) $primaryHue, $saturation, $lightness);
+                // An accent a few degrees away, which is what triggers a rotation.
+                $accent = palette_floor_rotation_hex((float) $primaryHue + 5.0, $saturation, $lightness);
+                if ((PaletteFloor::chroma($primary) ?? 0.0) <= PaletteFloor::CHROMA_MIN
+                    || (PaletteFloor::chroma($accent) ?? 0.0) <= PaletteFloor::CHROMA_MIN
+                ) {
+                    continue;
+                }
+                $warnings = [];
+                $out = PaletteFloor::repair(
+                    ['base' => '#FFFFFF', 'contrast' => '#111111', 'primary' => $primary,
+                        'secondary' => '#555555', 'accent' => $accent],
+                    $warnings,
+                );
+                $delta = PaletteFloor::hueDistance($out['accent'], $out['primary']);
+                if ($delta !== null) {
+                    $worst = min($worst, $delta);
+                }
+            }
+        }
+    }
+    assert_true(
+        $worst >= PaletteFloor::HUE_TOO_CLOSE,
+        sprintf('worst delivered separation %.2f fell under the %.1f line', $worst, PaletteFloor::HUE_TOO_CLOSE),
+    );
+});
