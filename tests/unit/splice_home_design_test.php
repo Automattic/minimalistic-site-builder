@@ -287,5 +287,12 @@ test('splice keeps the site <style> byte-identical to site.css and page-scopes t
         !str_contains($site[0], '.work-grid'),
         'the body CSS must NOT be duplicated into the site stylesheet',
     );
+    assert_true(
+        preg_match(
+            '/<style\b[^>]*\bdata-page-css\b[^>]*>.*?<\/style>\s*<main\b/is',
+            $home,
+        ) === 1,
+        'page CSS sits immediately before <main>, like an inner page',
+    );
     exec('rm -rf ' . escapeshellarg($tmp));
 });

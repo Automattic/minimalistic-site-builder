@@ -126,7 +126,10 @@ final class SpliceHomeDesignStep implements Step
         $prefix = substr($previewHtml, 0, $previewMain['start']);
         $pageCss = self::bodyPageCss($bodyHtml, $body['style'] ?? null);
         if ($pageCss !== '') {
-            $prefix = self::mergeBodyCssIntoPreviewHead($prefix, $pageCss);
+            // Own page-scoped block immediately before <main>, like an inner
+            // page. Never merge into the preview <style> — that is the SITE
+            // stylesheet, byte-identical to design/site.css.
+            $prefix .= '<style data-page-css>' . $pageCss . "</style>\n";
         }
 
         return $prefix
@@ -154,25 +157,6 @@ final class SpliceHomeDesignStep implements Step
             (int) $style['open_end'],
             (int) $style['close_start'] - (int) $style['open_end'],
         ));
-    }
-
-    /**
-     * The home body's CSS ships as its own page-scoped block and is NEVER
-     * merged into the preview's <style>. That block is the SITE stylesheet —
-     * byte-identical to design/site.css — and PageStylesStep treats a page
-     * artifact's unattributed <style> as site CSS, so merging would put the
-     * body's class vocabulary outside PageScope::bodyClass() scoping and let it
-     * collide with every other page. It would also ship the same rules twice.
-     */
-    private static function mergeBodyCssIntoPreviewHead(string $prefix, string $css): string
-    {
-        $block = '<style data-page-css>' . $css . "</style>\n";
-        $headClose = stripos($prefix, '</head>');
-        if ($headClose !== false) {
-            return substr($prefix, 0, $headClose) . $block . substr($prefix, $headClose);
-        }
-        // No <head> to land in: keep the CSS rather than dropping it silently.
-        return $block . $prefix;
     }
 
     /**

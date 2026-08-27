@@ -113,7 +113,7 @@ test('home-body css-coverage repair failure warns and still delivers the fragmen
     }
 });
 
-test('splice-home-design merges home-body page CSS into home.html after preview CSS', function () {
+test('splice-home-design places home-body page CSS immediately before main', function () {
     $preview = splice_home_preview();
     $body = '<style data-page-css>.work-grid{display:grid;gap:1.5rem}</style>'
         . "\n" . splice_home_body();
@@ -124,14 +124,17 @@ test('splice-home-design merges home-body page CSS into home.html after preview 
         $site = ':root{--ink:#231f20}';
         assert_contains('.work-grid{display:grid;gap:1.5rem}', $home);
         assert_contains($site, $home);
-        $homeStyleBytes = 0;
-        if (preg_match_all('/<style\b[^>]*>(.*?)<\/style>/is', $home, $m)) {
-            foreach ($m[1] as $chunk) {
-                $homeStyleBytes += strlen($chunk);
-            }
-        }
-        assert_true($homeStyleBytes > strlen($site), 'home.html style carries body CSS beyond site/preview CSS');
-        assert_contains('data-page-css', $home);
+        assert_true(
+            preg_match(
+                '/<style\b[^>]*\bdata-page-css\b[^>]*>.*?<\/style>\s*<main\b/is',
+                $home,
+            ) === 1,
+            'page CSS sits immediately before <main>',
+        );
+        assert_true(
+            preg_match('/<head\b[^>]*>.*?data-page-css.*?<\/head>/is', $home) !== 1,
+            'page CSS must not land in the document head',
+        );
         assert_contains('HOME-BODY-STORY-5D2E', $home);
         assert_true(!$project->exists('warnings.json'), 'valid styled splice needs no warning');
     } finally {
