@@ -118,6 +118,7 @@ test('HeroUnit exposes one isolated assigned recipe behind the shared site layer
     $renderer = new PromptRenderer(repo_path('prompts'));
     $markers = [
         'cinematic-safe-zone' => 'landscape cover stage',
+        'knockout-type' => 'Cut the headline out of a solid panel',
         'foreground-split' => 'deliberately unequal copy and foreground-media regions',
         'layered-poster' => 'cover image beneath controlled block-built type',
         'type-manifesto' => 'one imageless, type-led band',

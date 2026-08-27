@@ -508,6 +508,38 @@ final class ScaffoldThemeStep implements Step
         .hero-composition--foreground-split .hero-media--portrait img {
             aspect-ratio: 3 / 4;
         }
+        /* knockout-type (BIGR-935) cuts the headline out of a solid panel so
+           the cover photograph shows only through the letterforms. multiply is
+           what does the cutting: the panel's dark ink multiplies to itself over
+           the image, and pure white text multiplies to the image underneath.
+           The white is forced here rather than left to the palette's base slug,
+           because a tinted white tints every letter — this is the one place a
+           colour must be exact.
+
+           The panel expands to fill the cover so the field reads as one solid
+           surface, and the copy group below it keeps its own opaque background,
+           outside the blend, where a standfirst stays readable. */
+        .hero-composition--knockout-type > .wp-block-cover {
+            isolation: isolate;
+        }
+        .hero-composition--knockout-type .hero-knockout {
+            mix-blend-mode: multiply;
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            inline-size: 100%;
+        }
+        .hero-composition--knockout-type .hero-knockout :is(h1, h2, p) {
+            color: #fff;
+        }
+        /* Forced-colours users get a solid, unblended headline: the knockout is
+           decoration, and the words must survive without it. */
+        @media (forced-colors: active) {
+            .hero-composition--knockout-type .hero-knockout {
+                mix-blend-mode: normal;
+            }
+        }
         .hero-composition--layered-poster {
             overflow: hidden;
         }
