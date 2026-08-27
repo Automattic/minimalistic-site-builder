@@ -5,7 +5,8 @@
   "description": "Root manifest for the Node helper tools under bin/ (installed together via npm workspaces).",
   "workspaces": [
     "bin/screenshot",
-    "bin/block-fixer"
+    "bin/block-fixer",
+    "bin/sandbox"
   ],
   "devDependencies": {
     "@wp-playground/cli": "3.1.46"

@@ -30,6 +30,10 @@
         "sections": "large",
         "page-styles": "large",
         "custom-motion": "large",
-        "image-prompt-repair": "small"
+        "image-prompt-repair": "small",
+        "brief": "large",
+        "tokens": "large",
+        "section-trees": "large",
+        "tree-repair": "large"
     }
 }

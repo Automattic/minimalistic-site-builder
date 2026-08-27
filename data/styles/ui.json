@@ -1,0 +1,1612 @@
+[
+    {
+        "name": "Flat Design",
+        "cues": {
+            "palette": "bold clean hues, no gradients",
+            "typography": "simple geometric sans, clear weights",
+            "composition": "iconic simplicity, shape-first layouts",
+            "texture": "none — pure flat color planes"
+        }
+    },
+    {
+        "name": "Skeuomorphism",
+        "cues": {
+            "palette": "material-true leathers, woods, glass tints",
+            "typography": "embossed, engraved, letterpressed labels",
+            "composition": "real-object metaphors, tactile panels",
+            "texture": "stitching, grain, brushed metal, gloss"
+        }
+    },
+    {
+        "name": "Neumorphism",
+        "cues": {
+            "palette": "single soft ground, tone-on-tone",
+            "typography": "quiet rounded sans, low contrast",
+            "composition": "extruded soft shapes from one surface",
+            "texture": "dual soft shadows, matte silicone feel"
+        }
+    },
+    {
+        "name": "Glassmorphism",
+        "cues": {
+            "palette": "translucent whites over vivid backdrops",
+            "typography": "light airy sans over frosted panes",
+            "composition": "floating layered glass cards",
+            "texture": "frosted blur, thin light borders"
+        }
+    },
+    {
+        "name": "Material Design",
+        "cues": {
+            "palette": "bold primaries with tonal ramps",
+            "typography": "clean grotesque, strict type scale",
+            "composition": "card surfaces, elevation logic, grid discipline",
+            "texture": "paper shadows, ink ripples"
+        }
+    },
+    {
+        "name": "Fluent Design",
+        "cues": {
+            "palette": "soft neutrals, acrylic tints, one system accent",
+            "typography": "Segoe-class humanist sans, clear ramps",
+            "composition": "layered depth, reveal-lit surfaces, generous cards",
+            "texture": "acrylic blur, subtle depth shadows"
+        }
+    },
+    {
+        "name": "Human Interface Design",
+        "aliases": [
+            "apple hig"
+        ],
+        "cues": {
+            "palette": "clean whites, system grays, restrained tint",
+            "typography": "SF-class neo-grotesque, tight optical sizes",
+            "composition": "content-first clarity, edge-to-edge hierarchy",
+            "texture": "hairline dividers, translucent bars"
+        }
+    },
+    {
+        "name": "Minimalist UI",
+        "cues": {
+            "palette": "near-white field, ink text, single accent",
+            "typography": "one family, two weights, exact rhythm",
+            "composition": "ruthless reduction, generous whitespace",
+            "texture": "none — spacing is the ornament"
+        }
+    },
+    {
+        "name": "Maximalist UI",
+        "cues": {
+            "palette": "layered saturated hues, clashing accents",
+            "typography": "mixed display personalities, big scale swings",
+            "composition": "dense modules, every zone alive",
+            "texture": "patterns, badges, layered imagery"
+        }
+    },
+    {
+        "name": "Brutalist Web Design",
+        "cues": {
+            "palette": "default black-on-white, raw system blue",
+            "typography": "system fonts at crude sizes, underlined links",
+            "composition": "unstyled stacking, visible structure",
+            "texture": "default borders, no polish on purpose"
+        }
+    },
+    {
+        "name": "Neo-Brutalism",
+        "aliases": [
+            "neobrutalism"
+        ],
+        "cues": {
+            "palette": "flat brights on cream, thick black keylines",
+            "typography": "chunky grotesque, oversized labels",
+            "composition": "boxed modules, hard offsets, sticker energy",
+            "texture": "solid offset shadows, zero blur"
+        }
+    },
+    {
+        "name": "Material You",
+        "aliases": [
+            "material 3",
+            "material three"
+        ],
+        "cues": {
+            "palette": "dynamic tonal palettes from one seed color",
+            "typography": "friendly geometric sans, tonal emphasis",
+            "composition": "pill shapes, large touch comfort, adaptive layouts",
+            "texture": "tonal elevation, soft morphing corners"
+        }
+    },
+    {
+        "name": "Cupertino Style",
+        "cues": {
+            "palette": "light neutrals, vibrancy blur tints",
+            "typography": "SF-class, large titles collapsing on scroll",
+            "composition": "sheets, tab bars, rounded cards",
+            "texture": "frosted translucency, hairlines"
+        }
+    },
+    {
+        "name": "Metro UI",
+        "cues": {
+            "palette": "flat tile brights on black or white",
+            "typography": "light large Segoe-style, lowercase headers",
+            "composition": "live tile mosaics, panoramic hubs",
+            "texture": "pure flat color, no chrome"
+        }
+    },
+    {
+        "name": "Aqua Interface",
+        "cues": {
+            "palette": "aqua blue gels, brushed silver, white",
+            "typography": "Lucida-class friendly sans",
+            "composition": "pinstriped windows, candy buttons",
+            "texture": "glossy gel, brushed metal, drop reflections"
+        }
+    },
+    {
+        "name": "Aero Glass",
+        "cues": {
+            "palette": "glass blues, glowing greens, dark translucency",
+            "typography": "Segoe-era clean sans",
+            "composition": "layered translucent chrome, glowing controls",
+            "texture": "frosted glass borders, specular gleam"
+        }
+    },
+    {
+        "name": "Luna Theme",
+        "cues": {
+            "palette": "XP blue, meadow green, warm silver",
+            "typography": "Tahoma-class compact sans",
+            "composition": "rounded task-panel chrome, friendly toolbar rows",
+            "texture": "plastic gradients, rounded gloss"
+        }
+    },
+    {
+        "name": "Classic Mac OS Style",
+        "cues": {
+            "palette": "1-bit black-white, platinum grays",
+            "typography": "Chicago-class bitmap display",
+            "composition": "menu-bar order, modal simplicity",
+            "texture": "pinstripes, pixel borders, dithers"
+        }
+    },
+    {
+        "name": "Windows 95 Aesthetic",
+        "aliases": [
+            "windows 95",
+            "win95"
+        ],
+        "cues": {
+            "palette": "gray chrome, navy title bars, teal desktop",
+            "typography": "MS Sans bitmap, underlined accelerators",
+            "composition": "raised-bevel panels, dialog stacks",
+            "texture": "3D bevels, chunky borders"
+        }
+    },
+    {
+        "name": "AmigaOS Aesthetic",
+        "aliases": [
+            "amiga workbench"
+        ],
+        "cues": {
+            "palette": "workbench blue, orange, white, black",
+            "typography": "topaz bitmap charm",
+            "composition": "chunky window gadgets, checkerboard fills",
+            "texture": "coarse pixels, hard bevels"
+        }
+    },
+    {
+        "name": "Terminal Style",
+        "cues": {
+            "palette": "phosphor green or amber on black",
+            "typography": "monospace everything, blinking cursor",
+            "composition": "prompt-driven line flow, full-width text",
+            "texture": "glow bloom, scan flicker"
+        }
+    },
+    {
+        "name": "Command Line Interface",
+        "aliases": [
+            "cli aesthetic"
+        ],
+        "cues": {
+            "palette": "dark shell, ANSI accent colors",
+            "typography": "monospace, flags and prompts as design",
+            "composition": "stdin-stdout rhythm, aligned columns",
+            "texture": "box-drawing rules, ASCII dividers"
+        }
+    },
+    {
+        "name": "ASCII Art UI",
+        "cues": {
+            "palette": "single ink on terminal ground",
+            "typography": "characters as graphics, figlet banners",
+            "composition": "character-grid illustration panels",
+            "texture": "@#% density shading"
+        }
+    },
+    {
+        "name": "ANSI Art UI",
+        "cues": {
+            "palette": "16-color BBS brights on black",
+            "typography": "block-glyph headers, CP437 frames",
+            "composition": "block-mosaic panels, scroller flow",
+            "texture": "half-block gradients, dial-up nostalgia"
+        }
+    },
+    {
+        "name": "Matrix Code Aesthetic",
+        "cues": {
+            "palette": "cascading green code on black",
+            "typography": "monospace glyph rain, katakana fragments",
+            "composition": "vertical streams, terminal overlays",
+            "texture": "glow trails, digital drizzle"
+        }
+    },
+    {
+        "name": "Cyberpunk UI",
+        "cues": {
+            "palette": "neon magenta-cyan on deep black",
+            "typography": "techno display, glitched mono labels",
+            "composition": "HUD frames, clipped corner panels, dense readouts",
+            "texture": "neon glow, scanlines, chromatic split"
+        }
+    },
+    {
+        "name": "Steampunk UI",
+        "cues": {
+            "palette": "brass, oxblood leather, parchment",
+            "typography": "Victorian display with engraved plates",
+            "composition": "gauge clusters, riveted panels",
+            "texture": "etched brass, leather stitching, patina"
+        }
+    },
+    {
+        "name": "Solarpunk UI",
+        "cues": {
+            "palette": "leaf greens, solar gold, sky white",
+            "typography": "organic humanist sans, warm rounded",
+            "composition": "vine-framed cards, sunlit openness",
+            "texture": "botanical accents, stained-glass gradients"
+        }
+    },
+    {
+        "name": "Glitch Art UI",
+        "cues": {
+            "palette": "RGB-split neon over dark",
+            "typography": "displaced slices, corrupted headers",
+            "composition": "broken grids, datamoshed banners",
+            "texture": "pixel sorting, VHS tearing"
+        }
+    },
+    {
+        "name": "Pixel Art UI",
+        "cues": {
+            "palette": "limited retro ramps, dithered shades",
+            "typography": "bitmap fonts, chunky icons",
+            "composition": "tile-based panels, sprite buttons",
+            "texture": "hard pixels, 9-slice borders"
+        }
+    },
+    {
+        "name": "Voxel Art UI",
+        "cues": {
+            "palette": "toybox brights, clean cube ramps",
+            "typography": "blocky cubic display",
+            "composition": "isometric cube panels and icons",
+            "texture": "stepped cube edges, soft AO"
+        }
+    },
+    {
+        "name": "Low Poly UI",
+        "cues": {
+            "palette": "faceted gradient meshes, sunset ramps",
+            "typography": "clean geometric sans over facets",
+            "composition": "triangulated backdrops, angular cards",
+            "texture": "flat-shaded polygon planes"
+        }
+    },
+    {
+        "name": "Wireframe Aesthetic",
+        "cues": {
+            "palette": "grayscale boxes, annotation blue",
+            "typography": "placeholder gray bars, mono labels",
+            "composition": "boxes-and-crosses layout honesty",
+            "texture": "outlines only, X-image frames"
+        }
+    },
+    {
+        "name": "Blueprint Style",
+        "cues": {
+            "palette": "cyanotype blue ground, white linework",
+            "typography": "drafting caps, dimension labels",
+            "composition": "measured plans, callout leaders",
+            "texture": "grid paper, stamp blocks"
+        }
+    },
+    {
+        "name": "Technical Schematic",
+        "cues": {
+            "palette": "white ground, black line, signal red",
+            "typography": "DIN-style caps, reference numbers",
+            "composition": "exploded views, labeled circuits",
+            "texture": "hatching, precise line weights"
+        }
+    },
+    {
+        "name": "Vector Art UI",
+        "cues": {
+            "palette": "flat clean fills, smooth gradients",
+            "typography": "crisp geometric sans",
+            "composition": "illustration-led sections, layered scenes",
+            "texture": "bezier smoothness, no grain"
+        }
+    },
+    {
+        "name": "Line Art UI",
+        "cues": {
+            "palette": "monoline ink on quiet ground",
+            "typography": "light hairline display",
+            "composition": "outlined icons and borders carry the design",
+            "texture": "single stroke weight, open fills"
+        }
+    },
+    {
+        "name": "Monospace Minimal",
+        "cues": {
+            "palette": "paper white, ink black, one accent",
+            "typography": "monospace for everything, plain-text dignity",
+            "composition": "column-aligned text blocks, list-driven",
+            "texture": "none — character grid is the texture"
+        }
+    },
+    {
+        "name": "Bauhaus UI",
+        "cues": {
+            "palette": "primary red-yellow-blue, black, white",
+            "typography": "geometric sans, constructed hierarchy",
+            "composition": "grid-true blocks, circle-triangle-square motifs",
+            "texture": "flat planes, black rules"
+        }
+    },
+    {
+        "name": "Pop Art UI",
+        "cues": {
+            "palette": "comic primaries, loud flat fills",
+            "typography": "exclamatory comic display",
+            "composition": "panel grids, halftone hero moments",
+            "texture": "ben-day dots, thick outlines"
+        }
+    },
+    {
+        "name": "Op Art UI",
+        "cues": {
+            "palette": "black-white vibration, systematic steps",
+            "typography": "clean geometric over pattern",
+            "composition": "optical backgrounds, rhythmic dividers",
+            "texture": "moiré fields, wave grids"
+        }
+    },
+    {
+        "name": "Psychedelic UI",
+        "cues": {
+            "palette": "acid rainbow, vibrating complements",
+            "typography": "melting bulbous display",
+            "composition": "swirling frames, concentric flow",
+            "texture": "liquid marble, kaleidoscope"
+        }
+    },
+    {
+        "name": "Grunge UI",
+        "cues": {
+            "palette": "dirty neutrals, rust, faded black",
+            "typography": "distressed stamps, scrawled accents",
+            "composition": "layered collage, taped fragments",
+            "texture": "scratches, xerox noise, grime"
+        }
+    },
+    {
+        "name": "Frutiger Aero",
+        "cues": {
+            "palette": "sky blue, glossy green, white light",
+            "typography": "humanist sans, optimistic clarity",
+            "composition": "floating orbs, nature-tech collage",
+            "texture": "gloss bubbles, lens flare, water drops"
+        }
+    },
+    {
+        "name": "Web 1.0 Retro",
+        "cues": {
+            "palette": "web-safe brights, gray table borders",
+            "typography": "Times default, blue underlined links",
+            "composition": "table layouts, hit counters, marquees",
+            "texture": "tiled backgrounds, animated GIFs"
+        }
+    },
+    {
+        "name": "Web 2.0 Glossy",
+        "cues": {
+            "palette": "candy gradients, badge orange, sky blue",
+            "typography": "rounded bold sans, beta badges",
+            "composition": "reflective heroes, big friendly buttons",
+            "texture": "gloss highlights, mirror reflections"
+        }
+    },
+    {
+        "name": "Mobile-First UI",
+        "cues": {
+            "palette": "high-contrast simple hues",
+            "typography": "large legible sans, thumb-scale labels",
+            "composition": "single column, bottom-reach actions",
+            "texture": "flat surfaces, tap ripples"
+        }
+    },
+    {
+        "name": "Responsive Fluid",
+        "cues": {
+            "palette": "calm adaptable neutrals",
+            "typography": "fluid clamp() scaling, viewport-aware",
+            "composition": "reflowing grids, container-query modules",
+            "texture": "seamless breakpoint transitions"
+        }
+    },
+    {
+        "name": "Card-Based Layout",
+        "cues": {
+            "palette": "neutral canvas, card-white surfaces",
+            "typography": "clear card headlines, meta captions",
+            "composition": "uniform card grids, scannable modules",
+            "texture": "soft elevation shadows"
+        }
+    },
+    {
+        "name": "Bento Grid Layout",
+        "cues": {
+            "palette": "quiet ground, per-cell accent moments",
+            "typography": "big stat numerals, compact labels",
+            "composition": "mixed-size rounded cells, packed neatly",
+            "texture": "soft-corner tiles, subtle depth"
+        }
+    },
+    {
+        "name": "Masonry Layout",
+        "cues": {
+            "palette": "content-led, chrome recedes",
+            "typography": "minimal captions under imagery",
+            "composition": "staggered column flow, pin-board rhythm",
+            "texture": "image-dominant, thin gutters"
+        }
+    },
+    {
+        "name": "Split Screen Layout",
+        "cues": {
+            "palette": "two contrasting field colors",
+            "typography": "mirrored hierarchy per pane",
+            "composition": "50/50 duel panes, dual CTAs",
+            "texture": "hard center seam, hover swaps"
+        }
+    },
+    {
+        "name": "Asymmetric Layout",
+        "cues": {
+            "palette": "neutral field, placed accent weights",
+            "typography": "offset headlines, hanging indents",
+            "composition": "deliberate imbalance, diagonal tension",
+            "texture": "overlapping planes, cropped edges"
+        }
+    },
+    {
+        "name": "Editorial Layout",
+        "cues": {
+            "palette": "paper white, ink, one editorial accent",
+            "typography": "serif headlines, refined column text",
+            "composition": "article grids, pull quotes, bylines",
+            "texture": "rules, drop caps, folios"
+        }
+    },
+    {
+        "name": "Magazine Style",
+        "cues": {
+            "palette": "glossy imagery, confident accents",
+            "typography": "display-serif covers, kicker-deck structure",
+            "composition": "feature spreads, image-led sections",
+            "texture": "full-bleed photography, caption rhythm"
+        }
+    },
+    {
+        "name": "Newspaper Layout",
+        "cues": {
+            "palette": "newsprint gray, ink black, spot red",
+            "typography": "condensed headlines, justified columns",
+            "composition": "multi-column broadsheet, section headers",
+            "texture": "column rules, dateline rituals"
+        }
+    },
+    {
+        "name": "Minimal White Space",
+        "cues": {
+            "palette": "white field, sparse ink",
+            "typography": "small precise type, vast margins",
+            "composition": "few elements breathing in emptiness",
+            "texture": "space itself as material"
+        }
+    },
+    {
+        "name": "Dark Mode Default",
+        "cues": {
+            "palette": "near-black grounds, desaturated accents, glowing highlights",
+            "typography": "light-weight type on dark, careful contrast",
+            "composition": "layered dark surfaces, elevation by lightness",
+            "texture": "soft glows, subtle borders"
+        }
+    },
+    {
+        "name": "Light Mode Default",
+        "cues": {
+            "palette": "airy whites, soft grays, clear accents",
+            "typography": "dark ink, comfortable contrast",
+            "composition": "bright open surfaces, shadow depth",
+            "texture": "paper lightness, crisp edges"
+        }
+    },
+    {
+        "name": "High Contrast Accessibility",
+        "cues": {
+            "palette": "maximum-contrast pairs, WCAG AAA discipline",
+            "typography": "large legible type, strong focus rings",
+            "composition": "clear targets, unambiguous states",
+            "texture": "thick borders, no subtlety-for-subtlety"
+        }
+    },
+    {
+        "name": "Monochromatic UI",
+        "cues": {
+            "palette": "one hue in many tints and shades",
+            "typography": "hierarchy by weight, not color",
+            "composition": "tonal layering, unified calm",
+            "texture": "gradient steps within one family"
+        }
+    },
+    {
+        "name": "Duotone Style",
+        "cues": {
+            "palette": "two-color imagery and surfaces",
+            "typography": "bold type in the second hue",
+            "composition": "duotone heroes, color-mapped photos",
+            "texture": "posterized two-channel imagery"
+        }
+    },
+    {
+        "name": "Gradient-Heavy UI",
+        "cues": {
+            "palette": "multi-stop vivid gradients everywhere",
+            "typography": "gradient-filled display headlines",
+            "composition": "gradient heroes, buttons, borders",
+            "texture": "smooth color transitions, mesh glow"
+        }
+    },
+    {
+        "name": "Neon Pastel",
+        "cues": {
+            "palette": "soft pastels with electric neon pops",
+            "typography": "rounded friendly display",
+            "composition": "dreamy grounds, neon focal accents",
+            "texture": "soft glow on candy surfaces"
+        }
+    },
+    {
+        "name": "Earthy Organic",
+        "cues": {
+            "palette": "clay, sand, moss, cream",
+            "typography": "warm humanist serif-sans mix",
+            "composition": "rounded natural sections, gentle flow",
+            "texture": "paper grain, arch shapes, hand accents"
+        }
+    },
+    {
+        "name": "Biophilic UI",
+        "cues": {
+            "palette": "canopy greens, sky, sun, earth",
+            "typography": "natural humanist curves",
+            "composition": "leafy imagery woven through modules",
+            "texture": "botanical photos, organic blobs"
+        }
+    },
+    {
+        "name": "Eco-Design UI",
+        "cues": {
+            "palette": "recycled kraft, moss, unbleached tones",
+            "typography": "honest low-ink sans",
+            "composition": "lightweight pages, modest imagery",
+            "texture": "recycled paper feel, minimal assets"
+        }
+    },
+    {
+        "name": "Sustainable Web Design",
+        "cues": {
+            "palette": "system colors, dark-friendly efficiency",
+            "typography": "system fonts, no webfont weight",
+            "composition": "lean pages, content prioritized",
+            "texture": "compressed imagery, carbon-aware restraint"
+        }
+    },
+    {
+        "name": "Corporate Memphis",
+        "cues": {
+            "palette": "flat friendly brights, purple-heavy",
+            "typography": "rounded geometric sans, cheerful",
+            "composition": "big-limbed character illustrations beside copy",
+            "texture": "flat vector people, blob backgrounds"
+        }
+    },
+    {
+        "name": "Alegria Art Style",
+        "cues": {
+            "palette": "warm corals, purples, mustard flats",
+            "typography": "soft approachable sans",
+            "composition": "exaggerated joyful figures, floating scenes",
+            "texture": "flat organic shapes, minimal shading"
+        }
+    },
+    {
+        "name": "Flat Illustration UI",
+        "cues": {
+            "palette": "harmonized flat scene colors",
+            "typography": "clean sans beside spot illustrations",
+            "composition": "illustration-anchored sections",
+            "texture": "flat fills, simple geometric shading"
+        }
+    },
+    {
+        "name": "3D Claymorphism",
+        "aliases": [
+            "claymorphism"
+        ],
+        "cues": {
+            "palette": "pastel clay tones, soft candy hues",
+            "typography": "rounded chubby display",
+            "composition": "inflated 3D shapes, puffy cards",
+            "texture": "clay softness, inner-outer shadow puff"
+        }
+    },
+    {
+        "name": "Isomorphic UI",
+        "cues": {
+            "palette": "clean tech hues, consistent ramps",
+            "typography": "neutral geometric sans",
+            "composition": "isometric scene blocks, parallel projection",
+            "texture": "extruded flat surfaces, uniform depth"
+        }
+    },
+    {
+        "name": "Holographic UI",
+        "cues": {
+            "palette": "iridescent spectral shifts, chrome pastels",
+            "typography": "sleek futuristic display",
+            "composition": "floating translucent panels",
+            "texture": "foil sheen, prismatic gradients"
+        }
+    },
+    {
+        "name": "Kinetic Typography",
+        "cues": {
+            "palette": "type-first, restrained ground",
+            "typography": "huge animated headlines as the interface",
+            "composition": "words moving, scaling, revealing on scroll",
+            "texture": "motion blur, staggered reveals"
+        }
+    },
+    {
+        "name": "Conversational UI",
+        "cues": {
+            "palette": "chat-bubble duotone, soft ground",
+            "typography": "message-scale sans, timestamp meta",
+            "composition": "threaded dialogue flow, input-anchored",
+            "texture": "rounded bubbles, typing indicators"
+        }
+    },
+    {
+        "name": "Chatbot Aesthetic",
+        "cues": {
+            "palette": "friendly accent on neutral chat field",
+            "typography": "approachable rounded sans",
+            "composition": "quick-reply chips, guided dialogue",
+            "texture": "avatar circles, bubble tails"
+        }
+    },
+    {
+        "name": "Gamified UI",
+        "cues": {
+            "palette": "reward golds, XP greens, energetic brights",
+            "typography": "bold score numerals, badge labels",
+            "composition": "progress bars, streaks, level-up moments",
+            "texture": "shiny badges, confetti bursts"
+        }
+    },
+    {
+        "name": "HUD Style",
+        "cues": {
+            "palette": "translucent cyan-green on dark",
+            "typography": "condensed technical caps, readout numerals",
+            "composition": "corner-anchored overlays, reticle focus",
+            "texture": "thin glowing frames, targeting brackets"
+        }
+    },
+    {
+        "name": "Sci-Fi Dashboard",
+        "cues": {
+            "palette": "deep space blues, plasma accents",
+            "typography": "futuristic condensed, data numerals",
+            "composition": "radial gauges, orbital panels, dense telemetry",
+            "texture": "glowing wireframes, holo grids"
+        }
+    },
+    {
+        "name": "Aviation Cockpit UI",
+        "cues": {
+            "palette": "instrument black, amber-green readouts",
+            "typography": "avionics caps, dial numerals",
+            "composition": "primary-flight hierarchy, gauge clusters",
+            "texture": "bezeled dials, warning striping"
+        }
+    },
+    {
+        "name": "Automotive Dashboard Style",
+        "cues": {
+            "palette": "night black, speedo red-white, ambient glow",
+            "typography": "speedometer numerals, condensed labels",
+            "composition": "driver-centric arc clusters",
+            "texture": "brushed bezels, backlit needles"
+        }
+    },
+    {
+        "name": "Military Grade UI",
+        "cues": {
+            "palette": "olive drab, black, alert amber",
+            "typography": "stencil caps, designation codes",
+            "composition": "rugged panels, status boards",
+            "texture": "diamond plate, riveted frames"
+        }
+    },
+    {
+        "name": "Industrial Machine Interface",
+        "cues": {
+            "palette": "safety yellow, steel gray, e-stop red",
+            "typography": "high-legibility caps, big numerals",
+            "composition": "big-button panels, state indicators",
+            "texture": "membrane keys, hazard striping"
+        }
+    },
+    {
+        "name": "Medical Device UI",
+        "cues": {
+            "palette": "clinical white, trust blue, alarm codes",
+            "typography": "clear medical sans, vital numerals",
+            "composition": "patient-safe hierarchy, alarm zones",
+            "texture": "sterile flatness, soft alerts"
+        }
+    },
+    {
+        "name": "Tactile Haptic UI",
+        "cues": {
+            "palette": "material-true surface tones",
+            "typography": "pressable weighty labels",
+            "composition": "controls that look grippable",
+            "texture": "knurling, ridges, press depressions"
+        }
+    },
+    {
+        "name": "Parallax Scrolling Style",
+        "cues": {
+            "palette": "layered scene depth colors",
+            "typography": "foreground type over drifting layers",
+            "composition": "depth-staggered scroll layers",
+            "texture": "floating planes, dimensional drift"
+        }
+    },
+    {
+        "name": "Infinite Scroll Layout",
+        "cues": {
+            "palette": "feed-neutral chrome",
+            "typography": "repeating card headlines",
+            "composition": "endless vertical stream, lazy loading",
+            "texture": "seamless continuation, no footer"
+        }
+    },
+    {
+        "name": "Paginated Clean",
+        "cues": {
+            "palette": "calm chrome, clear active states",
+            "typography": "numbered navigation, stable rhythm",
+            "composition": "fixed-size pages, deliberate steps",
+            "texture": "crisp page breaks, breadcrumb calm"
+        }
+    },
+    {
+        "name": "Stepper-Based UI",
+        "cues": {
+            "palette": "progress accent on neutral flow",
+            "typography": "step labels, ordinal clarity",
+            "composition": "one decision per screen, linear rail",
+            "texture": "connected step dots, check states"
+        }
+    },
+    {
+        "name": "Wizard Layout",
+        "cues": {
+            "palette": "guided calm, single accent path",
+            "typography": "friendly instruction-first headers",
+            "composition": "sequential panels, back-next ritual",
+            "texture": "progress trail, completion reward"
+        }
+    },
+    {
+        "name": "Kanban Board UI",
+        "cues": {
+            "palette": "column-neutral ground, label chips",
+            "typography": "card titles, tag chips",
+            "composition": "swimlane columns, draggable cards",
+            "texture": "card shadows, drop-zone highlights"
+        }
+    },
+    {
+        "name": "Dashboard Analytics Layout",
+        "cues": {
+            "palette": "data-viz series colors on quiet ground",
+            "typography": "big KPI numerals, small dense labels",
+            "composition": "stat tiles, chart grids, filter rails",
+            "texture": "sparklines, gridded panels"
+        }
+    },
+    {
+        "name": "E-Commerce Clean",
+        "cues": {
+            "palette": "product-first white, conversion accent",
+            "typography": "price-prominent numerals, clear CTAs",
+            "composition": "product grids, sticky carts, trust rows",
+            "texture": "clean product photography, badge chips"
+        }
+    },
+    {
+        "name": "SaaS Minimal",
+        "cues": {
+            "palette": "white, cool gray, single brand accent",
+            "typography": "geometric sans, benefit-led headlines",
+            "composition": "hero-CTA-social-proof rhythm, feature grids",
+            "texture": "soft cards, subtle gradients"
+        }
+    },
+    {
+        "name": "Crypto Web3 Aesthetic",
+        "aliases": [
+            "web3"
+        ],
+        "cues": {
+            "palette": "deep space purple, neon gradients, token gold",
+            "typography": "futuristic grotesque, wallet-address mono",
+            "composition": "glassy stat cards, gradient orbs, dark heroes",
+            "texture": "mesh gradients, glow borders, chain motifs"
+        }
+    },
+    {
+        "name": "NFT Marketplace Grid",
+        "cues": {
+            "palette": "dark gallery ground, artwork-led color",
+            "typography": "auction numerals, collection labels",
+            "composition": "uniform art tiles, bid overlays",
+            "texture": "hover lifts, verified badges"
+        }
+    },
+    {
+        "name": "Cyber-Garden Blog",
+        "cues": {
+            "palette": "terminal green meets botanical pastels",
+            "typography": "mono headings, humanist body",
+            "composition": "digital-garden link thickets, note tiles",
+            "texture": "sprout icons, backlink trails"
+        }
+    },
+    {
+        "name": "Indie Dev Portfolio",
+        "cues": {
+            "palette": "off-white, ink, one playful accent",
+            "typography": "mono-sans mix, personable scale",
+            "composition": "project cards, README candor",
+            "texture": "hand emoji accents, commit-log honesty"
+        }
+    },
+    {
+        "name": "Brutalist Portfolio",
+        "cues": {
+            "palette": "raw white, black, single shock hue",
+            "typography": "enormous names, default-font defiance",
+            "composition": "unpolished lists, exposed edges",
+            "texture": "hard borders, no shadows"
+        }
+    },
+    {
+        "name": "Creative Studio Bold",
+        "cues": {
+            "palette": "black canvas, electric statement accents",
+            "typography": "massive display headlines, marquee energy",
+            "composition": "full-screen case studies, cursor play",
+            "texture": "hover reveals, oversized motion"
+        }
+    },
+    {
+        "name": "Luxury High-End Minimal",
+        "cues": {
+            "palette": "ivory, charcoal, hairline gold",
+            "typography": "refined serif display, wide tracking",
+            "composition": "sparse product staging, ceremonial space",
+            "texture": "subtle foil accents, silk restraint"
+        }
+    },
+    {
+        "name": "Fashion Editorial UI",
+        "cues": {
+            "palette": "black-white photography, runway accent",
+            "typography": "high-contrast didone display",
+            "composition": "oversized imagery, asymmetric captions",
+            "texture": "full-bleed lookbook spreads"
+        }
+    },
+    {
+        "name": "Streetwear Lookbook UI",
+        "cues": {
+            "palette": "concrete gray, drop-red, black",
+            "typography": "heavy condensed caps, price tags",
+            "composition": "gridded drops, countdown urgency",
+            "texture": "sticker slaps, tape, photo grit"
+        }
+    },
+    {
+        "name": "Artsy Avant-Garde",
+        "cues": {
+            "palette": "unexpected clashes, gallery white breaks",
+            "typography": "experimental display, broken conventions",
+            "composition": "rule-defying placement, deliberate discomfort",
+            "texture": "mixed media collisions"
+        }
+    },
+    {
+        "name": "Architectural Minimal",
+        "cues": {
+            "palette": "concrete, glass gray, blueprint accent",
+            "typography": "precise grotesque, measured tracking",
+            "composition": "structural grids, elevation-like sections",
+            "texture": "thin rules, material photography"
+        }
+    },
+    {
+        "name": "Academic Clean",
+        "cues": {
+            "palette": "paper white, ink, citation blue",
+            "typography": "scholarly serif body, clear footnotes",
+            "composition": "single-column reading, abstract-first",
+            "texture": "numbered sections, reference lists"
+        }
+    },
+    {
+        "name": "Editorial Serif",
+        "cues": {
+            "palette": "warm paper, ink black, muted accent",
+            "typography": "serif-led hierarchy at every level",
+            "composition": "long-read columns, drop caps, pull quotes",
+            "texture": "typographic ornament only"
+        }
+    },
+    {
+        "name": "Sans-Serif Corporate",
+        "cues": {
+            "palette": "trust blue, gray scale, white",
+            "typography": "neutral grotesque, consistent ramps",
+            "composition": "predictable sections, stakeholder-safe",
+            "texture": "flat icons, modest shadows"
+        }
+    },
+    {
+        "name": "Hand-Drawn Sketch UI",
+        "cues": {
+            "palette": "paper cream, pencil gray, marker accents",
+            "typography": "handwritten headers, sketch annotations",
+            "composition": "doodle frames, wobbly borders",
+            "texture": "pencil hatching, eraser smudges"
+        }
+    },
+    {
+        "name": "Wireframe Lo-Fi",
+        "cues": {
+            "palette": "grayscale placeholders only",
+            "typography": "squiggle text bars, label stubs",
+            "composition": "boxes and X-frames, layout skeleton",
+            "texture": "outline-only austerity"
+        }
+    },
+    {
+        "name": "Dark Academia UI",
+        "cues": {
+            "palette": "espresso, oxblood, brass on parchment dark",
+            "typography": "scholarly serifs, typewriter meta",
+            "composition": "library-panel sections, manuscript rhythm",
+            "texture": "leather grain, candlelight vignette"
+        }
+    },
+    {
+        "name": "Light Academia UI",
+        "cues": {
+            "palette": "cream, oat, sage, soft gold",
+            "typography": "gentle serifs, italic notes",
+            "composition": "sunlit reading layouts, airy margins",
+            "texture": "linen paper, marble lightness"
+        }
+    },
+    {
+        "name": "Cottagecore Aesthetic",
+        "cues": {
+            "palette": "meadow pastels, butter, dusty rose",
+            "typography": "storybook serif, hand-penned script",
+            "composition": "wreathed frames, recipe-card modules",
+            "texture": "gingham, pressed flowers, stitching"
+        }
+    },
+    {
+        "name": "Goth Tech",
+        "cues": {
+            "palette": "black on black, violet glow, silver",
+            "typography": "sharp blackletter-tech hybrid",
+            "composition": "dark ritual panels, glowing sigils",
+            "texture": "chrome spikes, mist gradients"
+        }
+    },
+    {
+        "name": "Emo Grunge",
+        "cues": {
+            "palette": "black, hot pink, checkerboard",
+            "typography": "scratchy marker, sticker fonts",
+            "composition": "diary collage, angsty layering",
+            "texture": "notebook scribbles, tape, pins"
+        }
+    },
+    {
+        "name": "Punk Zine Aesthetic",
+        "cues": {
+            "palette": "xerox black-white, riot accent",
+            "typography": "ransom-note cutouts, stencil shouts",
+            "composition": "pasted-up chaos, torn columns",
+            "texture": "photocopy grit, staples, rips"
+        }
+    },
+    {
+        "name": "Stencil Graffiti UI",
+        "cues": {
+            "palette": "wall gray, spray black, one spot color",
+            "typography": "cut-stencil letterforms",
+            "composition": "stamped statements, repeatable marks",
+            "texture": "overspray mist, crisp bridges"
+        }
+    },
+    {
+        "name": "Pop Surrealism UI",
+        "cues": {
+            "palette": "candy-dark contrasts, doll pastels",
+            "typography": "storybook-gone-strange serifs",
+            "composition": "uncanny mascots, dreamlike vignettes",
+            "texture": "polished airbrush, vintage patina"
+        }
+    },
+    {
+        "name": "Lowbrow Art UI",
+        "cues": {
+            "palette": "hot-rod flake, comic brights",
+            "typography": "custom-culture script, pinstripe flourish",
+            "composition": "cartoon-surreal panels, underground wit",
+            "texture": "airbrush gloss, pinstriping"
+        }
+    },
+    {
+        "name": "Abstract Geometric",
+        "cues": {
+            "palette": "confident flat color blocks",
+            "typography": "shape-integrated geometric sans",
+            "composition": "circles, bars, triangles composing sections",
+            "texture": "hard edges, overlapping planes"
+        }
+    },
+    {
+        "name": "Bauhaus Geometry",
+        "cues": {
+            "palette": "primary triad, black skeleton, white field",
+            "typography": "constructed geometric display",
+            "composition": "circle-triangle-square modules, grid play",
+            "texture": "flat shapes, black keylines"
+        }
+    },
+    {
+        "name": "Memphis Geometric",
+        "cues": {
+            "palette": "bubblegum, teal, yellow, black squiggle",
+            "typography": "chunky playful geometric",
+            "composition": "scattered confetti shapes, tilted panels",
+            "texture": "squiggles, terrazzo speckle"
+        }
+    },
+    {
+        "name": "Fluid Liquid Shapes",
+        "cues": {
+            "palette": "flowing gradient hues",
+            "typography": "soft rounded display",
+            "composition": "wave dividers, morphing blobs between sections",
+            "texture": "liquid meshes, molten motion"
+        }
+    },
+    {
+        "name": "Blob UI",
+        "cues": {
+            "palette": "soft candy tones",
+            "typography": "rounded friendly sans",
+            "composition": "amoeba background shapes, organic cards",
+            "texture": "squishy curves, gentle wobble"
+        }
+    },
+    {
+        "name": "Generative Art UI",
+        "cues": {
+            "palette": "seeded algorithmic harmonies",
+            "typography": "mono parameters, system labels",
+            "composition": "emergent pattern backdrops, unique per visit",
+            "texture": "particle traces, plotted lines"
+        }
+    },
+    {
+        "name": "Algorithmic UI",
+        "cues": {
+            "palette": "computed parametric ramps",
+            "typography": "technical mono annotations",
+            "composition": "rule-driven layout variation",
+            "texture": "recursive precision detail"
+        }
+    },
+    {
+        "name": "Particle System UI",
+        "cues": {
+            "palette": "glowing points on dark field",
+            "typography": "clean sans amid motion",
+            "composition": "swarming interactive backgrounds",
+            "texture": "connecting lines, drift and attract"
+        }
+    },
+    {
+        "name": "Matrix Rain UI",
+        "cues": {
+            "palette": "cascading code green on black",
+            "typography": "monospace glyph streams",
+            "composition": "raining columns behind terminal panels",
+            "texture": "glow trails, glyph flicker"
+        }
+    },
+    {
+        "name": "Scanline CRT Filter",
+        "cues": {
+            "palette": "phosphor tones, curved-glass vignette",
+            "typography": "bitmap or terminal type, slight bloom",
+            "composition": "screen-in-screen framing",
+            "texture": "scanlines, curvature, flicker"
+        }
+    },
+    {
+        "name": "VHS Glitch Aesthetic",
+        "cues": {
+            "palette": "magenta-cyan tape bleed, static white",
+            "typography": "tracking-error titles, timestamp OSD",
+            "composition": "play-screen framing, tape-label blocks",
+            "texture": "tape noise, head-switching tear"
+        }
+    },
+    {
+        "name": "Retro Arcade UI",
+        "cues": {
+            "palette": "cabinet neon, insert-coin yellow, black",
+            "typography": "arcade bitmap caps, score tables",
+            "composition": "attract-mode screens, hi-score lists",
+            "texture": "marquee glow, joystick chrome"
+        }
+    },
+    {
+        "name": "8-Bit UI",
+        "aliases": [
+            "8bit"
+        ],
+        "cues": {
+            "palette": "NES-class limited brights",
+            "typography": "8px bitmap fonts",
+            "composition": "tile grids, sprite icons, health bars",
+            "texture": "hard pixels, no anti-aliasing"
+        }
+    },
+    {
+        "name": "16-Bit UI",
+        "aliases": [
+            "16bit"
+        ],
+        "cues": {
+            "palette": "SNES-class richer ramps, dithered skies",
+            "typography": "detailed bitmap fonts, shadowed",
+            "composition": "layered parallax panels, ornate HUD frames",
+            "texture": "fine dithering, sprite polish"
+        }
+    },
+    {
+        "name": "Console Command Style",
+        "cues": {
+            "palette": "dark shell, prompt green, flag cyan",
+            "typography": "monospace commands as navigation",
+            "composition": "prompt-led interaction, output blocks",
+            "texture": "cursor blink, box-drawing frames"
+        }
+    },
+    {
+        "name": "Git Repo Aesthetic",
+        "cues": {
+            "palette": "diff green-red, code-editor dark or light",
+            "typography": "monospace filenames, commit-message headers",
+            "composition": "README-like pages, file-tree navigation",
+            "texture": "contribution graphs, badge shields"
+        }
+    },
+    {
+        "name": "Markdown Clean",
+        "cues": {
+            "palette": "white ground, ink, link blue",
+            "typography": "hash-header hierarchy, code fences",
+            "composition": "single readable column, list-driven",
+            "texture": "blockquote bars, horizontal rules"
+        }
+    },
+    {
+        "name": "Wiki Plain Text",
+        "cues": {
+            "palette": "utilitarian white, dense link blue",
+            "typography": "default serif-sans, footnote small",
+            "composition": "content-dense articles, infoboxes, TOCs",
+            "texture": "thin table borders, edit-link modesty"
+        }
+    },
+    {
+        "name": "Brutalist Hypertext",
+        "cues": {
+            "palette": "white, black, raw link blue-purple",
+            "typography": "default browser styles, honest anchors",
+            "composition": "link lists as architecture",
+            "texture": "underlines, visited states, nothing else"
+        }
+    },
+    {
+        "name": "Single-Page Application Style",
+        "cues": {
+            "palette": "app-shell neutral, stateful accents",
+            "typography": "interface sans, view-title rhythm",
+            "composition": "persistent shell, swapped views, no reloads",
+            "texture": "route transitions, optimistic updates"
+        }
+    },
+    {
+        "name": "Immersive Fullscreen",
+        "cues": {
+            "palette": "edge-to-edge imagery, overlay scrim",
+            "typography": "cinematic titles over media",
+            "composition": "viewport-filling scenes, chrome hidden",
+            "texture": "video backdrops, fade overlays"
+        }
+    },
+    {
+        "name": "Horizontal Scroll Layout",
+        "cues": {
+            "palette": "gallery-neutral chrome",
+            "typography": "rotated markers, chapter numerals",
+            "composition": "sideways panel journey, snap sections",
+            "texture": "progress rail, drag affordances"
+        }
+    },
+    {
+        "name": "Zooming User Interface",
+        "aliases": [
+            "zui"
+        ],
+        "cues": {
+            "palette": "map-like layered detail tones",
+            "typography": "scale-dependent labels",
+            "composition": "semantic zoom levels, dive-in navigation",
+            "texture": "smooth scale transitions"
+        }
+    },
+    {
+        "name": "Infinite Canvas UI",
+        "cues": {
+            "palette": "whiteboard field, sticky-note accents",
+            "typography": "freeform labels at any angle",
+            "composition": "spatial arrangement, pan-and-zoom freedom",
+            "texture": "dot grid, selection marquees"
+        }
+    },
+    {
+        "name": "Node-Based Editor UI",
+        "cues": {
+            "palette": "dark graph field, typed-port colors",
+            "typography": "node titles, port labels, mono values",
+            "composition": "wired node graphs, flow left-to-right",
+            "texture": "bezier wires, snap grids"
+        }
+    },
+    {
+        "name": "Visual Scripting Interface",
+        "cues": {
+            "palette": "block-category color coding",
+            "typography": "verb-first block labels",
+            "composition": "snap-together logic blocks",
+            "texture": "puzzle-piece connectors"
+        }
+    },
+    {
+        "name": "Audio Synthesizer Grid",
+        "cues": {
+            "palette": "studio dark, LED ambers, patch-cable colors",
+            "typography": "panel-engraved caps, parameter mono",
+            "composition": "knob matrices, step-sequencer rows",
+            "texture": "brushed panels, glowing LEDs"
+        }
+    },
+    {
+        "name": "DJ Deck UI",
+        "cues": {
+            "palette": "club dark, waveform neon, hot-cue colors",
+            "typography": "BPM numerals, track-title marquee",
+            "composition": "dual decks, center mixer, waveform lanes",
+            "texture": "jog-wheel sheen, fader tracks"
+        }
+    },
+    {
+        "name": "Material Layering",
+        "cues": {
+            "palette": "tonal surfaces stacked by elevation",
+            "typography": "clean sans, layer-aware contrast",
+            "composition": "sheets above sheets, shadow logic",
+            "texture": "consistent elevation shadows"
+        }
+    },
+    {
+        "name": "Depth-Map UI",
+        "cues": {
+            "palette": "gradient depth cues, atmospheric fade",
+            "typography": "foreground-crisp, background-soft",
+            "composition": "z-layered parallax panels",
+            "texture": "blur-by-distance, occlusion shading"
+        }
+    },
+    {
+        "name": "Isometric Grid Layout",
+        "cues": {
+            "palette": "clean tech ramps, consistent shading",
+            "typography": "flat labels beside 30° scenes",
+            "composition": "diamond-grid illustration blocks",
+            "texture": "extruded faces, uniform light"
+        }
+    },
+    {
+        "name": "Perspective 3D UI",
+        "cues": {
+            "palette": "stage-lit surfaces, vanishing depth",
+            "typography": "type in space, tilted planes",
+            "composition": "cards rotating into perspective",
+            "texture": "3D transforms, cast shadows"
+        }
+    },
+    {
+        "name": "Clay Texture UI",
+        "cues": {
+            "palette": "matte pastel clay tones",
+            "typography": "soft rounded display",
+            "composition": "hand-molded shapes, puffy panels",
+            "texture": "fingerprint softness, matte bumps"
+        }
+    },
+    {
+        "name": "Paper Texture UI",
+        "cues": {
+            "palette": "cream stock, ink, kraft accents",
+            "typography": "letterpress serif warmth",
+            "composition": "layered sheets, torn-edge dividers",
+            "texture": "paper grain, fold creases, deckle"
+        }
+    },
+    {
+        "name": "Grainy Noise Overlay",
+        "cues": {
+            "palette": "muted tones under film grain",
+            "typography": "clean type roughened by grain",
+            "composition": "standard layouts, atmosphere from noise",
+            "texture": "uniform grain veil, dust specks"
+        }
+    },
+    {
+        "name": "Analog Film Aesthetic",
+        "cues": {
+            "palette": "kodachrome warmth, faded highlights",
+            "typography": "date-stamp mono, title-card serifs",
+            "composition": "frame borders, light-leak edges",
+            "texture": "grain, halation, sprocket holes"
+        }
+    },
+    {
+        "name": "Print Media Emulation",
+        "cues": {
+            "palette": "CMYK inks on paper white",
+            "typography": "print-grade serif hierarchy, folios",
+            "composition": "spread logic, registration precision",
+            "texture": "halftone dots, ink traps, crop marks"
+        }
+    },
+    {
+        "name": "Comic Book Pop Art",
+        "cues": {
+            "palette": "four-color process brights",
+            "typography": "shouting display, speech-balloon script",
+            "composition": "panel grids, action bursts, gutters",
+            "texture": "ben-day dots, heavy ink outlines"
+        }
+    },
+    {
+        "name": "Manga Screentone Style",
+        "cues": {
+            "palette": "black-white with tone grays",
+            "typography": "vertical-friendly display, sound-effect brush",
+            "composition": "dynamic panel diagonals, speed-line focus",
+            "texture": "screentone dots, hatching, ink"
+        }
+    },
+    {
+        "name": "Ukiyo-e Digital Fusion",
+        "cues": {
+            "palette": "indigo, vermilion, ivory with digital neon",
+            "typography": "brush cartouches beside clean sans",
+            "composition": "flat woodblock planes, wave motifs in modern grids",
+            "texture": "woodgrain gradients, bokashi meets pixels"
+        }
+    },
+    {
+        "name": "Calligraphic UI",
+        "cues": {
+            "palette": "ink black, paper, vermilion seal",
+            "typography": "brush-stroke display, flowing hands",
+            "composition": "gestural headlines, generous emptiness",
+            "texture": "brush texture, ink bleed"
+        }
+    },
+    {
+        "name": "Minimal Line Weight",
+        "cues": {
+            "palette": "pale ground, single thin ink",
+            "typography": "hairline display, light labels",
+            "composition": "everything drawn at one delicate weight",
+            "texture": "1px discipline, fine rules"
+        }
+    },
+    {
+        "name": "Bold Border Minimal",
+        "cues": {
+            "palette": "white field, thick black frames, one accent",
+            "typography": "heavy grotesque inside heavy boxes",
+            "composition": "bordered modules, cellular clarity",
+            "texture": "fat keylines, no shadows"
+        }
+    },
+    {
+        "name": "Shadow-Drop Elevation",
+        "cues": {
+            "palette": "layer-lit neutrals",
+            "typography": "clean sans with floating headers",
+            "composition": "hierarchy told entirely by shadow depth",
+            "texture": "graduated soft shadows"
+        }
+    },
+    {
+        "name": "Floating Action UI",
+        "cues": {
+            "palette": "calm field, high-contrast action button",
+            "typography": "clear labels, icon-led actions",
+            "composition": "one hovering primary action, thumb-reach",
+            "texture": "raised circular button, ripple feedback"
+        }
+    },
+    {
+        "name": "Bottom Sheet UI",
+        "cues": {
+            "palette": "scrim-dimmed ground, bright sheet",
+            "typography": "sheet-title hierarchy, list actions",
+            "composition": "sliding panels from below, drag handles",
+            "texture": "rounded top corners, grabber pill"
+        }
+    },
+    {
+        "name": "Sidebar Dashboard",
+        "cues": {
+            "palette": "dark rail, light content field",
+            "typography": "nav labels, section headers",
+            "composition": "fixed side navigation, content grid right",
+            "texture": "active-item highlight, collapsible groups"
+        }
+    },
+    {
+        "name": "Mega-Menu Navigation",
+        "cues": {
+            "palette": "brand-topbar, panel white",
+            "typography": "category headers, dense link lists",
+            "composition": "full-width dropdown panels, columned links",
+            "texture": "hover reveals, promo tiles inside menus"
+        }
+    },
+    {
+        "name": "Breadcrumb Clean",
+        "cues": {
+            "palette": "quiet chrome, path-link accents",
+            "typography": "small trail labels, chevron rhythm",
+            "composition": "location-first orientation, shallow pages",
+            "texture": "separator ticks, truncation ellipses"
+        }
+    },
+    {
+        "name": "Tag-Cloud UI",
+        "cues": {
+            "palette": "weighted accent variations",
+            "typography": "size-by-frequency labels",
+            "composition": "organic clustered word fields",
+            "texture": "buoyant scattered arrangement"
+        }
+    },
+    {
+        "name": "Modular Scale UI",
+        "cues": {
+            "palette": "calm field, proportion-led accents",
+            "typography": "ratio-derived size ramp, harmonic steps",
+            "composition": "spacing from the same scale as type",
+            "texture": "mathematical rhythm throughout"
+        }
+    },
+    {
+        "name": "Golden Ratio Layout",
+        "cues": {
+            "palette": "quiet ground, focal accent at the division",
+            "typography": "phi-stepped hierarchy",
+            "composition": "1:1.618 splits, spiral focal flow",
+            "texture": "proportional serenity"
+        }
+    },
+    {
+        "name": "Rule of Thirds UI",
+        "cues": {
+            "palette": "imagery-led, intersection accents",
+            "typography": "headlines on third-lines",
+            "composition": "content at grid intersections, off-center heroes",
+            "texture": "photographic balance"
+        }
+    },
+    {
+        "name": "Center-Aligned Aesthetic",
+        "cues": {
+            "palette": "symmetric calm neutrals",
+            "typography": "centered headlines and decks",
+            "composition": "middle-axis ceremony, stacked symmetry",
+            "texture": "balanced margins, formal stillness"
+        }
+    },
+    {
+        "name": "Full-Bleed Imagery UI",
+        "cues": {
+            "palette": "photography-driven, scrim overlays",
+            "typography": "type over imagery, high contrast",
+            "composition": "edge-to-edge visuals, text floating on media",
+            "texture": "gradient scrims, ken-burns drift"
+        }
+    }
+]

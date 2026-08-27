@@ -1,0 +1,203 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "x-contract/design-tokens.schema.json",
+  "title": "DesignTokens",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "palette",
+    "spacing",
+    "typography",
+    "layout"
+  ],
+  "properties": {
+    "palette": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "slug",
+          "name",
+          "color"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "slug": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]+$"
+          },
+          "name": {
+            "type": "string"
+          },
+          "color": {
+            "type": "string",
+            "pattern": "^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "primary",
+              "secondary",
+              "accent",
+              "background",
+              "surface",
+              "text",
+              "muted",
+              "border",
+              "other"
+            ]
+          }
+        }
+      }
+    },
+    "spacing": {
+      "type": "object",
+      "required": [
+        "scale_unit",
+        "steps"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "scale_unit": {
+          "type": "string",
+          "enum": [
+            "px",
+            "rem",
+            "em",
+            "%",
+            "vw",
+            "vh"
+          ]
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "slug",
+              "size"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "slug": {
+                "type": "string",
+                "pattern": "^[a-z0-9-]+$"
+              },
+              "size": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "typography": {
+      "type": "object",
+      "required": [
+        "families",
+        "sizes"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "families": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "slug",
+              "name",
+              "fontFamily"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "slug": {
+                "type": "string",
+                "pattern": "^[a-z0-9-]+$"
+              },
+              "name": {
+                "type": "string"
+              },
+              "fontFamily": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "sizes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "slug",
+              "size"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "slug": {
+                "type": "string",
+                "pattern": "^[a-z0-9-]+$"
+              },
+              "name": {
+                "type": "string"
+              },
+              "size": {
+                "type": "string"
+              },
+              "fluid": {
+                "oneOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "min": {
+                        "type": "string"
+                      },
+                      "max": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "layout": {
+      "type": "object",
+      "required": [
+        "contentSize",
+        "wideSize"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "contentSize": {
+          "type": "string"
+        },
+        "wideSize": {
+          "type": "string"
+        }
+      }
+    },
+    "css": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "interfaces v2, expression-ladder rung 5: custom css compiled into global styles (theme-update-safe). Requires the cited failure of rungs 1-4.",
+      "properties": {
+        "global": {
+          "type": "string"
+        },
+        "blocks": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

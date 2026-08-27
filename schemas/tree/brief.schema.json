@@ -1,0 +1,590 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "x-pipeline/brief.schema.json",
+    "title": "Brief",
+    "description": "S1 output: the whole plan of the site, fixed before the second LLM call. S/B/P/I are read from it and never renegotiated.",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+        "version",
+        "identity",
+        "art_direction",
+        "style",
+        "axis",
+        "language",
+        "palette",
+        "pages",
+        "custom_blocks",
+        "schema_packages",
+        "navigation",
+        "footer"
+    ],
+    "properties": {
+        "version": {
+            "const": 1
+        },
+        "identity": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "site_title",
+                "tagline"
+            ],
+            "properties": {
+                "site_title": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "tagline": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "voice": {
+                    "type": "string"
+                }
+            }
+        },
+        "art_direction": {
+            "type": "string",
+            "minLength": 40,
+            "description": "Two or three sentences (wp-blocks SKILL \u00a72). Also the style line for the image pass."
+        },
+        "style": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "artistic",
+                "ui",
+                "rationale"
+            ],
+            "description": "The site's ONE style combo: an artistic style and a UI design style, chosen from the two lists in the prompt (exact names). A style the request itself names is set in stone — never overridden; only the missing half is chosen. The art_direction is written FROM this combo.",
+            "properties": {
+                "artistic": {
+                    "type": "string",
+                    "minLength": 2,
+                    "description": "EXACT name of one entry from the artistic styles list. Drives mood, color story, texture, imagery."
+                },
+                "ui": {
+                    "type": "string",
+                    "minLength": 2,
+                    "description": "EXACT name of one entry from the UI design styles list. Drives layout, density, component shapes, navigation feel."
+                },
+                "rationale": {
+                    "type": "string",
+                    "minLength": 20,
+                    "description": "One or two sentences: why THIS pairing serves THIS site — an argument, not a preference."
+                }
+            }
+        },
+        "axis": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "anchor",
+                "argument"
+            ],
+            "description": "The site's ONE alignment axis (wp-blocks SKILL \u00a72, One axis). The header dictates it and every section anchors on it; composition varies down the page, the axis does not.",
+            "properties": {
+                "anchor": {
+                    "enum": [
+                        "left",
+                        "center"
+                    ],
+                    "description": "Where text and content anchor site-wide. Ranged-left is the editorial default; center is a deliberate, ceremonial choice."
+                },
+                "argument": {
+                    "type": "string",
+                    "minLength": 10,
+                    "description": "One sentence: why this axis serves THIS art direction (not a preference \u2014 an argument)."
+                }
+            }
+        },
+        "language": {
+            "type": "string",
+            "minLength": 2,
+            "description": "The ONE language of every piece of content, named plainly (\"English\", \"Romanian\"): the dominant language of the request itself. Topic, mood, or addresses never switch it \u2014 a France address does not make French copy. Proper nouns keep their own language; the prose around them does not follow them."
+        },
+        "palette": {
+            "type": "array",
+            "minItems": 2,
+            "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                    "name",
+                    "color",
+                    "role"
+                ],
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "minLength": 1
+                    },
+                    "color": {
+                        "type": "string",
+                        "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$"
+                    },
+                    "role": {
+                        "enum": [
+                            "primary",
+                            "secondary",
+                            "accent",
+                            "background",
+                            "surface",
+                            "text",
+                            "muted",
+                            "border",
+                            "other"
+                        ]
+                    }
+                }
+            }
+        },
+        "pages": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                    "slug",
+                    "title",
+                    "sections"
+                ],
+                "properties": {
+                    "slug": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9-]+$"
+                    },
+                    "title": {
+                        "type": "string",
+                        "minLength": 1
+                    },
+                    "front_page": {
+                        "type": "boolean"
+                    },
+                    "sections": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                                "id",
+                                "role",
+                                "copy_notes",
+                                "design"
+                            ],
+                            "properties": {
+                                "id": {
+                                    "type": "string",
+                                    "pattern": "^[a-z0-9-]+$"
+                                },
+                                "role": {
+                                    "enum": [
+                                        "header",
+                                        "hero",
+                                        "features",
+                                        "gallery",
+                                        "testimonial",
+                                        "pricing",
+                                        "faq",
+                                        "cta",
+                                        "contact",
+                                        "content",
+                                        "footer",
+                                        "section"
+                                    ]
+                                },
+                                "copy_notes": {
+                                    "type": "string",
+                                    "minLength": 10,
+                                    "description": "What the section says \u2014 headlines, claims, tone. The tree task writes the actual copy from this."
+                                },
+                                "design": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "required": [
+                                        "band",
+                                        "layout"
+                                    ],
+                                    "properties": {
+                                        "band": {
+                                            "enum": [
+                                                "base",
+                                                "surface",
+                                                "contrast",
+                                                "accent"
+                                            ],
+                                            "description": "The ground this section sits on. Bands alternate down the page; AT MOST ONE accent band per page \u2014 the one bright moment."
+                                        },
+                                        "layout": {
+                                            "enum": [
+                                                "stack",
+                                                "split",
+                                                "asymmetric",
+                                                "grid"
+                                            ],
+                                            "description": "The section's COMPOSITION only — how the content is arranged. Vary it down the page. Anchoring comes from the site axis, never from this field."
+                                        },
+                                        "axis_break": {
+                                            "type": "boolean",
+                                            "description": "Deliberately break the site axis for this ONE section (it anchors on the opposite axis). At most one per page — the axis counterpart of the accent band — and the argument goes in notes."
+                                        },
+                                        "notes": {
+                                            "type": "string",
+                                            "description": "One line of art direction specific to this section. Required in spirit when axis_break is set: say why the break earns itself."
+                                        }
+                                    }
+                                },
+                                "image_intent": {
+                                    "oneOf": [
+                                        {
+                                            "type": "string",
+                                            "minLength": 10
+                                        },
+                                        {
+                                            "type": "array",
+                                            "minItems": 1,
+                                            "items": {
+                                                "type": "string",
+                                                "minLength": 10
+                                            }
+                                        }
+                                    ],
+                                    "description": "One intent per generated image this section shows. A gallery carries an ARRAY (3-6 intents); each intent is one metered image call (I)."
+                                },
+                                "uses_custom_block": {
+                                    "type": "string",
+                                    "pattern": "^[a-z0-9-]+$",
+                                    "description": "slug of a custom_blocks[] entry this section is built around."
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "custom_blocks": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                    "slug",
+                    "title",
+                    "gap_argument",
+                    "render_intent",
+                    "attributes"
+                ],
+                "properties": {
+                    "slug": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9-]+$"
+                    },
+                    "title": {
+                        "type": "string",
+                        "minLength": 1
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "User-facing inserter description, written for site editors."
+                    },
+                    "gap_argument": {
+                        "type": "string",
+                        "minLength": 40,
+                        "description": "Why core vocabulary cannot express the section \u2014 cite the rungs (supports, tokens, styles, variations) that fail. A block without a winning argument does not exist."
+                    },
+                    "render_intent": {
+                        "type": "string",
+                        "minLength": 20
+                    },
+                    "attributes": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                                "name",
+                                "type",
+                                "control"
+                            ],
+                            "properties": {
+                                "name": {
+                                    "type": "string",
+                                    "pattern": "^[a-zA-Z][a-zA-Z0-9]*$"
+                                },
+                                "type": {
+                                    "enum": [
+                                        "string",
+                                        "number",
+                                        "boolean",
+                                        "array"
+                                    ]
+                                },
+                                "default": {},
+                                "control": {
+                                    "enum": [
+                                        "text",
+                                        "textarea",
+                                        "number",
+                                        "toggle",
+                                        "select"
+                                    ]
+                                },
+                                "options": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "additionalProperties": false,
+                                        "required": [
+                                            "label",
+                                            "value"
+                                        ],
+                                        "properties": {
+                                            "label": {
+                                                "type": "string"
+                                            },
+                                            "value": {
+                                                "type": "string"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "interactivity": {
+                        "enum": [
+                            "none",
+                            "view-script",
+                            "interactivity-api"
+                        ]
+                    },
+                    "stylesheet": {
+                        "type": "boolean"
+                    }
+                }
+            }
+        },
+        "schema_packages": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                    "slug",
+                    "intent",
+                    "lifecycle_argument",
+                    "post_types"
+                ],
+                "properties": {
+                    "slug": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9-]+$"
+                    },
+                    "intent": {
+                        "type": "string",
+                        "minLength": 20
+                    },
+                    "lifecycle_argument": {
+                        "type": "string",
+                        "minLength": 40,
+                        "description": "Why this data has a lifecycle (created, moderated, listed, uninstalled) that a block alone cannot own. wp-schema S1: model before UI."
+                    },
+                    "post_types": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                                "slug",
+                                "label"
+                            ],
+                            "properties": {
+                                "slug": {
+                                    "type": "string",
+                                    "pattern": "^[a-z0-9-]+$"
+                                },
+                                "label": {
+                                    "type": "string"
+                                },
+                                "supports": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                },
+                                "public": {
+                                    "type": "boolean"
+                                },
+                                "meta": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "additionalProperties": false,
+                                        "required": [
+                                            "key",
+                                            "type"
+                                        ],
+                                        "properties": {
+                                            "key": {
+                                                "type": "string",
+                                                "pattern": "^[a-z0-9_]+$",
+                                                "description": "Registered meta key \u2014 snake_case (wp_schema_scaffold requires ^[a-z0-9_]+$)."
+                                            },
+                                            "type": {
+                                                "enum": [
+                                                    "string",
+                                                    "integer",
+                                                    "number",
+                                                    "boolean"
+                                                ]
+                                            },
+                                            "description": {
+                                                "type": "string"
+                                            }
+                                        }
+                                    }
+                                },
+                                "taxonomies": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "routes": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                                "path",
+                                "methods",
+                                "auth"
+                            ],
+                            "properties": {
+                                "path": {
+                                    "type": "string",
+                                    "pattern": "^/[a-z0-9/-]*$"
+                                },
+                                "methods": {
+                                    "type": "array",
+                                    "minItems": 1,
+                                    "items": {
+                                        "enum": [
+                                            "GET",
+                                            "POST"
+                                        ]
+                                    }
+                                },
+                                "auth": {
+                                    "enum": [
+                                        "public-nonce",
+                                        "capability"
+                                    ]
+                                },
+                                "capability": {
+                                    "type": "string"
+                                },
+                                "intent": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "bindings": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                                "name",
+                                "meta_key"
+                            ],
+                            "properties": {
+                                "name": {
+                                    "type": "string",
+                                    "pattern": "^[a-z0-9-]+$",
+                                    "description": "Block-binding source name \u2014 kebab-case (^[a-z0-9-]+$). Not the meta key: meta keys are snake_case, binding names are kebab-case."
+                                },
+                                "meta_key": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "navigation": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "items"
+            ],
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                            "label",
+                            "page_slug"
+                        ],
+                        "properties": {
+                            "label": {
+                                "type": "string",
+                                "minLength": 1
+                            },
+                            "page_slug": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9-]+$"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "footer": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "intent",
+                "items"
+            ],
+            "properties": {
+                "intent": {
+                    "type": "string",
+                    "minLength": 10
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                            "label",
+                            "page_slug"
+                        ],
+                        "properties": {
+                            "label": {
+                                "type": "string",
+                                "minLength": 1
+                            },
+                            "page_slug": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9-]+$"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

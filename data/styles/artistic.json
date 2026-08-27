@@ -1,0 +1,1706 @@
+[
+    {
+        "name": "Bauhaus",
+        "cues": {
+            "palette": "primary red, yellow, blue on white and black",
+            "typography": "geometric sans, lowercase experiments, functional hierarchy",
+            "composition": "grid-true, asymmetric balance, form follows function",
+            "texture": "flat planes, no ornament, honest materials"
+        }
+    },
+    {
+        "name": "Art Nouveau",
+        "aliases": [
+            "jugendstil"
+        ],
+        "cues": {
+            "palette": "muted greens, golds, dusty rose, ivory",
+            "typography": "flowing organic display serifs, hand-lettered feel",
+            "composition": "sinuous whiplash curves, framed vignettes, vertical stems",
+            "texture": "botanical ornament, stained-glass linework"
+        }
+    },
+    {
+        "name": "Art Deco",
+        "aliases": [
+            "deco"
+        ],
+        "cues": {
+            "palette": "black, gold, cream, jewel accents",
+            "typography": "geometric high-contrast display, wide letterspacing, uppercase",
+            "composition": "symmetry, stepped forms, sunbursts, strong verticals",
+            "texture": "metallic sheen, lacquer, inlaid geometric borders"
+        }
+    },
+    {
+        "name": "Brutalist",
+        "cues": {
+            "palette": "raw concrete grays, stark black-white, one loud accent",
+            "typography": "oversized heavy grotesque, brutal scale jumps",
+            "composition": "massive blocks, hard edges, unapologetic stacking",
+            "texture": "béton brut, unfinished, exposed seams"
+        }
+    },
+    {
+        "name": "Deconstructivism",
+        "cues": {
+            "palette": "steel, white, black with disruptive accents",
+            "typography": "fractured, rotated, colliding type",
+            "composition": "skewed grids, fragmented overlapping planes",
+            "texture": "sharp facets, torn edges, tension"
+        }
+    },
+    {
+        "name": "Postmodern",
+        "cues": {
+            "palette": "clashing brights with pastel irony",
+            "typography": "mixed families, playful historic quotation",
+            "composition": "broken rules, collage, ornament as joke",
+            "texture": "pattern-on-pattern, faux finishes"
+        }
+    },
+    {
+        "name": "Memphis Design",
+        "cues": {
+            "palette": "bubblegum pink, teal, yellow, black squiggles",
+            "typography": "chunky geometric sans, playful weights",
+            "composition": "scattered shapes, tilted grids, confetti balance",
+            "texture": "squiggles, terrazzo speckle, stripes"
+        }
+    },
+    {
+        "name": "Mid-Century Modern",
+        "aliases": [
+            "midcentury modern"
+        ],
+        "cues": {
+            "palette": "mustard, teal, burnt orange, walnut, cream",
+            "typography": "friendly geometric sans, generous spacing",
+            "composition": "clean horizontals, tapered forms, open plans",
+            "texture": "teak grain, boucle, atomic-era motifs"
+        }
+    },
+    {
+        "name": "Scandinavian",
+        "cues": {
+            "palette": "white, pale wood, soft gray, muted blue",
+            "typography": "light humanist sans, airy leading",
+            "composition": "functional calm, light-filled openness",
+            "texture": "birch, wool, matte ceramics"
+        }
+    },
+    {
+        "name": "Japandi",
+        "cues": {
+            "palette": "warm neutrals, charcoal, clay, moss",
+            "typography": "quiet sans, generous margins, small precise labels",
+            "composition": "low horizons, negative space, functional stillness",
+            "texture": "oak, linen, unglazed ceramic"
+        }
+    },
+    {
+        "name": "Wabi-Sabi",
+        "aliases": [
+            "wabisabi"
+        ],
+        "cues": {
+            "palette": "faded earth, ash, moss, unbleached cotton",
+            "typography": "imperfect humanist forms, understated scale",
+            "composition": "asymmetry, emptiness honored, humble focus",
+            "texture": "cracked glaze, weathered wood, patina"
+        }
+    },
+    {
+        "name": "Maximalist",
+        "cues": {
+            "palette": "saturated jewel tones layered fearlessly",
+            "typography": "expressive display mixing, dramatic scale",
+            "composition": "dense layering, every zone active, curated excess",
+            "texture": "pattern collision, gilt, lush surfaces"
+        }
+    },
+    {
+        "name": "Bohemian",
+        "cues": {
+            "palette": "terracotta, ochre, jewel accents, cream",
+            "typography": "eclectic serif-script pairings, relaxed",
+            "composition": "layered informal clusters, global mix",
+            "texture": "woven kilim, macramé, fringed layers"
+        }
+    },
+    {
+        "name": "Shabby Chic",
+        "cues": {
+            "palette": "chalk white, blush, faded pastels",
+            "typography": "vintage serifs, script accents",
+            "composition": "soft romantic vignettes, gentle symmetry",
+            "texture": "distressed paint, lace, florals"
+        }
+    },
+    {
+        "name": "Industrial",
+        "cues": {
+            "palette": "concrete gray, steel, rust, safety accents",
+            "typography": "condensed grotesques, stencil hints, utilitarian labels",
+            "composition": "exposed structure, modular bays, heavy horizontals",
+            "texture": "raw concrete, brushed metal, rivets, wear"
+        }
+    },
+    {
+        "name": "Rustic",
+        "cues": {
+            "palette": "barnwood brown, wheat, forest, iron",
+            "typography": "sturdy slab or hand-hewn serif",
+            "composition": "grounded, hearth-centered warmth",
+            "texture": "rough timber, burlap, hammered metal"
+        }
+    },
+    {
+        "name": "Coastal",
+        "cues": {
+            "palette": "white, sand, seafoam, navy",
+            "typography": "breezy light sans, airy caps",
+            "composition": "horizontal calm, open light, wide views",
+            "texture": "driftwood, rope, linen, weathered white"
+        }
+    },
+    {
+        "name": "Mediterranean",
+        "cues": {
+            "palette": "azure, whitewash, terracotta, olive",
+            "typography": "warm serifs, sunlit contrast",
+            "composition": "arched rhythms, courtyard openness",
+            "texture": "stucco, glazed tile, wrought iron"
+        }
+    },
+    {
+        "name": "Arts and Crafts",
+        "cues": {
+            "palette": "forest green, oxblood, oak, brass",
+            "typography": "hand-cut serifs, decorative initials",
+            "composition": "honest structure, bordered panels",
+            "texture": "quarter-sawn oak, hammered copper, stylized flora"
+        }
+    },
+    {
+        "name": "Victorian",
+        "cues": {
+            "palette": "burgundy, forest, gold, sepia",
+            "typography": "ornate serifs, engraved caps, rule-lined",
+            "composition": "dense symmetric ornament, framed hierarchy",
+            "texture": "damask, dark wood, filigree borders"
+        }
+    },
+    {
+        "name": "Romanesque",
+        "cues": {
+            "palette": "stone, ochre, oxide red, bronze",
+            "typography": "sturdy incised capitals, uncial hints",
+            "composition": "round arches, thick massing, arcaded rhythm",
+            "texture": "heavy masonry, carved capitals"
+        }
+    },
+    {
+        "name": "Byzantine",
+        "cues": {
+            "palette": "gold, deep blue, crimson, emerald",
+            "typography": "formal capitals, iconographic gravity",
+            "composition": "frontal symmetry, domed hierarchy, halo focus",
+            "texture": "gold mosaic tesserae, rich brocade"
+        }
+    },
+    {
+        "name": "Islamic Architecture",
+        "cues": {
+            "palette": "turquoise, cobalt, white, gold",
+            "typography": "calligraphic flourish, geometric frames",
+            "composition": "radial symmetry, iwan arches, courtyard order",
+            "texture": "girih tilework, muqarnas, arabesque"
+        }
+    },
+    {
+        "name": "Moorish",
+        "cues": {
+            "palette": "terracotta, turquoise, ivory, gold",
+            "typography": "ornamental display, horseshoe-arch frames",
+            "composition": "repeating arches, patterned courtyards",
+            "texture": "zellige tile, carved stucco lace"
+        }
+    },
+    {
+        "name": "Mughal",
+        "cues": {
+            "palette": "white marble, red sandstone, emerald, gold",
+            "typography": "elegant flourished display, inlay borders",
+            "composition": "mirrored symmetry, garden quadrants, domes",
+            "texture": "pietra dura inlay, floral arabesque"
+        }
+    },
+    {
+        "name": "Zen",
+        "cues": {
+            "palette": "stone gray, sand, moss, ink black",
+            "typography": "sparse, quiet, single brush accent",
+            "composition": "emptiness as subject, single focal stone",
+            "texture": "raked gravel, smooth river stone, paper"
+        }
+    },
+    {
+        "name": "Feng Shui",
+        "cues": {
+            "palette": "balanced five-element tones, soft naturals",
+            "typography": "calm, uncluttered, harmonious scale",
+            "composition": "flow-conscious placement, balanced quadrants",
+            "texture": "water, wood, natural fiber balance"
+        }
+    },
+    {
+        "name": "Traditional",
+        "cues": {
+            "palette": "navy, burgundy, cream, mahogany",
+            "typography": "classic serifs, time-honored hierarchy",
+            "composition": "symmetric, anchored, familiar order",
+            "texture": "polished wood, brass, woven classics"
+        }
+    },
+    {
+        "name": "Transitional",
+        "cues": {
+            "palette": "greige, taupe, soft navy, warm white",
+            "typography": "serif-sans pairing, comfortable modern",
+            "composition": "classic bones with clean-lined restraint",
+            "texture": "mixed smooth and woven, quiet contrast"
+        }
+    },
+    {
+        "name": "Contemporary",
+        "cues": {
+            "palette": "neutral field, confident single accent",
+            "typography": "current grotesque, crisp hierarchy",
+            "composition": "open, uncluttered, of-the-moment",
+            "texture": "smooth surfaces, glass, matte metal"
+        }
+    },
+    {
+        "name": "High-Tech Architecture",
+        "cues": {
+            "palette": "silver, white, structural blue, safety accents",
+            "typography": "engineered sans, technical labeling",
+            "composition": "exposed systems, modular frames, service cores",
+            "texture": "steel truss, cable, glazed skin"
+        }
+    },
+    {
+        "name": "Cyberpunk",
+        "cues": {
+            "palette": "neon magenta, cyan, acid green on black",
+            "typography": "glitched techno display, terminal mono",
+            "composition": "dense layered signage, vertical sprawl",
+            "texture": "neon glow, rain-slick chrome, static"
+        }
+    },
+    {
+        "name": "Steampunk",
+        "cues": {
+            "palette": "brass, copper, oxblood, sepia",
+            "typography": "Victorian display with mechanical flourish",
+            "composition": "gauge-and-gear clusters, ornate frames",
+            "texture": "riveted brass, leather, etched metal"
+        }
+    },
+    {
+        "name": "Solarpunk",
+        "cues": {
+            "palette": "leaf green, solar gold, sky, warm white",
+            "typography": "organic humanist sans, hopeful curves",
+            "composition": "greenery woven through structure, light-filled",
+            "texture": "living walls, bamboo, stained-glass sun"
+        }
+    },
+    {
+        "name": "Retrofuturism",
+        "cues": {
+            "palette": "atomic orange, teal, chrome, cream",
+            "typography": "space-age display, swooping italics",
+            "composition": "streamlined arcs, orbit motifs, optimism",
+            "texture": "chrome trim, starbursts, fins"
+        }
+    },
+    {
+        "name": "Synthwave",
+        "cues": {
+            "palette": "sunset magenta-orange, electric purple, grid cyan",
+            "typography": "chrome 80s display, laser italics",
+            "composition": "horizon grids, sun discs, mirrored glow",
+            "texture": "scanlines, neon haze, gradient chrome"
+        }
+    },
+    {
+        "name": "Vaporwave",
+        "cues": {
+            "palette": "pink, mint, lavender, glitch teal",
+            "typography": "serif-meets-fullwidth, ironic classical",
+            "composition": "floating statuary, checkerboards, collage haze",
+            "texture": "marble busts, palm silhouettes, VHS blur"
+        }
+    },
+    {
+        "name": "Acid Graphic",
+        "cues": {
+            "palette": "toxic green, chrome, hot pink, black",
+            "typography": "warped liquid display, aggressive distortion",
+            "composition": "chaotic layered energy, sticker collage",
+            "texture": "chrome blobs, ooze, rave grit"
+        }
+    },
+    {
+        "name": "Swiss Design",
+        "cues": {
+            "palette": "red, black, white, disciplined accents",
+            "typography": "neo-grotesque, flush-left, strict scale",
+            "composition": "mathematical grid, generous negative space",
+            "texture": "flat ink, photographic objectivity"
+        }
+    },
+    {
+        "name": "International Typographic Style",
+        "cues": {
+            "palette": "black-white with one signal color",
+            "typography": "Helvetica-class grotesque, ranged left, unjustified",
+            "composition": "modular grid, hierarchy by size and weight only",
+            "texture": "none — type and grid are the design"
+        }
+    },
+    {
+        "name": "Constructivism",
+        "cues": {
+            "palette": "revolutionary red, black, raw white",
+            "typography": "bold angled sans, diagonal setting",
+            "composition": "dynamic diagonals, photomontage, agitprop energy",
+            "texture": "rough print, overprint, collage edges"
+        }
+    },
+    {
+        "name": "Suprematism",
+        "cues": {
+            "palette": "black, red, white, pure primaries",
+            "typography": "stark geometric, floating placement",
+            "composition": "pure shapes adrift on white infinity",
+            "texture": "flat paint, no material reference"
+        }
+    },
+    {
+        "name": "Dadaism",
+        "cues": {
+            "palette": "newsprint, black, chance accents",
+            "typography": "ransom-note mixing, chaotic scale",
+            "composition": "anti-composition, absurd collage",
+            "texture": "torn paper, rubber stamps, found scraps"
+        }
+    },
+    {
+        "name": "Surrealism",
+        "cues": {
+            "palette": "dream blues, desert ochre, uncanny contrasts",
+            "typography": "classical serif set in impossible contexts",
+            "composition": "impossible juxtaposition, deep dreamscapes",
+            "texture": "hyperreal rendering of the unreal"
+        }
+    },
+    {
+        "name": "Cubism",
+        "cues": {
+            "palette": "analytic browns, grays, muted ochre",
+            "typography": "fragmented letterforms, collaged labels",
+            "composition": "faceted planes, simultaneous viewpoints",
+            "texture": "papier collé, canvas grain"
+        }
+    },
+    {
+        "name": "Expressionism",
+        "cues": {
+            "palette": "clashing emotional saturation, acid greens, reds",
+            "typography": "jagged hand-cut display, urgent weight",
+            "composition": "distorted perspective, emotional exaggeration",
+            "texture": "rough woodcut, aggressive brushwork"
+        }
+    },
+    {
+        "name": "Impressionism",
+        "cues": {
+            "palette": "sunlit pastels, lilac shadows, warm light",
+            "typography": "soft serifs, gentle contrast",
+            "composition": "loose captured moments, open air",
+            "texture": "broken color, visible strokes, shimmer"
+        }
+    },
+    {
+        "name": "Pop Art",
+        "cues": {
+            "palette": "primary comic brights, flat and loud",
+            "typography": "bold comic display, exclamatory scale",
+            "composition": "repetition, iconic close-ups, panel logic",
+            "texture": "ben-day dots, hard outlines, silkscreen"
+        }
+    },
+    {
+        "name": "Op Art",
+        "cues": {
+            "palette": "high-contrast black-white, vibrating pairs",
+            "typography": "clean geometric, pattern-integrated",
+            "composition": "optical rhythm, moiré, perceptual play",
+            "texture": "precise repeating line and wave"
+        }
+    },
+    {
+        "name": "Psychedelic",
+        "cues": {
+            "palette": "vibrating complementaries, acid rainbow",
+            "typography": "melting bulbous display, poster lettering",
+            "composition": "swirling concentric flow, dense poster energy",
+            "texture": "liquid marbling, kaleidoscope"
+        }
+    },
+    {
+        "name": "Grunge",
+        "cues": {
+            "palette": "dirty neutrals, faded black, rust",
+            "typography": "distressed, photocopied, hand-scrawled",
+            "composition": "layered mess, taped-on fragments",
+            "texture": "scratches, xerox noise, stains"
+        }
+    },
+    {
+        "name": "Y2K Aesthetic",
+        "aliases": [
+            "y2k"
+        ],
+        "cues": {
+            "palette": "silver, baby blue, hot pink, lime",
+            "typography": "bubble display, chrome gradients, pixel accents",
+            "composition": "orbs, swooshes, techno optimism",
+            "texture": "lens flares, plastic gloss, cyber chrome"
+        }
+    },
+    {
+        "name": "Cottagecore",
+        "cues": {
+            "palette": "meadow greens, butter, dusty rose, cream",
+            "typography": "storybook serifs, hand-penned scripts",
+            "composition": "cozy pastoral vignettes, wreathed frames",
+            "texture": "gingham, pressed flowers, linen"
+        }
+    },
+    {
+        "name": "Dark Academia",
+        "cues": {
+            "palette": "espresso, oxblood, forest, aged brass",
+            "typography": "scholarly serifs, typewriter accents",
+            "composition": "library gravitas, layered manuscripts",
+            "texture": "worn leather, candlelight, marginalia"
+        }
+    },
+    {
+        "name": "Light Academia",
+        "cues": {
+            "palette": "cream, oat, soft gold, sage",
+            "typography": "gentle serifs, italic annotations",
+            "composition": "sunlit study calm, open pages",
+            "texture": "linen, marble, soft paper"
+        }
+    },
+    {
+        "name": "Goth",
+        "cues": {
+            "palette": "black on black, blood red, violet",
+            "typography": "blackletter and sharp serifs",
+            "composition": "dramatic dark hierarchy, candlelit focus",
+            "texture": "velvet, lace, wrought iron"
+        }
+    },
+    {
+        "name": "Emo",
+        "cues": {
+            "palette": "black, hot pink, checkerboard white",
+            "typography": "scratchy hand-drawn, sticker fonts",
+            "composition": "diary-page collage, angsty layering",
+            "texture": "notebook scribbles, safety pins, tape"
+        }
+    },
+    {
+        "name": "Punk",
+        "cues": {
+            "palette": "black, white, shock pink, danger red",
+            "typography": "ransom-note cutouts, stencil shouts",
+            "composition": "anarchic collage, torn flyers",
+            "texture": "photocopy grit, staples, rips"
+        }
+    },
+    {
+        "name": "Glitch Art",
+        "cues": {
+            "palette": "RGB channel splits, corrupted neon",
+            "typography": "datamoshed, displaced, broken type",
+            "composition": "fragmented scans, slice displacement",
+            "texture": "pixel sorting, compression artifacts"
+        }
+    },
+    {
+        "name": "Pixel Art",
+        "cues": {
+            "palette": "limited retro palettes, dithered ramps",
+            "typography": "bitmap fonts, chunky pixels",
+            "composition": "tile grids, sprite-scale scenes",
+            "texture": "visible pixels, dither patterns"
+        }
+    },
+    {
+        "name": "Low Poly",
+        "cues": {
+            "palette": "faceted gradients, sunset ramps",
+            "typography": "clean geometric sans against facets",
+            "composition": "triangulated forms, angular landscapes",
+            "texture": "flat-shaded polygons, crisp edges"
+        }
+    },
+    {
+        "name": "Vector Art",
+        "cues": {
+            "palette": "clean flat fills, smooth gradients",
+            "typography": "crisp geometric, path-perfect",
+            "composition": "scalable shapes, layered illustration",
+            "texture": "none — pure bezier smoothness"
+        }
+    },
+    {
+        "name": "Line Art",
+        "cues": {
+            "palette": "monoline ink on paper tones",
+            "typography": "light hairline display, drawn feel",
+            "composition": "contour-only forms, open space",
+            "texture": "single-weight stroke, no fill"
+        }
+    },
+    {
+        "name": "Abstract",
+        "cues": {
+            "palette": "free expressive color relationships",
+            "typography": "type as shape, compositional element",
+            "composition": "non-representational balance, gesture",
+            "texture": "varied mark-making, layered fields"
+        }
+    },
+    {
+        "name": "Geometric",
+        "cues": {
+            "palette": "confident flat color blocking",
+            "typography": "modular geometric construction",
+            "composition": "circles, triangles, rules — pure shape order",
+            "texture": "hard edges, flat planes"
+        }
+    },
+    {
+        "name": "Organic Modern",
+        "cues": {
+            "palette": "warm neutrals, clay, sage, cream",
+            "typography": "soft contemporary sans, rounded warmth",
+            "composition": "curved forms in clean space",
+            "texture": "travertine, oak, boucle"
+        }
+    },
+    {
+        "name": "Biophilic Design",
+        "cues": {
+            "palette": "canopy greens, earth, sky, sun",
+            "typography": "natural humanist, leaf-like curves",
+            "composition": "nature woven through structure, light and air",
+            "texture": "living plants, wood grain, stone, water"
+        }
+    },
+    {
+        "name": "Eco-Design",
+        "cues": {
+            "palette": "recycled kraft, moss, unbleached naturals",
+            "typography": "honest utilitarian, low-ink sensibility",
+            "composition": "reduce-reuse clarity, modest scale",
+            "texture": "recycled paper, cork, raw fiber"
+        }
+    },
+    {
+        "name": "Sustainable Architecture",
+        "cues": {
+            "palette": "timber, earth tones, solar accents",
+            "typography": "clean engineering sans, quiet confidence",
+            "composition": "passive-light orientation, green integration",
+            "texture": "mass timber, rammed earth, planted roofs"
+        }
+    },
+    {
+        "name": "Kinetic Art",
+        "cues": {
+            "palette": "high-contrast movers on calm grounds",
+            "typography": "type in motion, rotational rhythm",
+            "composition": "implied or real movement, balance in flux",
+            "texture": "polished mobiles, mechanical repetition"
+        }
+    },
+    {
+        "name": "Optical Art",
+        "cues": {
+            "palette": "black-white vibration, systematic color steps",
+            "typography": "pattern-embedded geometry",
+            "composition": "perceptual illusion, rhythmic distortion",
+            "texture": "precision line fields, wave grids"
+        }
+    },
+    {
+        "name": "De Stijl",
+        "cues": {
+            "palette": "primary red-yellow-blue, black grid, white",
+            "typography": "rectilinear geometric, constructed forms",
+            "composition": "asymmetric orthogonal grid balance",
+            "texture": "flat planes, black rules"
+        }
+    },
+    {
+        "name": "Abstract Expressionism",
+        "cues": {
+            "palette": "raw expressive fields, dripped blacks",
+            "typography": "gestural, oversized, painterly",
+            "composition": "all-over energy, monumental scale",
+            "texture": "drips, splatter, heavy canvas"
+        }
+    },
+    {
+        "name": "Minimalism",
+        "cues": {
+            "palette": "monochrome fields, industrial neutrals",
+            "typography": "systematic, unexpressive, exact",
+            "composition": "serial repetition, literal space",
+            "texture": "industrial finish, no gesture"
+        }
+    },
+    {
+        "name": "Precisionism",
+        "cues": {
+            "palette": "clean industrial blues, whites, brick",
+            "typography": "machined sans, sharp edges",
+            "composition": "razor geometry of industry, smooth volumes",
+            "texture": "airless smooth surfaces, hard light"
+        }
+    },
+    {
+        "name": "Futurism",
+        "cues": {
+            "palette": "speed reds, steel blues, dynamic contrasts",
+            "typography": "italic velocity, words-in-freedom",
+            "composition": "motion lines, dynamic diagonals, simultaneity",
+            "texture": "fractured speed blur"
+        }
+    },
+    {
+        "name": "Vorticism",
+        "cues": {
+            "palette": "harsh black, white, machine red",
+            "typography": "angular blast-style display",
+            "composition": "vortex diagonals, mechanical abstraction",
+            "texture": "hard-edged machined planes"
+        }
+    },
+    {
+        "name": "Fluxus",
+        "cues": {
+            "palette": "newsprint, black, stamped red",
+            "typography": "typewriter, rubber stamp, instruction cards",
+            "composition": "event scores, boxed multiples, anti-art wit",
+            "texture": "cheap paper, stamps, found objects"
+        }
+    },
+    {
+        "name": "Neo-Geo",
+        "cues": {
+            "palette": "synthetic brights, commercial neons",
+            "typography": "sharp geometric, ironic precision",
+            "composition": "cool diagrammatic abstraction",
+            "texture": "plastic-smooth, day-glo flatness"
+        }
+    },
+    {
+        "name": "Rococo",
+        "cues": {
+            "palette": "pastel pinks, powder blue, cream, gold",
+            "typography": "delicate serifs, flourished italic accents",
+            "composition": "playful asymmetric curves, light airy scenes",
+            "texture": "shell motifs, gilded filigree, porcelain finish"
+        }
+    },
+    {
+        "name": "Baroque",
+        "cues": {
+            "palette": "deep crimson, gold, umber, ivory",
+            "typography": "ornate serifs, swash italics, engraved feel",
+            "composition": "dramatic diagonals, theatrical depth, grand focal points",
+            "texture": "gilt ornament, velvet, carved flourish"
+        }
+    },
+    {
+        "name": "Renaissance",
+        "cues": {
+            "palette": "earth ochres, ultramarine, sage, parchment",
+            "typography": "humanist serifs, classical proportions, small caps",
+            "composition": "perspective depth, golden-ratio balance, centered order",
+            "texture": "fresco softness, aged parchment, marble"
+        }
+    },
+    {
+        "name": "Neoclassical",
+        "cues": {
+            "palette": "marble white, stone gray, navy, antique gold",
+            "typography": "didone serifs, engraved capitals, restrained",
+            "composition": "strict symmetry, columned rhythm, pediment hierarchy",
+            "texture": "polished marble, subtle relief, laurel motifs"
+        }
+    },
+    {
+        "name": "Gothic",
+        "cues": {
+            "palette": "charcoal, deep purple, blood red, bone",
+            "typography": "blackletter display touches over sober serif body",
+            "composition": "vertical thrust, pointed-arch rhythms, tracery frames",
+            "texture": "carved stone, stained glass, wrought iron"
+        }
+    },
+    {
+        "name": "Beaux-Arts",
+        "cues": {
+            "palette": "limestone, gilt, slate blue, cream",
+            "typography": "inscribed Roman capitals, academic order",
+            "composition": "axial symmetry, monumental approach",
+            "texture": "carved garlands, coffered grandeur"
+        }
+    },
+    {
+        "name": "Federal Style",
+        "cues": {
+            "palette": "muted blue, straw, brick red, white trim",
+            "typography": "refined transitional serifs, oval motifs",
+            "composition": "delicate symmetry, fanlight geometry",
+            "texture": "slender molding, eagle and swag motifs"
+        }
+    },
+    {
+        "name": "Greek Revival",
+        "cues": {
+            "palette": "temple white, pale stone, black shutters",
+            "typography": "wide Roman capitals, lapidary spacing",
+            "composition": "columned porticos, pediment order",
+            "texture": "fluted columns, painted timber"
+        }
+    },
+    {
+        "name": "Italianate",
+        "cues": {
+            "palette": "warm buff, olive, deep brown cornices",
+            "typography": "sturdy Victorian serifs",
+            "composition": "tall windows, bracketed eaves, campanile accents",
+            "texture": "cast ornament, hooded moldings"
+        }
+    },
+    {
+        "name": "Second Empire",
+        "cues": {
+            "palette": "slate mansard gray, cream, gilt",
+            "typography": "ornate French display, banded rules",
+            "composition": "mansard silhouettes, paired columns",
+            "texture": "iron cresting, patterned slate"
+        }
+    },
+    {
+        "name": "Queen Anne",
+        "cues": {
+            "palette": "painted-lady multicolor, sage, rust, cream",
+            "typography": "eclectic Victorian mixing",
+            "composition": "asymmetric turrets, wraparound porches",
+            "texture": "fish-scale shingle, spindlework"
+        }
+    },
+    {
+        "name": "Tudor Revival",
+        "cues": {
+            "palette": "half-timber brown, cream stucco, brick",
+            "typography": "old-English display touches",
+            "composition": "steep gables, leaded casements",
+            "texture": "timber framing, herringbone brick"
+        }
+    },
+    {
+        "name": "Colonial Revival",
+        "cues": {
+            "palette": "white clapboard, black shutters, brick",
+            "typography": "traditional serifs, colonial formality",
+            "composition": "centered doorways, balanced facades",
+            "texture": "clapboard, paneled doors, brass"
+        }
+    },
+    {
+        "name": "Mission Revival",
+        "cues": {
+            "palette": "white stucco, red tile, desert tan",
+            "typography": "rounded mission-style display",
+            "composition": "curved parapets, arcades, bell motifs",
+            "texture": "smooth stucco, clay tile"
+        }
+    },
+    {
+        "name": "Pueblo Revival",
+        "cues": {
+            "palette": "adobe earth, turquoise, sun-bleached wood",
+            "typography": "soft rounded display, handcraft feel",
+            "composition": "stepped massing, rounded edges",
+            "texture": "adobe plaster, vigas, carved wood"
+        }
+    },
+    {
+        "name": "Spanish Colonial",
+        "cues": {
+            "palette": "whitewash, terracotta, cobalt, iron black",
+            "typography": "colonial serifs, tiled ornament",
+            "composition": "courtyards, arcades, tiled stairs",
+            "texture": "talavera tile, wrought iron, stucco"
+        }
+    },
+    {
+        "name": "Prairie School",
+        "cues": {
+            "palette": "prairie ochre, olive, brick, cream",
+            "typography": "geometric craftsman lettering",
+            "composition": "long horizontals, cantilevered planes",
+            "texture": "roman brick, art glass, oak"
+        }
+    },
+    {
+        "name": "Craftsman",
+        "cues": {
+            "palette": "forest, amber, oak, copper",
+            "typography": "hand-tooled display, sturdy serifs",
+            "composition": "exposed joinery, grounded porches",
+            "texture": "quartersawn oak, hammered copper"
+        }
+    },
+    {
+        "name": "Art Moderne",
+        "cues": {
+            "palette": "white, chrome, nautical navy",
+            "typography": "streamlined sans, speed whiskers",
+            "composition": "rounded corners, horizontal banding",
+            "texture": "smooth stucco, glass block, steel rail"
+        }
+    },
+    {
+        "name": "Streamline Moderne",
+        "cues": {
+            "palette": "cream, sea green, chrome accents",
+            "typography": "aerodynamic italic display",
+            "composition": "wind-tunnel curves, ribbon windows",
+            "texture": "polished chrome speed lines"
+        }
+    },
+    {
+        "name": "International Style",
+        "cues": {
+            "palette": "white, glass, steel gray, black",
+            "typography": "rational grotesque, no ornament",
+            "composition": "ribbon glazing, pilotis, free plans",
+            "texture": "curtain-wall smoothness"
+        }
+    },
+    {
+        "name": "Googie",
+        "cues": {
+            "palette": "atomic red, aqua, sunshine yellow",
+            "typography": "exuberant angled display, starbursts",
+            "composition": "upswept roofs, boomerang angles",
+            "texture": "neon, terrazzo, chrome"
+        }
+    },
+    {
+        "name": "Rayonism",
+        "cues": {
+            "palette": "prismatic beams, refracted brights",
+            "typography": "sliced angular display",
+            "composition": "intersecting light rays, fractured space",
+            "texture": "sharp radiating strokes"
+        }
+    },
+    {
+        "name": "Orphism",
+        "cues": {
+            "palette": "chromatic circles, prismatic harmony",
+            "typography": "rhythmic curved display",
+            "composition": "concentric color discs, musical abstraction",
+            "texture": "soft simultaneous contrast"
+        }
+    },
+    {
+        "name": "Synchromism",
+        "cues": {
+            "palette": "orchestrated color scales, vivid chords",
+            "typography": "color-shaped display forms",
+            "composition": "swirling color symphonies",
+            "texture": "blended chromatic planes"
+        }
+    },
+    {
+        "name": "Purism",
+        "cues": {
+            "palette": "cool grays, muted blues, ochre",
+            "typography": "machine-clean sans, exact spacing",
+            "composition": "still-life geometry, mathematical calm",
+            "texture": "matte precision, no gesture"
+        }
+    },
+    {
+        "name": "Spatialism",
+        "cues": {
+            "palette": "monochrome fields, void black",
+            "typography": "punctured, slit, minimal",
+            "composition": "the cut as gesture, space beyond surface",
+            "texture": "slashed canvas, pierced holes"
+        }
+    },
+    {
+        "name": "Concrete Art",
+        "cues": {
+            "palette": "systematic primaries, exact grays",
+            "typography": "constructed geometric, rule-based",
+            "composition": "mathematical self-referential order",
+            "texture": "flat mechanical finish"
+        }
+    },
+    {
+        "name": "Kineticism",
+        "cues": {
+            "palette": "high-contrast pattern movers",
+            "typography": "vibrating repeated forms",
+            "composition": "systematic motion illusion",
+            "texture": "precise mechanical repetition"
+        }
+    },
+    {
+        "name": "Photorealism",
+        "cues": {
+            "palette": "true-to-lens color fidelity",
+            "typography": "clean neutral captions, gallery restraint",
+            "composition": "camera-framed banality, mirror precision",
+            "texture": "invisible brushwork, lens sheen"
+        }
+    },
+    {
+        "name": "Hyperrealism",
+        "cues": {
+            "palette": "heightened lifelike saturation",
+            "typography": "minimal, lets the image dominate",
+            "composition": "monumental close-ups, intensified detail",
+            "texture": "sharper-than-life pores and reflections"
+        }
+    },
+    {
+        "name": "Neo-Expressionism",
+        "cues": {
+            "palette": "violent brights, tar black, raw canvas",
+            "typography": "scrawled, crossed-out, urgent",
+            "composition": "figurative chaos, crowded energy",
+            "texture": "thick impasto, crude marks"
+        }
+    },
+    {
+        "name": "Transavantgarde",
+        "cues": {
+            "palette": "mediterranean earth, mythic golds",
+            "typography": "painterly classical references",
+            "composition": "mythic figuration, eclectic quotation",
+            "texture": "loose expressive paint"
+        }
+    },
+    {
+        "name": "Superflat",
+        "cues": {
+            "palette": "anime candy brights, flat CMYK pop",
+            "typography": "kawaii rounded display",
+            "composition": "depthless all-over pattern, character swarm",
+            "texture": "vinyl-flat, outline crisp"
+        }
+    },
+    {
+        "name": "Toyism",
+        "cues": {
+            "palette": "toybox saturation, storybook brights",
+            "typography": "playful rounded display",
+            "composition": "narrative dreamscenes, dotted signatures",
+            "texture": "smooth enamel, patterned detail"
+        }
+    },
+    {
+        "name": "Lowbrow Art",
+        "cues": {
+            "palette": "hot-rod flake, comic brights",
+            "typography": "custom-culture script, pinstripe flourish",
+            "composition": "cartoon surrealism, underground wit",
+            "texture": "airbrush gloss, pinstriping"
+        }
+    },
+    {
+        "name": "Pop Surrealism",
+        "cues": {
+            "palette": "candy-dark contrasts, doll pastels",
+            "typography": "storybook-gone-wrong serifs",
+            "composition": "big-eyed uncanny narratives",
+            "texture": "polished oil finish, vintage patina"
+        }
+    },
+    {
+        "name": "Street Art",
+        "cues": {
+            "palette": "aerosol brights on urban gray",
+            "typography": "tag scripts, throw-up bubbles",
+            "composition": "wall-scale statements, site-responsive",
+            "texture": "spray fade, drips, brick"
+        }
+    },
+    {
+        "name": "Graffiti",
+        "cues": {
+            "palette": "wildstyle chrome, fills, outline black",
+            "typography": "interlocked letterform energy",
+            "composition": "burners, arrows, letter architecture",
+            "texture": "aerosol gradients, halo glow"
+        }
+    },
+    {
+        "name": "Muralism",
+        "cues": {
+            "palette": "earthy monumental warms, fresco tones",
+            "typography": "heroic display, banner ribbons",
+            "composition": "epic narrative sweep, public scale",
+            "texture": "fresco matte, wall grain"
+        }
+    },
+    {
+        "name": "Digital Art",
+        "cues": {
+            "palette": "unbounded RGB, luminous gradients",
+            "typography": "contemporary digital display",
+            "composition": "layer-native compositing freedom",
+            "texture": "airbrush-smooth to painterly brushes"
+        }
+    },
+    {
+        "name": "Generative Art",
+        "cues": {
+            "palette": "algorithmic harmonies, seeded variation",
+            "typography": "monospace credits, system labels",
+            "composition": "emergent pattern fields, rule-driven variety",
+            "texture": "plotter lines, particle traces"
+        }
+    },
+    {
+        "name": "Algorithmic Art",
+        "cues": {
+            "palette": "computed gradients, parametric color",
+            "typography": "technical mono annotations",
+            "composition": "mathematical structures made visible",
+            "texture": "precise curves, recursive detail"
+        }
+    },
+    {
+        "name": "Fractal Art",
+        "cues": {
+            "palette": "deep-zoom spectral cycling",
+            "typography": "minimal, defers to infinite detail",
+            "composition": "self-similar spirals, infinite recursion",
+            "texture": "filigree edges, nested complexity"
+        }
+    },
+    {
+        "name": "Glitchcore",
+        "cues": {
+            "palette": "oversaturated RGB clashes, corrupted rainbow on black",
+            "typography": "broken shifting display, layered duplicates",
+            "composition": "chaotic overload, flashing fragment collage",
+            "texture": "heavy datamosh, pixel shred, static bursts"
+        }
+    },
+    {
+        "name": "Cyber-Goth",
+        "aliases": [
+            "cybergoth"
+        ],
+        "cues": {
+            "palette": "black with UV neon green, violet, biohazard accents",
+            "typography": "spiked techno-blackletter hybrids",
+            "composition": "club-flyer density, industrial symmetry",
+            "texture": "PVC gloss, goggles-and-tubes hardware, UV glow"
+        }
+    },
+    {
+        "name": "Seapunk",
+        "cues": {
+            "palette": "aqua, seafoam, dolphin gradients, chrome",
+            "typography": "early-web chrome display, wave dingbats",
+            "composition": "floating ocean iconography, tiled water",
+            "texture": "3D dolphins, marble columns, water caustics"
+        }
+    },
+    {
+        "name": "Dreamcore",
+        "cues": {
+            "palette": "washed-out sky blues, hazy golds, off-whites",
+            "typography": "slightly wrong familiar serifs, faded captions",
+            "composition": "liminal emptiness, lone objects in vast space",
+            "texture": "soft blur, overexposure, dream haze"
+        }
+    },
+    {
+        "name": "Weirdcore",
+        "cues": {
+            "palette": "clashing saturated primaries on dingy grounds",
+            "typography": "misplaced system text, ominous captions",
+            "composition": "unsettling non-sequitur placement, empty rooms",
+            "texture": "low-res JPEG grit, red-eye flash, arrows and circles"
+        }
+    },
+    {
+        "name": "Kidcore",
+        "cues": {
+            "palette": "crayon primaries, rainbow everything",
+            "typography": "chunky playful print, sticker letters",
+            "composition": "toybox scatter, cheerful clutter",
+            "texture": "stickers, crayon scribble, plastic beads"
+        }
+    },
+    {
+        "name": "Space Age",
+        "cues": {
+            "palette": "white, silver, orbit orange, cosmic teal",
+            "typography": "rounded space-era display, italic thrust",
+            "composition": "orbital curves, pod forms, starfield openness",
+            "texture": "molded plastic, chrome spheres, starbursts"
+        }
+    },
+    {
+        "name": "Atompunk",
+        "cues": {
+            "palette": "atomic red, turquoise, mustard, chrome",
+            "typography": "googie display, boomerang flourish",
+            "composition": "atom motifs, radial optimism, fin shapes",
+            "texture": "formica speckle, chrome trim, starburst clocks"
+        }
+    },
+    {
+        "name": "Dieselpunk",
+        "cues": {
+            "palette": "gunmetal, oil brown, brass, warning red",
+            "typography": "riveted deco-industrial caps, stenciled serials",
+            "composition": "streamlined machines, propaganda-poster drama",
+            "texture": "riveted steel, engine grease, canvas"
+        }
+    },
+    {
+        "name": "Biopunk",
+        "cues": {
+            "palette": "sickly greens, membrane pinks, lab white",
+            "typography": "organic distorted techno, specimen labels",
+            "composition": "grown-not-built forms, vat and vein motifs",
+            "texture": "wet membranes, chitin, culture-dish gloss"
+        }
+    },
+    {
+        "name": "Cassette Futurism",
+        "cues": {
+            "palette": "beige, orange, brown, phosphor green",
+            "typography": "chunky 70s techno display, LCD numerals",
+            "composition": "chunky-console panels, honest buttons and vents",
+            "texture": "matte plastic, tape spools, CRT curvature"
+        }
+    },
+    {
+        "name": "Whimsigoth",
+        "cues": {
+            "palette": "midnight purple, wine, gold celestial accents",
+            "typography": "curly mystical serifs, moon-and-star dingbats",
+            "composition": "layered cozy-occult clutter, tapestry framing",
+            "texture": "velvet, celestial patterns, candle glow"
+        }
+    },
+    {
+        "name": "Coastal Grandmother",
+        "cues": {
+            "palette": "cream, linen white, hydrangea blue, sand",
+            "typography": "genteel serifs, relaxed italic accents",
+            "composition": "breezy uncluttered comfort, garden-to-kitchen calm",
+            "texture": "linen, rattan, striped cotton, weathered wood"
+        }
+    },
+    {
+        "name": "Normcore",
+        "cues": {
+            "palette": "plain grays, denim blue, unremarkable neutrals",
+            "typography": "default-adjacent sans, deliberately unstyled",
+            "composition": "ordinary catalog plainness, no statement",
+            "texture": "flat cotton, stock-photo blandness embraced"
+        }
+    },
+    {
+        "name": "Gorpcore",
+        "cues": {
+            "palette": "trail orange, forest green, carabiner silver, black",
+            "typography": "outdoor-gear techno sans, spec labels",
+            "composition": "gear-flatlay grids, topo-map backdrops",
+            "texture": "ripstop nylon, webbing straps, contour lines"
+        }
+    },
+    {
+        "name": "Indie Sleaze",
+        "cues": {
+            "palette": "flash-blown contrast, party neon on grime",
+            "typography": "messy condensed caps, flyer stamps",
+            "composition": "candid chaos, off-kilter crops",
+            "texture": "direct flash, film grain, sweat and glitter"
+        }
+    },
+    {
+        "name": "New Wave",
+        "cues": {
+            "palette": "hot pink, electric blue, black, acid yellow",
+            "typography": "angular quirky display, zigzag baselines",
+            "composition": "skewed blocks, diagonal energy, squiggle accents",
+            "texture": "flat pop planes, memphis-adjacent patterns"
+        }
+    },
+    {
+        "name": "Post-Punk",
+        "cues": {
+            "palette": "stark black-white, institutional gray, one cold accent",
+            "typography": "austere grotesque, wide-tracked caps",
+            "composition": "sparse severe blocks, clinical space",
+            "texture": "pulse-wave diagrams, matte print, photocopy chill"
+        }
+    },
+    {
+        "name": "Dark Wave",
+        "cues": {
+            "palette": "black, fog gray, cold violet, moonlight",
+            "typography": "gothic serifs with cold modern tracking",
+            "composition": "veiled romantic austerity, heavy negative dark",
+            "texture": "mist gradients, silver on black"
+        }
+    },
+    {
+        "name": "Mod Style",
+        "cues": {
+            "palette": "black-white check, target red-white-blue",
+            "typography": "clean 60s grotesque, sharp tight tracking",
+            "composition": "roundel motifs, crisp tailored geometry",
+            "texture": "vespa chrome, tonic sheen, op checks"
+        }
+    },
+    {
+        "name": "Hippie Aesthetic",
+        "cues": {
+            "palette": "tie-dye rainbow, earth browns, sunflower gold",
+            "typography": "bulbous psychedelic lettering, hand-drawn",
+            "composition": "flowing communal collage, flower motifs",
+            "texture": "tie-dye swirl, macramé, patchwork denim"
+        }
+    },
+    {
+        "name": "Disco Aesthetic",
+        "cues": {
+            "palette": "mirror silver, hot magenta, gold, midnight blue",
+            "typography": "chrome script and fat rounded display",
+            "composition": "radial sparkle, dance-floor grids",
+            "texture": "mirrorball glitter, lamé sheen, light rays"
+        }
+    },
+    {
+        "name": "Glam Rock",
+        "cues": {
+            "palette": "glitter gold, electric blue, lipstick red, black",
+            "typography": "flamboyant chrome display, lightning bolts",
+            "composition": "theatrical poster staging, star motifs",
+            "texture": "sequins, platform shine, stage smoke"
+        }
+    },
+    {
+        "name": "Riot Grrrl",
+        "cues": {
+            "palette": "photocopy black-white, riot pink, marker red",
+            "typography": "cut-and-paste zine letters, scrawled marker",
+            "composition": "pasted manifesto collage, urgent margins",
+            "texture": "xerox grit, tape, handwriting"
+        }
+    },
+    {
+        "name": "Hip Hop Golden Era",
+        "aliases": [
+            "golden era hip hop"
+        ],
+        "cues": {
+            "palette": "brick, gold chains, kente brights, asphalt gray",
+            "typography": "graffiti-piece display, bold slab tags",
+            "composition": "album-cover portrait blocks, boombox iconography",
+            "texture": "spray fade, gold rope, polaroid grain"
+        }
+    },
+    {
+        "name": "Afrofuturism",
+        "cues": {
+            "palette": "cosmic purples, gold, kente and ankara brights",
+            "typography": "futurist display with pan-African geometry",
+            "composition": "regal sci-fi portraiture, radiant symmetry",
+            "texture": "beadwork, metallic headdress, star fields"
+        }
+    },
+    {
+        "name": "Chicano Art",
+        "cues": {
+            "palette": "fierce reds, turquoise, gold, mural earth",
+            "typography": "old-english script, sign-painter flourish",
+            "composition": "mural narrative density, lowrider curves",
+            "texture": "airbrush fade, fine-line black ink, pinstripe"
+        }
+    },
+    {
+        "name": "Harajuku Streetwear",
+        "cues": {
+            "palette": "clashing candy brights, layered neons",
+            "typography": "mixed kawaii-punk display, sticker chaos",
+            "composition": "maximal layered styling, decora clutter",
+            "texture": "patches, charms, tulle, vinyl"
+        }
+    },
+    {
+        "name": "Kawaii Culture",
+        "cues": {
+            "palette": "pastel pink, baby blue, cream, cherry accents",
+            "typography": "round bubbly display, face dingbats",
+            "composition": "mascot-centered cuteness, rounded everything",
+            "texture": "plush softness, blush stickers, sparkle dots"
+        }
+    },
+    {
+        "name": "Visual Kei",
+        "cues": {
+            "palette": "black, blood red, silver, royal purple",
+            "typography": "ornate gothic display, sharp flourish",
+            "composition": "theatrical androgynous portraiture, rose motifs",
+            "texture": "lace, leather, teased-hair drama, chrome studs"
+        }
+    },
+    {
+        "name": "Otaku Culture",
+        "cues": {
+            "palette": "anime-cel brights, akihabara neon",
+            "typography": "manga display, exclamation energy",
+            "composition": "character-shrine density, panel collage",
+            "texture": "cel gloss, figure plastic, poster wall"
+        }
+    },
+    {
+        "name": "Neo-Noir",
+        "cues": {
+            "palette": "black, rain-slick blue, neon red slice",
+            "typography": "cold condensed sans, title-card serifs",
+            "composition": "venetian-blind shadows, lone-figure framing",
+            "texture": "wet asphalt reflections, cigarette haze, neon bleed"
+        }
+    },
+    {
+        "name": "Tech-Wear",
+        "aliases": [
+            "techwear"
+        ],
+        "cues": {
+            "palette": "matte black, asphalt gray, safety orange zip",
+            "typography": "technical mono labels, spec callouts",
+            "composition": "modular strap-and-pocket articulation, urban utility",
+            "texture": "waterproof shell, buckles, taped seams"
+        }
+    },
+    {
+        "name": "Military Tactical",
+        "cues": {
+            "palette": "olive drab, coyote tan, black, blaze accents",
+            "typography": "stencil caps, designation numerals",
+            "composition": "loadout grids, patch-and-badge order",
+            "texture": "molle webbing, camo patterns, gun-metal"
+        }
+    },
+    {
+        "name": "Workwear Aesthetic",
+        "cues": {
+            "palette": "duck canvas tan, denim indigo, rust, forest",
+            "typography": "vintage label slabs, union stamps",
+            "composition": "honest catalog grids, tool-bench order",
+            "texture": "waxed canvas, triple stitching, brass rivets"
+        }
+    },
+    {
+        "name": "Americana",
+        "cues": {
+            "palette": "faded red-white-blue, denim, wheat gold",
+            "typography": "hand-painted sign serifs, star-spangled script",
+            "composition": "roadside-diner warmth, county-fair symmetry",
+            "texture": "weathered enamel signs, gingham, chrome trim"
+        }
+    },
+    {
+        "name": "Western Ranch",
+        "cues": {
+            "palette": "saddle brown, dust tan, turquoise, rust red",
+            "typography": "wanted-poster slabs, rope-script flourish",
+            "composition": "big-sky horizontals, corral framing",
+            "texture": "tooled leather, rough timber, horseshoe iron"
+        }
+    },
+    {
+        "name": "Cabin Core",
+        "cues": {
+            "palette": "pine green, log brown, flannel red, smoke gray",
+            "typography": "cozy sturdy serifs, hand-carved feel",
+            "composition": "hearth-centered warmth, small-window coziness",
+            "texture": "log grain, plaid flannel, wool blankets"
+        }
+    },
+    {
+        "name": "Alpine Lodge",
+        "cues": {
+            "palette": "snow white, spruce, antler cream, fireside amber",
+            "typography": "chalet blackletter hints over clean serifs",
+            "composition": "steep-gable symmetry, après-ski warmth",
+            "texture": "knit patterns, stone hearth, timber beams"
+        }
+    },
+    {
+        "name": "Desert Modernism",
+        "cues": {
+            "palette": "sand, terracotta, palm green, pool turquoise",
+            "typography": "breezy mid-century sans, cursive script accents",
+            "composition": "low horizontal lines, breeze-block rhythm",
+            "texture": "breeze blocks, stucco, sun-bleached concrete"
+        }
+    },
+    {
+        "name": "Hollywood Regency",
+        "cues": {
+            "palette": "black-white lacquer, emerald, gold, blush",
+            "typography": "glamorous high-contrast didone, gilded caps",
+            "composition": "mirrored symmetry, dramatic entryway staging",
+            "texture": "lacquer gloss, brass, greek-key trim, velvet"
+        }
+    },
+    {
+        "name": "Palm Beach Chic",
+        "cues": {
+            "palette": "flamingo pink, palm green, white, lemon",
+            "typography": "preppy serifs, breezy script accents",
+            "composition": "sunny symmetric verandas, garden-party order",
+            "texture": "banana-leaf print, wicker, scalloped trim"
+        }
+    },
+    {
+        "name": "Neo-Pop",
+        "cues": {
+            "palette": "hyper-saturated toy brights, balloon sheen",
+            "typography": "inflated glossy display, sticker boldness",
+            "composition": "iconic single-object worship, repetition",
+            "texture": "balloon-dog gloss, vinyl shine, flat outlines"
+        }
+    },
+    {
+        "name": "Post-Internet Art",
+        "cues": {
+            "palette": "default-blue hyperlink, render gray, brand brights",
+            "typography": "system fonts used knowingly, watermark layers",
+            "composition": "stock-image collage, screenshot framing",
+            "texture": "render sheen, drop shadows, watermark tiling"
+        }
+    },
+    {
+        "name": "Mall Goth",
+        "cues": {
+            "palette": "black, blood red, chain silver, bruise purple",
+            "typography": "spiky metal-band display, safety-pin letters",
+            "composition": "poster-wall clutter, band-tee framing",
+            "texture": "fishnet, studs, tripp-pant straps, eyeliner smear"
+        }
+    },
+    {
+        "name": "E-Girl/E-Boy Aesthetic",
+        "aliases": [
+            "e girl",
+            "e boy",
+            "egirl",
+            "eboy"
+        ],
+        "cues": {
+            "palette": "black and hot pink, split-dye contrast, blush",
+            "typography": "grunge-kawaii mix, chain dingbats",
+            "composition": "webcam-frame closeness, sticker overlays",
+            "texture": "mesh layers, chains, heart stamps, ring light"
+        }
+    },
+    {
+        "name": "Pastel Goth",
+        "cues": {
+            "palette": "lavender, baby pink, mint over black base",
+            "typography": "cute-creepy display, bat and moon dingbats",
+            "composition": "soft-macabre balance, symmetrical shrines",
+            "texture": "pastel hair gradients, lace on candy"
+        }
+    },
+    {
+        "name": "Witchcore",
+        "cues": {
+            "palette": "forest black, moss, bone, candle amber",
+            "typography": "spellbook serifs, hand-inked runes",
+            "composition": "altar-arranged clusters, botanical margins",
+            "texture": "dried herbs, wax drips, crystal facets, grimoire paper"
+        }
+    },
+    {
+        "name": "Goblincore",
+        "cues": {
+            "palette": "mud brown, moss green, mushroom cream, tarnished gold",
+            "typography": "crooked woodland serifs, scavenged labels",
+            "composition": "cluttered treasure-hoard vignettes",
+            "texture": "moss, snail shells, damp earth, shiny trinkets"
+        }
+    },
+    {
+        "name": "Fairycore",
+        "cues": {
+            "palette": "petal pink, glowworm gold, dew green, iridescent",
+            "typography": "delicate flourished script, tiny caps",
+            "composition": "glade vignettes, wing symmetry, scattered sparkle",
+            "texture": "gossamer wings, glitter dust, mushroom rings"
+        }
+    },
+    {
+        "name": "Royalcore",
+        "cues": {
+            "palette": "royal blue, crimson, ermine white, crown gold",
+            "typography": "regal engraved serifs, monogram flourish",
+            "composition": "heraldic symmetry, throne-room ceremony",
+            "texture": "brocade, gilt frames, velvet drape, crests"
+        }
+    },
+    {
+        "name": "Bio-Mechanical",
+        "aliases": [
+            "biomechanical"
+        ],
+        "cues": {
+            "palette": "bone gray, chrome, oil black, sinew umber",
+            "typography": "ribbed alien display, engraved plates",
+            "composition": "fused flesh-machine symmetry, spinal columns",
+            "texture": "airbrushed chitin, hoses and vertebrae, cold sheen"
+        }
+    },
+    {
+        "name": "Ukiyo-e",
+        "aliases": [
+            "ukiyoe"
+        ],
+        "cues": {
+            "palette": "indigo, vermilion, ivory, pine",
+            "typography": "brush kanji cartouches, vertical setting",
+            "composition": "flat planes, cropped views, floating world",
+            "texture": "woodgrain impression, bokashi gradation"
+        }
+    },
+    {
+        "name": "Sumi-e",
+        "aliases": [
+            "sumie"
+        ],
+        "cues": {
+            "palette": "ink black gradations on white",
+            "typography": "single brush stroke energy",
+            "composition": "vast emptiness, one living gesture",
+            "texture": "wet-on-dry brush flight, paper breath"
+        }
+    },
+    {
+        "name": "Shan Shui",
+        "cues": {
+            "palette": "ink washes, mist grays, pale jade",
+            "typography": "vertical calligraphy columns",
+            "composition": "mountain-water balance, wandering path",
+            "texture": "layered washes, mist voids"
+        }
+    },
+    {
+        "name": "Persian Miniature",
+        "cues": {
+            "palette": "turquoise, gold, rose, midnight blue",
+            "typography": "calligraphic panels, illuminated frames",
+            "composition": "tilted planes, garden paradises",
+            "texture": "jewel-fine detail, patterned tile"
+        }
+    },
+    {
+        "name": "Byzantine Iconography",
+        "cues": {
+            "palette": "gold ground, deep crimson, blue",
+            "typography": "sacred abbreviated letterforms",
+            "composition": "frontal hierarchic figures, inverse perspective",
+            "texture": "gold leaf, egg tempera, halo relief"
+        }
+    },
+    {
+        "name": "Celtic Art",
+        "cues": {
+            "palette": "moss, gold, oxblood, vellum",
+            "typography": "insular display capitals, knotted initials",
+            "composition": "interlace fields, spiral symmetry",
+            "texture": "knotwork, enamel inlay"
+        }
+    },
+    {
+        "name": "Folk Art",
+        "cues": {
+            "palette": "homespun reds, blues, barn tones",
+            "typography": "sign-painter charm, decorated caps",
+            "composition": "symmetric motifs, storytelling panels",
+            "texture": "painted wood, embroidery, tin"
+        }
+    },
+    {
+        "name": "Aboriginal Art",
+        "cues": {
+            "palette": "desert ochres, white, charcoal",
+            "typography": "dot-bordered display restraint",
+            "composition": "dreaming maps, concentric journeys",
+            "texture": "dot fields, rarrk cross-hatch"
+        }
+    },
+    {
+        "name": "Dutch Golden Age",
+        "cues": {
+            "palette": "warm interior browns, pearl light",
+            "typography": "sober roman text, engraved frontispiece",
+            "composition": "domestic light from a window, still-life abundance",
+            "texture": "polished oil realism, tactile fabric"
+        }
+    },
+    {
+        "name": "Pre-Raphaelite Brotherhood",
+        "cues": {
+            "palette": "jewel greens, auburn, medieval blue",
+            "typography": "medieval-revival display, illuminated",
+            "composition": "literary tableaux, dense nature detail",
+            "texture": "wet-white brilliance, botanical precision"
+        }
+    }
+]
