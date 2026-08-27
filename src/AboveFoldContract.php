@@ -272,7 +272,7 @@ final class AboveFoldContract
             // Carried for the same reason as mobile_transformation: the build
             // stamps a root class from it at finalization, and by then the
             // blueprint itself is no longer in hand (BIGR-925).
-            'media_aspect' => self::mediaAspect($blueprint, $recipe),
+            'media_aspect' => self::mediaAspect($blueprint, $recipeMeta),
             'primary_action' => $action,
             'seam' => [
                 'following_kind' => is_array($following) ? 'section' : 'footer',
@@ -580,16 +580,16 @@ final class AboveFoldContract
      * own normalize step applies (BIGR-925).
      *
      * @param array<string,mixed> $blueprint
+     * @param array<string,mixed> $recipeMeta
      */
-    private static function mediaAspect(array $blueprint, string $recipe): string
+    private static function mediaAspect(array $blueprint, array $recipeMeta): string
     {
-        $meta = HeroComposition::metadata($recipe);
         $committed = is_string($blueprint['media_aspect'] ?? null)
             ? trim($blueprint['media_aspect'])
             : '';
-        return in_array($committed, (array) $meta['media_aspects'], true)
+        return in_array($committed, (array) $recipeMeta['media_aspects'], true)
             ? $committed
-            : (string) $meta['defaults']['media_aspect'];
+            : (string) $recipeMeta['defaults']['media_aspect'];
     }
 
     /**
@@ -968,20 +968,13 @@ final class AboveFoldContract
         if (!in_array($contract['writing_direction'], ['ltr', 'rtl'], true)) {
             throw new \RuntimeException('aboveFold.json writing_direction must be ltr or rtl');
         }
+        $recipeMeta = HeroComposition::metadata($contract['recipe']);
         if (!in_array($contract['mobile_transformation'], HeroBlueprint::MOBILE_TRANSFORMATIONS, true)
-            || !in_array(
-                $contract['mobile_transformation'],
-                HeroComposition::metadata($contract['recipe'])['mobile_transformations'],
-                true,
-            )
+            || !in_array($contract['mobile_transformation'], $recipeMeta['mobile_transformations'], true)
         ) {
             throw new \RuntimeException('aboveFold.json has an incompatible mobile transformation');
         }
-        if (!in_array(
-            $contract['media_aspect'] ?? null,
-            HeroComposition::metadata($contract['recipe'])['media_aspects'],
-            true,
-        )) {
+        if (!in_array($contract['media_aspect'] ?? null, $recipeMeta['media_aspects'], true)) {
             throw new \RuntimeException('aboveFold.json has an incompatible media aspect');
         }
 
