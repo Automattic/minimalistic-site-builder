@@ -247,3 +247,34 @@ test('parse populates structuralErrors even when it returns null', function () {
     assert_eq(null, $doc);
     assert_true($errors !== [], 'a refused document must say why');
 });
+
+/**
+ * ROUND 3 — the architect's C4 spec said the <main> must be a direct child of
+ * <body>. That rule came from SpliceHomeDesignStep, which only ever parses
+ * design/home.html, a full document. It is wrong for inner pages, and applying
+ * it broke 163 of the 255 real design artifacts. The correct rule is below.
+ */
+
+test('main() resolves in a bare inner-page fragment', function () {
+    // 163 of 255 real design pages are fragments with no doctype:
+    //   <style data-page-css>...</style><main>...</main>
+    // Opening with <style> keeps libxml in head mode, so the <main> parses
+    // under <head>. Requiring <body> parentage rejects every one of them.
+    $fragment = '<style data-page-css>.a{color:red}</style>'
+        . '<main><section id="s"><h2>x</h2></section></main>';
+    $errors = [];
+    $doc = DesignDocument::parse($fragment, $errors);
+    assert_true($doc !== null, 'a bare fragment must parse');
+    assert_true(
+        $doc->main() !== null,
+        'main must resolve wherever libxml places it in a fragment, not only under body'
+    );
+    assert_eq('section', strtolower($doc->main()->firstElementChild->nodeName));
+});
+
+test('styles() still reads the page CSS from a bare fragment', function () {
+    $doc = DesignDocument::parse(
+        '<style data-page-css>.b{color:blue}</style><main><section>s</section></main>'
+    );
+    assert_contains('.b{color:blue}', $doc->styles());
+});
