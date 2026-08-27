@@ -35,7 +35,17 @@ final class BandColor
         }
         $baseFamily = GroundTint::classify($base);
         $bandFamily = GroundTint::classify($band);
-        if ($baseFamily === null || $bandFamily !== $baseFamily) {
+        if ($baseFamily === null || $bandFamily === null) {
+            return false;
+        }
+        // Near the neutral threshold the family name is quantization, not a
+        // visible difference: a base at chroma 0.019 and a band at 0.035 are
+        // two whispers of the same grey, and rejecting the pair replaced
+        // authored bands with flat grey (BIGR-919). Two near-grey surfaces
+        // are one family whatever the classifier calls each side.
+        $nearGrey = static fn (array $rgb): bool =>
+            (max($rgb) - min($rgb)) / 255 <= GroundTint::NEUTRAL_CHROMA * 2;
+        if ($bandFamily !== $baseFamily && !($nearGrey($baseRgb) && $nearGrey($bandRgb))) {
             return false;
         }
         $baseLightness = self::toHsl($baseRgb)[2];
@@ -55,19 +65,31 @@ final class BandColor
         }
         [$hue, $saturation, $lightness] = self::toHsl($rgb);
         $family = GroundTint::classify($base);
-        if ($family === 'neutral') {
-            $saturation = 0.0;
-        }
         $target = self::targetLightness($lightness);
+        if ($family === 'neutral') {
+            // A neutral ground is rarely a mathematical grey: the classifier
+            // calls anything under GroundTint::NEUTRAL_CHROMA grey, and real
+            // bases keep a whisper of tint inside that band. Saturation zero
+            // here shipped flat #313131 / #CCCCCC surfaces on tinted
+            // near-greys (BIGR-919). Keep the base's hue and as much of its
+            // saturation as still classifies neutral at the band's lightness.
+            $saturation = min($saturation, self::neutralSaturationCeiling($target));
+        }
 
         // A visibly tinted base can sit barely above GroundTint's neutral
         // threshold at an extreme. Moving it toward the middle at unchanged
         // saturation usually increases chroma; when rounding still collapses
         // it, increase saturation only until the committed family survives.
+        // A neutral base retreats the other way — toward true grey — until
+        // the candidate classifies neutral again.
         for ($try = 0; $try < 9; $try++) {
             $candidate = self::toHex(self::hslToRgb($hue, min(1.0, $saturation), $target));
             if (GroundTint::classify($candidate) === $family && self::valid($base, $candidate)) {
                 return $candidate;
+            }
+            if ($family === 'neutral') {
+                $saturation *= 0.5;
+                continue;
             }
             $saturation += 0.10;
             if (isset(self::FAMILY_CENTERS[$family])) {
@@ -79,6 +101,18 @@ final class BandColor
             }
         }
         return null;
+    }
+
+    /**
+     * The highest HSL saturation that still reads as neutral at one
+     * lightness. RGB chroma of HSL(h, s, l) is s * (1 - |2l - 1|); hold it a
+     * step under GroundTint::NEUTRAL_CHROMA so 8-bit rounding cannot push
+     * the candidate over the threshold.
+     */
+    private static function neutralSaturationCeiling(float $lightness): float
+    {
+        $span = max(1e-6, 1.0 - abs(2.0 * $lightness - 1.0));
+        return (GroundTint::NEUTRAL_CHROMA * 0.85) / $span;
     }
 
     /** HSL lightness in [0,1], or null when the hex is invalid. */
