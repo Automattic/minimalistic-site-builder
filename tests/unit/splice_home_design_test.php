@@ -277,12 +277,17 @@ test('splice keeps the site <style> byte-identical to site.css and page-scopes t
 
     assert_eq(1, count($site), 'exactly one site <style> survives the splice');
     assert_eq(
-        trim($project->readText('design/site.css')),
-        trim($site[0]),
-        'the site <style> must stay byte-identical to design/site.css',
+        $project->readText('design/site.css'),
+        $site[0],
+        "design/home.html's unattributed <style> === design/site.css, byte for byte",
     );
     assert_eq(1, count($page), 'the body CSS lands in exactly one data-page-css block');
     assert_contains('.work-grid', $page[0], 'the body CSS is carried, not dropped');
+    assert_eq(
+        1,
+        substr_count($home, $bodyCss),
+        'body CSS must appear once (data-page-css only), not also in the site block',
+    );
     assert_true(
         !str_contains($site[0], '.work-grid'),
         'the body CSS must NOT be duplicated into the site stylesheet',
