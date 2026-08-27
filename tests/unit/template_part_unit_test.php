@@ -605,6 +605,7 @@ test('FooterUnit renders exactly one reviewed recipe and image instructions only
         'conversion-panel' => 'Build a bold, offset invitation',
         'editorial-colophon' => 'final plate of a book or',
         'split-ledger' => 'Build a strong 65/35 or 70/30 split',
+        'status-readout' => 'quiet status readout',
         'contact-sheet' => 'A film contact sheet closes the page',
         'mosaic-tiles' => 'A hard-edged mosaic of flat color tiles',
         'color-field' => 'One massive inset panel of a single strong palette color',

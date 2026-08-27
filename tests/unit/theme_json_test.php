@@ -1192,7 +1192,11 @@ test('repairFonts drops a third family the direction never committed', function 
         ],
     );
     $slugs = array_column($theme['settings']['typography']['fontFamilies'], 'slug');
-    assert_eq(['heading', 'body'], $slugs, 'only the two committed families ship');
+    assert_eq(
+        ['heading', 'body', 'mono'],
+        $slugs,
+        'the two committed families plus the code-owned mono ship'
+    );
     $joined = implode(' ', $warnings);
     assert_contains("fontFamilies slug 'accent'", $joined);
     assert_contains('Caveat', $joined);
@@ -1556,6 +1560,30 @@ test('repairColors and repairFonts replace object-shaped required entries with n
         implode(' ', $fontWarnings),
     );
     assert_contains("fontFamilies missing slug 'heading'; filled with the system stack", implode(' ', $fontWarnings));
+});
+
+test('repairFonts ships the code-owned mono preset silently', function () {
+    [$theme, $fontWarnings] = ThemeJsonStep::repairFonts(valid_theme_payload());
+    $bySlug = array_column($theme['settings']['typography']['fontFamilies'], 'fontFamily', 'slug');
+    assert_eq('ui-monospace, Menlo, Consolas, monospace', $bySlug['mono']);
+    assert_true(
+        !str_contains(implode(' ', $fontWarnings), "'mono'"),
+        'a code-owned preset fills without a warning'
+    );
+});
+
+test('repairFonts keeps an authored mono family', function () {
+    $theme = valid_theme_payload();
+    $theme['settings']['typography']['fontFamilies'][] = [
+        'slug' => 'mono', 'name' => 'Mono', 'fontFamily' => '"JetBrains Mono", monospace',
+    ];
+    [$theme] = ThemeJsonStep::repairFonts($theme);
+    $monoEntries = array_values(array_filter(
+        $theme['settings']['typography']['fontFamilies'],
+        static fn ($entry) => ($entry['slug'] ?? null) === 'mono',
+    ));
+    assert_eq(1, count($monoEntries), 'the authored entry is not duplicated');
+    assert_eq('"JetBrains Mono", monospace', $monoEntries[0]['fontFamily']);
 });
 
 test('theme-json forces useRootPaddingAwareAlignments when root side padding is set', function () {
@@ -2976,7 +3004,10 @@ test('theme-json never fails on an empty model response', function () {
         ['base', 'contrast', 'primary', 'secondary', 'accent', 'band'],
         array_column($theme['settings']['color']['palette'], 'slug'),
     );
-    assert_eq(['heading', 'body'], array_column($theme['settings']['typography']['fontFamilies'], 'slug'));
+    assert_eq(
+        ['heading', 'body', 'mono'],
+        array_column($theme['settings']['typography']['fontFamilies'], 'slug'),
+    );
     assert_eq('var:preset|color|base', $theme['styles']['color']['background'], 'scaffold still wires');
     assert_true(($project->readJson('warnings.json')['theme-json'] ?? []) !== [], 'every fill is warned');
     exec('rm -rf ' . escapeshellarg($tmp));
