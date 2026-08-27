@@ -388,3 +388,407 @@ System architecture, data flow with shadow paths, and the dependency before/afte
 5. Confirm `section-rhythm` and `normalize-layout` are not no-ops on chrome-only input during milestone 4.
 6. Do not proceed past milestone 5 if the comparison shows a small visual delta — the premise is untested until then.
 7. Milestone 8 waits on `feature/deterministic-patterns`.
+
+---
+
+## Amendments from implementation (2026-08-27)
+
+Three decisions in the sections above were changed during milestones 2–3 because
+measuring the corpus contradicted the premise they rested on. The sections above
+are left as written; these override them.
+
+### 6A is withdrawn — no wrapper descent
+
+6A said to descend through non-section wrappers, on the premise that a naive
+split "yields 0 islands — page lost". Both halves of that premise are wrong.
+
+`TransformSiteStep::extractPage` has always islanded every **element** child of
+`<main>`, not every `<section>` child. A wrapper-only page yields one unit, never
+zero. No shipped code has the blank-page bug 6A was written to prevent; the bug
+belonged to a hypothetical rule nobody proposed.
+
+And the wrappers are not what 6A assumed. All 12 wrapper pages in the corpus
+(of 300) carry the page's content column on the wrapper itself:
+
+| page | wrapper rule |
+|---|---|
+| amber-ember2/contact | `.pg-wrap{max-width:var(--wide-size);margin:0 auto;padding:0 20px}` |
+| swift-grove/about, /contact | `.page{max-width:var(--wide-size);margin:0 auto}` |
+| clever-valley/contact | `.pg{max-width:…;margin:0 auto;border-left:1px solid var(--hairline);border-right:…}` |
+| sunny-ember/contact | `.page-wrap{position:relative;overflow:hidden;background:radial-gradient(…)}` |
+| (8 more) | `max-width:var(--wide-size); margin:0 auto; padding:0 <gutter>` |
+
+**Zero carry `display:grid` or `display:flex`** — 6A's stated hazard does not occur
+in the corpus at all. But its stated remedy does damage: descending re-parents the
+children and drops the wrapper, so every island loses the content column and goes
+full-bleed. `SectionLayoutStep`, which re-binds sections to the content column on
+the blocks path, is dropped from this graph, so nothing restores it. Two pages
+would lose more than the inset — a continuous hairline border down the page, and a
+page-level radial background.
+
+Descent trades a granularity gain on 4% of pages for a visual regression on those
+same pages. **Split on direct element children of `<main>`; never descend.** A
+wrapper-only page is one island, intact.
+
+### 9B is withdrawn — no tag-stack scanner
+
+9B asked `island-pages` to assert the tag stack per island and synthesize missing
+closers. Islands are serialized out of the DOM, so they are balanced by
+construction; a scanner over that output measures nothing. (Same instrument error
+as using `saveHTML()` to detect source imbalance.)
+
+The hazard 9B is reaching for is real but different: libxml silently **re-nesting**
+a truncated document so later sections become children of an earlier one. A tag
+scanner cannot see that. The structural-error check from 10A can. Balance is
+therefore asserted as an output property plus a truncation case, not built as a
+scanner.
+
+### Milestone 2 splits in two
+
+`aboveFold.json` derivation is separated from `island-pages` into its own slice,
+because reading the consumers changed what the work is.
+
+3A said to "derive the contract from the design HTML". In fact
+`AboveFoldContract::resolve()` — which builds the whole contract — reads
+`siteSpec`, the hero blueprint, `theme.json`, the canvas and the design CSS, and
+**no markup at all**. Only `AboveFoldPartFacts::inspect()` reads markup, and of
+the eight facts it returns, two need no change on this graph: `part_keys` is
+filenames, and `header` parses `theme/parts/header.html`, which `transform-chrome`
+still delivers as real blocks.
+
+So the work is an **islands facts adapter** for the remaining five
+(`opening_overlay_support`, `opening_surfaces`, the two `primary_action_*`, and
+`hero`), not a second contract implementation. That matters beyond size: a
+conservative adapter that reports "no overlay support" would make
+`finalizeDelivery` degrade every islands build's header from overlay to stacked —
+quietly, since that degrade path is designed to be routine. The adapter has to read
+island HTML for real, and the degradation must be visible in `island-report.json`.
+
+| slice | scope |
+|---|---|
+| 2a `island-pages` | split, parse degrade, re-sanitize, missing-artifact skip, `pages.json`, parts, `island-report.json` |
+| 2b `island-above-fold` | the facts adapter + `aboveFold.json`; depends on 2a and on `transform-chrome` |
+
+### Milestone 4's three open conditions, resolved by measurement
+
+The review left three questions for "decide during milestone 4". All three were
+answered by running the real code against island-shaped input, each with a
+known-answer control on block input.
+
+**`normalize-layout`: retain graph-wide, unchanged.** Both halves were probed.
+`FixBlocksStep::normalizeLayouts` is a byte-for-byte no-op on a `wp:html` island
+(nothing to stamp a layout on) and does real work on chrome in the same run
+(stamped `layout:constrained` on a header group). `StorefrontDegrade::markup()`
+operates on raw anchors, so it works on islands directly — it relabelled both
+purchase CTAs in an island and repointed `/cart/` and `/checkout/` at `/contact/`.
+No chrome-scoping is needed; the step is already correct on this graph.
+
+**`section-rhythm`: drop from the islands graph.** Probed against an island page:
+it does not throw and does not change the island, but it records one degradation
+per page — `section 'hero' must contain exactly one top-level wp:group`. That is
+one non-actionable warning per page per build, the same AGENTS.md rung-2 violation
+that removed `extract-patterns` from the post-image list. Chrome-scoping it would
+be meaningless: `planEntries()` reads only page section parts from `pages.json`,
+so it has no chrome to work on.
+
+**`header-hero`'s hero-echo dedupe: port it, do not accept the loss.** This is the
+one that matters. `dedupeAgainstHero()` collects the hero's short lines with
+`BlockMarkup::parse($heroMarkup)`, taking only `paragraph` and `heading` blocks.
+An island hero parses as a single `html` block, so it yields zero lines. Measured
+against a control:
+
+| hero | header rewritten | notes | warnings |
+|---|---|---|---|
+| block markup | yes — echo removed | 1 | 1 |
+| island | **no — echo survives** | **0** | **0** |
+
+A header that repeats the hero's headline and CTA ships, with nothing in
+`warnings.json` to say so. That is a `RESCUED=N, TEST=N, USER SEES=Silent` row,
+which the failure registry claims does not exist — so the registry gains a row
+and the port is required, not optional.
+
+The port is small: `dedupeAgainstHero()` needs only the hero's short text lines,
+so the block path stays and an island path reads `<p>` and `<h1>`–`<h6>` text out
+of the raw HTML. Everything downstream of `$heroLines` is unchanged.
+
+### RES-1, carried from milestone 1
+
+`bin/images.php:39-55` (`images_html_first_from_project`) resolves the graph name
+correctly and then flattens it to a boolean with
+`=== StepComposition::GRAPH_HTML_FIRST`. On an islands project that yields
+`false`, so `CollectImagesStep` is constructed as if this were the blocks graph
+and stops reading prose alts as image subjects. Its fallback heuristic fails the
+same way: absent `design/transform-report.json` — which this graph never writes —
+it guesses `blocks`. Milestone 4 must keep the graph a string end to end.
+
+### 4A's cover-contrast path, re-derived
+
+4A said `cover-contrast` "must find hero and background images in island markup
+instead". Measuring the corpus says the mechanism it would look for does not
+exist on this graph, and the one that replaces it is different in kind.
+
+Across all 300 design pages:
+
+| measure | count |
+|---|---|
+| CSS rules with a `background: url()` / `background-image: url()` | **0** |
+| `<img>` tags | 1,012 |
+| files with a `position:absolute` rule | 241 of 300 |
+| absolute rules that also set a text `color` | 151 |
+
+There are **no CSS background images anywhere in the corpus**. Every image is an
+`<img>` in flow. So there is nothing for a background-image finder to find.
+
+Text over an image is authored instead as a **pseudo-element scrim** over an
+`<img>`. The most common absolute selectors in the corpus are exactly that:
+
+```
+75  .hero-media::after      56  #hero::before      18  #hero img
+67  .hero-media             55  #hero::after       16  .hero-photo::after
+```
+
+So the islands equivalent of "raise `dimRatio`" is "adjust the authored
+`::before`/`::after` scrim, or flip the text colour" — a CSS edit, not a block
+attribute edit. The reason the step exists is unchanged: the model chose the text
+colour before the image existed.
+
+Two consequences for scheduling:
+
+1. This is not a bullet inside milestone 4. It is its own slice, and it needs a
+   contrast instrument that can reason about a pseudo-element scrim.
+   `CssSelectorMatcher::matches()` takes a `DOMElement` and has an
+   `accountForPseudoStateSuffix` flag; whether it can address `::after` at all is
+   the first thing to settle.
+2. Until it exists, `cover-contrast` on the islands graph is a **no-op that must
+   say so** — one report line per build, not silence. Its block path still does
+   real work on the chrome parts, which stay block markup, so the step is not
+   dropped.
+
+---
+
+## Milestone 5 result (2026-08-27): STOP. Do not proceed to milestone 6.
+
+Ten builds, five prompts, one arm per graph, same codebase. ~1.01M tokens.
+
+### What the gate found
+
+**Content fidelity does not separate the arms.** Both preserve 100% of authored
+section ids and all images. A 72.2% text score on one html-first case was an
+instrument artifact — tracklist titles and durations split across separate
+nodes — not loss. `transform-report.json` reads clean, as it always has.
+
+**The islands arm loses the styling system.** This is the visual channel the plan
+said was unmeasured. It is now measured, and it fails.
+
+The design documents ship only a skeleton stylesheet — 436 bytes to 4.8KB — and
+carry a class vocabulary they never style: on one build the delivered page used
+37 design classes and only 7 had a matching rule in `theme/style.css`. On
+`html-first` that does not matter, because the transformer compiles the design
+into blocks and `theme.json` supplies grid, spacing, measure and type scale.
+Islands preserve the authored markup and nothing styles it. Heroes render well;
+everything below falls back to browser defaults.
+
+This is structural, not a defect to patch. The premise — that delivering the
+authored HTML raises fidelity — assumed the design document was the source of
+truth for appearance. It is not. The block layer is.
+
+### Where the arms do win
+
+| measure | html-first | html-islands |
+|---|---|---|
+| authored section ids kept | 100% | 100% |
+| warnings raised | 1,222 | 701 (−43%) |
+| delivered page weight | 157 KB | 57 KB (−64%) |
+| tokens | 521k | 490k (−6%) |
+| wall clock | 1,111s | 1,054s (−5%) |
+| renders as designed | yes | hero only |
+
+The token and wall differences are inside run-to-run noise. The warning and page
+weight reductions are real and large.
+
+### Two defects the gate surfaced, both fixed
+
+1. **Every image lost its source.** `DesignMarkupSanitizer` strips the `theme:`
+   scheme, and 7A told `island-pages` to re-sanitize each section. Measured 9
+   images with 0 sources against html-first's 9 of 9. 7A's premise was wrong:
+   `TransformSiteStep` sanitizes only *repair* fragments, so html-first never
+   re-sanitizes after `assign-image-sources` writes `theme:` paths. Fixed by
+   allowing the `theme:` scheme, tested in both directions.
+2. **The degrade path aborted the build.** `stackedFallbackContract()` emitted a
+   contract with an empty `following_section.layout_archetype`, which
+   `validate-theme` treats as fatal. A degrade that makes a later step fatal is
+   worse than no degrade.
+
+### What to do instead
+
+The graph is built, tested and works. Milestones 6–8 do not proceed. The
+surviving reasons to keep it are tail risk, design vocabulary (SVG), and code
+removed — none of which justify deleting `html-first`. Options, in order:
+
+1. **Keep both graphs, ship neither change.** `html-islands` stays available
+   behind `SITE_BUILD_GRAPH` for the tail-risk and SVG cases. Cheapest.
+2. **Make the design document a complete stylesheet.** The real blocker is that
+   `inner-pages-design` authors classes it does not style. If the design shipped
+   its own full CSS, islands would deliver it verbatim and the premise would
+   hold. That is a prompt-and-validation problem, not a pipeline one, and it is
+   worth measuring before anything else.
+3. **Retire the branch.** Only after 2 is ruled out.
+
+Do not delete `html-first` on this evidence.
+
+---
+
+## Milestone 5 verdict CORRECTED (2026-08-27): the first reading was wrong
+
+The verdict recorded above compared arm against arm and concluded the islands
+graph "loses the styling system". That comparison was the wrong one, and the
+conclusion does not survive the right one.
+
+The plan's own milestone 5 says to **diff against the design**. Doing that
+inverts the result.
+
+### The measurement that matters
+
+Sections delivered **verbatim** — the authored `<main>` child's text present
+unchanged in the delivered page — across all five cases:
+
+| graph | verbatim | rate |
+|---|---|---|
+| **html-islands** | **34 / 34** | **100%** |
+| html-first | 28 / 36 | 78% |
+
+Islands deliver the design document exactly. On `artist-music` the delivered
+island payload is 102.2% of the authored `<main>` markup by byte — the extra 2%
+is the `theme:` src rewrite and whitespace. That is the graph's entire stated
+purpose, and it works.
+
+### The screenshots answer the question directly
+
+Rendering `design/home.html` in a browser beside the delivered site:
+
+- **islands**: the design render and the delivered page **match**. Same hero,
+  same typography, same below-fold plainness. Whatever the design authored is
+  what ships.
+- **html-first**: they do **not** match, and not subtly. On `artist-music` the
+  design document renders as a bare unstyled page — Times New Roman, blue
+  underlined links, default bullets, no colour — while the delivered site is a
+  polished dark editorial page. `theme.json` and the block layer invent the
+  entire visual identity.
+
+### What the earlier verdict actually measured
+
+Two errors compounded:
+
+1. **Wrong baseline.** Arm-vs-arm cannot answer a fidelity question. It measured
+   which output looked nicer, not which matched its source.
+2. **A false generalisation from one case.** I recorded "the islands designs ship
+   a 436-byte skeleton". Measured across all ten builds, the 436B skeleton
+   appears in three islands cases **and two html-first cases**. It is
+   design-generation variance hitting both graphs equally, not a property of
+   either.
+
+Where the design's own CSS is thin, islands faithfully render a thin design and
+html-first papers over it with theme.json. That is a difference in *what the
+graphs are for*, not evidence against islands.
+
+### Revised standing
+
+**Milestone 6 is not blocked by fidelity.** On the criterion the plan set —
+does the delivered page match the authored design — islands wins outright,
+34/34 against 28/36, and is the only graph whose render matches its design.
+
+The open question is no longer "is islands faithful" but **"should the design
+document be the source of truth for appearance?"** The graph assumes yes. If
+that holds, the real work is upstream: `inner-pages-design` emitting a 436-byte
+stylesheet on 5 of 10 builds is the defect worth fixing, and it degrades both
+graphs — it is simply visible on islands and hidden on html-first.
+
+Deleting html-first still needs a deliberate decision, because the block layer
+demonstrably adds design that thin documents lack. But it must be argued on that
+basis, not on a fidelity claim that measurement contradicts.
+
+---
+
+## Why the designs look broken (2026-08-27)
+
+The unstyled pages are not an islands defect. They are an upstream one that
+`html-first` was hiding.
+
+`prompts/home-body-design.md:38` instructs: *"Prefer established site classes
+from the site CSS and minimize new page-specific classes. **Do not emit a
+`<style>` element.**"* `prompts/inner-page-design.md:35` allows inner pages
+exactly one `<style data-page-css>`. That asymmetry is the whole story: inner
+pages look designed, the home body does not.
+
+Measured across 59 builds:
+
+| measure | value |
+|---|---|
+| `home-body.html` files carrying any CSS | **0 of 59** |
+| home-body classes with no rule anywhere | **890 of 1,467 (61%)** |
+| mean dead classes per home page | **15.1** |
+| worst cases | 72/72, 58/58, 46/46 unstyled |
+| hero (`preview.html`) coverage, for contrast | **13 of 13 styled (100%)** |
+
+`design/home.html`'s `<style>` is byte-identical to `design/site.css` and to
+`preview.html`'s: it is entirely above-fold CSS. `splice-home-design` joins a
+fully styled hero to a completely unstyled body.
+
+The model is told to reuse established classes and invents new ones 61% of the
+time. A prompt ban is not a floor. The fix is deterministic: after home-body
+generation, diff its class vocabulary against `site.css` and either map invented
+classes onto established ones or permit a scoped `<style>` for the residue.
+
+**This degrades both graphs.** On `html-first` the transformer compiles to blocks
+and `theme.json` supplies grid, spacing and measure, so the dead classes never
+show. On `html-islands` the design ships verbatim, so they show completely.
+Islands did not cause this; islands are the instrument that made it visible.
+
+---
+
+## The home-body CSS fix (2026-08-27): design right, islands matching
+
+The defect above is fixed and verified on two live builds with different prompts.
+
+**Changes.** `prompts/home-body-design.md` now allows the home body one
+`<style data-page-css>`, matching `prompts/inner-page-design.md`.
+`InnerPagesDesignStep` reuses the existing inner-page CSS path for the
+`home-body` unit and applies a deterministic floor: any class with no matching
+rule is repaired, and what resists is warned with names and counts.
+`SpliceHomeDesignStep` carries that CSS as its own page-scoped block.
+
+**One defect found during the fix.** The first cut merged the body CSS into the
+preview's `<style>` *and* emitted the `data-page-css` block — shipping the rules
+twice (10,381B against a 4,529B `site.css`) and pushing the body's class
+vocabulary outside `PageScope::bodyClass()` scoping, since `PageStylesStep`
+treats a page artifact's unattributed `<style>` as site CSS. Corrected, with the
+invariant asserted as a test — `design/home.html`'s unattributed `<style>` must
+stay byte-identical to `design/site.css` — and mutation-tested: restoring the
+merge fails that test and nothing else.
+
+**Verified, two builds, different prompts:**
+
+| check | portfolio | restaurant |
+|---|---|---|
+| home body ships CSS | 5,388B | 5,815B |
+| site `<style>` mirrors `site.css` | yes | yes |
+| home-body classes with a rule | 27 / 27 | 33 / 33 |
+| authored sections delivered verbatim | 6 / 6 | 7 / 7 |
+| one `core/html` island per section | 6 / 6 | 7 / 7 |
+| images keeping their source | 8 / 8 | 8 / 8 |
+| those rules in `theme/style.css` | 27 / 27 | 33 / 33 |
+
+Before the fix the same check read 0 of 42 classes styled and 1 of 42 present in
+the theme.
+
+Screenshots confirm it: the authored design and the delivered WordPress site are
+the same page, section for section. The admin bar and the block-built chrome are
+the only intended differences.
+
+Suite 3,663 passing with the three known pre-existing failures; integration 34/0.
+
+**Standing.** The fidelity objection to milestone 6 is gone: islands deliver the
+design verbatim and the design is now worth delivering. The remaining question
+for retiring `html-first` is a product one — whether the block layer's
+compensation is worth keeping — not a fidelity one. Note this fix improves BOTH
+graphs; html-first was hiding the defect, not avoiding it.
