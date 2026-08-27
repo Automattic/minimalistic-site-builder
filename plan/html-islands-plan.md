@@ -635,3 +635,74 @@ removed — none of which justify deleting `html-first`. Options, in order:
 3. **Retire the branch.** Only after 2 is ruled out.
 
 Do not delete `html-first` on this evidence.
+
+---
+
+## Milestone 5 verdict CORRECTED (2026-08-27): the first reading was wrong
+
+The verdict recorded above compared arm against arm and concluded the islands
+graph "loses the styling system". That comparison was the wrong one, and the
+conclusion does not survive the right one.
+
+The plan's own milestone 5 says to **diff against the design**. Doing that
+inverts the result.
+
+### The measurement that matters
+
+Sections delivered **verbatim** — the authored `<main>` child's text present
+unchanged in the delivered page — across all five cases:
+
+| graph | verbatim | rate |
+|---|---|---|
+| **html-islands** | **34 / 34** | **100%** |
+| html-first | 28 / 36 | 78% |
+
+Islands deliver the design document exactly. On `artist-music` the delivered
+island payload is 102.2% of the authored `<main>` markup by byte — the extra 2%
+is the `theme:` src rewrite and whitespace. That is the graph's entire stated
+purpose, and it works.
+
+### The screenshots answer the question directly
+
+Rendering `design/home.html` in a browser beside the delivered site:
+
+- **islands**: the design render and the delivered page **match**. Same hero,
+  same typography, same below-fold plainness. Whatever the design authored is
+  what ships.
+- **html-first**: they do **not** match, and not subtly. On `artist-music` the
+  design document renders as a bare unstyled page — Times New Roman, blue
+  underlined links, default bullets, no colour — while the delivered site is a
+  polished dark editorial page. `theme.json` and the block layer invent the
+  entire visual identity.
+
+### What the earlier verdict actually measured
+
+Two errors compounded:
+
+1. **Wrong baseline.** Arm-vs-arm cannot answer a fidelity question. It measured
+   which output looked nicer, not which matched its source.
+2. **A false generalisation from one case.** I recorded "the islands designs ship
+   a 436-byte skeleton". Measured across all ten builds, the 436B skeleton
+   appears in three islands cases **and two html-first cases**. It is
+   design-generation variance hitting both graphs equally, not a property of
+   either.
+
+Where the design's own CSS is thin, islands faithfully render a thin design and
+html-first papers over it with theme.json. That is a difference in *what the
+graphs are for*, not evidence against islands.
+
+### Revised standing
+
+**Milestone 6 is not blocked by fidelity.** On the criterion the plan set —
+does the delivered page match the authored design — islands wins outright,
+34/34 against 28/36, and is the only graph whose render matches its design.
+
+The open question is no longer "is islands faithful" but **"should the design
+document be the source of truth for appearance?"** The graph assumes yes. If
+that holds, the real work is upstream: `inner-pages-design` emitting a 436-byte
+stylesheet on 5 of 10 builds is the defect worth fixing, and it degrades both
+graphs — it is simply visible on islands and hidden on html-first.
+
+Deleting html-first still needs a deliberate decision, because the block layer
+demonstrably adds design that thin documents lack. But it must be argued on that
+basis, not on a fidelity claim that measurement contradicts.
