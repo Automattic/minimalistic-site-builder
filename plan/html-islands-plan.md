@@ -563,3 +563,75 @@ Two consequences for scheduling:
    say so** — one report line per build, not silence. Its block path still does
    real work on the chrome parts, which stay block markup, so the step is not
    dropped.
+
+---
+
+## Milestone 5 result (2026-08-27): STOP. Do not proceed to milestone 6.
+
+Ten builds, five prompts, one arm per graph, same codebase. ~1.01M tokens.
+
+### What the gate found
+
+**Content fidelity does not separate the arms.** Both preserve 100% of authored
+section ids and all images. A 72.2% text score on one html-first case was an
+instrument artifact — tracklist titles and durations split across separate
+nodes — not loss. `transform-report.json` reads clean, as it always has.
+
+**The islands arm loses the styling system.** This is the visual channel the plan
+said was unmeasured. It is now measured, and it fails.
+
+The design documents ship only a skeleton stylesheet — 436 bytes to 4.8KB — and
+carry a class vocabulary they never style: on one build the delivered page used
+37 design classes and only 7 had a matching rule in `theme/style.css`. On
+`html-first` that does not matter, because the transformer compiles the design
+into blocks and `theme.json` supplies grid, spacing, measure and type scale.
+Islands preserve the authored markup and nothing styles it. Heroes render well;
+everything below falls back to browser defaults.
+
+This is structural, not a defect to patch. The premise — that delivering the
+authored HTML raises fidelity — assumed the design document was the source of
+truth for appearance. It is not. The block layer is.
+
+### Where the arms do win
+
+| measure | html-first | html-islands |
+|---|---|---|
+| authored section ids kept | 100% | 100% |
+| warnings raised | 1,222 | 701 (−43%) |
+| delivered page weight | 157 KB | 57 KB (−64%) |
+| tokens | 521k | 490k (−6%) |
+| wall clock | 1,111s | 1,054s (−5%) |
+| renders as designed | yes | hero only |
+
+The token and wall differences are inside run-to-run noise. The warning and page
+weight reductions are real and large.
+
+### Two defects the gate surfaced, both fixed
+
+1. **Every image lost its source.** `DesignMarkupSanitizer` strips the `theme:`
+   scheme, and 7A told `island-pages` to re-sanitize each section. Measured 9
+   images with 0 sources against html-first's 9 of 9. 7A's premise was wrong:
+   `TransformSiteStep` sanitizes only *repair* fragments, so html-first never
+   re-sanitizes after `assign-image-sources` writes `theme:` paths. Fixed by
+   allowing the `theme:` scheme, tested in both directions.
+2. **The degrade path aborted the build.** `stackedFallbackContract()` emitted a
+   contract with an empty `following_section.layout_archetype`, which
+   `validate-theme` treats as fatal. A degrade that makes a later step fatal is
+   worse than no degrade.
+
+### What to do instead
+
+The graph is built, tested and works. Milestones 6–8 do not proceed. The
+surviving reasons to keep it are tail risk, design vocabulary (SVG), and code
+removed — none of which justify deleting `html-first`. Options, in order:
+
+1. **Keep both graphs, ship neither change.** `html-islands` stays available
+   behind `SITE_BUILD_GRAPH` for the tail-risk and SVG cases. Cheapest.
+2. **Make the design document a complete stylesheet.** The real blocker is that
+   `inner-pages-design` authors classes it does not style. If the design shipped
+   its own full CSS, islands would deliver it verbatim and the premise would
+   hold. That is a prompt-and-validation problem, not a pipeline one, and it is
+   worth measuring before anything else.
+3. **Retire the branch.** Only after 2 is ruled out.
+
+Do not delete `html-first` on this evidence.
