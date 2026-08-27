@@ -706,3 +706,40 @@ graphs — it is simply visible on islands and hidden on html-first.
 Deleting html-first still needs a deliberate decision, because the block layer
 demonstrably adds design that thin documents lack. But it must be argued on that
 basis, not on a fidelity claim that measurement contradicts.
+
+---
+
+## Why the designs look broken (2026-08-27)
+
+The unstyled pages are not an islands defect. They are an upstream one that
+`html-first` was hiding.
+
+`prompts/home-body-design.md:38` instructs: *"Prefer established site classes
+from the site CSS and minimize new page-specific classes. **Do not emit a
+`<style>` element.**"* `prompts/inner-page-design.md:35` allows inner pages
+exactly one `<style data-page-css>`. That asymmetry is the whole story: inner
+pages look designed, the home body does not.
+
+Measured across 59 builds:
+
+| measure | value |
+|---|---|
+| `home-body.html` files carrying any CSS | **0 of 59** |
+| home-body classes with no rule anywhere | **890 of 1,467 (61%)** |
+| mean dead classes per home page | **15.1** |
+| worst cases | 72/72, 58/58, 46/46 unstyled |
+| hero (`preview.html`) coverage, for contrast | **13 of 13 styled (100%)** |
+
+`design/home.html`'s `<style>` is byte-identical to `design/site.css` and to
+`preview.html`'s: it is entirely above-fold CSS. `splice-home-design` joins a
+fully styled hero to a completely unstyled body.
+
+The model is told to reuse established classes and invents new ones 61% of the
+time. A prompt ban is not a floor. The fix is deterministic: after home-body
+generation, diff its class vocabulary against `site.css` and either map invented
+classes onto established ones or permit a scoped `<style>` for the residue.
+
+**This degrades both graphs.** On `html-first` the transformer compiles to blocks
+and `theme.json` supplies grid, spacing and measure, so the dead classes never
+show. On `html-islands` the design ships verbatim, so they show completely.
+Islands did not cause this; islands are the instrument that made it visible.
