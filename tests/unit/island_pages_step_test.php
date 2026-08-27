@@ -360,16 +360,38 @@ test('island-pages: every island is re-sanitized before delivery', function () {
     });
 });
 
-test('island-pages: an island whose sanitize fails is dropped, and its page keeps the rest', function () {
+test('island-pages: hostile markup is stripped in place and the island survives', function () {
+    // CORRECTED 2026-08-27, after the contract was frozen. The original test was
+    // named "an island whose sanitize fails is dropped" and asserted a drop path.
+    // Probing DesignMarkupSanitizer through DesignDocument::sanitizedHtml() shows
+    // it NEVER throws on hostile content — a <?php PI, <script>, an on* handler, a
+    // javascript: href and an <iframe> all strip cleanly with one warning each and
+    // return the surviving markup. So no drop path is reachable from hostile input,
+    // and the original test would have passed without testing anything.
+    //
+    // The catch around sanitizedHtml() is still required — the engine declares
+    // \RuntimeException — but an unreachable path is not something a contract can
+    // assert, so it is stated in the spec rather than faked in a test.
     with_project('island-pages', function ($project) {
         ip_project($project, ['home' => ip_doc(
             '<section id="ok"><h1>Kept</h1></section>'
-            . '<section id="bad"><?php echo "x"; ?></section>'
+            . '<section id="bad"><h2>Also kept</h2>'
+            . '<div onclick="alert(1)">Handler</div>'
+            . '<a href="javascript:alert(2)">Link</a>'
+            . '<iframe src="//evil"></iframe>'
+            . '</section>'
         )]);
         (new IslandPagesStep())->run($project);
-        assert_contains('ok', implode(',', ip_section_slugs($project, 'home')), 'the healthy island survives');
+        $slugs = ip_section_slugs($project, 'home');
+        assert_eq(['ok', 'bad'], $slugs, 'both islands ship — stripping is not dropping');
+        $bad = ip_part_text($project, 'home', 'bad');
+        assert_contains('Also kept', $bad, 'safe content survives');
+        assert_contains('Handler', $bad, 'the element survives; only its handler is removed');
+        assert_true(!str_contains($bad, 'onclick'), 'the event handler is stripped');
+        assert_true(!str_contains($bad, 'javascript:'), 'the javascript: URL is stripped');
+        assert_true(!str_contains($bad, '<iframe'), 'the iframe is stripped');
         $warnings = json_encode($project->readJson('warnings.json'));
-        assert_contains('island-pages', $warnings, 'the drop is reported under this step');
+        assert_contains('island-pages', $warnings, 'every strip is reported under this step');
     });
 });
 
