@@ -520,3 +520,46 @@ correctly and then flattens it to a boolean with
 and stops reading prose alts as image subjects. Its fallback heuristic fails the
 same way: absent `design/transform-report.json` — which this graph never writes —
 it guesses `blocks`. Milestone 4 must keep the graph a string end to end.
+
+### 4A's cover-contrast path, re-derived
+
+4A said `cover-contrast` "must find hero and background images in island markup
+instead". Measuring the corpus says the mechanism it would look for does not
+exist on this graph, and the one that replaces it is different in kind.
+
+Across all 300 design pages:
+
+| measure | count |
+|---|---|
+| CSS rules with a `background: url()` / `background-image: url()` | **0** |
+| `<img>` tags | 1,012 |
+| files with a `position:absolute` rule | 241 of 300 |
+| absolute rules that also set a text `color` | 151 |
+
+There are **no CSS background images anywhere in the corpus**. Every image is an
+`<img>` in flow. So there is nothing for a background-image finder to find.
+
+Text over an image is authored instead as a **pseudo-element scrim** over an
+`<img>`. The most common absolute selectors in the corpus are exactly that:
+
+```
+75  .hero-media::after      56  #hero::before      18  #hero img
+67  .hero-media             55  #hero::after       16  .hero-photo::after
+```
+
+So the islands equivalent of "raise `dimRatio`" is "adjust the authored
+`::before`/`::after` scrim, or flip the text colour" — a CSS edit, not a block
+attribute edit. The reason the step exists is unchanged: the model chose the text
+colour before the image existed.
+
+Two consequences for scheduling:
+
+1. This is not a bullet inside milestone 4. It is its own slice, and it needs a
+   contrast instrument that can reason about a pseudo-element scrim.
+   `CssSelectorMatcher::matches()` takes a `DOMElement` and has an
+   `accountForPseudoStateSuffix` flag; whether it can address `::after` at all is
+   the first thing to settle.
+2. Until it exists, `cover-contrast` on the islands graph is a **no-op that must
+   say so** — one report line per build, not silence. Its block path still does
+   real work on the chrome parts, which stay block markup, so the step is not
+   dropped.
