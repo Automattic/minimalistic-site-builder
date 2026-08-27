@@ -38,22 +38,14 @@ final class DesignDocument
     ];
 
     /**
-     * Nesting that means a landmark is not page-level. html/head/body are
-     * omitted: libxml invents them for fragments and they must not reject.
+     * Ancestors a page-level landmark may have. Anything else — figure,
+     * blockquote, th, dd, div — disqualifies. html/head/body (and the
+     * document node) are the libxml envelope, including head-parked fragments.
      */
-    private const CONTENT_ANCESTORS = [
-        'div',
-        'section',
-        'article',
-        'aside',
-        'nav',
-        'main',
-        'footer',
-        'address',
-        'header',
-        'form',
-        'td',
-        'li',
+    private const PAGE_LEVEL_ANCESTORS = [
+        'html',
+        'head',
+        'body',
     ];
 
     /** HTML5 elements whose end tag may be omitted. */
@@ -104,31 +96,24 @@ final class DesignDocument
             return null;
         }
 
-        self::reportMainStructure($dom, $structuralErrors);
+        self::reportLandmarkStructure($dom, $structuralErrors);
 
         return new self($dom);
     }
 
     public function main(): ?\DOMElement
     {
-        $found = [];
-        foreach ($this->dom->getElementsByTagName('main') as $element) {
-            $found[] = $element;
-        }
-        if (count($found) !== 1 || self::hasContentAncestor($found[0])) {
-            return null;
-        }
-        return $found[0];
+        return $this->uniquePageLevelLandmark('main');
     }
 
     public function header(): ?\DOMElement
     {
-        return $this->topLevelLandmark('header');
+        return $this->uniquePageLevelLandmark('header');
     }
 
     public function footer(): ?\DOMElement
     {
-        return $this->topLevelLandmark('footer');
+        return $this->uniquePageLevelLandmark('footer');
     }
 
     public function html(\DOMElement $element): string
@@ -172,27 +157,40 @@ final class DesignDocument
         return $css;
     }
 
-    private function topLevelLandmark(string $tag): ?\DOMElement
+    private function uniquePageLevelLandmark(string $tag): ?\DOMElement
     {
-        foreach ($this->dom->getElementsByTagName($tag) as $element) {
-            if (!self::hasContentAncestor($element)) {
-                return $element;
-            }
-        }
-        return null;
+        $found = self::pageLevelElements($this->dom, $tag);
+        return count($found) === 1 ? $found[0] : null;
     }
 
-    private static function hasContentAncestor(\DOMElement $element): bool
+    /**
+     * @return list<\DOMElement>
+     */
+    private static function pageLevelElements(\DOMDocument $dom, string $tag): array
     {
-        for ($node = $element->parentNode; $node !== null; $node = $node->parentNode) {
-            if (
-                $node instanceof \DOMElement
-                && in_array(strtolower($node->nodeName), self::CONTENT_ANCESTORS, true)
-            ) {
-                return true;
+        $found = [];
+        foreach ($dom->getElementsByTagName($tag) as $element) {
+            if (self::isPageLevel($element)) {
+                $found[] = $element;
             }
         }
-        return false;
+        return $found;
+    }
+
+    private static function isPageLevel(\DOMElement $element): bool
+    {
+        for ($node = $element->parentNode; $node !== null; $node = $node->parentNode) {
+            if ($node instanceof \DOMDocument) {
+                continue;
+            }
+            if (
+                !$node instanceof \DOMElement
+                || !in_array(strtolower($node->nodeName), self::PAGE_LEVEL_ANCESTORS, true)
+            ) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private function serialize(\DOMElement $element): string
@@ -227,19 +225,21 @@ final class DesignDocument
     /**
      * @param list<string> $structuralErrors
      */
-    private static function reportMainStructure(\DOMDocument $dom, array &$structuralErrors): void
+    private static function reportLandmarkStructure(\DOMDocument $dom, array &$structuralErrors): void
     {
-        $mains = $dom->getElementsByTagName('main');
-        if ($mains->length > 1) {
-            $structuralErrors[] = 'document has more than one main element';
-            return;
+        $pageMains = self::pageLevelElements($dom, 'main');
+        if (count($pageMains) > 1) {
+            $structuralErrors[] = 'document has more than one page-level main';
+        } elseif (
+            $pageMains === []
+            && $dom->getElementsByTagName('main')->length > 0
+        ) {
+            $structuralErrors[] = 'main is not a page-level landmark';
         }
-        if ($mains->length === 0) {
-            return;
-        }
-        $main = $mains->item(0);
-        if ($main instanceof \DOMElement && self::hasContentAncestor($main)) {
-            $structuralErrors[] = 'main is nested inside a content element';
+        foreach (['header', 'footer'] as $tag) {
+            if (count(self::pageLevelElements($dom, $tag)) > 1) {
+                $structuralErrors[] = "document has more than one page-level {$tag}";
+            }
         }
     }
 
