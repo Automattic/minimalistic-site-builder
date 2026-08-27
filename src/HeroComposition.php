@@ -154,6 +154,10 @@ final class HeroComposition
                 'class' => 'hero-knockout',
                 'holds_headline' => true,
                 'needs_background' => true,
+                // The blend follows the delivered panel's luminance, not the
+                // slug: 'contrast' is dark ink on a light palette and light ink
+                // on a dark one, and the wrong blend inverts the composition.
+                'blend_by_luminance' => true,
             ],
             'defaults' => [
                 'media_mode' => 'cover-image', 'headline_register' => 'display',

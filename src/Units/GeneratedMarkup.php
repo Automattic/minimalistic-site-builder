@@ -13,6 +13,7 @@ use Automattic\SiteBuild\BlockSerializer\Json\JsonValue;
 use Automattic\SiteBuild\CodeFences;
 use Automattic\SiteBuild\HtmlBlockContext;
 use Automattic\SiteBuild\MarkupSalvage;
+use Automattic\SiteBuild\PaletteFloor;
 use Automattic\SiteBuild\MarkupSanitizer;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\PlainText;
@@ -3134,6 +3135,121 @@ final class GeneratedMarkup
             'disposition' => 'repaired',
         ];
         return $document->render();
+    }
+
+    /**
+     * Clear the cover dim for a recipe whose image lives only inside the type
+     * (BIGR-935).
+     *
+     * A dim is a scrim for copy sitting ON a photograph. Here the photograph is
+     * visible only through the letterforms, so every point of dim is subtracted
+     * from the only place the image exists: the first audited build shipped
+     * dimRatio 40 and the letters read as grey, not as a picture. The block is
+     * otherwise untouched.
+     *
+     * @param list<array<string,mixed>> $repairs
+     */
+    public static function clearCoverDim(string $markup, string $part, array &$repairs = []): string
+    {
+        $document = BlockMarkup::parse($markup);
+        $cleared = 0;
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) !== 'cover') {
+                continue;
+            }
+            $attrs = $document->attrs($index) ?? [];
+            $dim = $attrs['dimRatio'] ?? null;
+            if ($dim === null || (int) $dim === 0) {
+                continue;
+            }
+            $attrs['dimRatio'] = 0;
+            $document->setAttrs($index, $attrs);
+            $document->removeClassTokenInOwnHtml($index, 'has-background-dim-' . (int) $dim);
+            $cleared++;
+        }
+        if ($cleared === 0) {
+            return $markup;
+        }
+        $repairs[] = [
+            'code' => 'hero-knockout-cover-dim',
+            'part' => $part,
+            'authored' => "{$cleared} cover dim(s) over the knockout photograph",
+            'delivered' => 'dimRatio 0 (the image exists only inside the letters)',
+            'disposition' => 'repaired',
+        ];
+        return $document->render();
+    }
+
+    /**
+     * Stamp the blend mode a knockout panel needs, from the luminance of the
+     * colour it was actually painted (BIGR-935).
+     *
+     * The knockout is a blend, and the blend depends on which way round the
+     * palette is, not on what the slug is called. A dark panel needs multiply,
+     * whose white text resolves to the photograph beneath. A light panel needs
+     * screen, whose dark text does the same. The catalog cannot decide this:
+     * `contrast` is the dark ink on a light palette and the light ink on a dark
+     * one, and the first audited build of this recipe shipped a light panel
+     * with multiply, which shows the photograph everywhere EXCEPT the letters —
+     * the exact inverse of the composition.
+     *
+     * So the build reads the delivered panel colour out of the theme palette
+     * and stamps `--ink` or `--paper`. A panel whose colour cannot be resolved
+     * is left unstamped, and the reviewed stylesheet then renders it as a plain
+     * solid panel: no knockout, but nothing unreadable either.
+     *
+     * @param array<mixed>            $themeJson
+     * @param list<array<string,mixed>> $repairs
+     */
+    public static function knockoutBlend(
+        string $markup,
+        array $themeJson,
+        string $regionClass,
+        string $part,
+        array &$repairs = [],
+    ): string {
+        $palette = [];
+        foreach (($themeJson['settings']['color']['palette'] ?? []) as $entry) {
+            if (is_array($entry) && is_string($entry['slug'] ?? null) && is_string($entry['color'] ?? null)) {
+                $palette[$entry['slug']] = $entry['color'];
+            }
+        }
+        if ($palette === []) {
+            return $markup;
+        }
+
+        $document = BlockMarkup::parse($markup);
+        foreach ($document->indices() as $index) {
+            $attrs = $document->attrs($index) ?? [];
+            $classes = self::classTokens((string) ($attrs['className'] ?? ''));
+            if (!in_array($regionClass, $classes, true)) {
+                continue;
+            }
+            // Already stamped: the pass is a fixed point.
+            foreach ($classes as $token) {
+                if (str_starts_with($token, $regionClass . '--')) {
+                    return $markup;
+                }
+            }
+            $slug = trim((string) ($attrs['backgroundColor'] ?? ''));
+            $luminance = $slug === '' ? null : PaletteFloor::luminance($palette[$slug] ?? '');
+            if ($luminance === null) {
+                return $markup;
+            }
+            $modifier = $regionClass . ($luminance < 0.4 ? '--ink' : '--paper');
+            $attrs['className'] = implode(' ', [...$classes, $modifier]);
+            $document->setAttrs($index, $attrs);
+            $document->replaceClassTokenInOwnHtml($index, $regionClass, $regionClass . ' ' . $modifier);
+            $repairs[] = [
+                'code' => 'hero-knockout-blend',
+                'part' => $part,
+                'authored' => "panel painted '{$slug}'",
+                'delivered' => $modifier . ' (relative luminance ' . number_format($luminance, 3) . ')',
+                'disposition' => 'repaired',
+            ];
+            return $document->render();
+        }
+        return $markup;
     }
 
     /**

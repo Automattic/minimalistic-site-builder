@@ -454,7 +454,12 @@ test('knockout-type puts the image inside the letters, nowhere else (BIGR-935)',
     // Read as a shape before it is read as words.
     assert_eq(['display', 'poster'], $meta['headline_registers']);
     assert_eq(
-        ['class' => 'hero-knockout', 'holds_headline' => true, 'needs_background' => true],
+        [
+            'class' => 'hero-knockout',
+            'holds_headline' => true,
+            'needs_background' => true,
+            'blend_by_luminance' => true,
+        ],
         $meta['required_region'],
     );
 

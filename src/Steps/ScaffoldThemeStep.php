@@ -509,34 +509,45 @@ final class ScaffoldThemeStep implements Step
             aspect-ratio: 3 / 4;
         }
         /* knockout-type (BIGR-935) cuts the headline out of a solid panel so
-           the cover photograph shows only through the letterforms. multiply is
-           what does the cutting: the panel's dark ink multiplies to itself over
-           the image, and pure white text multiplies to the image underneath.
-           The white is forced here rather than left to the palette's base slug,
-           because a tinted white tints every letter — this is the one place a
+           the cover photograph shows only through the letterforms.
+
+           The blend has to match the panel's luminance, and which palette slug
+           is dark is a per-site fact, so the build stamps --ink or --paper from
+           the delivered colour (GeneratedMarkup::knockoutBlend). On a dark
+           panel, multiply resolves white text to the photograph beneath; on a
+           light panel, screen resolves dark text the same way. The text colour
+           is forced to pure white or pure black rather than a palette slug,
+           because a tinted ink tints every letter — this is the one place a
            colour must be exact.
 
-           The panel expands to fill the cover so the field reads as one solid
-           surface, and the copy group below it keeps its own opaque background,
-           outside the blend, where a standfirst stays readable. */
+           An unstamped panel keeps its solid colour and its authored text
+           colour: no knockout, but a legible hero. */
         .hero-composition--knockout-type > .wp-block-cover {
             isolation: isolate;
         }
         .hero-composition--knockout-type .hero-knockout {
-            mix-blend-mode: multiply;
             flex-grow: 1;
             display: flex;
             flex-direction: column;
             justify-content: center;
             inline-size: 100%;
         }
-        .hero-composition--knockout-type .hero-knockout :is(h1, h2, p) {
+        .hero-composition--knockout-type .hero-knockout--ink {
+            mix-blend-mode: multiply;
+        }
+        .hero-composition--knockout-type .hero-knockout--ink :is(h1, h2, p) {
             color: #fff;
+        }
+        .hero-composition--knockout-type .hero-knockout--paper {
+            mix-blend-mode: screen;
+        }
+        .hero-composition--knockout-type .hero-knockout--paper :is(h1, h2, p) {
+            color: #000;
         }
         /* Forced-colours users get a solid, unblended headline: the knockout is
            decoration, and the words must survive without it. */
         @media (forced-colors: active) {
-            .hero-composition--knockout-type .hero-knockout {
+            .hero-composition--knockout-type :is(.hero-knockout--ink, .hero-knockout--paper) {
                 mix-blend-mode: normal;
             }
         }
