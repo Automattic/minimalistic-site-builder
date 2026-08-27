@@ -388,3 +388,83 @@ System architecture, data flow with shadow paths, and the dependency before/afte
 5. Confirm `section-rhythm` and `normalize-layout` are not no-ops on chrome-only input during milestone 4.
 6. Do not proceed past milestone 5 if the comparison shows a small visual delta — the premise is untested until then.
 7. Milestone 8 waits on `feature/deterministic-patterns`.
+
+---
+
+## Amendments from implementation (2026-08-27)
+
+Three decisions in the sections above were changed during milestones 2–3 because
+measuring the corpus contradicted the premise they rested on. The sections above
+are left as written; these override them.
+
+### 6A is withdrawn — no wrapper descent
+
+6A said to descend through non-section wrappers, on the premise that a naive
+split "yields 0 islands — page lost". Both halves of that premise are wrong.
+
+`TransformSiteStep::extractPage` has always islanded every **element** child of
+`<main>`, not every `<section>` child. A wrapper-only page yields one unit, never
+zero. No shipped code has the blank-page bug 6A was written to prevent; the bug
+belonged to a hypothetical rule nobody proposed.
+
+And the wrappers are not what 6A assumed. All 12 wrapper pages in the corpus
+(of 300) carry the page's content column on the wrapper itself:
+
+| page | wrapper rule |
+|---|---|
+| amber-ember2/contact | `.pg-wrap{max-width:var(--wide-size);margin:0 auto;padding:0 20px}` |
+| swift-grove/about, /contact | `.page{max-width:var(--wide-size);margin:0 auto}` |
+| clever-valley/contact | `.pg{max-width:…;margin:0 auto;border-left:1px solid var(--hairline);border-right:…}` |
+| sunny-ember/contact | `.page-wrap{position:relative;overflow:hidden;background:radial-gradient(…)}` |
+| (8 more) | `max-width:var(--wide-size); margin:0 auto; padding:0 <gutter>` |
+
+**Zero carry `display:grid` or `display:flex`** — 6A's stated hazard does not occur
+in the corpus at all. But its stated remedy does damage: descending re-parents the
+children and drops the wrapper, so every island loses the content column and goes
+full-bleed. `SectionLayoutStep`, which re-binds sections to the content column on
+the blocks path, is dropped from this graph, so nothing restores it. Two pages
+would lose more than the inset — a continuous hairline border down the page, and a
+page-level radial background.
+
+Descent trades a granularity gain on 4% of pages for a visual regression on those
+same pages. **Split on direct element children of `<main>`; never descend.** A
+wrapper-only page is one island, intact.
+
+### 9B is withdrawn — no tag-stack scanner
+
+9B asked `island-pages` to assert the tag stack per island and synthesize missing
+closers. Islands are serialized out of the DOM, so they are balanced by
+construction; a scanner over that output measures nothing. (Same instrument error
+as using `saveHTML()` to detect source imbalance.)
+
+The hazard 9B is reaching for is real but different: libxml silently **re-nesting**
+a truncated document so later sections become children of an earlier one. A tag
+scanner cannot see that. The structural-error check from 10A can. Balance is
+therefore asserted as an output property plus a truncation case, not built as a
+scanner.
+
+### Milestone 2 splits in two
+
+`aboveFold.json` derivation is separated from `island-pages` into its own slice,
+because reading the consumers changed what the work is.
+
+3A said to "derive the contract from the design HTML". In fact
+`AboveFoldContract::resolve()` — which builds the whole contract — reads
+`siteSpec`, the hero blueprint, `theme.json`, the canvas and the design CSS, and
+**no markup at all**. Only `AboveFoldPartFacts::inspect()` reads markup, and of
+the eight facts it returns, two need no change on this graph: `part_keys` is
+filenames, and `header` parses `theme/parts/header.html`, which `transform-chrome`
+still delivers as real blocks.
+
+So the work is an **islands facts adapter** for the remaining five
+(`opening_overlay_support`, `opening_surfaces`, the two `primary_action_*`, and
+`hero`), not a second contract implementation. That matters beyond size: a
+conservative adapter that reports "no overlay support" would make
+`finalizeDelivery` degrade every islands build's header from overlay to stacked —
+quietly, since that degrade path is designed to be routine. The adapter has to read
+island HTML for real, and the degradation must be visible in `island-report.json`.
+
+| slice | scope |
+|---|---|
+| 2a `island-pages` | split, parse degrade, re-sanitize, missing-artifact skip, `pages.json`, parts, `island-report.json` |
+| 2b `island-above-fold` | the facts adapter + `aboveFold.json`; depends on 2a and on `transform-chrome` |
