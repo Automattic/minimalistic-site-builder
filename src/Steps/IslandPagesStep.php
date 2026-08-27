@@ -29,6 +29,9 @@ final class IslandPagesStep implements Step
 {
     private const SKIP_TAGS = ['header', 'footer', 'style', 'script'];
 
+    /** Direct <main> children that are page content, not chrome — exclude from islands but warn (G7). */
+    private const LANDMARK_SKIP_TAGS = ['header', 'footer'];
+
     public function id(): string
     {
         return 'island-pages';
@@ -110,6 +113,7 @@ final class IslandPagesStep implements Step
     /**
      * Direct element children of <main> that become islands.
      * Skips header/footer/style/script. No wrapper descent.
+     * header/footer skips are warned in processPage (G7); style/script stay silent.
      *
      * @return list<DOMElement>
      */
@@ -128,9 +132,43 @@ final class IslandPagesStep implements Step
         return $elements;
     }
 
+    /**
+     * Direct header/footer children of <main>. Page content per DesignDocument
+     * landmark rules, not site chrome — excluded from islands but not silent.
+     *
+     * @return list<string>
+     */
+    public static function excludedLandmarks(DOMElement $main): array
+    {
+        $tags = [];
+        foreach ($main->childNodes as $child) {
+            if (
+                !$child instanceof DOMElement
+                || !in_array(strtolower($child->tagName), self::LANDMARK_SKIP_TAGS, true)
+            ) {
+                continue;
+            }
+            $tags[] = strtolower($child->tagName);
+        }
+        return $tags;
+    }
+
     public static function isTextOnlyFallback(DOMElement $main, array $elements): bool
     {
-        return $elements === [] && trim($main->textContent) !== '';
+        if ($elements !== []) {
+            return false;
+        }
+        $text = '';
+        foreach ($main->childNodes as $child) {
+            if (
+                $child instanceof DOMElement
+                && in_array(strtolower($child->tagName), self::SKIP_TAGS, true)
+            ) {
+                continue;
+            }
+            $text .= $child->textContent;
+        }
+        return trim($text) !== '';
     }
 
     /**
@@ -205,10 +243,33 @@ final class IslandPagesStep implements Step
             return self::skip($reason);
         }
 
+        $excluded = self::excludedLandmarks($main);
+        foreach ($excluded as $tag) {
+            $warnings[] = "malformed_design: {$rel} context page {$slug}; "
+                . "authored <{$tag}> inside <main>; delivered removed; disposition excluded-landmark";
+            $degrades[] = [
+                'slug'   => $slug,
+                'reason' => "<{$tag}> inside <main> excluded from islands",
+            ];
+        }
+
         $elements = self::islandElements($main);
         $textOnly = self::isTextOnlyFallback($main, $elements);
         if ($textOnly) {
-            $elements = [$main];
+            $stripped = $main->cloneNode(true);
+            if ($stripped instanceof DOMElement) {
+                foreach (iterator_to_array($stripped->childNodes) as $child) {
+                    if (
+                        $child instanceof DOMElement
+                        && in_array(strtolower($child->tagName), self::SKIP_TAGS, true)
+                    ) {
+                        $stripped->removeChild($child);
+                    }
+                }
+                $elements = [$stripped];
+            } else {
+                $elements = [$main];
+            }
         }
 
         $sections = [];
@@ -273,10 +334,11 @@ final class IslandPagesStep implements Step
                 'sections'   => $sections,
             ],
             'report' => [
-                'slug'                => $slug,
-                'islands'             => count($sections),
-                'non_section_islands' => $nonSection,
-                'text_only'           => $textOnly,
+                'slug'                 => $slug,
+                'islands'              => count($sections),
+                'non_section_islands'  => $nonSection,
+                'text_only'            => $textOnly,
+                'excluded_landmarks'   => count($excluded),
             ],
         ];
     }
