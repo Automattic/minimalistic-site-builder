@@ -269,6 +269,10 @@ final class AboveFoldContract
                 'focal' => $focal,
             ],
             'mobile_transformation' => (string) ($blueprint['mobile_transformation'] ?? 'stack-copy-first'),
+            // Carried for the same reason as mobile_transformation: the build
+            // stamps a root class from it at finalization, and by then the
+            // blueprint itself is no longer in hand (BIGR-925).
+            'media_aspect' => self::mediaAspect($blueprint, $recipe),
             'primary_action' => $action,
             'seam' => [
                 'following_kind' => is_array($following) ? 'section' : 'footer',
@@ -567,6 +571,25 @@ final class AboveFoldContract
             }
         }
         return $pages[0];
+    }
+
+    /**
+     * The blueprint's committed media aspect, held to what the recipe can
+     * actually serve. A blueprint naming an aspect its recipe has no slot for
+     * falls back to the recipe default, the same resolution HeroBlueprint's
+     * own normalize step applies (BIGR-925).
+     *
+     * @param array<string,mixed> $blueprint
+     */
+    private static function mediaAspect(array $blueprint, string $recipe): string
+    {
+        $meta = HeroComposition::metadata($recipe);
+        $committed = is_string($blueprint['media_aspect'] ?? null)
+            ? trim($blueprint['media_aspect'])
+            : '';
+        return in_array($committed, (array) $meta['media_aspects'], true)
+            ? $committed
+            : (string) $meta['defaults']['media_aspect'];
     }
 
     /**
@@ -953,6 +976,13 @@ final class AboveFoldContract
             )
         ) {
             throw new \RuntimeException('aboveFold.json has an incompatible mobile transformation');
+        }
+        if (!in_array(
+            $contract['media_aspect'] ?? null,
+            HeroComposition::metadata($contract['recipe'])['media_aspects'],
+            true,
+        )) {
+            throw new \RuntimeException('aboveFold.json has an incompatible media aspect');
         }
 
         $header = $contract['header'];

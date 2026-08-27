@@ -2673,3 +2673,109 @@ test('the header prompt forbids overlayMenu always and never', function () {
     assert_contains('inline links on desktop', $prompt);
     assert_contains('exactly one hamburger on mobile', $prompt);
 });
+
+test('the build stamps the blueprint media aspect on the hero root (BIGR-925)', function () {
+    // BIGR-912 moved the portrait plate's aspect-ratio onto a hero-media--
+    // class, but only the model wrote it, so a model that skipped it silently
+    // lost the contained vertical frame. The build stamps it now, the same way
+    // it stamps hero-mobile--, so the CSS hook cannot go missing.
+    with_project('builder_hh_aspect_', function ($project) {
+        $pages = [[
+            'slug' => 'home', 'title' => 'Home', 'path' => '/', 'front' => true,
+            'sections' => [[
+                'slug' => 'hero', 'role' => 'hero',
+                'layout_archetype' => 'asymmetric-split', 'background' => 'base',
+            ]],
+        ]];
+        $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+        $project->writeJson('theme/theme.json', hh_theme_json());
+        $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'calm']);
+        $project->writeJson('pages.json', ['pages' => $pages]);
+
+        $blueprint = HeroBlueprint::defaultFor('foreground-split');
+        $blueprint['media_aspect'] = 'portrait';
+        $delivery = AboveFoldContract::resolve(
+            $pages,
+            $blueprint,
+            'full-bleed',
+            hh_theme_json(),
+            ['stable_id' => 'hh-aspect', 'writing_direction' => 'ltr', 'page_count' => 1],
+            ['archetype' => 'minimal-columns', 'surface' => 'base'],
+        );
+        assert_eq('portrait', $delivery['media_aspect'], 'the contract carries the committed aspect');
+        $project->writeJson('aboveFold.json', $delivery);
+
+        $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}'));
+        // The authored hero deliberately omits the class the CSS keys on.
+        $project->writeText(
+            'theme/parts/page-home--hero.html',
+            '<!-- wp:group {"anchor":"hero","className":"hero-composition--foreground-split hero-mobile--stack-copy-first","layout":{"type":"constrained"}} -->'
+                . '<div id="hero" class="wp-block-group hero-composition--foreground-split hero-mobile--stack-copy-first">'
+                . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Hero</h1><!-- /wp:heading -->'
+                . '</div><!-- /wp:group -->',
+        );
+
+        putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
+        (new HeaderHeroStep())->run($project);
+
+        $hero = $project->readText('theme/parts/page-home--hero.html');
+        // Once in the rendered class attribute, and once in the block comment's
+        // JSON, where a literal `--` is illegal inside an HTML comment and is
+        // therefore escaped.
+        assert_eq(1, substr_count($hero, 'class="wp-block-group hero-composition--foreground-split '
+            . 'hero-mobile--stack-copy-first hero-media--portrait"'));
+        assert_eq(1, substr_count($hero, 'hero-media--portrait'));
+        assert_contains('hero-composition--foreground-split', $hero);
+        assert_contains('hero-mobile--stack-copy-first', $hero);
+    });
+});
+
+test('a stale media-aspect marker on an authored hero is replaced, not doubled (BIGR-925)', function () {
+    with_project('builder_hh_aspect2_', function ($project) {
+        $pages = [[
+            'slug' => 'home', 'title' => 'Home', 'path' => '/', 'front' => true,
+            'sections' => [[
+                'slug' => 'hero', 'role' => 'hero',
+                'layout_archetype' => 'asymmetric-split', 'background' => 'base',
+            ]],
+        ]];
+        $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+        $project->writeJson('theme/theme.json', hh_theme_json());
+        $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'calm']);
+        $project->writeJson('pages.json', ['pages' => $pages]);
+
+        $blueprint = HeroBlueprint::defaultFor('foreground-split');
+        $blueprint['media_aspect'] = 'square';
+        $project->writeJson('aboveFold.json', AboveFoldContract::resolve(
+            $pages,
+            $blueprint,
+            'full-bleed',
+            hh_theme_json(),
+            ['stable_id' => 'hh-aspect2', 'writing_direction' => 'ltr', 'page_count' => 1],
+            ['archetype' => 'minimal-columns', 'surface' => 'base'],
+        ));
+
+        $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}'));
+        $project->writeText(
+            'theme/parts/page-home--hero.html',
+            '<!-- wp:group {"anchor":"hero","className":"hero-composition--foreground-split hero-mobile--stack-copy-first hero-media--portrait","layout":{"type":"constrained"}} -->'
+                . '<div id="hero" class="wp-block-group hero-composition--foreground-split hero-mobile--stack-copy-first hero-media--portrait">'
+                . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Hero</h1><!-- /wp:heading -->'
+                . '</div><!-- /wp:group -->',
+        );
+
+        putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
+        (new HeaderHeroStep())->run($project);
+
+        $hero = $project->readText('theme/parts/page-home--hero.html');
+        assert_contains('hero-media--square', $hero);
+        // Both spellings must be gone: the rendered class attribute, and the
+        // block comment's JSON, which escapes a `--` that is illegal inside an
+        // HTML comment.
+        assert_true(
+            !str_contains($hero, 'hero-media--portrait')
+                && !str_contains($hero, 'hero-media\u002d\u002dportrait'),
+            'the model\'s contradicting aspect marker is replaced by the committed one',
+        );
+    });
+});

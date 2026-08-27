@@ -34,8 +34,11 @@ final class HeroFallback
                 "aboveFold.json mobile transformation '{$mobile}' is incompatible with recipe '{$recipe}'"
             );
         }
+        // assertPhase() above already held this to the recipe's own aspects,
+        // so the fallback stamps it without re-checking (BIGR-925).
+        $aspect = (string) $contract['media_aspect'];
         $rootClasses = 'hero-composition--' . $recipe . ' hero-mobile--' . $mobile
-            . ' hero-fallback--' . $family;
+            . ' hero-media--' . $aspect . ' hero-fallback--' . $family;
         $attrs = [
             'anchor' => $slug,
             'className' => $rootClasses,
