@@ -16,6 +16,7 @@ final class HeroComposition
     public const RECIPES = [
         'cinematic-safe-zone',
         'editorial-split',
+        'offset-frame',
         'framed-portrait',
         'focal-subject-stage',
         'layered-poster',
@@ -75,6 +76,8 @@ final class HeroComposition
             // a corner of the frame.
             'headline_registers' => ['restrained'],
             'height_profiles' => ['standard', 'immersive'],
+            // No overlap card, so no extra region is required.
+            'required_region' => null,
             'defaults' => [
                 'media_mode' => 'cover-image', 'headline_register' => 'restrained',
                 'text_anchor' => 'center',
@@ -101,6 +104,8 @@ final class HeroComposition
             'prompt' => 'hero-compositions/editorial-split.md',
             'headline_registers' => ['restrained', 'display'],
             'height_profiles' => ['compact', 'standard'],
+            // No overlap card, so no extra region is required.
+            'required_region' => null,
             'defaults' => [
                 'media_mode' => 'foreground-image', 'headline_register' => 'display',
                 'text_anchor' => 'center-start',
@@ -127,6 +132,8 @@ final class HeroComposition
             'prompt' => 'hero-compositions/framed-portrait.md',
             'headline_registers' => ['restrained', 'display'],
             'height_profiles' => ['compact', 'standard'],
+            // No overlap card, so no extra region is required.
+            'required_region' => null,
             'defaults' => [
                 'media_mode' => 'foreground-image', 'headline_register' => 'restrained',
                 'text_anchor' => 'center-start',
@@ -153,6 +160,8 @@ final class HeroComposition
             'prompt' => 'hero-compositions/focal-subject-stage.md',
             'headline_registers' => ['restrained', 'display'],
             'height_profiles' => ['standard', 'immersive'],
+            // No overlap card, so no extra region is required.
+            'required_region' => null,
             'defaults' => [
                 'media_mode' => 'foreground-image', 'headline_register' => 'display',
                 'text_anchor' => 'center-start',
@@ -160,6 +169,48 @@ final class HeroComposition
                 'focal_region' => 'none', 'text_safe_region' => 'full',
                 'height_profile' => 'immersive', 'cta_treatment' => 'prominent',
                 'mobile_transformation' => 'stack-media-first',
+            ],
+        ],
+        // BIGR-914: the overlap recipe. Every other contained split places the
+        // copy BESIDE the plate; here the copy card sits ON the plate's edge,
+        // so the two regions read as one object with depth instead of two
+        // objects sharing a row. layered-poster overlays type on a full-bleed
+        // cover, which is a different thing: there is no contained plate to
+        // overlap, and no card.
+        'offset-frame' => [
+            'canvases' => ['full-bleed', 'framed'],
+            'media_modes' => ['foreground-image'],
+            'min_images' => 1,
+            'max_images' => 1,
+            'backgrounds' => ['base', 'tinted', 'contrast'],
+            'default_background' => 'tinted',
+            'fallback_background' => 'base',
+            // The plate does not cover the band, so it cannot protect a
+            // transparent header.
+            'header_modes' => ['stacked'],
+            'copy_capacity' => 'compact',
+            // The overlap is a desktop device. Mobile flattens it into an
+            // ordered stack rather than pulling a card over a photograph in a
+            // 390px column, where the card would cover the subject.
+            'mobile_transformations' => ['flatten-layers', 'stack-media-first'],
+            'layout_archetype' => 'asymmetric-split',
+            'fallback_family' => 'foreground-split',
+            'root_hook' => '.hero-composition--offset-frame',
+            'prompt' => 'hero-compositions/offset-frame.md',
+            'headline_registers' => ['restrained', 'display'],
+            'height_profiles' => ['standard', 'immersive'],
+            // The card region the overlap needs. markupWarnings() reads this
+            // field, so the check never branches on a recipe name.
+            'required_region' => 'hero-composition__card',
+            'defaults' => [
+                'media_mode' => 'foreground-image', 'headline_register' => 'display',
+                // repairSpatialCompatibility() pins both spatial fields for
+                // every non-cover recipe; these keep defaultFor() a fixed point.
+                'text_anchor' => 'bottom-start',
+                'headline_line_target' => ['desktop' => [1, 3], 'mobile' => [2, 5]],
+                'focal_region' => 'none', 'text_safe_region' => 'full',
+                'height_profile' => 'standard', 'cta_treatment' => 'prominent',
+                'mobile_transformation' => 'flatten-layers',
             ],
         ],
         'layered-poster' => [
@@ -181,6 +232,8 @@ final class HeroComposition
             'prompt' => 'hero-compositions/layered-poster.md',
             'headline_registers' => ['display', 'poster'],
             'height_profiles' => ['standard', 'immersive'],
+            // No overlap card, so no extra region is required.
+            'required_region' => null,
             'defaults' => [
                 'media_mode' => 'cover-image', 'headline_register' => 'poster',
                 // BIGR-775 follow-up: a top-pinned safe zone left a dead band
@@ -220,6 +273,8 @@ final class HeroComposition
             // No image means no media plate to balance, so an immersive band
             // would only add empty canvas under the copy.
             'height_profiles' => ['compact', 'standard'],
+            // No overlap card, so no extra region is required.
+            'required_region' => null,
             'defaults' => [
                 'media_mode' => 'none', 'headline_register' => 'display',
                 'text_anchor' => 'center-start',
@@ -538,6 +593,35 @@ final class HeroComposition
                 ['matching_regions' => $mediaRegions],
                 'safe parseable hero was retained; restore only the missing assigned foreground-media region hooks',
             );
+        }
+        // BIGR-914: a recipe whose identity is an overlap needs the region the
+        // overlap is made of. Without the card the copy simply sits beside the
+        // plate, which is a composition the catalog already holds three of, so
+        // the missing hook is the whole defect. The required region is catalog
+        // metadata, so this check never grows a branch per recipe name.
+        $requiredRegion = $meta['required_region'] ?? null;
+        if (is_string($requiredRegion)) {
+            $regions = 0;
+            foreach ($document->indices() as $index) {
+                $classes = preg_split(
+                    '/\s+/',
+                    trim((string) (($document->attrs($index) ?? [])['className'] ?? '')),
+                    -1,
+                    PREG_SPLIT_NO_EMPTY,
+                ) ?: [];
+                if (in_array($requiredRegion, $classes, true)) {
+                    $regions++;
+                }
+            }
+            if ($regions !== 1) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'recipe required region',
+                    ['required_class' => $requiredRegion, 'expected_regions' => 1],
+                    ['matching_regions' => $regions],
+                    'safe parseable hero was retained; restore the single assigned region hook the overlap is built from',
+                );
+            }
         }
         if (in_array('foreground-image', $mediaModes, true)
             && $covers > 0

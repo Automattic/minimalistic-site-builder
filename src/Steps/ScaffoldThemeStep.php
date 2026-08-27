@@ -509,6 +509,25 @@ final class ScaffoldThemeStep implements Step
             aspect-ratio: 3 / 4;
             object-fit: cover;
         }
+        /* offset-frame (BIGR-914) is a copy card crossing the edge of a
+           contained plate. The pull is code-owned rather than generated: an
+           authored negative margin is an inline style fix-blocks deletes, and
+           the overlap is the recipe's whole identity. Below the stacking
+           breakpoint the card returns to normal flow, which is what
+           flatten-layers promises on mobile. */
+        @media (min-width: 782px) {
+            .hero-composition--offset-frame .hero-composition__card {
+                position: relative;
+                z-index: 1;
+                margin-inline-start: -12%;
+                inline-size: min(100%, 34rem);
+            }
+        }
+        .hero-composition--offset-frame .hero-composition__media img {
+            width: 100%;
+            height: auto;
+            object-fit: cover;
+        }
         .hero-composition--layered-poster {
             overflow: hidden;
         }

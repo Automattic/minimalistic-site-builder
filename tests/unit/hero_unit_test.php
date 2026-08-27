@@ -113,6 +113,7 @@ test('HeroUnit exposes one isolated assigned recipe behind the shared site layer
     $markers = [
         'cinematic-safe-zone' => 'landscape cover stage',
         'editorial-split' => 'deliberately unequal copy and foreground-media regions',
+        'offset-frame' => 'let a solid copy card overlap its edge',
         'framed-portrait' => 'contained vertical foreground image',
         'focal-subject-stage' => 'singular subject as an opaque foreground content image',
         'layered-poster' => 'cover image beneath controlled block-built type',

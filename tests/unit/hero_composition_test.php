@@ -5,7 +5,7 @@ use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
 
 test('hero catalog entries own complete metadata, defaults, prompts, and unique hooks', function () {
-    assert_eq(6, count(HeroComposition::RECIPES));
+    assert_eq(7, count(HeroComposition::RECIPES));
     $hooks = [];
     foreach (HeroComposition::RECIPES as $recipe) {
         $meta = HeroComposition::metadata($recipe);
@@ -13,7 +13,7 @@ test('hero catalog entries own complete metadata, defaults, prompts, and unique 
             'canvases', 'media_modes', 'min_images', 'max_images', 'backgrounds',
             'default_background', 'fallback_background', 'header_modes', 'copy_capacity',
             'mobile_transformations', 'layout_archetype', 'fallback_family', 'root_hook',
-            'prompt', 'headline_registers', 'height_profiles', 'defaults',
+            'prompt', 'headline_registers', 'height_profiles', 'required_region', 'defaults',
         ] as $field) {
             assert_true(array_key_exists($field, $meta), "{$recipe} metadata has {$field}");
         }
@@ -292,4 +292,59 @@ test('hero copy budget and headline punctuation overruns warn without hiding val
     $cleanHeadline = str_replace('One subject — staged', 'One subject staged', $inBudget);
     $warnings = HeroComposition::markupWarnings($cleanHeadline, 'focal-subject-stage', 'page-home--hero');
     assert_eq([], array_values(array_filter($warnings, fn (string $w): bool => str_contains($w, 'hero headline punctuation'))));
+});
+
+test('offset-frame is the overlap recipe and owns its card region (BIGR-914)', function () {
+    $meta = HeroComposition::metadata('offset-frame');
+    assert_eq(['foreground-image'], $meta['media_modes']);
+    assert_eq(1, $meta['min_images']);
+    assert_eq(1, $meta['max_images']);
+    // A contained plate cannot protect a transparent header.
+    assert_eq(['stacked'], $meta['header_modes']);
+    // The overlap is a desktop device; mobile flattens it rather than pulling
+    // a card over a photograph in a narrow column.
+    assert_eq('flatten-layers', $meta['defaults']['mobile_transformation']);
+    assert_eq('hero-composition__card', $meta['required_region']);
+
+    foreach (HeroComposition::RECIPES as $recipe) {
+        if ($recipe === 'offset-frame') {
+            continue;
+        }
+        assert_eq(null, HeroComposition::metadata($recipe)['required_region'], $recipe);
+    }
+});
+
+test('the overlap check counts the delivered card region (BIGR-914)', function () {
+    $media = '<!-- wp:group {"className":"hero-composition__media"} --><div class="wp-block-group hero-composition__media">'
+        . '<img src="theme:./assets/plate.jpg" alt="AI_IMAGE: A bindery bench | hero plate | photorealistic | landscape" />'
+        . '</div><!-- /wp:group -->';
+    $card = static fn (string $classes): string =>
+        '<!-- wp:group {"className":"' . $classes . '"} --><div class="wp-block-group ' . $classes . '">'
+        . '<!-- wp:heading {"level":1} --><h1>Bound by hand</h1><!-- /wp:heading -->'
+        . '</div><!-- /wp:group -->';
+
+    // Copy beside the plate, with no card: the overlap never happened.
+    $beside = '<!-- wp:group --><div class="wp-block-group">' . $media
+        . $card('hero-composition__copy') . '</div><!-- /wp:group -->';
+    $warnings = HeroComposition::markupWarnings($beside, 'offset-frame', 'page-home--hero');
+    assert_eq(1, count($warnings));
+    assert_contains('recipe required region', $warnings[0]);
+    assert_contains('hero-composition__card', $warnings[0]);
+
+    $overlap = '<!-- wp:group --><div class="wp-block-group">' . $media
+        . $card('hero-composition__copy hero-composition__card') . '</div><!-- /wp:group -->';
+    assert_eq([], HeroComposition::markupWarnings($overlap, 'offset-frame', 'page-home--hero'));
+
+    // Two cards are two objects, which is the same defect from the other side.
+    $twoCards = '<!-- wp:group --><div class="wp-block-group">' . $media
+        . $card('hero-composition__copy hero-composition__card')
+        . $card('hero-composition__card') . '</div><!-- /wp:group -->';
+    $warnings = HeroComposition::markupWarnings($twoCards, 'offset-frame', 'page-home--hero');
+    assert_true(count(array_filter(
+        $warnings,
+        static fn (string $row): bool => str_contains($row, 'recipe required region'),
+    )) === 1);
+
+    // The check belongs to the recipe that declares the region.
+    assert_eq([], HeroComposition::markupWarnings($beside, 'editorial-split', 'page-home--hero'));
 });
