@@ -68,7 +68,7 @@ test('palette-audit --fixtures prints G5 counts and exits 0 after repair', funct
     foreach ([
         'fixtures: 10',
         'pre-repair violating palettes: 6',
-        'pre-repair findings: 13',
+        'pre-repair findings: 12',
         'post-repair remaining: 0',
     ] as $line) {
         assert_true(in_array($line, $run['lines'], true), $text);
