@@ -37,6 +37,25 @@ final class DesignDocument
         'textarea',
     ];
 
+    /**
+     * Nesting that means a landmark is not page-level. html/head/body are
+     * omitted: libxml invents them for fragments and they must not reject.
+     */
+    private const CONTENT_ANCESTORS = [
+        'div',
+        'section',
+        'article',
+        'aside',
+        'nav',
+        'main',
+        'footer',
+        'address',
+        'header',
+        'form',
+        'td',
+        'li',
+    ];
+
     /** HTML5 elements whose end tag may be omitted. */
     private const OPTIONAL_END_TAGS = [
         'html',
@@ -92,15 +111,11 @@ final class DesignDocument
 
     public function main(): ?\DOMElement
     {
-        $body = $this->bodyElement();
-        if ($body === null) {
-            return null;
-        }
         $found = [];
         foreach ($this->dom->getElementsByTagName('main') as $element) {
             $found[] = $element;
         }
-        if (count($found) !== 1 || $found[0]->parentNode !== $body) {
+        if (count($found) !== 1 || self::hasContentAncestor($found[0])) {
             return null;
         }
         return $found[0];
@@ -157,24 +172,27 @@ final class DesignDocument
         return $css;
     }
 
-    private function bodyElement(): ?\DOMElement
-    {
-        $body = $this->dom->getElementsByTagName('body')->item(0);
-        return $body instanceof \DOMElement ? $body : null;
-    }
-
     private function topLevelLandmark(string $tag): ?\DOMElement
     {
-        $body = $this->bodyElement();
-        if ($body === null) {
-            return null;
-        }
-        foreach ($body->childNodes as $child) {
-            if ($child instanceof \DOMElement && strtolower($child->nodeName) === $tag) {
-                return $child;
+        foreach ($this->dom->getElementsByTagName($tag) as $element) {
+            if (!self::hasContentAncestor($element)) {
+                return $element;
             }
         }
         return null;
+    }
+
+    private static function hasContentAncestor(\DOMElement $element): bool
+    {
+        for ($node = $element->parentNode; $node !== null; $node = $node->parentNode) {
+            if (
+                $node instanceof \DOMElement
+                && in_array(strtolower($node->nodeName), self::CONTENT_ANCESTORS, true)
+            ) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private function serialize(\DOMElement $element): string
@@ -220,13 +238,8 @@ final class DesignDocument
             return;
         }
         $main = $mains->item(0);
-        $body = $dom->getElementsByTagName('body')->item(0);
-        if (
-            $main instanceof \DOMElement
-            && $body instanceof \DOMElement
-            && $main->parentNode !== $body
-        ) {
-            $structuralErrors[] = 'main is not a direct child of body';
+        if ($main instanceof \DOMElement && self::hasContentAncestor($main)) {
+            $structuralErrors[] = 'main is nested inside a content element';
         }
     }
 
