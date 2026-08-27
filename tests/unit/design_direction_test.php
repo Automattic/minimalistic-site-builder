@@ -463,6 +463,46 @@ test('design-direction records a collapsed round once, without a shared-ground e
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('design-direction records a round of distinct worlds that all lean on one tint', function () {
+    // BIGR-922: tint is not in the dedup key, so three distinct worlds can
+    // still share a family — the audited cohort's cream skew. The lean is
+    // recorded, never blocking.
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $llm->queueJson(['seeds' => [
+        designdir_seed_obj('One', 'light', 'heritage', 'warm') + ['tint' => 'warm'],
+        designdir_seed_obj('Two', 'light', 'modernist', 'cool') + ['tint' => 'warm'],
+        designdir_seed_obj('Three', 'dark', 'noir', 'jewel') + ['tint' => 'warm'],
+    ]]);
+    $llm->queueJson(['direction' => designdir_direction()]);
+
+    (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $joined = implode("\n", $project->readJson('warnings.json')['design-direction'] ?? []);
+    assert_contains('every concept seed is warm-tinted', $joined);
+    assert_contains('disposition tolerated', $joined);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('design-direction stays quiet about tint when the round spreads its families', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $llm->queueJson(['seeds' => [
+        designdir_seed_obj('One', 'light', 'heritage', 'warm') + ['tint' => 'warm'],
+        designdir_seed_obj('Two', 'light', 'modernist', 'cool') + ['tint' => 'cool'],
+        designdir_seed_obj('Three', 'dark', 'noir', 'jewel') + ['tint' => 'violet'],
+    ]]);
+    $llm->queueJson(['direction' => designdir_direction()]);
+
+    (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $joined = $project->exists('warnings.json')
+        ? implode("\n", $project->readJson('warnings.json')['design-direction'] ?? [])
+        : '';
+    assert_true(!str_contains($joined, '-tinted'), 'a spread round earns no tint row');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('design-direction does not warn that every seed is grounded when two left ground unstated', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
     $llm->queueJson(['seeds' => [

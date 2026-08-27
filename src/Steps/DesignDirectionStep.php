@@ -509,21 +509,29 @@ final class DesignDirectionStep implements Step
             ];
         }
         $pool = ConceptSeeds::distinct($seeds, $warnings);
-        $sharedGround = ConceptSeeds::sharedGround($pool);
-        if ($sharedGround !== null) {
-            $triples = [];
-            foreach ($pool as $seed) {
-                $key = ConceptSeeds::axisKey($seed);
-                if ($key !== null) {
-                    $triples[$key] = true;
-                }
+        $triples = [];
+        foreach ($pool as $seed) {
+            $key = ConceptSeeds::axisKey($seed);
+            if ($key !== null) {
+                $triples[$key] = true;
             }
-            // distinct() already records a collapsed round (one world, kept
-            // whole). A second row that restates the shared ground is the
-            // same event, and "open brief" is a claim this step never checked.
-            if (count($triples) > 1) {
+        }
+        // distinct() already records a collapsed round (one world, kept
+        // whole). A second row that restates the shared axis is the same
+        // event, and "open brief" is a claim this step never checked.
+        if (count($triples) > 1) {
+            $sharedGround = ConceptSeeds::sharedGround($pool);
+            if ($sharedGround !== null) {
                 $warnings[] = 'design-direction: every concept seed is ' . $sharedGround
                     . '-grounded; picked from it anyway; disposition tolerated';
+            }
+            // The tint is not in the dedup key, so a round of three distinct
+            // worlds can still lean one way — the audited cohort's cream
+            // skew (BIGR-922). Visible in the report, never blocking.
+            $sharedTint = ConceptSeeds::sharedTint($pool);
+            if ($sharedTint !== null) {
+                $warnings[] = 'design-direction: every concept seed is ' . $sharedTint
+                    . '-tinted; picked from the one-family round anyway; disposition tolerated';
             }
         }
         return self::chosen($pool[random_int(0, count($pool) - 1)]);
