@@ -509,6 +509,30 @@ final class ScaffoldThemeStep implements Step
             aspect-ratio: 3 / 4;
             object-fit: cover;
         }
+        /* split-bleed-duo (BIGR-913) is two panels meeting at a hard seam. The
+           block's default gap and the theme's block spacing would open a
+           gutter between them, which is the one thing the recipe cannot have,
+           and the image half must fill its panel rather than sit inside it. */
+        .hero-composition--split-bleed-duo .wp-block-media-text {
+            gap: 0;
+            grid-gap: 0;
+        }
+        .hero-composition--split-bleed-duo .wp-block-media-text__media img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .hero-composition--split-bleed-duo .wp-block-media-text__content {
+            padding: clamp(1.75rem, 6vw, 5rem);
+        }
+        /* Core stacks media-text at 600px, where a viewport-height panel pair
+           would leave the copy scrolling under a tall photograph. Only the
+           side-by-side state carries the height. */
+        @media (min-width: 601px) {
+            .hero-composition--split-bleed-duo .wp-block-media-text {
+                min-block-size: min(78vh, 720px);
+            }
+        }
         .hero-composition--layered-poster {
             overflow: hidden;
         }

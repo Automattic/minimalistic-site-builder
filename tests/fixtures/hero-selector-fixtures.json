@@ -91,6 +91,7 @@
         "hero_copy_capacity": "compact"
       },
       "eligible": [
+        "split-bleed-duo",
         "focal-subject-stage"
       ]
     },
@@ -107,6 +108,7 @@
         "hero_copy_capacity": "compact"
       },
       "eligible": [
+        "split-bleed-duo",
         "focal-subject-stage"
       ]
     },
@@ -151,6 +153,7 @@
         "hero_copy_capacity": "compact"
       },
       "eligible": [
+        "split-bleed-duo",
         "focal-subject-stage"
       ]
     }

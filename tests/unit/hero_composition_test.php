@@ -5,7 +5,7 @@ use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
 
 test('hero catalog entries own complete metadata, defaults, prompts, and unique hooks', function () {
-    assert_eq(6, count(HeroComposition::RECIPES));
+    assert_eq(7, count(HeroComposition::RECIPES));
     $hooks = [];
     foreach (HeroComposition::RECIPES as $recipe) {
         $meta = HeroComposition::metadata($recipe);
@@ -13,7 +13,7 @@ test('hero catalog entries own complete metadata, defaults, prompts, and unique 
             'canvases', 'media_modes', 'min_images', 'max_images', 'backgrounds',
             'default_background', 'fallback_background', 'header_modes', 'copy_capacity',
             'mobile_transformations', 'layout_archetype', 'fallback_family', 'root_hook',
-            'prompt', 'headline_registers', 'height_profiles', 'defaults',
+            'prompt', 'headline_registers', 'height_profiles', 'row_alignment', 'defaults',
         ] as $field) {
             assert_true(array_key_exists($field, $meta), "{$recipe} metadata has {$field}");
         }
@@ -292,4 +292,62 @@ test('hero copy budget and headline punctuation overruns warn without hiding val
     $cleanHeadline = str_replace('One subject — staged', 'One subject staged', $inBudget);
     $warnings = HeroComposition::markupWarnings($cleanHeadline, 'focal-subject-stage', 'page-home--hero');
     assert_eq([], array_values(array_filter($warnings, fn (string $w): bool => str_contains($w, 'hero headline punctuation'))));
+});
+
+test('split-bleed-duo is the seam recipe and holds its row to the band edges (BIGR-913)', function () {
+    $meta = HeroComposition::metadata('split-bleed-duo');
+    assert_eq(['foreground-image'], $meta['media_modes']);
+    assert_eq(1, $meta['min_images']);
+    assert_eq(1, $meta['max_images']);
+    assert_eq('asymmetric-split', $meta['layout_archetype']);
+    // A half-solid band cannot protect a transparent header.
+    assert_eq(['stacked'], $meta['header_modes']);
+    // The panel must differ from the photograph beside it, so the recipe opens
+    // on a painted field rather than the page background.
+    assert_eq('contrast', $meta['default_background']);
+    assert_eq('full', $meta['row_alignment']);
+
+    // Only this recipe requires an aligned row; every other entry says so
+    // explicitly rather than by omission.
+    foreach (HeroComposition::RECIPES as $recipe) {
+        if ($recipe === 'split-bleed-duo') {
+            continue;
+        }
+        assert_eq(null, HeroComposition::metadata($recipe)['row_alignment'], $recipe);
+    }
+});
+
+test('the seam check reads the delivered row alignment, not the recipe name (BIGR-913)', function () {
+    $copy = '<!-- wp:group {"className":"hero-composition__copy"} --><div class="wp-block-group hero-composition__copy">'
+        . '<!-- wp:heading {"level":1} --><h1>Two fields, one edge</h1><!-- /wp:heading -->'
+        . '</div><!-- /wp:group -->';
+    $media = '<!-- wp:group {"className":"hero-composition__media"} --><div class="wp-block-group hero-composition__media">'
+        . '<img src="theme:./assets/panel.jpg" alt="AI_IMAGE: A press room | hero media panel | photorealistic | landscape" />'
+        . '</div><!-- /wp:group -->';
+
+    $gutterBound = '<!-- wp:group --><div class="wp-block-group">'
+        . '<!-- wp:media-text --><div class="wp-block-media-text">' . $media . $copy . '</div><!-- /wp:media-text -->'
+        . '</div><!-- /wp:group -->';
+    $warnings = HeroComposition::markupWarnings($gutterBound, 'split-bleed-duo', 'page-home--hero');
+    assert_eq(1, count($warnings));
+    assert_contains('recipe row alignment', $warnings[0]);
+    assert_contains('full', $warnings[0]);
+
+    $seam = '<!-- wp:group --><div class="wp-block-group">'
+        . '<!-- wp:media-text {"align":"full","imageFill":true} --><div class="wp-block-media-text alignfull">'
+        . $media . $copy . '</div><!-- /wp:media-text -->'
+        . '</div><!-- /wp:group -->';
+    assert_eq([], HeroComposition::markupWarnings($seam, 'split-bleed-duo', 'page-home--hero'));
+
+    // A full-aligned wp:columns row carries the seam just as well.
+    $columns = '<!-- wp:group --><div class="wp-block-group">'
+        . '<!-- wp:columns {"align":"full"} --><div class="wp-block-columns alignfull">'
+        . '<!-- wp:column --><div class="wp-block-column">' . $media . '</div><!-- /wp:column -->'
+        . '<!-- wp:column --><div class="wp-block-column">' . $copy . '</div><!-- /wp:column -->'
+        . '</div><!-- /wp:columns --></div><!-- /wp:group -->';
+    assert_eq([], HeroComposition::markupWarnings($columns, 'split-bleed-duo', 'page-home--hero'));
+
+    // The check belongs to the recipe that declares it: the same gutter-bound
+    // markup is silent for a recipe with no seam to hold.
+    assert_eq([], HeroComposition::markupWarnings($gutterBound, 'editorial-split', 'page-home--hero'));
 });

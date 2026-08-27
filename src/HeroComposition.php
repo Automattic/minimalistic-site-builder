@@ -16,6 +16,7 @@ final class HeroComposition
     public const RECIPES = [
         'cinematic-safe-zone',
         'editorial-split',
+        'split-bleed-duo',
         'framed-portrait',
         'focal-subject-stage',
         'layered-poster',
@@ -75,6 +76,8 @@ final class HeroComposition
             // a corner of the frame.
             'headline_registers' => ['restrained'],
             'height_profiles' => ['standard', 'immersive'],
+            // No seam to hold, so no row alignment is required.
+            'row_alignment' => null,
             'defaults' => [
                 'media_mode' => 'cover-image', 'headline_register' => 'restrained',
                 'text_anchor' => 'center',
@@ -101,6 +104,8 @@ final class HeroComposition
             'prompt' => 'hero-compositions/editorial-split.md',
             'headline_registers' => ['restrained', 'display'],
             'height_profiles' => ['compact', 'standard'],
+            // No seam to hold, so no row alignment is required.
+            'row_alignment' => null,
             'defaults' => [
                 'media_mode' => 'foreground-image', 'headline_register' => 'display',
                 'text_anchor' => 'center-start',
@@ -127,6 +132,8 @@ final class HeroComposition
             'prompt' => 'hero-compositions/framed-portrait.md',
             'headline_registers' => ['restrained', 'display'],
             'height_profiles' => ['compact', 'standard'],
+            // No seam to hold, so no row alignment is required.
+            'row_alignment' => null,
             'defaults' => [
                 'media_mode' => 'foreground-image', 'headline_register' => 'restrained',
                 'text_anchor' => 'center-start',
@@ -153,10 +160,51 @@ final class HeroComposition
             'prompt' => 'hero-compositions/focal-subject-stage.md',
             'headline_registers' => ['restrained', 'display'],
             'height_profiles' => ['standard', 'immersive'],
+            // No seam to hold, so no row alignment is required.
+            'row_alignment' => null,
             'defaults' => [
                 'media_mode' => 'foreground-image', 'headline_register' => 'display',
                 'text_anchor' => 'center-start',
                 'headline_line_target' => ['desktop' => [1, 3], 'mobile' => [2, 4]],
+                'focal_region' => 'none', 'text_safe_region' => 'full',
+                'height_profile' => 'immersive', 'cta_treatment' => 'prominent',
+                'mobile_transformation' => 'stack-media-first',
+            ],
+        ],
+        // BIGR-913: the seam recipe. Every other split in the catalog composes
+        // inside the content gutters, so its media always reads as a plate
+        // placed on the page. Here two panels meet at a hard vertical seam and
+        // run to the band edges, which is a different first impression, not a
+        // different ratio.
+        'split-bleed-duo' => [
+            'canvases' => ['full-bleed', 'framed'],
+            'media_modes' => ['foreground-image'],
+            'min_images' => 1,
+            'max_images' => 1,
+            'backgrounds' => ['base', 'tinted', 'contrast'],
+            // The copy panel is a painted field, not a page background: the
+            // seam only reads when the two halves differ.
+            'default_background' => 'contrast',
+            'fallback_background' => 'tinted',
+            // Overlay needs an image-led band. Half of this one is a solid
+            // panel, so a transparent header would sit on it unprotected.
+            'header_modes' => ['stacked'],
+            'copy_capacity' => 'compact',
+            'mobile_transformations' => ['stack-media-first', 'stack-copy-first'],
+            'layout_archetype' => 'asymmetric-split',
+            'fallback_family' => 'foreground-split',
+            'root_hook' => '.hero-composition--split-bleed-duo',
+            'prompt' => 'hero-compositions/split-bleed-duo.md',
+            'headline_registers' => ['display', 'poster'],
+            'height_profiles' => ['standard', 'immersive'],
+            // The seam is the whole composition, so the row that carries it
+            // must reach the band edges. markupWarnings() reads this field
+            // rather than the recipe name.
+            'row_alignment' => 'full',
+            'defaults' => [
+                'media_mode' => 'foreground-image', 'headline_register' => 'display',
+                'text_anchor' => 'center-start',
+                'headline_line_target' => ['desktop' => [1, 3], 'mobile' => [2, 5]],
                 'focal_region' => 'none', 'text_safe_region' => 'full',
                 'height_profile' => 'immersive', 'cta_treatment' => 'prominent',
                 'mobile_transformation' => 'stack-media-first',
@@ -181,6 +229,8 @@ final class HeroComposition
             'prompt' => 'hero-compositions/layered-poster.md',
             'headline_registers' => ['display', 'poster'],
             'height_profiles' => ['standard', 'immersive'],
+            // No seam to hold, so no row alignment is required.
+            'row_alignment' => null,
             'defaults' => [
                 'media_mode' => 'cover-image', 'headline_register' => 'poster',
                 // BIGR-775 follow-up: a top-pinned safe zone left a dead band
@@ -220,6 +270,8 @@ final class HeroComposition
             // No image means no media plate to balance, so an immersive band
             // would only add empty canvas under the copy.
             'height_profiles' => ['compact', 'standard'],
+            // No seam to hold, so no row alignment is required.
+            'row_alignment' => null,
             'defaults' => [
                 'media_mode' => 'none', 'headline_register' => 'display',
                 'text_anchor' => 'center-start',
@@ -538,6 +590,32 @@ final class HeroComposition
                 ['matching_regions' => $mediaRegions],
                 'safe parseable hero was retained; restore only the missing assigned foreground-media region hooks',
             );
+        }
+        // BIGR-913: a recipe whose identity is a seam needs the row carrying it
+        // to reach the band edges. Inside the content gutters the two panels
+        // read as one more plate-beside-copy split, which the catalog already
+        // has three of. The field is catalog metadata, so this check never
+        // grows a branch per recipe name.
+        $rowAlignment = $meta['row_alignment'] ?? null;
+        if (is_string($rowAlignment)) {
+            $alignedRows = 0;
+            foreach ($document->indices() as $index) {
+                if (!in_array($document->name($index), ['columns', 'media-text'], true)) {
+                    continue;
+                }
+                if ((string) (($document->attrs($index) ?? [])['align'] ?? '') === $rowAlignment) {
+                    $alignedRows++;
+                }
+            }
+            if ($alignedRows < 1) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'recipe row alignment',
+                    ['required_align' => $rowAlignment, 'row_blocks' => ['wp:columns', 'wp:media-text']],
+                    ['aligned_rows' => $alignedRows],
+                    'safe parseable hero was retained; align only the panel row to the band edges so the seam survives',
+                );
+            }
         }
         if (in_array('foreground-image', $mediaModes, true)
             && $covers > 0
