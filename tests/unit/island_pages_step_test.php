@@ -124,20 +124,35 @@ function ip_rules_page(): string
  */
 function ip_project(object $project, array $designs, array $pageOverrides = []): void
 {
-    $pages = [];
+    // PagePlanStep::flattenPages() derives `parent` ONLY by walking `children`;
+    // a `parent` key on an already-flat page is ignored and comes back null.
+    // So a parent relationship must be expressed here as nesting, or the
+    // orphan test below passes without the code doing anything.
+    $rows = [];
     $order = 0;
     foreach (array_keys($designs) as $slug) {
-        $pages[] = array_merge([
+        $rows[$slug] = array_merge([
             'slug' => $slug,
             'title' => ucfirst($slug),
             'path' => $slug === 'home' ? '/' : "/{$slug}/",
             'front' => $slug === 'home',
-            'parent' => null,
             'menu_order' => $order++,
             'purpose' => '',
             'sections' => [],
         ], $pageOverrides[$slug] ?? []);
     }
+    $pages = [];
+    foreach ($rows as $slug => $row) {
+        $parent = $row['parent'] ?? null;
+        unset($row['parent']);
+        if ($parent !== null && isset($rows[$parent])) {
+            $rows[$parent]['children'][] = $row;
+            continue;
+        }
+        $pages[] = &$rows[$slug];
+    }
+    unset($row);
+    $pages = array_values(array_map(static fn ($r) => $r, $pages));
     $project->writeJson('siteSpec.json', ['slug' => 'test-site', 'writing_direction' => 'ltr', 'pages' => $pages]);
     $project->writeJson('meta.json', ['graph' => 'html-islands']);
     $project->writeText('design/site.css', 'body{margin:0}');
@@ -477,6 +492,15 @@ test('island-pages: a skipped page named as a parent does not orphan its child',
             }
         }
         assert_true($team !== null, 'the child page still ships');
+        // Guard the guard: if flattenPages never populated the parent, this test
+        // would pass without the step clearing anything. Prove the relationship
+        // exists in the input before asserting the output cleared it.
+        $flat = \Automattic\SiteBuild\Steps\PagePlanStep::flattenPages($project->readJson('siteSpec.json'));
+        $inputParent = null;
+        foreach ($flat as $row) {
+            if (($row['slug'] ?? null) === 'team') { $inputParent = $row['parent'] ?? null; }
+        }
+        assert_eq('about', $inputParent, 'the fixture must actually give team a parent, or this test is vacuous');
         assert_true(($team['parent'] ?? null) === null, 'its skipped parent is cleared rather than dangling');
     });
 });
