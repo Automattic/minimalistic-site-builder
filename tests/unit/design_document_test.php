@@ -278,3 +278,53 @@ test('styles() still reads the page CSS from a bare fragment', function () {
     );
     assert_contains('.b{color:blue}', $doc->styles());
 });
+
+/**
+ * ROUND 4 — the content-ancestor DENYLIST from round 3 was leaky by
+ * construction: anything not on a 12-name list silently counted as page level.
+ * Verified leaks included <figure>, <blockquote>, <th> (while <td> was on the
+ * list), and <dd> (while <li> was). The rule is now an ALLOWLIST: a page-level
+ * landmark may have only html/head/body ancestors. Validated over the 255 real
+ * design pages at 255 accepted / 0 rejected before being frozen here.
+ */
+
+test('main() rejects a main wrapped in figure, not just the listed tags', function () {
+    $doc = DesignDocument::parse(dd_page('<figure><main><section>s</section></main></figure>'));
+    assert_eq(null, $doc->main(), 'an allowlist must reject every wrapper, not 12 named ones');
+});
+
+test('footer() ignores a blockquote attribution footer', function () {
+    // <blockquote><p>q</p><footer>- Jane</footer></blockquote> is the canonical
+    // MDN attribution pattern and is the aae0f1c / 7a1db0e regression class.
+    $doc = DesignDocument::parse(dd_page(
+        '<main><section>s</section></main>'
+        . '<blockquote><p>q</p><footer id="attrib">- Jane</footer></blockquote>'
+        . '<footer id="site">f</footer>'
+    ));
+    $footer = $doc->footer();
+    assert_true($footer !== null, 'the site footer must be found');
+    assert_eq('site', $footer->getAttribute('id'), 'a blockquote attribution footer is not the site footer');
+});
+
+test('header() ignores a header inside a table cell', function () {
+    // <td> was on the denylist and <th> was not, so one character of difference
+    // in the source produced opposite results.
+    $doc = DesignDocument::parse(dd_page(
+        '<table><tr><th><header id="cell">c</header></th></tr></table>'
+        . '<header id="site">s</header><main><section>s</section></main>'
+    ));
+    $header = $doc->header();
+    assert_true($header !== null, 'the site header must be found');
+    assert_eq('site', $header->getAttribute('id'), 'a header in a table cell is not the site header');
+});
+
+test('footer() fails closed when there is more than one page-level footer', function () {
+    // SpliceHomeDesignStep.php:288-297 rejects when count($topLevelFooters) !== 1.
+    // Returning the first is how the two graphs drift apart.
+    $errors = [];
+    $doc = DesignDocument::parse(dd_page(
+        '<main><section>s</section></main><footer id="one">1</footer><footer id="two">2</footer>'
+    ), $errors);
+    assert_eq(null, $doc->footer(), 'ambiguous page-level footers must not resolve to the first');
+    assert_true($errors !== [], 'more than one page-level footer must be reported as structural');
+});
