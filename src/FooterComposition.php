@@ -18,6 +18,7 @@ final class FooterComposition
         'editorial-colophon',
         'split-ledger',
         'color-field',
+        'repeat-rail',
     ];
 
     /** @var array<string,string> */
@@ -29,6 +30,7 @@ final class FooterComposition
         'editorial-colophon' => 'footer-compositions/editorial-colophon.md',
         'split-ledger' => 'footer-compositions/split-ledger.md',
         'color-field' => 'footer-compositions/color-field.md',
+        'repeat-rail' => 'footer-compositions/repeat-rail.md',
     ];
 
     /** @var array<string,string> */
@@ -40,6 +42,7 @@ final class FooterComposition
         'editorial-colophon' => 'base',
         'split-ledger' => 'contrast',
         'color-field' => 'base',
+        'repeat-rail' => 'base',
     ];
 
     /** @var list<string> */
