@@ -17,14 +17,32 @@ namespace Automattic\SiteBuild;
  */
 final class PaletteFloor
 {
-    /** contrast on base — prompts/theme-json.md CONTRAST REQUIREMENTS. */
-    public const CONTRAST_ON_BASE = 7.0;
+    /**
+     * contrast on base — prompts/theme-json.md CONTRAST REQUIREMENTS.
+     *
+     * WCAG AA for normal text, not AAA (BIGR-923). The old 7:1 floor pushed
+     * every ink toward near-black on light grounds and near-white on dark
+     * ones, and forbade legitimate mid-dark inks (a warm brown on cream at
+     * ~6:1). Rendered-content checks already run at 4.5, and a committed
+     * `surface` texture raises the requirement to 7:1 through
+     * Surface::contrastFloor so the overlay leaves 4.5 after its sheet —
+     * callers pass that raised floor into check()/repair().
+     */
+    public const CONTRAST_ON_BASE = 4.5;
 
     /** primary on base, secondary on base. */
     public const ROLE_ON_BASE = 4.5;
 
-    /** base on accent (button labels). Ratio is symmetric. */
-    public const BASE_ON_ACCENT = 4.5;
+    /**
+     * Label ink on accent (button labels). The accent is a fill, not a text
+     * color: its label ink is whichever of base/contrast reads better on it
+     * (ContrastFixStep repairs `styles.elements.button` text between exactly
+     * those two slugs), so the floor holds for the BETTER of the two pairs,
+     * never for base alone. Judging base alone is what turned every warm
+     * light-ground accent into the same dark olive (BIGR-918): a vivid amber
+     * fails against cream, and a yellow darkened at fixed hue is mud.
+     */
+    public const LABEL_ON_ACCENT = 4.5;
 
     /** Primary/accent closer than this, with chroma on both, is a miss. */
     public const HUE_TOO_CLOSE = 25.0;
@@ -54,10 +72,11 @@ final class PaletteFloor
      *     floor: float
      * }>
      */
-    public static function check(array $palette): array
+    public static function check(array $palette, ?float $contrastOnBase = null): array
     {
+        $contrastOnBase ??= self::CONTRAST_ON_BASE;
         $findings = [];
-        foreach (self::contrastPairs() as [$role, $against, $floor]) {
+        foreach (self::contrastPairs($contrastOnBase) as [$role, $against, $floor]) {
             $hex = self::hexOf($palette, $role);
             $other = self::hexOf($palette, $against);
             if ($hex === null || $other === null) {
@@ -76,8 +95,20 @@ final class PaletteFloor
             }
         }
 
-        $primary = self::hexOf($palette, 'primary');
         $accent = self::hexOf($palette, 'accent');
+        $ink = self::labelInk($palette);
+        if ($accent !== null && $ink !== null && $ink['ratio'] < self::LABEL_ON_ACCENT) {
+            $findings[] = [
+                'class' => 'contrast',
+                'role' => 'accent',
+                'against' => $ink['slug'],
+                'authored' => $accent,
+                'metric' => $ink['ratio'],
+                'floor' => self::LABEL_ON_ACCENT,
+            ];
+        }
+
+        $primary = self::hexOf($palette, 'primary');
         if ($primary !== null && $accent !== null) {
             $cPrimary = self::chroma($primary);
             $cAccent = self::chroma($accent);
@@ -139,16 +170,17 @@ final class PaletteFloor
      *        authored=/delivered=/disposition= shape
      * @return array<string,string>
      */
-    public static function repair(array $palette, array &$warnings): array
+    public static function repair(array $palette, array &$warnings, ?float $contrastOnBase = null): array
     {
+        $contrastOnBase ??= self::CONTRAST_ON_BASE;
         $authored = $palette;
         /** @var array<string, list<array{kind:string,text:string}>> $notes */
         $notes = [];
-        $out = self::repairContrast($palette, $notes);
+        $out = self::repairContrast($palette, $notes, $contrastOnBase);
         $out = self::repairHue($out, $notes);
         $out = self::repairChroma($out, $notes);
-        $out = self::repairContrast($out, $notes);
-        self::warnResiduals($out, $notes);
+        $out = self::repairContrast($out, $notes, $contrastOnBase);
+        self::warnResiduals($out, $notes, $contrastOnBase);
         self::emitNotes($authored, $out, $notes, $warnings);
         return $out;
     }
@@ -202,16 +234,43 @@ final class PaletteFloor
     }
 
     /**
+     * The text roles judged against base. Accent is absent on purpose: it is
+     * a fill judged against its best label ink — see labelInk().
+     *
      * @return list<array{0:string,1:string,2:float}> role, against, floor
      */
-    private static function contrastPairs(): array
+    private static function contrastPairs(float $contrastOnBase): array
     {
         return [
-            ['contrast', 'base', self::CONTRAST_ON_BASE],
+            ['contrast', 'base', $contrastOnBase],
             ['primary', 'base', self::ROLE_ON_BASE],
             ['secondary', 'base', self::ROLE_ON_BASE],
-            ['accent', 'base', self::BASE_ON_ACCENT],
         ];
+    }
+
+    /**
+     * The accent's best label-ink pair: the higher of base-on-accent and
+     * contrast-on-accent, with the slug that produced it. Null when the
+     * accent or both inks are missing or unreadable.
+     *
+     * @param array<string,string> $palette
+     * @return array{slug:string,ratio:float}|null
+     */
+    private static function labelInk(array $palette): ?array
+    {
+        $accent = self::hexOf($palette, 'accent');
+        if ($accent === null) {
+            return null;
+        }
+        $best = null;
+        foreach (['base', 'contrast'] as $slug) {
+            $hex = self::hexOf($palette, $slug);
+            $ratio = $hex === null ? null : self::ratio($accent, $hex);
+            if ($ratio !== null && ($best === null || $ratio > $best['ratio'])) {
+                $best = ['slug' => $slug, 'ratio' => $ratio];
+            }
+        }
+        return $best;
     }
 
     /**
@@ -219,13 +278,13 @@ final class PaletteFloor
      * @param array<string, list<array{kind:string,text:string}>> $notes
      * @return array<string,string>
      */
-    private static function repairContrast(array $palette, array &$notes): array
+    private static function repairContrast(array $palette, array &$notes, float $contrastOnBase): array
     {
         $base = self::hexOf($palette, 'base');
         if ($base === null) {
             return $palette;
         }
-        foreach (self::contrastPairs() as [$role, $against, $floor]) {
+        foreach (self::contrastPairs($contrastOnBase) as [$role, $against, $floor]) {
             // The pair is always judged against base, but the slug we
             // move is never base: GroundTint owns that family's hue.
             $hex = self::hexOf($palette, $role);
@@ -269,6 +328,63 @@ final class PaletteFloor
                 ),
             );
         }
+        return self::repairAccentInk($palette, $notes);
+    }
+
+    /**
+     * Hold the label-ink floor on the accent fill. The accent moves only when
+     * NEITHER base nor contrast reads on it — a mid-tone fill no ink can
+     * label — and then only as far as the nearer ink needs. A fill one ink
+     * already reads on is left exactly as authored: the fill's own contrast
+     * against the page is a design choice, not a floor.
+     *
+     * @param array<string,string> $palette
+     * @param array<string, list<array{kind:string,text:string}>> $notes
+     * @return array<string,string>
+     */
+    private static function repairAccentInk(array $palette, array &$notes): array
+    {
+        $hex = self::hexOf($palette, 'accent');
+        $ink = self::labelInk($palette);
+        if ($hex === null || $ink === null || $ink['ratio'] >= self::LABEL_ON_ACCENT) {
+            return $palette;
+        }
+        $inkHex = self::hexOf($palette, $ink['slug']);
+        $fixed = $inkHex === null
+            ? $hex
+            : self::meetContrast($hex, $inkHex, self::LABEL_ON_ACCENT);
+        $after = self::labelInk([...$palette, 'accent' => $fixed]);
+        if (
+            $after !== null
+            && $after['ratio'] >= self::LABEL_ON_ACCENT
+            && !self::sameHex($fixed, $hex)
+        ) {
+            $palette['accent'] = $fixed;
+            self::note(
+                $notes,
+                'accent',
+                'repaired',
+                sprintf(
+                    'contrast floor %s:1 for the %s label ink on the accent fill, lightness moved at fixed hue',
+                    self::floorLabel(self::LABEL_ON_ACCENT),
+                    $ink['slug'],
+                ),
+            );
+            return $palette;
+        }
+        $achieved = $inkHex === null
+            ? $ink['ratio']
+            : self::bestAchievedRatio($hex, $inkHex, $fixed);
+        self::note(
+            $notes,
+            'accent',
+            'unrepaired',
+            sprintf(
+                'unrepaired — label-ink contrast floor %s:1 on the accent fill unreachable, best achieved %s:1',
+                self::floorLabel(self::LABEL_ON_ACCENT),
+                self::ratioLabel($achieved),
+            ),
+        );
         return $palette;
     }
 
@@ -552,7 +668,7 @@ final class PaletteFloor
      * @param array<string,string> $palette
      * @param array<string, list<array{kind:string,text:string}>> $notes
      */
-    private static function warnResiduals(array $palette, array &$notes): void
+    private static function warnResiduals(array $palette, array &$notes, float $contrastOnBase): void
     {
         $covered = [];
         foreach ($notes as $role => $items) {
@@ -566,7 +682,7 @@ final class PaletteFloor
                 $covered[$class . ':' . $role] = true;
             }
         }
-        foreach (self::check($palette) as $finding) {
+        foreach (self::check($palette, $contrastOnBase) as $finding) {
             $key = $finding['class'] . ':' . $finding['role'];
             if (isset($covered[$key])) {
                 continue;
@@ -801,6 +917,6 @@ final class PaletteFloor
 
     private static function floorLabel(float $floor): string
     {
-        return $floor === self::CONTRAST_ON_BASE ? '7.0' : '4.5';
+        return number_format($floor, 1);
     }
 }

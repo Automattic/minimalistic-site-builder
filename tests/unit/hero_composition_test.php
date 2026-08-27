@@ -5,7 +5,7 @@ use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
 
 test('hero catalog entries own complete metadata, defaults, prompts, and unique hooks', function () {
-    assert_eq(6, count(HeroComposition::RECIPES));
+    assert_eq(4, count(HeroComposition::RECIPES));
     $hooks = [];
     foreach (HeroComposition::RECIPES as $recipe) {
         $meta = HeroComposition::metadata($recipe);
@@ -13,7 +13,8 @@ test('hero catalog entries own complete metadata, defaults, prompts, and unique 
             'canvases', 'media_modes', 'min_images', 'max_images', 'backgrounds',
             'default_background', 'fallback_background', 'header_modes', 'copy_capacity',
             'mobile_transformations', 'layout_archetype', 'fallback_family', 'root_hook',
-            'prompt', 'headline_registers', 'height_profiles', 'defaults',
+            'prompt', 'headline_registers', 'height_profiles', 'media_aspects',
+            'media_weights', 'defaults',
         ] as $field) {
             assert_true(array_key_exists($field, $meta), "{$recipe} metadata has {$field}");
         }
@@ -53,7 +54,7 @@ test('hero compatibility filters objective caller constraints before selection',
     assert_eq(['type-manifesto'], HeroComposition::compatible(['allowed_hero_media_modes' => ['none']]));
     assert_throws(fn () => HeroComposition::validateConstraints(['max_hero_images' => 0]));
     $oneImage = HeroComposition::compatible(['max_hero_images' => 1]);
-    assert_true(in_array('editorial-split', $oneImage, true));
+    assert_true(in_array('foreground-split', $oneImage, true));
     assert_true(in_array('cinematic-safe-zone', $oneImage, true));
 
     $foreground = HeroComposition::compatible(['allowed_hero_media_modes' => ['foreground-image']]);
@@ -76,19 +77,46 @@ test('invalid hero constraints and empty compatible pools fail preflight', funct
     assert_throws(fn () => HeroComposition::validateConstraints(['allowed_hero_media_modes' => []]));
     assert_throws(fn () => HeroComposition::validateConstraints(['typo' => 'framed']));
 
-    // 'expanded' capacity stays a valid enum value with no cataloged recipe
-    // left, so it exercises the loud empty-pool path.
-    $impossible = ['hero_copy_capacity' => 'expanded'];
-    assert_eq([], HeroComposition::compatible($impossible));
-    assert_throws(fn () => HeroComposition::select('site', 'seed', $impossible));
+    // Capacity is a ceiling since BIGR-912, so it can no longer empty the
+    // pool: every cataloged recipe fits under 'expanded'.
+    assert_eq(HeroComposition::RECIPES, HeroComposition::compatible(['hero_copy_capacity' => 'expanded']));
+    assert_eq(HeroComposition::RECIPES, HeroComposition::compatible(['hero_copy_capacity' => 'standard']));
+
+    // With capacity as a ceiling, no requestable constraint set can empty the
+    // pool: every combination the validator accepts still has a recipe. The
+    // empty-pool throw in select() stays as defense for a future catalog that
+    // narrows a row, and this invariant is what would catch that edit.
+    $modeSets = [];
+    foreach (HeroComposition::MEDIA_MODES as $mode) {
+        $modeSets[] = [$mode];
+    }
+    $modeSets[] = HeroComposition::MEDIA_MODES;
+    foreach (HeroComposition::CANVASES as $canvas) {
+        foreach ($modeSets as $modes) {
+            foreach ([1, 2] as $maxImages) {
+                foreach (HeroComposition::COPY_CAPACITIES as $capacity) {
+                    $constraints = [
+                        'hero_canvas' => $canvas,
+                        'allowed_hero_media_modes' => $modes,
+                        'max_hero_images' => $maxImages,
+                        'hero_copy_capacity' => $capacity,
+                    ];
+                    assert_true(
+                        HeroComposition::compatible($constraints) !== [],
+                        'every requestable constraint set keeps a recipe: ' . json_encode($constraints),
+                    );
+                }
+            }
+        }
+    }
 });
 
 test('hero catalog exposes image gating and deterministic page-plan projection', function () {
-    assert_true(HeroComposition::usesGeneratedImages('editorial-split'));
+    assert_true(HeroComposition::usesGeneratedImages('foreground-split'));
     // A blueprint whose media degraded to 'none' disarms image generation
     // even though the recipe itself is image-bearing.
     assert_true(!HeroComposition::usesGeneratedImages([
-        'recipe' => 'editorial-split',
+        'recipe' => 'foreground-split',
         'media_mode' => 'none',
     ]));
 
@@ -201,7 +229,14 @@ test('structured selector fixture corpus exercises eligibility and media distrib
             $mediaModes[$mode] = true;
         }
     }
-    assert_true(count($selected) >= 5, 'objective fixture set exercises broad catalog selection');
+    // Every cataloged recipe must be reachable from the corpus. The old
+    // floor of five survived the BIGR-912 merge only because three of the
+    // recipes it counted were the same composition.
+    assert_eq(
+        count(HeroComposition::RECIPES),
+        count($selected),
+        'objective fixture set selects every cataloged recipe',
+    );
     foreach (['none', 'cover-image', 'foreground-image'] as $mode) {
         assert_true(isset($mediaModes[$mode]), "fixture selections cover {$mode}");
     }
@@ -211,6 +246,94 @@ test('the retired diptych-editorial recipe is unknown to the catalog', function 
     assert_true(!in_array('diptych-editorial', HeroComposition::RECIPES, true));
     assert_throws(fn () => HeroComposition::metadata('diptych-editorial'));
     assert_throws(fn () => HeroComposition::validateConstraints(['allowed_hero_media_modes' => ['diptych']]));
+});
+
+test('the three merged contained-split recipes are unknown to the catalog (BIGR-912)', function () {
+    foreach (['editorial-split', 'framed-portrait', 'focal-subject-stage'] as $merged) {
+        assert_true(!in_array($merged, HeroComposition::RECIPES, true));
+        assert_throws(fn () => HeroComposition::metadata($merged));
+        assert_throws(fn () => HeroBlueprint::defaultFor($merged));
+    }
+
+    // The one recipe that replaced them keeps every shape they could draw:
+    // the portrait plate framed-portrait owned, the dominant exhibit scale
+    // focal-subject-stage owned, and the balanced imbalance of editorial-split.
+    $meta = HeroComposition::metadata('foreground-split');
+    assert_eq(['portrait', 'landscape', 'square'], $meta['media_aspects']);
+    assert_eq(['balanced', 'dominant'], $meta['media_weights']);
+    assert_eq(['compact', 'standard', 'immersive'], $meta['height_profiles']);
+    assert_eq(['restrained', 'display'], $meta['headline_registers']);
+    assert_eq('foreground-split', $meta['fallback_family']);
+});
+
+test('media axes are seeded per site inside the recipe allowed values (BIGR-912)', function () {
+    // Stable for one site, and stable per axis.
+    $first = HeroComposition::selectMediaAxes('alder-studio', 'A measured cobalt edge.', 'foreground-split');
+    assert_eq($first, HeroComposition::selectMediaAxes('alder-studio', 'A measured cobalt edge.', 'foreground-split'));
+    assert_eq($first, HeroComposition::selectMediaAxes('  ALDER-Studio ', 'A measured cobalt edge.', 'foreground-split'));
+
+    // Spread across sites: the merge is only honest if all six pairs the
+    // recipe allows actually reach real builds.
+    $pairs = [];
+    foreach (range(1, 60) as $index) {
+        $axes = HeroComposition::selectMediaAxes("site-{$index}", 'one concept seed', 'foreground-split');
+        assert_true(in_array($axes['media_aspect'], ['portrait', 'landscape', 'square'], true));
+        assert_true(in_array($axes['media_weight'], ['balanced', 'dominant'], true));
+        $pairs[$axes['media_aspect'] . '/' . $axes['media_weight']] = true;
+    }
+    assert_eq(6, count($pairs), 'every allowed aspect/weight pair is reachable');
+
+    // A recipe whose slot has one shape keeps it, whatever the seed.
+    foreach (['cinematic-safe-zone', 'layered-poster'] as $cover) {
+        assert_eq(
+            ['media_aspect' => 'landscape', 'media_weight' => 'dominant'],
+            HeroComposition::selectMediaAxes('any-site', 'any seed', $cover),
+        );
+    }
+    assert_eq(
+        ['media_aspect' => 'none', 'media_weight' => 'none'],
+        HeroComposition::selectMediaAxes('any-site', 'any seed', 'type-manifesto'),
+    );
+
+    // The seeded pick is a valid blueprint value for its recipe, so it never
+    // arrives as a normalize repair.
+    foreach (HeroComposition::RECIPES as $recipe) {
+        $axes = HeroComposition::selectMediaAxes('seeded-site', 'seeded concept', $recipe);
+        $repairs = [];
+        $warnings = [];
+        $normalized = HeroBlueprint::normalize(
+            array_merge(HeroBlueprint::defaultFor($recipe), $axes),
+            $recipe,
+            $repairs,
+            $warnings,
+        );
+        assert_eq($axes['media_aspect'], $normalized['media_aspect']);
+        assert_eq($axes['media_weight'], $normalized['media_weight']);
+        assert_eq([], $repairs, "{$recipe} seeded axes need no repair");
+    }
+});
+
+test('every recipe pins the media axes its slot can serve (BIGR-912)', function () {
+    foreach (HeroComposition::RECIPES as $recipe) {
+        $meta = HeroComposition::metadata($recipe);
+        assert_true($meta['media_aspects'] !== [], "{$recipe} names its media aspects");
+        assert_true($meta['media_weights'] !== [], "{$recipe} names its media weights");
+        foreach ($meta['media_aspects'] as $aspect) {
+            assert_true(in_array($aspect, HeroComposition::MEDIA_ASPECTS, true));
+        }
+        foreach ($meta['media_weights'] as $weight) {
+            assert_true(in_array($weight, HeroComposition::MEDIA_WEIGHTS, true));
+        }
+        // 'none' is the imageless value on both axes, so a recipe carries it
+        // only when it carries no image at all — and then on both axes.
+        $imageless = (int) $meta['max_images'] === 0;
+        assert_eq($imageless, in_array('none', $meta['media_aspects'], true), "{$recipe} aspect none");
+        assert_eq($imageless, in_array('none', $meta['media_weights'], true), "{$recipe} weight none");
+
+        $default = $meta['defaults'];
+        assert_true(in_array($default['media_aspect'], $meta['media_aspects'], true));
+        assert_true(in_array($default['media_weight'], $meta['media_weights'], true));
+    }
 });
 
 test('the retired stacked-headline-band recipe and its media mode are unknown (BIGR-905)', function () {
@@ -246,7 +369,7 @@ test('hero recipe inspection keeps cover and aspect drift actionable at their ex
         . '<img src="theme:./assets/subject.jpg" alt="AI_IMAGE: Subject | foreground slot | photorealistic | landscape" />'
         . '</div><!-- /wp:cover -->';
     $foreground = '<!-- wp:group --><div class="wp-block-group">' . $copy . $cover . '</div><!-- /wp:group -->';
-    $coverWarnings = HeroComposition::markupWarnings($foreground, 'editorial-split', 'page-home--hero');
+    $coverWarnings = HeroComposition::markupWarnings($foreground, 'foreground-split', 'page-home--hero');
     assert_eq(1, count($coverWarnings));
     assert_contains('foreground recipe cover usage', $coverWarnings[0]);
 
@@ -254,11 +377,35 @@ test('hero recipe inspection keeps cover and aspect drift actionable at their ex
         . '<!-- wp:group {"className":"hero-composition__media"} --><div class="wp-block-group hero-composition__media">'
         . '<img src="theme:./assets/portrait.jpg" alt="AI_IMAGE: Person | portrait slot | photorealistic | landscape" />'
         . '</div><!-- /wp:group --></div><!-- /wp:group -->';
-    $aspectWarnings = HeroComposition::markupWarnings($portrait, 'framed-portrait', 'page-home--hero');
+    // foreground-split serves three aspects, so the blueprint's committed one
+    // is what the delivered image must match (BIGR-912). A landscape file in a
+    // composition built for a portrait plate is the drift this reports.
+    $aspectWarnings = HeroComposition::markupWarnings(
+        $portrait,
+        'foreground-split',
+        'page-home--hero',
+        HeroBlueprint::defaultFor('foreground-split') + [],
+    );
+    assert_eq([], $aspectWarnings, 'a landscape file matches the landscape default');
+
+    $portraitBlueprint = HeroBlueprint::defaultFor('foreground-split');
+    $portraitBlueprint['media_aspect'] = 'portrait';
+    $aspectWarnings = HeroComposition::markupWarnings(
+        $portrait,
+        'foreground-split',
+        'page-home--hero',
+        $portraitBlueprint,
+    );
     assert_eq(1, count($aspectWarnings));
     assert_contains('recipe image aspect', $aspectWarnings[0]);
     assert_contains('portrait', $aspectWarnings[0]);
     assert_contains('landscape', $aspectWarnings[0]);
+
+    // Without a blueprint the catalog list still bounds the check: the pinned
+    // cover recipes keep their exact aspect, and the multi-aspect recipe
+    // accepts any aspect its slot can serve rather than guessing one.
+    $coverAspect = HeroComposition::markupWarnings($portrait, 'foreground-split', 'page-home--hero');
+    assert_eq([], $coverAspect);
 });
 
 test('hero copy budget and headline punctuation overruns warn without hiding valid heroes (BIGR-775)', function () {
@@ -272,8 +419,8 @@ test('hero copy budget and headline punctuation overruns warn without hiding val
         . '<!-- wp:paragraph --><p>A second line.</p><!-- /wp:paragraph -->'
         . '<!-- wp:paragraph --><p>A third caption line.</p><!-- /wp:paragraph -->'
         . '</div><!-- /wp:group --></div><!-- /wp:group -->';
-    // focal-subject-stage is compact: the H1 plus one paragraph is the budget.
-    $warnings = HeroComposition::markupWarnings($overBudget, 'focal-subject-stage', 'page-home--hero');
+    // foreground-split is compact: the H1 plus one paragraph is the budget.
+    $warnings = HeroComposition::markupWarnings($overBudget, 'foreground-split', 'page-home--hero');
     $budget = array_values(array_filter($warnings, fn (string $w): bool => str_contains($w, 'hero copy budget')));
     assert_eq(1, count($budget));
     assert_contains('max_text_blocks', $budget[0]);
@@ -283,13 +430,13 @@ test('hero copy budget and headline punctuation overruns warn without hiding val
         . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">One subject — staged</h1><!-- /wp:heading -->'
         . '<!-- wp:paragraph --><p>A standfirst.</p><!-- /wp:paragraph -->'
         . '</div><!-- /wp:group --></div><!-- /wp:group -->';
-    $warnings = HeroComposition::markupWarnings($inBudget, 'focal-subject-stage', 'page-home--hero');
+    $warnings = HeroComposition::markupWarnings($inBudget, 'foreground-split', 'page-home--hero');
     assert_eq([], array_values(array_filter($warnings, fn (string $w): bool => str_contains($w, 'hero copy budget'))));
     // The em dash inside the H1 is its own advisory.
     $dash = array_values(array_filter($warnings, fn (string $w): bool => str_contains($w, 'hero headline punctuation')));
     assert_eq(1, count($dash));
 
     $cleanHeadline = str_replace('One subject — staged', 'One subject staged', $inBudget);
-    $warnings = HeroComposition::markupWarnings($cleanHeadline, 'focal-subject-stage', 'page-home--hero');
+    $warnings = HeroComposition::markupWarnings($cleanHeadline, 'foreground-split', 'page-home--hero');
     assert_eq([], array_values(array_filter($warnings, fn (string $w): bool => str_contains($w, 'hero headline punctuation'))));
 });

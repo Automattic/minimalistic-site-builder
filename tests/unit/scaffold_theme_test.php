@@ -281,9 +281,9 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     // consume only the transformation marker normalized by HeroUnit.
     foreach ([
         'cinematic-safe-zone',
-        'editorial-split',
-        'framed-portrait',
-        'focal-subject-stage',
+        'foreground-split',
+        'foreground-split',
+        'foreground-split',
         'layered-poster',
     ] as $recipe) {
         assert_contains('.hero-composition--' . $recipe, $css);

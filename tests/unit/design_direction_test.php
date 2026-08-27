@@ -79,7 +79,7 @@ function designdir_direction(): array
         'image_crop'       => 'portrait',
         'card_style'       => 'framed',
         'depth'            => 'soft',
-        'hero_blueprint'   => HeroBlueprint::defaultFor('editorial-split'),
+        'hero_blueprint'   => HeroBlueprint::defaultFor('foreground-split'),
     ];
 }
 
@@ -463,6 +463,46 @@ test('design-direction records a collapsed round once, without a shared-ground e
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('design-direction records a round of distinct worlds that all lean on one tint', function () {
+    // BIGR-922: tint is not in the dedup key, so three distinct worlds can
+    // still share a family — the audited cohort's cream skew. The lean is
+    // recorded, never blocking.
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $llm->queueJson(['seeds' => [
+        designdir_seed_obj('One', 'light', 'heritage', 'warm') + ['tint' => 'warm'],
+        designdir_seed_obj('Two', 'light', 'modernist', 'cool') + ['tint' => 'warm'],
+        designdir_seed_obj('Three', 'dark', 'noir', 'jewel') + ['tint' => 'warm'],
+    ]]);
+    $llm->queueJson(['direction' => designdir_direction()]);
+
+    (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $joined = implode("\n", $project->readJson('warnings.json')['design-direction'] ?? []);
+    assert_contains('every concept seed is warm-tinted', $joined);
+    assert_contains('disposition tolerated', $joined);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('design-direction stays quiet about tint when the round spreads its families', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $llm->queueJson(['seeds' => [
+        designdir_seed_obj('One', 'light', 'heritage', 'warm') + ['tint' => 'warm'],
+        designdir_seed_obj('Two', 'light', 'modernist', 'cool') + ['tint' => 'cool'],
+        designdir_seed_obj('Three', 'dark', 'noir', 'jewel') + ['tint' => 'violet'],
+    ]]);
+    $llm->queueJson(['direction' => designdir_direction()]);
+
+    (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $joined = $project->exists('warnings.json')
+        ? implode("\n", $project->readJson('warnings.json')['design-direction'] ?? [])
+        : '';
+    assert_true(!str_contains($joined, '-tinted'), 'a spread round earns no tint row');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('design-direction does not warn that every seed is grounded when two left ground unstated', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
     $llm->queueJson(['seeds' => [
@@ -613,7 +653,7 @@ test('the seed and expansion prompts ask for both ground coordinates, and ban tr
     $direction = $renderer->render('design-direction.md', [
         'user_prompt' => 'a bakery', 'site_spec' => '{}', 'seed' => 'Seed',
         'hero_composition' => '', 'ground_key' => 'dark', 'ground_tint' => 'violet',
-        'register' => 'editorial', 'type_register' => 'didone',
+        'register' => 'editorial', 'type_register' => 'didone', 'type_candidates' => '',
     ]);
     assert_contains('ground_key', $direction, 'the expansion commits the light/dark field the build enforces');
     assert_contains('dark', $direction, 'and is told which side the seed chose');
@@ -946,13 +986,13 @@ test('format renders the narrative plus the structured fact list', function () {
         ],
         'image_grade'      => 'monochrome documentary',
         'concept_seed' => 'must stay hidden',
-        'hero_blueprint' => HeroBlueprint::defaultFor('editorial-split'),
+        'hero_blueprint' => HeroBlueprint::defaultFor('foreground-split'),
     ]);
     assert_contains('# Archivo Silencioso', $text);
     assert_contains('base #F4F1EA', $text);
     assert_contains('heading — Spectral; weights 900; body — Source Sans 3; weights 400', $text);
     assert_contains('monochrome documentary', $text);
-    assert_true(!str_contains($text, 'editorial-split'), 'general format excludes hero recipe');
+    assert_true(!str_contains($text, 'foreground-split'), 'general format excludes hero recipe');
     assert_true(!str_contains($text, 'must stay hidden'), 'general format excludes concept seed');
 
     // Empty fields are omitted — a bare direction is just the narrative.
@@ -1834,7 +1874,7 @@ test('HERO_RECIPE is exact, persisted, and isolated to one recipe fragment', fun
     $llm->queueJson(['seeds' => designdir_seeds()]);
     $llm->queueJson(['direction' => designdir_direction()]);
 
-    putenv('HERO_RECIPE=focal-subject-stage');
+    putenv('HERO_RECIPE=foreground-split');
     try {
         (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
     } finally {
@@ -1842,11 +1882,11 @@ test('HERO_RECIPE is exact, persisted, and isolated to one recipe fragment', fun
     }
 
     $direction = $project->readJson('designDirection.json');
-    assert_eq('focal-subject-stage', $direction['hero_blueprint']['recipe']);
+    assert_eq('foreground-split', $direction['hero_blueprint']['recipe']);
     assert_eq('foreground-image', $direction['hero_blueprint']['media_mode']);
-    assert_contains('focal-subject-stage', $llm->calls[1]['prompt']);
+    assert_contains('foreground-split', $llm->calls[1]['prompt']);
     foreach (HeroComposition::RECIPES as $recipe) {
-        if ($recipe !== 'focal-subject-stage') {
+        if ($recipe !== 'foreground-split') {
             assert_true(!str_contains($llm->calls[1]['prompt'], $recipe), "{$recipe} is not exposed");
         }
     }
@@ -1870,7 +1910,7 @@ test('unknown or caller-incompatible HERO_RECIPE fails before any LLM spend', fu
         'prompt' => 'A cozy neighborhood bakery',
         'design_constraints' => ['allowed_hero_media_modes' => ['none']],
     ]);
-    putenv('HERO_RECIPE=editorial-split');
+    putenv('HERO_RECIPE=foreground-split');
     try {
         assert_throws(fn () => (new DesignDirectionStep(
             $llm,
@@ -1941,7 +1981,7 @@ test('fallible batch hero assignment remaps incompatibility and warns with reque
     $project->writeJson('meta.json', [
         'prompt' => 'A cozy neighborhood bakery',
         'design_constraints' => ['allowed_hero_media_modes' => ['cover-image']],
-        'hero_assignment' => ['source' => 'batch', 'requested_recipe' => 'editorial-split'],
+        'hero_assignment' => ['source' => 'batch', 'requested_recipe' => 'foreground-split'],
     ]);
     $llm->queueJson(['seeds' => designdir_seeds()]);
     $llm->queueJson(['direction' => designdir_direction()]);
@@ -1954,7 +1994,7 @@ test('fallible batch hero assignment remaps incompatibility and warns with reque
         'foreground request remapped inside the cover-image pool',
     );
     $joined = implode(' ', $project->readJson('warnings.json')['design-direction'] ?? []);
-    assert_contains('editorial-split', $joined);
+    assert_contains('foreground-split', $joined);
     assert_contains($delivered, $joined);
     assert_contains('remapped', $joined);
     exec('rm -rf ' . escapeshellarg($tmp));
@@ -1987,7 +2027,7 @@ test('hero blueprint accessors keep front-page topology out of the general brief
     $project = (new ProjectStore($tmp))->create('demo');
     assert_throws(fn () => DesignDirectionStep::heroBlueprintFor($project));
 
-    $blueprint = HeroBlueprint::defaultFor('framed-portrait');
+    $blueprint = HeroBlueprint::defaultFor('foreground-split');
     $project->writeJson('designDirection.json', [
         'description' => 'A quiet gallery language with warm mineral color.',
         'hero_blueprint' => $blueprint,
@@ -1996,9 +2036,9 @@ test('hero blueprint accessors keep front-page topology out of the general brief
     assert_eq($blueprint, DesignDirectionStep::heroBlueprintFor($project));
     $focused = DesignDirectionStep::formatHeroBlueprint($blueprint);
     assert_contains('Front-page hero blueprint (front page only)', $focused);
-    assert_contains('framed-portrait', $focused);
+    assert_contains('foreground-split', $focused);
     $general = DesignDirectionStep::readFor($project);
-    assert_true(!str_contains($general, 'framed-portrait'));
+    assert_true(!str_contains($general, 'foreground-split'));
     assert_true(!str_contains($general, 'Hidden seed bytes'));
 
     $project->writeJson('designDirection.json', [
@@ -2016,10 +2056,10 @@ test('legacy signature-device fields are dropped from the normalized direction',
         'description' => 'A complete visual direction.',
         'signature_device' => 'One notched color block.',
         'signature_device_slots' => ['hero'],
-        'hero_blueprint' => array_merge(HeroBlueprint::defaultFor('editorial-split'), [
+        'hero_blueprint' => array_merge(HeroBlueprint::defaultFor('foreground-split'), [
             'signature_device_use' => 'Place the notch beside the headline.',
         ]),
-    ], 'editorial-split', 'Seed bytes', $repairs, $warnings);
+    ], 'foreground-split', 'Seed bytes', $repairs, $warnings);
     assert_true(!array_key_exists('signature_device', $direction));
     assert_true(!array_key_exists('signature_device_slots', $direction));
     assert_true(!array_key_exists('signature_device_use', $direction['hero_blueprint']));

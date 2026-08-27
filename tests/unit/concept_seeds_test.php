@@ -112,6 +112,17 @@ test('ConceptSeeds::sharedGround reports a round that explores one half of the b
     assert_eq(null, ConceptSeeds::sharedGround([concept_seed_at('One', null, null, null), concept_seed_at('Two', null, null, null)]));
 });
 
+test('ConceptSeeds::sharedTint reports a round that leans on one ground family', function () {
+    $tinted = static fn (string $title, ?string $tint): array => [
+        'text' => $title, 'ground' => 'light', 'register' => 'heritage',
+        'accent' => 'warm', 'tint' => $tint, 'type_register' => null,
+    ];
+    assert_eq('warm', ConceptSeeds::sharedTint([$tinted('One', 'warm'), $tinted('Two', 'warm')]));
+    assert_eq(null, ConceptSeeds::sharedTint([$tinted('One', 'warm'), $tinted('Two', 'cool')]));
+    assert_eq(null, ConceptSeeds::sharedTint([$tinted('One', 'warm'), $tinted('Two', null)]), 'a missing tint is not a vote');
+    assert_eq(null, ConceptSeeds::sharedTint([$tinted('Alone', 'warm')]), 'one seed shares nothing');
+});
+
 test('ConceptSeeds::distinct drops a byte-identical seed even when no coordinates were named', function () {
     // A null axis key is not evidence of sameness, but the pick lands on the
     // sentence. Two copies of the same sentence are one world wearing two slots.

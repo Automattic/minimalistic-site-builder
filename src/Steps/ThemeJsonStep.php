@@ -16,6 +16,7 @@ use Automattic\SiteBuild\GeneratedJsonFallbackStep;
 use Automattic\SiteBuild\ImageTreatment;
 use Automattic\SiteBuild\BandColor;
 use Automattic\SiteBuild\ContrastMath;
+use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\CssChecks;
 use Automattic\SiteBuild\CtaStyle;
 use Automattic\SiteBuild\PaletteFloor;
@@ -66,13 +67,21 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      * tell a model hex that was moved to clear one from ordinary drift.
      */
     private const CONTRAST_FLOORS = [
-        'contrast' => 7.0,
+        'contrast' => ContrastMath::NORMAL_TEXT,
         'primary' => ContrastMath::NORMAL_TEXT,
         'secondary' => ContrastMath::NORMAL_TEXT,
         'accent' => ContrastMath::NORMAL_TEXT,
     ];
     private const REQUIRED_FONTS = ['heading', 'body'];
     private const OPTIONAL_FONTS = ['accent'];
+    /**
+     * Code-owned font presets every theme ships. The status-readout footer
+     * archetype sets its rows in `mono`, and a pure system stack needs no
+     * bundled font file, so the preset is deterministic and free.
+     */
+    private const PIPELINE_FONTS = [
+        'mono' => 'ui-monospace, Menlo, Consolas, monospace',
+    ];
 
     /** @var array{contentSize:string,wideSize:string} */
     private const FALLBACK_LAYOUT_WIDTHS = [
@@ -563,8 +572,13 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $shapeWarnings,
         );
 
-        // Floors run on the palette about to be written, after every other repair.
-        [$theme, $floorWarnings] = self::applyPaletteFloor($theme);
+        // Floors run on the palette about to be written, after every other
+        // repair. A committed surface texture raises the body-ink floor to
+        // 7:1 so the overlay's sheet leaves 4.5:1 (Surface::contrastFloor).
+        [$theme, $floorWarnings] = self::applyPaletteFloor(
+            $theme,
+            Surface::contrastFloor(DesignDirectionStep::surfaceFor($project)),
+        );
         $warnings = array_merge($warnings, $floorWarnings);
 
         // The bounded render-time treatment owns the duotone catalog after
@@ -1532,7 +1546,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      * @param array<mixed> $theme
      * @return array{0:array<mixed>,1:list<string>} theme, warnings
      */
-    public static function applyPaletteFloor(array $theme): array
+    public static function applyPaletteFloor(array $theme, ?float $contrastOnBase = null): array
     {
         $palette = $theme['settings']['color']['palette'] ?? null;
         if (!is_array($palette)) {
@@ -1554,7 +1568,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $map[$slug] = trim($color);
         }
         $warnings = [];
-        $fixed = PaletteFloor::repair($map, $warnings);
+        $fixed = PaletteFloor::repair($map, $warnings, $contrastOnBase);
         foreach ($theme['settings']['color']['palette'] as $i => $entry) {
             if (!is_array($entry)) {
                 continue;
@@ -1595,8 +1609,11 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $palette = [];
         }
         // The background every other slug is judged against, resolved before the
-        // loop because `base` may sit after the entry being decided.
+        // loop because `base` may sit after the entry being decided. The
+        // contrast ink is resolved the same way: accent is a fill, and its
+        // floor holds for the better of its two label inks (base or contrast).
         $deliveredBase = self::deliveredBase($palette, $preferredHexes);
+        $deliveredContrast = self::deliveredSlugHex($palette, $preferredHexes, 'contrast');
         $entries = [];
         $nonObjects = 0;
         foreach ($palette as $entry) {
@@ -1623,17 +1640,22 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $current = self::normalizeHex($entry['color']);
             if ($preferred !== null && $current !== null && $current !== $preferred) {
                 $authored = $entry['color'];
-                if (self::writebackWouldBlind($slug, $current, $preferred, $deliveredBase)) {
+                if (self::writebackWouldBlind($slug, $current, $preferred, $deliveredBase, $deliveredContrast)) {
                     // The model's hex clears WCAG on the delivered base and the
                     // direction's does not. Keep the readable one and say so;
                     // ContrastFixStep only reports on the base/contrast pair and
                     // is skipped outright on the HTML-first path, so nothing
                     // downstream would catch this.
+                    $against = $slug === 'accent'
+                        ? 'its best label ink (base or contrast)'
+                        : 'base ' . $deliveredBase;
                     $warnings[] = "theme.json palette slug '{$slug}': authored {$authored}; delivered {$authored}"
                         . "; disposition kept the model hex because the design-direction hex {$preferred} scored "
-                        . self::ratioLabel($preferred, $deliveredBase) . ':1 on base ' . $deliveredBase
+                        . self::slugRatioLabel($slug, $preferred, $deliveredBase, $deliveredContrast)
+                        . ':1 on ' . $against
                         . ', below the ' . self::CONTRAST_FLOORS[$slug] . ':1 floor for this slug, '
-                        . 'which the model hex clears at ' . self::ratioLabel($current, $deliveredBase) . ':1'
+                        . 'which the model hex clears at '
+                        . self::slugRatioLabel($slug, $current, $deliveredBase, $deliveredContrast) . ':1'
                         . self::hueDriftNote($slug, $current, $preferred);
                 } else {
                     $entry['color'] = $preferred;
@@ -1660,7 +1682,10 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $neutral = $needed === 'band'
                 ? (BandColor::fromBase($deliveredBase) ?? self::FALLBACK_COLORS[$needed])
                 : self::FALLBACK_COLORS[$needed];
-            if ($fromDirection === null || self::clearsFloor($needed, $fromDirection, $deliveredBase)) {
+            if (
+                $fromDirection === null
+                || self::clearsFloor($needed, $fromDirection, $deliveredBase, $deliveredContrast)
+            ) {
                 $hex = $fromDirection ?? $neutral;
                 if ($needed === 'band') {
                     $repairs[] = "palette missing slug 'band': delivered {$hex}; disposition derived the "
@@ -1672,15 +1697,20 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                 // Same floor the writeback above enforces, applied to the one
                 // other way a direction hex reaches the palette. There is no
                 // model hex to keep here, so the choice is the direction's own
-                // against the neutral default: take whichever actually reads on
-                // the delivered base, and never make the slug less readable.
-                $hex = (self::ratioOn($neutral, $deliveredBase) ?? 0.0)
-                    > (self::ratioOn($fromDirection, $deliveredBase) ?? 0.0)
+                // against the neutral default: take whichever actually reads
+                // (per the slug's own measurement), and never make the slug
+                // less readable.
+                $hex = (self::slugRatio($needed, $neutral, $deliveredBase, $deliveredContrast) ?? 0.0)
+                    > (self::slugRatio($needed, $fromDirection, $deliveredBase, $deliveredContrast) ?? 0.0)
                     ? $neutral
                     : $fromDirection;
+                $against = $needed === 'accent'
+                    ? 'its best label ink (base or contrast)'
+                    : 'base ' . $deliveredBase;
                 $warnings[] = "theme.json palette missing slug '{$needed}': authored {$fromDirection}"
                     . "; delivered {$hex}; disposition the design-direction hex scored "
-                    . self::ratioLabel($fromDirection, $deliveredBase) . ':1 on base ' . $deliveredBase
+                    . self::slugRatioLabel($needed, $fromDirection, $deliveredBase, $deliveredContrast)
+                    . ':1 on ' . $against
                     . ', below the ' . self::CONTRAST_FLOORS[$needed] . ':1 floor for this slug'
                     . self::hueDriftNote($needed, $fromDirection, $hex);
             }
@@ -1811,6 +1841,13 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                 ? "theme.json fontFamilies missing slug '{$needed}'; filled from designDirection.json with {$stack}"
                 : "theme.json fontFamilies missing slug '{$needed}'; filled with the system stack";
         }
+        // Code-owned presets fill silently: nothing the model authored was
+        // lost, so a warning row here would be noise on every build.
+        foreach (self::PIPELINE_FONTS as $slug => $stack) {
+            if (!in_array($slug, array_column($families, 'slug'), true)) {
+                $families[] = ['slug' => $slug, 'name' => ucfirst($slug), 'fontFamily' => $stack];
+            }
+        }
 
         $theme['settings']['typography']['fontFamilies'] = $families;
         return [$theme, $warnings, $repairs];
@@ -1842,36 +1879,85 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
 
     /**
      * True when the direction's hex would drop a slug the model had made
-     * compliant below the floor prompts/theme-json.md:36-39 states for it.
+     * compliant below the floor prompts/theme-json.md states for it.
      *
      * `base` is exempt: it is the reference background, and replacing it is a
-     * design decision rather than a readability one. The floors below are the
-     * prompt's own, and the ratio is symmetric, so `accent`'s requirement —
-     * "base on accent >= 4.5:1" for button labels — is the same measurement.
+     * design decision rather than a readability one. Text roles measure
+     * against base; `accent` is a fill and measures against its best label
+     * ink (base or contrast) — the same measurement PaletteFloor holds.
      */
     private static function writebackWouldBlind(
         string $slug,
         string $authored,
         string $preferred,
         string $base,
+        ?string $contrast,
     ): bool {
-        return self::clearsFloor($slug, $authored, $base)
-            && !self::clearsFloor($slug, $preferred, $base);
+        return self::clearsFloor($slug, $authored, $base, $contrast)
+            && !self::clearsFloor($slug, $preferred, $base, $contrast);
     }
 
     /**
-     * Whether one hex meets the floor its slug carries on the delivered base.
-     * A slug with no floor, and a hex we cannot measure, both pass: this gate
-     * exists to catch a measured failure, not to reject unfamiliar input.
+     * Whether one hex meets the floor its slug carries. A slug with no
+     * floor, and a hex we cannot measure, both pass: this gate exists to
+     * catch a measured failure, not to reject unfamiliar input.
      */
-    private static function clearsFloor(string $slug, string $hex, string $base): bool
+    private static function clearsFloor(string $slug, string $hex, string $base, ?string $contrast): bool
     {
         $floor = self::CONTRAST_FLOORS[$slug] ?? null;
         if ($floor === null) {
             return true;
         }
-        $ratio = self::ratioOn($hex, $base);
+        $ratio = self::slugRatio($slug, $hex, $base, $contrast);
         return $ratio === null || $ratio >= $floor;
+    }
+
+    /**
+     * The measurement a slug's floor holds: text roles read on base, the
+     * accent fill is read BY its better label ink. Null when unmeasurable.
+     */
+    private static function slugRatio(string $slug, string $hex, string $base, ?string $contrast): ?float
+    {
+        $onBase = self::ratioOn($hex, $base);
+        if ($slug !== 'accent') {
+            return $onBase;
+        }
+        $onContrast = $contrast === null ? null : self::ratioOn($hex, $contrast);
+        if ($onBase === null) {
+            return $onContrast;
+        }
+        return $onContrast === null ? $onBase : max($onBase, $onContrast);
+    }
+
+    private static function slugRatioLabel(string $slug, string $hex, string $base, ?string $contrast): string
+    {
+        $ratio = self::slugRatio($slug, $hex, $base, $contrast);
+        return $ratio === null ? 'an unmeasurable' : number_format($ratio, 2);
+    }
+
+    /**
+     * One delivered slug hex, preferring the direction's commitment and
+     * falling back to the model's palette entry — the same resolution order
+     * deliveredBase() uses. Null when neither names a readable hex.
+     */
+    private static function deliveredSlugHex(mixed $palette, array $preferredHexes, string $slug): ?string
+    {
+        $fromDirection = is_string($preferredHexes[$slug] ?? null)
+            ? self::normalizeHex($preferredHexes[$slug])
+            : null;
+        if ($fromDirection !== null) {
+            return $fromDirection;
+        }
+        foreach (is_array($palette) ? $palette : [] as $entry) {
+            if (!is_array($entry) || ($entry['slug'] ?? null) !== $slug) {
+                continue;
+            }
+            $hex = is_string($entry['color'] ?? null) ? self::normalizeHex($entry['color']) : null;
+            if ($hex !== null) {
+                return $hex;
+            }
+        }
+        return null;
     }
 
     /**

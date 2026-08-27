@@ -14,6 +14,7 @@ use Automattic\SiteBuild\DirectionExecutability;
 use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\FontCatalog;
 use Automattic\SiteBuild\FontMonoculture;
+use Automattic\SiteBuild\FontShortlist;
 use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\TypeTreatment;
 use Automattic\SiteBuild\GeneratedJsonException;
@@ -204,6 +205,9 @@ final class DesignDirectionStep implements Step
 
         $spec = $project->readText('siteSpec.json');
         $specData = $project->readJson('siteSpec.json');
+        // Loaded once: the expansion prompt samples its font shortlist from
+        // it, and the monoculture floor below substitutes against it.
+        $fontCatalog = FontCatalog::load();
 
         $warnings = [];
         [
@@ -219,7 +223,18 @@ final class DesignDirectionStep implements Step
             $seed,
             $warnings,
         );
-        $blueprintDefaults = HeroBlueprint::defaultFor($recipe, $constraints);
+        // The recipe is code-owned and seeded, and so are its media axes
+        // (BIGR-912). The prompt below tells the model to preserve the defaults
+        // it is handed, so handing every site the same aspect and weight would
+        // make the merged contained-split recipe draw one composition forever.
+        $blueprintDefaults = array_merge(
+            HeroBlueprint::defaultFor($recipe, $constraints),
+            HeroComposition::selectMediaAxes(
+                (string) ($specData['slug'] ?? $project->slug()),
+                $seed,
+                $recipe,
+            ),
+        );
         $heroComposition = $this->renderer->render('hero-composition.md', [
             'recipe' => $recipe,
             'blueprint_defaults' => json_encode(
@@ -252,6 +267,14 @@ final class DesignDirectionStep implements Step
             'type_register' => $seedTypeRegister === ''
                 ? 'not committed by the seed — read the letterform tradition off the seed sentence'
                 : $seedTypeRegister,
+            // A rotating per-site shortlist of real families in the committed
+            // tradition. Naming the tradition alone lands every build on its
+            // one famous face (BIGR-920); empty for a degraded seed.
+            'type_candidates' => FontShortlist::promptParagraph(
+                $seedTypeRegister,
+                (string) ($specData['slug'] ?? $project->slug()),
+                $fontCatalog,
+            ),
             'hero_composition' => $heroComposition,
         ]);
         try {
@@ -311,7 +334,7 @@ final class DesignDirectionStep implements Step
         $direction = self::substituteMonocultureFonts(
             $direction,
             (string) ($specData['slug'] ?? $project->slug()),
-            FontCatalog::load(),
+            $fontCatalog,
             $warnings,
         );
 
@@ -486,21 +509,29 @@ final class DesignDirectionStep implements Step
             ];
         }
         $pool = ConceptSeeds::distinct($seeds, $warnings);
-        $sharedGround = ConceptSeeds::sharedGround($pool);
-        if ($sharedGround !== null) {
-            $triples = [];
-            foreach ($pool as $seed) {
-                $key = ConceptSeeds::axisKey($seed);
-                if ($key !== null) {
-                    $triples[$key] = true;
-                }
+        $triples = [];
+        foreach ($pool as $seed) {
+            $key = ConceptSeeds::axisKey($seed);
+            if ($key !== null) {
+                $triples[$key] = true;
             }
-            // distinct() already records a collapsed round (one world, kept
-            // whole). A second row that restates the shared ground is the
-            // same event, and "open brief" is a claim this step never checked.
-            if (count($triples) > 1) {
+        }
+        // distinct() already records a collapsed round (one world, kept
+        // whole). A second row that restates the shared axis is the same
+        // event, and "open brief" is a claim this step never checked.
+        if (count($triples) > 1) {
+            $sharedGround = ConceptSeeds::sharedGround($pool);
+            if ($sharedGround !== null) {
                 $warnings[] = 'design-direction: every concept seed is ' . $sharedGround
                     . '-grounded; picked from it anyway; disposition tolerated';
+            }
+            // The tint is not in the dedup key, so a round of three distinct
+            // worlds can still lean one way — the audited cohort's cream
+            // skew (BIGR-922). Visible in the report, never blocking.
+            $sharedTint = ConceptSeeds::sharedTint($pool);
+            if ($sharedTint !== null) {
+                $warnings[] = 'design-direction: every concept seed is ' . $sharedTint
+                    . '-tinted; picked from the one-family round anyway; disposition tolerated';
             }
         }
         return self::chosen($pool[random_int(0, count($pool) - 1)]);
