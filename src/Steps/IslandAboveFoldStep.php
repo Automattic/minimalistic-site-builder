@@ -67,9 +67,51 @@ final class IslandAboveFoldStep implements Step
             (array) ($project->readJson('pages.json')['pages'] ?? []),
             'is_array',
         ));
-        $pages = self::withContractSectionFields($pages);
-        $contract = self::deliveryContract($project, $pages);
-        $contract = AboveFoldContract::finalizeMarkup($contract, $pages, self::facts($project, $pages, $contract));
+        $skippedOpenings = [];
+        $usable = [];
+        foreach ($pages as $page) {
+            $sections = array_values(array_filter((array) ($page['sections'] ?? []), 'is_array'));
+            if ($sections === []) {
+                $skippedOpenings[] = (string) ($page['slug'] ?? '');
+                continue;
+            }
+            $page['sections'] = $sections;
+            $usable[] = $page;
+        }
+        $stepWarnings = [];
+        foreach ($skippedOpenings as $slug) {
+            $stepWarnings[] = "island-above-fold: page '{$slug}' has no opening section; skipped for above-fold; "
+                . 'disposition=page omitted from the contract';
+        }
+        if ($usable === []) {
+            $front = $pages[0] ?? ['slug' => 'home', 'title' => 'Home'];
+            $usable = [[
+                'slug' => (string) ($front['slug'] ?? 'home'),
+                'title' => (string) ($front['title'] ?? 'Home'),
+                'path' => (string) ($front['path'] ?? '/'),
+                'front' => true,
+                'parent' => null,
+                'menu_order' => 0,
+                'purpose' => '',
+                'sections' => [[
+                    'slug' => 'opening',
+                    'title' => 'Opening',
+                    'layout_archetype' => 'html-island',
+                ]],
+            ]];
+            $stepWarnings[] = 'island-above-fold: no delivered page has an opening section; '
+                . 'authored empty pages.json sections; delivered a stacked fallback contract; '
+                . 'disposition=degraded and continued';
+        }
+        $pages = self::withContractSectionFields($usable);
+        try {
+            $contract = self::deliveryContract($project, $pages);
+            $contract = AboveFoldContract::finalizeMarkup($contract, $pages, self::facts($project, $pages, $contract));
+        } catch (\InvalidArgumentException|\RuntimeException $e) {
+            $stepWarnings[] = 'island-above-fold: ' . $e->getMessage()
+                . '; delivered a stacked fallback contract; disposition=degraded and continued';
+            $contract = self::stackedFallbackContract($project, $pages);
+        }
         $project->writeJson('aboveFold.json', $contract);
 
         $report = $project->exists('island-report.json')
@@ -81,13 +123,38 @@ final class IslandAboveFoldStep implements Step
         $report['above_fold'] = [
             'degradations' => (array) ($contract['degradations'] ?? []),
             'header_mode' => $contract['header']['mode'] ?? null,
+            'skipped_openings' => $skippedOpenings,
         ];
         $project->writeJson('island-report.json', $report);
 
-        $warnings = AboveFoldContract::warningRows($contract);
+        $warnings = array_merge($stepWarnings, AboveFoldContract::warningRows($contract));
         if ($warnings !== []) {
             $project->addWarnings($this->id(), $warnings);
         }
+    }
+
+    /**
+     * @param array<int,array<string,mixed>> $pages
+     * @return array<string,mixed>
+     */
+    private static function stackedFallbackContract(Project $project, array $pages): array
+    {
+        $dummy = self::withContractSectionFields($pages !== [] ? $pages : [[
+            'slug' => 'home',
+            'title' => 'Home',
+            'path' => '/',
+            'front' => true,
+            'parent' => null,
+            'menu_order' => 0,
+            'purpose' => '',
+            'sections' => [[
+                'slug' => 'opening',
+                'title' => 'Opening',
+                'layout_archetype' => 'html-island',
+            ]],
+        ]]);
+        $contract = self::deliveryContract($project, $dummy);
+        return AboveFoldContract::finalizeMarkup($contract, $dummy, self::facts($project, $dummy, $contract));
     }
 
     /**

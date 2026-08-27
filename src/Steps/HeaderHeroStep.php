@@ -576,13 +576,18 @@ final class HeaderHeroStep implements Step
         // repairs. The pure finalizer is independently idempotent, so this is
         // an assertion-by-construction that the bytes, plan, and final
         // contract describe the same delivered state before persistence.
-        $deliveryForRefinalize = $final;
-        $deliveryForRefinalize['phase'] = AboveFoldContract::PHASE_DELIVERY;
-        $partBytes = self::partBytes($project, $writes);
-        $facts = $withOverlayEvidence(AboveFoldPartFacts::inspect($pages, $partBytes, $deliveryForRefinalize));
-        $final = AboveFoldContract::finalizeMarkup($deliveryForRefinalize, $pages, $facts);
-        $mode = (string) $final['header']['mode'];
-        array_push($warnings, ...AboveFoldContract::warningRows($final, $degradationOffset));
+        // Islands already wrote PHASE_FINAL via IslandPartFacts. Re-finalizing
+        // with the group-root inspector would silently degrade every overlay
+        // header (top-level block is wp:html, not wp:group).
+        if (!$alreadyFinal) {
+            $deliveryForRefinalize = $final;
+            $deliveryForRefinalize['phase'] = AboveFoldContract::PHASE_DELIVERY;
+            $partBytes = self::partBytes($project, $writes);
+            $facts = $withOverlayEvidence(AboveFoldPartFacts::inspect($pages, $partBytes, $deliveryForRefinalize));
+            $final = AboveFoldContract::finalizeMarkup($deliveryForRefinalize, $pages, $facts);
+            $mode = (string) $final['header']['mode'];
+            array_push($warnings, ...AboveFoldContract::warningRows($final, $degradationOffset));
+        }
 
         $footerRel = 'parts/footer.html';
         if ($project->exists('theme/' . $footerRel) || isset($writes[$footerRel])) {
