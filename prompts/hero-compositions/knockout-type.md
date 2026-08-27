@@ -22,9 +22,13 @@ letters, the recipe has not been built.
   headline reduces the effect to noise. Prefer one strong noun pair.
 - Dim: the cover's `dimRatio` is 0. Any dim greys the image inside the letters,
   which is the only place the image exists.
-- Image brief: request a photograph with large, simple areas of light and dark
-  and a clear subject at its centre — a busy or low-contrast frame reads as
-  mud once it is only visible through letter-sized openings.
+- Image brief: the letters are small windows onto the photograph, so the
+  photograph must carry a WIDE tonal range in large simple areas — a bright
+  subject or bright ground against deep shadow, with the contrast visible from
+  across a room. Ask for it explicitly in the image request. An evenly dark
+  frame, an evenly pale frame, or a busy detailed one reads as mud or as
+  nothing at all once it is seen only through letter-sized openings. Avoid
+  night scenes, dim interiors without a light source, and close-up texture.
 - Identity: the one root group carries exactly `.hero-composition--knockout-type`.
 - Surface: the panel and the copy group both carry the contrast colour, so the
   band reads as one field. Never paint the root group with the image, never add

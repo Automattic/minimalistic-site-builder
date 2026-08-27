@@ -524,12 +524,28 @@ final class ScaffoldThemeStep implements Step
            colour: no knockout, but a legible hero. */
         .hero-composition--knockout-type > .wp-block-cover {
             isolation: isolate;
+            padding: 0;
+        }
+        /* The panel has to reach every edge of the band. Core constrains the
+           cover's inner container to contentSize and pads the cover, which
+           leaves the photograph showing in a frame around the panel — and this
+           composition promises the image appears in the letters and nowhere
+           else. The first audited cohort shipped exactly that frame. */
+        .hero-composition--knockout-type .wp-block-cover__inner-container {
+            max-inline-size: none;
+            inline-size: 100%;
+            block-size: 100%;
+            display: flex;
+            flex-direction: column;
         }
         .hero-composition--knockout-type .hero-knockout {
-            flex-grow: 1;
+            flex: 1 1 auto;
             display: flex;
             flex-direction: column;
             justify-content: center;
+            inline-size: 100%;
+        }
+        .hero-composition--knockout-type .hero-composition__copy {
             inline-size: 100%;
         }
         .hero-composition--knockout-type .hero-knockout--ink {
