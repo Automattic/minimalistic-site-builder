@@ -24,6 +24,19 @@ test('the chosen seed carries its two traditions into the expansion prompt', fun
     assert_contains('noir', $expansion, 'the design tradition reaches the expansion');
     assert_contains('didone', $expansion, 'so does the letterform tradition');
 
+    // The renderer throws on an unresolved placeholder but is silent about
+    // an unused variable, so deleting {{type_candidates}} from the template
+    // would disable the shortlist without failing anything else (BIGR-920).
+    $candidates = \Automattic\SiteBuild\FontShortlist::candidates(
+        'didone',
+        'demo',
+        \Automattic\SiteBuild\FontCatalog::load(),
+    );
+    assert_true($candidates !== [], 'the didone shelf yields a sample');
+    foreach ($candidates as $family) {
+        assert_contains($family, $expansion, 'the shortlist sample reaches the expansion prompt');
+    }
+
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

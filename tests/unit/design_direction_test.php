@@ -613,7 +613,7 @@ test('the seed and expansion prompts ask for both ground coordinates, and ban tr
     $direction = $renderer->render('design-direction.md', [
         'user_prompt' => 'a bakery', 'site_spec' => '{}', 'seed' => 'Seed',
         'hero_composition' => '', 'ground_key' => 'dark', 'ground_tint' => 'violet',
-        'register' => 'editorial', 'type_register' => 'didone',
+        'register' => 'editorial', 'type_register' => 'didone', 'type_candidates' => '',
     ]);
     assert_contains('ground_key', $direction, 'the expansion commits the light/dark field the build enforces');
     assert_contains('dark', $direction, 'and is told which side the seed chose');
