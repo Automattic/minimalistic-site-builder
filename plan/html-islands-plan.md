@@ -468,3 +468,55 @@ island HTML for real, and the degradation must be visible in `island-report.json
 |---|---|
 | 2a `island-pages` | split, parse degrade, re-sanitize, missing-artifact skip, `pages.json`, parts, `island-report.json` |
 | 2b `island-above-fold` | the facts adapter + `aboveFold.json`; depends on 2a and on `transform-chrome` |
+
+### Milestone 4's three open conditions, resolved by measurement
+
+The review left three questions for "decide during milestone 4". All three were
+answered by running the real code against island-shaped input, each with a
+known-answer control on block input.
+
+**`normalize-layout`: retain graph-wide, unchanged.** Both halves were probed.
+`FixBlocksStep::normalizeLayouts` is a byte-for-byte no-op on a `wp:html` island
+(nothing to stamp a layout on) and does real work on chrome in the same run
+(stamped `layout:constrained` on a header group). `StorefrontDegrade::markup()`
+operates on raw anchors, so it works on islands directly — it relabelled both
+purchase CTAs in an island and repointed `/cart/` and `/checkout/` at `/contact/`.
+No chrome-scoping is needed; the step is already correct on this graph.
+
+**`section-rhythm`: drop from the islands graph.** Probed against an island page:
+it does not throw and does not change the island, but it records one degradation
+per page — `section 'hero' must contain exactly one top-level wp:group`. That is
+one non-actionable warning per page per build, the same AGENTS.md rung-2 violation
+that removed `extract-patterns` from the post-image list. Chrome-scoping it would
+be meaningless: `planEntries()` reads only page section parts from `pages.json`,
+so it has no chrome to work on.
+
+**`header-hero`'s hero-echo dedupe: port it, do not accept the loss.** This is the
+one that matters. `dedupeAgainstHero()` collects the hero's short lines with
+`BlockMarkup::parse($heroMarkup)`, taking only `paragraph` and `heading` blocks.
+An island hero parses as a single `html` block, so it yields zero lines. Measured
+against a control:
+
+| hero | header rewritten | notes | warnings |
+|---|---|---|---|
+| block markup | yes — echo removed | 1 | 1 |
+| island | **no — echo survives** | **0** | **0** |
+
+A header that repeats the hero's headline and CTA ships, with nothing in
+`warnings.json` to say so. That is a `RESCUED=N, TEST=N, USER SEES=Silent` row,
+which the failure registry claims does not exist — so the registry gains a row
+and the port is required, not optional.
+
+The port is small: `dedupeAgainstHero()` needs only the hero's short text lines,
+so the block path stays and an island path reads `<p>` and `<h1>`–`<h6>` text out
+of the raw HTML. Everything downstream of `$heroLines` is unchanged.
+
+### RES-1, carried from milestone 1
+
+`bin/images.php:39-55` (`images_html_first_from_project`) resolves the graph name
+correctly and then flattens it to a boolean with
+`=== StepComposition::GRAPH_HTML_FIRST`. On an islands project that yields
+`false`, so `CollectImagesStep` is constructed as if this were the blocks graph
+and stops reading prose alts as image subjects. Its fallback heuristic fails the
+same way: absent `design/transform-report.json` — which this graph never writes —
+it guesses `blocks`. Milestone 4 must keep the graph a string end to end.
