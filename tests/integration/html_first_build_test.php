@@ -100,9 +100,9 @@ function html_first_home_body(string $marker = 'HTML-FIRST-HOME'): string
 {
     $html = <<<'HTML'
 <main>
-<section id="story" class="story"><h2>HTML-FIRST-HOME</h2><p>Slow fermentation, local grain.</p></section>
+<section id="story"><h2>HTML-FIRST-HOME</h2><p>Slow fermentation, local grain.</p></section>
 </main>
-<footer class="site-shell"><p>Visit the neighborhood oven.</p></footer>
+<footer><p>Visit the neighborhood oven.</p></footer>
 HTML;
 
     return str_replace('HTML-FIRST-HOME', $marker, $html);

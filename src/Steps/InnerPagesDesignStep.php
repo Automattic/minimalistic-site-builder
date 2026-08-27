@@ -252,7 +252,7 @@ final class InnerPagesDesignStep implements Step
                 ? static fn (string $fragment): bool => self::isValidHomeBodyFragment(trim($fragment))
                 : static fn (string $fragment): bool => self::isValidFragment(trim($fragment));
             if ($isValid($sanitized)) {
-                self::writeSuccessfulDesign($project, $path, $failedPath, $sanitized);
+                $this->deliverDesign($project, $path, $failedPath, $sanitized, $isHome, $cachedPrefixes, $warnings);
                 if ($strippedAuthored !== $authored) {
                     $warnings[] = "malformed_design: {$path} context page {$slug} batch response; authored "
                         . self::warningValue($authored)
@@ -267,7 +267,7 @@ final class InnerPagesDesignStep implements Step
                 : $sanitized;
             $balanced = self::balanceFragment($stripped);
             if ($isValid($balanced)) {
-                self::writeSuccessfulDesign($project, $path, $failedPath, $balanced);
+                $this->deliverDesign($project, $path, $failedPath, $balanced, $isHome, $cachedPrefixes, $warnings);
                 $proseRemoved = $strippedAuthored !== $authored || $stripped !== $sanitized;
                 $delivered = $proseRemoved
                     ? ($balanced !== $stripped
@@ -281,8 +281,8 @@ final class InnerPagesDesignStep implements Step
             }
 
             $repairContract = $isHome
-                ? 'one closed bare <main> with no attributes for below-fold content, followed by one closed '
-                    . '<footer>; no header or hero'
+                ? 'the optional <style data-page-css> immediately before one closed bare <main> with no attributes '
+                    . 'for below-fold content, followed by one closed <footer>; no header or hero'
                 : 'the full optional <style data-page-css> followed by one closed <main> fragment only';
             $repairPrompt = $unit['prompt']
                 . "\n\nThe previous response was empty or malformed. Repair it once. Return {$repairContract}.\n\n"
@@ -331,7 +331,7 @@ final class InnerPagesDesignStep implements Step
                 : $repair;
             $repair = self::balanceFragment($strippedRepair);
             if ($isValid($repair)) {
-                self::writeSuccessfulDesign($project, $path, $failedPath, $repair);
+                $this->deliverDesign($project, $path, $failedPath, $repair, $isHome, $cachedPrefixes, $warnings);
                 $proseRemoved = $strippedRawRepair !== $rawRepair
                     || $strippedRepair !== $unbalancedRepair;
                 if ($proseRemoved) {
@@ -669,7 +669,7 @@ final class InnerPagesDesignStep implements Step
         $candidate = trim($candidate);
         $isValid = static fn (string $fragment): bool => self::isValidHomeBodyFragment(trim($fragment));
         if ($isValid($candidate)) {
-            self::writeSuccessfulDesign($project, $path, $failedPath, $candidate);
+            $this->deliverDesign($project, $path, $failedPath, $candidate, true, $cachedPrefixes, $warnings);
             if ($strippedAuthored !== $authored) {
                 $warnings[] = "malformed_design: {$path} context page {$slug} batch response; authored "
                     . self::warningValue($authored)
@@ -684,7 +684,7 @@ final class InnerPagesDesignStep implements Step
             : $candidate;
         $balanced = self::balanceFragment($stripped);
         if ($isValid($balanced)) {
-            self::writeSuccessfulDesign($project, $path, $failedPath, $balanced);
+            $this->deliverDesign($project, $path, $failedPath, $balanced, true, $cachedPrefixes, $warnings);
             $proseRemoved = $strippedAuthored !== $authored || $stripped !== $candidate;
             $delivered = $proseRemoved
                 ? ($balanced !== $stripped
@@ -698,8 +698,9 @@ final class InnerPagesDesignStep implements Step
         }
 
         $repairPrompt = (string) $unit['prompt']
-            . "\n\nThe previous response was empty or malformed. Repair it once. Return one closed bare <main> "
-            . "with no attributes for below-fold content, followed by one closed <footer>; no header or hero.\n\n"
+            . "\n\nThe previous response was empty or malformed. Repair it once. Return the optional "
+            . "<style data-page-css> immediately before one closed bare <main> with no attributes for "
+            . "below-fold content, followed by one closed <footer>; no header or hero.\n\n"
             . "<authored_fragment>\n{$authored}\n</authored_fragment>";
         try {
             $repair = ContinuationRecovery::completeToClose(
@@ -743,7 +744,7 @@ final class InnerPagesDesignStep implements Step
             : $repair;
         $repair = self::balanceFragment($strippedRepair);
         if ($isValid($repair)) {
-            self::writeSuccessfulDesign($project, $path, $failedPath, $repair);
+            $this->deliverDesign($project, $path, $failedPath, $repair, true, $cachedPrefixes, $warnings);
             $proseRemoved = $strippedRawRepair !== $rawRepair
                 || $strippedRepair !== $unbalancedRepair;
             if ($proseRemoved) {
@@ -810,6 +811,166 @@ final class InnerPagesDesignStep implements Step
         // max_tokens truncation, dropping the authored tail. Post-return
         // balancing still salvages a completed-but-malformed repair.
         return $sanitized === $candidate && $isValid($sanitized);
+    }
+
+    /**
+     * @param list<string> $cachedPrefixes
+     * @param list<string> $warnings
+     */
+    private function deliverDesign(
+        Project $project,
+        string $path,
+        string $failedPath,
+        string $content,
+        bool $isHome,
+        array $cachedPrefixes,
+        array &$warnings,
+    ): void {
+        if ($isHome) {
+            $content = $this->coverUnstyledHomeBodyClasses($project, $content, $cachedPrefixes, $warnings);
+        }
+        self::writeSuccessfulDesign($project, $path, $failedPath, $content);
+    }
+
+    /**
+     * Class names used in markup that no available CSS rule styles.
+     *
+     * @return list<string>
+     */
+    public static function unstyledClasses(string $html, string $css): array
+    {
+        $used = self::htmlClassNames($html);
+        if ($used === []) {
+            return [];
+        }
+        $styled = self::cssClassNames($css);
+        $missing = [];
+        foreach ($used as $class) {
+            if (!isset($styled[$class])) {
+                $missing[] = $class;
+            }
+        }
+        return $missing;
+    }
+
+    /**
+     * @return list<string>
+     */
+    public static function htmlClassNames(string $html): array
+    {
+        $names = [];
+        if (preg_match_all('/\bclass\s*=\s*(?:"([^"]*)"|\'([^\']*)\')/i', $html, $matches, PREG_SET_ORDER) === false) {
+            return [];
+        }
+        foreach ($matches as $match) {
+            $value = $match[1] !== '' ? $match[1] : ($match[2] ?? '');
+            foreach (preg_split('/\s+/', trim($value)) ?: [] as $class) {
+                if ($class !== '' && preg_match('/^[A-Za-z_][A-Za-z0-9_-]*$/', $class) === 1) {
+                    $names[$class] = true;
+                }
+            }
+        }
+        $list = array_keys($names);
+        sort($list, SORT_STRING);
+        return $list;
+    }
+
+    /**
+     * @return array<string,true>
+     */
+    public static function cssClassNames(string $css): array
+    {
+        $css = preg_replace('/\/\*.*?\*\//s', '', $css) ?? $css;
+        $styled = [];
+        if (preg_match_all('/\.(-?[_A-Za-z]+[_A-Za-z0-9-]*)/', $css, $matches) === false) {
+            return [];
+        }
+        foreach ($matches[1] as $class) {
+            $styled[$class] = true;
+        }
+        return $styled;
+    }
+
+    /**
+     * @param list<string> $cachedPrefixes
+     * @param list<string> $warnings
+     */
+    private function coverUnstyledHomeBodyClasses(
+        Project $project,
+        string $html,
+        array $cachedPrefixes,
+        array &$warnings,
+    ): string {
+        $siteCss = $project->exists('design/site.css') ? $project->readText('design/site.css') : '';
+        $pageCss = self::pageCssFromFragment($html);
+        $available = $siteCss . "\n" . $pageCss;
+        $missing = self::unstyledClasses($html, $available);
+        if ($missing === []) {
+            return $html;
+        }
+
+        $list = implode(', ', $missing);
+        $repairPrompt = "The homepage below-fold fragment uses classes with no matching CSS rule: {$list}.\n"
+            . "Return the same fragment with exactly one <style data-page-css> immediately before <main> "
+            . "that styles those classes. Prefer established site classes. Keep the existing HTML. "
+            . "No header, no hero, no second h1. Optional style, then bare <main>, then <footer>.\n\n"
+            . "<authored_fragment>\n{$html}\n</authored_fragment>";
+        try {
+            $repair = ContinuationRecovery::completeToClose(
+                $this->llm,
+                $repairPrompt,
+                $this->withOptions(['cached_prefixes' => $cachedPrefixes]),
+                static fn (string $fragment): bool => self::isClosedRepairCandidate(
+                    $fragment,
+                    static fn (string $candidate): bool => self::isValidHomeBodyFragment(trim($candidate)),
+                ),
+            );
+        } catch (TruncatedGenerationException $error) {
+            $repair = $error->getPartialText();
+        } catch (\RuntimeException) {
+            $warnings[] = 'malformed_design: design/home-body.html context page home-body; authored unstyled classes '
+                . self::warningValue($list)
+                . '; delivered original fragment; disposition css-coverage repair unavailable; '
+                . 'unstyled_classes=' . $list;
+            return $html;
+        }
+
+        $repaired = DesignMarkupSanitizer::sanitize(
+            self::stripSurroundingProse(trim($repair)),
+            'design/home-body.html',
+            'page home-body css-coverage repair',
+            $warnings,
+        );
+        $repaired = trim(self::balanceFragment($repaired));
+        if (!self::isValidHomeBodyFragment($repaired)) {
+            $warnings[] = 'malformed_design: design/home-body.html context page home-body; authored unstyled classes '
+                . self::warningValue($list)
+                . '; delivered original fragment; disposition css-coverage repair invalid; '
+                . 'unstyled_classes=' . $list;
+            return $html;
+        }
+
+        $still = self::unstyledClasses($repaired, $siteCss . "\n" . self::pageCssFromFragment($repaired));
+        if ($still !== []) {
+            $remain = implode(', ', $still);
+            $warnings[] = 'malformed_design: design/home-body.html context page home-body; authored unstyled classes '
+                . self::warningValue($list)
+                . '; delivered repaired fragment; disposition css-coverage residual; unstyled_classes='
+                . $remain;
+        }
+        return $repaired;
+    }
+
+    public static function pageCssFromFragment(string $html): string
+    {
+        if (preg_match(
+            '/\A<style\b[^>]*\bdata-page-css\b[^>]*>(.*?)<\/style>/is',
+            $html,
+            $match,
+        ) !== 1) {
+            return '';
+        }
+        return $match[1];
     }
 
     /**
@@ -1332,9 +1493,11 @@ final class InnerPagesDesignStep implements Step
                 $opening = array_pop($stack);
                 if ($stack === []) {
                     $roots[] = [
-                        'name'  => $name,
-                        'start' => $opening['start'],
-                        'end'   => $token['end'],
+                        'name'        => $name,
+                        'start'       => $opening['start'],
+                        'open_end'    => $opening['end'],
+                        'close_start' => $token['start'],
+                        'end'         => $token['end'],
                     ];
                 }
                 continue;
@@ -1359,10 +1522,10 @@ final class InnerPagesDesignStep implements Step
             if ($name === 'h1' || self::openingTagAttribute($html, $token, 'id') === 'hero') {
                 return false;
             }
-            if ($name === 'style') {
+            if ($name === 'style' && $stack !== []) {
                 return false;
             }
-            if ($stack === [] && !in_array($name, ['main', 'footer'], true)) {
+            if ($stack === [] && !in_array($name, ['style', 'main', 'footer'], true)) {
                 return false;
             }
             if (!in_array($name, self::VOID_ELEMENTS, true)) {
@@ -1373,11 +1536,39 @@ final class InnerPagesDesignStep implements Step
         if ($stack !== [] || $mainCount !== 1 || $footerCount !== 1) {
             return false;
         }
-        if (array_column($roots, 'name') !== ['main', 'footer']) {
+        $names = array_column($roots, 'name');
+        if ($names !== ['main', 'footer'] && $names !== ['style', 'main', 'footer']) {
             return false;
         }
-        if ($roots[0]['start'] !== 0 || $roots[1]['end'] !== strlen($html)) {
+        if ($roots[0]['start'] !== 0 || $roots[count($roots) - 1]['end'] !== strlen($html)) {
             return false;
+        }
+        if ($names === ['style', 'main', 'footer']) {
+            $style = $roots[0];
+            $styleOpen = substr($html, $style['start'], $style['open_end'] - $style['start']);
+            if (
+                preg_match(
+                    '/(?:^|\s)data-page-css(?:\s*=\s*(?:"[^"]*"|\'[^\']*\'|[^\s>]+))?(?=\s|\/?>)/i',
+                    $styleOpen,
+                ) !== 1
+                || strlen(substr(
+                    $html,
+                    $style['open_end'],
+                    $style['close_start'] - $style['open_end'],
+                )) > self::MAX_PAGE_CSS_BYTES
+                || !self::isHtmlWhitespace(substr(
+                    $html,
+                    $style['end'],
+                    $roots[1]['start'] - $style['end'],
+                ))
+            ) {
+                return false;
+            }
+            return self::isHtmlWhitespace(substr(
+                $html,
+                $roots[1]['end'],
+                $roots[2]['start'] - $roots[1]['end'],
+            ));
         }
         return self::isHtmlWhitespace(substr(
             $html,

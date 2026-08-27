@@ -95,7 +95,7 @@ final class SpliceHomeDesignStep implements Step
 
     /**
      * @param array{main:array<string,int|string|null>,hero:array<string,int|string|null>,body:array<string,int|string|null>} $preview
-     * @param array{main:array<string,int|string|null>,footer:array<string,int|string|null>} $body
+     * @param array{main:array<string,int|string|null>,footer:array<string,int|string|null>,style:?array<string,int|string|null>} $body
      */
     private static function compose(string $previewHtml, string $bodyHtml, array $preview, array $body): string
     {
@@ -123,7 +123,13 @@ final class SpliceHomeDesignStep implements Step
         );
         $footerSource = substr($bodyHtml, $footer['start'], $footer['end'] - $footer['start']);
 
-        return substr($previewHtml, 0, $previewMain['start'])
+        $prefix = substr($previewHtml, 0, $previewMain['start']);
+        $pageCss = self::bodyPageCss($bodyHtml, $body['style'] ?? null);
+        if ($pageCss !== '') {
+            $prefix = self::mergeBodyCssIntoPreviewHead($prefix, $pageCss);
+        }
+
+        return $prefix
             . $mainOpen
             . $heroSource
             . $belowFold
@@ -135,6 +141,38 @@ final class SpliceHomeDesignStep implements Step
             )
             . $footerSource
             . substr($previewHtml, $previewBody['close_start']);
+    }
+
+    /** @param array<string,int|string|null>|null $style */
+    private static function bodyPageCss(string $bodyHtml, ?array $style): string
+    {
+        if ($style === null) {
+            return '';
+        }
+        return trim(substr(
+            $bodyHtml,
+            (int) $style['open_end'],
+            (int) $style['close_start'] - (int) $style['open_end'],
+        ));
+    }
+
+    /**
+     * The home body's CSS ships as its own page-scoped block and is NEVER
+     * merged into the preview's <style>. That block is the SITE stylesheet —
+     * byte-identical to design/site.css — and PageStylesStep treats a page
+     * artifact's unattributed <style> as site CSS, so merging would put the
+     * body's class vocabulary outside PageScope::bodyClass() scoping and let it
+     * collide with every other page. It would also ship the same rules twice.
+     */
+    private static function mergeBodyCssIntoPreviewHead(string $prefix, string $css): string
+    {
+        $block = '<style data-page-css>' . $css . "</style>\n";
+        $headClose = stripos($prefix, '</head>');
+        if ($headClose !== false) {
+            return substr($prefix, 0, $headClose) . $block . substr($prefix, $headClose);
+        }
+        // No <head> to land in: keep the CSS rather than dropping it silently.
+        return $block . $prefix;
     }
 
     /**
@@ -270,7 +308,7 @@ final class SpliceHomeDesignStep implements Step
     }
 
     /**
-     * @return array{main:array<string,int|string|null>,footer:array<string,int|string|null>}|null
+     * @return array{main:array<string,int|string|null>,footer:array<string,int|string|null>,style:?array<string,int|string|null>}|null
      */
     private static function bodyParts(string $html): ?array
     {
@@ -312,20 +350,42 @@ final class SpliceHomeDesignStep implements Step
             $elements,
             static fn (array $element): bool => $element['parent'] === null,
         ));
+        $rootNames = array_column($roots, 'name');
+        $style = null;
+        if ($rootNames === ['style', 'main', 'footer']) {
+            $style = $roots[0];
+            $styleOpen = substr($html, (int) $style['start'], (int) $style['open_end'] - (int) $style['start']);
+            if (
+                preg_match(
+                    '/(?:^|\s)data-page-css(?:\s*=\s*(?:"[^"]*"|\'[^\']*\'|[^\s>]+))?(?=\s|\/?>)/i',
+                    $styleOpen,
+                ) !== 1
+                || !self::isWhitespace(substr($html, 0, (int) $style['start']))
+                || !self::isWhitespace(substr(
+                    $html,
+                    (int) $style['end'],
+                    (int) $main['start'] - (int) $style['end'],
+                ))
+            ) {
+                return null;
+            }
+        } elseif ($rootNames !== ['main', 'footer']) {
+            return null;
+        }
+        $prefixEnd = $style === null ? $main['start'] : $style['start'];
         if (
             $mainAttributes === null
             || $mainAttributes !== []
             || $main['parent'] !== null
             || $footer['parent'] !== null
             || $main['start'] >= $footer['start']
-            || array_column($roots, 'name') !== ['main', 'footer']
-            || !self::isWhitespace(substr($html, 0, $main['start']))
+            || !self::isWhitespace(substr($html, 0, (int) $prefixEnd))
             || !self::isWhitespace(substr(
                 $html,
-                $main['end'],
-                $footer['start'] - $main['end'],
+                (int) $main['end'],
+                (int) $footer['start'] - (int) $main['end'],
             ))
-            || !self::isWhitespace(substr($html, $footer['end']))
+            || !self::isWhitespace(substr($html, (int) $footer['end']))
         ) {
             return null;
         }
@@ -334,7 +394,7 @@ final class SpliceHomeDesignStep implements Step
                 return null;
             }
         }
-        return ['main' => $main, 'footer' => $footer];
+        return ['main' => $main, 'footer' => $footer, 'style' => $style];
     }
 
     /**

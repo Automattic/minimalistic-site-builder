@@ -35,7 +35,8 @@ Return one `<main>` fragment for content below the fold followed immediately by 
 - Include exactly one `<main>` and exactly one `<footer>`.
 - Return a bare <main> with no attributes. Put all classes and IDs on its child sections.
 - Do not add a second `h1`; the design preview owns the homepage heading.
-- Prefer established site classes from the site CSS and minimize new page-specific classes. Do not emit a `<style>` element.
+- Prefer established site classes from the site CSS and minimize new page-specific classes. Page-specific CSS is a last resort and must stay minimal and well under 16 KB. Any class you introduce must have a matching rule.
+- When page-specific CSS is essential, put exactly one `<style data-page-css>` immediately before `<main>`. Never put a style element inside `<main>`.
 - Inside `<main>`, when a button or link leads to another page of THIS site, use that page's path from SITE PAGES verbatim (e.g. `href="/menu/"`) — never a path that isn't in the list. A deep link to another page includes that owning page's path (e.g. `href="/page/#anchor"`). A bare `href="#anchor"` is valid only when that exact section ID exists in the homepage `<main>`. Do not link the page to itself. An external link uses an exact URL supplied by the SITE SPEC; when none was supplied, omit the link or render its label as plain text. NEVER emit `href="#"`.
 - The footer renders on EVERY page, so each link must resolve everywhere: page links use the SITE PAGES paths verbatim except the front page (the site name is the home link — do NOT put a Home item in footer `<nav>`). A link to a homepage section is root-relative — `href="/#anchor"`, NEVER a bare `href="#anchor"`, which is dead on every page except the homepage itself. No `href="#"` placeholders. External links use only an exact URL present in the SITE SPEC; otherwise omit the link or render its label as plain text.
 
@@ -57,4 +58,4 @@ Every image needs meaningful `alt` text written as a usable image generation pro
 - Reuse its grid, flex, bounded content widths, responsive spacing, focus states, readable contrast, and reduced-motion behavior.
 - Keep images, navigation, tables, long words, and multi-column layouts usable on narrow screens.
 
-Return only the finished bare <main> with no attributes followed by `<footer>`.
+Return only the finished optional `<style data-page-css>` followed by the bare `<main>` with no attributes, then `<footer>`.

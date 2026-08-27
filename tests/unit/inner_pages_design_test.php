@@ -246,6 +246,10 @@ test('home-body accepts a nested attribution footer plus one page footer without
     [$project, $llm, $tmp] = inner_pages_fixture([
         inner_page('home', 'Home', 'One-page site'),
     ]);
+    $project->writeText(
+        'design/site.css',
+        $project->readText('design/site.css') . ".quote-attribution{font-style:italic}\n",
+    );
     $homeBody = '<main><section id="testimonials"><blockquote><p>Exceptional work.</p>'
         . '<footer class="quote-attribution">Casey Rivera</footer>'
         . '</blockquote></section></main>'
