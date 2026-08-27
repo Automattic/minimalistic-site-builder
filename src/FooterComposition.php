@@ -17,6 +17,7 @@ final class FooterComposition
         'conversion-panel',
         'editorial-colophon',
         'split-ledger',
+        'cover-coda',
         'diptych',
         'sunken-wordmark',
         'status-readout',
@@ -34,6 +35,7 @@ final class FooterComposition
         'conversion-panel' => 'footer-compositions/conversion-panel.md',
         'editorial-colophon' => 'footer-compositions/editorial-colophon.md',
         'split-ledger' => 'footer-compositions/split-ledger.md',
+        'cover-coda' => 'footer-compositions/cover-coda.md',
         'diptych' => 'footer-compositions/diptych.md',
         'sunken-wordmark' => 'footer-compositions/sunken-wordmark.md',
         'status-readout' => 'footer-compositions/status-readout.md',
@@ -51,6 +53,7 @@ final class FooterComposition
         'conversion-panel' => 'contrast',
         'editorial-colophon' => 'base',
         'split-ledger' => 'contrast',
+        'cover-coda' => 'contrast',
         'diptych' => 'base',
         'sunken-wordmark' => 'contrast',
         'status-readout' => 'contrast',
@@ -61,7 +64,7 @@ final class FooterComposition
     ];
 
     /** @var list<string> */
-    private const IMAGE_ARCHETYPES = ['photographic-split', 'image-plinth', 'mosaic-tiles', 'contact-sheet'];
+    private const IMAGE_ARCHETYPES = ['photographic-split', 'image-plinth', 'mosaic-tiles', 'contact-sheet', 'cover-coda'];
 
     /**
      * The surfaces a footer root can actually be painted. Only base and

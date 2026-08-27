@@ -309,6 +309,7 @@ test('footer prompt renders only its selected high-impact recipe', function () {
         'conversion-panel' => 'Build a bold, offset invitation',
         'editorial-colophon' => 'final plate of a book or',
         'split-ledger' => 'Build a strong 65/35 or 70/30 split',
+        'cover-coda' => 'ONE full-bleed wp:cover closes the page',
         'diptych' => 'EXACTLY two full-height slabs',
         'sunken-wordmark' => 'Invert the billboard',
         'status-readout' => 'quiet status readout',
