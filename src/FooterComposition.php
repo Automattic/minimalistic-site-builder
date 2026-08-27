@@ -17,6 +17,7 @@ final class FooterComposition
         'conversion-panel',
         'editorial-colophon',
         'split-ledger',
+        'color-field',
         'repeat-rail',
     ];
 
@@ -28,6 +29,7 @@ final class FooterComposition
         'conversion-panel' => 'footer-compositions/conversion-panel.md',
         'editorial-colophon' => 'footer-compositions/editorial-colophon.md',
         'split-ledger' => 'footer-compositions/split-ledger.md',
+        'color-field' => 'footer-compositions/color-field.md',
         'repeat-rail' => 'footer-compositions/repeat-rail.md',
     ];
 
@@ -39,6 +41,7 @@ final class FooterComposition
         'conversion-panel' => 'contrast',
         'editorial-colophon' => 'base',
         'split-ledger' => 'contrast',
+        'color-field' => 'base',
         'repeat-rail' => 'base',
     ];
 
