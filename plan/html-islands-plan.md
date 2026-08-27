@@ -743,3 +743,52 @@ classes onto established ones or permit a scoped `<style>` for the residue.
 and `theme.json` supplies grid, spacing and measure, so the dead classes never
 show. On `html-islands` the design ships verbatim, so they show completely.
 Islands did not cause this; islands are the instrument that made it visible.
+
+---
+
+## The home-body CSS fix (2026-08-27): design right, islands matching
+
+The defect above is fixed and verified on two live builds with different prompts.
+
+**Changes.** `prompts/home-body-design.md` now allows the home body one
+`<style data-page-css>`, matching `prompts/inner-page-design.md`.
+`InnerPagesDesignStep` reuses the existing inner-page CSS path for the
+`home-body` unit and applies a deterministic floor: any class with no matching
+rule is repaired, and what resists is warned with names and counts.
+`SpliceHomeDesignStep` carries that CSS as its own page-scoped block.
+
+**One defect found during the fix.** The first cut merged the body CSS into the
+preview's `<style>` *and* emitted the `data-page-css` block — shipping the rules
+twice (10,381B against a 4,529B `site.css`) and pushing the body's class
+vocabulary outside `PageScope::bodyClass()` scoping, since `PageStylesStep`
+treats a page artifact's unattributed `<style>` as site CSS. Corrected, with the
+invariant asserted as a test — `design/home.html`'s unattributed `<style>` must
+stay byte-identical to `design/site.css` — and mutation-tested: restoring the
+merge fails that test and nothing else.
+
+**Verified, two builds, different prompts:**
+
+| check | portfolio | restaurant |
+|---|---|---|
+| home body ships CSS | 5,388B | 5,815B |
+| site `<style>` mirrors `site.css` | yes | yes |
+| home-body classes with a rule | 27 / 27 | 33 / 33 |
+| authored sections delivered verbatim | 6 / 6 | 7 / 7 |
+| one `core/html` island per section | 6 / 6 | 7 / 7 |
+| images keeping their source | 8 / 8 | 8 / 8 |
+| those rules in `theme/style.css` | 27 / 27 | 33 / 33 |
+
+Before the fix the same check read 0 of 42 classes styled and 1 of 42 present in
+the theme.
+
+Screenshots confirm it: the authored design and the delivered WordPress site are
+the same page, section for section. The admin bar and the block-built chrome are
+the only intended differences.
+
+Suite 3,663 passing with the three known pre-existing failures; integration 34/0.
+
+**Standing.** The fidelity objection to milestone 6 is gone: islands deliver the
+design verbatim and the design is now worth delivering. The remaining question
+for retiring `html-first` is a product one — whether the block layer's
+compensation is worth keeping — not a fidelity one. Note this fix improves BOTH
+graphs; html-first was hiding the defect, not avoiding it.
