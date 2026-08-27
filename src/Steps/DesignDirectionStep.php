@@ -14,6 +14,7 @@ use Automattic\SiteBuild\DirectionExecutability;
 use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\FontCatalog;
 use Automattic\SiteBuild\FontMonoculture;
+use Automattic\SiteBuild\FontShortlist;
 use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\TypeTreatment;
 use Automattic\SiteBuild\GeneratedJsonException;
@@ -204,6 +205,9 @@ final class DesignDirectionStep implements Step
 
         $spec = $project->readText('siteSpec.json');
         $specData = $project->readJson('siteSpec.json');
+        // Loaded once: the expansion prompt samples its font shortlist from
+        // it, and the monoculture floor below substitutes against it.
+        $fontCatalog = FontCatalog::load();
 
         $warnings = [];
         [
@@ -252,6 +256,14 @@ final class DesignDirectionStep implements Step
             'type_register' => $seedTypeRegister === ''
                 ? 'not committed by the seed — read the letterform tradition off the seed sentence'
                 : $seedTypeRegister,
+            // A rotating per-site shortlist of real families in the committed
+            // tradition. Naming the tradition alone lands every build on its
+            // one famous face (BIGR-920); empty for a degraded seed.
+            'type_candidates' => FontShortlist::promptParagraph(
+                $seedTypeRegister,
+                (string) ($specData['slug'] ?? $project->slug()),
+                $fontCatalog,
+            ),
             'hero_composition' => $heroComposition,
         ]);
         try {
@@ -311,7 +323,7 @@ final class DesignDirectionStep implements Step
         $direction = self::substituteMonocultureFonts(
             $direction,
             (string) ($specData['slug'] ?? $project->slug()),
-            FontCatalog::load(),
+            $fontCatalog,
             $warnings,
         );
 

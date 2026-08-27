@@ -18,6 +18,8 @@ The seed also committed two traditions. They are binding in the same way its sen
 - **Design tradition**: {{register}} — the visual language the whole direction speaks in. Every later choice (palette, spatial rhythm, typography, imagery) must be one a designer working in this tradition would make.
 - **Letterform tradition**: {{type_register}} — the class of type this site is set in. Choose `type.heading` and `type.body` from inside it. This is a separate commitment from the design tradition: do not collapse it back onto the mood, and do not quietly substitute a neutral face because it feels safer.
 
+{{type_candidates}}
+
 ## The Use Scene — decide light or dark from it, not from the category
 
 Before you choose a ground, write one sentence to yourself naming the physical scene: WHO uses this site, WHERE, and under WHAT ambient light. A late-night ordering page, a gallery viewed on a phone in daylight, a workshop screen under fluorescents, a reference read at a desk for an hour — each of those forces a different answer. Let that sentence decide light or dark.
@@ -116,7 +118,7 @@ Respond with ONLY a JSON object. No explanation, no commentary, no text before o
     "ground_tint": "The committed ground family, echoed per the ground_tint field above.",
     "type": {
       "heading": {
-        "family": "Fraunces",
+        "family": "An exact Google Fonts family name from the committed letterform tradition",
         "weights": [700, 900],
         "italic": false,
         "axes": {
@@ -125,14 +127,14 @@ Respond with ONLY a JSON object. No explanation, no commentary, no text before o
             "max": 144
           }
         },
-        "character": "Swaggering display serif with sharp editorial contrast"
+        "character": "One sentence on the face's voice and why it serves this concept"
       },
       "body": {
-        "family": "Source Serif 4",
+        "family": "An exact Google Fonts family name that sets long text well",
         "weights": [400, 600],
         "italic": true,
         "axes": {},
-        "character": "Warm, highly readable editorial text with true emphasis"
+        "character": "One sentence on the body voice"
       },
       "accent": {
         "family": "",
