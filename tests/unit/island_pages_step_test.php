@@ -304,10 +304,10 @@ test('island-pages: each part is exactly one core/html block', function () {
         $part = ip_part_text($project, 'home', 'hero');
         assert_eq(1, substr_count($part, '<!-- wp:html -->'), 'exactly one opening html block delimiter');
         assert_eq(1, substr_count($part, '<!-- /wp:html -->'), 'exactly one closing html block delimiter');
-        assert_true(
-            !preg_match('/<!--\s*wp:(?!html\b)/', $part),
-            'an island contains no block markup other than the core/html wrapper',
-        );
+        $trim = trim($part);
+        assert_true(str_starts_with($trim, '<!-- wp:html -->'), 'the island\'s only top-level block is core/html');
+        assert_true(str_ends_with($trim, '<!-- /wp:html -->'), 'the island closes the core/html wrapper');
+        assert_contains('<!-- wp:heading', $part, 'phrasing headings become editable inner blocks');
     });
 });
 

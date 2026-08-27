@@ -106,6 +106,10 @@ final class Serializer implements TemplateTransformer
             // strategy() is an intentional fail-closed supported-domain guard.
             $this->registry->strategy($node->name);
 
+            if ($node->name === 'core/html' && $node->innerBlocks !== []) {
+                return $this->serializeHtmlBlock($node, $path);
+            }
+
             $inner = [];
             $repairs = [];
             foreach ($node->innerBlocks as $index => $child) {
@@ -141,6 +145,44 @@ final class Serializer implements TemplateTransformer
         return [
             'html' => $this->serializeRawBlock($node, validateChildren: false),
             'repairs' => [new Repair(Repair::PRESERVED_PREFIX . "{$node->name} ({$reason})", $path)],
+        ];
+    }
+
+    /**
+     * WordPress 7.1 lets core/html interleave static markup with inner blocks.
+     * Save reconstructs from innerContent so nested heading/paragraph comments
+     * are not dropped the way sourced `content` (bytes between children only) would.
+     *
+     * @return array{html:string,repairs:list<Repair>}
+     */
+    private function serializeHtmlBlock(BlockNode $node, string $path): array
+    {
+        $child = 0;
+        $parts = [];
+        $repairs = [];
+        foreach ($node->innerContent as $part) {
+            if ($part !== null) {
+                $parts[] = $part;
+                continue;
+            }
+            $inner = $node->innerBlocks[$child] ?? null;
+            if ($inner === null) {
+                throw new \RuntimeException("Missing html inner block for {$path}");
+            }
+            $result = $this->serializeBlock($inner, $path . '/' . $child);
+            $parts[] = $result['html'];
+            $repairs = array_merge($repairs, $result['repairs']);
+            $child++;
+        }
+        $innerHtml = implode('', $parts);
+        $block = $this->normalizer->normalize($node, $innerHtml, $path);
+        return [
+            'html' => $this->comments->delimit(
+                $node->name,
+                $this->comments->attributes($block),
+                trim($innerHtml),
+            ),
+            'repairs' => array_merge($repairs, $block->repairs),
         ];
     }
 

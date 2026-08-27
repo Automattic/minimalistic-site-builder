@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\DesignDocument;
+use Automattic\SiteBuild\IslandEditableLeaves;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Step;
@@ -387,6 +388,7 @@ final class IslandPagesStep implements Step
 
     private static function htmlBlock(string $inner): string
     {
+        $inner = IslandEditableLeaves::wrap($inner);
         return "<!-- wp:html -->\n{$inner}\n<!-- /wp:html -->\n";
     }
 
