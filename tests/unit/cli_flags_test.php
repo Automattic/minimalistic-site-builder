@@ -257,21 +257,15 @@ require ' . var_export($build, true) . ';
     }
 });
 
-test('--html-islands is refused as not yet implemented', function () {
-    $command = 'ANTHROPIC_API_KEY=' . escapeshellarg('test-key') . ' '
-        . php_child_command(repo_path('bin/build.php'), [
-            'demo',
-            '--provider=anthropic',
-            '--html-islands',
-            '--no-serve',
-        ]);
-    $output = [];
-    $exit = 0;
-    exec($command . ' 2>&1', $output, $exit);
-    $text = implode("\n", $output);
+test('--html-islands runs the build on the HTML-islands graph', function () {
+    $ids = build_cli_graph_ids(['--html-islands']);
+    $seen = implode(',', $ids);
 
-    assert_eq(1, $exit, $text);
-    assert_true(str_contains($text, 'html-islands graph is not yet implemented'), $text);
+    assert_true(in_array('island-pages', $ids, true), $seen);
+    assert_true(in_array('transform-chrome', $ids, true), $seen);
+    assert_true(in_array('island-above-fold', $ids, true), $seen);
+    assert_true(!in_array('transform-site', $ids, true), $seen);
+    assert_true(!in_array('section-rhythm', $ids, true), $seen);
 });
 
 test('a --from resume runs the graph meta.json recorded, not the ambient one', function () {

@@ -123,11 +123,11 @@ test('postImages validates against the graph it is handed, not the env selector'
     // rules that path deliberately skips, and only the HTML-first path has a
     // design stylesheet to consult.
     assert_true(
-        in_array('design/site.css', $validateReads(StepComposition::postImages($images, htmlFirst: true)), true),
+        in_array('design/site.css', $validateReads(StepComposition::postImages($images, graph: StepComposition::GRAPH_HTML_FIRST)), true),
         'an HTML-first project is re-validated with the HTML-first width rules',
     );
     assert_true(
-        !in_array('design/site.css', $validateReads(StepComposition::postImages($images, htmlFirst: false)), true),
+        !in_array('design/site.css', $validateReads(StepComposition::postImages($images, graph: StepComposition::GRAPH_BLOCKS)), true),
         'a blocks project is not',
     );
 });
@@ -457,19 +457,22 @@ test('an unknown requested graph is refused by the request name, not blamed on t
     assert_true(!str_contains($e->getMessage(), 'built on the blocks graph'), $e->getMessage());
 });
 
-test('SITE_BUILD_GRAPH=html-islands is recognized and refuses to build', function () {
+test('SITE_BUILD_GRAPH=html-islands is recognized and builds the islands graph', function () {
     $previous = getenv('SITE_BUILD_GRAPH');
     putenv('SITE_BUILD_GRAPH=html-islands');
     try {
         assert_eq('html-islands', StepComposition::selectedGraph());
         $d = composition_deps();
-        $e = assert_throws(static fn () => StepComposition::default(
+        $composition = StepComposition::default(
             llm: $d['llm'],
             renderer: $d['renderer'],
             blockFixer: $d['blockFixer'],
-        ));
-        assert_true($e instanceof RuntimeException, get_class($e));
-        assert_eq(\Automattic\SiteBuild\Graph::NOT_IMPLEMENTED, $e->getMessage());
+        );
+        $ids = array_map(static fn ($s) => $s->id(), $composition->steps());
+        assert_true(in_array('island-pages', $ids, true), implode(',', $ids));
+        assert_true(in_array('transform-chrome', $ids, true), implode(',', $ids));
+        assert_true(in_array('island-above-fold', $ids, true), implode(',', $ids));
+        assert_true(!in_array('transform-site', $ids, true), implode(',', $ids));
     } finally {
         $previous === false
             ? putenv('SITE_BUILD_GRAPH')

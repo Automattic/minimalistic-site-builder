@@ -36,7 +36,7 @@ require_once __DIR__ . '/../src/bootstrap.php';
  * recognize. An unknown record is narrated so a newer graph never silently
  * falls through to blocks and drops images.
  */
-function images_html_first_from_project(Project $project): bool
+function images_graph_from_project(Project $project): string
 {
     $meta = $project->exists('meta.json') ? $project->readJson('meta.json') : [];
     $recordedGraph = $meta['graph'] ?? null;
@@ -50,9 +50,17 @@ function images_html_first_from_project(Project $project): bool
         $graph = null;
     }
 
-    return ($graph ?? ($project->exists(TransformArtifacts::REPORT)
+    return $graph ?? ($project->exists(TransformArtifacts::REPORT)
         ? StepComposition::GRAPH_HTML_FIRST
-        : StepComposition::GRAPH_BLOCKS)) === StepComposition::GRAPH_HTML_FIRST;
+        : StepComposition::GRAPH_BLOCKS);
+}
+
+/** @deprecated keep the old name as a graph-aware bool for in-file callers */
+function images_html_first_from_project(Project $project): bool
+{
+    $graph = images_graph_from_project($project);
+    return $graph === StepComposition::GRAPH_HTML_FIRST
+        || $graph === StepComposition::GRAPH_HTML_ISLANDS;
 }
 
 $scriptFilename = $_SERVER['SCRIPT_FILENAME'] ?? null;
@@ -72,11 +80,13 @@ $project = $store->open($slug);
 
 echo "Generating images for '{$project->slug()}'\n";
 
-$htmlFirst = images_html_first_from_project($project);
+$graph = images_graph_from_project($project);
+$htmlFirst = $graph === StepComposition::GRAPH_HTML_FIRST
+    || $graph === StepComposition::GRAPH_HTML_ISLANDS;
 
 // Use the durable record from the pipeline; only collect if it's absent.
 if (!$project->exists('images.json')) {
-    // HTML-first is what tells the collector to read prose alts as image subjects.
+    // HTML-first / html-islands is what tells the collector to read prose alts as image subjects.
     (new CollectImagesStep(htmlFirst: $htmlFirst))->run($project);
 }
 $specs = $project->readJson('images.json');
@@ -97,7 +107,7 @@ try {
 // — has to run here too, or a project that got its images this way keeps the
 // placeholders the pipeline left behind.
 $start = microtime(true);
-foreach (StepComposition::postImages(make_generate_images_step($llm), htmlFirst: $htmlFirst) as $step) {
+foreach (StepComposition::postImages(make_generate_images_step($llm), graph: $graph) as $step) {
     $step->run($project);
 }
 printf("  done in %.1fs\n", microtime(true) - $start);

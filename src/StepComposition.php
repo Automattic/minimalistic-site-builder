@@ -20,6 +20,8 @@ use Automattic\SiteBuild\Steps\FixPagesStep;
 use Automattic\SiteBuild\Steps\FontsPhpStep;
 use Automattic\SiteBuild\Steps\HeaderHeroStep;
 use Automattic\SiteBuild\Steps\InnerPagesDesignStep;
+use Automattic\SiteBuild\Steps\IslandAboveFoldStep;
+use Automattic\SiteBuild\Steps\IslandPagesStep;
 use Automattic\SiteBuild\Steps\MotionSanityStep;
 use Automattic\SiteBuild\Steps\NormalizeLayoutStep;
 use Automattic\SiteBuild\Steps\PagePlanStep;
@@ -37,6 +39,7 @@ use Automattic\SiteBuild\Steps\SiteSpecStep;
 use Automattic\SiteBuild\Steps\SpliceHomeDesignStep;
 use Automattic\SiteBuild\Steps\ThemeJsonStep;
 use Automattic\SiteBuild\Steps\ThemeScreenshotStep;
+use Automattic\SiteBuild\Steps\TransformChromeStep;
 use Automattic\SiteBuild\Steps\TransformSiteStep;
 use Automattic\SiteBuild\Steps\ValidateThemeStep;
 
@@ -86,7 +89,7 @@ final class StepComposition
      * The package default / CLI composition: the blocks graph, where the model
      * authors block markup directly. The CLI's --html-first flag, or
      * SITE_BUILD_GRAPH=html-first, selects the HTML-first graph instead.
-     * SITE_BUILD_GRAPH=html-islands is recognized but not yet implemented.
+     * SITE_BUILD_GRAPH=html-islands selects the HTML-islands graph.
      *
      * @param array<string, string> $models       step id => model id overrides
      * @param array<string, ?float> $temperatures step id => temperature overrides
@@ -103,7 +106,7 @@ final class StepComposition
         return match ($graph) {
             self::GRAPH_HTML_FIRST => self::htmlFirst($llm, $renderer, $models, $temperatures, $blockFixer, $fontFetcher),
             self::GRAPH_BLOCKS => self::blocks($llm, $renderer, $models, $temperatures, $blockFixer, $fontFetcher),
-            self::GRAPH_HTML_ISLANDS => throw new \RuntimeException(Graph::NOT_IMPLEMENTED),
+            self::GRAPH_HTML_ISLANDS => self::htmlIslands($llm, $renderer, $models, $temperatures, $blockFixer, $fontFetcher),
             default => throw new \RuntimeException($graph . ' graph is not yet implemented'),
         };
     }
@@ -338,6 +341,99 @@ final class StepComposition
     }
 
     /**
+     * The HTML-islands graph: the model authors an HTML+CSS design, chrome
+     * becomes real block parts, and each design section ships as one core/html
+     * island. Same prefix as htmlFirst(); transform-site splits into
+     * transform-chrome + island-pages + island-above-fold. Section rhythm,
+     * section layout, fix-pages, and extract-patterns are dropped.
+     *
+     * @param array<string, string> $models       step id => model id overrides
+     * @param array<string, ?float> $temperatures step id => temperature overrides
+     */
+    public static function htmlIslands(
+        Llm $llm,
+        PromptRenderer $renderer,
+        array $models = [],
+        array $temperatures = [],
+        ?BlockFixer $blockFixer = null,
+        ?FontFetcher $fontFetcher = null,
+    ): self {
+        $blockFixer ??= BlockFixers::default();
+        $models = array_merge(StepDefaults::models(), $models);
+        $temps = array_merge(StepDefaults::temperatures(), $temperatures);
+
+        return new self([
+            new ScaffoldThemeStep(),
+            new ScaffoldPluginStep(),
+            new RefinePromptStep($llm, $renderer, $models['refine-prompt'], $temps['refine-prompt']),
+            new SiteSpecStep($llm, $renderer, $models['site-spec'], $temps['site-spec']),
+            new ApplyIdentityStep(),
+            new DesignDirectionStep(
+                $llm,
+                $renderer,
+                $models['design-direction'],
+                $temps['design-direction'],
+                $models['design-direction-seeds'],
+            ),
+            new DesignPreviewStep(
+                $llm,
+                $renderer,
+                $models['design-preview'] ?? null,
+                $temps['design-preview'] ?? null,
+            ),
+            new ThemeJsonStep(
+                llm: $llm,
+                renderer: $renderer,
+                model: $models['theme-json'],
+                temperature: $temps['theme-json'],
+                htmlFirst: true,
+            ),
+            new InnerPagesDesignStep(
+                $llm,
+                $renderer,
+                $models['inner-pages-design'] ?? null,
+                $temps['inner-pages-design'] ?? null,
+                new PagePlanStep(
+                    $llm,
+                    $renderer,
+                    $models['page-plan'],
+                    $temps['page-plan'],
+                ),
+            ),
+            new SpliceHomeDesignStep(),
+            new AssignImageSourcesStep(),
+            new TransformChromeStep(
+                llm: $llm,
+                renderer: $renderer,
+                model: $models['transform-site'] ?? null,
+                temperature: $temps['transform-site'] ?? null,
+            ),
+            new IslandPagesStep(),
+            new IslandAboveFoldStep(),
+            new ResolveNavLinksStep(),
+            new CollectImagesStep(htmlFirst: true),
+            new NormalizeLayoutStep(htmlFirst: true),
+            new HeaderHeroStep(htmlFirst: true),
+            new ContrastFixStep(htmlFirst: true),
+            new MotionSanityStep(htmlFirst: true),
+            new FixBlocksStep($blockFixer, htmlFirst: true),
+            new AssemblePagesStep(),
+            new PageStylesStep(
+                llm: $llm,
+                renderer: $renderer,
+                model: $models['page-styles'],
+                temperature: $temps['page-styles'],
+                htmlFirst: true,
+            ),
+            new CustomMotionStep($llm, $renderer, $models['custom-motion'], $temps['custom-motion']),
+            new FontsPhpStep(htmlFirst: true),
+            new FinalizeThemeStep(),
+            new ThemeScreenshotStep(),
+            new ValidateThemeStep(htmlFirst: true),
+        ]);
+    }
+
+    /**
      * The blocks graph: sections are generated as block markup directly, with
      * no HTML design document in between. This is what default() returns.
      *
@@ -506,7 +602,7 @@ final class StepComposition
      * The caller builds the image step, because choosing an image client means
      * reading the environment and this package leaves that to its hosts.
      *
-     * @param ?bool $htmlFirst which graph built the project being finished.
+     * @param ?string $graph which graph built the project being finished.
      *        Null asks the env selection, which is only the truth for a host
      *        that just ran that graph in this process: an entry point resuming
      *        a project it did not build reads the record and passes it, or the
@@ -516,9 +612,11 @@ final class StepComposition
     public static function postImages(
         Step $generateImages,
         ?BlockFixer $blockFixer = null,
-        ?bool $htmlFirst = null,
+        ?string $graph = null,
     ): array {
-        return [
+        $graph ??= self::selectedGraph();
+        $designOwnsLayout = $graph === self::GRAPH_HTML_FIRST || $graph === self::GRAPH_HTML_ISLANDS;
+        $steps = [
             $generateImages,
             // The pipeline drew a palette poster because no photo existed.
             // Now one does, so the card becomes the site's own hero. Before
@@ -529,13 +627,16 @@ final class StepComposition
             // Cover text was picked against an image that did not exist yet;
             // re-check it against the real, dimmed pixels.
             new CoverContrastStep($blockFixer ?? BlockFixers::default()),
+        ];
+        if ($graph !== self::GRAPH_HTML_ISLANDS) {
             // Cover contrast can rewrite assembled page markup after the graph.
             // Refresh pattern winners from those final bytes, then re-validate
             // the delivered theme (the in-graph ValidateThemeStep ran before
             // this phase rewrote covers and re-extracted patterns).
-            new ExtractPatternsStep(),
-            new ValidateThemeStep(htmlFirst: $htmlFirst ?? (self::selectedGraph() === self::GRAPH_HTML_FIRST)),
-        ];
+            $steps[] = new ExtractPatternsStep();
+        }
+        $steps[] = new ValidateThemeStep(htmlFirst: $designOwnsLayout);
+        return $steps;
     }
 
     /** @return Step[] */

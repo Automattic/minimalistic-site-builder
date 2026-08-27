@@ -28,7 +28,9 @@ Default blocks graph (`StepComposition::default()` → `StepComposition::blocks(
 
 Image generation is slow and networked, so it is in neither graph. The steps that depend on the real pixels are named once, in `StepComposition::postImages()`, and every entry point runs that list after the graph:
 
-`generate-images -> theme-screenshot -> cover-contrast -> extract-patterns -> validate-theme`
+`generate-images -> theme-screenshot -> cover-contrast -> extract-patterns -> validate-theme` (blocks and html-first). The html-islands post-image list drops `extract-patterns`:
+
+`generate-images -> theme-screenshot -> cover-contrast -> validate-theme`
 
 A host that generates images must run that phase too. Mirroring only the graph ships a theme whose cover text was checked against images that did not exist yet, and whose preview card is the palette poster `theme-screenshot` drew in-pipeline rather than the site's own hero.
 
@@ -38,7 +40,11 @@ Pass `--html-first` (or set `SITE_BUILD_GRAPH=html-first`) for the HTML-first gr
 
 On that path `theme-json` reads CSS-derived design tokens. `assign-image-sources` gives every design `<img>` the theme asset path the rest of the image pipeline generates into. `contrast-fix` and `motion-sanity` stay addressable but skip only in explicit HTML-first composition mode. `normalize-layout`, `fix-blocks`, and `validate-theme` skip the width rules that assume the theme owns page width — here the carried design CSS does. `page-styles` scrubs and merges generated CSS, then runs `CssContrastCheck` and applies safe tail-only adjustments against delivered markup. Stale `design/site.css` bytes never select pipeline behavior.
 
-`createProject()` records the chosen graph in `meta.json` as `graph: html-first|blocks|html-islands`, and `--from` reads it back so a resume runs the graph that built the project. A flag contradicting the record is refused, not honored — `section-rhythm`, `collect-images` and friends exist in both graphs, so a crossed resume would otherwise read artifacts the other path never wrote and still look like it worked. An unknown or retired recorded name is an error naming that value, not a fall-through. A project with no recorded graph (built before this landed) falls back to the flag/env choice. A host driving a fixed `StepComposition` must pass `graph:` to `createProject()`, since the default reads the env key that host never consults. `--html-islands` / `SITE_BUILD_GRAPH=html-islands` is a known name with no composition yet and fails with "html-islands graph is not yet implemented".
+Pass `--html-islands` (or set `SITE_BUILD_GRAPH=html-islands`) for the HTML-islands graph (`StepComposition::htmlIslands()`), where the model authors an HTML+CSS design, chrome becomes real block parts, and each design section ships as one `core/html` island:
+
+`scaffold-theme -> scaffold-plugin -> refine-prompt -> site-spec -> apply-identity -> design-direction -> design-preview -> theme-json -> inner-pages-design -> splice-home-design -> assign-image-sources -> transform-chrome -> island-pages -> island-above-fold -> resolve-nav-links -> collect-images -> normalize-layout -> header-hero -> contrast-fix -> motion-sanity -> fix-blocks -> assemble-pages -> page-styles -> custom-motion -> fonts-php -> finalize-theme -> theme-screenshot -> validate-theme`
+
+`createProject()` records the chosen graph in `meta.json` as `graph: html-first|blocks|html-islands`, and `--from` reads it back so a resume runs the graph that built the project. A flag contradicting the record is refused, not honored — `section-rhythm`, `collect-images` and friends exist in both graphs, so a crossed resume would otherwise read artifacts the other path never wrote and still look like it worked. An unknown or retired recorded name is an error naming that value, not a fall-through. A project with no recorded graph (built before this landed) falls back to the flag/env choice. A host driving a fixed `StepComposition` must pass `graph:` to `createProject()`, since the default reads the env key that host never consults.
 
 `bin/build.php` and `bin/build-demos.php` take `--html-first`, `--blocks-first`, and `--html-islands`. Any one sets `SITE_BUILD_GRAPH` for the process, so an explicit flag always beats a shell export or an `.env` line; passing none leaves that env var in charge. The flags are mutually exclusive. `StepComposition::selectedGraph()` remains the single reader of the key, so nothing has to be taught the choice twice. A leftover `SITE_BUILD_HTML_FIRST` with `SITE_BUILD_GRAPH` unset is an error naming both keys, not a silent fallback to blocks.
 
