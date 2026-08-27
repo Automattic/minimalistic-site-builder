@@ -27,7 +27,7 @@ Answer these for the look you actually wrote. Use only the words listed. If a la
 
 Pick three different combinations of those answers first. Then write the sentence that fits each one.
 
-Every family is equally available. Warm cream is the answer this brief will pull you toward hardest and it is right only when the concept genuinely asks for it; a blue, violet, or green ground is not a riskier choice, just a less reflexive one. If all three seeds come back `warm`, you have written one world three times.
+Every family is equally available. Warm cream is the answer this brief will pull you toward hardest and it is right only when the concept genuinely asks for it; a blue, violet, or green ground is not a riskier choice, just a less reflexive one. If all three seeds come back `warm`, you have written one world three times. On an open brief the three seeds must not share one `tint`: name at least two families across the round, and prefer three. Only a brief that fixes the palette earns a repeated tint — honor it in all three seeds and let them match. The build records a round that leans on one family either way.
 {{locked_labels}}
 
 ## Differentiation — gauge the brief first
