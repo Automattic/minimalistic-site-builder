@@ -310,6 +310,9 @@ test('footer prompt renders only its selected high-impact recipe', function () {
         'editorial-colophon' => 'final plate of a book or',
         'split-ledger' => 'Build a strong 65/35 or 70/30 split',
         'contact-sheet' => 'A film contact sheet closes the page',
+        'mosaic-tiles' => 'A hard-edged mosaic of flat color tiles',
+        'color-field' => 'One massive inset panel of a single strong palette color',
+        'repeat-rail' => 'The identity as printed tape',
     ];
     assert_contains($recipeMarkers[$archetype], $footer);
     foreach ($recipeMarkers as $otherArchetype => $marker) {

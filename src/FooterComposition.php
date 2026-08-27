@@ -18,6 +18,9 @@ final class FooterComposition
         'editorial-colophon',
         'split-ledger',
         'contact-sheet',
+        'mosaic-tiles',
+        'color-field',
+        'repeat-rail',
     ];
 
     /** @var array<string,string> */
@@ -29,6 +32,9 @@ final class FooterComposition
         'editorial-colophon' => 'footer-compositions/editorial-colophon.md',
         'split-ledger' => 'footer-compositions/split-ledger.md',
         'contact-sheet' => 'footer-compositions/contact-sheet.md',
+        'mosaic-tiles' => 'footer-compositions/mosaic-tiles.md',
+        'color-field' => 'footer-compositions/color-field.md',
+        'repeat-rail' => 'footer-compositions/repeat-rail.md',
     ];
 
     /** @var array<string,string> */
@@ -40,10 +46,13 @@ final class FooterComposition
         'editorial-colophon' => 'base',
         'split-ledger' => 'contrast',
         'contact-sheet' => 'contrast',
+        'mosaic-tiles' => 'base',
+        'color-field' => 'base',
+        'repeat-rail' => 'base',
     ];
 
     /** @var list<string> */
-    private const IMAGE_ARCHETYPES = ['photographic-split', 'image-plinth', 'contact-sheet'];
+    private const IMAGE_ARCHETYPES = ['photographic-split', 'image-plinth', 'mosaic-tiles', 'contact-sheet'];
 
     /**
      * The surfaces a footer root can actually be painted. Only base and

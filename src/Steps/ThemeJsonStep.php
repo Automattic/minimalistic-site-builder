@@ -16,6 +16,7 @@ use Automattic\SiteBuild\GeneratedJsonFallbackStep;
 use Automattic\SiteBuild\ImageTreatment;
 use Automattic\SiteBuild\BandColor;
 use Automattic\SiteBuild\ContrastMath;
+use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\CssChecks;
 use Automattic\SiteBuild\CtaStyle;
 use Automattic\SiteBuild\PaletteFloor;
@@ -66,7 +67,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      * tell a model hex that was moved to clear one from ordinary drift.
      */
     private const CONTRAST_FLOORS = [
-        'contrast' => 7.0,
+        'contrast' => ContrastMath::NORMAL_TEXT,
         'primary' => ContrastMath::NORMAL_TEXT,
         'secondary' => ContrastMath::NORMAL_TEXT,
         'accent' => ContrastMath::NORMAL_TEXT,
@@ -563,8 +564,13 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $shapeWarnings,
         );
 
-        // Floors run on the palette about to be written, after every other repair.
-        [$theme, $floorWarnings] = self::applyPaletteFloor($theme);
+        // Floors run on the palette about to be written, after every other
+        // repair. A committed surface texture raises the body-ink floor to
+        // 7:1 so the overlay's sheet leaves 4.5:1 (Surface::contrastFloor).
+        [$theme, $floorWarnings] = self::applyPaletteFloor(
+            $theme,
+            Surface::contrastFloor(DesignDirectionStep::surfaceFor($project)),
+        );
         $warnings = array_merge($warnings, $floorWarnings);
 
         // The bounded render-time treatment owns the duotone catalog after
@@ -1532,7 +1538,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      * @param array<mixed> $theme
      * @return array{0:array<mixed>,1:list<string>} theme, warnings
      */
-    public static function applyPaletteFloor(array $theme): array
+    public static function applyPaletteFloor(array $theme, ?float $contrastOnBase = null): array
     {
         $palette = $theme['settings']['color']['palette'] ?? null;
         if (!is_array($palette)) {
@@ -1554,7 +1560,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $map[$slug] = trim($color);
         }
         $warnings = [];
-        $fixed = PaletteFloor::repair($map, $warnings);
+        $fixed = PaletteFloor::repair($map, $warnings, $contrastOnBase);
         foreach ($theme['settings']['color']['palette'] as $i => $entry) {
             if (!is_array($entry)) {
                 continue;
