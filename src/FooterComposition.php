@@ -18,6 +18,12 @@ final class FooterComposition
         'editorial-colophon',
         'split-ledger',
         'diptych',
+        'sunken-wordmark',
+        'status-readout',
+        'contact-sheet',
+        'mosaic-tiles',
+        'color-field',
+        'repeat-rail',
     ];
 
     /** @var array<string,string> */
@@ -29,6 +35,12 @@ final class FooterComposition
         'editorial-colophon' => 'footer-compositions/editorial-colophon.md',
         'split-ledger' => 'footer-compositions/split-ledger.md',
         'diptych' => 'footer-compositions/diptych.md',
+        'sunken-wordmark' => 'footer-compositions/sunken-wordmark.md',
+        'status-readout' => 'footer-compositions/status-readout.md',
+        'contact-sheet' => 'footer-compositions/contact-sheet.md',
+        'mosaic-tiles' => 'footer-compositions/mosaic-tiles.md',
+        'color-field' => 'footer-compositions/color-field.md',
+        'repeat-rail' => 'footer-compositions/repeat-rail.md',
     ];
 
     /** @var array<string,string> */
@@ -40,10 +52,16 @@ final class FooterComposition
         'editorial-colophon' => 'base',
         'split-ledger' => 'contrast',
         'diptych' => 'base',
+        'sunken-wordmark' => 'contrast',
+        'status-readout' => 'contrast',
+        'contact-sheet' => 'contrast',
+        'mosaic-tiles' => 'base',
+        'color-field' => 'base',
+        'repeat-rail' => 'base',
     ];
 
     /** @var list<string> */
-    private const IMAGE_ARCHETYPES = ['photographic-split', 'image-plinth'];
+    private const IMAGE_ARCHETYPES = ['photographic-split', 'image-plinth', 'mosaic-tiles', 'contact-sheet'];
 
     /**
      * The surfaces a footer root can actually be painted. Only base and

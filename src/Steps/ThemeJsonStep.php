@@ -16,6 +16,7 @@ use Automattic\SiteBuild\GeneratedJsonFallbackStep;
 use Automattic\SiteBuild\ImageTreatment;
 use Automattic\SiteBuild\BandColor;
 use Automattic\SiteBuild\ContrastMath;
+use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\CssChecks;
 use Automattic\SiteBuild\CtaStyle;
 use Automattic\SiteBuild\PaletteFloor;
@@ -66,13 +67,21 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      * tell a model hex that was moved to clear one from ordinary drift.
      */
     private const CONTRAST_FLOORS = [
-        'contrast' => 7.0,
+        'contrast' => ContrastMath::NORMAL_TEXT,
         'primary' => ContrastMath::NORMAL_TEXT,
         'secondary' => ContrastMath::NORMAL_TEXT,
         'accent' => ContrastMath::NORMAL_TEXT,
     ];
     private const REQUIRED_FONTS = ['heading', 'body'];
     private const OPTIONAL_FONTS = ['accent'];
+    /**
+     * Code-owned font presets every theme ships. The status-readout footer
+     * archetype sets its rows in `mono`, and a pure system stack needs no
+     * bundled font file, so the preset is deterministic and free.
+     */
+    private const PIPELINE_FONTS = [
+        'mono' => 'ui-monospace, Menlo, Consolas, monospace',
+    ];
 
     /** @var array{contentSize:string,wideSize:string} */
     private const FALLBACK_LAYOUT_WIDTHS = [
@@ -563,8 +572,13 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $shapeWarnings,
         );
 
-        // Floors run on the palette about to be written, after every other repair.
-        [$theme, $floorWarnings] = self::applyPaletteFloor($theme);
+        // Floors run on the palette about to be written, after every other
+        // repair. A committed surface texture raises the body-ink floor to
+        // 7:1 so the overlay's sheet leaves 4.5:1 (Surface::contrastFloor).
+        [$theme, $floorWarnings] = self::applyPaletteFloor(
+            $theme,
+            Surface::contrastFloor(DesignDirectionStep::surfaceFor($project)),
+        );
         $warnings = array_merge($warnings, $floorWarnings);
 
         // The bounded render-time treatment owns the duotone catalog after
@@ -1532,7 +1546,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      * @param array<mixed> $theme
      * @return array{0:array<mixed>,1:list<string>} theme, warnings
      */
-    public static function applyPaletteFloor(array $theme): array
+    public static function applyPaletteFloor(array $theme, ?float $contrastOnBase = null): array
     {
         $palette = $theme['settings']['color']['palette'] ?? null;
         if (!is_array($palette)) {
@@ -1554,7 +1568,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $map[$slug] = trim($color);
         }
         $warnings = [];
-        $fixed = PaletteFloor::repair($map, $warnings);
+        $fixed = PaletteFloor::repair($map, $warnings, $contrastOnBase);
         foreach ($theme['settings']['color']['palette'] as $i => $entry) {
             if (!is_array($entry)) {
                 continue;
@@ -1826,6 +1840,13 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $warnings[] = isset($preferred[$needed])
                 ? "theme.json fontFamilies missing slug '{$needed}'; filled from designDirection.json with {$stack}"
                 : "theme.json fontFamilies missing slug '{$needed}'; filled with the system stack";
+        }
+        // Code-owned presets fill silently: nothing the model authored was
+        // lost, so a warning row here would be noise on every build.
+        foreach (self::PIPELINE_FONTS as $slug => $stack) {
+            if (!in_array($slug, array_column($families, 'slug'), true)) {
+                $families[] = ['slug' => $slug, 'name' => ucfirst($slug), 'fontFamily' => $stack];
+            }
         }
 
         $theme['settings']['typography']['fontFamilies'] = $families;
