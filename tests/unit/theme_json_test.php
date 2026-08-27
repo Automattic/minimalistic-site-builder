@@ -3651,6 +3651,9 @@ test('applyPaletteFloor leaves a clean C1 palette unchanged', function () {
 });
 
 test('applyPaletteFloor records unrepaired when a contrast floor cannot be met', function () {
+    // 4.5:1 is reachable from any base (black or white always measures at
+    // least ~4.58:1), so the unreachable branch now exists only under the
+    // raised surface-texture floor a committed surface passes in (BIGR-923).
     $theme = [
         'settings' => ['color' => ['palette' => [
             ['slug' => 'base', 'color' => '#808080', 'name' => 'Base'],
@@ -3661,7 +3664,7 @@ test('applyPaletteFloor records unrepaired when a contrast floor cannot be met',
         ]]],
     ];
 
-    [$out, $warnings] = ThemeJsonStep::applyPaletteFloor($theme);
+    [$out, $warnings] = ThemeJsonStep::applyPaletteFloor($theme, 7.0);
     $bySlug = array_column($out['settings']['color']['palette'], 'color', 'slug');
     assert_eq('#AAAAAA', $bySlug['contrast'], 'authored contrast kept');
     $joined = implode(' ', $warnings);
