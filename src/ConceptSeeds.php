@@ -317,6 +317,29 @@ final class ConceptSeeds
         return count($grounds) === 1 ? (string) array_key_first($grounds) : null;
     }
 
+    /**
+     * The one tint a whole round shares, or null when it spans families,
+     * when any seed left tint unstated, or when fewer than two seeds
+     * arrived. Same guards as sharedGround: a single named tint is not a
+     * round-wide claim (BIGR-922).
+     *
+     * @param list<array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string}> $seeds
+     */
+    public static function sharedTint(array $seeds): ?string
+    {
+        if (count($seeds) < 2) {
+            return null;
+        }
+        $tints = [];
+        foreach ($seeds as $seed) {
+            if ($seed['tint'] === null) {
+                return null;
+            }
+            $tints[$seed['tint']] = true;
+        }
+        return count($tints) === 1 ? (string) array_key_first($tints) : null;
+    }
+
     /** The seed's title, the part before its committing sentence. */
     private static function shortTitle(string $text): string
     {

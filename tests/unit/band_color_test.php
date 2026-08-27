@@ -19,6 +19,37 @@ test('BandColor derives a same-family surface ten lightness points from light an
     }
 });
 
+test('BandColor keeps a neutral base\'s residual tint instead of flat grey', function () {
+    // BIGR-919: tbilisi's base #16151A (a violet-leaning near-black inside
+    // the neutral threshold) produced the pure grey band #313131, and
+    // tbilisi2's #E8E7E3 produced #CCCCCC. The derived surface must keep the
+    // base's hue direction while still classifying neutral.
+    foreach (['#16151A', '#E8E7E3'] as $base) {
+        $band = (string) BandColor::fromBase($base);
+        $rgb = \Automattic\SiteBuild\ContrastMath::hexToRgb($band);
+        assert_true($rgb !== null && max($rgb) - min($rgb) > 0, "{$base} band {$band} kept some tint");
+        assert_eq('neutral', GroundTint::classify($band), "{$base} band {$band} still reads neutral");
+        assert_true(BandColor::valid($base, $band));
+    }
+
+    // A mathematical grey has no tint to keep.
+    $grey = (string) BandColor::fromBase('#707070');
+    $rgb = \Automattic\SiteBuild\ContrastMath::hexToRgb($grey);
+    assert_true($rgb !== null && max($rgb) - min($rgb) === 0, 'a true grey base derives a true grey band');
+});
+
+test('BandColor accepts two near-grey surfaces whatever the classifier calls each side', function () {
+    // #16151A classifies neutral; #2B2A33 sits just over the threshold and
+    // classifies cool. Both are whispers of the same grey, and the pair is
+    // inside the lightness window on the same dark side.
+    assert_true(BandColor::valid('#16151A', '#2B2A33'));
+    // The tolerance does not open the lightness window: tbilisi's authored
+    // #22212A is 5.5 points from base, under the 6-point minimum.
+    assert_true(!BandColor::valid('#16151A', '#22212A'));
+    // Nor does it accept a genuinely tinted band over a neutral base.
+    assert_true(!BandColor::valid('#16151A', '#3A2B55'));
+});
+
 test('BandColor rejects same-color, wrong-family, over-wide, and key-crossing surfaces', function () {
     assert_true(!BandColor::valid('#F4EBDA', '#F4EBDA'), 'a zero-delta band is inert');
     assert_true(!BandColor::valid('#F4EBDA', '#D8E9F4'), 'a cool band drifts from a warm base');
