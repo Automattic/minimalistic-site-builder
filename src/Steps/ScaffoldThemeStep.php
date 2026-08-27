@@ -509,6 +509,17 @@ final class ScaffoldThemeStep implements Step
             aspect-ratio: 3 / 4;
             object-fit: cover;
         }
+        /* triptych (BIGR-915) is three frames read as one series. The shared
+           crop is what makes them a series, so the frames hold one ratio here
+           rather than inheriting three different intrinsic sizes, and the row
+           keeps its columns at every width down to the stacking breakpoint. */
+        .hero-composition--triptych .hero-composition__media img,
+        .hero-composition--triptych .wp-block-gallery img {
+            width: 100%;
+            aspect-ratio: 4 / 5;
+            object-fit: cover;
+            display: block;
+        }
         .hero-composition--layered-poster {
             overflow: hidden;
         }

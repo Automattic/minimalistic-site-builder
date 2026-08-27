@@ -16,6 +16,7 @@ final class HeroComposition
     public const RECIPES = [
         'cinematic-safe-zone',
         'editorial-split',
+        'triptych',
         'framed-portrait',
         'focal-subject-stage',
         'layered-poster',
@@ -160,6 +161,38 @@ final class HeroComposition
                 'focal_region' => 'none', 'text_safe_region' => 'full',
                 'height_profile' => 'immersive', 'cta_treatment' => 'prominent',
                 'mobile_transformation' => 'stack-media-first',
+            ],
+        ],
+        // BIGR-915: the only hero that opens on a body of work rather than one
+        // picture. A portfolio, a gallery or a maker's site has a set, and
+        // every other image-bearing recipe in the catalog shows exactly one
+        // frame of it. Three images at one shared crop read as a series; three
+        // images at three crops read as a collage, which is a different (and
+        // noisier) idea this recipe deliberately refuses.
+        'triptych' => [
+            'canvases' => ['full-bleed', 'framed'],
+            'media_modes' => ['foreground-image'],
+            'min_images' => 3,
+            'max_images' => 3,
+            'backgrounds' => ['base', 'tinted', 'contrast'],
+            'default_background' => 'base',
+            'fallback_background' => 'base',
+            'header_modes' => ['stacked'],
+            'copy_capacity' => 'compact',
+            'mobile_transformations' => ['stack-copy-first'],
+            'layout_archetype' => 'mixed-width-editorial',
+            'fallback_family' => 'foreground-split',
+            'root_hook' => '.hero-composition--triptych',
+            'prompt' => 'hero-compositions/triptych.md',
+            'headline_registers' => ['restrained', 'display'],
+            'height_profiles' => ['compact', 'standard'],
+            'defaults' => [
+                'media_mode' => 'foreground-image', 'headline_register' => 'display',
+                'text_anchor' => 'top-start',
+                'headline_line_target' => ['desktop' => [1, 2], 'mobile' => [2, 4]],
+                'focal_region' => 'none', 'text_safe_region' => 'full',
+                'height_profile' => 'standard', 'cta_treatment' => 'quiet',
+                'mobile_transformation' => 'stack-copy-first',
             ],
         ],
         'layered-poster' => [
@@ -365,9 +398,17 @@ final class HeroComposition
         }
         if (array_key_exists('max_hero_images', $constraints)) {
             $max = $constraints['max_hero_images'];
-            if (!is_int($max) || $max < 1 || $max > 2) {
+            // The ceiling has to reach the widest cataloged slot, or the
+            // recipe it caps becomes unrequestable (BIGR-915 raised it to 3
+            // for triptych). Derived, so a future wider recipe cannot leave a
+            // stale literal behind.
+            $catalogMax = max(array_map(
+                static fn (array $meta): int => (int) $meta['max_images'],
+                array_values(self::CATALOG),
+            ));
+            if (!is_int($max) || $max < 1 || $max > $catalogMax) {
                 throw new \InvalidArgumentException(
-                    'design_constraints.max_hero_images must be an integer from 1 through 2'
+                    "design_constraints.max_hero_images must be an integer from 1 through {$catalogMax}"
                 );
             }
             $out['max_hero_images'] = $max;

@@ -5,7 +5,7 @@ use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
 
 test('hero catalog entries own complete metadata, defaults, prompts, and unique hooks', function () {
-    assert_eq(6, count(HeroComposition::RECIPES));
+    assert_eq(7, count(HeroComposition::RECIPES));
     $hooks = [];
     foreach (HeroComposition::RECIPES as $recipe) {
         $meta = HeroComposition::metadata($recipe);
@@ -72,7 +72,9 @@ test('hero selection is stable inside the compatible pool', function () {
 
 test('invalid hero constraints and empty compatible pools fail preflight', function () {
     assert_throws(fn () => HeroComposition::validateConstraints(['hero_canvas' => 'poster']));
-    assert_throws(fn () => HeroComposition::validateConstraints(['max_hero_images' => 3]));
+    // Three is a real slot since BIGR-915; four is still past the widest
+    // cataloged recipe.
+    assert_throws(fn () => HeroComposition::validateConstraints(['max_hero_images' => 4]));
     assert_throws(fn () => HeroComposition::validateConstraints(['allowed_hero_media_modes' => []]));
     assert_throws(fn () => HeroComposition::validateConstraints(['typo' => 'framed']));
 
@@ -292,4 +294,69 @@ test('hero copy budget and headline punctuation overruns warn without hiding val
     $cleanHeadline = str_replace('One subject — staged', 'One subject staged', $inBudget);
     $warnings = HeroComposition::markupWarnings($cleanHeadline, 'focal-subject-stage', 'page-home--hero');
     assert_eq([], array_values(array_filter($warnings, fn (string $w): bool => str_contains($w, 'hero headline punctuation'))));
+});
+
+test('triptych is the set recipe and widens the caller image ceiling (BIGR-915)', function () {
+    $meta = HeroComposition::metadata('triptych');
+    assert_eq(['foreground-image'], $meta['media_modes']);
+    // A set, not a picture: the count is fixed at three on both sides.
+    assert_eq(3, $meta['min_images']);
+    assert_eq(3, $meta['max_images']);
+    assert_eq('mixed-width-editorial', $meta['layout_archetype']);
+    assert_eq(['stacked'], $meta['header_modes']);
+
+    // The caller ceiling now derives from the catalog, so the recipe it caps
+    // stays requestable and a fourth image is still refused.
+    assert_eq(['max_hero_images' => 3], HeroComposition::validateConstraints(['max_hero_images' => 3]));
+    assert_throws(fn () => HeroComposition::validateConstraints(['max_hero_images' => 4]));
+    assert_throws(fn () => HeroComposition::validateConstraints(['max_hero_images' => 0]));
+
+    // A caller that can host one image must not be offered the set.
+    assert_true(!in_array('triptych', HeroComposition::compatible(['max_hero_images' => 1]), true));
+    assert_true(in_array('triptych', HeroComposition::compatible(['max_hero_images' => 3]), true));
+});
+
+test('the media-count check holds the triptych to exactly three frames (BIGR-915)', function () {
+    $copy = '<!-- wp:group {"className":"hero-composition__copy"} --><div class="wp-block-group hero-composition__copy">'
+        . '<!-- wp:heading {"level":1} --><h1>Three from the bench</h1><!-- /wp:heading -->'
+        . '</div><!-- /wp:group -->';
+    $frame = static fn (int $index): string =>
+        '<!-- wp:group {"className":"hero-composition__media"} --><div class="wp-block-group hero-composition__media">'
+        . '<img src="theme:./assets/work-' . $index . '.jpg" alt="AI_IMAGE: Work ' . $index
+        . ' | hero frame | photorealistic | portrait" /></div><!-- /wp:group -->';
+    $row = static fn (string $frames): string =>
+        '<!-- wp:group --><div class="wp-block-group">' . $copy
+        . '<!-- wp:columns {"align":"wide"} --><div class="wp-block-columns alignwide">' . $frames
+        . '</div><!-- /wp:columns --></div><!-- /wp:group -->';
+
+    assert_eq([], HeroComposition::markupWarnings(
+        $row($frame(1) . $frame(2) . $frame(3)),
+        'triptych',
+        'page-home--hero',
+    ));
+
+    // Two frames is the defect this recipe exists to prevent: one more picture
+    // beside the copy, which the catalog already has. It reports twice on
+    // purpose — the count is short AND the third region hook is missing, and a
+    // repair pass needs both rows.
+    $warnings = HeroComposition::markupWarnings($row($frame(1) . $frame(2)), 'triptych', 'page-home--hero');
+    $counts = array_values(array_filter(
+        $warnings,
+        static fn (string $row): bool => str_contains($row, 'recipe media count'),
+    ));
+    assert_eq(1, count($counts));
+    assert_contains('"min_images":3', $counts[0]);
+    assert_true((bool) array_filter(
+        $warnings,
+        static fn (string $row): bool => str_contains($row, 'recipe foreground media regions'),
+    ));
+
+    $warnings = HeroComposition::markupWarnings(
+        $row($frame(1) . $frame(2) . $frame(3) . $frame(4)),
+        'triptych',
+        'page-home--hero',
+    );
+    assert_eq(1, count($warnings));
+    assert_contains('recipe media count', $warnings[0]);
+    assert_contains('"max_images":3', $warnings[0]);
 });
