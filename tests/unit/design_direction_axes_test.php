@@ -60,6 +60,17 @@ test('the expansion prompt names the five reflex fonts without banning them', fu
     );
 });
 
+test('the seeds prompt demands topic-defensible letterform traditions', function () {
+    // BIGR-921: the tbilisi demo (a traditional Georgian tavern) received
+    // type_register "slab" and shipped a techy web face, because the prompt
+    // asked the three seeds to differ without asking each tradition to fit
+    // the subject. Spread stays; random tradition assignment goes.
+    $prompt = (string) file_get_contents(repo_path('prompts/design-direction-seeds.md'));
+    assert_contains('defend for THIS brief', $prompt);
+    assert_contains('Differentiate among the defensible traditions, never past them', $prompt);
+    assert_contains('The three seeds should not all name the same tradition', $prompt);
+});
+
 test('normalize reads the page rhythm and density the direction commits to', function () {
     $repairs = [];
     $warnings = [];
