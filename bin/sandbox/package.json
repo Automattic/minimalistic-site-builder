@@ -1,0 +1,8 @@
+{
+    "name": "sandbox",
+    "private": true,
+    "description": "Headless-Chrome driver for the tree graph's sandbox: harness compile and measured verification.",
+    "dependencies": {
+        "playwright-core": "1.61.1"
+    }
+}
