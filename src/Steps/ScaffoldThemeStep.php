@@ -493,21 +493,20 @@ final class ScaffoldThemeStep implements Step
         .hero-composition--cinematic-safe-zone .wp-block-columns {
             max-width: none;
         }
-        .hero-composition--editorial-split .wp-block-columns,
-        .hero-composition--framed-portrait .wp-block-columns,
-        .hero-composition--focal-subject-stage .wp-block-columns {
+        .hero-composition--foreground-split .wp-block-columns {
             align-items: center;
         }
-        .hero-composition--editorial-split .hero-composition__media img,
-        .hero-composition--focal-subject-stage .hero-composition__media img {
+        .hero-composition--foreground-split .hero-composition__media img {
             width: 100%;
             height: auto;
             object-fit: cover;
         }
-        .hero-composition--framed-portrait .hero-composition__media img {
-            width: 100%;
+        /* The blueprint's portrait media_aspect (BIGR-912). The recipe asks for
+           a portrait asset, and this holds the plate to that ratio even when
+           the delivered image drifts, so the contained vertical frame the
+           composition is built around survives a landscape file. */
+        .hero-composition--foreground-split .hero-media--portrait img {
             aspect-ratio: 3 / 4;
-            object-fit: cover;
         }
         .hero-composition--layered-poster {
             overflow: hidden;

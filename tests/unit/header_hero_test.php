@@ -24,7 +24,7 @@ use Automattic\SiteBuild\Steps\ScaffoldThemeStep;
  * @param array<int,array<string,mixed>> $pages
  * @param array<string,mixed>|null $theme themeContext for token verification
  */
-function hh_above_fold($project, array $pages, string $recipe = 'focal-subject-stage', ?array $theme = null, ?string $forced = null): array
+function hh_above_fold($project, array $pages, string $recipe = 'foreground-split', ?array $theme = null, ?string $forced = null): array
 {
     $delivery = AboveFoldContract::resolve(
         $pages,
@@ -629,7 +629,7 @@ test('the step repairs parts, writes the behavior artifact, and keeps successful
         hh_above_fold($project, [[
             'slug' => 'home', 'title' => 'Home', 'front' => true,
             'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
-        ]], 'focal-subject-stage');
+        ]], 'foreground-split');
         $project->writeText('theme/parts/header.html', hh_header('{"className":"header-overlay","layout":{"type":"constrained"}}') . "\n");
         $project->writeText('theme/parts/page-home--hero.html', hh_cover('92') . "\n");
 
@@ -761,7 +761,7 @@ test('the step protects a resumed legacy theme with global Group padding', funct
         hh_above_fold($project, [[
             'slug' => 'home', 'title' => 'Home', 'front' => true,
             'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
-        ]], 'focal-subject-stage');
+        ]], 'foreground-split');
         $project->writeText(
             'theme/parts/header.html',
             '<!-- wp:group {"style":{"spacing":{"padding":{"top":"var:preset|spacing|sm","bottom":"var:preset|spacing|sm"}}},"layout":{"type":"constrained"}} -->'
@@ -772,8 +772,8 @@ test('the step protects a resumed legacy theme with global Group padding', funct
         );
         $project->writeText(
             'theme/parts/page-home--hero.html',
-            '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
-                . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage hero-mobile--stack-media-first">'
+            '<!-- wp:group {"anchor":"hero","className":"hero-composition--foreground-split hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
+                . '<div id="hero" class="wp-block-group hero-composition--foreground-split hero-mobile--stack-media-first">'
                 . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Hero</h1><!-- /wp:heading --></div><!-- /wp:group -->',
         );
 
@@ -807,15 +807,15 @@ test('removing authored sticky behavior from a resolved static header warns acti
         hh_above_fold($project, [[
             'slug' => 'home', 'title' => 'Home', 'front' => true,
             'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
-        ]], 'focal-subject-stage');
+        ]], 'foreground-split');
         $project->writeText(
             'theme/parts/header.html',
             hh_header('{"backgroundColor":"base","textColor":"contrast","style":{"position":{"type":"sticky","top":"0px"}},"layout":{"type":"constrained"}}') . "\n",
         );
         $project->writeText(
             'theme/parts/page-home--hero.html',
-            '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
-                . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage hero-mobile--stack-media-first">'
+            '<!-- wp:group {"anchor":"hero","className":"hero-composition--foreground-split hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
+                . '<div id="hero" class="wp-block-group hero-composition--foreground-split hero-mobile--stack-media-first">'
                 . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Hero</h1><!-- /wp:heading --></div><!-- /wp:group -->',
         );
 
@@ -858,12 +858,12 @@ test('the step warns actionably when an unreadable palette downgrades sticky-sof
         hh_above_fold($project, [
             ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section]],
             ['slug' => 'about', 'title' => 'About', 'front' => false, 'sections' => [$section]],
-        ], 'focal-subject-stage');
+        ], 'foreground-split');
         $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
         $project->writeText(
             'theme/parts/page-home--hero.html',
-            '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
-                . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage hero-mobile--stack-media-first">'
+            '<!-- wp:group {"anchor":"hero","className":"hero-composition--foreground-split hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
+                . '<div id="hero" class="wp-block-group hero-composition--foreground-split hero-mobile--stack-media-first">'
                 . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Hero</h1><!-- /wp:heading --></div><!-- /wp:group -->',
         );
 
@@ -897,15 +897,15 @@ test('moving authored root sticky behavior to a sticky outer shell is a warning-
         hh_above_fold($project, [
             ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section]],
             ['slug' => 'about', 'title' => 'About', 'front' => false, 'sections' => [$section]],
-        ], 'focal-subject-stage');
+        ], 'foreground-split');
         $project->writeText(
             'theme/parts/header.html',
             hh_header('{"backgroundColor":"base","textColor":"contrast","style":{"position":{"type":"sticky","top":"0px"}},"layout":{"type":"constrained"}}') . "\n",
         );
         $project->writeText(
             'theme/parts/page-home--hero.html',
-            '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
-                . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage hero-mobile--stack-media-first">'
+            '<!-- wp:group {"anchor":"hero","className":"hero-composition--foreground-split hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
+                . '<div id="hero" class="wp-block-group hero-composition--foreground-split hero-mobile--stack-media-first">'
                 . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Hero</h1><!-- /wp:heading --></div><!-- /wp:group -->',
         );
 
@@ -1083,12 +1083,12 @@ test('the step writes earned sticky treatments into both the header part and the
         hh_above_fold($project, [
             ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section]],
             ['slug' => 'about', 'title' => 'About', 'front' => false, 'sections' => [$section]],
-        ], 'focal-subject-stage');
+        ], 'foreground-split');
         $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
         $project->writeText(
             'theme/parts/page-home--hero.html',
-            '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
-                . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage hero-mobile--stack-media-first">'
+            '<!-- wp:group {"anchor":"hero","className":"hero-composition--foreground-split hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
+                . '<div id="hero" class="wp-block-group hero-composition--foreground-split hero-mobile--stack-media-first">'
                 . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Hero</h1><!-- /wp:heading --></div><!-- /wp:group -->',
         );
 
@@ -1131,12 +1131,12 @@ test('theme.json page background feeds the transparent-start contrast contract i
         hh_above_fold($project, [
                 ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section]],
                 ['slug' => 'about', 'title' => 'About', 'front' => false, 'sections' => [$section]],
-            ], 'focal-subject-stage');
+            ], 'foreground-split');
             $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
         $project->writeText(
             'theme/parts/page-home--hero.html',
-            '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
-                . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage hero-mobile--stack-media-first">'
+            '<!-- wp:group {"anchor":"hero","className":"hero-composition--foreground-split hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
+                . '<div id="hero" class="wp-block-group hero-composition--foreground-split hero-mobile--stack-media-first">'
                 . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Hero</h1><!-- /wp:heading --></div><!-- /wp:group -->',
         );
             putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
@@ -1524,7 +1524,7 @@ test('the step repairs header and hero parts without promoting successful repair
     $project->writeJson('pages.json', ['pages' => $pages]);
     $project->writeJson('aboveFold.json', AboveFoldContract::resolve(
         pages: $pages,
-        blueprint: HeroBlueprint::defaultFor('focal-subject-stage'),
+        blueprint: HeroBlueprint::defaultFor('foreground-split'),
         canvas: 'full-bleed',
         themeContext: ['version' => 3],
         siteContext: ['stable_id' => 'demo', 'writing_direction' => 'ltr', 'page_count' => 1],
@@ -1561,7 +1561,7 @@ test('the step removes an exact hero action when its delivered target is dead', 
     ]];
     $delivery = AboveFoldContract::resolve(
         $pages,
-        HeroBlueprint::defaultFor('focal-subject-stage'),
+        HeroBlueprint::defaultFor('foreground-split'),
         'full-bleed',
         ['base' => '#FFFFFF', 'contrast' => '#111111'],
         ['stable_id' => 'dead-action', 'writing_direction' => 'ltr', 'page_count' => 1],
@@ -1573,8 +1573,8 @@ test('the step removes an exact hero action when its delivered target is dead', 
     $project->writeText('theme/parts/header.html', hh_header('{"className":"header-archetype--standard-row","backgroundColor":"base","textColor":"contrast","layout":{"type":"constrained"}}'));
     $sibling = '<!-- wp:paragraph --><p>Sibling proposition remains.</p><!-- /wp:paragraph -->';
     $button = '<!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="/missing/">Missing work</a></div><!-- /wp:button -->';
-    $hero = '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
-        . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage hero-mobile--stack-media-first">'
+    $hero = '<!-- wp:group {"anchor":"hero","className":"hero-composition--foreground-split hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
+        . '<div id="hero" class="wp-block-group hero-composition--foreground-split hero-mobile--stack-media-first">'
         . $sibling . '<!-- wp:buttons --><div class="wp-block-buttons">' . $button . '</div><!-- /wp:buttons -->'
         . '</div><!-- /wp:group -->';
     $project->writeText('theme/parts/page-home--hero.html', $hero);
@@ -1896,8 +1896,8 @@ function hh_null_action_fixture($project, string $heroMarkup): void
 /** Wrap authored hero children in the contract-required composition root. */
 function hh_authored_hero(string $children): string
 {
-    return '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
-        . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage hero-mobile--stack-media-first">'
+    return '<!-- wp:group {"anchor":"hero","className":"hero-composition--foreground-split hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
+        . '<div id="hero" class="wp-block-group hero-composition--foreground-split hero-mobile--stack-media-first">'
         . $children
         . '</div><!-- /wp:group -->';
 }

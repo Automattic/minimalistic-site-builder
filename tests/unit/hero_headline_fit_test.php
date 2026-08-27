@@ -93,7 +93,7 @@ test('the fit is idempotent and never fights an authored explicit size', functio
 });
 
 test('a percentage column narrows the measure it inherits', function () {
-    // The audited miss: an editorial-split hero puts the copy in one column of
+    // The audited miss: an foreground-split hero puts the copy in one column of
     // a wide constrained section, so the section width is not the measure.
     [$open, $close] = hhf_section('1200px');
     $bare = hhf_hero('Two Nights of Electronic Immersion', '"layout":{"type":"constrained"}', $open, $close);

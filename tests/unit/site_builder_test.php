@@ -296,7 +296,10 @@ test('SiteBuilder invalid structured inputs fail before creating a project direc
     assert_throws(fn () => $builder->createProject(
         'a test cafe',
         'invalid-inputs',
-        designConstraints: ['allowed_hero_media_modes' => ['none'], 'hero_copy_capacity' => 'standard'],
+        // An empty media list names no mode at all, so the constraint cannot
+        // be satisfied by construction. It replaced a capacity/mode pair that
+        // stopped being impossible when capacity became a ceiling (BIGR-912).
+        designConstraints: ['allowed_hero_media_modes' => []],
     ));
     assert_true(!is_dir($tmp . '/invalid-inputs'));
 

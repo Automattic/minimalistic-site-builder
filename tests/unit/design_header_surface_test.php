@@ -70,7 +70,7 @@ function design_header_contract(?string $css, array $palette): array
 {
     return AboveFoldContract::resolve(
         pages: design_header_pages(),
-        blueprint: HeroBlueprint::defaultFor('editorial-split'),
+        blueprint: HeroBlueprint::defaultFor('foreground-split'),
         canvas: 'full-bleed',
         themeContext: design_header_theme($palette),
         siteContext: [
@@ -535,7 +535,7 @@ test('a header degradation keeps the surface the design authored', function () {
     ];
     $contract = AboveFoldContract::resolve(
         pages: [$page('home'), $page('about')],
-        blueprint: HeroBlueprint::defaultFor('editorial-split'),
+        blueprint: HeroBlueprint::defaultFor('foreground-split'),
         canvas: 'full-bleed',
         themeContext: design_header_theme(DESIGN_HEADER_AZURE_PALETTE),
         siteContext: [
