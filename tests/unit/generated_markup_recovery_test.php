@@ -1516,8 +1516,8 @@ test('wrapper repair leaves stray closers and content-bearing shells alone', fun
 test('clampHeroTopPadding lowers xl to sm on media-led and to lg on copy-led hero roots', function () {
     // Regression: lumen4's panorama-rail (recipe since retired) root carried padding-top:xl, opening
     // a dead band under the header that pushed the whole rail below the fold.
-    $mediaLed = '<!-- wp:group {"tagName":"section","anchor":"hero","className":"hero-composition--focal-subject-stage","style":{"spacing":{"padding":{"top":"var:preset|spacing|xl","bottom":"var:preset|spacing|xl"}}},"layout":{"type":"constrained"}} -->'
-        . '<section id="hero" class="wp-block-group hero-composition--focal-subject-stage" style="padding-top:var(--wp--preset--spacing--xl);padding-bottom:var(--wp--preset--spacing--xl)">'
+    $mediaLed = '<!-- wp:group {"tagName":"section","anchor":"hero","className":"hero-composition--foreground-split","style":{"spacing":{"padding":{"top":"var:preset|spacing|xl","bottom":"var:preset|spacing|xl"}}},"layout":{"type":"constrained"}} -->'
+        . '<section id="hero" class="wp-block-group hero-composition--foreground-split" style="padding-top:var(--wp--preset--spacing--xl);padding-bottom:var(--wp--preset--spacing--xl)">'
         . '<!-- wp:image {"className":"hero-composition__media"} --><figure class="wp-block-image hero-composition__media"><img src="theme:./assets/x.jpg" alt="AI_IMAGE: a | b | c | landscape"/></figure><!-- /wp:image -->'
         . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">A quiet panorama headline</h1><!-- /wp:heading -->'
         . '</section><!-- /wp:group -->';
