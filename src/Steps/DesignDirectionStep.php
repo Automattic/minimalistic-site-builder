@@ -14,6 +14,7 @@ use Automattic\SiteBuild\DirectionExecutability;
 use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\FontCatalog;
 use Automattic\SiteBuild\FontMonoculture;
+use Automattic\SiteBuild\FontShortlist;
 use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\TypeTreatment;
 use Automattic\SiteBuild\GeneratedJsonException;
@@ -204,6 +205,9 @@ final class DesignDirectionStep implements Step
 
         $spec = $project->readText('siteSpec.json');
         $specData = $project->readJson('siteSpec.json');
+        // Loaded once: the expansion prompt samples its font shortlist from
+        // it, and the monoculture floor below substitutes against it.
+        $fontCatalog = FontCatalog::load();
 
         $warnings = [];
         [
@@ -219,7 +223,18 @@ final class DesignDirectionStep implements Step
             $seed,
             $warnings,
         );
-        $blueprintDefaults = HeroBlueprint::defaultFor($recipe, $constraints);
+        // The recipe is code-owned and seeded, and so are its media axes
+        // (BIGR-912). The prompt below tells the model to preserve the defaults
+        // it is handed, so handing every site the same aspect and weight would
+        // make the merged contained-split recipe draw one composition forever.
+        $blueprintDefaults = array_merge(
+            HeroBlueprint::defaultFor($recipe, $constraints),
+            HeroComposition::selectMediaAxes(
+                (string) ($specData['slug'] ?? $project->slug()),
+                $seed,
+                $recipe,
+            ),
+        );
         $heroComposition = $this->renderer->render('hero-composition.md', [
             'recipe' => $recipe,
             'blueprint_defaults' => json_encode(
@@ -252,6 +267,14 @@ final class DesignDirectionStep implements Step
             'type_register' => $seedTypeRegister === ''
                 ? 'not committed by the seed — read the letterform tradition off the seed sentence'
                 : $seedTypeRegister,
+            // A rotating per-site shortlist of real families in the committed
+            // tradition. Naming the tradition alone lands every build on its
+            // one famous face (BIGR-920); empty for a degraded seed.
+            'type_candidates' => FontShortlist::promptParagraph(
+                $seedTypeRegister,
+                (string) ($specData['slug'] ?? $project->slug()),
+                $fontCatalog,
+            ),
             'hero_composition' => $heroComposition,
         ]);
         try {
@@ -311,7 +334,7 @@ final class DesignDirectionStep implements Step
         $direction = self::substituteMonocultureFonts(
             $direction,
             (string) ($specData['slug'] ?? $project->slug()),
-            FontCatalog::load(),
+            $fontCatalog,
             $warnings,
         );
 

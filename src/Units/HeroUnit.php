@@ -137,7 +137,7 @@ final class HeroUnit extends AbstractPageSectionUnit
         }
         array_push(
             $warnings,
-            ...HeroComposition::markupWarnings($markup, $context['recipe'], $key),
+            ...HeroComposition::markupWarnings($markup, $context['recipe'], $key, $context['blueprint']),
         );
         return new MarkupResult($markup, $repairs, $warnings);
     }
