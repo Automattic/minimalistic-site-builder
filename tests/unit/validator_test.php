@@ -74,7 +74,7 @@ function validator_above_fold_project(): array
             'primary_action' => null,
         ]],
     ]];
-    $blueprint = HeroBlueprint::defaultFor('focal-subject-stage');
+    $blueprint = HeroBlueprint::defaultFor('foreground-split');
     $delivery = AboveFoldContract::resolve(
         $pages,
         $blueprint,
@@ -87,8 +87,8 @@ function validator_above_fold_project(): array
     $header = '<!-- wp:group {"className":"header-archetype--standard-row","backgroundColor":"base","textColor":"contrast"} -->'
         . '<div class="wp-block-group header-archetype--standard-row has-base-background-color has-contrast-color"></div>'
         . '<!-- /wp:group -->';
-    $hero = '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage","layout":{"type":"constrained"}} -->'
-        . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage"></div><!-- /wp:group -->';
+    $hero = '<!-- wp:group {"anchor":"hero","className":"hero-composition--foreground-split","layout":{"type":"constrained"}} -->'
+        . '<div id="hero" class="wp-block-group hero-composition--foreground-split"></div><!-- /wp:group -->';
     $final = AboveFoldContract::finalizeMarkup($delivery, $pages, [
         'part_keys' => ['header', 'page-home--hero'],
         'opening_overlay_support' => ['page-home--hero' => false],
@@ -256,7 +256,7 @@ test('final above-fold validator checks saved Cover paint for an earned clear he
 test('final above-fold validator reports downstream drift without mutating markup', function () {
     [$project, $tmp] = validator_above_fold_project();
     $header = str_replace('header-archetype--standard-row', 'header-archetype--split-nav', $project->readText('theme/parts/header.html'));
-    $hero = str_replace('hero-composition--focal-subject-stage', 'hero-composition--editorial-split', $project->readText('plugin/pages/home.html'));
+    $hero = str_replace('hero-composition--foreground-split', 'hero-composition--layered-poster', $project->readText('plugin/pages/home.html'));
     $project->writeText('theme/parts/header.html', $header);
     $project->writeText('plugin/pages/home.html', $hero);
 
@@ -280,8 +280,8 @@ test('final above-fold validator reports competing stacked chrome and an over-bu
         '"backgroundColor":"base","gradient":"invented-gradient"',
         $project->readText('theme/parts/header.html'),
     );
-    $opening = '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage","layout":{"type":"constrained"}} -->'
-        . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage">'
+    $opening = '<!-- wp:group {"anchor":"hero","className":"hero-composition--foreground-split","layout":{"type":"constrained"}} -->'
+        . '<div id="hero" class="wp-block-group hero-composition--foreground-split">'
         . '<!-- wp:cover {"minHeight":92,"minHeightUnit":"vh"} --><div class="wp-block-cover" style="min-height:92vh"></div><!-- /wp:cover -->'
         . '</div><!-- /wp:group -->';
     $project->writeText('theme/parts/header.html', $header);
