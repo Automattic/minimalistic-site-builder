@@ -30,6 +30,18 @@ final class GroundTint
     public const NEUTRAL_CHROMA = 0.02;
 
     /**
+     * RGB chroma of one pixel, the quantity NEUTRAL_CHROMA measures — the
+     * (max-min) channel span over [0,1]. One shared implementation for the
+     * classifier and for BandColor's near-grey tolerance.
+     *
+     * @param array{0:int,1:int,2:int} $rgb
+     */
+    public static function chromaOf(array $rgb): float
+    {
+        return (max($rgb) - min($rgb)) / 255;
+    }
+
+    /**
      * The family a hex belongs to, or null when it is not a hex color.
      */
     public static function classify(string $hex): ?string
@@ -38,7 +50,7 @@ final class GroundTint
         if ($rgb === null) {
             return null;
         }
-        if ((max($rgb) - min($rgb)) / 255 < self::NEUTRAL_CHROMA) {
+        if (self::chromaOf($rgb) < self::NEUTRAL_CHROMA) {
             return 'neutral';
         }
         $hue = self::hue($rgb);

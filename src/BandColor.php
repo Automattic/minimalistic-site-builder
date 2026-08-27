@@ -44,7 +44,7 @@ final class BandColor
         // authored bands with flat grey (BIGR-919). Two near-grey surfaces
         // are one family whatever the classifier calls each side.
         $nearGrey = static fn (array $rgb): bool =>
-            (max($rgb) - min($rgb)) / 255 <= GroundTint::NEUTRAL_CHROMA * 2;
+            GroundTint::chromaOf($rgb) <= GroundTint::NEUTRAL_CHROMA * 2;
         if ($bandFamily !== $baseFamily && !($nearGrey($baseRgb) && $nearGrey($bandRgb))) {
             return false;
         }
