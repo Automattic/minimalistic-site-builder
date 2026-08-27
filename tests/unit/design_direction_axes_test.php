@@ -24,6 +24,19 @@ test('the chosen seed carries its two traditions into the expansion prompt', fun
     assert_contains('noir', $expansion, 'the design tradition reaches the expansion');
     assert_contains('didone', $expansion, 'so does the letterform tradition');
 
+    // The renderer throws on an unresolved placeholder but is silent about
+    // an unused variable, so deleting {{type_candidates}} from the template
+    // would disable the shortlist without failing anything else (BIGR-920).
+    $candidates = \Automattic\SiteBuild\FontShortlist::candidates(
+        'didone',
+        'demo',
+        \Automattic\SiteBuild\FontCatalog::load(),
+    );
+    assert_true($candidates !== [], 'the didone shelf yields a sample');
+    foreach ($candidates as $family) {
+        assert_contains($family, $expansion, 'the shortlist sample reaches the expansion prompt');
+    }
+
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -58,6 +71,17 @@ test('the expansion prompt names the five reflex fonts without banning them', fu
         !str_contains($prompt, 'never mention Archivo'),
         'the reflex fonts are discouraged, not forbidden',
     );
+});
+
+test('the seeds prompt demands topic-defensible letterform traditions', function () {
+    // BIGR-921: the tbilisi demo (a traditional Georgian tavern) received
+    // type_register "slab" and shipped a techy web face, because the prompt
+    // asked the three seeds to differ without asking each tradition to fit
+    // the subject. Spread stays; random tradition assignment goes.
+    $prompt = (string) file_get_contents(repo_path('prompts/design-direction-seeds.md'));
+    assert_contains('defend for THIS brief', $prompt);
+    assert_contains('Differentiate among the defensible traditions, never past them', $prompt);
+    assert_contains('The three seeds should not all name the same tradition', $prompt);
 });
 
 test('normalize reads the page rhythm and density the direction commits to', function () {

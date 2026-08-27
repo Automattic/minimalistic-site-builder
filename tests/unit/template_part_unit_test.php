@@ -606,6 +606,13 @@ test('FooterUnit renders exactly one reviewed recipe and image instructions only
         'editorial-colophon' => 'final plate of a book or',
         'split-ledger' => 'Build a strong 65/35 or 70/30 split',
         'cover-coda' => 'ONE full-bleed wp:cover closes the page',
+        'diptych' => 'EXACTLY two full-height slabs',
+        'sunken-wordmark' => 'Invert the billboard',
+        'status-readout' => 'quiet status readout',
+        'contact-sheet' => 'A film contact sheet closes the page',
+        'mosaic-tiles' => 'A hard-edged mosaic of flat color tiles',
+        'color-field' => 'One massive inset panel of a single strong palette color',
+        'repeat-rail' => 'The identity as printed tape',
     ];
 
     assert_eq(FooterComposition::ARCHETYPES, array_keys($markers));
