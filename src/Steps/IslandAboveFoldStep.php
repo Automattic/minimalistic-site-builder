@@ -104,12 +104,18 @@ final class IslandAboveFoldStep implements Step
                 . 'disposition=degraded and continued';
         }
         $pages = self::withContractSectionFields($usable);
+        $contract = null;
         try {
             $contract = self::deliveryContract($project, $pages);
             $contract = AboveFoldContract::finalizeMarkup($contract, $pages, self::facts($project, $pages, $contract));
+            $contract = self::withValidFollowingSection($contract);
+            AboveFoldContract::assertPhase($contract, AboveFoldContract::PHASE_FINAL);
         } catch (\InvalidArgumentException|\RuntimeException $e) {
+            $contract = null;
             $stepWarnings[] = 'island-above-fold: ' . $e->getMessage()
                 . '; delivered a stacked fallback contract; disposition=degraded and continued';
+        }
+        if ($contract === null) {
             $contract = self::stackedFallbackContract($project, $pages);
         }
         $project->writeJson('aboveFold.json', $contract);
@@ -137,7 +143,7 @@ final class IslandAboveFoldStep implements Step
      * @param array<int,array<string,mixed>> $pages
      * @return array<string,mixed>
      */
-    private static function stackedFallbackContract(Project $project, array $pages): array
+    public static function stackedFallbackContract(Project $project, array $pages): array
     {
         $dummy = self::withContractSectionFields($pages !== [] ? $pages : [[
             'slug' => 'home',
@@ -154,7 +160,51 @@ final class IslandAboveFoldStep implements Step
             ]],
         ]]);
         $contract = self::deliveryContract($project, $dummy);
-        return AboveFoldContract::finalizeMarkup($contract, $dummy, self::facts($project, $dummy, $contract));
+        $contract = AboveFoldContract::finalizeMarkup($contract, $dummy, self::facts($project, $dummy, $contract));
+        $contract = self::withValidFollowingSection($contract);
+        AboveFoldContract::assertPhase($contract, AboveFoldContract::PHASE_FINAL);
+        return $contract;
+    }
+
+    /**
+     * assertContract requires a non-empty layout_archetype (and surface/slug/part)
+     * when following_section is present. Island pages.json has {slug,title} only;
+     * refreshDeliveredFacts can still emit "". Fill rather than ship a contract
+     * validate-theme will abort on.
+     *
+     * @param array<string,mixed> $contract
+     * @return array<string,mixed>
+     */
+    public static function withValidFollowingSection(array $contract): array
+    {
+        $following = $contract['following_section'] ?? null;
+        if (!is_array($following)) {
+            return $contract;
+        }
+        $front = (string) ($contract['front_page'] ?? 'home');
+        $slug = is_string($following['slug'] ?? null) ? trim((string) $following['slug']) : '';
+        if ($slug === '') {
+            $slug = 'following';
+        }
+        $part = is_string($following['part'] ?? null) ? trim((string) $following['part']) : '';
+        if ($part === '') {
+            $part = 'page-' . $front . '--' . $slug;
+        }
+        $layout = is_string($following['layout_archetype'] ?? null) ? trim((string) $following['layout_archetype']) : '';
+        if ($layout === '') {
+            $layout = 'html-island';
+        }
+        $surface = is_string($following['surface'] ?? null) ? trim((string) $following['surface']) : '';
+        if ($surface === '') {
+            $surface = 'base';
+        }
+        $contract['following_section'] = [
+            'slug' => $slug,
+            'part' => $part,
+            'layout_archetype' => $layout,
+            'surface' => $surface,
+        ];
+        return $contract;
     }
 
     /**

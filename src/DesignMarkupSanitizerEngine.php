@@ -983,6 +983,13 @@ final class DesignMarkupSanitizerEngine
         if (in_array($scheme, ['http', 'https'], true)) {
             return true;
         }
+        // Pipeline-authored theme asset paths. AssignImageSourcesStep writes
+        // theme:./assets/... after this sanitizer's upstream callers have
+        // already run; island-pages is the first step that re-sanitizes after
+        // that write. javascript:/data:/vbscript: stay rejected.
+        if ($scheme === 'theme' && in_array($attribute, ['src', 'href'], true)) {
+            return true;
+        }
         return $attribute === 'href' && in_array($scheme, ['mailto', 'tel'], true);
     }
 
