@@ -59,8 +59,7 @@
         "hero_copy_capacity": "standard"
       },
       "eligible": [
-        "editorial-split",
-        "framed-portrait"
+        "foreground-split"
       ]
     },
     {
@@ -75,8 +74,7 @@
         "hero_copy_capacity": "standard"
       },
       "eligible": [
-        "editorial-split",
-        "framed-portrait"
+        "foreground-split"
       ]
     },
     {
@@ -91,7 +89,7 @@
         "hero_copy_capacity": "compact"
       },
       "eligible": [
-        "focal-subject-stage"
+        "foreground-split"
       ]
     },
     {
@@ -107,7 +105,7 @@
         "hero_copy_capacity": "compact"
       },
       "eligible": [
-        "focal-subject-stage"
+        "foreground-split"
       ]
     },
     {
@@ -122,8 +120,7 @@
         "hero_copy_capacity": "standard"
       },
       "eligible": [
-        "editorial-split",
-        "framed-portrait"
+        "foreground-split"
       ]
     },
     {
@@ -151,7 +148,7 @@
         "hero_copy_capacity": "compact"
       },
       "eligible": [
-        "focal-subject-stage"
+        "foreground-split"
       ]
     }
   ]

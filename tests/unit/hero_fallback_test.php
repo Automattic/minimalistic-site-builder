@@ -12,7 +12,7 @@ use Automattic\SiteBuild\PageOpeningFallback;
 function hero_fallback_contract(string $mode = 'stacked'): array
 {
     return test_above_fold_contract(
-        $mode === 'overlay' ? 'cinematic-safe-zone' : 'editorial-split',
+        $mode === 'overlay' ? 'cinematic-safe-zone' : 'foreground-split',
         $mode === 'overlay' ? 'minimal-overlay' : 'standard-row',
         [
             'label' => 'See the work',
@@ -25,7 +25,7 @@ function hero_fallback_contract(string $mode = 'stacked'): array
 /** @return array<string,mixed> */
 function hero_fallback_input(): array
 {
-    $blueprint = HeroBlueprint::defaultFor('editorial-split');
+    $blueprint = HeroBlueprint::defaultFor('foreground-split');
     $blueprint['mobile_transformation'] = 'stack-copy-first';
     return [
         'site_spec' => ['name' => 'Northlight Studio', 'title' => 'Northlight Studio'],
@@ -55,7 +55,7 @@ test('hero family fallback retains its key, exact markers, identity, and validat
         $document->indices(),
         static fn (int $index): bool => $document->parent($index) === null,
     )), 'fallback has exactly one top-level block');
-    assert_contains('hero-composition--editorial-split', $markup);
+    assert_contains('hero-composition--foreground-split', $markup);
     assert_contains('hero-mobile--stack-copy-first', $markup);
     assert_contains('hero-fallback--foreground-split', $markup);
     assert_contains('hero-composition__copy', $markup);
@@ -94,7 +94,7 @@ test('reviewed hero fallback families have distinct code-owned topology', functi
     )->markup;
     $split = HeroFallback::render(
         $input,
-        test_above_fold_contract('editorial-split', 'standard-row'),
+        test_above_fold_contract('foreground-split', 'standard-row'),
     )->markup;
 
     assert_contains('hero-fallback__cover-stage', $cover);
@@ -111,7 +111,7 @@ test('hero fallback uses the dynamic real site title instead of inventing generi
     ];
     $markup = HeroFallback::render(
         $input,
-        test_above_fold_contract('focal-subject-stage', 'standard-row'),
+        test_above_fold_contract('foreground-split', 'standard-row'),
     )->markup;
 
     assert_contains('wp:site-title', $markup);

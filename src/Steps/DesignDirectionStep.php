@@ -219,7 +219,18 @@ final class DesignDirectionStep implements Step
             $seed,
             $warnings,
         );
-        $blueprintDefaults = HeroBlueprint::defaultFor($recipe, $constraints);
+        // The recipe is code-owned and seeded, and so are its media axes
+        // (BIGR-912). The prompt below tells the model to preserve the defaults
+        // it is handed, so handing every site the same aspect and weight would
+        // make the merged contained-split recipe draw one composition forever.
+        $blueprintDefaults = array_merge(
+            HeroBlueprint::defaultFor($recipe, $constraints),
+            HeroComposition::selectMediaAxes(
+                (string) ($specData['slug'] ?? $project->slug()),
+                $seed,
+                $recipe,
+            ),
+        );
         $heroComposition = $this->renderer->render('hero-composition.md', [
             'recipe' => $recipe,
             'blueprint_defaults' => json_encode(
