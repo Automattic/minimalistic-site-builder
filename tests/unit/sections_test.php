@@ -1349,6 +1349,15 @@ test('page-plan steers pages off the same surface the footer is actually painted
     // test still green.
     [$project, $tmp] = sections_fixture();
     $project->writeJson('meta.json', ['prompt' => 'Demo prompt']);
+    // The closing section must sit on NEITHER footer surface candidate. What
+    // this test pins is the shared seed derivation; a closing section that
+    // happens to match the hashed archetype's preferred surface legitimately
+    // makes resolveSurface() pick the other candidate (the degraded path it
+    // exists for), and which archetype the fixture hashes to moves every time
+    // the catalog grows. A tinted closing keeps the assertion about the seed.
+    $pages = $project->readJson('pages.json');
+    $pages['pages'][0]['sections'][1]['background'] = 'tinted';
+    $project->writeJson('pages.json', $pages);
 
     $planStep = new \Automattic\SiteBuild\Steps\PagePlanStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
     $planRequests = $planStep->requests($project);
