@@ -40,7 +40,7 @@ Return a single JSON object with this exact shape:
       "type": "a short, specific semantic label; examples: menu, timeline, case-studies, process, services, gallery, testimonials, pricing, team, faq, contact, story",
       "purpose": "1 sentence: what this section is for and what the visitor should take away",
       "content_notes": "2-4 sentences of concrete guidance: the specific copy points, items, or layout idea for this section, grounded in the site spec (real facts where given)",
-      "layout_archetype": "one of: full-bleed-cover, asymmetric-split, centered-stack, offset-grid, mixed-width-editorial, equal-card-grid, list-with-thumbnails",
+      "layout_archetype": "one of: full-bleed-cover, asymmetric-split, centered-stack, offset-grid, equal-card-grid, list-with-thumbnails",
       "background": "one of: base, tinted, contrast, image",
       "vertical_density": "one of: compact, standard, spacious",
       "item_pattern": null,
@@ -68,17 +68,16 @@ Never invent an email, street address, phone number, or URL.
 
 Layout archetypes (pick the one that best serves each section's content):
 - full-bleed-cover — a full-width cover image or gradient with overlaid text
-- asymmetric-split — two unequal columns (e.g. 34/66 or 40/60), never 50/50
+- asymmetric-split — one row of unequal regions, never equal. Two regions (e.g. 34/66 or 40/60) for a lead-and-support band about one thing; three (e.g. 50/25/25) for a magazine row mixing one wide feature with narrow notes. Pick two unless the content is genuinely several items.
 - centered-stack — a single constrained, centered column carried by type and whitespace (display lines center; wrapping body copy stays start-aligned — left for LTR, right for RTL)
-- offset-grid — a staggered grid whose items deliberately don't line up in neat rows. Use ONLY when the site is clearly a photography or gallery site (SITE SPEC area/topic is photography, a photographer, photojournalism, or a gallery). For every other site, pick a level row (equal-card-grid, mixed-width-editorial, or list-with-thumbnails) instead of offsetting sibling tops.
-- mixed-width-editorial — a magazine-like row mixing wide and narrow items
+- offset-grid — a staggered grid whose items deliberately don't line up in neat rows. Use ONLY when the site is clearly a photography or gallery site (SITE SPEC area/topic is photography, a photographer, photojournalism, or a gallery). For every other site, pick a level row (equal-card-grid, asymmetric-split, or list-with-thumbnails) instead of offsetting sibling tops.
 - equal-card-grid — the classic equal-height card row
 - list-with-thumbnails — stacked rows, each a small image beside text
 
 Section structure and types:
 - List sections in their intended page order. The builder derives each section's structural role from that order after generation, so do not return a `role` field.
 - `type` is an open-ended semantic label, always in English. Choose or invent the most specific short label for what the section actually contains; do not collapse a menu, timeline, case-study index, process, event calendar, or location guide into a generic bucket.
-- The site's committed repeated-item idiom is `{{item_pattern}}`. Set `item_pattern` to exactly `"{{item_pattern}}"` on every genuinely list-like section: menus, catalogs, schedules, programs, archives, pricing/features/services sets, technical facts, skills/genres/amenities, directories, teams, timelines, FAQs, and similar repeated collections. Set it to null on heroes, stories, single CTAs, quotes, galleries without textual items, and other non-list sections. Never choose a different idiom per section. Choose a layout archetype that can house the assigned idiom: `rule-row`, `index`, `spec-table`, and `tag-cluster` generally need a centered stack, asymmetric split, or mixed-width editorial region rather than an equal-card grid; `card` may use the card/grid archetypes.
+- The site's committed repeated-item idiom is `{{item_pattern}}`. Set `item_pattern` to exactly `"{{item_pattern}}"` on every genuinely list-like section: menus, catalogs, schedules, programs, archives, pricing/features/services sets, technical facts, skills/genres/amenities, directories, teams, timelines, FAQs, and similar repeated collections. Set it to null on heroes, stories, single CTAs, quotes, galleries without textual items, and other non-list sections. Never choose a different idiom per section. Choose a layout archetype that can house the assigned idiom: `rule-row`, `index`, `spec-table`, and `tag-cluster` generally need a centered stack or an asymmetric split rather than an equal-card grid; `card` may use the card/grid archetypes.
 
 Background treatments:
 - base — the default page background

@@ -41,7 +41,7 @@ function above_fold_pages(?array $action = null, string $heroSurface = 'image', 
                 [
                     'slug' => 'menu-opening',
                     'title' => 'Menu',
-                    'layout_archetype' => 'mixed-width-editorial',
+                    'layout_archetype' => 'asymmetric-split',
                     'background' => $menuSurface,
                     'primary_action' => null,
                 ],
@@ -275,7 +275,7 @@ test('overlay requires an image-led recipe, every protected opening, an unframed
     )['header']['mode']);
 
     $solidStacked = above_fold_pages(null, 'contrast', 'contrast');
-    $solidStacked[0]['sections'][0]['layout_archetype'] = 'mixed-width-editorial';
+    $solidStacked[0]['sections'][0]['layout_archetype'] = 'asymmetric-split';
     assert_eq('stacked', above_fold_resolve($solidStacked, recipe: 'foreground-split')['header']['mode']);
 });
 
@@ -534,7 +534,7 @@ test('lost overlay support degrades to one reviewed stacked relation with an act
 
 test('split navigation and removed neighbors degrade only enumerated delivery facts', function () {
     $pages = above_fold_pages(null, 'contrast', 'contrast');
-    $pages[0]['sections'][0]['layout_archetype'] = 'mixed-width-editorial';
+    $pages[0]['sections'][0]['layout_archetype'] = 'asymmetric-split';
     $contract = above_fold_resolve($pages, recipe: 'foreground-split', forced: 'split-nav');
     assert_eq('split-nav', $contract['header']['archetype']);
 

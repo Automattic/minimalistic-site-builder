@@ -69,7 +69,7 @@ function validator_above_fold_project(): array
         'sections' => [[
             'slug' => 'hero',
             'title' => 'Home',
-            'layout_archetype' => 'mixed-width-editorial',
+            'layout_archetype' => 'asymmetric-split',
             'background' => 'contrast',
             'primary_action' => null,
         ]],

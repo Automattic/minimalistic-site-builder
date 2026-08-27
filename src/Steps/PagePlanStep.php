@@ -87,6 +87,12 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      * of its archetype budget on `mixed-width-editorial` while never once
      * breaking adjacency — the rule held and the page was uniform anyway. Only
      * a count over the whole page catches that.
+     *
+     * BIGR-945 retired `mixed-width-editorial` into `asymmetric-split`, so that
+     * name no longer exists. The measurement stands and the cap still earns its
+     * place: a merge removes the vaguest option, it does not decide who picks.
+     * Watch the same share on the merged name — if 77% simply moves there, the
+     * concentration was never about having two names for one shape.
      */
     private const ARCHETYPE_SHARE_DIVISOR = 3;
 
@@ -96,7 +102,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      */
     private const LEVEL_ROW_ARCHETYPES = [
         'equal-card-grid',
-        'mixed-width-editorial',
+        'asymmetric-split',
         'list-with-thumbnails',
     ];
 
@@ -2101,7 +2107,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             // variety rule holds by construction.
             $safeArchetypes = self::archetypeEligible('offset-grid', $allowOffsetGrid)
                 ? ['centered-stack', 'asymmetric-split', 'offset-grid']
-                : ['centered-stack', 'asymmetric-split', 'mixed-width-editorial'];
+                : ['centered-stack', 'asymmetric-split', 'equal-card-grid'];
             $briefs = [
                 [
                     'slug'          => 'overview',

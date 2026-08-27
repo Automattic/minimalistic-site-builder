@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\SectionComposition;
 use Automattic\SiteBuild\Steps\PagePlanStep;
 
@@ -124,11 +125,99 @@ test('every section catalog entry carries complete executable metadata', functio
         ] as $bullet) {
             assert_contains($bullet, $fragment, "{$archetype} fragment carries the {$bullet} bullet");
         }
+        // A fragment may carry only the placeholders `recipeVars()` fills.
+        // PromptRenderer throws on an unresolved one, and that throw would land
+        // mid-build, so the fragment and its filler are checked against each
+        // other rather than the fragment being forbidden any variable at all.
+        preg_match_all('/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/', $fragment, $found);
+        assert_eq(
+            [],
+            array_values(array_diff($found[1], SectionComposition::RECIPE_VARS)),
+            "{$archetype} fragment uses only published recipe variables",
+        );
+        foreach ([null, 'card'] as $itemPattern) {
+            $vars = SectionComposition::recipeVars($archetype, $itemPattern);
+            assert_eq(
+                [],
+                array_values(array_diff(SectionComposition::RECIPE_VARS, array_keys($vars))),
+                "{$archetype} recipe vars cover every published variable",
+            );
+            // The real render is the proof: it throws on any placeholder the
+            // catalog does not fill.
+            $rendered = PromptRenderer::fill($fragment, $vars);
+            assert_true(
+                !str_contains($rendered, '{{'),
+                "{$archetype} fragment renders with no placeholder left",
+            );
+        }
+    }
+});
+
+test('only an unequal-region archetype pins a lead column', function () {
+    // The pin is code-owned on two facts that are both already on the plan: an
+    // archetype whose regions differ in weight, and a section the planner
+    // marked as a repeated set.
+    assert_true(SectionComposition::hasUnequalRegions('asymmetric-split'));
+    assert_true(SectionComposition::pinsLeadColumn('asymmetric-split', 'rule-row'));
+    assert_true(SectionComposition::pinsLeadColumn('asymmetric-split', 'card'));
+
+    // No item pattern means no repeated set to scroll past the lead.
+    assert_true(!SectionComposition::pinsLeadColumn('asymmetric-split', null));
+    assert_true(!SectionComposition::pinsLeadColumn('asymmetric-split', '  '));
+
+    // Every other archetype composes level or equal regions, so none of them
+    // can strand a region and none of them may pin.
+    foreach (SectionComposition::ARCHETYPES as $archetype) {
+        if ($archetype === 'asymmetric-split') {
+            continue;
+        }
         assert_true(
-            !str_contains($fragment, '{{'),
-            "{$archetype} fragment holds no unresolved placeholder",
+            !SectionComposition::hasUnequalRegions($archetype),
+            "{$archetype} does not compose unequal regions",
+        );
+        assert_true(
+            !SectionComposition::pinsLeadColumn($archetype, 'card'),
+            "{$archetype} never pins a column",
+        );
+        assert_eq(
+            '',
+            SectionComposition::recipeVars($archetype, 'card')['pin_directive'],
+            "{$archetype} reads no word about the pin",
         );
     }
+});
+
+test('the pin directive names the class, the column, and the viewport guard', function () {
+    $directive = SectionComposition::pinDirective('asymmetric-split', 'rule-row');
+    assert_contains(SectionComposition::PIN_CLASS, $directive, 'names the class to apply');
+    assert_contains('never on the column that holds the repeated items', $directive);
+    assert_contains('fits one screen', $directive, 'caps the pinned column against the viewport');
+    assert_contains('exactly two regions', $directive, 'three regions never pin');
+    assert_eq('', SectionComposition::pinDirective('asymmetric-split', null));
+});
+
+test('mixed-width-editorial is retired into asymmetric-split', function () {
+    // BIGR-945. The two were one topology; the merged entry keeps the wider
+    // media ceiling so a three-region feature-and-notes row still fits.
+    assert_true(!SectionComposition::isKnown('mixed-width-editorial'));
+    assert_true(!in_array('mixed-width-editorial', SectionComposition::ARCHETYPES, true));
+    assert_true(!is_file(repo_path('prompts/section-compositions/mixed-width-editorial.md')));
+    assert_eq(12, SectionComposition::metadata('asymmetric-split')['max_images']);
+
+    // The retired name must not survive anywhere a build reads it.
+    foreach (['prompts/page-plan.md', 'prompts/section-compositions/asymmetric-split.md'] as $file) {
+        assert_true(
+            !str_contains((string) file_get_contents(repo_path($file)), 'mixed-width-editorial'),
+            "{$file} no longer names the retired archetype",
+        );
+    }
+
+    // The surviving fragment absorbed the three-region case it was retired for.
+    $fragment = (string) file_get_contents(
+        repo_path('prompts/section-compositions/asymmetric-split.md')
+    );
+    assert_contains('Three regions', $fragment, 'the feature-and-notes row survives the merge');
+    assert_contains('50/25/25', $fragment, 'the three-region widths survive the merge');
 });
 
 test('the section eligibility gate reserves offset-grid for photography and gallery sites', function () {
@@ -195,7 +284,6 @@ test('the section catalog stays quiet on markup that executes its assignment', f
         'asymmetric-split' => section_composition_row(1),
         'centered-stack' => '<!-- wp:paragraph --><p>One column.</p><!-- /wp:paragraph -->',
         'offset-grid' => section_composition_row(2),
-        'mixed-width-editorial' => section_composition_row(2),
         'equal-card-grid' => section_composition_row(3),
         'list-with-thumbnails' => section_composition_row(2),
     ] as $archetype => $inner) {
@@ -209,6 +297,91 @@ test('the section catalog stays quiet on markup that executes its assignment', f
             "{$archetype} executed as assigned draws no warning",
         );
     }
+
+    // One plate beside one copy column is this archetype's most common and most
+    // successful shape. The balance check must never report it.
+    assert_eq(
+        [],
+        SectionComposition::markupWarnings(
+            section_composition_markup('asymmetric-split', section_composition_row(1)),
+            'asymmetric-split',
+            'page-home--band',
+            null,
+        ),
+        'one image against none is a balanced split',
+    );
+
+    // A staggered photo grid puts several frames in one region by design. The
+    // balance check is scoped to unequal-region bands so it stays quiet here.
+    assert_eq(
+        [],
+        SectionComposition::markupWarnings(
+            section_composition_markup('offset-grid', section_composition_row(4)),
+            'offset-grid',
+            'page-home--band',
+            'card',
+        ),
+        'a stagger is not an unbalanced split',
+    );
+});
+
+test('the section catalog reports a split that strands a region beside its sibling', function () {
+    // BIGR-945: the `cat-luthier` shape — one region carrying a stack of media
+    // against a sibling carrying one. Markup holds no heights, so the check
+    // measures the authored fact that produces the blank quadrant.
+    $rows = SectionComposition::markupWarnings(
+        section_composition_markup('asymmetric-split', section_composition_row(3)),
+        'asymmetric-split',
+        'page-home--band',
+        null,
+    );
+    assert_eq(1, count($rows), 'one unbalanced row is one warning');
+    assert_contains('archetype region balance', $rows[0]);
+    assert_contains('"images_per_region":[3,0]', $rows[0], 'the row carries the delivered spread');
+    assert_contains('"spread":3', $rows[0]);
+    assert_contains('balance the regions or pin the short one', $rows[0], 'the row names both fixes');
+    assert_contains("file='theme/parts/page-home--band.html'", $rows[0]);
+
+    // Two against none is the first difference copy cannot absorb.
+    assert_eq(
+        1,
+        count(SectionComposition::markupWarnings(
+            section_composition_markup('asymmetric-split', section_composition_row(2)),
+            'asymmetric-split',
+            'page-home--band',
+            null,
+        )),
+        'two images against none is already unbalanced',
+    );
+});
+
+test('the section catalog reports a pin the delivered band ignored', function () {
+    $unpinned = section_composition_markup('asymmetric-split', section_composition_row(1));
+
+    // No item pattern: no pin was asked for, so nothing is reported.
+    assert_eq([], SectionComposition::markupWarnings($unpinned, 'asymmetric-split', 'p', null));
+
+    // With one, the pin was required and the delivered band dropped it.
+    $rows = SectionComposition::markupWarnings($unpinned, 'asymmetric-split', 'page-home--menu', 'rule-row');
+    assert_eq(1, count($rows), 'a dropped pin is one row');
+    assert_contains('archetype pinned lead', $rows[0]);
+    assert_contains('"required_class":"' . SectionComposition::PIN_CLASS . '"', $rows[0]);
+    assert_contains('"item_pattern":"rule-row"', $rows[0], 'the row records why the pin was asked for');
+    assert_contains('stranding a blank quadrant', $rows[0]);
+
+    // The same band with the class present is quiet.
+    $pinned = str_replace(
+        '<!-- wp:column {"width":"60%"} --><div class="wp-block-column">',
+        '<!-- wp:column {"width":"60%","className":"' . SectionComposition::PIN_CLASS . '"} -->'
+        . '<div class="wp-block-column ' . SectionComposition::PIN_CLASS . '">',
+        $unpinned,
+    );
+    assert_true($pinned !== $unpinned, 'the fixture actually gained the class');
+    assert_eq(
+        [],
+        SectionComposition::markupWarnings($pinned, 'asymmetric-split', 'page-home--menu', 'rule-row'),
+        'a delivered pin draws no warning',
+    );
 });
 
 test('the section catalog reports an ignored assignment as an advisory warning', function () {

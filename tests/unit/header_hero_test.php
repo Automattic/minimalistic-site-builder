@@ -1555,7 +1555,7 @@ test('the step removes an exact hero action when its delivered target is dead', 
     $pages = [[
         'slug' => 'home', 'title' => 'Home', 'path' => '/', 'front' => true,
         'sections' => [[
-            'slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'mixed-width-editorial',
+            'slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'asymmetric-split',
             'background' => 'contrast', 'primary_action' => $action,
         ]],
     ]];
@@ -1877,7 +1877,7 @@ function hh_null_action_fixture($project, string $heroMarkup): void
         'sections' => [[
             'slug' => 'hero',
             'role' => 'hero',
-            'layout_archetype' => 'mixed-width-editorial',
+            'layout_archetype' => 'asymmetric-split',
             'background' => 'base',
             'primary_action' => null,
         ]],
@@ -1995,7 +1995,7 @@ test('HeaderHeroStep unwraps a header action row emptied by duplicate CTA remova
             'sections' => [[
                 'slug' => 'hero',
                 'role' => 'hero',
-                'layout_archetype' => 'mixed-width-editorial',
+                'layout_archetype' => 'asymmetric-split',
                 'background' => 'base',
                 'primary_action' => $action,
             ]],
@@ -2135,7 +2135,7 @@ test('header-hero does not restore a planned Add to cart label after storefront 
         [
             'slug' => 'home', 'title' => 'Home', 'path' => '/', 'front' => true,
             'sections' => [[
-                'slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'mixed-width-editorial',
+                'slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'asymmetric-split',
                 'background' => 'base', 'primary_action' => $action,
             ]],
         ],
