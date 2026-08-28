@@ -358,6 +358,13 @@ final class HeaderHeroStep implements Step
                     $heroPart,
                     $heroRepairs,
                 );
+                $heroMarkup = GeneratedMarkup::withRootClassMarker(
+                    $heroMarkup,
+                    'hero-media--',
+                    'hero-media--' . (string) $delivery['media_aspect'],
+                    $heroPart,
+                    $heroRepairs,
+                );
                 $beforeLayout = $heroMarkup;
                 $heroMarkup = GeneratedMarkup::constrainedPart($heroMarkup, $wideMeasureRootClasses);
                 if ($heroMarkup !== $beforeLayout) {

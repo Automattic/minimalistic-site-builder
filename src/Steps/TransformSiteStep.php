@@ -597,6 +597,13 @@ final class TransformSiteStep implements Step
                 $heroPart,
                 $stampRepairs,
             );
+            $heroMarkup = GeneratedMarkup::withRootClassMarker(
+                $heroMarkup,
+                'hero-media--',
+                'hero-media--' . (string) $delivery['media_aspect'],
+                $heroPart,
+                $stampRepairs,
+            );
             $project->writeText($heroRel, $heroMarkup);
         }
 
