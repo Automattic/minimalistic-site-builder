@@ -270,7 +270,7 @@ test('repair() rotates V3 accent off primary and leaves primary unchanged', func
     );
 });
 
-test('repair() of V4 accent lands at least 39 degrees from primary', function () {
+test('repair() of V4 accent lands at least HUE_SEPARATION minus rounding slack from primary', function () {
     $palette = palette_floor_fixture('v4')['palette'];
     $authoredPrimary = $palette['primary'];
     $warnings = [];
@@ -713,6 +713,7 @@ test('8-bit rounding never drags a rotated accent back under the too-close line 
     // circle at several lightness/saturation pairs and hold the delivered
     // separation above the line.
     $worst = 360.0;
+    $evaluated = 0;
     foreach (range(0, 357, 9) as $primaryHue) {
         foreach ([0.3, 0.5, 0.7] as $lightness) {
             foreach ([0.35, 0.65, 0.95] as $saturation) {
@@ -732,11 +733,17 @@ test('8-bit rounding never drags a rotated accent back under the too-close line 
                 );
                 $delta = PaletteFloor::hueDistance($out['accent'], $out['primary']);
                 if ($delta !== null) {
+                    $evaluated++;
                     $worst = min($worst, $delta);
                 }
             }
         }
     }
+    // Guard against a vacuous pass: the chroma guard must not skip every probe.
+    assert_true(
+        $evaluated > 0,
+        'the sweep evaluated no probe, so the separation assertion is vacuous',
+    );
     assert_true(
         $worst >= PaletteFloor::HUE_TOO_CLOSE,
         sprintf('worst delivered separation %.2f fell under the %.1f line', $worst, PaletteFloor::HUE_TOO_CLOSE),
