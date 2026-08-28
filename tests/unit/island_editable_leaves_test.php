@@ -195,3 +195,124 @@ test('serializer round-trips interleaved image inner blocks inside core/html', f
     assert_contains('<figure class="wp-block-image island-bare-image"><img src="theme:hero.jpg" alt="Hero"/></figure>', $out);
     assert_contains('id="hero"', $out);
 });
+
+test('a flat ul becomes core/list with core/list-item children', function () {
+    $html = IslandEditableLeaves::wrap('<ul><li>One</li><li>Two <strong>b</strong></li></ul>');
+    assert_contains('<!-- wp:list -->', $html);
+    assert_contains('<!-- wp:list-item -->', $html);
+    assert_contains('<ul class="wp-block-list">', $html);
+    assert_contains('<li>One</li>', $html);
+    assert_contains('<li>Two <strong>b</strong></li>', $html);
+    $saves = new SaveStrategyRegistry(new BlockRegistry());
+    assert_eq(
+        '<ul class="wp-block-list"><li>One</li></ul>',
+        $saves->save('core/list', [], '<li>One</li>'),
+        'emitted list markup matches the registry save shape',
+    );
+});
+
+test('a nested list nests as a list-item containing a list', function () {
+    $html = IslandEditableLeaves::wrap('<ul><li>Parent<ul><li>Child</li></ul></li></ul>');
+    assert_contains('<!-- wp:list -->', $html);
+    assert_contains('<li>Parent<!-- wp:list -->', $html);
+    assert_contains('<li>Child</li>', $html);
+    assert_eq(2, substr_count($html, '<!-- wp:list -->'));
+    assert_eq(2, substr_count($html, '<!-- wp:list-item -->'));
+});
+
+test('a table with thead and caption round-trips as core/table', function () {
+    $html = IslandEditableLeaves::wrap(
+        '<table><caption>Cap</caption><thead><tr><th>H</th></tr></thead><tbody><tr><td>A</td></tr></tbody></table>'
+    );
+    assert_contains('<!-- wp:table {"hasFixedLayout":false,"className":"island-bare-table"} -->', $html);
+    assert_contains('<figure class="wp-block-table island-bare-table">', $html);
+    assert_contains('<thead><tr><th>H</th></tr>', $html);
+    assert_contains('<tbody><tr><td>A</td></tr>', $html);
+    assert_contains('<figcaption class="wp-element-caption">Cap</figcaption>', $html);
+    $saves = new SaveStrategyRegistry(new BlockRegistry());
+    assert_eq(
+        '<figure class="wp-block-table island-bare-table"><table><thead><tr><th>H</th></tr></thead>'
+        . '<tbody><tr><td>A</td></tr></tbody></table><figcaption class="wp-element-caption">Cap</figcaption></figure>',
+        $saves->save('core/table', [
+            'hasFixedLayout' => false,
+            'className' => 'island-bare-table',
+            'caption' => 'Cap',
+            'head' => [['cells' => [['content' => 'H', 'tag' => 'th']]]],
+            'body' => [['cells' => [['content' => 'A', 'tag' => 'td']]]],
+        ], ''),
+        'emitted table markup matches the registry save shape',
+    );
+});
+
+test('a table keeps authored class on the table and row text boundaries', function () {
+    $html = IslandEditableLeaves::wrap(
+        '<table class="hours"><thead><tr><th>Days</th><th>Open</th></tr></thead>'
+        . '<tbody><tr><th>Wed</th><td>7am</td></tr></tbody></table>'
+    );
+    assert_contains('<!-- wp:table {"hasFixedLayout":false,"className":"island-bare-table hours"} -->', $html);
+    assert_contains('<figure class="wp-block-table island-bare-table hours">', $html);
+    assert_contains('<table class="hours">', $html);
+    $stripped = preg_replace('/<!--\s*\/?wp:[a-z-]+[^>]*-->/', '', $html) ?? $html;
+    $norm = preg_replace('/\s+/u', ' ', trim(strip_tags($stripped))) ?? '';
+    assert_contains('Open Wed', $norm);
+    assert_contains('DaysOpen', $norm);
+});
+
+test('a pretty-printed table stays inert when save() would collapse row text', function () {
+    $html = IslandEditableLeaves::wrap(
+        "<table>\n<thead>\n<tr><th>Days</th><th>Open</th></tr>\n</thead>\n"
+        . "<tbody>\n<tr><th>Wed</th><td>7am</td></tr>\n</tbody>\n</table>"
+    );
+    assert_true(!str_contains($html, '<!-- wp:table'), 'pretty table is not wrapped');
+    assert_contains('<th>Days</th>', $html);
+    assert_contains('<th>Wed</th>', $html);
+});
+
+test('a table with a class on tr stays inert', function () {
+    $html = IslandEditableLeaves::wrap('<table><tr class="odd"><td>A</td></tr></table>');
+    assert_true(!str_contains($html, '<!-- wp:table'), 'unrepresentable row class leaves the table inert');
+    assert_contains('<tr class="odd">', $html);
+});
+
+test('a table with colspan stays inert', function () {
+    $html = IslandEditableLeaves::wrap('<table><tr><td colspan="2">A</td></tr></table>');
+    assert_true(!str_contains($html, '<!-- wp:table'), 'colspan cannot be represented as a wrapped table');
+    assert_contains('<td colspan="2">A</td>', $html);
+});
+
+test('a blockquote with cite becomes core/quote with attribution', function () {
+    $html = IslandEditableLeaves::wrap('<blockquote><p>Hello</p><cite>Ada</cite></blockquote>');
+    assert_contains('<!-- wp:quote -->', $html);
+    assert_contains('<blockquote class="wp-block-quote">', $html);
+    assert_contains('<!-- wp:paragraph -->', $html);
+    assert_contains('<p>Hello</p>', $html);
+    assert_contains('<cite>Ada</cite>', $html);
+    $saves = new SaveStrategyRegistry(new BlockRegistry());
+    assert_eq(
+        '<blockquote class="wp-block-quote"><p>Hello</p><cite>Ada</cite></blockquote>',
+        $saves->save('core/quote', ['citation' => 'Ada'], '<p>Hello</p>'),
+        'emitted quote markup matches the registry save shape',
+    );
+});
+
+test('a quote with a class on cite stays inert', function () {
+    $html = IslandEditableLeaves::wrap('<blockquote><p>Hello</p><cite class="by">Ada</cite></blockquote>');
+    assert_true(!str_contains($html, '<!-- wp:quote'), 'unrepresentable cite class leaves the quote inert');
+    assert_contains('<cite class="by">Ada</cite>', $html);
+});
+
+test('a page whose CSS contains a child combinator on table leaves tables inert and warns', function () {
+    $warnings = [];
+    $html = IslandEditableLeaves::wrap(
+        '<table><tr><td>A</td></tr></table>',
+        '.copy > table { width: 100%; }',
+        'design/home.html',
+        'page home island copy',
+        $warnings,
+    );
+    assert_true(!str_contains($html, '<!-- wp:table'), 'bare table is not wrapped');
+    assert_contains('<table><tr><td>A</td></tr></table>', $html);
+    assert_eq(1, count($warnings), 'one combinator warning for the page');
+    assert_contains('combinator targeting table', $warnings[0]);
+    assert_contains('delivered bare tables inert', $warnings[0]);
+});

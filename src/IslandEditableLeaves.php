@@ -12,21 +12,29 @@ use Automattic\SiteBuild\BlockSerializer\Save\SaveStrategyRegistry;
 use Automattic\SiteBuild\BlockSerializer\Serializer;
 
 /**
- * Wrap phrasing-only headings, paragraphs, and images inside an HTML
- * island so WordPress 7.1 can edit them in place as inner blocks.
+ * Wrap phrasing-only headings, paragraphs, images, lists, tables, and
+ * quotes inside an HTML island so WordPress 7.1 can edit them in place
+ * as inner blocks.
  */
 final class IslandEditableLeaves
 {
     public const BARE_WRAPPER_CLASS = 'island-bare-image';
     public const BARE_WRAPPER_CSS = ".island-bare-image {\n    display: contents;\n}\n";
+    public const BARE_TABLE_CLASS = 'island-bare-table';
+    public const BARE_TABLE_CSS = ".island-bare-table {\n    display: contents;\n}\n";
 
-    private const PHRASING = ['a', 'br', 'code', 'em', 'mark', 's', 'strong', 'sub', 'sup'];
+    private const PHRASING = ['a', 'br', 'code', 'em', 'mark', 's', 'span', 'strong', 'sub', 'sup'];
     private const IMG_ATTRS = ['src', 'alt', 'id', 'class', 'width', 'height', 'loading', 'title'];
 
     public static function cssBlocksBareImages(string $css): bool
     {
+        return self::cssBlocksBareTag($css, 'img');
+    }
+
+    public static function cssBlocksBareTag(string $css, string $tag): bool
+    {
         $css = preg_replace('/\/\*.*?\*\//s', '', $css) ?? $css;
-        return preg_match('/[>+~]\s*img\b/i', $css) === 1;
+        return preg_match('/[>+~]\s*' . preg_quote($tag, '/') . '\b/i', $css) === 1;
     }
 
     /**
@@ -42,7 +50,8 @@ final class IslandEditableLeaves
         if ($html === '') {
             return $html;
         }
-        $blockBare = self::cssBlocksBareImages($css);
+        $blockBareImg = self::cssBlocksBareTag($css, 'img');
+        $blockBareTable = self::cssBlocksBareTag($css, 'table');
         $registry = new BlockRegistry();
         $saves = new SaveStrategyRegistry($registry);
         $comments = new CommentSerializer($registry);
@@ -61,22 +70,40 @@ final class IslandEditableLeaves
             $wrapped = self::tryWrap(
                 $candidate,
                 $html,
-                $blockBare,
+                $blockBareImg,
+                $blockBareTable,
                 $saves,
                 $comments,
                 $serializer,
             );
             if (
                 $wrapped === null
-                && $blockBare
-                && $candidate['tag'] === 'img'
                 && $path !== ''
+                && (
+                    ($blockBareImg && $candidate['tag'] === 'img')
+                    || ($blockBareTable && $candidate['tag'] === 'table')
+                )
                 && !self::hasCombinatorWarning($warnings, $path)
             ) {
-                $warnings[] = "malformed_design: {$path} context {$context}; authored CSS combinator targeting img; "
-                    . 'delivered bare images inert; disposition skipped';
+                $target = $candidate['tag'] === 'table' ? 'table' : 'img';
+                $noun = $target === 'table' ? 'tables' : 'images';
+                $warnings[] = "malformed_design: {$path} context {$context}; authored CSS combinator targeting {$target}; "
+                    . "delivered bare {$noun} inert; disposition skipped";
             }
-            $out .= $wrapped ?? substr($html, $candidate['start'], $candidate['end'] - $candidate['start']);
+            if ($wrapped !== null) {
+                $out .= $wrapped;
+            } elseif ($candidate['inner'] !== '' && self::canDescend($candidate['tag'])) {
+                $close = substr(
+                    $html,
+                    $candidate['start'] + strlen($candidate['open']) + strlen($candidate['inner']),
+                    $candidate['end'] - $candidate['start'] - strlen($candidate['open']) - strlen($candidate['inner']),
+                );
+                $out .= $candidate['open']
+                    . self::wrap($candidate['inner'], $css, $path, $context, $warnings)
+                    . $close;
+            } else {
+                $out .= substr($html, $candidate['start'], $candidate['end'] - $candidate['start']);
+            }
             $offset = $candidate['end'];
         }
         return $out;
@@ -88,7 +115,8 @@ final class IslandEditableLeaves
     private static function tryWrap(
         array $candidate,
         string $html,
-        bool $blockBare,
+        bool $blockBareImg,
+        bool $blockBareTable,
         SaveStrategyRegistry $saves,
         CommentSerializer $comments,
         Serializer $serializer,
@@ -98,10 +126,22 @@ final class IslandEditableLeaves
             return self::tryWrapFigure($candidate, $saves, $comments, $serializer);
         }
         if ($tag === 'img') {
-            if ($blockBare || self::imgHasForbiddenParent($html, $candidate['start'], $candidate['end'])) {
+            if ($blockBareImg || self::imgHasForbiddenParent($html, $candidate['start'], $candidate['end'])) {
                 return null;
             }
             return self::tryWrapBareImage($candidate, $saves, $comments, $serializer);
+        }
+        if ($tag === 'ul' || $tag === 'ol') {
+            return self::tryWrapList($candidate, $saves, $comments, $serializer);
+        }
+        if ($tag === 'table') {
+            if ($blockBareTable) {
+                return null;
+            }
+            return self::tryWrapTable($candidate, $saves, $comments, $serializer);
+        }
+        if ($tag === 'blockquote') {
+            return self::tryWrapQuote($candidate, $saves, $comments, $serializer);
         }
         $open = $candidate['open'];
         $inner = $candidate['inner'];
@@ -426,7 +466,7 @@ final class IslandEditableLeaves
     private static function hasCombinatorWarning(array $warnings, string $path): bool
     {
         foreach ($warnings as $warning) {
-            if (str_contains($warning, $path) && str_contains($warning, 'combinator targeting img')) {
+            if (str_contains($warning, $path) && str_contains($warning, 'combinator targeting')) {
                 return true;
             }
         }
@@ -468,15 +508,591 @@ final class IslandEditableLeaves
     /**
      * @param array<string,mixed> $blockAttrs
      */
+    private static function canDescend(string $tag): bool
+    {
+        return in_array($tag, ['ul', 'ol', 'table', 'blockquote', 'p'], true)
+            || preg_match('/^h[1-6]$/', $tag) === 1;
+    }
+
+    /**
+     * @param array{start:int,end:int,tag:string,open:string,inner:string} $candidate
+     */
+    private static function tryWrapList(
+        array $candidate,
+        SaveStrategyRegistry $saves,
+        CommentSerializer $comments,
+        Serializer $serializer,
+    ): ?string {
+        if (self::hasStyleAttribute($candidate['open'] . $candidate['inner'])) {
+            return null;
+        }
+        $attrs = self::openingAttributes($candidate['open']);
+        if ($attrs === null) {
+            return null;
+        }
+        $block = [];
+        if ($candidate['tag'] === 'ol') {
+            $block['ordered'] = true;
+        }
+        foreach ($attrs as $attr) {
+            $name = strtolower($attr['name']);
+            $value = $attr['value'];
+            if ($name === 'class') {
+                $classes = array_values(array_filter(
+                    preg_split('/\s+/', trim($value), -1, PREG_SPLIT_NO_EMPTY) ?: [],
+                    static fn (string $class): bool => $class !== 'wp-block-list',
+                ));
+                if ($classes !== []) {
+                    $block['className'] = implode(' ', $classes);
+                }
+                continue;
+            }
+            if ($name === 'id') {
+                if ($value === '') {
+                    return null;
+                }
+                $block['anchor'] = $value;
+                continue;
+            }
+            if ($name === 'start' && $candidate['tag'] === 'ol') {
+                if (preg_match('/^-?\d+$/', $value) !== 1) {
+                    return null;
+                }
+                $block['start'] = (int) $value;
+                continue;
+            }
+            if ($name === 'reversed' && $candidate['tag'] === 'ol') {
+                $block['reversed'] = true;
+                continue;
+            }
+            return null;
+        }
+        $items = self::listItems($candidate['inner']);
+        if ($items === null || $items === []) {
+            return null;
+        }
+        $emitted = [];
+        foreach ($items as $item) {
+            $one = self::emitListItem($item, $saves, $comments, $serializer);
+            if ($one === null) {
+                return null;
+            }
+            $emitted[] = $one;
+        }
+        return self::emit('core/list', $block, $saves, $comments, $serializer, implode("\n\n", $emitted));
+    }
+
+    /**
+     * @return list<array{open:string,inner:string}>|null
+     */
+    private static function listItems(string $inner): ?array
+    {
+        $offset = 0;
+        $length = strlen($inner);
+        $items = [];
+        while ($offset < $length) {
+            if (preg_match('/\G\s+/', $inner, $ws, 0, $offset) === 1) {
+                $offset += strlen($ws[0]);
+                continue;
+            }
+            if (preg_match('/\G<li(?=[\s>])/i', $inner, $m, 0, $offset) !== 1) {
+                return null;
+            }
+            $openEnd = self::tagEnd($inner, $offset);
+            if ($openEnd === null) {
+                return null;
+            }
+            $close = self::matchingClose($inner, 'li', $openEnd);
+            if ($close === null) {
+                return null;
+            }
+            $items[] = [
+                'open'  => substr($inner, $offset, $openEnd - $offset),
+                'inner' => substr($inner, $openEnd, $close['start'] - $openEnd),
+            ];
+            $offset = $close['end'];
+        }
+        return $items;
+    }
+
+    /**
+     * @param array{open:string,inner:string} $item
+     */
+    private static function emitListItem(
+        array $item,
+        SaveStrategyRegistry $saves,
+        CommentSerializer $comments,
+        Serializer $serializer,
+    ): ?string {
+        if (self::hasStyleAttribute($item['open'] . $item['inner'])) {
+            return null;
+        }
+        $attrs = self::openingAttributes($item['open']);
+        if ($attrs === null) {
+            return null;
+        }
+        $block = [];
+        foreach ($attrs as $attr) {
+            $name = strtolower($attr['name']);
+            if ($name === 'id') {
+                if ($attr['value'] === '') {
+                    return null;
+                }
+                $block['anchor'] = $attr['value'];
+                continue;
+            }
+            return null;
+        }
+        $parts = self::listItemParts($item['inner']);
+        if ($parts === null) {
+            return null;
+        }
+        $block['content'] = $parts['content'];
+        $nested = '';
+        if ($parts['list'] !== null) {
+            $nested = self::tryWrapList($parts['list'], $saves, $comments, $serializer);
+            if ($nested === null) {
+                return null;
+            }
+        }
+        return self::emit('core/list-item', $block, $saves, $comments, $serializer, $nested);
+    }
+
+    /**
+     * @return array{content:string,list:?array{start:int,end:int,tag:string,open:string,inner:string}}|null
+     */
+    private static function listItemParts(string $inner): ?array
+    {
+        if (preg_match('/<(ul|ol)(?=[\s>])/i', $inner, $match, PREG_OFFSET_CAPTURE) === 1) {
+            $at = (int) $match[0][1];
+            $prefix = substr($inner, 0, $at);
+            if (self::hasUnsupportedInner($prefix)) {
+                return null;
+            }
+            $tag = strtolower($match[1][0]);
+            $openEnd = self::tagEnd($inner, $at);
+            if ($openEnd === null) {
+                return null;
+            }
+            $close = self::matchingClose($inner, $tag, $openEnd);
+            if ($close === null || trim(substr($inner, $close['end'])) !== '') {
+                return null;
+            }
+            return [
+                'content' => $prefix,
+                'list'    => [
+                    'start' => $at,
+                    'end'   => $close['end'],
+                    'tag'   => $tag,
+                    'open'  => substr($inner, $at, $openEnd - $at),
+                    'inner' => substr($inner, $openEnd, $close['start'] - $openEnd),
+                ],
+            ];
+        }
+        if (self::hasUnsupportedInner($inner)) {
+            return null;
+        }
+        return ['content' => $inner, 'list' => null];
+    }
+
+    /**
+     * @param array{start:int,end:int,tag:string,open:string,inner:string} $candidate
+     */
+    private static function tryWrapTable(
+        array $candidate,
+        SaveStrategyRegistry $saves,
+        CommentSerializer $comments,
+        Serializer $serializer,
+    ): ?string {
+        $markup = $candidate['open'] . $candidate['inner'];
+        if (self::hasStyleAttribute($markup) || preg_match('/\s(?:colspan|rowspan)\s*=/i', $markup) === 1) {
+            return null;
+        }
+        $attrs = self::openingAttributes($candidate['open']);
+        if ($attrs === null) {
+            return null;
+        }
+        $block = ['hasFixedLayout' => false];
+        $classes = [self::BARE_TABLE_CLASS];
+        $tableClasses = [];
+        foreach ($attrs as $attr) {
+            $name = strtolower($attr['name']);
+            $value = $attr['value'];
+            if ($name === 'class') {
+                foreach (preg_split('/\s+/', trim($value), -1, PREG_SPLIT_NO_EMPTY) ?: [] as $class) {
+                    if ($class !== 'wp-block-table' && $class !== self::BARE_TABLE_CLASS) {
+                        $classes[] = $class;
+                        $tableClasses[] = $class;
+                    }
+                }
+                continue;
+            }
+            if ($name === 'id') {
+                if ($value === '') {
+                    return null;
+                }
+                $block['anchor'] = $value;
+                continue;
+            }
+            return null;
+        }
+        $parts = self::tableParts($candidate['inner']);
+        if ($parts === null) {
+            return null;
+        }
+        $block['head'] = $parts['head'];
+        $block['body'] = $parts['body'];
+        if ($parts['foot'] !== []) {
+            $block['foot'] = $parts['foot'];
+        }
+        if ($parts['caption'] !== null) {
+            $block['caption'] = $parts['caption'];
+        }
+        if ($block['head'] === [] && $block['body'] === [] && ($block['foot'] ?? []) === []) {
+            return null;
+        }
+        $block['className'] = implode(' ', array_values(array_unique($classes)));
+        $emitted = self::emit('core/table', $block, $saves, $comments, $serializer);
+        if ($emitted === null || !self::tableTextCompatible($candidate['inner'], $emitted)) {
+            return null;
+        }
+        return self::tableFrontHtml($emitted, $tableClasses);
+    }
+
+    /**
+     * save() (and later fix-blocks) emit compact table HTML. Pretty-printed
+     * source keeps inter-row whitespace that strip_tags treats as word
+     * boundaries; wrapping those tables would glue "open Wed" into "openWed".
+     */
+    private static function tableTextCompatible(string $inner, string $emitted): bool
+    {
+        $orig = preg_replace('/<caption\b[^>]*>.*?<\/caption>/is', '', $inner) ?? $inner;
+        $emit = preg_replace('/<!--\s*\/?wp:[a-z-]+[^>]*-->/', '', $emitted) ?? $emitted;
+        $emit = preg_replace('/<figcaption\b[^>]*>.*?<\/figcaption>/is', '', $emit) ?? $emit;
+        $norm = static fn (string $s): string => preg_replace('/\s+/u', ' ', trim(strip_tags($s))) ?? '';
+        return $norm($orig) === $norm($emit);
+    }
+
+    /**
+     * Save() emits a compact table. Keep authored classes on the inner
+     * <table> so layout rules still hit, and keep a boundary after rows
+     * and sections so strip_tags text matches pretty-printed design HTML.
+     *
+     * @param list<string> $tableClasses
+     */
+    private static function tableFrontHtml(string $emitted, array $tableClasses): string
+    {
+        $emitted = preg_replace('/<\/(?:tr|thead|tbody|tfoot)>(?=<)/i', '$0 ', $emitted) ?? $emitted;
+        if ($tableClasses === []) {
+            return $emitted;
+        }
+        $class = htmlspecialchars(implode(' ', array_values(array_unique($tableClasses))), ENT_QUOTES);
+        $updated = preg_replace(
+            '/(<figure class="wp-block-table[^"]*">)<table>/',
+            '$1<table class="' . $class . '">',
+            $emitted,
+            1,
+        );
+        return is_string($updated) ? $updated : $emitted;
+    }
+
+    /**
+     * @return array{caption:?string,head:list<array{cells:list<array<string,string>>}>,body:list<array{cells:list<array<string,string>>}>,foot:list<array{cells:list<array<string,string>>}>}|null
+     */
+    private static function tableParts(string $inner): ?array
+    {
+        $offset = 0;
+        $length = strlen($inner);
+        $caption = null;
+        $head = [];
+        $body = [];
+        $foot = [];
+        while ($offset < $length) {
+            if (preg_match('/\G\s+/', $inner, $ws, 0, $offset) === 1) {
+                $offset += strlen($ws[0]);
+                continue;
+            }
+            if (preg_match('/\G<(caption|thead|tbody|tfoot|tr)(?=[\s>])/i', $inner, $m, 0, $offset) !== 1) {
+                return null;
+            }
+            $tag = strtolower($m[1]);
+            $openEnd = self::tagEnd($inner, $offset);
+            if ($openEnd === null) {
+                return null;
+            }
+            $open = substr($inner, $offset, $openEnd - $offset);
+            $sectionAttrs = self::openingAttributes($open);
+            if ($sectionAttrs === null || $sectionAttrs !== []) {
+                return null;
+            }
+            $close = self::matchingClose($inner, $tag, $openEnd);
+            if ($close === null) {
+                return null;
+            }
+            $sectionInner = substr($inner, $openEnd, $close['start'] - $openEnd);
+            if ($tag === 'caption') {
+                if ($caption !== null || $head !== [] || $body !== [] || $foot !== []) {
+                    return null;
+                }
+                if (self::hasUnsupportedInner($sectionInner) || self::hasStyleAttribute(substr($inner, $offset, $close['end'] - $offset))) {
+                    return null;
+                }
+                $caption = $sectionInner;
+            } elseif ($tag === 'tr') {
+                $row = self::tableRow($sectionInner);
+                if ($row === null) {
+                    return null;
+                }
+                $body[] = $row;
+            } else {
+                $rows = self::tableRows($sectionInner);
+                if ($rows === null) {
+                    return null;
+                }
+                if ($tag === 'thead') {
+                    $head = array_merge($head, $rows);
+                } elseif ($tag === 'tfoot') {
+                    $foot = array_merge($foot, $rows);
+                } else {
+                    $body = array_merge($body, $rows);
+                }
+            }
+            $offset = $close['end'];
+        }
+        return ['caption' => $caption, 'head' => $head, 'body' => $body, 'foot' => $foot];
+    }
+
+    /**
+     * @return list<array{cells:list<array<string,string>>}>|null
+     */
+    private static function tableRows(string $inner): ?array
+    {
+        $offset = 0;
+        $length = strlen($inner);
+        $rows = [];
+        while ($offset < $length) {
+            if (preg_match('/\G\s+/', $inner, $ws, 0, $offset) === 1) {
+                $offset += strlen($ws[0]);
+                continue;
+            }
+            if (preg_match('/\G<tr(?=[\s>])/i', $inner, $m, 0, $offset) !== 1) {
+                return null;
+            }
+            $openEnd = self::tagEnd($inner, $offset);
+            if ($openEnd === null) {
+                return null;
+            }
+            $open = substr($inner, $offset, $openEnd - $offset);
+            $rowAttrs = self::openingAttributes($open);
+            if ($rowAttrs === null || $rowAttrs !== []) {
+                return null;
+            }
+            $close = self::matchingClose($inner, 'tr', $openEnd);
+            if ($close === null) {
+                return null;
+            }
+            $row = self::tableRow(substr($inner, $openEnd, $close['start'] - $openEnd));
+            if ($row === null) {
+                return null;
+            }
+            $rows[] = $row;
+            $offset = $close['end'];
+        }
+        return $rows;
+    }
+
+    /**
+     * @return array{cells:list<array<string,string>>}|null
+     */
+    private static function tableRow(string $inner): ?array
+    {
+        $offset = 0;
+        $length = strlen($inner);
+        $cells = [];
+        while ($offset < $length) {
+            if (preg_match('/\G\s+/', $inner, $ws, 0, $offset) === 1) {
+                $offset += strlen($ws[0]);
+                continue;
+            }
+            if (preg_match('/\G<(td|th)(?=[\s>])/i', $inner, $m, 0, $offset) !== 1) {
+                return null;
+            }
+            $tag = strtolower($m[1]);
+            $openEnd = self::tagEnd($inner, $offset);
+            if ($openEnd === null) {
+                return null;
+            }
+            $close = self::matchingClose($inner, $tag, $openEnd);
+            if ($close === null) {
+                return null;
+            }
+            $open = substr($inner, $offset, $openEnd - $offset);
+            $cellInner = substr($inner, $openEnd, $close['start'] - $openEnd);
+            if (self::hasStyleAttribute($open . $cellInner) || self::hasUnsupportedInner($cellInner)) {
+                return null;
+            }
+            $cellAttrs = self::openingAttributes($open);
+            if ($cellAttrs === null) {
+                return null;
+            }
+            $cell = ['content' => $cellInner, 'tag' => $tag];
+            foreach ($cellAttrs as $attr) {
+                $name = strtolower($attr['name']);
+                if ($tag === 'th' && $name === 'scope' && in_array($attr['value'], ['col', 'row', 'colgroup', 'rowgroup'], true)) {
+                    $cell['scope'] = $attr['value'];
+                    continue;
+                }
+                return null;
+            }
+            $cells[] = $cell;
+            $offset = $close['end'];
+        }
+        if ($cells === []) {
+            return null;
+        }
+        return ['cells' => $cells];
+    }
+
+    /**
+     * @param array{start:int,end:int,tag:string,open:string,inner:string} $candidate
+     */
+    private static function tryWrapQuote(
+        array $candidate,
+        SaveStrategyRegistry $saves,
+        CommentSerializer $comments,
+        Serializer $serializer,
+    ): ?string {
+        if (self::hasStyleAttribute($candidate['open'] . $candidate['inner'])) {
+            return null;
+        }
+        $attrs = self::openingAttributes($candidate['open']);
+        if ($attrs === null) {
+            return null;
+        }
+        $block = [];
+        foreach ($attrs as $attr) {
+            $name = strtolower($attr['name']);
+            $value = $attr['value'];
+            if ($name === 'class') {
+                $classes = array_values(array_filter(
+                    preg_split('/\s+/', trim($value), -1, PREG_SPLIT_NO_EMPTY) ?: [],
+                    static fn (string $class): bool => $class !== 'wp-block-quote',
+                ));
+                if ($classes !== []) {
+                    $block['className'] = implode(' ', $classes);
+                }
+                continue;
+            }
+            if ($name === 'id') {
+                if ($value === '') {
+                    return null;
+                }
+                $block['anchor'] = $value;
+                continue;
+            }
+            return null;
+        }
+        $parts = self::quoteParts($candidate['inner']);
+        if ($parts === null) {
+            return null;
+        }
+        if ($parts['citation'] !== null) {
+            $block['citation'] = $parts['citation'];
+        }
+        $innerBlocks = [];
+        foreach ($parts['blocks'] as $child) {
+            $emitted = self::tryWrap($child, $child['open'] . $child['inner'], false, false, $saves, $comments, $serializer);
+            if ($emitted === null) {
+                return null;
+            }
+            $innerBlocks[] = $emitted;
+        }
+        if ($innerBlocks === []) {
+            return null;
+        }
+        return self::emit('core/quote', $block, $saves, $comments, $serializer, implode("\n\n", $innerBlocks));
+    }
+
+    /**
+     * @return array{blocks:list<array{start:int,end:int,tag:string,open:string,inner:string}>,citation:?string}|null
+     */
+    private static function quoteParts(string $inner): ?array
+    {
+        $offset = 0;
+        $length = strlen($inner);
+        $blocks = [];
+        $citation = null;
+        while ($offset < $length) {
+            if (preg_match('/\G\s+/', $inner, $ws, 0, $offset) === 1) {
+                $offset += strlen($ws[0]);
+                continue;
+            }
+            if ($citation !== null) {
+                return null;
+            }
+            if (preg_match('/\G<(p|h[1-6]|cite)(?=[\s>])/i', $inner, $m, 0, $offset) !== 1) {
+                $rest = substr($inner, $offset);
+                if ($blocks === [] && $citation === null && !self::hasUnsupportedInner($rest)) {
+                    $blocks[] = [
+                        'start' => $offset,
+                        'end'   => $length,
+                        'tag'   => 'p',
+                        'open'  => '<p>',
+                        'inner' => $rest,
+                    ];
+                    break;
+                }
+                return null;
+            }
+            $tag = strtolower($m[1]);
+            $openEnd = self::tagEnd($inner, $offset);
+            if ($openEnd === null) {
+                return null;
+            }
+            $close = self::matchingClose($inner, $tag, $openEnd);
+            if ($close === null) {
+                return null;
+            }
+            $open = substr($inner, $offset, $openEnd - $offset);
+            $childInner = substr($inner, $openEnd, $close['start'] - $openEnd);
+            if ($tag === 'cite') {
+                $citeAttrs = self::openingAttributes($open);
+                if (
+                    $citeAttrs === null
+                    || $citeAttrs !== []
+                    || self::hasUnsupportedInner($childInner)
+                    || self::hasStyleAttribute($open . $childInner)
+                ) {
+                    return null;
+                }
+                $citation = $childInner;
+            } else {
+                $blocks[] = [
+                    'start' => $offset,
+                    'end'   => $close['end'],
+                    'tag'   => $tag,
+                    'open'  => $open,
+                    'inner' => $childInner,
+                ];
+            }
+            $offset = $close['end'];
+        }
+        if ($blocks === []) {
+            return null;
+        }
+        return ['blocks' => $blocks, 'citation' => $citation];
+    }
+
     private static function emit(
         string $name,
         array $blockAttrs,
         SaveStrategyRegistry $saves,
         CommentSerializer $comments,
         Serializer $serializer,
+        string $innerBlocks = '',
     ): ?string {
         try {
-            $saved = $saves->save($name, $blockAttrs, '');
+            $saved = $saves->save($name, $blockAttrs, $innerBlocks);
             $typed = new JsonObject();
             foreach ($blockAttrs as $key => $value) {
                 $typed->set($key, JsonValue::fromNative($value));
@@ -516,7 +1132,7 @@ final class IslandEditableLeaves
                 $offset = self::skipRawText($html, strtolower($raw[1]), $lt);
                 continue;
             }
-            if (preg_match('/\G<(figure|img|h[1-6]|p)(?=[\s\/>])/i', $html, $match, 0, $lt) !== 1) {
+            if (preg_match('/\G<(figure|img|ul|ol|table|blockquote|h[1-6]|p)(?=[\s\/>])/i', $html, $match, 0, $lt) !== 1) {
                 $offset = $lt + 1;
                 continue;
             }
@@ -604,16 +1220,31 @@ final class IslandEditableLeaves
 
     private static function skipComment(string $html, int $lt): int
     {
-        if (preg_match('/\G<!--\s*wp:(heading|paragraph|image)\b/i', $html, $match, 0, $lt) === 1) {
-            $close = strpos($html, '<!-- /wp:' . strtolower($match[1]), $lt + 4);
-            if ($close === false) {
-                return strlen($html);
-            }
-            $end = strpos($html, '-->', $close);
+        if (preg_match('/\G<!--\s*wp:([a-z0-9-]+)\b/i', $html, $match, 0, $lt) !== 1) {
+            $end = strpos($html, '-->', $lt + 4);
             return $end === false ? strlen($html) : $end + 3;
         }
-        $end = strpos($html, '-->', $lt + 4);
-        return $end === false ? strlen($html) : $end + 3;
+        $name = strtolower($match[1]);
+        $offset = $lt + 4;
+        $depth = 1;
+        $length = strlen($html);
+        while ($offset < $length && $depth > 0) {
+            $next = strpos($html, '<!--', $offset);
+            if ($next === false) {
+                return $length;
+            }
+            if (preg_match('/\G<!--\s*\/wp:' . preg_quote($name, '/') . '(?=\s|-->)/i', $html, $m, 0, $next) === 1) {
+                $depth--;
+                $end = strpos($html, '-->', $next);
+                $offset = $end === false ? $length : $end + 3;
+                continue;
+            }
+            if (preg_match('/\G<!--\s*wp:' . preg_quote($name, '/') . '(?=\s|\{|-->)/i', $html, $m, 0, $next) === 1) {
+                $depth++;
+            }
+            $offset = $next + 4;
+        }
+        return $offset;
     }
 
     private static function skipRawText(string $html, string $tag, int $lt): int

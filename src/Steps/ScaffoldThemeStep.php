@@ -637,6 +637,9 @@ final class ScaffoldThemeStep implements Step
         .island-bare-image {
             display: contents;
         }
+        .island-bare-table {
+            display: contents;
+        }
 
         CSS;
 

@@ -415,10 +415,16 @@ final class IslandPagesStep implements Step
             return;
         }
         $style = $project->readText('theme/style.css');
-        if (str_contains($style, '.' . IslandEditableLeaves::BARE_WRAPPER_CLASS)) {
+        $rule = '';
+        if (!str_contains($style, '.' . IslandEditableLeaves::BARE_WRAPPER_CLASS)) {
+            $rule .= IslandEditableLeaves::BARE_WRAPPER_CSS;
+        }
+        if (!str_contains($style, '.' . IslandEditableLeaves::BARE_TABLE_CLASS)) {
+            $rule .= IslandEditableLeaves::BARE_TABLE_CSS;
+        }
+        if ($rule === '') {
             return;
         }
-        $rule = IslandEditableLeaves::BARE_WRAPPER_CSS;
         $marker = '/* Wrap at spaces only — never split a word mid-token. */';
         $offset = strpos($style, $marker);
         if ($offset === false) {
