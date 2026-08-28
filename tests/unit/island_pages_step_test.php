@@ -590,7 +590,7 @@ test('island-pages: an inert table is named in island-report and warnings.json',
             'island-pages' => ['stale table warning from a previous resume'],
         ]);
         ip_project($project, [
-            'home' => ip_doc('<section id="copy"><table><tr><td colspan="2">A</td></tr></table></section>'),
+            'home' => ip_doc('<section id="copy"><table><tr class="odd"><td>A</td></tr></table></section>'),
         ]);
         (new IslandPagesStep())->run($project);
         $report = $project->readJson('island-report.json');
@@ -598,7 +598,7 @@ test('island-pages: an inert table is named in island-report and warnings.json',
         $rows = $report['warnings'] ?? [];
         assert_eq(1, count($rows), 'exactly one inert-leaf warning');
         assert_contains('authored <table>', (string) $rows[0]);
-        assert_contains('colspan/rowspan cannot be represented', (string) $rows[0]);
+        assert_contains('unrepresentable table structure', (string) $rows[0]);
         assert_eq($rows, $warnings['island-pages'] ?? [], 'warnings.json matches island-report');
         assert_true(
             !in_array('stale table warning from a previous resume', $warnings['island-pages'] ?? [], true),

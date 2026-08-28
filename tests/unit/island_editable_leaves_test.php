@@ -141,13 +141,21 @@ test('a bare img gets a layout-transparent wp-block-image wrapper', function () 
     );
 });
 
-test('a figure with a span sibling stays inert', function () {
+test('a figure with a span sibling stays inert and warns', function () {
+    $warnings = [];
     $html = IslandEditableLeaves::wrap(
-        '<figure><span class="frame"></span><img src="x.jpg" alt="A"></figure>'
+        '<figure><span class="frame"></span><img src="x.jpg" alt="A"></figure>',
+        '',
+        'design/home.html',
+        'page home island hero',
+        $warnings,
     );
     assert_true(!str_contains($html, '<!-- wp:image'), 'unsupported figure siblings stay inert');
     assert_contains('<span class="frame"></span>', $html);
     assert_contains('<img src="x.jpg" alt="A">', $html);
+    assert_eq(1, count($warnings));
+    assert_contains('authored <figure>', $warnings[0]);
+    assert_contains('unsupported figure siblings', $warnings[0]);
 });
 
 test('a page whose CSS contains a child combinator on img leaves bare images inert and warns', function () {
@@ -325,19 +333,26 @@ test('a table with a class on tr stays inert and warns', function () {
     assert_contains('disposition skipped', $warnings[0]);
 });
 
-test('a table with colspan stays inert and warns', function () {
-    $warnings = [];
+test('a table with colspan and rowspan wraps as core/table', function () {
     $html = IslandEditableLeaves::wrap(
-        '<table><tr><td colspan="2">A</td></tr></table>',
-        '',
-        'design/home.html',
-        'page home island copy',
-        $warnings,
+        '<table><thead><tr><th scope="col" colspan="2">H</th></tr></thead>'
+        . '<tbody><tr><th scope="row" rowspan="2">A</th><td>B</td></tr></tbody></table>'
     );
-    assert_true(!str_contains($html, '<!-- wp:table'), 'colspan cannot be represented as a wrapped table');
-    assert_contains('<td colspan="2">A</td>', $html);
-    assert_eq(1, count($warnings));
-    assert_contains('colspan/rowspan cannot be represented', $warnings[0]);
+    assert_contains('<!-- wp:table', $html);
+    assert_contains('colspan="2"', $html);
+    assert_contains('rowspan="2"', $html);
+    $saves = new SaveStrategyRegistry(new BlockRegistry());
+    assert_contains(
+        'colspan="2"',
+        $saves->save('core/table', [
+            'hasFixedLayout' => false,
+            'head' => [['cells' => [['content' => 'H', 'tag' => 'th', 'scope' => 'col', 'colspan' => '2']]]],
+            'body' => [['cells' => [
+                ['content' => 'A', 'tag' => 'th', 'scope' => 'row', 'rowspan' => '2'],
+                ['content' => 'B', 'tag' => 'td'],
+            ]]],
+        ], ''),
+    );
 });
 
 test('a blockquote with cite becomes core/quote with attribution', function () {

@@ -95,7 +95,7 @@ final class IslandEditableLeaves
                 $wrapped === null
                 && $path !== ''
                 && !$combinatorSkip
-                && in_array($tag, ['ul', 'ol', 'table', 'blockquote'], true)
+                && self::isWarnedLeaf($tag)
             ) {
                 self::warnInert($warnings, $path, $context, $tag, $reason);
             }
@@ -133,13 +133,16 @@ final class IslandEditableLeaves
     ): ?string {
         $tag = $candidate['tag'];
         if ($tag === 'figure') {
-            return self::tryWrapFigure($candidate, $saves, $comments, $serializer);
+            return self::tryWrapFigure($candidate, $saves, $comments, $serializer, $reason);
         }
         if ($tag === 'img') {
-            if ($blockBareImg || self::imgHasForbiddenParent($html, $candidate['start'], $candidate['end'])) {
-                return null;
+            if ($blockBareImg) {
+                return self::skip('CSS combinator targeting img', $reason);
             }
-            return self::tryWrapBareImage($candidate, $saves, $comments, $serializer);
+            if (self::imgHasForbiddenParent($html, $candidate['start'], $candidate['end'])) {
+                return self::skip('image inside unsupported parent', $reason);
+            }
+            return self::tryWrapBareImage($candidate, $saves, $comments, $serializer, $reason);
         }
         if ($tag === 'ul' || $tag === 'ol') {
             return self::tryWrapList($candidate, $saves, $comments, $serializer, $reason);
@@ -157,10 +160,13 @@ final class IslandEditableLeaves
         $inner = $candidate['inner'];
         $attrs = self::openingAttributes($open);
         if ($attrs === null) {
-            return null;
+            return self::skip('unrepresentable attribute', $reason);
         }
-        if (self::hasStyleAttribute($open . $inner) || self::hasUnsupportedInner($inner)) {
-            return null;
+        if (self::hasStyleAttribute($open . $inner)) {
+            return self::skip('style attribute', $reason);
+        }
+        if (self::hasUnsupportedInner($inner)) {
+            return self::skip('unsupported inner', $reason);
         }
 
         $blockAttrs = [];
@@ -189,22 +195,23 @@ final class IslandEditableLeaves
             }
             if ($attrName === 'id') {
                 if ($value === '') {
-                    return null;
+                    return self::skip('unrepresentable attribute', $reason);
                 }
                 $blockAttrs['anchor'] = $value;
                 continue;
             }
             if ($name === 'core/paragraph' && $attrName === 'dir') {
                 if ($value !== 'ltr' && $value !== 'rtl') {
-                    return null;
+                    return self::skip('unrepresentable attribute', $reason);
                 }
                 $blockAttrs['direction'] = $value;
                 continue;
             }
-            return null;
+            return self::skip('unrepresentable attribute', $reason);
         }
 
-        return self::emit($name, $blockAttrs, $saves, $comments, $serializer);
+        $out = self::emit($name, $blockAttrs, $saves, $comments, $serializer);
+        return $out ?? self::skip('save() round-trip failed', $reason);
     }
 
     /**
@@ -215,23 +222,25 @@ final class IslandEditableLeaves
         SaveStrategyRegistry $saves,
         CommentSerializer $comments,
         Serializer $serializer,
+        ?string &$reason = null,
     ): ?string {
         if (self::hasStyleAttribute($candidate['open'] . $candidate['inner'])) {
-            return null;
+            return self::skip('style attribute', $reason);
         }
         $figureAttrs = self::openingAttributes($candidate['open']);
         if ($figureAttrs === null) {
-            return null;
+            return self::skip('unrepresentable attribute', $reason);
         }
         $parts = self::figureParts($candidate['inner']);
         if ($parts === null) {
-            return null;
+            return self::skip('unsupported figure siblings', $reason);
         }
         $blockAttrs = self::imageBlockAttrs($parts['img'], $figureAttrs, $parts['link'], $parts['caption'], false);
         if ($blockAttrs === null) {
-            return null;
+            return self::skip('unrepresentable image attributes', $reason);
         }
-        return self::emit('core/image', $blockAttrs, $saves, $comments, $serializer);
+        $out = self::emit('core/image', $blockAttrs, $saves, $comments, $serializer);
+        return $out ?? self::skip('save() round-trip failed', $reason);
     }
 
     /**
@@ -242,15 +251,17 @@ final class IslandEditableLeaves
         SaveStrategyRegistry $saves,
         CommentSerializer $comments,
         Serializer $serializer,
+        ?string &$reason = null,
     ): ?string {
         if (self::hasStyleAttribute($candidate['open'])) {
-            return null;
+            return self::skip('style attribute', $reason);
         }
         $blockAttrs = self::imageBlockAttrs($candidate['open'], [], null, null, true);
         if ($blockAttrs === null) {
-            return null;
+            return self::skip('unrepresentable image attributes', $reason);
         }
-        return self::emit('core/image', $blockAttrs, $saves, $comments, $serializer);
+        $out = self::emit('core/image', $blockAttrs, $saves, $comments, $serializer);
+        return $out ?? self::skip('save() round-trip failed', $reason);
     }
 
     /**
@@ -487,6 +498,12 @@ final class IslandEditableLeaves
     {
         $reason = $why;
         return null;
+    }
+
+    private static function isWarnedLeaf(string $tag): bool
+    {
+        return in_array($tag, ['ul', 'ol', 'table', 'blockquote', 'figure', 'img', 'p'], true)
+            || preg_match('/^h[1-6]$/', $tag) === 1;
     }
 
     /**
@@ -743,9 +760,6 @@ final class IslandEditableLeaves
         $markup = $candidate['open'] . $candidate['inner'];
         if (self::hasStyleAttribute($markup)) {
             return self::skip('style attribute', $reason);
-        }
-        if (preg_match('/\s(?:colspan|rowspan)\s*=/i', $markup) === 1) {
-            return self::skip('colspan/rowspan cannot be represented', $reason);
         }
         $attrs = self::openingAttributes($candidate['open']);
         if ($attrs === null) {
@@ -1058,8 +1072,21 @@ final class IslandEditableLeaves
             $cell = ['content' => $cellInner, 'tag' => $tag];
             foreach ($cellAttrs as $attr) {
                 $name = strtolower($attr['name']);
-                if ($tag === 'th' && $name === 'scope' && in_array($attr['value'], ['col', 'row', 'colgroup', 'rowgroup'], true)) {
-                    $cell['scope'] = $attr['value'];
+                $value = $attr['value'];
+                if ($tag === 'th' && $name === 'scope' && in_array($value, ['col', 'row', 'colgroup', 'rowgroup'], true)) {
+                    $cell['scope'] = $value;
+                    continue;
+                }
+                if ($name === 'colspan' && preg_match('/^[1-9]\d*$/', $value) === 1) {
+                    $cell['colspan'] = $value;
+                    continue;
+                }
+                if ($name === 'rowspan' && preg_match('/^[1-9]\d*$/', $value) === 1) {
+                    $cell['rowspan'] = $value;
+                    continue;
+                }
+                if ($name === 'data-align' && in_array($value, ['left', 'center', 'right'], true)) {
+                    $cell['align'] = $value;
                     continue;
                 }
                 return null;
