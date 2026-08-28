@@ -110,7 +110,7 @@ final class IslandPagesStep implements Step
             'degrades' => $degrades,
             'warnings' => $warnings,
         ]);
-        $project->addWarnings($this->id(), $warnings);
+        $project->replaceWarnings($this->id(), $warnings);
         self::ensureBareWrapperCss($project);
     }
 

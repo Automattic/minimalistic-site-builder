@@ -505,6 +505,14 @@ final class CoreBlockRenderer
         [$colorClasses, $colorStyles] = $this->colorProps($attrs);
         [$borderClasses, $borderStyles] = $this->borderProps($attrs);
         $tableClasses = trim($colorClasses . ' ' . $borderClasses . (($attrs['hasFixedLayout'] ?? true) ? ' has-fixed-layout' : ''));
+        $className = trim((string) ($attrs['className'] ?? ''));
+        if ($className !== '' && str_contains($className, 'island-bare-table')) {
+            foreach (preg_split('/\s+/', $className, -1, PREG_SPLIT_NO_EMPTY) ?: [] as $class) {
+                if ($class !== 'wp-block-table' && $class !== 'island-bare-table') {
+                    $tableClasses = trim($tableClasses . ' ' . $class);
+                }
+            }
+        }
         $sections = [];
         foreach ([['head', $head], ['body', $body], ['foot', $foot]] as [$type, $rows]) {
             if ($rows === []) {

@@ -258,26 +258,86 @@ test('a table keeps authored class on the table and row text boundaries', functi
     assert_contains('DaysOpen', $norm);
 });
 
-test('a pretty-printed table stays inert when save() would collapse row text', function () {
+test('a pretty-printed table wraps and keeps row text boundaries', function () {
     $html = IslandEditableLeaves::wrap(
-        "<table>\n<thead>\n<tr><th>Days</th><th>Open</th></tr>\n</thead>\n"
-        . "<tbody>\n<tr><th>Wed</th><td>7am</td></tr>\n</tbody>\n</table>"
+        "<table class=\"hours\">\n<thead>\n<tr><th scope=\"col\">Days</th><th scope=\"col\">Counter open</th></tr>\n</thead>\n"
+        . "<tbody>\n<tr><th scope=\"row\">Wed</th><td>7am</td></tr>\n</tbody>\n</table>"
     );
-    assert_true(!str_contains($html, '<!-- wp:table'), 'pretty table is not wrapped');
-    assert_contains('<th>Days</th>', $html);
-    assert_contains('<th>Wed</th>', $html);
+    assert_contains('<!-- wp:table {"hasFixedLayout":false,"className":"island-bare-table hours"} -->', $html);
+    assert_contains('scope="row"', $html);
+    assert_contains('<table class="hours">', $html);
+    $stripped = preg_replace('/<!--\s*\/?wp:[a-z-]+[^>]*-->/', '', $html) ?? $html;
+    $norm = preg_replace('/\s+/u', ' ', trim(strip_tags($stripped))) ?? '';
+    assert_contains('open Wed', $norm);
 });
 
-test('a table with a class on tr stays inert', function () {
-    $html = IslandEditableLeaves::wrap('<table><tr class="odd"><td>A</td></tr></table>');
+test('a table with cells on their own lines keeps cell text boundaries', function () {
+    $html = IslandEditableLeaves::wrap(
+        "<table class=\"coffee-table\">\n<thead>\n<tr>\n<th scope=\"col\">Drink</th>\n"
+        . "<th scope=\"col\">How</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td>Espresso</td>\n"
+        . "<td>A shot.</td>\n</tr>\n</tbody>\n</table>"
+    );
+    assert_contains('<!-- wp:table', $html);
+    $stripped = preg_replace('/<!--\s*\/?wp:[a-z-]+[^>]*-->/', '', $html) ?? $html;
+    $norm = preg_replace('/\s+/u', ' ', trim(strip_tags($stripped))) ?? '';
+    assert_contains('Drink How', $norm);
+    assert_contains('Espresso A shot.', $norm);
+});
+
+test('a table with th scope=row in tbody wraps as core/table', function () {
+    $html = IslandEditableLeaves::wrap(
+        '<table><thead><tr><th scope="col">Days</th><th scope="col">Open</th></tr></thead>'
+        . '<tbody><tr><th scope="row">Wed</th><td>7am</td></tr></tbody></table>'
+    );
+    assert_contains('<!-- wp:table', $html);
+    assert_contains('<th scope="row">Wed</th>', $html);
+    $saves = new SaveStrategyRegistry(new BlockRegistry());
+    assert_contains(
+        '<th scope="row">Wed – Fri</th>',
+        $saves->save('core/table', [
+            'hasFixedLayout' => false,
+            'head' => [['cells' => [
+                ['content' => 'Days', 'tag' => 'th', 'scope' => 'col'],
+                ['content' => 'Open', 'tag' => 'th', 'scope' => 'col'],
+            ]]],
+            'body' => [['cells' => [
+                ['content' => 'Wed – Fri', 'tag' => 'th', 'scope' => 'row'],
+                ['content' => '7am', 'tag' => 'td'],
+            ]]],
+        ], ''),
+    );
+});
+
+test('a table with a class on tr stays inert and warns', function () {
+    $warnings = [];
+    $html = IslandEditableLeaves::wrap(
+        '<table><tr class="odd"><td>A</td></tr></table>',
+        '',
+        'design/home.html',
+        'page home island copy',
+        $warnings,
+    );
     assert_true(!str_contains($html, '<!-- wp:table'), 'unrepresentable row class leaves the table inert');
     assert_contains('<tr class="odd">', $html);
+    assert_eq(1, count($warnings), 'inert table is warned, not silent');
+    assert_contains('authored <table>', $warnings[0]);
+    assert_contains('delivered inert', $warnings[0]);
+    assert_contains('disposition skipped', $warnings[0]);
 });
 
-test('a table with colspan stays inert', function () {
-    $html = IslandEditableLeaves::wrap('<table><tr><td colspan="2">A</td></tr></table>');
+test('a table with colspan stays inert and warns', function () {
+    $warnings = [];
+    $html = IslandEditableLeaves::wrap(
+        '<table><tr><td colspan="2">A</td></tr></table>',
+        '',
+        'design/home.html',
+        'page home island copy',
+        $warnings,
+    );
     assert_true(!str_contains($html, '<!-- wp:table'), 'colspan cannot be represented as a wrapped table');
     assert_contains('<td colspan="2">A</td>', $html);
+    assert_eq(1, count($warnings));
+    assert_contains('colspan/rowspan cannot be represented', $warnings[0]);
 });
 
 test('a blockquote with cite becomes core/quote with attribution', function () {
@@ -295,10 +355,36 @@ test('a blockquote with cite becomes core/quote with attribution', function () {
     );
 });
 
-test('a quote with a class on cite stays inert', function () {
-    $html = IslandEditableLeaves::wrap('<blockquote><p>Hello</p><cite class="by">Ada</cite></blockquote>');
+test('a quote with a class on cite stays inert and warns', function () {
+    $warnings = [];
+    $html = IslandEditableLeaves::wrap(
+        '<blockquote><p>Hello</p><cite class="by">Ada</cite></blockquote>',
+        '',
+        'design/home.html',
+        'page home island copy',
+        $warnings,
+    );
     assert_true(!str_contains($html, '<!-- wp:quote'), 'unrepresentable cite class leaves the quote inert');
     assert_contains('<cite class="by">Ada</cite>', $html);
+    assert_eq(1, count($warnings));
+    assert_contains('authored <blockquote>', $warnings[0]);
+    assert_contains('unrepresentable quote structure', $warnings[0]);
+});
+
+test('an inert list with nested headings warns', function () {
+    $warnings = [];
+    $html = IslandEditableLeaves::wrap(
+        '<ul class="tenets"><li><h3>Title</h3><p>Body</p></li></ul>',
+        '',
+        'design/about.html',
+        'page about island tenets',
+        $warnings,
+    );
+    assert_true(!str_contains($html, '<!-- wp:list'), 'list with heading children stays inert');
+    assert_contains('<!-- wp:heading', $html);
+    assert_eq(1, count($warnings));
+    assert_contains('authored <ul>', $warnings[0]);
+    assert_contains('unsupported list-item inner', $warnings[0]);
 });
 
 test('a page whose CSS contains a child combinator on table leaves tables inert and warns', function () {

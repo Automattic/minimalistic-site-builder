@@ -67,6 +67,7 @@ final class IslandEditableLeaves
                 break;
             }
             $out .= substr($html, $offset, $candidate['start'] - $offset);
+            $reason = null;
             $wrapped = self::tryWrap(
                 $candidate,
                 $html,
@@ -75,20 +76,28 @@ final class IslandEditableLeaves
                 $saves,
                 $comments,
                 $serializer,
+                $reason,
             );
+            $tag = $candidate['tag'];
+            $combinatorSkip = ($blockBareImg && $tag === 'img') || ($blockBareTable && $tag === 'table');
             if (
                 $wrapped === null
                 && $path !== ''
-                && (
-                    ($blockBareImg && $candidate['tag'] === 'img')
-                    || ($blockBareTable && $candidate['tag'] === 'table')
-                )
+                && $combinatorSkip
                 && !self::hasCombinatorWarning($warnings, $path)
             ) {
-                $target = $candidate['tag'] === 'table' ? 'table' : 'img';
+                $target = $tag === 'table' ? 'table' : 'img';
                 $noun = $target === 'table' ? 'tables' : 'images';
                 $warnings[] = "malformed_design: {$path} context {$context}; authored CSS combinator targeting {$target}; "
                     . "delivered bare {$noun} inert; disposition skipped";
+            }
+            if (
+                $wrapped === null
+                && $path !== ''
+                && !$combinatorSkip
+                && in_array($tag, ['ul', 'ol', 'table', 'blockquote'], true)
+            ) {
+                self::warnInert($warnings, $path, $context, $tag, $reason);
             }
             if ($wrapped !== null) {
                 $out .= $wrapped;
@@ -120,6 +129,7 @@ final class IslandEditableLeaves
         SaveStrategyRegistry $saves,
         CommentSerializer $comments,
         Serializer $serializer,
+        ?string &$reason = null,
     ): ?string {
         $tag = $candidate['tag'];
         if ($tag === 'figure') {
@@ -132,16 +142,16 @@ final class IslandEditableLeaves
             return self::tryWrapBareImage($candidate, $saves, $comments, $serializer);
         }
         if ($tag === 'ul' || $tag === 'ol') {
-            return self::tryWrapList($candidate, $saves, $comments, $serializer);
+            return self::tryWrapList($candidate, $saves, $comments, $serializer, $reason);
         }
         if ($tag === 'table') {
             if ($blockBareTable) {
-                return null;
+                return self::skip('CSS combinator targeting table', $reason);
             }
-            return self::tryWrapTable($candidate, $saves, $comments, $serializer);
+            return self::tryWrapTable($candidate, $saves, $comments, $serializer, $reason);
         }
         if ($tag === 'blockquote') {
-            return self::tryWrapQuote($candidate, $saves, $comments, $serializer);
+            return self::tryWrapQuote($candidate, $saves, $comments, $serializer, $reason);
         }
         $open = $candidate['open'];
         $inner = $candidate['inner'];
@@ -473,6 +483,27 @@ final class IslandEditableLeaves
         return false;
     }
 
+    private static function skip(string $why, ?string &$reason): ?string
+    {
+        $reason = $why;
+        return null;
+    }
+
+    /**
+     * @param list<string> $warnings
+     */
+    private static function warnInert(
+        array &$warnings,
+        string $path,
+        string $context,
+        string $tag,
+        ?string $reason,
+    ): void {
+        $why = $reason ?? 'unrepresentable markup';
+        $warnings[] = "malformed_design: {$path} context {$context}; authored <{$tag}>; "
+            . "delivered inert ({$why}); disposition skipped";
+    }
+
     /**
      * @param list<array{name:string,value:string}> $attrs
      */
@@ -522,13 +553,14 @@ final class IslandEditableLeaves
         SaveStrategyRegistry $saves,
         CommentSerializer $comments,
         Serializer $serializer,
+        ?string &$reason = null,
     ): ?string {
         if (self::hasStyleAttribute($candidate['open'] . $candidate['inner'])) {
-            return null;
+            return self::skip('style attribute', $reason);
         }
         $attrs = self::openingAttributes($candidate['open']);
         if ($attrs === null) {
-            return null;
+            return self::skip('unrepresentable attribute', $reason);
         }
         $block = [];
         if ($candidate['tag'] === 'ol') {
@@ -549,14 +581,14 @@ final class IslandEditableLeaves
             }
             if ($name === 'id') {
                 if ($value === '') {
-                    return null;
+                    return self::skip('unrepresentable attribute', $reason);
                 }
                 $block['anchor'] = $value;
                 continue;
             }
             if ($name === 'start' && $candidate['tag'] === 'ol') {
                 if (preg_match('/^-?\d+$/', $value) !== 1) {
-                    return null;
+                    return self::skip('unrepresentable attribute', $reason);
                 }
                 $block['start'] = (int) $value;
                 continue;
@@ -565,21 +597,22 @@ final class IslandEditableLeaves
                 $block['reversed'] = true;
                 continue;
             }
-            return null;
+            return self::skip('unrepresentable attribute', $reason);
         }
         $items = self::listItems($candidate['inner']);
         if ($items === null || $items === []) {
-            return null;
+            return self::skip('unrepresentable list items', $reason);
         }
         $emitted = [];
         foreach ($items as $item) {
-            $one = self::emitListItem($item, $saves, $comments, $serializer);
+            $one = self::emitListItem($item, $saves, $comments, $serializer, $reason);
             if ($one === null) {
                 return null;
             }
             $emitted[] = $one;
         }
-        return self::emit('core/list', $block, $saves, $comments, $serializer, implode("\n\n", $emitted));
+        $out = self::emit('core/list', $block, $saves, $comments, $serializer, implode("\n\n", $emitted));
+        return $out ?? self::skip('save() round-trip failed', $reason);
     }
 
     /**
@@ -623,39 +656,41 @@ final class IslandEditableLeaves
         SaveStrategyRegistry $saves,
         CommentSerializer $comments,
         Serializer $serializer,
+        ?string &$reason = null,
     ): ?string {
         if (self::hasStyleAttribute($item['open'] . $item['inner'])) {
-            return null;
+            return self::skip('style attribute', $reason);
         }
         $attrs = self::openingAttributes($item['open']);
         if ($attrs === null) {
-            return null;
+            return self::skip('unrepresentable list-item attribute', $reason);
         }
         $block = [];
         foreach ($attrs as $attr) {
             $name = strtolower($attr['name']);
             if ($name === 'id') {
                 if ($attr['value'] === '') {
-                    return null;
+                    return self::skip('unrepresentable list-item attribute', $reason);
                 }
                 $block['anchor'] = $attr['value'];
                 continue;
             }
-            return null;
+            return self::skip('unrepresentable list-item attribute', $reason);
         }
         $parts = self::listItemParts($item['inner']);
         if ($parts === null) {
-            return null;
+            return self::skip('unsupported list-item inner', $reason);
         }
         $block['content'] = $parts['content'];
         $nested = '';
         if ($parts['list'] !== null) {
-            $nested = self::tryWrapList($parts['list'], $saves, $comments, $serializer);
+            $nested = self::tryWrapList($parts['list'], $saves, $comments, $serializer, $reason);
             if ($nested === null) {
                 return null;
             }
         }
-        return self::emit('core/list-item', $block, $saves, $comments, $serializer, $nested);
+        $out = self::emit('core/list-item', $block, $saves, $comments, $serializer, $nested);
+        return $out ?? self::skip('save() round-trip failed', $reason);
     }
 
     /**
@@ -703,14 +738,18 @@ final class IslandEditableLeaves
         SaveStrategyRegistry $saves,
         CommentSerializer $comments,
         Serializer $serializer,
+        ?string &$reason = null,
     ): ?string {
         $markup = $candidate['open'] . $candidate['inner'];
-        if (self::hasStyleAttribute($markup) || preg_match('/\s(?:colspan|rowspan)\s*=/i', $markup) === 1) {
-            return null;
+        if (self::hasStyleAttribute($markup)) {
+            return self::skip('style attribute', $reason);
+        }
+        if (preg_match('/\s(?:colspan|rowspan)\s*=/i', $markup) === 1) {
+            return self::skip('colspan/rowspan cannot be represented', $reason);
         }
         $attrs = self::openingAttributes($candidate['open']);
         if ($attrs === null) {
-            return null;
+            return self::skip('unrepresentable attribute', $reason);
         }
         $block = ['hasFixedLayout' => false];
         $classes = [self::BARE_TABLE_CLASS];
@@ -729,16 +768,16 @@ final class IslandEditableLeaves
             }
             if ($name === 'id') {
                 if ($value === '') {
-                    return null;
+                    return self::skip('unrepresentable attribute', $reason);
                 }
                 $block['anchor'] = $value;
                 continue;
             }
-            return null;
+            return self::skip('unrepresentable attribute', $reason);
         }
         $parts = self::tableParts($candidate['inner']);
         if ($parts === null) {
-            return null;
+            return self::skip('unrepresentable table structure', $reason);
         }
         $block['head'] = $parts['head'];
         $block['body'] = $parts['body'];
@@ -749,12 +788,19 @@ final class IslandEditableLeaves
             $block['caption'] = $parts['caption'];
         }
         if ($block['head'] === [] && $block['body'] === [] && ($block['foot'] ?? []) === []) {
-            return null;
+            return self::skip('unrepresentable table structure', $reason);
         }
         $block['className'] = implode(' ', array_values(array_unique($classes)));
         $emitted = self::emit('core/table', $block, $saves, $comments, $serializer);
-        if ($emitted === null || !self::tableTextCompatible($candidate['inner'], $emitted)) {
-            return null;
+        if ($emitted === null) {
+            return self::skip('save() round-trip failed', $reason);
+        }
+        if (!self::tableTextCompatible($candidate['inner'], $emitted)) {
+            $block = self::padRowBoundaries($block);
+            $emitted = self::emit('core/table', $block, $saves, $comments, $serializer);
+            if ($emitted === null || !self::tableTextCompatible($candidate['inner'], $emitted)) {
+                return self::skip('compact save() would collapse inter-row text', $reason);
+            }
         }
         return self::tableFrontHtml($emitted, $tableClasses);
     }
@@ -771,6 +817,69 @@ final class IslandEditableLeaves
         $emit = preg_replace('/<figcaption\b[^>]*>.*?<\/figcaption>/is', '', $emit) ?? $emit;
         $norm = static fn (string $s): string => preg_replace('/\s+/u', ' ', trim(strip_tags($s))) ?? '';
         return $norm($orig) === $norm($emit);
+    }
+
+    /**
+     * Compact save() drops inter-row whitespace. A trailing space on the last
+     * cell of every row but the last restores strip_tags word boundaries
+     * without changing table layout, and survives a later re-save.
+     *
+     * @param array<string,mixed> $block
+     * @return array<string,mixed>
+     */
+    private static function padRowBoundaries(array $block): array
+    {
+        $refs = [];
+        foreach (['head', 'body', 'foot'] as $section) {
+            foreach ($block[$section] ?? [] as $i => $row) {
+                $refs[] = [$section, $i];
+            }
+        }
+        $last = count($refs) - 1;
+        for ($i = 0; $i < $last; $i++) {
+            [$section, $idx] = $refs[$i];
+            $cells = $block[$section][$idx]['cells'] ?? [];
+            if ($cells === []) {
+                continue;
+            }
+            self::padLastCell($block[$section][$idx]['cells']);
+        }
+        return $block;
+    }
+
+    /**
+     * @param list<array<string,string>> $cells
+     */
+    private static function padLastCell(array &$cells): void
+    {
+        if ($cells === []) {
+            return;
+        }
+        $i = count($cells) - 1;
+        $content = (string) ($cells[$i]['content'] ?? '');
+        if ($content !== '' && preg_match('/\s$/u', $content) !== 1) {
+            $cells[$i]['content'] = $content . ' ';
+        }
+    }
+
+    /**
+     * @param list<array{cells:list<array<string,string>>}> $head
+     * @param list<array{cells:list<array<string,string>>}> $body
+     * @param list<array{cells:list<array<string,string>>}> $foot
+     */
+    private static function padTrailingCell(array &$head, array &$body, array &$foot): void
+    {
+        if ($foot !== []) {
+            self::padLastCell($foot[count($foot) - 1]['cells']);
+            return;
+        }
+        if ($body !== []) {
+            self::padLastCell($body[count($body) - 1]['cells']);
+            return;
+        }
+        if ($head !== []) {
+            self::padLastCell($head[count($head) - 1]['cells']);
+        }
     }
 
     /**
@@ -807,11 +916,16 @@ final class IslandEditableLeaves
         $head = [];
         $body = [];
         $foot = [];
+        $started = false;
         while ($offset < $length) {
             if (preg_match('/\G\s+/', $inner, $ws, 0, $offset) === 1) {
+                if ($started) {
+                    self::padTrailingCell($head, $body, $foot);
+                }
                 $offset += strlen($ws[0]);
                 continue;
             }
+            $started = true;
             if (preg_match('/\G<(caption|thead|tbody|tfoot|tr)(?=[\s>])/i', $inner, $m, 0, $offset) !== 1) {
                 return null;
             }
@@ -872,6 +986,9 @@ final class IslandEditableLeaves
         $rows = [];
         while ($offset < $length) {
             if (preg_match('/\G\s+/', $inner, $ws, 0, $offset) === 1) {
+                if ($rows !== []) {
+                    self::padLastCell($rows[count($rows) - 1]['cells']);
+                }
                 $offset += strlen($ws[0]);
                 continue;
             }
@@ -911,6 +1028,9 @@ final class IslandEditableLeaves
         $cells = [];
         while ($offset < $length) {
             if (preg_match('/\G\s+/', $inner, $ws, 0, $offset) === 1) {
+                if ($cells !== []) {
+                    self::padLastCell($cells);
+                }
                 $offset += strlen($ws[0]);
                 continue;
             }
@@ -961,13 +1081,14 @@ final class IslandEditableLeaves
         SaveStrategyRegistry $saves,
         CommentSerializer $comments,
         Serializer $serializer,
+        ?string &$reason = null,
     ): ?string {
         if (self::hasStyleAttribute($candidate['open'] . $candidate['inner'])) {
-            return null;
+            return self::skip('style attribute', $reason);
         }
         $attrs = self::openingAttributes($candidate['open']);
         if ($attrs === null) {
-            return null;
+            return self::skip('unrepresentable attribute', $reason);
         }
         $block = [];
         foreach ($attrs as $attr) {
@@ -985,32 +1106,36 @@ final class IslandEditableLeaves
             }
             if ($name === 'id') {
                 if ($value === '') {
-                    return null;
+                    return self::skip('unrepresentable attribute', $reason);
                 }
                 $block['anchor'] = $value;
                 continue;
             }
-            return null;
+            return self::skip('unrepresentable attribute', $reason);
         }
         $parts = self::quoteParts($candidate['inner']);
         if ($parts === null) {
-            return null;
+            return self::skip('unrepresentable quote structure', $reason);
         }
         if ($parts['citation'] !== null) {
             $block['citation'] = $parts['citation'];
         }
         $innerBlocks = [];
         foreach ($parts['blocks'] as $child) {
-            $emitted = self::tryWrap($child, $child['open'] . $child['inner'], false, false, $saves, $comments, $serializer);
+            $emitted = self::tryWrap($child, $child['open'] . $child['inner'], false, false, $saves, $comments, $serializer, $reason);
             if ($emitted === null) {
+                if ($reason === null) {
+                    $reason = 'unrepresentable quote inner block';
+                }
                 return null;
             }
             $innerBlocks[] = $emitted;
         }
         if ($innerBlocks === []) {
-            return null;
+            return self::skip('unrepresentable quote structure', $reason);
         }
-        return self::emit('core/quote', $block, $saves, $comments, $serializer, implode("\n\n", $innerBlocks));
+        $out = self::emit('core/quote', $block, $saves, $comments, $serializer, implode("\n\n", $innerBlocks));
+        return $out ?? self::skip('save() round-trip failed', $reason);
     }
 
     /**
