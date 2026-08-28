@@ -47,8 +47,21 @@ final class PaletteFloor
     /** Primary/accent closer than this, with chroma on both, is a miss. */
     public const HUE_TOO_CLOSE = 25.0;
 
-    /** Accent is rotated to at least this many degrees from primary. */
-    public const HUE_SEPARATION = 40.0;
+    /**
+     * Accent is rotated to this many degrees from primary.
+     *
+     * Held just above HUE_TOO_CLOSE rather than well past it (BIGR-943). The
+     * rotation exists to clear that line, and every degree beyond it is a
+     * degree further from the hue the model actually chose. At 40 the overshoot
+     * was 15 degrees, which pushed a warm primary's accent into the 50-70 band
+     * where a saturated color reads as acid yellow: a terracotta bakery
+     * authored `#C05617` and shipped `#DDCB1A`.
+     *
+     * 8-bit rounding costs at most ~1.3 degrees of the target, measured over
+     * 1560 hue/lightness/saturation probes, so this delivers at least 30
+     * degrees of real separation — a 5 degree cushion over the 25 degree line.
+     */
+    public const HUE_SEPARATION = 32.0;
 
     /** Below this chroma a hue is too faint to count as a competing color. */
     public const CHROMA_MIN = 0.1;
