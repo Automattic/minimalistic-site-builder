@@ -501,11 +501,12 @@ final class ScaffoldThemeStep implements Step
             height: auto;
             object-fit: cover;
         }
-        /* The blueprint's portrait media_aspect (BIGR-912). The recipe asks for
-           a portrait asset, and this holds the plate to that ratio even when
-           the delivered image drifts, so the contained vertical frame the
-           composition is built around survives a landscape file. */
-        .hero-composition--foreground-split .hero-media--portrait img {
+        /* The blueprint's portrait media_aspect (BIGR-912). The build stamps
+           hero-media--<aspect> on the hero root the same way it stamps
+           hero-mobile--<transformation>, so this holds the plate to its ratio
+           even when the delivered image drifts and the contained vertical
+           frame survives a landscape file (BIGR-925). */
+        .hero-composition--foreground-split.hero-media--portrait .hero-composition__media img {
             aspect-ratio: 3 / 4;
         }
         /* knockout-type (BIGR-935) cuts the headline out of a solid panel so

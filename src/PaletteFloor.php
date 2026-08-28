@@ -47,8 +47,21 @@ final class PaletteFloor
     /** Primary/accent closer than this, with chroma on both, is a miss. */
     public const HUE_TOO_CLOSE = 25.0;
 
-    /** Accent is rotated to at least this many degrees from primary. */
-    public const HUE_SEPARATION = 40.0;
+    /**
+     * Accent is rotated to this many degrees from primary.
+     *
+     * Held just above HUE_TOO_CLOSE rather than well past it (BIGR-943). The
+     * rotation exists to clear that line, and every degree beyond it is a
+     * degree further from the hue the model actually chose. At 40 the overshoot
+     * was 15 degrees, which pushed a warm primary's accent into the 50-70 band
+     * where a saturated color reads as acid yellow: a terracotta bakery
+     * authored `#C05617` and shipped `#DDCB1A`.
+     *
+     * 8-bit rounding costs at most ~1.3 degrees of the target, measured over
+     * 1560 hue/lightness/saturation probes, so this delivers at least 30
+     * degrees of real separation — a 5 degree cushion over the 25 degree line.
+     */
+    public const HUE_SEPARATION = 32.0;
 
     /** Below this chroma a hue is too faint to count as a competing color. */
     public const CHROMA_MIN = 0.1;
@@ -214,9 +227,17 @@ final class PaletteFloor
     public static function chroma(string $hex): ?float
     {
         $rgb = ContrastMath::hexToRgb($hex);
-        if ($rgb === null) {
-            return null;
-        }
+        return $rgb === null ? null : self::chromaOf($rgb);
+    }
+
+    /**
+     * The same quantity for an RGB triple the caller already holds, so the
+     * chroma search does not round-trip through hex on every probe.
+     *
+     * @param array{0:int,1:int,2:int} $rgb
+     */
+    private static function chromaOf(array $rgb): float
+    {
         [$r, $g, $b] = [$rgb[0] / 255.0, $rgb[1] / 255.0, $rgb[2] / 255.0];
         return max($r, $g, $b) - min($r, $g, $b);
     }
@@ -481,11 +502,15 @@ final class PaletteFloor
     }
 
     /**
-     * Move LIGHTNESS at fixed hue/saturation until the pair meets $floor.
-     * Tries both directions (lighter and darker). When both pass, keeps
-     * the higher-chroma candidate, then the smaller luminance move.
-     * When neither passes, returns the authored hex — the caller must
-     * not record disposition=repaired.
+     * Move LIGHTNESS at fixed hue until the pair meets $floor. Tries both
+     * directions (lighter and darker). When both pass, keeps the
+     * higher-chroma candidate, then the smaller luminance move. When
+     * neither passes, returns the authored hex — the caller must not
+     * record disposition=repaired.
+     *
+     * Saturation is a starting point rather than an invariant: each passing
+     * candidate is re-solved to carry as much of the AUTHORED chroma as its
+     * own luminance allows (BIGR-941).
      */
     private static function meetContrast(string $hex, string $other, float $floor): string
     {
@@ -501,6 +526,7 @@ final class PaletteFloor
         [$hue, $saturation] = self::toHsl($rgb);
         $y = ContrastMath::luminance($rgb);
         $yOther = ContrastMath::luminance($otherRgb);
+        $authoredChroma = self::chromaOf($rgb);
 
         // A hair past the exact inversion so 8-bit rounding still clears.
         $margin = 0.004;
@@ -510,8 +536,8 @@ final class PaletteFloor
         $passers = [];
         foreach (
             [
-                self::probeContrast($hue, $saturation, $yHigh, 1.0, $other, $floor),
-                self::probeContrast($hue, $saturation, $yLow, -1.0, $other, $floor),
+                self::probeContrast($hue, $saturation, $yHigh, 1.0, $other, $floor, $authoredChroma),
+                self::probeContrast($hue, $saturation, $yLow, -1.0, $other, $floor, $authoredChroma),
             ] as $candidate
         ) {
             if ($candidate !== null) {
@@ -534,8 +560,13 @@ final class PaletteFloor
 
     /**
      * Walk lightness from $startY toward white (direction +1) or black
-     * (direction -1) at fixed hue/saturation. Null when this side cannot
-     * meet $floor — including when the inversion clamps at 0 or 1.
+     * (direction -1) at fixed hue and saturation. Null when this side
+     * cannot meet $floor — including when the inversion clamps at 0 or 1.
+     *
+     * The walk holds saturation because it is only looking for the first
+     * luminance that clears $floor. The candidate it finds is then re-solved
+     * against $targetChroma, which is the step that keeps the color's
+     * saturation (BIGR-941).
      *
      * @return array{hex:string,ratio:float,chroma:float,y:float}|null
      */
@@ -546,6 +577,7 @@ final class PaletteFloor
         float $direction,
         string $other,
         float $floor,
+        float $targetChroma,
     ): ?array {
         $y = min(1.0, max(0.0, $startY));
         $hex = self::toHex(self::atLuminance($hue, $saturation, $y));
@@ -555,7 +587,13 @@ final class PaletteFloor
             $chroma = self::chroma($hex);
             $yNow = self::luminance($hex);
             if ($now !== null && $now >= $floor && $chroma !== null && $yNow !== null) {
-                return ['hex' => $hex, 'ratio' => $now, 'chroma' => $chroma, 'y' => $yNow];
+                return self::withRestoredChroma(
+                    ['hex' => $hex, 'ratio' => $now, 'chroma' => $chroma, 'y' => $yNow],
+                    $hue,
+                    $targetChroma,
+                    $other,
+                    $floor,
+                );
             }
             $nextY = min(1.0, max(0.0, ($yNow ?? $y) + $direction * 0.012));
             if ($yNow !== null && abs($nextY - $yNow) < 1e-9) {
@@ -568,6 +606,8 @@ final class PaletteFloor
             $hex = $next;
         }
         $extreme = $direction > 0.0 ? 1.0 : 0.0;
+        // This fallback skips the chroma re-solve on purpose: at Y near 0 or
+        // 1 the reachable chroma is near zero, so a re-solve cannot gain any.
         $hex = self::toHex(self::atLuminance($hue, $saturation, $extreme));
         $now = self::ratio($hex, $other);
         $chroma = self::chroma($hex);
@@ -576,6 +616,76 @@ final class PaletteFloor
             return ['hex' => $hex, 'ratio' => $now, 'chroma' => $chroma, 'y' => $yNow];
         }
         return null;
+    }
+
+    /**
+     * One passing candidate, re-solved to carry as much of the authored
+     * chroma as its own luminance allows.
+     *
+     * The WCAG ratio is a function of relative luminance alone, so holding
+     * the luminance and moving only the saturation cannot drop the pair back
+     * below the floor. 8-bit rounding can still shift the luminance a little,
+     * so the re-solve is kept only when it measures clear AND actually gained
+     * chroma; otherwise the walk's own candidate stands.
+     *
+     * @param  array{hex:string,ratio:float,chroma:float,y:float} $row
+     * @return array{hex:string,ratio:float,chroma:float,y:float}
+     */
+    private static function withRestoredChroma(
+        array $row,
+        float $hue,
+        float $targetChroma,
+        string $other,
+        float $floor,
+    ): array {
+        if ($row['chroma'] >= $targetChroma) {
+            return $row;
+        }
+        $hex = self::toHex(self::atLuminanceNearChroma($hue, $targetChroma, $row['y']));
+        $ratio = self::ratio($hex, $other);
+        $chroma = self::chroma($hex);
+        $y = self::luminance($hex);
+        if (
+            $ratio === null || $chroma === null || $y === null
+            || $ratio < $floor || $chroma <= $row['chroma']
+        ) {
+            return $row;
+        }
+        return ['hex' => $hex, 'ratio' => $ratio, 'chroma' => $chroma, 'y' => $y];
+    }
+
+    /**
+     * The RGB at $target luminance whose chroma is nearest $targetChroma
+     * without going above it, found by moving saturation.
+     *
+     * HSL chroma is `(1 - |2L - 1|) * S`, so it collapses toward zero at both
+     * lightness extremes whatever S is. Reusing the authored saturation while
+     * walking lightness therefore sheds chroma the luminance target never
+     * asked for. Chroma rises monotonically with saturation at a fixed hue
+     * and target luminance, so a bisection finds the nearest saturation.
+     *
+     * Never returns more chroma than $targetChroma: the goal is to preserve
+     * what the model authored, not to saturate a muted color.
+     *
+     * @return array{0:int,1:int,2:int}
+     */
+    private static function atLuminanceNearChroma(float $hue, float $targetChroma, float $target): array
+    {
+        $full = self::atLuminance($hue, 1.0, $target);
+        if (self::chromaOf($full) <= $targetChroma) {
+            return $full;
+        }
+        $lo = 0.0;
+        $hi = 1.0;
+        for ($i = 0; $i < 24; $i++) {
+            $mid = ($lo + $hi) / 2;
+            if (self::chromaOf(self::atLuminance($hue, $mid, $target)) > $targetChroma) {
+                $hi = $mid;
+            } else {
+                $lo = $mid;
+            }
+        }
+        return self::atLuminance($hue, $lo, $target);
     }
 
     /**

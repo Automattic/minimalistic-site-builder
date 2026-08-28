@@ -21,10 +21,10 @@ have picked.
 - Media aspect: request exactly one foreground image in the blueprint's
   `media_aspect`, and keep the block ratio and saved dimensions in that same
   aspect.
-  - `portrait` — a contained vertical plate. The media region also carries the
-    class `hero-media--portrait`, which is what holds the plate to its portrait
-    ratio. Give it room: the negative space around a portrait is part of the
-    composition, and copy never crosses it.
+  - `portrait` — a contained vertical plate. The build holds the plate to its
+    portrait ratio from a root class it stamps itself, so add no class of your
+    own for it. Give the plate room: the negative space around a portrait is
+    part of the composition, and copy never crosses it.
   - `landscape` / `square` — a horizontal or square plate that fills its
     region's width.
 - Media weight: `balanced` gives the copy the leading region and the image the
