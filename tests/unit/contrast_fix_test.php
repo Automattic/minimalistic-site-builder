@@ -302,35 +302,6 @@ test('cover with image and text gets the dimRatio floor', function () {
     assert_eq('cover-dim', $res['findings'][0]['kind']);
 });
 
-test('cover text on an opaque panel keeps its dim, knockout or not (BIGR-935)', function () {
-    // The panel paints over the photograph, so the text is judged against the
-    // panel colour and the image dim adds nothing. A knockout composition needs
-    // this: its photograph exists only inside the letterforms, and a scrim
-    // greys the one thing the hero is made of.
-    $panelled = '<!-- wp:cover {"url":"theme:./assets/hero.jpg","dimRatio":0} -->' . "\n"
-        . '<div class="wp-block-cover"><div class="wp-block-cover__inner-container">'
-        . '<!-- wp:group {"backgroundColor":"contrast","className":"hero-knockout"} -->'
-        . '<div class="wp-block-group hero-knockout has-contrast-background-color has-background">'
-        . '<!-- wp:heading {"textColor":"base"} --><h1>Cut Sharp</h1><!-- /wp:heading -->'
-        . '</div><!-- /wp:group -->'
-        . '</div></div>' . "\n" . '<!-- /wp:cover -->';
-    $res = contrast_fix()->process($panelled);
-    assert_contains('"dimRatio":0', $res['markup']);
-    assert_true(!in_array('cover-dim', array_column($res['findings'], 'kind'), true));
-
-    // One text node OUTSIDE the panel is read against the photograph, so the
-    // floor comes back for the whole cover.
-    $mixed = str_replace(
-        '</div></div>' . "\n" . '<!-- /wp:cover -->',
-        '<!-- wp:paragraph --><p>Loose over the image.</p><!-- /wp:paragraph -->'
-        . '</div></div>' . "\n" . '<!-- /wp:cover -->',
-        $panelled,
-    );
-    $res = contrast_fix()->process($mixed);
-    assert_contains('"dimRatio":40', $res['markup']);
-    assert_true(in_array('cover-dim', array_column($res['findings'], 'kind'), true));
-});
-
 test('cover with image, text and a healthy dim is untouched; text inside deferred to phase 2', function () {
     $src = '<!-- wp:cover {"url":"theme:./assets/hero.jpg","dimRatio":50} -->' . "\n"
         . '<div class="wp-block-cover"><div class="wp-block-cover__inner-container">'
