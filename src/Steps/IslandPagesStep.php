@@ -51,9 +51,11 @@ final class IslandPagesStep implements Step
             reads: [
                 'siteSpec.json',
                 'design/*',
+                'theme/style.css',
             ],
             writes: [
                 'theme/parts/*',
+                'theme/style.css',
                 'pages.json',
                 'island-report.json',
                 'warnings.json',
@@ -109,6 +111,7 @@ final class IslandPagesStep implements Step
             'warnings' => $warnings,
         ]);
         $project->addWarnings($this->id(), $warnings);
+        self::ensureBareWrapperCss($project);
     }
 
     /**
@@ -254,6 +257,12 @@ final class IslandPagesStep implements Step
             ];
         }
 
+        $css = '';
+        if ($project->exists('design/site.css')) {
+            $css .= $project->readText('design/site.css') . "\n";
+        }
+        $css .= $doc->styles();
+
         $elements = self::islandElements($main);
         $textOnly = self::isTextOnlyFallback($main, $elements);
         if ($textOnly) {
@@ -312,7 +321,7 @@ final class IslandPagesStep implements Step
                 $nonSection++;
             }
             $partRel = 'theme/parts/' . SectionsStep::partSlug($slug, $sectionSlug) . '.html';
-            $project->writeText($partRel, self::htmlBlock($markup));
+            $project->writeText($partRel, self::htmlBlock($markup, $css, $rel, $context, $warnings));
             $sections[] = [
                 'slug'  => $sectionSlug,
                 'title' => self::headingTitle($element, $sectionSlug),
@@ -386,10 +395,40 @@ final class IslandPagesStep implements Step
         return $title !== '' ? $title : ucwords(str_replace('-', ' ', $slug));
     }
 
-    private static function htmlBlock(string $inner): string
-    {
-        $inner = IslandEditableLeaves::wrap($inner);
+    /**
+     * @param list<string> $warnings
+     */
+    private static function htmlBlock(
+        string $inner,
+        string $css,
+        string $path,
+        string $context,
+        array &$warnings,
+    ): string {
+        $inner = IslandEditableLeaves::wrap($inner, $css, $path, $context, $warnings);
         return "<!-- wp:html -->\n{$inner}\n<!-- /wp:html -->\n";
+    }
+
+    private static function ensureBareWrapperCss(Project $project): void
+    {
+        if (!$project->exists('theme/style.css')) {
+            return;
+        }
+        $style = $project->readText('theme/style.css');
+        if (str_contains($style, '.' . IslandEditableLeaves::BARE_WRAPPER_CLASS)) {
+            return;
+        }
+        $rule = IslandEditableLeaves::BARE_WRAPPER_CSS;
+        $marker = '/* Wrap at spaces only — never split a word mid-token. */';
+        $offset = strpos($style, $marker);
+        if ($offset === false) {
+            $project->writeText('theme/style.css', rtrim($style) . "\n\n" . $rule);
+            return;
+        }
+        $project->writeText(
+            'theme/style.css',
+            rtrim(substr($style, 0, $offset)) . "\n\n" . $rule . "\n" . substr($style, $offset),
+        );
     }
 
     private static function unwrapMain(string $html): string
