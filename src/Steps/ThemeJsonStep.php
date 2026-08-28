@@ -74,6 +74,14 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     ];
     private const REQUIRED_FONTS = ['heading', 'body'];
     private const OPTIONAL_FONTS = ['accent'];
+    /**
+     * Code-owned font presets every theme ships. The status-readout footer
+     * archetype sets its rows in `mono`, and a pure system stack needs no
+     * bundled font file, so the preset is deterministic and free.
+     */
+    private const PIPELINE_FONTS = [
+        'mono' => 'ui-monospace, Menlo, Consolas, monospace',
+    ];
 
     /** @var array{contentSize:string,wideSize:string} */
     private const FALLBACK_LAYOUT_WIDTHS = [
@@ -1832,6 +1840,13 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $warnings[] = isset($preferred[$needed])
                 ? "theme.json fontFamilies missing slug '{$needed}'; filled from designDirection.json with {$stack}"
                 : "theme.json fontFamilies missing slug '{$needed}'; filled with the system stack";
+        }
+        // Code-owned presets fill silently: nothing the model authored was
+        // lost, so a warning row here would be noise on every build.
+        foreach (self::PIPELINE_FONTS as $slug => $stack) {
+            if (!in_array($slug, array_column($families, 'slug'), true)) {
+                $families[] = ['slug' => $slug, 'name' => ucfirst($slug), 'fontFamily' => $stack];
+            }
         }
 
         $theme['settings']['typography']['fontFamilies'] = $families;
