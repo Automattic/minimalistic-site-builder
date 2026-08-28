@@ -22,6 +22,26 @@
         "baseten": {
             "large": "moonshotai/Kimi-K3",
             "small": "zai-org/GLM-5.2-Fast"
+        },
+        "hybrid": {
+            "$comment": "Mixed-transport set: Baseten serves the run, and the steps under `steps` go elsewhere. `transport` names the client every other step uses; each `steps` entry names its own transport and model. RoutingLlm dispatches per request on the model id, so no step knows more than one provider is in play. gpt-5.6-sol is served by OpenAI directly: the wpcom proxy reaches OpenAI over /v1/responses, which this client does not speak.",
+            "large": "moonshotai/Kimi-K3",
+            "small": "zai-org/GLM-5.2-Fast",
+            "transport": "baseten",
+            "steps": {
+                "inner-pages-design": {
+                    "transport": "openai",
+                    "model": "gpt-5.6-sol"
+                },
+                "sections": {
+                    "transport": "openai",
+                    "model": "gpt-5.6-sol"
+                },
+                "page-styles": {
+                    "transport": "openai",
+                    "model": "gpt-5.6-sol"
+                }
+            }
         }
     },
     "step_tiers": {

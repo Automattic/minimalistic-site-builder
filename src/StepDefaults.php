@@ -47,6 +47,13 @@ final class StepDefaults
      * LLM_MODEL_<STEP> env var (e.g. LLM_MODEL_SITE_SPEC) overrides it with any
      * model id, from any provider.
      *
+     * Resolution order, strongest first: LLM_MODEL_<STEP>, the provider's own
+     * per-step pin (config/models.json `steps` — how `hybrid` sends two steps
+     * to Claude while the rest go to Baseten), then LLM_MODEL / LLM_MODEL_SMALL,
+     * then the step's tier. A pin may name a step that has no tier at all —
+     * inner-pages-design has none — which is what puts that step in this map,
+     * and therefore under a model, for the first time.
+     *
      * @return array<string,string> step id => model id
      */
     public static function models(): array
@@ -56,8 +63,33 @@ final class StepDefaults
 
         $out = [];
         foreach (ModelConfig::stepTiers() as $step => $tier) {
+            $out[$step] = $tier === 'small' ? $small : $large;
+        }
+        foreach (ModelConfig::stepAssignments(self::provider()) as $step => $spec) {
+            $out[$step] = $spec['model'];
+        }
+        foreach ($out as $step => $model) {
             $envKey = 'LLM_MODEL_' . strtoupper(str_replace('-', '_', $step));
-            $out[$step] = Env::get($envKey, $tier === 'small' ? $small : $large);
+            $out[$step] = Env::get($envKey, $model);
+        }
+        return $out;
+    }
+
+    /**
+     * Model id (lowercased) => transport name, for every step this provider
+     * pins away from its default transport. RoutingLlm's dispatch table.
+     *
+     * Keyed by model rather than by step because that is what a request
+     * actually carries by the time it reaches the transport, and it means an
+     * LLM_MODEL_<STEP> override naming a pinned model still routes correctly.
+     *
+     * @return array<string,string>
+     */
+    public static function modelTransports(): array
+    {
+        $out = [];
+        foreach (ModelConfig::stepAssignments(self::provider()) as $spec) {
+            $out[strtolower($spec['model'])] = $spec['transport'];
         }
         return $out;
     }
