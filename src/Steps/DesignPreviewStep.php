@@ -47,6 +47,40 @@ final class DesignPreviewStep implements Step
         . '(?:photorealistic|digital-art|illustration|minimalist|flat-design|3d-render|abstract|watercolor) '
         . '\| (?:square|landscape|portrait)$/D';
 
+    /**
+     * Desktop lock that proves header visibility and the required row without
+     * discarding the rest of the authored design. Marker `--msb-preview-header`
+     * makes the append idempotent.
+     */
+    private const HEADER_LOCK_CSS = <<<'CSS'
+@media (min-width: 720px) {
+html body > header {
+--msb-preview-header: keep;
+display: flex !important;
+flex-direction: row !important;
+flex-wrap: nowrap !important;
+align-items: center !important;
+justify-content: space-between !important;
+visibility: visible !important;
+opacity: 1 !important;
+position: static !important;
+transform: none !important;
+animation: none !important;
+animation-name: none !important;
+}
+html body > header a,
+html body > header nav {
+visibility: visible !important;
+opacity: 1 !important;
+position: static !important;
+transform: none !important;
+animation: none !important;
+animation-name: none !important;
+order: 0 !important;
+}
+}
+CSS;
+
     public function __construct(
         private Llm $llm,
         private PromptRenderer $renderer,
@@ -424,8 +458,12 @@ final class DesignPreviewStep implements Step
             'align-items' => 'center',
             'justify-content' => 'space-between',
         ];
-        /** @var array<string,array{value:string,important:bool,specificity:int,order:int}> $winners */
+        /** @var array<string,array{value:string,important:bool,specificity:int,order:int,proven?:bool}> $winners */
         $winners = [];
+        /** @var array<string,array{value:string,important:bool,specificity:int,order:int,proven?:bool}> $proven */
+        $proven = [];
+        /** @var list<array{property:string,important:bool,specificity:int,specUnknown:bool,order:int}> $threats */
+        $threats = [];
 
         foreach (CssChecks::scanDeclarations($css) as $declaration) {
             if ($declaration['kind'] !== 'style' || !$declaration['structurallySafe']) {
@@ -443,6 +481,7 @@ final class DesignPreviewStep implements Step
             if ($scope === 'inert') {
                 continue;
             }
+            $priority = CssChecks::splitDeclarationPriority($declaration['value']);
 
             if ($property !== 'order') {
                 $match = self::matchingSpecificity(
@@ -450,51 +489,50 @@ final class DesignPreviewStep implements Step
                     $declaration['ancestors'],
                     $header,
                 );
-                if ($match['unprovable'] || ($match['specificity'] !== null && $scope === 'unprovable')) {
-                    return 'desktop header layout cannot be proven across the CSS cascade';
-                }
-                if ($match['specificity'] !== null) {
-                    $priority = CssChecks::splitDeclarationPriority($declaration['value']);
-                    $values = self::headerLayoutValues($property, $priority['value']);
-                    foreach ($values as $resolvedProperty => $value) {
-                        $candidate = [
-                            'value' => $value,
-                            'important' => $priority['important'],
-                            'specificity' => $match['specificity'],
-                            'order' => $declaration['start'],
-                        ];
-                        if (self::cascadeCandidateWins($candidate, $winners[$resolvedProperty] ?? null)) {
-                            $winners[$resolvedProperty] = $candidate;
-                        }
-                    }
-                }
+                self::recordHeaderCascade(
+                    $winners,
+                    $proven,
+                    $threats,
+                    $match,
+                    $scope,
+                    $priority,
+                    $declaration['start'],
+                    self::headerLayoutValues($property, $priority['value']),
+                );
             }
 
             if (!in_array($property, ['order', 'all'], true)) {
                 continue;
             }
-            $priority = CssChecks::splitDeclarationPriority($declaration['value']);
             foreach (['identity' => $identity, 'navigation' => $navigation] as $key => $element) {
                 $match = self::matchingSpecificity(
                     $declaration['context'],
                     $declaration['ancestors'],
                     $element,
                 );
-                if ($match['unprovable'] || ($match['specificity'] !== null && $scope === 'unprovable')) {
+                $orderValue = $property === 'all' ? '0' : self::headerOrderValue($priority['value']);
+                self::recordHeaderCascade(
+                    $winners,
+                    $proven,
+                    $threats,
+                    $match,
+                    $scope,
+                    $priority,
+                    $declaration['start'],
+                    ["{$key}-order" => $orderValue],
+                );
+            }
+        }
+
+        foreach ($threats as $threat) {
+            if (str_ends_with($threat['property'], '-order')) {
+                if (!self::headerThreatBeaten($threat, $proven[$threat['property']] ?? null)) {
                     return 'desktop header item order cannot be proven across the CSS cascade';
                 }
-                if ($match['specificity'] === null) {
-                    continue;
-                }
-                $candidate = [
-                    'value' => $property === 'all' ? '0' : self::headerOrderValue($priority['value']),
-                    'important' => $priority['important'],
-                    'specificity' => $match['specificity'],
-                    'order' => $declaration['start'],
-                ];
-                if (self::cascadeCandidateWins($candidate, $winners["{$key}-order"] ?? null)) {
-                    $winners["{$key}-order"] = $candidate;
-                }
+                continue;
+            }
+            if (!self::headerThreatBeaten($threat, $proven[$threat['property']] ?? null)) {
+                return 'desktop header layout cannot be proven across the CSS cascade';
             }
         }
 
@@ -521,8 +559,12 @@ final class DesignPreviewStep implements Step
         string $label,
         float $viewport,
     ): ?string {
-        /** @var array<string,array{value:string,important:bool,specificity:int,order:int}> $winners */
+        /** @var array<string,array{value:string,important:bool,specificity:int,order:int,proven?:bool}> $winners */
         $winners = [];
+        /** @var array<string,array{value:string,important:bool,specificity:int,order:int,proven?:bool}> $proven */
+        $proven = [];
+        /** @var list<array{property:string,important:bool,specificity:int,specUnknown:bool,order:int}> $threats */
+        $threats = [];
         $properties = [
             'display',
             'visibility',
@@ -550,23 +592,22 @@ final class DesignPreviewStep implements Step
                 $declaration['ancestors'],
                 $element,
             );
-            if ($match['unprovable'] || ($match['specificity'] !== null && $scope === 'unprovable')) {
-                return "desktop {$label} visibility and flow cannot be proven across the CSS cascade";
-            }
-            if ($match['specificity'] === null) {
-                continue;
-            }
             $priority = CssChecks::splitDeclarationPriority($declaration['value']);
-            foreach (self::headerCriticalValues($property, $priority['value']) as $resolved => $value) {
-                $candidate = [
-                    'value' => $value,
-                    'important' => $priority['important'],
-                    'specificity' => $match['specificity'],
-                    'order' => $declaration['start'],
-                ];
-                if (self::cascadeCandidateWins($candidate, $winners[$resolved] ?? null)) {
-                    $winners[$resolved] = $candidate;
-                }
+            self::recordHeaderCascade(
+                $winners,
+                $proven,
+                $threats,
+                $match,
+                $scope,
+                $priority,
+                $declaration['start'],
+                self::headerCriticalValues($property, $priority['value']),
+            );
+        }
+
+        foreach ($threats as $threat) {
+            if (!self::headerThreatBeaten($threat, $proven[$threat['property']] ?? null)) {
+                return "desktop {$label} visibility and flow cannot be proven across the CSS cascade";
             }
         }
 
@@ -736,6 +777,81 @@ final class DesignPreviewStep implements Step
         $viewports = array_map('floatval', $viewports);
         sort($viewports, SORT_NUMERIC);
         return $viewports;
+    }
+
+    /**
+     * @param array<string,array{value:string,important:bool,specificity:int,order:int,proven?:bool}> $winners
+     * @param array<string,array{value:string,important:bool,specificity:int,order:int,proven?:bool}> $proven
+     * @param list<array{property:string,important:bool,specificity:int,specUnknown:bool,order:int}> $threats
+     * @param array{specificity:?int,unprovable:bool} $match
+     * @param array{value:string,important:bool} $priority
+     * @param array<string,string> $values
+     */
+    private static function recordHeaderCascade(
+        array &$winners,
+        array &$proven,
+        array &$threats,
+        array $match,
+        string $scope,
+        array $priority,
+        int $order,
+        array $values,
+    ): void {
+        $unprovableMatch = $match['unprovable'];
+        $unprovableScope = $match['specificity'] !== null && $scope === 'unprovable';
+        $unprovable = $unprovableMatch || $unprovableScope;
+        if ($match['specificity'] === null && !$unprovableMatch) {
+            return;
+        }
+        $specificity = $match['specificity'] ?? 0;
+        $specUnknown = $unprovableMatch && $match['specificity'] === null;
+        foreach ($values as $property => $value) {
+            $candidate = [
+                'value' => $value,
+                'important' => $priority['important'],
+                'specificity' => $specificity,
+                'order' => $order,
+                'proven' => !$unprovable,
+            ];
+            if (self::cascadeCandidateWins($candidate, $winners[$property] ?? null)) {
+                $winners[$property] = $candidate;
+            }
+            if (!$unprovable && self::cascadeCandidateWins($candidate, $proven[$property] ?? null)) {
+                $proven[$property] = $candidate;
+            }
+            if ($unprovable) {
+                $threats[] = [
+                    'property' => $property,
+                    'important' => $priority['important'],
+                    'specificity' => $specificity,
+                    'specUnknown' => $specUnknown,
+                    'order' => $order,
+                ];
+            }
+        }
+    }
+
+    /**
+     * @param array{property:string,important:bool,specificity:int,specUnknown:bool,order:int} $threat
+     * @param array{value:string,important:bool,specificity:int,order:int,proven?:bool}|null $lock
+     */
+    private static function headerThreatBeaten(array $threat, ?array $lock): bool
+    {
+        if ($lock === null || empty($lock['proven']) || !$lock['important']) {
+            return false;
+        }
+        if (!$threat['important']) {
+            return true;
+        }
+        if ($threat['specUnknown']) {
+            return false;
+        }
+        return self::cascadeCandidateWins($lock, [
+            'value' => '',
+            'important' => $threat['important'],
+            'specificity' => $threat['specificity'],
+            'order' => $threat['order'],
+        ]);
     }
 
     /**
@@ -1360,6 +1476,17 @@ final class DesignPreviewStep implements Step
             if ($issue === null) {
                 return ['html' => $candidate, 'issue' => null];
             }
+            if (self::isUnprovenHeaderIssue($issue)) {
+                $locked = self::appendHeaderLock($candidate);
+                if ($locked !== null) {
+                    $warnings[] = 'malformed_design file design/preview.html block_path document '
+                        . 'authored_value ' . self::warningValue($issue)
+                        . ' delivered_value ' . self::warningValue(self::HEADER_LOCK_CSS)
+                        . ' disposition repaired';
+                    $candidate = $locked;
+                    continue;
+                }
+            }
             $next = self::recoverOnce($candidate, $issue);
             if ($next === null || $next === $candidate) {
                 return ['html' => $candidate, 'issue' => $issue];
@@ -1370,6 +1497,29 @@ final class DesignPreviewStep implements Step
             $candidate = $next;
         }
         return ['html' => $candidate, 'issue' => self::designIssue($candidate, $sitePages)];
+    }
+
+    private static function isUnprovenHeaderIssue(string $issue): bool
+    {
+        return str_ends_with($issue, 'cannot be proven across the CSS cascade');
+    }
+
+    private static function appendHeaderLock(string $html): ?string
+    {
+        if (str_contains($html, '--msb-preview-header')) {
+            return null;
+        }
+        $updated = preg_replace(
+            '/<\/style>/i',
+            "\n" . self::HEADER_LOCK_CSS . '</style>',
+            $html,
+            1,
+            $count,
+        );
+        if (!is_string($updated) || $count !== 1) {
+            return null;
+        }
+        return $updated;
     }
 
     private static function recoverOnce(string $html, string $issue): ?string
