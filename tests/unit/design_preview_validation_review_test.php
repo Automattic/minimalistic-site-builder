@@ -249,6 +249,8 @@ $designPreviewDependencyDefects = [
 
 $designPreviewDeterministicDependencyRemovals = [
     'image data src' => true,
+    'picture wrapper' => true,
+    'source element' => true,
     // theme: is a pipeline-authored scheme (AssignImageSourcesStep). The
     // sanitizer keeps it, so a preview fixture that injects one is no longer
     // a deterministic strip — it follows the bounded repair path.

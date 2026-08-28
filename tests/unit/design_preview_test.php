@@ -737,3 +737,93 @@ test('design-preview safe scaffold uses the supplied inner pages exactly', funct
     assert_true(!str_contains($html, 'Explore'), 'safe scaffold invents no navigation item');
     design_preview_cleanup($tmp);
 });
+
+test('design-preview degraded warning names the original and repair issues', function () {
+    [$project, $llm, $tmp] = design_preview_fixture();
+    $llm->queueText('MALFORMED-INITIAL');
+    $llm->queueText('MALFORMED-REPAIR');
+
+    design_preview_run($project, $llm);
+
+    $warnings = design_preview_warnings($project);
+    assert_contains('disposition degraded', $warnings);
+    assert_contains('safe scaffold', $warnings);
+    assert_contains('defect document is not one complete HTML document', $warnings);
+    assert_contains('repair_defect document is not one complete HTML document', $warnings);
+    design_preview_cleanup($tmp);
+});
+
+test('design-preview recovers an HTML comment instead of scaffolding', function () {
+    [$project, $llm, $tmp] = design_preview_fixture();
+    $css = design_preview_css();
+    $authored = str_replace(
+        '<!doctype html>',
+        '<!doctype html><!-- head note -->',
+        str_replace(
+            '<main>',
+            '<!-- preview note --><main>',
+            design_preview_document('COMMENT-KEEP-CSS'),
+        ),
+    );
+    $llm->queueText($authored);
+
+    design_preview_run($project, $llm);
+
+    $delivered = $project->readText('design/preview.html');
+    $siteCss = $project->readText('design/site.css');
+    $warnings = design_preview_warnings($project);
+    assert_eq(1, $llm->completeCalls, 'comment recovery does not ask the model to repair');
+    assert_true(!str_contains($delivered, '<!--'), 'HTML comment is stripped');
+    assert_contains('COMMENT-KEEP-CSS', $delivered, 'authored copy survives');
+    assert_eq($css, $siteCss, 'authored CSS is kept');
+    assert_true(!str_contains($warnings, 'disposition degraded'), 'safe scaffold is not used');
+    assert_contains('document contains HTML comments', $warnings);
+    design_preview_assert_shape($delivered);
+    design_preview_cleanup($tmp);
+});
+
+test('design-preview still scaffolds an empty document', function () {
+    [$project, $llm, $tmp] = design_preview_fixture();
+    $llm->queueText('   ');
+    $llm->queueText('');
+
+    design_preview_run($project, $llm);
+
+    $warnings = design_preview_warnings($project);
+    assert_contains('disposition degraded', $warnings);
+    assert_contains('safe scaffold', $warnings);
+    assert_contains('defect document is empty', $warnings);
+    design_preview_assert_shape($project->readText('design/preview.html'));
+    design_preview_cleanup($tmp);
+});
+
+test('design-preview still scaffolds an unparseable document', function () {
+    [$project, $llm, $tmp] = design_preview_fixture();
+    $llm->queueText('not html at all');
+    $llm->queueText('still not html');
+
+    design_preview_run($project, $llm);
+
+    $warnings = design_preview_warnings($project);
+    assert_contains('disposition degraded', $warnings);
+    assert_contains('safe scaffold', $warnings);
+    assert_contains('defect document is not one complete HTML document', $warnings);
+    design_preview_assert_shape($project->readText('design/preview.html'));
+    design_preview_cleanup($tmp);
+});
+
+test('design-preview trims trailing junk after the document instead of scaffolding', function () {
+    [$project, $llm, $tmp] = design_preview_fixture();
+    $valid = design_preview_document('TRIMMED-TRAILER');
+    $llm->queueText($valid . "\nThanks, here is the preview.\n");
+
+    design_preview_run($project, $llm);
+
+    $delivered = $project->readText('design/preview.html');
+    assert_eq(1, $llm->completeCalls, 'complete-document trim does not repair');
+    assert_contains('TRIMMED-TRAILER', $delivered);
+    assert_eq(design_preview_css(), $project->readText('design/site.css'), 'authored CSS is kept');
+    assert_true(!str_contains($delivered, 'Thanks, here is the preview.'));
+    design_preview_assert_shape($delivered);
+    design_preview_cleanup($tmp);
+});

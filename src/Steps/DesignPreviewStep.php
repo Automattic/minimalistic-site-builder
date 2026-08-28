@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\BlocksEngine\PhpTransformer\HtmlToBlocks\Style\CssSyntaxScanner;
 use Automattic\BlocksEngine\PhpTransformer\HtmlToBlocks\Style\CssSelectorMatcher;
 use Automattic\BlocksEngine\PhpTransformer\HtmlToBlocks\Style\CssValueSplitter;
+use Automattic\SiteBuild\CodeFences;
 use Automattic\SiteBuild\CssChecks;
 use Automattic\SiteBuild\DesignMarkupSanitizer;
 use Automattic\SiteBuild\Html;
@@ -24,9 +25,11 @@ use DOMXPath;
  * Generates one standalone first-fold design preview. The preview remains an
  * additive artifact until later slices make it the design seed.
  *
- * Generated markup is untrusted. One malformed response gets one direct repair
- * request; a missing or still-invalid response degrades to a deterministic,
- * contract-valid scaffold instead of aborting the build.
+ * Generated markup is untrusted. Recoverable defects (comments, leftover
+ * script/link/iframe, picture/source, trailing junk around a complete
+ * document) are stripped and re-validated. One remaining defect gets one
+ * direct repair request; a missing or still-invalid response degrades to a
+ * deterministic, contract-valid scaffold instead of aborting the build.
  */
 final class DesignPreviewStep implements Step
 {
@@ -101,13 +104,12 @@ final class DesignPreviewStep implements Step
             } catch (\RuntimeException $error) {
                 $scaffold = self::safeScaffold($siteSpec, $brief, $sitePages);
                 self::writePreview($project, $scaffold);
-                $warnings[] = self::degradedWarning(
-                    'initial LLM request failed: ' . $error->getMessage(),
-                    $scaffold,
-                );
+                $message = 'initial LLM request failed: ' . $error->getMessage();
+                $warnings[] = self::degradedWarning($message, $scaffold, $message);
                 return;
             }
 
+            $issue = 'unknown design defect';
             $initialSanitizerWarnings = [];
             try {
                 $candidate = self::sanitize(
@@ -115,18 +117,21 @@ final class DesignPreviewStep implements Step
                     'initial preview generation',
                     $initialSanitizerWarnings,
                 );
-                $issue = self::designIssue($candidate, $sitePages);
+                $recovered = self::recover($candidate, $sitePages, $initialSanitizerWarnings);
+                $candidate = $recovered['html'];
+                $issue = $recovered['issue'];
             } catch (\RuntimeException $error) {
                 $candidate = $authored;
                 $issue = 'sanitizer failed: ' . $error->getMessage();
             }
 
+            array_push($warnings, ...$initialSanitizerWarnings);
             if ($issue === null) {
                 self::writePreview($project, $candidate);
-                array_push($warnings, ...$initialSanitizerWarnings);
                 return;
             }
 
+            $repairedIssue = null;
             try {
                 $repairedAuthored = $this->llm->complete(
                     self::repairPrompt($prompt, $authored, $issue),
@@ -138,7 +143,9 @@ final class DesignPreviewStep implements Step
                     'malformed preview repair',
                     $repairSanitizerWarnings,
                 );
-                $repairedIssue = self::designIssue($repaired, $sitePages);
+                $recoveredRepair = self::recover($repaired, $sitePages, $repairSanitizerWarnings);
+                $repaired = $recoveredRepair['html'];
+                $repairedIssue = $recoveredRepair['issue'];
                 if ($repairedIssue !== null) {
                     throw new \RuntimeException("repair remained invalid: {$repairedIssue}");
                 }
@@ -155,6 +162,8 @@ final class DesignPreviewStep implements Step
                 $warnings[] = self::degradedWarning(
                     $authored . '; repair failure: ' . $error->getMessage(),
                     $scaffold,
+                    $issue,
+                    $repairedIssue ?? $error->getMessage(),
                 );
             }
         } finally {
@@ -1329,12 +1338,119 @@ final class DesignPreviewStep implements Step
         );
     }
 
-    private static function degradedWarning(string $authored, string $scaffold): string
+    /**
+     * @param list<array<string,mixed>> $sitePages
+     * @param list<string> $warnings
+     * @return array{html:string,issue:?string}
+     */
+    private static function recover(string $html, array $sitePages, array &$warnings): array
     {
-        return 'malformed_design file design/preview.html block_path document '
+        $candidate = $html;
+        if (str_contains($candidate, '<!--')) {
+            $stripped = self::stripHtmlComments($candidate);
+            if ($stripped !== $candidate) {
+                $warnings[] = 'malformed_design file design/preview.html block_path document '
+                    . 'authored_value ' . self::warningValue('document contains HTML comments')
+                    . ' delivered_value removed disposition removed';
+                $candidate = $stripped;
+            }
+        }
+        for ($i = 0; $i < 8; $i++) {
+            $issue = self::designIssue($candidate, $sitePages);
+            if ($issue === null) {
+                return ['html' => $candidate, 'issue' => null];
+            }
+            $next = self::recoverOnce($candidate, $issue);
+            if ($next === null || $next === $candidate) {
+                return ['html' => $candidate, 'issue' => $issue];
+            }
+            $warnings[] = 'malformed_design file design/preview.html block_path document '
+                . 'authored_value ' . self::warningValue($issue)
+                . ' delivered_value removed disposition removed';
+            $candidate = $next;
+        }
+        return ['html' => $candidate, 'issue' => self::designIssue($candidate, $sitePages)];
+    }
+
+    private static function recoverOnce(string $html, string $issue): ?string
+    {
+        if ($issue === 'document is not one complete HTML document') {
+            return self::trimToCompleteDocument($html);
+        }
+        if ($issue === 'document contains HTML comments') {
+            return self::stripHtmlComments($html);
+        }
+        if ($issue === 'document contains scripts or dependency elements') {
+            $next = preg_replace(
+                '/<(script|iframe|link)\b[^>]*>.*?<\/\1\s*>/is',
+                '',
+                $html,
+            ) ?? $html;
+            return preg_replace('/<(script|iframe|link)\b[^>]*\/?>/i', '', $next) ?? $next;
+        }
+        if ($issue === 'document contains responsive image dependency elements') {
+            $next = preg_replace_callback(
+                '/<picture\b[^>]*>.*?<\/picture\s*>/is',
+                static function (array $match): string {
+                    return preg_match('/<img\b[^>]*>/i', $match[0], $img) === 1 ? $img[0] : '';
+                },
+                $html,
+            ) ?? $html;
+            $next = preg_replace('/<source\b[^>]*\/?>/i', '', $next) ?? $next;
+            return preg_replace('/<\/source\s*>/i', '', $next) ?? $next;
+        }
+        return null;
+    }
+
+    private static function trimToCompleteDocument(string $html): ?string
+    {
+        $html = CodeFences::strip($html);
+        if (preg_match('/<!doctype\s+html\s*>/i', $html, $open, PREG_OFFSET_CAPTURE) !== 1) {
+            return null;
+        }
+        $start = (int) $open[0][1];
+        if (preg_match('/<html(?=[\s>])/i', $html, $htmlTag, PREG_OFFSET_CAPTURE, $start) !== 1) {
+            return null;
+        }
+        $close = strripos($html, '</html>');
+        if ($close === false || $close < (int) $htmlTag[0][1]) {
+            return null;
+        }
+        $gt = strpos($html, '>', $close);
+        if ($gt === false) {
+            return null;
+        }
+        $trimmed = substr($html, $start, $gt + 1 - $start);
+        if (
+            preg_match(
+                '/\A\s*<!doctype\s+html\s*>\s*<html(?=[\s>])[\s\S]*<\/html\s*>\s*\z/i',
+                $trimmed,
+            ) !== 1
+        ) {
+            return null;
+        }
+        return $trimmed;
+    }
+
+    private static function stripHtmlComments(string $html): string
+    {
+        return preg_replace('/<!--.*?-->/s', '', $html) ?? $html;
+    }
+
+    private static function degradedWarning(
+        string $authored,
+        string $scaffold,
+        string $issue,
+        ?string $repairIssue = null,
+    ): string {
+        $warning = 'malformed_design file design/preview.html block_path document '
             . 'authored_value ' . self::warningValue($authored)
             . ' delivered_value safe scaffold (' . strlen($scaffold) . ' bytes) '
-            . 'disposition degraded';
+            . 'disposition degraded; defect ' . self::warningValue($issue);
+        if ($repairIssue !== null && $repairIssue !== '') {
+            $warning .= '; repair_defect ' . self::warningValue($repairIssue);
+        }
+        return $warning;
     }
 
     private static function warningValue(string $value): string
