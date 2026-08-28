@@ -691,6 +691,169 @@ test('bodyFor gives OpenRouter Kimi K3 its configured budget and omits unsupport
     }
 });
 
+test('Baseten quiets the models it may quiet and floors GLM 5.3 Flash at low', function () {
+    $effort = static function (string $model): ?string {
+        $body = OpenAiCompatibleClient::bodyFor(['prompt' => 'p'], $model, 16000, 'baseten');
+        return $body['reasoning_effort'] ?? null;
+    };
+
+    foreach ([
+        'zai-org/GLM-5.2',
+        'zai-org/GLM-5.2-Fast',
+        'deepseek-ai/DeepSeek-V4-Pro',
+        'deepseek-ai/DeepSeek-V4-Flash-0731',
+        'moonshotai/Kimi-K3',
+    ] as $model) {
+        assert_eq('none', $effort($model), "{$model}: reasoning is switched off");
+    }
+
+    // GLM 5.3 Flash rejects `none`; low is the documented floor.
+    assert_eq('low', $effort('zai-org/GLM-5.3-Flash'), 'GLM 5.3 Flash cannot be disabled');
+
+    // Slug case is Baseten's, not ours: the table is matched case-insensitively.
+    assert_eq('none', $effort('zai-org/glm-5.2-fast'), 'the table is case-insensitive');
+
+    // zai-org/GLM-5.3 is NOT a Baseten model — the proxy answers 404 — so it
+    // must never acquire a profile here by looking like one that is.
+    assert_eq(null, $effort('zai-org/GLM-5.3'), 'GLM 5.3 plain does not exist and gets no profile');
+
+    // Absent from the table → no reasoning field at all, because Baseten
+    // answers 400 for a value the model does not list.
+    foreach (['zai-org/GLM-4.7', 'moonshotai/Kimi-K2.7-Code', 'nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B'] as $model) {
+        assert_eq(null, $effort($model), "{$model}: unlisted models keep the provider default");
+    }
+});
+
+test('Baseten quiets Kimi K3 too, unlike the OpenRouter K3 profile', function () {
+    $body = OpenAiCompatibleClient::bodyFor(
+        ['prompt' => 'p', 'temperature' => 0.9],
+        'moonshotai/Kimi-K3',
+        16000,
+        'baseten',
+    );
+
+    // The OpenRouter profile leans on a token floor that a caller pinning its
+    // own small budget defeats, returning reasoning and no answer. Baseten
+    // exposes the switch, so K3 is quieted outright.
+    assert_eq('none', $body['reasoning_effort'], 'K3 is quieted on Baseten');
+    assert_eq(16000, $body['max_tokens'], 'K3 takes no implicit floor on Baseten');
+    assert_eq(0.9, $body['temperature'], 'Baseten accepts a custom temperature on every model');
+
+    // A caller-pinned small budget is honoured verbatim — the shape that made
+    // every live conformance check fail while K3 still reasoned.
+    $probe = OpenAiCompatibleClient::bodyFor(
+        ['prompt' => 'p', 'max_tokens' => 24],
+        'moonshotai/Kimi-K3',
+        16000,
+        'baseten',
+    );
+    assert_eq(24, $probe['max_tokens'], 'a pinned probe budget is not silently raised');
+    assert_eq('none', $probe['reasoning_effort'], 'so the budget buys an answer, not thinking');
+
+    // Baseten documents max_tokens only — never OpenAI's longer key.
+    assert_eq(['max_tokens' => 100], OpenAiCompatibleClient::maxTokensParam('baseten', 'moonshotai/Kimi-K3', 100));
+    assert_eq(['max_tokens' => 100], OpenAiCompatibleClient::maxTokensParam('baseten', 'zai-org/GLM-5.2-Fast', 100));
+});
+
+test('reasoning_effort is Baseten-only and never reaches another provider', function () {
+    foreach ([
+        ['openai', 'gpt-5.5'],
+        ['openai', 'gpt-4o'],
+        ['xai', 'grok-4.6'],
+        ['openrouter', 'moonshotai/kimi-k3'],
+        ['openrouter', 'moonshotai/kimi-k2.5:nitro'],
+        // Same slugs Baseten quiets, served by a host that never listed the param.
+        ['openrouter', 'zai-org/GLM-5.2-Fast'],
+        ['openai', 'deepseek-ai/DeepSeek-V4-Pro'],
+    ] as [$provider, $model]) {
+        $body = OpenAiCompatibleClient::bodyFor(['prompt' => 'p'], $model, 16000, $provider);
+        assert_true(
+            !array_key_exists('reasoning_effort', $body),
+            "{$provider}/{$model}: reasoning_effort is not sent",
+        );
+    }
+
+    // The OpenRouter K3 profile is untouched by Baseten joining the matcher.
+    $k3 = OpenAiCompatibleClient::bodyFor(
+        ['prompt' => 'p', 'temperature' => 0.9],
+        'moonshotai/kimi-k3',
+        16000,
+        'openrouter',
+    );
+    assert_eq(65536, $k3['max_tokens'], 'OpenRouter K3 keeps its budget');
+    assert_true(!array_key_exists('temperature', $k3), 'OpenRouter K3 keeps its sampling policy');
+});
+
+test('Baseten generic JSON calls request JSON-object mode, and a schema still wins', function () {
+    $generic = OpenAiCompatibleClient::bodyFor(['prompt' => 'p'], 'zai-org/GLM-5.2-Fast', 16000, 'baseten', true);
+    assert_eq(['type' => 'json_object'], $generic['response_format'], 'open-weight models get the JSON steer');
+
+    $schema = OpenAiCompatibleClient::bodyFor(
+        ['prompt' => 'p', 'json_schema' => ['name' => 'plan', 'schema' => ['type' => 'object']]],
+        'zai-org/GLM-5.2-Fast',
+        16000,
+        'baseten',
+        true,
+    );
+    assert_eq('json_schema', $schema['response_format']['type'], 'an explicit schema beats json_object');
+    assert_true($schema['response_format']['json_schema']['strict'], 'structured outputs stay strict');
+
+    // Text completions are unaffected on either host.
+    $text = OpenAiCompatibleClient::bodyFor(['prompt' => 'p'], 'zai-org/GLM-5.2-Fast', 16000, 'baseten');
+    assert_true(!array_key_exists('response_format', $text), 'markup calls are not forced into JSON');
+});
+
+test('Baseten endpoint targets the wpcom AI proxy, and Baseten direct when overridden', function () {
+    $proxy = new OpenAiCompatibleClient(
+        'key',
+        'moonshotai/Kimi-K3',
+        'https://public-api.wordpress.com/wpcom/v2/ai-api-proxy/v1',
+    );
+    assert_eq(
+        'https://public-api.wordpress.com/wpcom/v2/ai-api-proxy/v1/chat/completions',
+        $proxy->endpoint(),
+    );
+
+    $direct = new OpenAiCompatibleClient('key', 'moonshotai/Kimi-K3', 'https://inference.baseten.co/v1');
+    assert_eq('https://inference.baseten.co/v1/chat/completions', $direct->endpoint());
+});
+
+test('extra headers are appended and cannot displace auth or the stream negotiation', function () {
+    $client = new OpenAiCompatibleClient(
+        'secret',
+        'zai-org/GLM-5.2-Fast',
+        'https://public-api.wordpress.com/wpcom/v2/ai-api-proxy/v1',
+        provider: 'baseten',
+        extraHeaders: ['X-WPCOM-AI-Feature' => 'site-builder'],
+    );
+
+    $headers = $client->requestHeaders();
+    assert_true(
+        in_array('X-WPCOM-AI-Feature: site-builder', $headers, true),
+        'the proxy routes and bills on this feature slug',
+    );
+    assert_true(in_array('Authorization: Bearer secret', $headers, true), 'auth survives');
+    assert_true(in_array('accept: text/event-stream', $headers, true), 'streaming survives');
+
+    // A caller cannot smuggle a replacement in: overriding names are appended,
+    // so the real Authorization line is still present and sent first.
+    $hostile = new OpenAiCompatibleClient(
+        'secret',
+        'm',
+        extraHeaders: ['Authorization' => 'Bearer attacker'],
+    );
+    $sent = $hostile->requestHeaders();
+    assert_eq('Authorization: Bearer secret', $sent[0], 'the real bearer token is sent first');
+
+    // Every other provider stays byte-identical to its pre-Baseten headers.
+    $plain = new OpenAiCompatibleClient('k', 'gpt-5.5');
+    assert_eq(
+        ['Authorization: Bearer k', 'content-type: application/json', 'accept: text/event-stream'],
+        $plain->requestHeaders(),
+        'providers that pass no extra headers are unchanged',
+    );
+});
+
 test('Kimi K3 JSON recovery doubles its effective 65k budget', function () {
     $client = new OpenAiCompatibleClient(
         'key',
