@@ -118,7 +118,6 @@ test('HeroUnit exposes one isolated assigned recipe behind the shared site layer
     $renderer = new PromptRenderer(repo_path('prompts'));
     $markers = [
         'cinematic-safe-zone' => 'landscape cover stage',
-        'knockout-type' => 'Cut the headline out of a solid panel',
         'foreground-split' => 'deliberately unequal copy and foreground-media regions',
         'layered-poster' => 'cover image beneath controlled block-built type',
         'type-manifesto' => 'one imageless, type-led band',
@@ -711,77 +710,4 @@ test('primary-action presence uses the same wp:button boundary as reconciliation
 
     $button = '<!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="/work/">Explore the work</a></div><!-- /wp:button -->';
     assert_true(GeneratedMarkup::containsPrimaryAction($button, $action));
-});
-
-test('a knockout panel gets the blend its delivered colour needs (BIGR-935)', function () {
-    $palette = static fn (string $contrast, string $base): array => ['settings' => ['color' => ['palette' => [
-        ['slug' => 'base', 'color' => $base],
-        ['slug' => 'contrast', 'color' => $contrast],
-    ]]]];
-    $panel = '<!-- wp:group {"backgroundColor":"contrast","className":"hero-knockout"} -->'
-        . '<div class="wp-block-group hero-knockout has-contrast-background-color has-background">'
-        . '<!-- wp:heading {"level":1} --><h1>Cut Sharp</h1><!-- /wp:heading -->'
-        . '</div><!-- /wp:group -->';
-    $hero = '<!-- wp:group --><div class="wp-block-group">'
-        . '<!-- wp:cover {"dimRatio":40} --><div class="wp-block-cover">'
-        . '<span aria-hidden="true" class="wp-block-cover__background has-background-dim-40 has-background-dim"></span>'
-        . $panel . '</div><!-- /wp:cover --></div><!-- /wp:group -->';
-
-    // Light palette: 'contrast' is the dark ink, so the panel multiplies.
-    $repairs = [];
-    $ink = GeneratedMarkup::knockoutBlend($hero, $palette('#111111', '#FFFFFF'), 'hero-knockout', 'page-home--hero', $repairs);
-    assert_contains('hero-knockout hero-knockout--ink', $ink);
-    assert_eq(['hero-knockout-blend'], array_column($repairs, 'code'));
-
-    // Dark palette: the same slug is the LIGHT ink, so the panel screens
-    // instead. This is the inversion the first audited build shipped.
-    $repairs = [];
-    $paper = GeneratedMarkup::knockoutBlend($hero, $palette('#DCE3EA', '#0B1016'), 'hero-knockout', 'page-home--hero', $repairs);
-    assert_contains('hero-knockout hero-knockout--paper', $paper);
-    assert_contains('luminance', $repairs[0]['delivered']);
-
-    // Fixed point: a stamped panel is not stamped twice.
-    $again = [];
-    assert_eq($paper, GeneratedMarkup::knockoutBlend($paper, $palette('#DCE3EA', '#0B1016'), 'hero-knockout', 'page-home--hero', $again));
-    assert_eq([], $again);
-
-    // An unresolvable colour leaves the panel alone: the stylesheet then
-    // renders a plain solid panel rather than a wrong blend.
-    $unknown = str_replace('"backgroundColor":"contrast"', '"backgroundColor":"invented"', $hero);
-    $skipped = [];
-    assert_eq($unknown, GeneratedMarkup::knockoutBlend($unknown, $palette('#111111', '#FFFFFF'), 'hero-knockout', 'page-home--hero', $skipped));
-    assert_eq([], $skipped);
-});
-
-test('the knockout cover keeps no dim over its photograph (BIGR-935)', function () {
-    $hero = '<!-- wp:group --><div class="wp-block-group">'
-        . '<!-- wp:cover {"dimRatio":40} --><div class="wp-block-cover">'
-        . '<span aria-hidden="true" class="wp-block-cover__background has-background-dim-40 has-background-dim"></span>'
-        . '</div><!-- /wp:cover --></div><!-- /wp:group -->';
-    $repairs = [];
-    $cleared = GeneratedMarkup::clearCoverDim($hero, 'page-home--hero', $repairs);
-    assert_contains('"dimRatio":0', $cleared);
-    assert_true(!str_contains($cleared, 'has-background-dim-40'));
-    // The bare `has-background-dim` token alone renders a 50% scrim. The
-    // repair must land on the dim-0 spelling so the token stays inert.
-    assert_contains('has-background-dim-0', $cleared);
-    assert_eq(['hero-knockout-cover-dim'], array_column($repairs, 'code'));
-
-    // Already clear, and a fixed point.
-    $again = [];
-    assert_eq($cleared, GeneratedMarkup::clearCoverDim($cleared, 'page-home--hero', $again));
-    assert_eq([], $again);
-
-    // Core save() omits the numbered class at the 50 default, so an authored
-    // dimRatio 50 carries only the bare token. The repair must still
-    // neutralize it.
-    $defaultDim = '<!-- wp:group --><div class="wp-block-group">'
-        . '<!-- wp:cover {"dimRatio":50} --><div class="wp-block-cover">'
-        . '<span aria-hidden="true" class="wp-block-cover__background has-background-dim"></span>'
-        . '</div><!-- /wp:cover --></div><!-- /wp:group -->';
-    $repairs = [];
-    $clearedDefault = GeneratedMarkup::clearCoverDim($defaultDim, 'page-home--hero', $repairs);
-    assert_contains('"dimRatio":0', $clearedDefault);
-    assert_contains('has-background-dim-0', $clearedDefault);
-    assert_eq(['hero-knockout-cover-dim'], array_column($repairs, 'code'));
 });

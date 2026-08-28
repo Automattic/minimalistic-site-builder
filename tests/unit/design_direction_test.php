@@ -1989,11 +1989,8 @@ test('fallible batch hero assignment remaps incompatibility and warns with reque
 
     $direction = $project->readJson('designDirection.json');
     $delivered = $direction['hero_blueprint']['recipe'];
-    // The pool is whatever the catalog says takes a cover image, so a new
-    // cover recipe joins it without editing this list (BIGR-935 added
-    // knockout-type).
     assert_true(
-        in_array($delivered, HeroComposition::compatible(['allowed_hero_media_modes' => ['cover-image']]), true),
+        in_array($delivered, ['cinematic-safe-zone', 'layered-poster'], true),
         'foreground request remapped inside the cover-image pool',
     );
     $joined = implode(' ', $project->readJson('warnings.json')['design-direction'] ?? []);

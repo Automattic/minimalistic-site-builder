@@ -177,14 +177,7 @@ final class ContrastFix
                 || ($attrs['useFeaturedImage'] ?? false) === true;
             $dim = (int) ($attrs['dimRatio'] ?? 100); // block.json default
             if ($hasImage) {
-                // The dim floor protects text read directly against a
-                // photograph. Text that sits inside an opaque panel is already
-                // protected by that panel, and for a knockout composition
-                // (BIGR-935) the dim is actively harmful: the photograph exists
-                // only inside the letterforms, so a scrim greys the one thing
-                // the hero is made of. Skip the floor when every visible text
-                // node in the cover lives inside such a panel.
-                if ($this->subtreeHasVisibleText($i) && !$this->coverTextSitsOnOpaquePanel($i)) {
+                if ($this->subtreeHasVisibleText($i)) {
                     $this->covers[] = ['index' => $i, 'dim' => $dim];
                 }
                 $bgColors = null; // unknowable until the image exists
@@ -1001,53 +994,6 @@ final class ContrastFix
             }
         }
         return false;
-    }
-
-    /**
-     * Whether every visible text node inside one cover sits on an opaque panel
-     * of its own (BIGR-935).
-     *
-     * A panel with a palette `backgroundColor` paints over the photograph, so
-     * the text on it is judged against that colour by the rest of this pass —
-     * the image dim adds nothing. One text node outside such a panel puts the
-     * cover back under the floor, because that node IS read against the image.
-     */
-    private function coverTextSitsOnOpaquePanel(int $cover): bool
-    {
-        $panels = [];
-        $texts = [];
-        $walk = function (int $node) use (&$walk, &$panels, &$texts): void {
-            foreach ($this->doc->children($node) as $child) {
-                $attrs = $this->doc->attrs($child) ?? [];
-                if (trim((string) ($attrs['backgroundColor'] ?? '')) !== '') {
-                    $panels[] = $child;
-                }
-                $name = $this->doc->name($child);
-                if (in_array($name, self::TEXT_BLOCKS, true)
-                    && (in_array($name, self::DYNAMIC_TEXT_BLOCKS, true)
-                        || self::visibleText($this->doc->innerHtml($child)) !== '')) {
-                    $texts[] = $child;
-                }
-                $walk($child);
-            }
-        };
-        $walk($cover);
-        if ($texts === [] || $panels === []) {
-            return false;
-        }
-        foreach ($texts as $text) {
-            $covered = false;
-            foreach ($panels as $panel) {
-                if ($this->isSelfOrDescendant($text, $panel)) {
-                    $covered = true;
-                    break;
-                }
-            }
-            if (!$covered) {
-                return false;
-            }
-        }
-        return true;
     }
 
     private function isSelfOrDescendant(int $node, int $ancestor): bool

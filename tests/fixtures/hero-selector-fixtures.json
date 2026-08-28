@@ -27,7 +27,6 @@
       },
       "eligible": [
         "cinematic-safe-zone",
-        "knockout-type",
         "layered-poster"
       ]
     },
@@ -44,7 +43,6 @@
       },
       "eligible": [
         "cinematic-safe-zone",
-        "knockout-type",
         "layered-poster"
       ]
     },
@@ -151,23 +149,6 @@
       },
       "eligible": [
         "foreground-split"
-      ]
-    },
-    {
-      "id": "compact-cover-layers",
-      "stable_identifier": "paper-stack",
-      "concept_seed": "Controlled paper layers frame one image and bold type.",
-      "constraints": {
-        "allowed_hero_media_modes": [
-          "cover-image"
-        ],
-        "max_hero_images": 1,
-        "hero_copy_capacity": "compact"
-      },
-      "eligible": [
-        "cinematic-safe-zone",
-        "knockout-type",
-        "layered-poster"
       ]
     }
   ]

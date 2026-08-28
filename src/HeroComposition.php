@@ -15,7 +15,6 @@ final class HeroComposition
     /** @var list<string> */
     public const RECIPES = [
         'cinematic-safe-zone',
-        'knockout-type',
         'foreground-split',
         'layered-poster',
         'type-manifesto',
@@ -98,8 +97,6 @@ final class HeroComposition
             // The cover plate is the band, so both media axes pin.
             'media_aspects' => ['landscape'],
             'media_weights' => ['dominant'],
-            // No region beyond the shared copy and media hooks.
-            'required_region' => null,
             'defaults' => [
                 'media_mode' => 'cover-image', 'headline_register' => 'restrained',
                 'text_anchor' => 'center',
@@ -113,64 +110,6 @@ final class HeroComposition
         // BIGR-912: the one contained-split recipe. It replaced
         // editorial-split, framed-portrait and focal-subject-stage, which
         // shared this topology and differed only in the two media axes below.
-        // BIGR-935: the type IS the picture. A solid panel covers the band and
-        // the photograph shows only through the letterforms, so the hero has
-        // no rectangle of image anywhere — the one thing every other
-        // image-bearing recipe in this catalog has. The panel and the cover
-        // beneath it are one composition: remove either and nothing is left to
-        // look at.
-        'knockout-type' => [
-            'canvases' => ['full-bleed', 'framed'],
-            'media_modes' => ['cover-image'],
-            'min_images' => 1,
-            'max_images' => 1,
-            // The knockout is a multiply blend, which only reads when the
-            // panel is the dark ink of the palette: a light panel multiplied
-            // over a photograph leaves the photograph showing everywhere.
-            'backgrounds' => ['contrast'],
-            'default_background' => 'contrast',
-            'fallback_background' => 'contrast',
-            // The band is a solid field, so it cannot protect a transparent
-            // header the way an open photograph can.
-            'header_modes' => ['stacked'],
-            'copy_capacity' => 'compact',
-            'mobile_transformations' => ['stack-copy-first'],
-            'layout_archetype' => 'full-bleed-cover',
-            'fallback_family' => 'cover',
-            'root_hook' => '.hero-composition--knockout-type',
-            'prompt' => 'hero-compositions/knockout-type.md',
-            // A knocked-out headline is read as a shape before it is read as
-            // words, so it is always the display register.
-            'headline_registers' => ['display', 'poster'],
-            'height_profiles' => ['standard', 'immersive'],
-            // One landscape plate fills the band behind the panel, and the
-            // letters are the only opening in it.
-            'media_aspects' => ['landscape'],
-            'media_weights' => ['dominant'],
-            // The panel the letters are cut from. It carries the headline and
-            // nothing else: anything else inside it would be knocked out too
-            // and become unreadable over the photograph.
-            'required_region' => [
-                'class' => 'hero-knockout',
-                'holds_headline' => true,
-                'needs_background' => true,
-                // The blend follows the delivered panel's luminance, not the
-                // slug: 'contrast' is dark ink on a light palette and light ink
-                // on a dark one, and the wrong blend inverts the composition.
-                'blend_by_luminance' => true,
-            ],
-            'defaults' => [
-                'media_mode' => 'cover-image', 'headline_register' => 'display',
-                'text_anchor' => 'center',
-                // Two lines of two short words is the legible ceiling: the
-                // letters have to be big enough to hold a photograph.
-                'headline_line_target' => ['desktop' => [1, 2], 'mobile' => [2, 3]],
-                'focal_region' => 'none', 'text_safe_region' => 'full',
-                'height_profile' => 'immersive', 'cta_treatment' => 'quiet',
-                'mobile_transformation' => 'stack-copy-first',
-                'media_aspect' => 'landscape', 'media_weight' => 'dominant',
-            ],
-        ],
         'foreground-split' => [
             'canvases' => ['full-bleed', 'framed'],
             'media_modes' => ['foreground-image'],
@@ -196,8 +135,6 @@ final class HeroComposition
             'height_profiles' => ['compact', 'standard', 'immersive'],
             'media_aspects' => ['portrait', 'landscape', 'square'],
             'media_weights' => ['balanced', 'dominant'],
-            // No region beyond the shared copy and media hooks.
-            'required_region' => null,
             'defaults' => [
                 'media_mode' => 'foreground-image', 'headline_register' => 'display',
                 'text_anchor' => 'center-start',
@@ -230,8 +167,6 @@ final class HeroComposition
             // The cover plate is the band, so both media axes pin.
             'media_aspects' => ['landscape'],
             'media_weights' => ['dominant'],
-            // No region beyond the shared copy and media hooks.
-            'required_region' => null,
             'defaults' => [
                 'media_mode' => 'cover-image', 'headline_register' => 'poster',
                 // BIGR-775 follow-up: a top-pinned safe zone left a dead band
@@ -275,8 +210,6 @@ final class HeroComposition
             // No media slot at all, so neither axis has a shape to describe.
             'media_aspects' => ['none'],
             'media_weights' => ['none'],
-            // No region beyond the shared copy and media hooks.
-            'required_region' => null,
             'defaults' => [
                 'media_mode' => 'none', 'headline_register' => 'display',
                 'text_anchor' => 'center-start',
@@ -665,82 +598,6 @@ final class HeroComposition
                 'safe parseable hero was retained; restore only the missing assigned foreground-media region hooks',
             );
         }
-        // BIGR-935: a recipe built around a region beyond the shared copy and
-        // media hooks declares it in the catalog, and the delivered part must
-        // carry exactly one. For knockout-type the region IS the composition:
-        // without the panel there is no knockout, and anything the panel holds
-        // besides the headline is knocked out with it and becomes unreadable
-        // over the photograph.
-        $region = $meta['required_region'] ?? null;
-        if (is_array($region)) {
-            $required = (string) $region['class'];
-            $found = [];
-            foreach ($document->indices() as $index) {
-                $attrs = $document->attrs($index) ?? [];
-                $classes = preg_split(
-                    '/\s+/',
-                    trim((string) ($attrs['className'] ?? '')),
-                    -1,
-                    PREG_SPLIT_NO_EMPTY,
-                ) ?: [];
-                if (in_array($required, $classes, true)) {
-                    $found[] = $index;
-                }
-            }
-            if (count($found) !== 1) {
-                $warnings[] = self::markupWarning(
-                    $part,
-                    'recipe required region',
-                    ['required_class' => $required, 'expected_regions' => 1],
-                    ['matching_regions' => count($found)],
-                    'safe parseable hero was retained; restore the single assigned region hook this recipe is built from',
-                );
-            } else {
-                $panel = $found[0];
-                $panelAttrs = $document->attrs($panel) ?? [];
-                if (($region['needs_background'] ?? false) === true
-                    && trim((string) ($panelAttrs['backgroundColor'] ?? '')) === ''
-                ) {
-                    $warnings[] = self::markupWarning(
-                        $part,
-                        'recipe region surface',
-                        ['required_class' => $required, 'backgroundColor' => 'a palette slug'],
-                        ['backgroundColor' => $panelAttrs['backgroundColor'] ?? null],
-                        'safe parseable hero was retained; restore the solid panel colour the letters are cut from',
-                    );
-                }
-                if (($region['holds_headline'] ?? false) === true) {
-                    $headlines = 0;
-                    $extras = 0;
-                    foreach ($document->indices() as $index) {
-                        if (!self::hasAncestorIndex($document, $index, $panel)) {
-                            continue;
-                        }
-                        $name = $document->name($index);
-                        $level = (int) (($document->attrs($index) ?? [])['level'] ?? 0);
-                        if ($name === 'heading' && $level === 1) {
-                            $headlines++;
-                        } elseif ($name === 'heading') {
-                            // A non-h1 heading crowds the panel just like a
-                            // paragraph does, so it counts as an extra too.
-                            $extras++;
-                        } elseif (in_array($name, ['paragraph', 'button', 'buttons', 'image', 'cover', 'list', 'quote', 'pullquote'], true)) {
-                            $extras++;
-                        }
-                    }
-                    if ($headlines !== 1 || $extras > 0) {
-                        $warnings[] = self::markupWarning(
-                            $part,
-                            'recipe region contents',
-                            ['required_class' => $required, 'level_1_headings' => 1, 'other_blocks' => 0],
-                            ['level_1_headings' => $headlines, 'other_blocks' => $extras],
-                            'safe parseable hero was retained; keep only the headline inside the region and move the '
-                                . 'supporting line and action onto the solid surface outside it',
-                        );
-                    }
-                }
-            }
-        }
         if (in_array('foreground-image', $mediaModes, true)
             && $covers > 0
         ) {
@@ -830,17 +687,6 @@ final class HeroComposition
             }
         }
         return $warnings;
-    }
-
-    /** Whether one block sits anywhere inside another (BIGR-935). */
-    private static function hasAncestorIndex(BlockMarkup $document, int $index, int $ancestor): bool
-    {
-        for ($parent = $document->parent($index); $parent !== null; $parent = $document->parent($parent)) {
-            if ($parent === $ancestor) {
-                return true;
-            }
-        }
-        return false;
     }
 
     /** Whether any ancestor of one block carries a class token. */
