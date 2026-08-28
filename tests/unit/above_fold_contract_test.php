@@ -1163,3 +1163,40 @@ test('headerFacts reads overlay mode from the classes delivery actually emits (B
         . 'has-background"><!-- wp:site-title /--></div><!-- /wp:group -->';
     assert_eq('stacked', AboveFoldPartFacts::headerFacts($static)['mode']);
 });
+
+test('the contract carries the committed media aspect and rejects an incompatible one (BIGR-925)', function () {
+    $pages = above_fold_pages(null, 'base', 'base');
+
+    // The blueprint's committed aspect reaches the contract verbatim.
+    $blueprint = HeroBlueprint::defaultFor('foreground-split');
+    $blueprint['media_aspect'] = 'portrait';
+    $contract = AboveFoldContract::resolve(
+        $pages,
+        $blueprint,
+        'full-bleed',
+        ['base' => '#FFFFFF', 'contrast' => '#111111'],
+        ['stable_id' => 'aspect-carry', 'writing_direction' => 'ltr', 'page_count' => count($pages)],
+        ['archetype' => 'minimal-columns', 'surface' => 'base'],
+    );
+    assert_eq('portrait', $contract['media_aspect']);
+    AboveFoldContract::assertPhase($contract, AboveFoldContract::PHASE_DELIVERY);
+
+    // A recipe with one aspect pins it whatever the blueprint says.
+    $cover = HeroBlueprint::defaultFor('cinematic-safe-zone');
+    $cover['media_aspect'] = 'portrait';
+    $pinned = AboveFoldContract::resolve(
+        $pages,
+        $cover,
+        'full-bleed',
+        ['base' => '#FFFFFF', 'contrast' => '#111111'],
+        ['stable_id' => 'aspect-pin', 'writing_direction' => 'ltr', 'page_count' => count($pages)],
+        ['archetype' => 'minimal-columns', 'surface' => 'base'],
+    );
+    assert_eq('landscape', $pinned['media_aspect'], 'a cover recipe cannot be talked into a portrait plate');
+
+    // A hand-edited contract naming an aspect its recipe has no slot for is
+    // rejected, the same way an incompatible mobile transformation is.
+    $broken = $contract;
+    $broken['media_aspect'] = 'none';
+    assert_throws(fn () => AboveFoldContract::assertPhase($broken, AboveFoldContract::PHASE_DELIVERY));
+});
