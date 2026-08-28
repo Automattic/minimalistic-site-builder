@@ -762,10 +762,26 @@ test('the knockout cover keeps no dim over its photograph (BIGR-935)', function 
     $cleared = GeneratedMarkup::clearCoverDim($hero, 'page-home--hero', $repairs);
     assert_contains('"dimRatio":0', $cleared);
     assert_true(!str_contains($cleared, 'has-background-dim-40'));
+    // The bare `has-background-dim` token alone renders a 50% scrim. The
+    // repair must land on the dim-0 spelling so the token stays inert.
+    assert_contains('has-background-dim-0', $cleared);
     assert_eq(['hero-knockout-cover-dim'], array_column($repairs, 'code'));
 
     // Already clear, and a fixed point.
     $again = [];
     assert_eq($cleared, GeneratedMarkup::clearCoverDim($cleared, 'page-home--hero', $again));
     assert_eq([], $again);
+
+    // Core save() omits the numbered class at the 50 default, so an authored
+    // dimRatio 50 carries only the bare token. The repair must still
+    // neutralize it.
+    $defaultDim = '<!-- wp:group --><div class="wp-block-group">'
+        . '<!-- wp:cover {"dimRatio":50} --><div class="wp-block-cover">'
+        . '<span aria-hidden="true" class="wp-block-cover__background has-background-dim"></span>'
+        . '</div><!-- /wp:cover --></div><!-- /wp:group -->';
+    $repairs = [];
+    $clearedDefault = GeneratedMarkup::clearCoverDim($defaultDim, 'page-home--hero', $repairs);
+    assert_contains('"dimRatio":0', $clearedDefault);
+    assert_contains('has-background-dim-0', $clearedDefault);
+    assert_eq(['hero-knockout-cover-dim'], array_column($repairs, 'code'));
 });

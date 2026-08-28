@@ -567,14 +567,17 @@ final class ScaffoldThemeStep implements Step
         .hero-composition--knockout-type .hero-knockout--ink {
             mix-blend-mode: multiply;
         }
+        /* !important: core's preset rule (.has-base-color { color: ... !important })
+           wins over any unflagged declaration, and the blend maths need the
+           exact endpoints. */
         .hero-composition--knockout-type .hero-knockout--ink :is(h1, h2, p) {
-            color: #fff;
+            color: #fff !important;
         }
         .hero-composition--knockout-type .hero-knockout--paper {
             mix-blend-mode: screen;
         }
         .hero-composition--knockout-type .hero-knockout--paper :is(h1, h2, p) {
-            color: #000;
+            color: #000 !important;
         }
         /* Forced-colours users get a solid, unblended headline: the knockout is
            decoration, and the words must survive without it. */

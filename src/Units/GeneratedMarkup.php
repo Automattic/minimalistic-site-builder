@@ -11,11 +11,12 @@ use Automattic\SiteBuild\BlockSerializer\Json\JsonDecoder;
 use Automattic\SiteBuild\BlockSerializer\Json\JsonObject;
 use Automattic\SiteBuild\BlockSerializer\Json\JsonValue;
 use Automattic\SiteBuild\CodeFences;
+use Automattic\SiteBuild\ContrastFix;
 use Automattic\SiteBuild\HtmlBlockContext;
 use Automattic\SiteBuild\MarkupSalvage;
-use Automattic\SiteBuild\PaletteFloor;
 use Automattic\SiteBuild\MarkupSanitizer;
 use Automattic\SiteBuild\Narrator;
+use Automattic\SiteBuild\PaletteFloor;
 use Automattic\SiteBuild\PlainText;
 use Automattic\SiteBuild\Warnings;
 
@@ -3164,7 +3165,10 @@ final class GeneratedMarkup
             }
             $attrs['dimRatio'] = 0;
             $document->setAttrs($index, $attrs);
-            $document->removeClassTokenInOwnHtml($index, 'has-background-dim-' . (int) $dim);
+            // A bare `has-background-dim` token still renders a 50% scrim, and
+            // an authored dimRatio 50 carries no numbered class at all. The
+            // shared swap covers both spellings and lands on the dim-0 class.
+            ContrastFix::swapDimClass($document, $index, (int) $dim, 0);
             $cleared++;
         }
         if ($cleared === 0) {

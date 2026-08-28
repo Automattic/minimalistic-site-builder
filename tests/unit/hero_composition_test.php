@@ -518,6 +518,20 @@ test('the knockout panel check reads the delivered region, not the recipe name (
     assert_eq(1, count($contents));
     assert_contains('"other_blocks":1', $contents[0]);
 
+    // A subheading inside the panel crowds it exactly like a paragraph does.
+    $subheaded = $cover($panel(
+        '{"className":"hero-knockout","backgroundColor":"contrast"}',
+        'hero-knockout',
+        $headline . '<!-- wp:heading {"level":2} --><h2 class="wp-block-heading">Since 1968</h2><!-- /wp:heading -->',
+    ));
+    $warnings = HeroComposition::markupWarnings($subheaded, 'knockout-type', 'page-home--hero');
+    $contents = array_values(array_filter(
+        $warnings,
+        static fn (string $row): bool => str_contains($row, 'recipe region contents'),
+    ));
+    assert_eq(1, count($contents));
+    assert_contains('"other_blocks":1', $contents[0]);
+
     // Two panels are two knockouts.
     $twice = $cover(
         $panel('{"className":"hero-knockout","backgroundColor":"contrast"}', 'hero-knockout', $headline)

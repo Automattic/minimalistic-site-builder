@@ -720,7 +720,11 @@ final class HeroComposition
                         $level = (int) (($document->attrs($index) ?? [])['level'] ?? 0);
                         if ($name === 'heading' && $level === 1) {
                             $headlines++;
-                        } elseif (in_array($name, ['paragraph', 'button', 'buttons', 'image', 'cover'], true)) {
+                        } elseif ($name === 'heading') {
+                            // A non-h1 heading crowds the panel just like a
+                            // paragraph does, so it counts as an extra too.
+                            $extras++;
+                        } elseif (in_array($name, ['paragraph', 'button', 'buttons', 'image', 'cover', 'list', 'quote', 'pullquote'], true)) {
                             $extras++;
                         }
                     }
