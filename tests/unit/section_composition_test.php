@@ -51,7 +51,7 @@ test('the section catalog is the one source of the plan step archetype menu', fu
     assert_eq(
         SectionComposition::ARCHETYPES,
         array_keys(SectionComposition::catalog()),
-        'the catalog holds exactly the seven published archetypes, in order',
+        'the catalog holds exactly the six published archetypes, in order',
     );
 });
 
@@ -381,6 +381,63 @@ test('the section catalog reports a pin the delivered band ignored', function ()
         [],
         SectionComposition::markupWarnings($pinned, 'asymmetric-split', 'page-home--menu', 'rule-row'),
         'a delivered pin draws no warning',
+    );
+});
+
+test('the section catalog reports a pin that sits on the repeated-items column', function () {
+    // The pin exists to hold the SHORT lead in view beside the long repeated
+    // set. A pin on the items column pins the long region instead, so a bare
+    // presence check would pass the exact defect the pin prevents.
+    $item = '<!-- wp:group {"className":"item-pattern__item"} -->'
+        . '<div class="wp-block-group item-pattern__item">'
+        . '<!-- wp:paragraph --><p>Item.</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->';
+    $row = static function (string $leadClass, string $itemsClass) use ($item): string {
+        $lead = $leadClass === ''
+            ? '{"width":"40%"}'
+            : '{"width":"40%","className":"' . $leadClass . '"}';
+        $items = $itemsClass === ''
+            ? '{"width":"60%"}'
+            : '{"width":"60%","className":"' . $itemsClass . '"}';
+        return '<!-- wp:columns --><div class="wp-block-columns">'
+            . '<!-- wp:column ' . $lead . ' --><div class="wp-block-column">'
+            . '<!-- wp:paragraph --><p>Lead copy.</p><!-- /wp:paragraph -->'
+            . '</div><!-- /wp:column -->'
+            . '<!-- wp:column ' . $items . ' --><div class="wp-block-column">'
+            . $item . $item . $item
+            . '</div><!-- /wp:column -->'
+            . '</div><!-- /wp:columns -->';
+    };
+
+    // Pin on the items column: reported, and the row says where the pin goes.
+    $rows = SectionComposition::markupWarnings(
+        section_composition_markup(
+            'asymmetric-split',
+            $row('', SectionComposition::PIN_CLASS)
+        ),
+        'asymmetric-split',
+        'page-home--menu',
+        'rule-row',
+    );
+    assert_eq(1, count($rows), 'a misplaced pin is one row');
+    assert_contains('archetype pinned lead', $rows[0]);
+    assert_contains('"pinned_blocks":1', $rows[0], 'the row records the pin was present');
+    assert_contains('"pinned_lead_columns":0', $rows[0], 'the row records it missed the lead');
+    assert_contains('move the pin class', $rows[0]);
+
+    // Pin on the lead column: silent.
+    assert_eq(
+        [],
+        SectionComposition::markupWarnings(
+            section_composition_markup(
+                'asymmetric-split',
+                $row(SectionComposition::PIN_CLASS, '')
+            ),
+            'asymmetric-split',
+            'page-home--menu',
+            'rule-row',
+        ),
+        'a pin on the lead column draws no warning',
     );
 });
 

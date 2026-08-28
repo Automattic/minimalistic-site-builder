@@ -51,11 +51,13 @@ final class SectionComposition
     /**
      * The class one column carries when the archetype asked for a pinned lead.
      *
-     * `PageStylesStep` already emits the rule for this token: `position:
-     * sticky` with a top offset, `align-self: flex-start`, and both gated to
-     * `min-width: 782px`. The archetype does not invent a mechanism; it decides
-     * WHEN the existing one is asked for, which is the part the model was
-     * getting wrong on its own.
+     * `ScaffoldThemeStep::STYLE_CSS` owns the guaranteed rule for this token:
+     * `position: sticky` with a top offset, `align-self: flex-start`, and the
+     * sticky part gated to `min-width: 782px`. `PageStylesStep::CLASSES` only
+     * documents a contract for a model-authored appendix, and that appendix can
+     * be dropped, so this archetype never depends on it. The archetype does not
+     * invent a mechanism; it decides WHEN the guaranteed one is asked for,
+     * which is the part the model was getting wrong on its own.
      */
     public const PIN_CLASS = 'sticky-side';
 
@@ -494,21 +496,38 @@ TEXT;
             );
         }
 
-        if (self::pinsLeadColumn($archetype, $itemPattern)
-            && !self::hasClassToken($document, self::PIN_CLASS)
-        ) {
-            $warnings[] = self::markupWarning(
-                $part,
-                'archetype pinned lead',
-                [
-                    'archetype' => $archetype,
-                    'item_pattern' => $itemPattern,
-                    'required_class' => self::PIN_CLASS,
-                    'required_on' => 'the wp:column holding the lead copy',
-                ],
-                ['pinned_columns' => 0],
-                'safe parseable section was retained; add the pin class to the lead column so the short region stops stranding a blank quadrant beside the long one',
-            );
+        if (self::pinsLeadColumn($archetype, $itemPattern)) {
+            // The pin must sit on the LEAD column — the one that does not hold
+            // the repeated items. A pin on the items column passes a bare
+            // presence check but pins the long region and strands the lead,
+            // which is the exact defect the pin exists to prevent.
+            $pinned = 0;
+            $pinnedLead = 0;
+            foreach ($document->indices() as $index) {
+                if (!in_array(self::PIN_CLASS, self::classTokens($document, $index), true)) {
+                    continue;
+                }
+                $pinned++;
+                if (!self::subtreeHasClassToken($document, $index, ItemPattern::ITEM_MARKER)) {
+                    $pinnedLead++;
+                }
+            }
+            if ($pinnedLead === 0) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'archetype pinned lead',
+                    [
+                        'archetype' => $archetype,
+                        'item_pattern' => $itemPattern,
+                        'required_class' => self::PIN_CLASS,
+                        'required_on' => 'the wp:column holding the lead copy',
+                    ],
+                    ['pinned_blocks' => $pinned, 'pinned_lead_columns' => 0],
+                    $pinned === 0
+                        ? 'safe parseable section was retained; add the pin class to the lead column so the short region stops stranding a blank quadrant beside the long one'
+                        : 'safe parseable section was retained; move the pin class off the repeated-items column and onto the lead column — a pinned items column pins the long region and strands the lead',
+                );
+            }
         }
 
         $spread = self::hasUnequalRegions($archetype) ? self::mediaSpread($document) : null;
@@ -540,8 +559,9 @@ TEXT;
      * holding several images beside a sibling holding one or none cannot end at
      * a similar height, whatever the copy does.
      *
-     * Only the widest row is judged, and only rows with two or more regions,
-     * so a band that legitimately puts one plate beside one copy column — the
+     * Every `wp:columns` row with two or more regions is judged and the worst
+     * spread is kept, so one balanced row cannot hide an unbalanced sibling. A
+     * band that legitimately puts one plate beside one copy column — the
      * archetype's most common and most successful shape — is never reported.
      *
      * @return array{per_region:list<int>,spread:int}|null
@@ -573,11 +593,14 @@ TEXT;
         return $worst;
     }
 
-    /** Whether any block in the document carries this class token. */
-    private static function hasClassToken(BlockMarkup $document, string $token): bool
+    /** Whether this block, or any block under it, carries this class token. */
+    private static function subtreeHasClassToken(BlockMarkup $document, int $index, string $token): bool
     {
-        foreach ($document->indices() as $index) {
-            if (in_array($token, self::classTokens($document, $index), true)) {
+        if (in_array($token, self::classTokens($document, $index), true)) {
+            return true;
+        }
+        foreach ($document->children($index) as $child) {
+            if (self::subtreeHasClassToken($document, $child, $token)) {
                 return true;
             }
         }

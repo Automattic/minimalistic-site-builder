@@ -178,10 +178,15 @@ final class EvalMetrics
                 $band = substr($markup, $start, $end - $start);
 
                 $splits++;
-                if (str_contains($band, SectionComposition::PIN_CLASS)) {
+                if (self::bandHasClassToken($band, SectionComposition::PIN_CLASS)) {
                     $pinned++;
                 }
-                foreach (SectionComposition::markupWarnings($band, $archetype, $path, $itemPattern) as $row) {
+                // `markupWarnings()` formats its label as
+                // `theme/parts/<label>.html`, so it gets the page slug, not the
+                // project-relative path — that path would render with a second
+                // `.html` and a wrong directory.
+                $label = basename($path, '.html');
+                foreach (SectionComposition::markupWarnings($band, $archetype, $label, $itemPattern) as $row) {
                     if (str_contains($row, 'archetype region balance')) {
                         $unbalanced++;
                         break;
@@ -195,6 +200,30 @@ final class EvalMetrics
             'unbalanced_split_bands' => $unbalanced,
             'pinned_split_bands' => $pinned,
         ];
+    }
+
+    /**
+     * Whether any block in the band carries this class token in its
+     * `className` attribute. The same token-boundary rule as the private
+     * `SectionComposition` class-token helpers: a raw substring match would
+     * also count a longer token such as `sticky-sidebar`, or the token inside
+     * prose.
+     */
+    private static function bandHasClassToken(string $band, string $token): bool
+    {
+        $document = BlockMarkup::parse($band);
+        foreach ($document->indices() as $index) {
+            $classes = preg_split(
+                '/\s+/',
+                trim((string) (($document->attrs($index) ?? [])['className'] ?? '')),
+                -1,
+                PREG_SPLIT_NO_EMPTY,
+            ) ?: [];
+            if (in_array($token, $classes, true)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

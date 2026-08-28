@@ -441,3 +441,40 @@ test('scaffold hero headings wrap at word boundaries and never snap mid-word', f
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('scaffold-theme owns the guaranteed sticky-side pin rule', function () {
+    // BIGR-945: `SectionComposition::PIN_CLASS` REQUIRES this behavior. The
+    // page-styles appendix is model-authored and can be dropped, so the
+    // scaffold ships the rule itself.
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_pin_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    (new ScaffoldThemeStep())->run($project);
+    $css = $project->readText('theme/style.css');
+
+    $hook = '.section-composition--asymmetric-split .wp-block-column.sticky-side';
+    assert_contains($hook . ' {', $css, 'the pin rule targets the archetype root and the pin class');
+
+    // The stretch opt-out applies at every width; the sticky part is
+    // desktop-only.
+    $matched = preg_match(
+        '~' . preg_quote($hook, '~') . '\s*\{(?<base>[^}]*)\}~',
+        $css,
+        $base
+    );
+    assert_eq(1, $matched, 'the base pin rule exists');
+    assert_contains('align-self: flex-start', $base['base']);
+
+    $matched = preg_match(
+        '~@media \(min-width: 782px\)\s*\{\s*'
+            . preg_quote($hook, '~') . '\s*\{(?<body>[^}]*)\}~',
+        $css,
+        $rule
+    );
+    assert_eq(1, $matched, 'the sticky part is gated to desktop widths');
+    assert_contains('position: sticky', $rule['body']);
+    assert_contains('top: var(--wp--preset--spacing--lg, 3rem)', $rule['body']);
+    assert_contains('max-block-size', $rule['body'], 'a tall pinned column stays reachable');
+    assert_contains('overflow-y: auto', $rule['body']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

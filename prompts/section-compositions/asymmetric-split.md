@@ -19,9 +19,12 @@ Choose the region count from the content, and commit to it:
   real feature and real notes — three regions of equal weight is a card grid,
   and this archetype is not one.
 
-- Structure: one `wp:columns` (or, for two regions, one `wp:media-text` with an
-  unequal media width) with explicit column widths that sum to 100%. Equal
-  widths are a failure at every region count.
+- Structure: one `wp:columns` with explicit column widths that sum to 100%.
+  For two regions WITHOUT a pinned lead, one `wp:media-text` with an unequal
+  media width is also allowed. When this band requires the pinned lead (the
+  directive below appears), author it as a `wp:columns` row — the pin class
+  works only on a `wp:column`. Equal widths are a failure at every region
+  count.
 - Copy budget: one heading and one lead line at most for the band. At two
   regions the leading region also holds the body copy. At three, the feature
   holds a heading and one or two short paragraphs and each note holds a heading
