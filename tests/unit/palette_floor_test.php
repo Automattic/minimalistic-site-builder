@@ -528,7 +528,34 @@ test('repair() still moves a mid-tone accent no ink can label, and names the ink
     assert_contains('label ink', palette_floor_warning_for($warnings, 'accent'));
 });
 
-test('repair() keeps the authored hex when the contrast floor is unreachable', function () {
+test('the default floor is AA: a mid-dark ink on cream survives repair()', function () {
+    // BIGR-923: #6B5138 on #F4EBDD measures ~6.2:1 — above AA, below the old
+    // AAA floor that used to overwrite it.
+    $palette = [
+        'base' => '#F4EBDD',
+        'contrast' => '#6B5138',
+        'primary' => '#8C3A1E',
+        'secondary' => '#6B5A47',
+        'accent' => '#7A2E2E',
+    ];
+    $ratio = PaletteFloor::ratio($palette['contrast'], $palette['base']);
+    assert_true($ratio !== null && $ratio > 4.5 && $ratio < 7.0, "mid-dark ink measures {$ratio}");
+
+    $warnings = [];
+    $out = PaletteFloor::repair($palette, $warnings);
+    assert_true(palette_floor_same_hex($out['contrast'], '#6B5138'), 'the authored ink ships');
+    assert_eq('', palette_floor_warning_for($warnings, 'contrast'));
+
+    // The same palette under a committed surface texture is still raised.
+    $surfaceWarnings = [];
+    $raised = PaletteFloor::repair($palette, $surfaceWarnings, 7.0);
+    assert_true(!palette_floor_same_hex($raised['contrast'], '#6B5138'), 'the texture floor still moves it');
+});
+
+test('repair() keeps the authored hex when the raised surface floor is unreachable', function () {
+    // Any base reaches 4.5:1 with black or white, so the unreachable branch
+    // exists only under the raised 7:1 surface-texture floor (BIGR-923).
+    $surfaceFloor = 7.0;
     $palette = [
         'base' => '#808080',
         'contrast' => '#AAAAAA',
@@ -537,19 +564,19 @@ test('repair() keeps the authored hex when the contrast floor is unreachable', f
         'accent' => '#000000',
     ];
     $before = PaletteFloor::ratio($palette['contrast'], $palette['base']);
-    assert_true($before !== null && $before < PaletteFloor::CONTRAST_ON_BASE);
-    assert_true(PaletteFloor::ratio('#FFFFFF', $palette['base']) < PaletteFloor::CONTRAST_ON_BASE);
-    assert_true(PaletteFloor::ratio('#000000', $palette['base']) < PaletteFloor::CONTRAST_ON_BASE);
+    assert_true($before !== null && $before < $surfaceFloor);
+    assert_true(PaletteFloor::ratio('#FFFFFF', $palette['base']) < $surfaceFloor);
+    assert_true(PaletteFloor::ratio('#000000', $palette['base']) < $surfaceFloor);
 
     $warnings = [];
-    $out = PaletteFloor::repair($palette, $warnings);
+    $out = PaletteFloor::repair($palette, $warnings, $surfaceFloor);
     assert_true(palette_floor_same_hex($out['contrast'], '#AAAAAA'), 'authored contrast survives');
     $row = palette_floor_warning_for($warnings, 'contrast');
     assert_contains('disposition=unrepaired', $row);
     assert_contains('contrast floor 7.0:1', $row);
     assert_contains('best achieved', $row);
     assert_contains(':1', $row);
-    $residual = palette_floor_finding(PaletteFloor::check($out), 'contrast', 'contrast');
+    $residual = palette_floor_finding(PaletteFloor::check($out, $surfaceFloor), 'contrast', 'contrast');
     assert_true($residual !== null);
 });
 

@@ -80,6 +80,26 @@ test('StepDefaults follows the active provider tiers (openai)', function () {
     }
 });
 
+test('StepDefaults uses K3 for Baseten quality steps and GLM 5.2 Fast for structural steps', function () {
+    putenv('LLM_PROVIDER=baseten');
+    try {
+        assert_eq('baseten', StepDefaults::provider());
+        $models = StepDefaults::models();
+        foreach (ModelConfig::stepTiers() as $step => $tier) {
+            $expected = $tier === 'large'
+                ? 'moonshotai/Kimi-K3'
+                : 'zai-org/GLM-5.2-Fast';
+            assert_eq(
+                $expected,
+                $models[$step],
+                "{$step} follows its configured {$tier} tier",
+            );
+        }
+    } finally {
+        putenv('LLM_PROVIDER');
+    }
+});
+
 test('StepDefaults uses K3 for OpenRouter quality steps and K2.5 for structural steps', function () {
     putenv('LLM_PROVIDER=openrouter');
     try {

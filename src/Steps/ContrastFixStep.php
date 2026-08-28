@@ -43,8 +43,6 @@ final class ContrastFixStep implements Step
 {
     private const REPORT_FILE = 'contrast-report.txt';
 
-    /** base↔contrast should be comfortably readable, not borderline. */
-    private const PALETTE_TARGET = 7.0;
 
     public function __construct(private bool $htmlFirst = false) {}
 
@@ -90,8 +88,11 @@ final class ContrastFixStep implements Step
         $warnings = 0;
 
         // Theme-level pairs first: the global link repair below changes the
-        // default that the per-file walk then inherits.
-        $themeChanged = $this->fixThemeLevel($themeJson, $palette, $report, $repaired, $warnings);
+        // default that the per-file walk then inherits. The target above the
+        // 4.5 minimum exists only when a committed surface texture demands
+        // headroom for its overlay (BIGR-923).
+        $paletteTarget = Surface::contrastFloor(DesignDirectionStep::surfaceFor($project));
+        $themeChanged = $this->fixThemeLevel($themeJson, $palette, $paletteTarget, $report, $repaired, $warnings);
         if ($themeChanged) {
             $project->writeJson('theme/theme.json', $themeJson);
         }
@@ -281,8 +282,14 @@ final class ContrastFixStep implements Step
      * @param array<string,string> $palette
      * @param list<string> $report
      */
-    private function fixThemeLevel(array &$themeJson, array $palette, array &$report, int &$repaired, int &$warnings): bool
-    {
+    private function fixThemeLevel(
+        array &$themeJson,
+        array $palette,
+        float $paletteTarget,
+        array &$report,
+        int &$repaired,
+        int &$warnings,
+    ): bool {
         $changed = false;
         $base = self::rgb($palette, 'base');
         $contrast = self::rgb($palette, 'contrast');
@@ -295,10 +302,10 @@ final class ContrastFixStep implements Step
                     $ratio, ContrastMath::NORMAL_TEXT
                 );
                 $warnings++;
-            } elseif ($ratio < self::PALETTE_TARGET) {
+            } elseif ($ratio < $paletteTarget) {
                 $report[] = sprintf(
-                    '[theme.json] palette base/contrast ratio %.2f is below the %.1f target (warning)',
-                    $ratio, self::PALETTE_TARGET
+                    '[theme.json] palette base/contrast ratio %.2f is below the %.1f surface-texture target (warning)',
+                    $ratio, $paletteTarget
                 );
                 $warnings++;
             }
