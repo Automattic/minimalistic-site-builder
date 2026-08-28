@@ -5,7 +5,7 @@ use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
 
 test('hero catalog entries own complete metadata, defaults, prompts, and unique hooks', function () {
-    assert_eq(4, count(HeroComposition::RECIPES));
+    assert_eq(5, count(HeroComposition::RECIPES));
     $hooks = [];
     foreach (HeroComposition::RECIPES as $recipe) {
         $meta = HeroComposition::metadata($recipe);
@@ -14,7 +14,7 @@ test('hero catalog entries own complete metadata, defaults, prompts, and unique 
             'default_background', 'fallback_background', 'header_modes', 'copy_capacity',
             'mobile_transformations', 'layout_archetype', 'fallback_family', 'root_hook',
             'prompt', 'headline_registers', 'height_profiles', 'media_aspects',
-            'media_weights', 'defaults',
+            'media_weights', 'required_region', 'defaults',
         ] as $field) {
             assert_true(array_key_exists($field, $meta), "{$recipe} metadata has {$field}");
         }
@@ -439,4 +439,110 @@ test('hero copy budget and headline punctuation overruns warn without hiding val
     $cleanHeadline = str_replace('One subject — staged', 'One subject staged', $inBudget);
     $warnings = HeroComposition::markupWarnings($cleanHeadline, 'foreground-split', 'page-home--hero');
     assert_eq([], array_values(array_filter($warnings, fn (string $w): bool => str_contains($w, 'hero headline punctuation'))));
+});
+
+test('knockout-type puts the image inside the letters, nowhere else (BIGR-935)', function () {
+    $meta = HeroComposition::metadata('knockout-type');
+    assert_eq(['cover-image'], $meta['media_modes']);
+    assert_eq(1, $meta['min_images']);
+    assert_eq(1, $meta['max_images']);
+    // multiply only cuts letters out of dark ink, so the surface is pinned.
+    assert_eq(['contrast'], $meta['backgrounds']);
+    assert_eq('contrast', $meta['default_background']);
+    // A solid field cannot protect a transparent header.
+    assert_eq(['stacked'], $meta['header_modes']);
+    // Read as a shape before it is read as words.
+    assert_eq(['display', 'poster'], $meta['headline_registers']);
+    assert_eq(
+        [
+            'class' => 'hero-knockout',
+            'holds_headline' => true,
+            'needs_background' => true,
+            'blend_by_luminance' => true,
+        ],
+        $meta['required_region'],
+    );
+
+    foreach (HeroComposition::RECIPES as $recipe) {
+        if ($recipe === 'knockout-type') {
+            continue;
+        }
+        assert_eq(null, HeroComposition::metadata($recipe)['required_region'], $recipe);
+    }
+});
+
+test('the knockout panel check reads the delivered region, not the recipe name (BIGR-935)', function () {
+    $headline = '<!-- wp:heading {"level":1,"fontSize":"display","textColor":"base"} -->'
+        . '<h1 class="wp-block-heading has-base-color">Cast Iron</h1><!-- /wp:heading -->';
+    $support = '<!-- wp:group {"className":"hero-composition__copy","backgroundColor":"contrast"} -->'
+        . '<div class="wp-block-group hero-composition__copy has-contrast-background-color">'
+        . '<!-- wp:paragraph --><p>Foundry and fabrication in Sheffield.</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->';
+    $cover = static fn (string $inner): string =>
+        '<!-- wp:group --><div class="wp-block-group">'
+        . '<!-- wp:cover {"dimRatio":0} --><div class="wp-block-cover">'
+        . '<img class="wp-block-cover__image-background" src="theme:./assets/iron.jpg"'
+        . ' alt="AI_IMAGE: A ladle pouring molten iron | hero cover behind the knockout headline | photorealistic | landscape" />'
+        . $inner . '</div><!-- /wp:cover --></div><!-- /wp:group -->';
+    $panel = static fn (string $attrs, string $classes, string $inner): string =>
+        '<!-- wp:group ' . $attrs . ' --><div class="wp-block-group ' . $classes . '">'
+        . $inner . '</div><!-- /wp:group -->';
+
+    $good = $cover($panel('{"className":"hero-knockout","backgroundColor":"contrast"}', 'hero-knockout', $headline) . $support);
+    assert_eq([], HeroComposition::markupWarnings($good, 'knockout-type', 'page-home--hero'));
+
+    // No panel: the headline sits on the open photograph and nothing is cut.
+    $noPanel = $cover($headline . $support);
+    $warnings = HeroComposition::markupWarnings($noPanel, 'knockout-type', 'page-home--hero');
+    assert_eq(1, count($warnings));
+    assert_contains('recipe required region', $warnings[0]);
+    assert_contains('hero-knockout', $warnings[0]);
+
+    // A panel with no colour has nothing to cut the letters from.
+    $noColour = $cover($panel('{"className":"hero-knockout"}', 'hero-knockout', $headline) . $support);
+    $warnings = HeroComposition::markupWarnings($noColour, 'knockout-type', 'page-home--hero');
+    assert_eq(1, count($warnings));
+    assert_contains('recipe region surface', $warnings[0]);
+
+    // A standfirst inside the panel is knocked out too, and unreadable.
+    $crowded = $cover($panel(
+        '{"className":"hero-knockout","backgroundColor":"contrast"}',
+        'hero-knockout',
+        $headline . '<!-- wp:paragraph --><p>Since 1968.</p><!-- /wp:paragraph -->',
+    ));
+    $warnings = HeroComposition::markupWarnings($crowded, 'knockout-type', 'page-home--hero');
+    $contents = array_values(array_filter(
+        $warnings,
+        static fn (string $row): bool => str_contains($row, 'recipe region contents'),
+    ));
+    assert_eq(1, count($contents));
+    assert_contains('"other_blocks":1', $contents[0]);
+
+    // A subheading inside the panel crowds it exactly like a paragraph does.
+    $subheaded = $cover($panel(
+        '{"className":"hero-knockout","backgroundColor":"contrast"}',
+        'hero-knockout',
+        $headline . '<!-- wp:heading {"level":2} --><h2 class="wp-block-heading">Since 1968</h2><!-- /wp:heading -->',
+    ));
+    $warnings = HeroComposition::markupWarnings($subheaded, 'knockout-type', 'page-home--hero');
+    $contents = array_values(array_filter(
+        $warnings,
+        static fn (string $row): bool => str_contains($row, 'recipe region contents'),
+    ));
+    assert_eq(1, count($contents));
+    assert_contains('"other_blocks":1', $contents[0]);
+
+    // Two panels are two knockouts.
+    $twice = $cover(
+        $panel('{"className":"hero-knockout","backgroundColor":"contrast"}', 'hero-knockout', $headline)
+        . $panel('{"className":"hero-knockout","backgroundColor":"contrast"}', 'hero-knockout', '')
+        . $support,
+    );
+    $warnings = HeroComposition::markupWarnings($twice, 'knockout-type', 'page-home--hero');
+    assert_eq(1, count($warnings));
+    assert_contains('recipe required region', $warnings[0]);
+
+    // The check belongs to the recipe that declares the region: the same
+    // panel-less markup is silent for a recipe with no region of its own.
+    assert_eq([], HeroComposition::markupWarnings($noPanel, 'cinematic-safe-zone', 'page-home--hero'));
 });

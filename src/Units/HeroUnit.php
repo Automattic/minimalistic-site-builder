@@ -117,6 +117,19 @@ final class HeroUnit extends AbstractPageSectionUnit
             $repairs,
             $warnings,
         );
+        // BIGR-935: a knockout panel needs the blend that matches the colour it
+        // was painted, which only the delivered palette can settle.
+        $region = $recipeMeta['required_region'] ?? null;
+        if (is_array($region) && ($region['blend_by_luminance'] ?? false) === true) {
+            $markup = GeneratedMarkup::clearCoverDim($markup, $key, $repairs);
+            $markup = GeneratedMarkup::knockoutBlend(
+                $markup,
+                $this->inputArrayOrJson($input, 'theme_json'),
+                (string) $region['class'],
+                $key,
+                $repairs,
+            );
+        }
         $markup = GeneratedMarkup::clampHeroTopPadding($markup, $key, $repairs);
         $band = BandSurfaceContract::enforce(
             $markup,
