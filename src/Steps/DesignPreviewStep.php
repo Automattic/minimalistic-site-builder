@@ -1479,12 +1479,18 @@ CSS;
             if (self::isUnprovenHeaderIssue($issue)) {
                 $locked = self::appendHeaderLock($candidate);
                 if ($locked !== null) {
-                    $warnings[] = 'malformed_design file design/preview.html block_path document '
-                        . 'authored_value ' . self::warningValue($issue)
-                        . ' delivered_value ' . self::warningValue(self::HEADER_LOCK_CSS)
-                        . ' disposition repaired';
-                    $candidate = $locked;
-                    continue;
+                    $after = self::designIssue($locked, $sitePages);
+                    if ($after !== $issue) {
+                        $warnings[] = 'malformed_design file design/preview.html block_path document '
+                            . 'authored_value ' . self::warningValue($issue)
+                            . ' delivered_value ' . self::warningValue(self::HEADER_LOCK_CSS)
+                            . ' disposition repaired';
+                        $candidate = $locked;
+                        if ($after === null) {
+                            return ['html' => $candidate, 'issue' => null];
+                        }
+                        continue;
+                    }
                 }
             }
             $next = self::recoverOnce($candidate, $issue);
