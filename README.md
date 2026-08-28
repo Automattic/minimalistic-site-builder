@@ -115,7 +115,7 @@ host-specific aliases to this package.
 
 ### Choosing the model / provider
 
-`--provider=<anthropic|openai|xai|openrouter|baseten>` (or the `LLM_PROVIDER` env var) picks a whole
+`--provider=<anthropic|openai|xai|openrouter|baseten|hybrid>` (or the `LLM_PROVIDER` env var) picks a whole
 model set at once. Each provider defines a **large** (quality-critical steps) and
 **small** (fast/cheap structural steps) model in
 [`config/models.json`](config/models.json), and each pipeline step is mapped to a
@@ -128,6 +128,7 @@ tier there — so switching providers needs no per-step configuration. Defaults:
 | `xai` | `grok-4.6` | `grok-4.6` |
 | `openrouter` | `moonshotai/kimi-k3` | `moonshotai/kimi-k2.5:nitro` |
 | `baseten` | `moonshotai/Kimi-K3` | `zai-org/GLM-5.2-Fast` |
+| `hybrid` | `moonshotai/Kimi-K3` | `zai-org/GLM-5.2-Fast` |
 
 `baseten` reaches Baseten's open-weight models through the WordPress.com AI
 proxy (`https://public-api.wordpress.com/wpcom/v2/ai-api-proxy/v1`, feature slug
@@ -136,6 +137,37 @@ proxy (`https://public-api.wordpress.com/wpcom/v2/ai-api-proxy/v1`, feature slug
 Baseten key. Besides the two tier defaults, `LLM_MODEL` / `LLM_MODEL_<STEP>`
 accept `deepseek-ai/DeepSeek-V4-Pro`, `deepseek-ai/DeepSeek-V4-Flash-0731`,
 `zai-org/GLM-5.2` and `zai-org/GLM-5.3-Flash`. Model ids are case-sensitive.
+
+### `hybrid`: Baseten for the run, Claude for the sections
+
+`--provider=hybrid` runs on Baseten but sends every step that writes page markup
+or its CSS to OpenAI. It needs `BASETEN_API_KEY` and `OPENAI_API_KEY`.
+
+| Step | Model | Transport |
+|------|-------|-----------|
+| `inner-pages-design`, `sections`, `page-styles` | `gpt-5.6-sol` | OpenAI |
+| `design-direction`, `theme-json`, `custom-motion` | `moonshotai/Kimi-K3` | Baseten |
+| `refine-prompt`, `site-spec`, `design-direction-seeds`, `page-plan`, `image-prompt-repair` | `zai-org/GLM-5.2-Fast` | Baseten |
+| `design-preview`, `transform-site` | large tier | Baseten |
+
+No step knows more than one provider is in play. `StepComposition` already
+hands every step its own model, so `RoutingLlm` dispatches each request on the
+model id alone, splitting a batch across transports when one genuinely mixes
+models and re-merging it in request order. `inner-pages-design` has no tier in
+`step_tiers`, so no other provider gives it a model at all — the pin in
+`config/models.json` is what puts it under one.
+
+`gpt-5.6-sol` is reached on the OpenAI API directly. The wpcom proxy serves
+OpenAI over `/v1/responses`, which this client does not speak, so that model
+404s on the Baseten route.
+
+Which steps go where is data, not code: edit the `steps` map under `hybrid` in
+[`config/models.json`](config/models.json). `LLM_MODEL_<STEP>` still overrides a
+pin, and the model id is what routes, so `LLM_MODEL_THEME_JSON=gpt-5.6-sol`
+moves that step to OpenAI without any further configuration. Only transports the
+provider already builds are available, though: an id belonging to a provider no
+`steps` entry names has no client to reach, so adding one means adding a `steps`
+entry rather than only setting an env var.
 
 Most of these models reason by default, and those tokens come out of the same
 completion budget as the answer — asked for 24 tokens, Kimi K3 and both DeepSeek

@@ -15,6 +15,7 @@ use Automattic\SiteBuild\ModelConfig;
 use Automattic\SiteBuild\OpenAiCompatibleClient;
 use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\RoutingLlm;
 use Automattic\SiteBuild\SiteBuilder;
 use Automattic\SiteBuild\StepDefaults;
 use Automattic\SiteBuild\Steps\GenerateImagesStep;
@@ -124,35 +125,68 @@ function openrouter_api_key(): string
  *   - baseten   — OpenAI-compatible client → Baseten's open-weight models
  *                 (Kimi, GLM, DeepSeek) via the wpcom AI proxy (BASETEN_API_KEY;
  *                 BASETEN_BASE_URL to reach Baseten directly instead)
+ *   - hybrid    — Baseten for the run, Anthropic for the steps config/models.json
+ *                 pins to it, dispatched per request by RoutingLlm
  *
  * Model IDs come from the provider's tiers in config/models.json (StepDefaults),
  * overridable per step via LLM_MODEL_* — so `--provider=openai` swaps the whole
  * model set without extra flags.
+ *
+ * A provider that pins steps to another transport (only `hybrid` does today)
+ * gets a RoutingLlm over one client per transport instead of a single client.
+ * Every other provider keeps exactly the client it had before.
  */
 function make_llm(): Llm
 {
     $provider = strtolower((string) Env::get('LLM_PROVIDER', ModelConfig::defaultProvider()));
+    $default = ModelConfig::hasProvider($provider) ? ModelConfig::transport($provider) : $provider;
+    $routes = ModelConfig::hasProvider($provider) ? StepDefaults::modelTransports() : [];
 
-    return match ($provider) {
+    if ($routes === []) {
+        return make_llm_transport($default, default_llm_model());
+    }
+
+    // One client per distinct transport. Each is given a default model its own
+    // transport can actually serve — the provider's large TIER for the default
+    // client, not default_llm_model(), which LLM_MODEL may have pointed at
+    // another provider entirely. RoutingLlm names the model on every request
+    // anyway, so these are a fallback that should never be reached.
+    $clients = [$default => make_llm_transport($default, ModelConfig::tierModel($provider, 'large'))];
+    foreach ($routes as $model => $transport) {
+        $clients[$transport] ??= make_llm_transport($transport, $model);
+    }
+
+    return new RoutingLlm($clients, $routes, $default, default_llm_model());
+}
+
+/**
+ * Build ONE wire client by transport name, with $model as its default model.
+ *
+ * Split out of make_llm() so a mixed-transport provider can build several.
+ * $model is what a request that names none will use.
+ */
+function make_llm_transport(string $transport, string $model): Llm
+{
+    return match ($transport) {
         'anthropic', '' => new AnthropicClient(
             apiKey: Env::getRequired('ANTHROPIC_API_KEY'),
-            model:  default_llm_model(),
+            model:  $model,
         ),
         'xai', 'grok' => new OpenAiCompatibleClient(
             apiKey:   Env::getRequired('XAI_API_KEY'),
-            model:    default_llm_model(),
+            model:    $model,
             baseUrl:  Env::get('OPENAI_BASE_URL', 'https://api.x.ai/v1'),
             provider: 'xai',
         ),
         'openai', 'openai-compatible' => new OpenAiCompatibleClient(
             apiKey:   Env::getRequired('OPENAI_API_KEY'),
-            model:    default_llm_model(),
+            model:    $model,
             baseUrl:  Env::get('OPENAI_BASE_URL', 'https://api.openai.com/v1'),
             provider: 'openai',
         ),
         'openrouter' => new OpenAiCompatibleClient(
             apiKey:   openrouter_api_key(),
-            model:    default_llm_model(),
+            model:    $model,
             baseUrl:  'https://openrouter.ai/api/v1',
             provider: 'openrouter',
             // Kimi K3 currently defaults to maximum-effort reasoning. Those
@@ -167,7 +201,7 @@ function make_llm(): Llm
         ),
         'baseten' => new OpenAiCompatibleClient(
             apiKey:   Env::getRequired('BASETEN_API_KEY'),
-            model:    default_llm_model(),
+            model:    $model,
             // The wpcom AI proxy fronts Baseten and is what the Automattic
             // key opens; Studio's hosted-model family uses this same route.
             // Set BASETEN_BASE_URL=https://inference.baseten.co/v1 to go direct
@@ -188,7 +222,8 @@ function make_llm(): Llm
             extraHeaders: ['X-WPCOM-AI-Feature' => 'site-builder'],
         ),
         default => throw new RuntimeException(
-            "Unknown LLM_PROVIDER '{$provider}'. Use anthropic, xai, openai, openrouter, or baseten."
+            "Unknown LLM_PROVIDER '{$transport}'. Known: "
+            . implode(', ', ModelConfig::providerNames())
         ),
     };
 }

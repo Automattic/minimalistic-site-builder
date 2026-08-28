@@ -80,6 +80,104 @@ test('StepDefaults follows the active provider tiers (openai)', function () {
     }
 });
 
+test('hybrid pins the markup steps away from Baseten and leaves the rest on it', function () {
+    putenv('LLM_PROVIDER=hybrid');
+    try {
+        $models = StepDefaults::models();
+
+        assert_eq('gpt-5.6-sol', $models['sections'], 'section generation goes to GPT');
+        assert_eq('gpt-5.6-sol', $models['page-styles'], 'page styles go to GPT');
+        assert_eq('gpt-5.6-sol', $models['inner-pages-design'], 'inner page sections go to GPT');
+
+        // The pinned set is stated here, not derived, so adding or dropping a
+        // pin has to be a deliberate edit to this list as well as to the config.
+        assert_eq(
+            ['inner-pages-design', 'sections', 'page-styles'],
+            array_keys(ModelConfig::stepAssignments('hybrid')),
+            'exactly these steps leave Baseten',
+        );
+
+        // inner-pages-design has no tier at all, so no other provider puts it
+        // in this map. The pin is what gives that step a model.
+        assert_true(
+            !array_key_exists('inner-pages-design', ModelConfig::stepTiers()),
+            'inner-pages-design is tier-less; the pin is its only source of a model',
+        );
+
+        // Everything else keeps the Baseten tier it would have had.
+        $pinned = ModelConfig::stepAssignments('hybrid');
+        foreach (ModelConfig::stepTiers() as $step => $tier) {
+            if (isset($pinned[$step])) {
+                continue;
+            }
+            $expected = $tier === 'large' ? 'moonshotai/Kimi-K3' : 'zai-org/GLM-5.2-Fast';
+            assert_eq($expected, $models[$step], "{$step} stays on its Baseten {$tier} tier");
+        }
+
+        // Three steps, one routed model, so exactly one extra transport.
+        assert_eq(
+            ['gpt-5.6-sol' => 'openai'],
+            StepDefaults::modelTransports(),
+            'each pinned model names the transport that can actually serve it',
+        );
+    } finally {
+        putenv('LLM_PROVIDER');
+    }
+});
+
+test('a per-step env override still beats a hybrid pin', function () {
+    putenv('LLM_PROVIDER=hybrid');
+    putenv('LLM_MODEL_SECTIONS=zai-org/GLM-5.2');
+    try {
+        $models = StepDefaults::models();
+        assert_eq('zai-org/GLM-5.2', $models['sections'], 'LLM_MODEL_<STEP> outranks the pin');
+        assert_eq('gpt-5.6-sol', $models['inner-pages-design'], 'the untouched pin is unaffected');
+    } finally {
+        putenv('LLM_MODEL_SECTIONS');
+        putenv('LLM_PROVIDER');
+    }
+});
+
+test('single-transport providers pin nothing and resolve exactly as before', function () {
+    foreach (['anthropic', 'openai', 'xai', 'openrouter', 'baseten'] as $provider) {
+        assert_eq([], ModelConfig::stepAssignments($provider), "{$provider} pins no step");
+        assert_eq($provider, ModelConfig::transport($provider), "{$provider} is its own transport");
+
+        putenv("LLM_PROVIDER={$provider}");
+        try {
+            $models = StepDefaults::models();
+            assert_eq(
+                array_keys(ModelConfig::stepTiers()),
+                array_keys($models),
+                "{$provider} maps exactly the tiered steps, gaining none",
+            );
+        } finally {
+            putenv('LLM_PROVIDER');
+        }
+    }
+
+    assert_eq('baseten', ModelConfig::transport('hybrid'), 'hybrid runs on the Baseten client by default');
+});
+
+test('a malformed step pin fails loudly rather than routing somewhere surprising', function () {
+    ModelConfig::useConfig([
+        'providers' => ['broken' => ['large' => 'm', 'steps' => ['sections' => ['model' => 'x']]]],
+        'step_tiers' => [],
+    ]);
+    try {
+        $threw = null;
+        try {
+            ModelConfig::stepAssignments('broken');
+        } catch (RuntimeException $e) {
+            $threw = $e->getMessage();
+        }
+        assert_true($threw !== null, 'a pin missing its transport is rejected');
+        assert_true(str_contains($threw, 'sections'), "the message names the step: {$threw}");
+    } finally {
+        ModelConfig::useConfig(null);
+    }
+});
+
 test('StepDefaults uses K3 for Baseten quality steps and GLM 5.2 Fast for structural steps', function () {
     putenv('LLM_PROVIDER=baseten');
     try {

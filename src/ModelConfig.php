@@ -101,6 +101,50 @@ final class ModelConfig
     }
 
     /**
+     * Transport a provider's unpinned steps use — the client make_llm() builds
+     * for it. Defaults to the provider's own name, so every single-transport
+     * provider needs no `transport` key at all; `hybrid` sets it to `baseten`.
+     */
+    public static function transport(string $provider): string
+    {
+        $entry = self::data()['providers'][$provider] ?? [];
+        $transport = is_array($entry) ? ($entry['transport'] ?? null) : null;
+        return is_string($transport) && $transport !== '' ? $transport : $provider;
+    }
+
+    /**
+     * Steps this provider pins to a specific transport and model, overriding
+     * the tier default. Absent for every single-transport provider.
+     *
+     * Validated strictly rather than skipped: a typo here would silently send a
+     * step to the wrong provider, and the whole point of the entry is that the
+     * step goes somewhere other than where you would otherwise assume.
+     *
+     * @return array<string,array{transport:string,model:string}>
+     */
+    public static function stepAssignments(string $provider): array
+    {
+        $entry = self::data()['providers'][$provider] ?? [];
+        $steps = is_array($entry) ? ($entry['steps'] ?? []) : [];
+        if (!is_array($steps)) {
+            throw new \RuntimeException("Provider '{$provider}' has a non-array 'steps' map in the model config.");
+        }
+
+        $out = [];
+        foreach ($steps as $step => $spec) {
+            $transport = is_array($spec) ? ($spec['transport'] ?? null) : null;
+            $model = is_array($spec) ? ($spec['model'] ?? null) : null;
+            if (!is_string($transport) || $transport === '' || !is_string($model) || $model === '') {
+                throw new \RuntimeException(
+                    "Provider '{$provider}' step '{$step}' needs both a non-empty 'transport' and 'model'."
+                );
+            }
+            $out[(string) $step] = ['transport' => $transport, 'model' => $model];
+        }
+        return $out;
+    }
+
+    /**
      * Step id => tier ('large' | 'small').
      *
      * @return array<string,string>
