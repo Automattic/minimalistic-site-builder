@@ -12,12 +12,55 @@ namespace Automattic\SiteBuild;
  * without step changes.
  *
  * Works with any OpenAI-compatible host. Defaults target OpenAI; for xAI set
- * baseUrl to https://api.x.ai/v1 (see make_llm() LLM_PROVIDER=xai).
+ * baseUrl to https://api.x.ai/v1 (see make_llm() LLM_PROVIDER=xai). Baseten's
+ * open-weight models (LLM_PROVIDER=baseten) are reached through the wpcom AI
+ * proxy by default, or https://inference.baseten.co/v1 with a direct key.
  */
 final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporting
 {
     /** K3's default max-effort reasoning shares this budget with its answer. */
     private const KIMI_K3_MIN_MAX_TOKENS = 65536;
+
+    /**
+     * `reasoning_effort` sent per Baseten model, keyed by lowercased model id.
+     *
+     * This pipeline wants block markup and JSON, not hidden thinking that
+     * spends the same completion budget, so every model Baseten lets us quiet
+     * gets `none`. GLM 5.3 Flash is documented as impossible to switch off, so
+     * it takes its `low` floor — the proxy does currently accept `none` there,
+     * but undocumented leniency is not something to build a default on.
+     *
+     * Kimi K3 is quieted here even though it leads the large tier, unlike the
+     * OpenRouter K3 profile. That profile survives on a token floor applied
+     * only when the caller pins no budget of its own; a caller that DOES pin a
+     * small one gets an empty answer. bin/llm-conformance.php is exactly such a
+     * caller, and every live check failed that way ("no text content in
+     * streamed response") until K3 was listed below. Baseten, unlike
+     * OpenRouter, gives us a switch — so use it rather than rely on the floor.
+     *
+     * An allowlist, not a blanket rule. Baseten validates this parameter and
+     * answers 400 for a value the model does not list ("reasoning_effort must
+     * be one of high, max, none; got 'medium'"), so a model missing here is
+     * sent no reasoning field and keeps whatever Baseten defaults it to.
+     *
+     * Not a micro-optimisation. Asked for 24 tokens with reasoning left on,
+     * Kimi K3 and both DeepSeek V4 models spend every one of them on
+     * reasoning_content and return finish_reason=length with an EMPTY answer;
+     * with `none` the same call returns its content and stops.
+     */
+    private const BASETEN_REASONING_EFFORT = [
+        'deepseek-ai/deepseek-v4-pro'        => 'none',
+        'deepseek-ai/deepseek-v4-pro-0813'   => 'none',
+        'deepseek-ai/deepseek-v4-flash-0731' => 'none',
+        'zai-org/glm-5.2'                    => 'none',
+        'zai-org/glm-5.2-fast'               => 'none',
+        'zai-org/glm-5.3-flash'              => 'low',
+        'moonshotai/kimi-k3'                 => 'none',
+        'moonshotai/kimi-k2.6'               => 'none',
+        'openai/gpt-oss-120b'                => 'none',
+        'thinkingmachines/inkling'           => 'none',
+        'thinkingmachines/inkling-small'     => 'none',
+    ];
 
     /**
      * Ceiling on an honored Retry-After wait, in seconds.
@@ -48,16 +91,21 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporti
     private ?\Closure $singleTransport;
 
     /**
-     * @param string $apiKey            Bearer token (OPENAI_API_KEY / XAI_API_KEY)
+     * @param string $apiKey            Bearer token (OPENAI_API_KEY / XAI_API_KEY / BASETEN_API_KEY)
      * @param string $model             Default model when a request does not pin one
      * @param string $baseUrl           API root, e.g. https://api.x.ai/v1 (no trailing slash required)
      * @param int    $defaultMaxTokens  max_tokens default for completions
      * @param string $provider          Selects provider-specific request quirks
-     *                                   (token-limit key, temperature support):
-     *                                   'openai', 'xai', or 'openrouter'.
+     *                                   (token-limit key, temperature support,
+     *                                   reasoning effort): 'openai', 'xai',
+     *                                   'openrouter', or 'baseten'.
      *                                   See maxTokensParam().
      * @param int    $timeoutSeconds    Hard timeout for one streamed request
      * @param int    $maxConcurrency    Most simultaneous requests in one batch
+     * @param array<string,string> $extraHeaders Extra request headers, e.g. the
+     *                                   routing header a gateway in front of the
+     *                                   provider needs. Never overrides auth or
+     *                                   the streaming content negotiation below.
      * @param ?callable $singleTransport Optional single-request transport seam for tests
      */
     public function __construct(
@@ -68,6 +116,7 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporti
         private string $provider = 'openai',
         private int $timeoutSeconds = 600,
         private int $maxConcurrency = 10,
+        private array $extraHeaders = [],
         ?callable $singleTransport = null,
     ) {
         $this->endpoint = rtrim($baseUrl, '/') . '/chat/completions';
@@ -330,6 +379,13 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporti
             $body['reasoning'] = ['enabled' => false];
         }
 
+        // Same intent one provider over: quiet the open-weight models Baseten
+        // lets us quiet, so thinking tokens do not eat the markup budget.
+        $effort = self::basetenReasoningEffort($provider, $model);
+        if ($effort !== null) {
+            $body['reasoning_effort'] = $effort;
+        }
+
         // OpenAI reasoning models reject a non-default temperature. Keep Kimi
         // K3 on its provider sampling default too: this profile is tuned
         // around K3's default max-effort reasoning behavior.
@@ -351,7 +407,7 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporti
                     'schema' => $spec['schema'],
                 ],
             ];
-        } elseif ($json && $provider === 'openrouter') {
+        } elseif ($json && ($provider === 'openrouter' || $provider === 'baseten')) {
             $body['response_format'] = ['type' => 'json_object'];
         }
         return $body;
@@ -377,6 +433,8 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporti
      * OpenAI's o-series and gpt-5+ (reasoning) models and all xAI models want
      * `max_completion_tokens`; legacy OpenAI (gpt-3*, gpt-4*) and everything
      * else use `max_tokens`. Ported from telex's AiClientFactory::maxTokensParam.
+     * Baseten takes the default branch deliberately: its Chat Completions
+     * schema documents `max_tokens` only and does not accept the longer key.
      *
      * @return array{max_tokens?:int,max_completion_tokens?:int}
      */
@@ -398,7 +456,7 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporti
      * temperature. OpenAI reasoning models (o-series / gpt-5+) require that;
      * the OpenRouter Kimi K3 profile deliberately keeps its provider default
      * alongside default max-effort reasoning. xAI (Grok) accepts arbitrary
-     * temperatures.
+     * temperatures, as does every Baseten model (0-4).
      */
     public static function restrictsTemperature(string $provider, string $model): bool
     {
@@ -411,6 +469,18 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporti
         $model = self::withoutRoutingVariant($model);
         return $provider === 'openrouter'
             && preg_match('~^moonshotai/kimi-k3(?:-\d{4,})?$~', $model) === 1;
+    }
+
+    /**
+     * Baseten `reasoning_effort` for a model, or null to send none at all and
+     * leave the provider default alone. See BASETEN_REASONING_EFFORT.
+     */
+    private static function basetenReasoningEffort(string $provider, string $model): ?string
+    {
+        if ($provider !== 'baseten') {
+            return null;
+        }
+        return self::BASETEN_REASONING_EFFORT[strtolower(self::withoutRoutingVariant($model))] ?? null;
     }
 
     private static function isKimiK25(string $provider, string $model): bool
@@ -1044,11 +1114,23 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporti
     /** @return list<string> */
     private function headers(): array
     {
-        return [
+        $headers = [
             'Authorization: Bearer ' . $this->apiKey,
             'content-type: application/json',
             'accept: text/event-stream',
         ];
+        // Appended, never merged over: a caller-supplied header must not be
+        // able to unset the bearer token or the event-stream negotiation.
+        foreach ($this->extraHeaders as $name => $value) {
+            $headers[] = $name . ': ' . $value;
+        }
+        return $headers;
+    }
+
+    /** Resolved request headers (for tests / diagnostics). @return list<string> */
+    public function requestHeaders(): array
+    {
+        return $this->headers();
     }
 
     /**
