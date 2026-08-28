@@ -212,6 +212,37 @@ final class ScaffoldThemeStep implements Step
             justify-content: center;
         }
 
+        /* Pinned lead region of a split band (BIGR-945). `SectionComposition`
+           asks for this class only where the plan already says one region
+           repeats and the other does not, so the short lead stays in view
+           instead of stranding a blank quadrant beside the long list.
+
+           The rule is owned here rather than left to the page-styles utility
+           of the same name: that utility is model-authored per site, and an
+           archetype that REQUIRES the behavior cannot depend on a CSS pass
+           choosing to emit it. A site whose page-styles also writes the utility
+           simply agrees with this.
+
+           Two guards make the pin safe. `align-self` opts the column out of the
+           row's default stretch, without which a full-height column can never
+           stick. `max-block-size` with a scroll keeps a lead column that
+           outgrew its copy budget reachable: a pinned column taller than the
+           viewport otherwise holds its own bottom permanently off screen. The
+           whole behavior is desktop-only, so the stacked state is an ordinary
+           column in source order. */
+        .section-composition--asymmetric-split .wp-block-column.sticky-side {
+            align-self: flex-start;
+        }
+        @media (min-width: 782px) {
+            .section-composition--asymmetric-split .wp-block-column.sticky-side {
+                position: sticky;
+                top: var(--wp--preset--spacing--lg, 3rem);
+                max-block-size: calc(100vh - (var(--wp--preset--spacing--lg, 3rem) * 2));
+                overflow-y: auto;
+                overscroll-behavior: contain;
+            }
+        }
+
         /* Flush-media cards (sections opt in via className="card-flush" on the
            card wp:group): the media is the card's first child at full width and
            only an inner .card-body group carries padding. Reset the card itself

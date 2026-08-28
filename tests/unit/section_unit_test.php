@@ -516,3 +516,44 @@ test('SectionUnit rejects malformed or unsupported section roles before calling 
         assert_eq(0, $llm->completeCalls, "{$case} role should fail before calling the LLM");
     }
 });
+
+test('SectionUnit renders the pin directive for an asymmetric-split with an item pattern', function () {
+    // BIGR-945: the catalog, not the model, decides when the band pins its
+    // lead. The rendered prompt is the proof the directive reaches the author.
+    $input = section_unit_input();
+    $input['section']['role'] = 'content';
+    $input['section']['type'] = 'feature';
+    $input['section']['layout_archetype'] = 'asymmetric-split';
+    $input['section']['background'] = 'base';
+    $input['section']['item_pattern'] = 'rule-row';
+
+    $prompt = section_unit_request_text(
+        (new SectionUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts'))))
+            ->request($input),
+    );
+
+    assert_contains('Pinned lead (REQUIRED for this section)', $prompt);
+    assert_contains(
+        '"className":"' . SectionComposition::PIN_CLASS . '"',
+        $prompt,
+        'the directive names the exact class attribute to author',
+    );
+    assert_contains('never on the column that holds the repeated items', $prompt);
+
+    // The same archetype with no item pattern reads no word about the pin.
+    $input['section']['item_pattern'] = null;
+    $quiet = section_unit_request_text(
+        (new SectionUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts'))))
+            ->request($input),
+    );
+    assert_true(
+        !str_contains($quiet, 'Pinned lead'),
+        'a band with no repeated set never reads the pin directive',
+    );
+    // The general utility-class list in section.md may still NAME the class;
+    // only the directive's authoring instruction must stay out.
+    assert_true(
+        !str_contains($quiet, '"className":"' . SectionComposition::PIN_CLASS . '"'),
+        'the pin authoring instruction never leaks into a prompt that must not pin',
+    );
+});

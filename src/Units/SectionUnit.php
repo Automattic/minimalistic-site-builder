@@ -94,9 +94,12 @@ final class SectionUnit extends AbstractPageSectionUnit
             'handoff'          => $compositionVars['handoff'],
             'neighbors'        => $this->inputString($input, 'neighbors'),
             'root_marker'      => SectionComposition::marker($archetype),
+            // The catalog, not the model, decides whether this band pins its
+            // lead region. A recipe that cannot pin renders an empty directive
+            // and never reads a word about it.
             'composition_recipe' => $this->renderer->render(
                 SectionComposition::recipeTemplate($archetype),
-                []
+                SectionComposition::recipeVars($archetype, $itemPattern),
             ),
         ]);
 
@@ -197,7 +200,12 @@ final class SectionUnit extends AbstractPageSectionUnit
         if ($archetype !== null) {
             array_push(
                 $warnings,
-                ...SectionComposition::markupWarnings($markup, $archetype, $this->key($input)),
+                ...SectionComposition::markupWarnings(
+                    $markup,
+                    $archetype,
+                    $this->key($input),
+                    $itemPattern,
+                ),
             );
         }
         if ($itemPattern !== null) {
