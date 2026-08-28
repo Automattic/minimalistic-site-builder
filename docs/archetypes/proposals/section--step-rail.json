@@ -1,0 +1,17 @@
+{
+    "id": "step-rail",
+    "family": "section",
+    "title": "S4 step-rail — an ordered process on one horizontal connector",
+    "idea": "An ordered process laid across the band on one continuous connector, so the sequence is visible before a word is read. The line through the numerals is the composition.",
+    "why_new": "the index item pattern numbers stacked rows, but the numbers sit in a scan column with nothing joining them, and the order runs down rather than across. This is also the only archetype that earns device--section-numeral, which has no home today.",
+    "built_from": "one wp:columns of four, plus one CSS hook for the connector in ScaffoldThemeStep.",
+    "risk": "it overlaps the index item pattern, so a site committed to index would carry both idioms. Decide which one owns ordered content before building. The connector must disappear when the steps stack, or it becomes a stray horizontal rule.",
+    "mockup": {
+        "scope": "mock-section-step-rail",
+        "html": "<div class=\"preview mock-section-step-rail r-band\">\n<h4>How a commission runs</h4>\n    <div class=\"rail\">\n      <div class=\"step\"><b>1</b><strong>Measure</strong><p>We visit, measure the room, and photograph the light.</p></div>\n      <div class=\"step\"><b>2</b><strong>Draw</strong><p>Two options on paper, costed, before any timber is cut.</p></div>\n      <div class=\"step\"><b>3</b><strong>Build</strong><p>Eight to fourteen weeks in the workshop.</p></div>\n      <div class=\"step\"><b>4</b><strong>Fit</strong><p>Delivered and installed by the pair who made it.</p></div>\n    </div>\n</div>",
+        "css": ".mock-section-step-rail { background: #f2f0e9; color: #16150f; font-family: var(--f-sans);\n  display: flex; flex-direction: column; justify-content: center; gap: 3.6cqw; padding: 0 6cqw; }\n.mock-section-step-rail h4 { margin: 0; font-family: var(--f-serif); font-size: 3.4cqw; line-height: 1.06; }\n.mock-section-step-rail .rail { display: grid; grid-template-columns: repeat(4, 1fr); }\n.mock-section-step-rail .step { padding-right: 3.4cqw; display: flex; flex-direction: column; gap: 1.3cqw;\n  position: relative; }\n.mock-section-step-rail .step:not(:last-child)::after { content: \"\"; position: absolute;\n  inset-inline: 3.4cqw 0; top: 1.7cqw; block-size: 1px; background: rgba(22,21,15,.28); }\n.mock-section-step-rail .step b { position: relative; z-index: 1; inline-size: 3.4cqw; block-size: 3.4cqw;\n  border-radius: 50%; background: #16150f; color: #f2f0e9; display: grid; place-items: center;\n  font-family: var(--f-mono); font-size: 1.25cqw; }\n.mock-section-step-rail .step strong { font-size: 1.85cqw; font-weight: 600; }\n.mock-section-step-rail .step p { margin: 0; font-size: 1.35cqw; line-height: 1.5; opacity: .66; }"
+    },
+    "origin": "hand",
+    "prompt": "",
+    "created": "2026-08-27"
+}

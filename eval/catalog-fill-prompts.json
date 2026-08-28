@@ -1,0 +1,81 @@
+{
+  "$comment": "Briefs for the section-catalog fill cohort. The demo cohort in theme-prompts.json exercises whatever archetypes its briefs happen to select, which leaves parts of the catalog with no screenshot and parts with only one. Each entry here pins the three site-wide assignments a build cannot otherwise be told \u2014 the header archetype (HEADER_ARCHETYPE), the hero recipe (HERO_RECIPE), and the footer archetype (patched into pages.json between the plan and the sections step) \u2014 so every archetype in the catalog reaches at least two captures. Build them with: php bin/build-catalog-cohort.php (then php bin/section-catalog.php). Assignment rules the entries respect: centered-masthead is refused over an image-led hero (cover-image media or an image surface); split-nav is refused on a one-page site, so its entries are multi-page; oversized-wordmark is refused whenever a front hero exists, which resolve() always has, so no entry can request it.",
+  "version": 1,
+  "prompts": [
+    {
+      "id": "cat-ledger",
+      "slug": "cat-ledger",
+      "site_type": "professional services",
+      "header": "standard-row",
+      "hero": "foreground-split",
+      "footer": "photographic-split",
+      "prompt": "Create a website for Ledger & Frame, a two-person bookbinding and paper conservation workshop in Ghent. They repair old books for libraries and private collectors, and they teach a small binding course four times a year."
+    },
+    {
+      "id": "cat-dunes",
+      "slug": "cat-dunes",
+      "site_type": "hotel",
+      "header": "standard-row",
+      "hero": "cinematic-safe-zone",
+      "footer": "image-plinth",
+      "prompt": "Create a website for Dunes & Pine, a nine-room guesthouse on the Baltic coast of Lithuania. Long empty beaches, pine forest, a sauna by the water, breakfast made from what the neighbours grow."
+    },
+    {
+      "id": "cat-broadsheet",
+      "slug": "cat-broadsheet",
+      "site_type": "publication",
+      "header": "centered-masthead",
+      "hero": "foreground-split",
+      "footer": "editorial-colophon",
+      "prompt": "Create a website for The Quarter Sheet, an independent quarterly magazine about working life in small European port cities. Long-form reporting, one photographer per issue, printed on newsprint."
+    },
+    {
+      "id": "cat-manifesto",
+      "slug": "cat-manifesto",
+      "site_type": "consultancy",
+      "header": "centered-masthead",
+      "hero": "type-manifesto",
+      "footer": "split-ledger",
+      "prompt": "Create a website for Plain Terms, a two-person consultancy that rewrites insurance and utility contracts into language ordinary customers can read. No stock photography, no illustrations \u2014 the writing is the product."
+    },
+    {
+      "id": "cat-atelier",
+      "slug": "cat-atelier",
+      "site_type": "studio",
+      "header": "split-nav",
+      "hero": "layered-poster",
+      "footer": "photographic-split",
+      "multi_page": true,
+      "pages": "Home, Work, Studio, Contact",
+      "prompt": "Create a website for Atelier Verso, a Lisbon studio that designs and prints exhibition posters by hand on a 1960s flatbed press. Bold colour, big type, short runs for museums and music venues."
+    },
+    {
+      "id": "cat-orchard",
+      "slug": "cat-orchard",
+      "site_type": "farm",
+      "header": "split-nav",
+      "hero": "layered-poster",
+      "footer": "image-plinth",
+      "multi_page": true,
+      "pages": "Home, Orchard, Visit, Contact",
+      "prompt": "Create a website for Wrenfield Orchard, a family cider orchard in Herefordshire with forty apple varieties. They press once a year, sell at the gate, and open the barn for two weekends each autumn."
+    },
+    {
+      "id": "cat-clinic",
+      "slug": "cat-clinic",
+      "site_type": "clinic",
+      "header": "standard-row",
+      "hero": "foreground-split",
+      "footer": "editorial-colophon",
+      "prompt": "Create a website for Northlight Physiotherapy, a clinic in Troms\u00f8 treating skiers, climbers and fishing crews. Calm, factual, appointment-led, with a plain explanation of what each treatment involves."
+    },
+    {
+      "id": "cat-luthier",
+      "slug": "cat-luthier",
+      "site_type": "workshop",
+      "header": "standard-row",
+      "hero": "foreground-split",
+      "prompt": "Create a website for Marta Ili\u0107, a luthier in Zagreb who builds classical guitars to order and restores instruments from the 1930s. One instrument at a time, an eighteen-month waiting list."
+    }
+  ]
+}

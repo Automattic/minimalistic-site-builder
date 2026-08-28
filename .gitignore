@@ -10,3 +10,8 @@ docs/evidence/issue-31/fixture/img/
 docs/superpowers/
 /vendor/
 /composer.lock
+
+# The archetype gallery page is rendered by bin/archetypes.php on every run.
+# Its shots and proposals are committed; the generated HTML is not.
+docs/archetypes/index.html
+docs/archetypes/selection.md

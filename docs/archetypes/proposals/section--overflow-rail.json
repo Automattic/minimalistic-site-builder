@@ -1,0 +1,17 @@
+{
+    "id": "overflow-rail",
+    "family": "section",
+    "title": "overflow-rail — one row of items that continues past the trailing edge",
+    "idea": "One row of items that runs past the trailing edge of the band and is cut mid-item. The visible fragment is the message: there is more here than the band can hold.",
+    "why_new": "every row in the catalog fits. A set of twenty items today becomes either a tall grid or an arbitrary top-six, and both lose the fact that the set is large.",
+    "built_from": "one full-aligned group with a non-wrapping flex row and a scroll container, plus the progress hairline.",
+    "risk": "horizontal scroll is an accessibility and discoverability hazard, so it needs keyboard reachability, a visible affordance, and a wrap-to-grid fallback. Gate to sets of eight or more, or the cut edge is a lie.",
+    "mockup": {
+        "scope": "mock-section-overflow-rail",
+        "html": "<div class=\"preview mock-section-overflow-rail r-mid\">\n<div class=\"head\"><h4>The current shelf</h4><span>24 titles</span></div>\n    <div class=\"track\">\n      <div class=\"it\"><i class=\"ph-room\"></i><b>Salt Cure</b><span>Ledger Press, 2021</span></div>\n      <div class=\"it\"><i class=\"ph-kiln\"></i><b>Kiln Notes</b><span>Ash &amp; Ochre, 2019</span></div>\n      <div class=\"it\"><i class=\"ph-sea\"></i><b>Tideline</b><span>Marram, 2023</span></div>\n      <div class=\"it\"><i class=\"ph-field\"></i><b>Common Ground</b><span>Furrow, 2018</span></div>\n    </div>\n    <div class=\"progress\"></div>\n</div>",
+        "css": ".mock-section-overflow-rail { background: #f6f4ed; color: #17150f; font-family: var(--f-sans);\n  display: flex; flex-direction: column; gap: 2.8cqw; padding: 5cqw 0 5cqw 6cqw; }\n.mock-section-overflow-rail .head { display: flex; align-items: baseline; gap: 2cqw; padding-right: 6cqw; }\n.mock-section-overflow-rail h4 { margin: 0; font-family: var(--f-serif); font-size: 3.4cqw; }\n.mock-section-overflow-rail .head span { margin-left: auto; font-family: var(--f-mono); font-size: 1.15cqw;\n  letter-spacing: .16em; text-transform: uppercase; opacity: .45; }\n.mock-section-overflow-rail .track { display: flex; gap: 2.4cqw; }\n.mock-section-overflow-rail .it { flex: 0 0 26cqw; display: flex; flex-direction: column; gap: 1.2cqw; }\n.mock-section-overflow-rail .it i { display: block; block-size: 15cqw; }\n.mock-section-overflow-rail .it b { font-weight: 600; font-size: 1.7cqw; }\n.mock-section-overflow-rail .it span { font-size: 1.3cqw; opacity: .58; }\n.mock-section-overflow-rail .progress { margin-right: 6cqw; block-size: 2px; background: rgba(23,21,15,.16);\n  position: relative; }\n.mock-section-overflow-rail .progress::after { content: \"\"; position: absolute; inset-block: 0; left: 0;\n  inline-size: 34%; background: #17150f; }"
+    },
+    "origin": "hand",
+    "prompt": "",
+    "created": "2026-08-27"
+}

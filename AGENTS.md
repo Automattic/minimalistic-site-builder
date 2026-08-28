@@ -46,6 +46,12 @@ Only the HTML-first graph is wrapped in `FallbackBuildPipeline`; the default blo
 
 For mixed multi-page HTML-first builds, each `design/<slug>.failed` marker routes only that slug through scoped blocks-path page planning and section generation. Other pages and shared transformed chrome stay on the HTML-first path; `page-styles` ignores failed-page source HTML.
 
+## Archetype gallery
+
+`php bin/archetypes.php` renders and serves the gallery of layout archetypes: every entry in the four code-owned catalogs (headers, heroes, sections, footers) illustrated with a screenshot of a real generated site, beside mockups of archetypes nobody has built yet. `list` prints the same coverage, `capture` refreshes the screenshots from the projects under `projects/`, and `propose` asks the model for a new archetype — from your description, or from the standing request to fill the widest gap in the catalog. See `docs/archetypes/README.md`.
+
+The screenshots under `docs/archetypes/shots/` **are committed**, and they are the one exception to the rule below about keeping screenshots out of the repository: they are the tool's own assets rather than review evidence for a PR. They are capped at 1100px and stored as WebP, so the whole set costs under a megabyte. The gallery HTML is generated on every run and is not committed.
+
 ## Site runner
 
 `bin/serve.php` boots a built site. Studio is the default when available (macOS/Windows desktop app); Playground is the failover for Linux and CI. Generated Studio sites live under `~/Studio` (`SITE_BUILD_STUDIO_ROOT` overrides). `--stop` / `--stop-all` / `--prune` always go to `StudioAppRunner` (persistent-site ops), never through `RunnerResolver`. `--prune` removes sites this checkout created (`marker.repo === repoPath`), not hand-made `~/Studio` dirs.

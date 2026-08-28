@@ -1,0 +1,17 @@
+{
+    "id": "quote-band",
+    "family": "section",
+    "title": "S2 quote-band — one oversized attributed line as its own short band",
+    "idea": "One attributed line at display scale on a deliberately short band. It is a rhythm device first and content second: a held breath between two tall sections.",
+    "why_new": "every band today is sized by whatever content it holds, so pages come out as a stack of similar heights. This is the first archetype whose defining property is that it is short.",
+    "built_from": "one group, one wp:quote or wp:pullquote, one citation line. The simplest entry on this page to ship, and the only one that needs no new CSS at all.",
+    "risk": "it must carry a real quotation from the brief and never an invented one, so it needs an eligibility gate on supplied testimonial or press copy. Cap it at one per page, or the rhythm device becomes the rhythm.",
+    "mockup": {
+        "scope": "mock-section-quote-band",
+        "html": "<div class=\"preview mock-section-quote-band r-short\">\n<blockquote>They rebuilt the kiln twice and never changed the glaze.</blockquote>\n    <cite>Ines Marchetti · Ceramics Review</cite>\n</div>",
+        "css": ".mock-section-quote-band { background: #14332a; color: #f0ece0; font-family: var(--f-serif);\n  display: flex; flex-direction: column; justify-content: center; gap: 2.6cqw; padding: 0 9cqw; }\n.mock-section-quote-band blockquote { margin: 0; font-size: 4.4cqw; line-height: 1.16; letter-spacing: -.015em; }\n.mock-section-quote-band cite { font-style: normal; font-family: var(--f-sans); font-size: 1.35cqw;\n  letter-spacing: .16em; text-transform: uppercase; opacity: .6; }"
+    },
+    "origin": "hand",
+    "prompt": "",
+    "created": "2026-08-27"
+}

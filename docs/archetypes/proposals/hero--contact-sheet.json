@@ -1,0 +1,17 @@
+{
+    "id": "contact-sheet",
+    "family": "hero",
+    "title": "contact-sheet — a dense field of frames as texture behind the headline",
+    "idea": "A grid of many small frames fills the band as texture, with the headline over a graded veil. No single picture is the subject — the volume of them is the argument.",
+    "why_new": "the widest slot today is one image, and the in-flight triptych is three frames read as a series. This is a field read as evidence.",
+    "built_from": "a gallery of 9–12 images under a reviewed veil group holding the copy.",
+    "risk": "image cost and build time multiply; needs its own generation budget and a gate to briefs that genuinely have an archive.",
+    "mockup": {
+        "scope": "mock-hero-contact-sheet",
+        "html": "<div class=\"preview mock-hero-contact-sheet grain\">\n<div class=\"chrome\" style=\"color:#f4f1ea\"><span>Alcorta</span><nav><span>Work</span><span>Timeline</span><span>Contact</span></nav></div>\n    <div class=\"tiles\">\n      <i class=\"ph-sea\"></i><i class=\"ph-figure\"></i><i class=\"ph-press\"></i><i class=\"ph-room\"></i><i class=\"ph-sea\"></i><i class=\"ph-kiln\"></i>\n      <i class=\"ph-press\"></i><i class=\"ph-room\"></i><i class=\"ph-sea\"></i><i class=\"ph-figure\"></i><i class=\"ph-kiln\"></i><i class=\"ph-press\"></i>\n      <i class=\"ph-room\"></i><i class=\"ph-sea\"></i><i class=\"ph-kiln\"></i><i class=\"ph-press\"></i><i class=\"ph-figure\"></i><i class=\"ph-room\"></i>\n      <i class=\"ph-figure\"></i><i class=\"ph-press\"></i><i class=\"ph-room\"></i><i class=\"ph-sea\"></i><i class=\"ph-press\"></i><i class=\"ph-kiln\"></i>\n    </div>\n    <div class=\"veil\">\n      <h4>Twenty years on<br>the same street</h4>\n      <div class=\"facts\"><span>1,400 frames</span><span>Buenos Aires</span><span>Since 2004</span></div>\n    </div>\n</div>",
+        "css": ".mock-hero-contact-sheet { background: #0b0b0a; color: #f4f1ea; font-family: \"Inter\", ui-sans-serif, sans-serif; }\n.mock-hero-contact-sheet .tiles { position: absolute; inset: 0; display: grid;\n  grid-template-columns: repeat(6, 1fr); grid-template-rows: repeat(4, 1fr); gap: .5cqw; padding: .5cqw; }\n.mock-hero-contact-sheet .tiles i { display: block; filter: saturate(.55) contrast(1.05); }\n.mock-hero-contact-sheet .veil { position: absolute; inset: 0; z-index: 2;\n  background: linear-gradient(180deg, rgba(8,8,7,.35) 0%, rgba(8,8,7,.78) 55%, rgba(8,8,7,.92) 100%);\n  display: flex; flex-direction: column; justify-content: flex-end; padding: 5cqw; gap: 2cqw; }\n.mock-hero-contact-sheet h4 { margin: 0; font-size: 7.4cqw; line-height: .95; font-weight: 300; letter-spacing: -.02em; }\n.mock-hero-contact-sheet .facts { display: flex; gap: 3cqw; font-size: 1.6cqw; letter-spacing: .1em;\n  text-transform: uppercase; opacity: .72; }"
+    },
+    "origin": "hand",
+    "prompt": "",
+    "created": "2026-08-27"
+}

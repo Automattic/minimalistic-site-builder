@@ -1,0 +1,17 @@
+{
+    "id": "collage-overlap",
+    "family": "section",
+    "title": "S9 collage-overlap — two or three overlapping images at different scales",
+    "idea": "Two or three images at different scales, overlapping, with one caption. Depth and scale difference carry the band rather than a grid.",
+    "why_new": "every multi-image band today is a grid whose items never touch. offset-grid staggers the tops but keeps the items apart, so overlap is inexpressible.",
+    "built_from": "one group with absolutely placed image children, or negative margins on a column row, plus a CSS hook and a stacking order.",
+    "risk": "the highest of the ten. Free placement produces a different composition on every build unless the offsets are code-owned and fixed to two or three reviewed arrangements. Overlap destroys crop, so it needs the same photography gate as offset-grid, and it must resolve to a plain stack on mobile.",
+    "mockup": {
+        "scope": "mock-section-collage-overlap",
+        "html": "<div class=\"preview mock-section-collage-overlap grain\">\n<i class=\"c1 ph-room\"></i>\n    <i class=\"c2 ph-kiln\"></i>\n    <i class=\"c3 ph-field\"></i>\n    <div class=\"cap\"><b>Three days in the valley</b><span>Selected frames · 2019</span></div>\n</div>",
+        "css": ".mock-section-collage-overlap { background: #e8e3d7; color: #1a1710; font-family: var(--f-sans); }\n.mock-section-collage-overlap i { position: absolute; display: block; box-shadow: 0 1.2cqw 3cqw rgba(20,15,8,.24); }\n.mock-section-collage-overlap .c1 { left: 4%; top: 11%; inline-size: 38%; block-size: 66%; }\n.mock-section-collage-overlap .c2 { left: 30%; top: 29%; inline-size: 32%; block-size: 62%; z-index: 2; }\n.mock-section-collage-overlap .c3 { left: 55%; top: 6%; inline-size: 30%; block-size: 50%; }\n.mock-section-collage-overlap .cap { position: absolute; right: 5cqw; bottom: 6cqw; inline-size: 26cqw;\n  text-align: end; display: flex; flex-direction: column; gap: .8cqw; }\n.mock-section-collage-overlap .cap b { font-family: var(--f-serif); font-weight: 400; font-size: 3cqw; line-height: 1.1; }\n.mock-section-collage-overlap .cap span { font-family: var(--f-mono); font-size: 1.15cqw;\n  letter-spacing: .14em; text-transform: uppercase; opacity: .5; }"
+    },
+    "origin": "hand",
+    "prompt": "",
+    "created": "2026-08-27"
+}

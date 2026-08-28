@@ -1,0 +1,17 @@
+{
+    "id": "quiet-fold",
+    "family": "hero",
+    "title": "quiet-fold — one short line low on an almost empty band",
+    "idea": "Most of the band is empty. One sentence at reading scale sits low against a hairline, with two facts beneath it. No image, no display type, no button — the confidence is in what is left out.",
+    "why_new": "type-manifesto is the loud imageless recipe — a display headline filling the band. This is its opposite, and the catalog has no quiet register at all.",
+    "built_from": "a constrained group, one heading at body-adjacent scale, one hairline, one meta row. The simplest recipe to ship.",
+    "risk": "reads as unfinished if the vertical rhythm is wrong; the empty space must be a fixed proportion of the band, not whatever the copy leaves over.",
+    "mockup": {
+        "scope": "mock-hero-quiet-fold",
+        "html": "<div class=\"preview mock-hero-quiet-fold\">\n<div class=\"chrome\" style=\"opacity:.62\"><span>Norrhavn</span><nav><span>Rooms</span><span>Table</span><span>Book</span></nav></div>\n    <div class=\"fold\">\n      <h4>Nine rooms between the marram grass and the pines.</h4>\n      <div class=\"line\"></div>\n      <div class=\"base\"><span>Baltic coast, Lithuania</span><span>Open May–October</span></div>\n    </div>\n</div>",
+        "css": ".mock-hero-quiet-fold { background: #faf9f6; color: #1a1917; font-family: \"Inter\", ui-sans-serif, sans-serif;\n  display: flex; flex-direction: column; justify-content: flex-end; padding: 0 6cqw 4.5cqw; }\n.mock-hero-quiet-fold .fold { width: 100%; }\n.mock-hero-quiet-fold h4 { margin: 0 0 2.6cqw; font-size: 4.6cqw; font-weight: 400; line-height: 1.12;\n  letter-spacing: -.02em; max-width: 58%; }\n.mock-hero-quiet-fold .line { block-size: 1px; background: #1a1917; opacity: .22; }\n.mock-hero-quiet-fold .base { display: flex; justify-content: space-between; align-items: baseline;\n  margin-top: 3cqw; font-size: 1.6cqw; letter-spacing: .14em; text-transform: uppercase; opacity: .55; }"
+    },
+    "origin": "hand",
+    "prompt": "",
+    "created": "2026-08-27"
+}
