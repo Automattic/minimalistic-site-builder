@@ -593,6 +593,8 @@ final class PaletteFloor
             $hex = $next;
         }
         $extreme = $direction > 0.0 ? 1.0 : 0.0;
+        // This fallback skips the chroma re-solve on purpose: at Y near 0 or
+        // 1 the reachable chroma is near zero, so a re-solve cannot gain any.
         $hex = self::toHex(self::atLuminance($hue, $saturation, $extreme));
         $now = self::ratio($hex, $other);
         $chroma = self::chroma($hex);
