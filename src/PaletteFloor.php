@@ -17,8 +17,18 @@ namespace Automattic\SiteBuild;
  */
 final class PaletteFloor
 {
-    /** contrast on base — prompts/theme-json.md CONTRAST REQUIREMENTS. */
-    public const CONTRAST_ON_BASE = 7.0;
+    /**
+     * contrast on base — prompts/theme-json.md CONTRAST REQUIREMENTS.
+     *
+     * WCAG AA for normal text, not AAA (BIGR-923). The old 7:1 floor pushed
+     * every ink toward near-black on light grounds and near-white on dark
+     * ones, and forbade legitimate mid-dark inks (a warm brown on cream at
+     * ~6:1). Rendered-content checks already run at 4.5, and a committed
+     * `surface` texture raises the requirement to 7:1 through
+     * Surface::contrastFloor so the overlay leaves 4.5 after its sheet —
+     * callers pass that raised floor into check()/repair().
+     */
+    public const CONTRAST_ON_BASE = 4.5;
 
     /** primary on base, secondary on base. */
     public const ROLE_ON_BASE = 4.5;
@@ -62,10 +72,11 @@ final class PaletteFloor
      *     floor: float
      * }>
      */
-    public static function check(array $palette): array
+    public static function check(array $palette, ?float $contrastOnBase = null): array
     {
+        $contrastOnBase ??= self::CONTRAST_ON_BASE;
         $findings = [];
-        foreach (self::contrastPairs() as [$role, $against, $floor]) {
+        foreach (self::contrastPairs($contrastOnBase) as [$role, $against, $floor]) {
             $hex = self::hexOf($palette, $role);
             $other = self::hexOf($palette, $against);
             if ($hex === null || $other === null) {
@@ -159,16 +170,17 @@ final class PaletteFloor
      *        authored=/delivered=/disposition= shape
      * @return array<string,string>
      */
-    public static function repair(array $palette, array &$warnings): array
+    public static function repair(array $palette, array &$warnings, ?float $contrastOnBase = null): array
     {
+        $contrastOnBase ??= self::CONTRAST_ON_BASE;
         $authored = $palette;
         /** @var array<string, list<array{kind:string,text:string}>> $notes */
         $notes = [];
-        $out = self::repairContrast($palette, $notes);
+        $out = self::repairContrast($palette, $notes, $contrastOnBase);
         $out = self::repairHue($out, $notes);
         $out = self::repairChroma($out, $notes);
-        $out = self::repairContrast($out, $notes);
-        self::warnResiduals($out, $notes);
+        $out = self::repairContrast($out, $notes, $contrastOnBase);
+        self::warnResiduals($out, $notes, $contrastOnBase);
         self::emitNotes($authored, $out, $notes, $warnings);
         return $out;
     }
@@ -235,10 +247,10 @@ final class PaletteFloor
      *
      * @return list<array{0:string,1:string,2:float}> role, against, floor
      */
-    private static function contrastPairs(): array
+    private static function contrastPairs(float $contrastOnBase): array
     {
         return [
-            ['contrast', 'base', self::CONTRAST_ON_BASE],
+            ['contrast', 'base', $contrastOnBase],
             ['primary', 'base', self::ROLE_ON_BASE],
             ['secondary', 'base', self::ROLE_ON_BASE],
         ];
@@ -274,13 +286,13 @@ final class PaletteFloor
      * @param array<string, list<array{kind:string,text:string}>> $notes
      * @return array<string,string>
      */
-    private static function repairContrast(array $palette, array &$notes): array
+    private static function repairContrast(array $palette, array &$notes, float $contrastOnBase): array
     {
         $base = self::hexOf($palette, 'base');
         if ($base === null) {
             return $palette;
         }
-        foreach (self::contrastPairs() as [$role, $against, $floor]) {
+        foreach (self::contrastPairs($contrastOnBase) as [$role, $against, $floor]) {
             // The pair is always judged against base, but the slug we
             // move is never base: GroundTint owns that family's hue.
             $hex = self::hexOf($palette, $role);
@@ -751,7 +763,7 @@ final class PaletteFloor
      * @param array<string,string> $palette
      * @param array<string, list<array{kind:string,text:string}>> $notes
      */
-    private static function warnResiduals(array $palette, array &$notes): void
+    private static function warnResiduals(array $palette, array &$notes, float $contrastOnBase): void
     {
         $covered = [];
         foreach ($notes as $role => $items) {
@@ -765,7 +777,7 @@ final class PaletteFloor
                 $covered[$class . ':' . $role] = true;
             }
         }
-        foreach (self::check($palette) as $finding) {
+        foreach (self::check($palette, $contrastOnBase) as $finding) {
             $key = $finding['class'] . ':' . $finding['role'];
             if (isset($covered[$key])) {
                 continue;
@@ -1000,6 +1012,6 @@ final class PaletteFloor
 
     private static function floorLabel(float $floor): string
     {
-        return $floor === self::CONTRAST_ON_BASE ? '7.0' : '4.5';
+        return number_format($floor, 1);
     }
 }
