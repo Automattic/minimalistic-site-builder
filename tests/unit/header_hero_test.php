@@ -2790,6 +2790,22 @@ test('ensureSiteLogoMark inserts a tagged site-logo before the site title', func
     assert_eq($out, HeaderHeroStep::ensureSiteLogoMark($out), 'idempotent when a logo already exists');
 });
 
+test('ensureSiteLogoMark inserts inside a tagName header wrapper when there is no site-title', function () {
+    $in = '<!-- wp:group {"tagName":"header","textColor":"contrast"} -->' . "\n"
+        . '<header class="wp-block-group"><!-- wp:paragraph --><p>Atlas</p><!-- /wp:paragraph --></header>' . "\n"
+        . '<!-- /wp:group -->';
+    $out = HeaderHeroStep::ensureSiteLogoMark($in);
+    $openAt = strpos($out, '<header class="wp-block-group">');
+    $logoAt = strpos($out, 'wp:site-logo');
+    $closeAt = strpos($out, '</header>');
+    assert_true($openAt !== false && $logoAt !== false && $closeAt !== false);
+    assert_true(
+        $openAt < $logoAt && $logoAt < $closeAt,
+        'HTML-first identity lives in a header element, not a div',
+    );
+    assert_contains('Atlas', $out);
+});
+
 test('ensureSiteLogoMark inserts inside the root group when there is no site-title', function () {
     $in = '<!-- wp:group {"layout":{"type":"flex"}} -->' . "\n"
         . '<div class="wp-block-group"><!-- wp:paragraph --><p>Hearth</p><!-- /wp:paragraph --></div>' . "\n"

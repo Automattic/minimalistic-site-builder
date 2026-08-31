@@ -206,7 +206,7 @@ final class HeaderHeroStep implements Step
             return (string) preg_replace('/(<!--\s+wp:site-title\b)/', $comment . "\n\$1", $markup, 1);
         }
         if (preg_match(
-            '/<!--\s+wp:group\b(?:\s+\{(?:(?!-->).)*?\})?\s+-->\s*<div\b[^>]*>/s',
+            '/<!--\s+wp:group\b(?:\s+\{(?:(?!-->).)*?\})?\s+-->\s*<(?:div|header)\b[^>]*>/s',
             $markup,
             $m,
             PREG_OFFSET_CAPTURE
@@ -285,9 +285,6 @@ final class HeaderHeroStep implements Step
             // original lives at original_prompt. Forward the refined text so
             // PhotographySite sees the same brief later steps see.
             $prompt = (string) ($project->readJson('meta.json')['prompt'] ?? '');
-        }
-        if (BusinessSite::matches($siteSpec, $prompt)) {
-            $header = self::ensureSiteLogoMark($header);
         }
         $authoredPositions = self::removedAuthoredPositions($header);
 
@@ -638,6 +635,14 @@ final class HeaderHeroStep implements Step
             array_push($warnings, ...$home['warnings']);
         }
 
+        // Inject after every header rewrite (fallback, overlay grant, CTA
+        // dedupe). An earlier insert is wiped when HeaderFallback replaces the
+        // part, which is the HTML-first path's usual landing.
+        if (BusinessSite::matches($siteSpec, $prompt)) {
+            $current = $writes[$headerRel] ?? $header;
+            $writes[$headerRel] = self::ensureSiteLogoMark($current);
+        }
+
         // Compute everything above before the first write: parts, pages and
         // final contract describe the same delivered state at the boundary.
         foreach ($writes as $rel => $markup) {
@@ -664,6 +669,13 @@ final class HeaderHeroStep implements Step
             $project->writeText($path, $markup);
             array_push($warnings, ...$degraded);
             $report[] = "[{$rel}] storefront cart UI degraded after header/hero reconcile";
+        }
+        if (BusinessSite::matches($siteSpec, $prompt) && $project->exists('theme/' . $headerRel)) {
+            $persisted = $project->readText('theme/' . $headerRel);
+            $withMark = self::ensureSiteLogoMark($persisted);
+            if ($withMark !== $persisted) {
+                $project->writeText('theme/' . $headerRel, $withMark);
+            }
         }
         $pagesArtifact = $project->readJson('pages.json');
         $pagesArtifact['pages'] = $pages;
