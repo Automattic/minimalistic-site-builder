@@ -223,3 +223,34 @@ test('keyOutBackground keeps the original when keying would erase everything', f
 
     assert_eq($bytes, ImageTransparency::keyOutBackground($bytes));
 });
+
+test('padToSquare centres a non-square bitmap on a transparent square at max(w, h, 512)', function () {
+    $src = transparency_fixture('transparent', 'red', 40, 20);
+    $out = ImageTransparency::padToSquare($src, 512);
+    assert_eq([512, 512], png_size($out));
+    assert_true(alpha_at($out, 0, 0) < 0.01, 'corner stays transparent');
+    assert_true(alpha_at($out, 511, 511) < 0.01);
+    // Native pixels are not resampled: the 40x20 canvas sits centred.
+    $cx = intdiv(512 - 40, 2) + 20;
+    $cy = intdiv(512 - 20, 2) + 10;
+    assert_true(alpha_at($out, $cx, $cy) > 0.5, 'subject still opaque at centre');
+});
+
+test('padToSquare uses the longer side when it already exceeds minSide', function () {
+    $src = transparency_fixture('transparent', 'red', 80, 600);
+    $out = ImageTransparency::padToSquare($src, 512);
+    assert_eq([600, 600], png_size($out));
+});
+
+test('padToSquare returns its input unchanged on undecodable bytes', function () {
+    assert_eq('NOT A PNG', ImageTransparency::padToSquare('NOT A PNG'));
+});
+
+test('isKeyed is true when every corner is fully transparent', function () {
+    $keyed = ImageTransparency::keyOutBackground(transparency_fixture('white', 'red', 60, 60));
+    assert_true(ImageTransparency::isKeyed($keyed));
+});
+
+test('isKeyed is false for a fully opaque PNG', function () {
+    assert_true(!ImageTransparency::isKeyed(transparency_fixture('white', 'red', 60, 60)));
+});

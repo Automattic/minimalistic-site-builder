@@ -163,6 +163,68 @@ final class ImageTransparency
     }
 
     /**
+     * Centre $pngBytes on a transparent square of side max(w, h, $minSide).
+     * Padding only — no resampling. Fails soft: any error returns the input.
+     */
+    public static function padToSquare(string $pngBytes, int $minSide = 512): string
+    {
+        if (!self::available()) {
+            return $pngBytes;
+        }
+        try {
+            $im = new \Imagick();
+            $im->readImageBlob($pngBytes);
+            $w = $im->getImageWidth();
+            $h = $im->getImageHeight();
+            $side = max($w, $h, $minSide);
+            if ($w === $side && $h === $side) {
+                return $pngBytes;
+            }
+            $canvas = new \Imagick();
+            $canvas->newImage($side, $side, new \ImagickPixel('transparent'));
+            $canvas->setImageFormat('png');
+            $canvas->compositeImage(
+                $im,
+                \Imagick::COMPOSITE_OVER,
+                intdiv($side - $w, 2),
+                intdiv($side - $h, 2),
+            );
+            return $canvas->getImageBlob();
+        } catch (\Throwable) {
+            return $pngBytes;
+        }
+    }
+
+    /**
+     * True when all four corner pixels are fully transparent. A successful
+     * keyOutBackground ends in trimToInk(), which leaves a transparent pad,
+     * so opaque corners mean the key was abandoned (or ink runs edge to edge).
+     */
+    public static function isKeyed(string $pngBytes): bool
+    {
+        if (!self::available()) {
+            return false;
+        }
+        try {
+            $im = new \Imagick();
+            $im->readImageBlob($pngBytes);
+            $w = $im->getImageWidth();
+            $h = $im->getImageHeight();
+            if ($w < 1 || $h < 1) {
+                return false;
+            }
+            foreach ([[0, 0], [$w - 1, 0], [0, $h - 1], [$w - 1, $h - 1]] as [$x, $y]) {
+                if ($im->getImagePixelColor($x, $y)->getColorValue(\Imagick::COLOR_ALPHA) > 0.0) {
+                    return false;
+                }
+            }
+            return true;
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
+    /**
      * Turn the white anti-aliasing baked into surviving pixels into real
      * translucency (see the class docblock). Per pixel: ink coverage
      * t = max(1-R, 1-G, 1-B) scaled so t >= SOLID_INK_COVERAGE is 1, alpha
