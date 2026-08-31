@@ -1460,7 +1460,6 @@ final class DesignDirectionStep implements Step
             $meaning = match ($itemPattern) {
                 'card'        => 'list-like sections repeat discrete bounded cards',
                 'rule-row'    => 'list-like sections use compact name/detail rows joined by a purposeful hairline',
-                'index'       => 'list-like sections use a strong numbered or lettered scan column',
                 'spec-table'  => 'list-like sections align compact label/value pairs for comparison',
                 'tag-cluster' => 'list-like sections wrap short categorical labels as compact inline chips',
             };
@@ -1565,7 +1564,6 @@ final class DesignDirectionStep implements Step
         if ($device !== null && $device !== 'none' && $deviceClass !== null) {
             $deviceMeaning = match ($device) {
                 'hairline-rule'  => 'a 1px rule in the current text color on ONE non-hero band',
-                'section-numeral'=> 'a folio numeral on ONE non-hero band',
                 'stamp'          => 'a rotated stamp mark on ONE non-hero band',
                 default          => 'the committed one-band CSS device',
             };
