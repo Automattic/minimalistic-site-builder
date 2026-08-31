@@ -907,15 +907,34 @@ test('normalizeSpacingSettings installs the canonical bounded responsive profile
     ], $theme['settings']['spacing']['spacingSizes']);
 });
 
-test('normalizeSpacingSettings keeps component rhythm stable and scales every section role by density', function () {
+test('normalizeSpacingSettings scales every component and section role by density', function () {
     $profiles = [];
     foreach (['airy', 'measured', 'dense'] as $density) {
         $profiles[$density] = ThemeJsonStep::normalizeSpacingSettings([], $density)
             ['settings']['spacing']['spacingSizes'];
     }
 
-    assert_eq(array_slice($profiles['measured'], 0, 3), array_slice($profiles['airy'], 0, 3));
-    assert_eq(array_slice($profiles['measured'], 0, 3), array_slice($profiles['dense'], 0, 3));
+    // Component spacing (xs/sm/md) follows the density with a smaller swing
+    // than the section ramp: md also feeds the root inline gutter (BIGR-954).
+    assert_eq([
+        'clamp(0.375rem, 0.6vw, 0.625rem)',
+        'clamp(1rem, 1.25vw, 1.25rem)',
+        'clamp(2rem, 2.5vw, 2.5rem)',
+    ], array_column(array_slice($profiles['airy'], 0, 3), 'size'));
+    assert_eq([
+        'clamp(0.25rem, 0.5vw, 0.5rem)',
+        'clamp(0.75rem, 1vw, 1rem)',
+        'clamp(1.5rem, 2vw, 2rem)',
+    ], array_column(array_slice($profiles['measured'], 0, 3), 'size'));
+    assert_eq([
+        'clamp(0.25rem, 0.4vw, 0.375rem)',
+        'clamp(0.625rem, 0.8vw, 0.875rem)',
+        'clamp(1.25rem, 1.5vw, 1.5rem)',
+    ], array_column(array_slice($profiles['dense'], 0, 3), 'size'));
+
+    assert_eq(['xs', 'sm', 'md', 'lg', 'xl', 'xxl'], array_column($profiles['airy'], 'slug'));
+    assert_eq(['xs', 'sm', 'md', 'lg', 'xl', 'xxl'], array_column($profiles['dense'], 'slug'));
+
     assert_eq([
         'clamp(4rem, 6vw, 6rem)',
         'clamp(5rem, 8vw, 9rem)',

@@ -145,16 +145,32 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         'accent'  => 'system-ui, sans-serif',
     ];
     /**
-     * Stable component spacing shared by every page density.
+     * Density-owned component spacing (BIGR-954). xs is the tight
+     * intra-component text rhythm (an eyebrow/heading/line stack inside one
+     * card or list row — BIGR-777); sm/md are component-level insets and gaps,
+     * and md also feeds ROOT_GUTTER, so the page's inline gutter follows the
+     * committed density with no extra wiring. The swing is deliberately
+     * smaller than the section ramp's (~±25%): component spacing must stay
+     * readable at both extremes. `measured` keeps the historical fixed values.
      *
-     * xs is the tight intra-component text rhythm (an eyebrow/heading/line
-     * stack inside one card or list row — BIGR-777). sm/md are component-level
-     * @var list<array{slug: string, name: string, size: string}>
+     * @var array<string,list<array{slug: string, name: string, size: string}>>
      */
-    private const COMPONENT_SPACING_PROFILE = [
-        ['slug' => 'xs', 'name' => 'Extra Small', 'size' => 'clamp(0.25rem, 0.5vw, 0.5rem)'],
-        ['slug' => 'sm', 'name' => 'Small', 'size' => 'clamp(0.75rem, 1vw, 1rem)'],
-        ['slug' => 'md', 'name' => 'Medium', 'size' => 'clamp(1.5rem, 2vw, 2rem)'],
+    private const COMPONENT_SPACING_PROFILES = [
+        'airy' => [
+            ['slug' => 'xs', 'name' => 'Extra Small', 'size' => 'clamp(0.375rem, 0.6vw, 0.625rem)'],
+            ['slug' => 'sm', 'name' => 'Small', 'size' => 'clamp(1rem, 1.25vw, 1.25rem)'],
+            ['slug' => 'md', 'name' => 'Medium', 'size' => 'clamp(2rem, 2.5vw, 2.5rem)'],
+        ],
+        'measured' => [
+            ['slug' => 'xs', 'name' => 'Extra Small', 'size' => 'clamp(0.25rem, 0.5vw, 0.5rem)'],
+            ['slug' => 'sm', 'name' => 'Small', 'size' => 'clamp(0.75rem, 1vw, 1rem)'],
+            ['slug' => 'md', 'name' => 'Medium', 'size' => 'clamp(1.5rem, 2vw, 2rem)'],
+        ],
+        'dense' => [
+            ['slug' => 'xs', 'name' => 'Extra Small', 'size' => 'clamp(0.25rem, 0.4vw, 0.375rem)'],
+            ['slug' => 'sm', 'name' => 'Small', 'size' => 'clamp(0.625rem, 0.8vw, 0.875rem)'],
+            ['slug' => 'md', 'name' => 'Medium', 'size' => 'clamp(1.25rem, 1.5vw, 1.5rem)'],
+        ],
     ];
 
     /**
@@ -304,8 +320,10 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     ];
     /**
      * The provisioned root inline gutter, from the canonical spacing scale.
-     * md is a component-level inset (~1.5–2rem), matching the ~1rem-per-side
-     * page gutter the designs author on their outermost container.
+     * md is a component-level inset (~1.5–2rem at measured density), matching
+     * the ~1rem-per-side page gutter the designs author on their outermost
+     * container. Because md is density-scaled (COMPONENT_SPACING_PROFILES),
+     * airy sites breathe wider and dense sites pull tighter at the page edge.
      */
     private const ROOT_GUTTER = 'var:preset|spacing|md';
 
@@ -712,7 +730,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         $theme['settings']['spacing']['defaultSpacingSizes'] = false;
         $density = BoundedChoice::explicit($density, DesignDirectionStep::DENSITIES) ?? 'measured';
         $theme['settings']['spacing']['spacingSizes'] = array_merge(
-            self::COMPONENT_SPACING_PROFILE,
+            self::COMPONENT_SPACING_PROFILES[$density],
             self::SECTION_SPACING_PROFILES[$density],
         );
 
