@@ -17,7 +17,6 @@ final class HeroComposition
         'cinematic-safe-zone',
         'foreground-split',
         'layered-poster',
-        'type-manifesto',
     ];
 
     /**
@@ -30,29 +29,27 @@ final class HeroComposition
      * composition, so half of all sites opened with it. They are one recipe
      * now, and these two axes carry the differences the visitor could see.
      *
-     * 'none' belongs to a recipe that carries no image at all; a cover recipe
-     * has one landscape plate that IS the band, so it pins both axes to their
-     * only meaningful value.
+     * A cover recipe has one landscape plate that IS the band, so it pins
+     * both axes to their only meaningful value.
      *
      * @var list<string>
      */
-    public const MEDIA_ASPECTS = ['portrait', 'landscape', 'square', 'none'];
+    public const MEDIA_ASPECTS = ['portrait', 'landscape', 'square'];
 
     /** @var list<string> */
-    public const MEDIA_WEIGHTS = ['balanced', 'dominant', 'none'];
+    public const MEDIA_WEIGHTS = ['balanced', 'dominant'];
 
-    // Caller-constraint enum. 'none' became requestable with type-manifesto
-    // (BIGR-885), the first cataloged recipe that carries no image. It stays a
-    // valid HeroBlueprint media_mode for the delivered value of a media-loss
-    // degradation too, so an image-bearing recipe can still degrade to it.
-    public const MEDIA_MODES = ['none', 'cover-image', 'foreground-image'];
+    // Caller-constraint enum. 'none' retired with type-manifesto (BIGR-885,
+    // removed again after the lumen audit): no cataloged recipe is imageless,
+    // so a caller cannot request it. 'none' stays a valid HeroBlueprint
+    // media_mode for the delivered value of a media-loss degradation.
+    public const MEDIA_MODES = ['cover-image', 'foreground-image'];
 
     /**
      * The media modes that put real pixels on the page, so the build must
      * generate an image for them. A mode absent from this list disarms image
-     * generation: 'none' is both a requestable constraint and the delivered
-     * value of a media-loss degradation, and a future non-image mode must opt
-     * in here on purpose.
+     * generation: 'none' is the delivered value of a media-loss degradation,
+     * and a future non-image mode must opt in here on purpose.
      *
      * @var list<string>
      */
@@ -180,49 +177,6 @@ final class HeroComposition
                 'media_aspect' => 'landscape', 'media_weight' => 'dominant',
             ],
         ],
-        // BIGR-885: the catalog's first imageless recipe. Type and negative
-        // space carry the band, so the recipe removes overlay contrast risk,
-        // image-aspect drift, and the media plate that pushes copy below the
-        // fold. 'centered-stack' is the projection because it is the only
-        // archetype in PagePlanStep::ARCHETYPES that a plan reader can read as
-        // "one column carried by type and whitespace"; the row archetypes
-        // would promise the following section a second column that this hero
-        // does not have.
-        'type-manifesto' => [
-            'canvases' => ['full-bleed', 'framed'],
-            'media_modes' => ['none'],
-            'min_images' => 0,
-            'max_images' => 0,
-            'backgrounds' => ['base', 'tinted', 'contrast'],
-            'default_background' => 'contrast',
-            'fallback_background' => 'base',
-            'header_modes' => ['stacked'],
-            'copy_capacity' => 'compact',
-            'mobile_transformations' => ['stack-copy-first'],
-            'layout_archetype' => 'centered-stack',
-            'fallback_family' => 'typographic',
-            'root_hook' => '.hero-composition--type-manifesto',
-            'prompt' => 'hero-compositions/type-manifesto.md',
-            'headline_registers' => ['display', 'poster'],
-            // No image means no media plate to balance, so an immersive band
-            // would only add empty canvas under the copy.
-            'height_profiles' => ['compact', 'standard'],
-            // No media slot at all, so neither axis has a shape to describe.
-            'media_aspects' => ['none'],
-            'media_weights' => ['none'],
-            'defaults' => [
-                'media_mode' => 'none', 'headline_register' => 'display',
-                'text_anchor' => 'center-start',
-                'headline_line_target' => ['desktop' => [1, 3], 'mobile' => [2, 5]],
-                // HeroBlueprint::repairSpatialCompatibility() pins both fields
-                // for every non-cover recipe; these values keep defaultFor() a
-                // fixed point.
-                'focal_region' => 'none', 'text_safe_region' => 'full',
-                'height_profile' => 'standard', 'cta_treatment' => 'prominent',
-                'mobile_transformation' => 'stack-copy-first',
-                'media_aspect' => 'none', 'media_weight' => 'none',
-            ],
-        ],
     ];
 
     public static function assertKnown(string $recipe): void
@@ -262,8 +216,7 @@ final class HeroComposition
      * The blueprint's delivered media_mode wins so a later deterministic
      * degradation to `none` cannot accidentally keep image generation armed.
      *
-     * An imageless recipe disarms generation on BOTH branches. The recipe
-     * branch reads min_images, which is 0. The blueprint branch reads the
+     * The recipe branch reads min_images. The blueprint branch reads the
      * catalog's max_images first, so a blueprint that drifted to an image
      * media_mode the recipe does not own cannot arm a slot the composition
      * has nowhere to put (BIGR-885).
@@ -546,21 +499,7 @@ final class HeroComposition
         $minImages = (int) $meta['min_images'];
         $maxImages = (int) $meta['max_images'];
         $mediaModes = (array) $meta['media_modes'];
-        // BIGR-885 objective failure for an imageless recipe: any <img> at all.
-        // The recipe exists to remove overlay contrast risk, aspect drift, and
-        // the media plate that pushes copy below the fold, and one image
-        // returns all three. The row names the recipe so the repair pass can
-        // act on it without re-deriving the media budget from the count rule.
-        $imageless = $mediaModes === ['none'];
-        if ($imageless && $imageCount > 0) {
-            $warnings[] = self::markupWarning(
-                $part,
-                'imageless hero media',
-                ['recipe' => $recipe, 'media_modes' => $mediaModes, 'image_count' => 0],
-                ['image_count' => $imageCount],
-                'safe parseable hero was retained; delete only the image and let type and negative space carry the band',
-            );
-        } elseif (!$imageless && ($imageCount < $minImages || $imageCount > $maxImages)) {
+        if ($imageCount < $minImages || $imageCount > $maxImages) {
             $warnings[] = self::markupWarning(
                 $part,
                 'recipe media count',
@@ -662,11 +601,6 @@ final class HeroComposition
         $expectedAspects = in_array($committed, (array) $meta['media_aspects'], true)
             ? [$committed]
             : array_values((array) $meta['media_aspects']);
-        // A recipe with no media slot has no aspect to check; its images are
-        // already an objective failure of the imageless rule above.
-        if ($expectedAspects === ['none']) {
-            $expectedAspects = [];
-        }
         if ($expectedAspects !== [] && $images !== []) {
             $aspects = array_values(array_map(
                 static fn (array $image): string => self::imageAspect($image['alt']),

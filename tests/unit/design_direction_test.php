@@ -2066,17 +2066,16 @@ test('legacy signature-device fields are dropped from the normalized direction',
 });
 
 test('automatic hero selection keeps the image gate aligned with each catalog media budget (BIGR-885)', function () {
-    // type-manifesto reopened the imageless shape, so the old "every recipe
-    // bears an image" invariant is gone. The invariant that replaces it: the
-    // image gate always agrees with the selected recipe's own budget, so an
-    // unconstrained build never generates an orphan image and never leaves an
-    // image-bearing recipe without one.
+    // The catalog holds no imageless recipe since the type-manifesto removal.
+    // The invariant that survives it: the image gate always agrees with the
+    // selected recipe's own budget, so an unconstrained build never generates
+    // an orphan image and never leaves an image-bearing recipe without one.
     $imageless = array_values(array_filter(
         Automattic\SiteBuild\HeroComposition::RECIPES,
         fn (string $recipe): bool
             => (int) Automattic\SiteBuild\HeroComposition::metadata($recipe)['max_images'] === 0,
     ));
-    assert_eq(['type-manifesto'], $imageless);
+    assert_eq([], $imageless);
 
     $selected = [];
     foreach (range(1, 16) as $i) {
