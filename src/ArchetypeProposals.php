@@ -24,6 +24,17 @@ final class ArchetypeProposals
     /** Origins a record may declare. */
     public const ORIGINS = ['hand', 'prompt', 'auto'];
 
+    /**
+     * Where a proposal stands.
+     *
+     * `waiting` is the queue. `built` means the archetype now lives in a
+     * code-owned catalog, so the card is history rather than work. `dropped`
+     * means it was tried or considered and will not be built — the record is
+     * kept on purpose, because a proposal deleted from disk is a proposal the
+     * variety pass will draw again next week.
+     */
+    public const STATUSES = ['waiting', 'built', 'dropped'];
+
     /** Fields every record carries. */
     private const REQUIRED = ['id', 'family', 'title', 'idea', 'why_new', 'built_from', 'risk', 'mockup'];
 
@@ -56,9 +67,13 @@ final class ArchetypeProposals
                 continue;
             }
         }
+        // Family order first, then the queue before the settled records: a card
+        // nobody can pick should not sit between two that can be picked.
         usort($records, static function (array $a, array $b): int {
             $families = array_flip(ArchetypeCatalog::FAMILIES);
-            return [$families[$a['family']] ?? 9, $a['id']] <=> [$families[$b['family']] ?? 9, $b['id']];
+            $rank = static fn (array $r): int => $r['status'] === 'waiting' ? 0 : 1;
+            return [$families[$a['family']] ?? 9, $rank($a), $a['id']]
+                <=> [$families[$b['family']] ?? 9, $rank($b), $b['id']];
         });
         return $records;
     }
@@ -132,6 +147,10 @@ final class ArchetypeProposals
         if (!in_array($origin, self::ORIGINS, true)) {
             $origin = 'hand';
         }
+        $status = strtolower(trim((string) ($record['status'] ?? 'waiting')));
+        if (!in_array($status, self::STATUSES, true)) {
+            $status = 'waiting';
+        }
 
         return [
             'id' => $id,
@@ -143,14 +162,44 @@ final class ArchetypeProposals
             'risk' => trim((string) $record['risk']),
             'mockup' => ['scope' => $scope, 'html' => trim($mockup['html']), 'css' => trim($mockup['css'])],
             'origin' => $origin,
+            'status' => $status,
+            'status_note' => trim((string) ($record['status_note'] ?? '')),
             'prompt' => trim((string) ($record['prompt'] ?? '')),
             'created' => trim((string) ($record['created'] ?? '')),
         ];
     }
 
     /**
+     * Move one proposal to a new status, keeping everything else it says.
+     *
+     * @throws \InvalidArgumentException on an unknown status or a missing record
+     */
+    public function setStatus(string $family, string $id, string $status, string $note = ''): string
+    {
+        if (!in_array($status, self::STATUSES, true)) {
+            throw new \InvalidArgumentException('status must be one of: ' . implode(', ', self::STATUSES));
+        }
+        $file = $this->dir . '/' . $family . '--' . $id . '.json';
+        if (!is_file($file)) {
+            throw new \InvalidArgumentException("no proposal at {$family}/{$id}");
+        }
+        $record = json_decode((string) file_get_contents($file), true);
+        if (!is_array($record)) {
+            throw new \InvalidArgumentException("proposal {$family}/{$id} is not readable JSON");
+        }
+        $record['status'] = $status;
+        $record['status_note'] = $note;
+        return $this->save($record);
+    }
+
+    /**
      * A mockup renders inside the gallery, so it may not script, handle events
      * or reach the network. A proposal is a drawing, not an application.
+     *
+     * `style` is refused in the markup for the same reason `assertScoped()`
+     * exists: a stylesheet inside the html would apply to the whole document
+     * and never pass through the scope check, which reads the css field only.
+     * A mockup that wants rules has a css field for them.
      */
     private static function assertInert(string $source, string $label): void
     {
@@ -158,7 +207,8 @@ final class ArchetypeProposals
             '~<\s*script~i' => 'script tags',
             '~\son[a-z]+\s*=~i' => 'inline event handlers',
             '~javascript:~i' => 'javascript: urls',
-            '~<\s*(iframe|object|embed|form|link|meta)\b~i' => 'embedded or network-reaching elements',
+            '~<\s*(iframe|object|embed|form|link|meta|base|style|svg|template)\b~i'
+                => 'embedded, network-reaching or style-carrying elements',
             '~@import~i' => 'css imports',
             '~https?://~i' => 'remote urls',
             '~url\(\s*[\'"]?//~i' => 'protocol-relative urls',
@@ -171,32 +221,88 @@ final class ArchetypeProposals
     }
 
     /**
-     * Every rule in a mockup's stylesheet must start at that mockup's own scope
-     * class. One unscoped selector would restyle the gallery around it, and a
-     * proposal that repaints the tool is unreviewable.
+     * Every rule in a mockup's stylesheet must *start* at that mockup's own
+     * scope class. One selector that reaches outside its card would restyle the
+     * gallery around it, and a proposal that repaints the tool is unreviewable.
+     *
+     * The check is on the leftmost compound selector, not on the selector as a
+     * whole: `body:has(.mock-hero-x)` names the scope but matches the document,
+     * and `.mock-hero-x-evil` merely starts with the same characters. Both have
+     * to be refused, so the leftmost compound is stripped of its functional
+     * pseudo-class arguments and then matched on a whole class token.
      */
     private static function assertScoped(string $css, string $scope): void
     {
         // Strip comments and at-rule wrappers (@media/@supports/@container),
-        // then check what remains: every selector list before a { must name the
-        // scope class in each of its comma-separated parts.
+        // then check what remains: every selector list before a { must be
+        // anchored on the scope class in each of its comma-separated parts.
         $stripped = (string) preg_replace('~/\*.*?\*/~s', '', $css);
         $stripped = (string) preg_replace('~@(media|supports|container)[^{]*\{~i', '', $stripped);
         if (preg_match_all('~([^{}]+)\{~', $stripped, $matches) === false) {
             return;
         }
         foreach ($matches[1] ?? [] as $selectorList) {
-            foreach (explode(',', $selectorList) as $selector) {
-                $selector = trim($selector);
+            foreach (self::splitSelectorList($selectorList) as $selector) {
                 if ($selector === '' || str_starts_with($selector, '@')) {
                     continue;
                 }
-                if (!str_contains($selector, '.' . $scope)) {
+                if (!self::anchoredOnScope($selector, $scope)) {
                     throw new \InvalidArgumentException(
-                        "mockup css selector '{$selector}' must be scoped to .{$scope}"
+                        "mockup css selector '{$selector}' must start at .{$scope}"
                     );
                 }
             }
         }
+    }
+
+    /**
+     * Split on the commas that separate selectors, ignoring the ones inside a
+     * functional pseudo-class such as `:is(a, b)`.
+     *
+     * @return list<string>
+     */
+    private static function splitSelectorList(string $selectorList): array
+    {
+        $parts = [];
+        $depth = 0;
+        $current = '';
+        foreach (str_split($selectorList) as $char) {
+            if ($char === '(') {
+                $depth++;
+            } elseif ($char === ')') {
+                $depth = max(0, $depth - 1);
+            } elseif ($char === ',' && $depth === 0) {
+                $parts[] = trim($current);
+                $current = '';
+                continue;
+            }
+            $current .= $char;
+        }
+        $parts[] = trim($current);
+        return array_values(array_filter($parts, static fn (string $p): bool => $p !== ''));
+    }
+
+    /** Does this selector's leftmost compound carry the scope class itself? */
+    private static function anchoredOnScope(string $selector, string $scope): bool
+    {
+        // Everything up to the first combinator is the compound that decides
+        // what the rule can match at all. A combinator inside a functional
+        // pseudo-class does not end it, so track parenthesis depth.
+        $compound = '';
+        $depth = 0;
+        foreach (str_split($selector) as $char) {
+            if ($char === '(') {
+                $depth++;
+            } elseif ($char === ')') {
+                $depth = max(0, $depth - 1);
+            } elseif ($depth === 0 && in_array($char, [' ', "\t", "\n", '>', '+', '~'], true)) {
+                break;
+            }
+            $compound .= $char;
+        }
+        // `body:has(.scope)` names the scope only inside an argument list, and
+        // matches the whole document — drop those arguments before looking.
+        $compound = (string) preg_replace('~\([^()]*\)~', '', $compound);
+        return preg_match('~(^|[^\w-])\.' . preg_quote($scope, '~') . '(?![\w-])~', $compound) === 1;
     }
 }

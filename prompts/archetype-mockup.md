@@ -16,7 +16,10 @@ already does, so your proposal is a shape none of them can express.
 
 {{existing}}
 
-## Already proposed and waiting — never repeat one of these either
+## Already proposed — never repeat one of these either
+
+Some carry a status. `(built)` means it is now in the generator; `(dropped)`
+means it was considered and refused. Both are closed: do not draw them again.
 
 {{proposed}}
 
@@ -42,9 +45,13 @@ The mockup is a drawing of the composition, rendered inside a 16:10 frame in a
 gallery page. Draw the SHAPE, not a finished brand.
 
 - `html` is ONE `<div class="preview {{scope}}">…</div>` element. Inside it you
-  may use only plain divs, spans, headings and paragraphs.
-- `css` styles only that element and its descendants. EVERY selector must start
-  with `.{{scope}}`. A selector that does not is rejected.
+  may use only plain divs, spans, headings and paragraphs. No `<style>` element:
+  every rule belongs in `css`, which is the only field that is scope-checked.
+- `css` styles only that element and its descendants. EVERY selector must START
+  at `.{{scope}}` — that class must be in the leftmost part of the selector,
+  before any space, `>`, `+` or `~`. `.{{scope}} .row` and `.{{scope}}:hover`
+  are accepted; `body .{{scope}}`, `body:has(.{{scope}})` and `.{{scope}}-wide`
+  are rejected, because each of them can paint outside the card.
 - Size everything in `cqw` units (the frame is a container), never in px, so
   the drawing scales with the card.
 - No images, no scripts, no event handlers, no urls of any kind, no `@import`.

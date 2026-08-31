@@ -132,7 +132,13 @@ final class ArchetypeMockups
         return $slug . '-' . substr(hash('sha256', $slug . microtime()), 0, 6);
     }
 
-    /** @param list<array<string,mixed>> $rows */
+    /**
+     * A settled proposal is listed with its status, not hidden. One that was
+     * built is already in the catalog; one that was dropped was considered and
+     * refused, and re-drawing it is the exact waste the record exists to stop.
+     *
+     * @param list<array<string,mixed>> $rows
+     */
     private static function describe(array $rows, string $field): string
     {
         if ($rows === []) {
@@ -144,7 +150,9 @@ final class ArchetypeMockups
             if (mb_strlen($text) > 400) {
                 $text = mb_substr($text, 0, 400) . '…';
             }
-            $lines[] = '- **' . $row['id'] . '** — ' . $text;
+            $status = (string) ($row['status'] ?? 'waiting');
+            $label = $status === 'waiting' ? '' : ' _(' . $status . ')_';
+            $lines[] = '- **' . $row['id'] . '**' . $label . ' — ' . $text;
         }
         return implode("\n", $lines);
     }

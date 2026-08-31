@@ -11,10 +11,12 @@ The gallery has two halves.
 
 **What we can build** — one card per archetype in the four code-owned catalogs
 (`AboveFoldContract` headers, `HeroComposition` heroes, `SectionComposition`
-sections, `FooterComposition` footers), each with its metadata, its prompt
-fragment's opening paragraph, and a screenshot of the archetype as it shipped on
-a real generated site. A card with no screenshot is an archetype no built site
-has drawn yet.
+sections, `FooterComposition` footers), each with its metadata, the opening line
+of its prompt fragment, and **several** screenshots of the archetype as it
+shipped on real generated sites. Several, not one, on purpose: one image proves
+the archetype exists, and only a set of them shows how much it varies from brief
+to brief — which is the question a variety review actually asks. A card with one
+example says so; a card with none is an archetype no built site has drawn yet.
 
 **What we could build** — mockups of archetypes nobody has implemented. Each one
 argues for itself: the idea, why the current catalog cannot express it, what it
@@ -27,8 +29,10 @@ notes, and the page hands you the prompt that implements them.
 | --- | --- |
 | `serve [--port=9310]` | Renders the page and serves it, with composing enabled. |
 | `build` | Writes `index.html` and stops. Opening it from disk works; composing does not. |
-| `list` | Prints the catalog and its coverage. |
-| `capture [--only=slug,…] [--width=1366]` | Boots every built project under `projects/`, screenshots each part it delivered, and files one image per archetype. |
+| `list` | Prints the catalog, how many examples each archetype has, and what is stale. |
+| `capture [--only=slug,…] [--width=1366] [--per-archetype=3]` | Boots every built project under `projects/`, screenshots each part it delivered, and files up to `--per-archetype` images per archetype, preferring different sites. Also drops shots of archetypes the catalogs no longer own. |
+| `fill [--only=brief,…] [--parallel=3]` | Builds the cohort in `eval/catalog-fill-prompts.json`, which pins a header, a hero and a footer per brief so the archetypes no demo selects get drawn at all. Slow, and it costs model calls. |
+| `status <family/id> <waiting\|built\|dropped> [--note="…"]` | Records where a proposal ended up. |
 | `propose "<what you want>" [--family=…] [--count=1]` | Asks the model to draw one archetype from your description. |
 | `propose --auto [--family=…]` | Asks the model to find the widest gap in the catalog and fill it. |
 
@@ -38,36 +42,69 @@ the gap.
 
 ## What lives here
 
-- `shots/` — one WebP per archetype, plus `index.json` naming the site each came
-  from. **These are committed.** They are the tool's own assets, not review
+- `shots/` — a few WebP per archetype, plus `index.json` naming the site each
+  came from. **These are committed.** They are the tool's own assets, not review
   evidence, which is why the AGENTS.md rule about keeping screenshots out of the
   repository does not apply to them. They are capped at 1100px and re-encoded,
-  so the whole set costs the repository under a megabyte.
+  so the whole set stays small.
 - `proposals/` — one JSON record per proposed archetype, including its mockup.
   **Committed**, so a drawing the model produced is reviewable in a diff and
-  editable by hand afterwards. Delete the file to drop the proposal.
+  editable by hand afterwards.
 - `index.html` — generated on every run. **Not committed.**
 
-## Filling an empty card
+## Filling an empty card, and thickening a thin one
 
-An archetype with no screenshot has not been drawn by any site under
-`projects/`. Selection is deterministic per brief, so the way to reach a
-specific one is to pin it:
+`capture` photographs what a site drew, so a card with no screenshot needs a
+build before it needs a screenshot. Selection is deterministic per brief, which
+is why more demo sites do not help: the same briefs keep choosing the same
+archetypes. Pin the assignment instead.
+
+```bash
+php bin/archetypes.php fill              # the whole cohort, three builds at a time
+php bin/archetypes.php fill --only=cat-tidal
+php bin/archetypes.php capture           # then photograph what they drew
+```
+
+`fill` runs `bin/build-catalog-cohort.php` over
+`eval/catalog-fill-prompts.json`. Each brief pins the three steerable
+assignments: the header (`HEADER_ARCHETYPE`), the hero (`HERO_RECIPE`), and the
+footer — which has no env override and is patched into `pages.json` between the
+plan and the sections step. Add a brief there to reach an archetype the cohort
+does not cover yet; the builder refuses a combination the contract would degrade
+rather than paying for a build that silently lands on `standard-row`.
+
+One brief at a time works too, when that is all you need:
 
 ```bash
 HERO_RECIPE=type-manifesto php bin/build.php --slug=demo --with-images --no-serve "a brief"
-HEADER_ARCHETYPE=split-nav  php bin/build.php --slug=demo --multi-page …
 php bin/archetypes.php capture --only=demo
 ```
 
-`bin/build-catalog-cohort.php` does this in bulk from `eval/catalog-fill-prompts.json`,
-including the footer archetype, which has no env override and has to be patched
-into `pages.json` between the plan and the sections step.
+## Where a proposal ends up
+
+A proposal is `waiting`, `built` or `dropped`. Record the move rather than
+deleting the file:
+
+```bash
+php bin/archetypes.php status hero/knockout-type dropped --note="merged in #393, reverted in #399"
+```
+
+The record stays on disk on purpose. A settled proposal keeps its card, out of
+the queue and out of the export, and the composer is told its status — so the
+variety pass does not draw the same idea again next week, which is exactly what
+deleting the file would cause.
 
 ## Safety of a generated mockup
 
 A mockup renders inside the gallery, so `ArchetypeProposals::validate()` refuses
-one that carries script, event handlers, embedded elements, `@import`, or any
-URL, and requires every CSS selector to be scoped to that proposal's own class.
+one that carries script, event handlers, embedded elements, a `<style>` element,
+`@import`, or any URL, and requires every CSS selector to *start* at that
+proposal's own class.
+
+Start at, not merely mention: `body:has(.mock-hero-x)` names the class and
+matches the whole document, and `.mock-hero-x-wide` merely shares its first
+characters. Both are refused. `.mock-hero-x .row`, `.mock-hero-x:hover` and a
+scoped rule inside `@media` are accepted, which is everything a drawing needs.
+
 Those rules apply to hand-written records too: the tool cannot tell, and should
 not care, who typed it.

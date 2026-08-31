@@ -28,11 +28,13 @@ final class ArchetypeGallery
      */
     public static function render(array $entries, array $shots, array $proposals, bool $live): string
     {
-        $shotIndex = is_array($shots['shots'] ?? null) ? $shots['shots'] : [];
+        $shotIndex = self::normalizeShots($shots['shots'] ?? []);
         $width = (int) ($shots['width'] ?? 1366);
 
         $catalogSections = '';
         $counts = [];
+        $samples = 0;
+        $thin = [];
         foreach (ArchetypeCatalog::FAMILIES as $family) {
             $rows = array_values(array_filter($entries, static fn (array $e): bool => $e['family'] === $family));
             if ($rows === []) {
@@ -41,9 +43,13 @@ final class ArchetypeGallery
             $shown = 0;
             $cards = '';
             foreach ($rows as $entry) {
-                $shot = $shotIndex[$entry['key']] ?? null;
-                $shown += $shot === null ? 0 : 1;
-                $cards .= self::catalogCard($entry, $shot);
+                $entryShots = $shotIndex[$entry['key']] ?? [];
+                $shown += $entryShots === [] ? 0 : 1;
+                $samples += count($entryShots);
+                if (count($entryShots) === 1) {
+                    $thin[] = $entry['key'];
+                }
+                $cards .= self::catalogCard($entry, $entryShots);
             }
             $counts[$family] = ['total' => count($rows), 'shown' => $shown];
             [$title, $blurb] = array_values(ArchetypeCatalog::familyLabel($family));
@@ -51,23 +57,37 @@ final class ArchetypeGallery
                 . '<h2>' . self::esc($title) . ' <span class="count">' . $shown . '/' . count($rows)
                 . ' illustrated</span></h2>'
                 . '<p class="blurb">' . self::esc($blurb) . '</p>'
-                . '<div class="grid">' . $cards . '</div></section>';
+                . '<div class="grid catalog">' . $cards . '</div></section>';
         }
 
+        // A shot naming an archetype no catalog owns would otherwise be
+        // invisible: the gallery draws catalog rows, not the index.
+        $known = array_flip(array_column($entries, 'key'));
+        $orphans = array_values(array_filter(
+            array_keys($shotIndex),
+            static fn (string $key): bool => !isset($known[$key]),
+        ));
+
         $proposalSections = '';
+        $waiting = 0;
         foreach (ArchetypeCatalog::FAMILIES as $family) {
             $rows = array_values(array_filter($proposals, static fn (array $p): bool => $p['family'] === $family));
             if ($rows === []) {
                 continue;
             }
             $cards = '';
+            $familyWaiting = 0;
             foreach ($rows as $proposal) {
+                $familyWaiting += ($proposal['status'] ?? 'waiting') === 'waiting' ? 1 : 0;
                 $cards .= self::proposalCard($proposal);
             }
+            $waiting += $familyWaiting;
             $label = ArchetypeCatalog::familyLabel($family);
+            $settled = count($rows) - $familyWaiting;
             $proposalSections .= '<section class="family" id="proposals-' . self::esc($family) . '">'
-                . '<h2>' . self::esc($label['title']) . ' <span class="count">' . count($rows) . ' proposed</span></h2>'
-                . '<div class="grid">' . $cards . '</div></section>';
+                . '<h2>' . self::esc($label['title']) . ' <span class="count">' . $familyWaiting . ' waiting'
+                . ($settled > 0 ? ', ' . $settled . ' settled' : '') . '</span></h2>'
+                . '<div class="grid proposals">' . $cards . '</div></section>';
         }
 
         $mockupCss = '';
@@ -78,7 +98,10 @@ final class ArchetypeGallery
         $totals = [
             'archetypes' => count($entries),
             'illustrated' => array_sum(array_column($counts, 'shown')),
-            'proposals' => count($proposals),
+            'samples' => $samples,
+            'proposals' => $waiting,
+            'thin' => $thin,
+            'orphans' => $orphans,
         ];
         $composePanel = $live ? self::composePanel() : self::composeOffline();
         $liveFlag = $live ? 'true' : 'false';
@@ -86,17 +109,55 @@ final class ArchetypeGallery
         return self::page($catalogSections, $proposalSections, $mockupCss, $totals, $width, $composePanel, $liveFlag);
     }
 
-    /** @param array<string,mixed>|null $shot */
-    private static function catalogCard(array $entry, ?array $shot): string
+    /**
+     * Accept either shape of `shots/index.json`: one entry per archetype, as the
+     * first version of the tool wrote it, or the list of examples it writes now.
+     *
+     * @param mixed $shots
+     * @return array<string,list<array<string,mixed>>>
+     */
+    public static function normalizeShots(mixed $shots): array
     {
-        $figure = '<p class="gap">No screenshot yet — run <code>php bin/archetypes.php capture</code> '
-            . 'after building a site that uses it.</p>';
-        if ($shot !== null) {
-            $figure = '<figure><a href="shots/' . self::esc((string) $shot['file']) . '" target="_blank">'
-                . '<img loading="lazy" src="shots/' . self::esc((string) $shot['file']) . '" alt="'
-                . self::esc($entry['id'] . ' as built on ' . ($shot['site'] ?? '')) . '"></a>'
-                . '<figcaption>' . self::esc((string) ($shot['site'] ?? '')) . ' <span>('
-                . self::esc((string) ($shot['slug'] ?? '')) . ')</span></figcaption></figure>';
+        if (!is_array($shots)) {
+            return [];
+        }
+        $normalized = [];
+        foreach ($shots as $key => $value) {
+            if (!is_array($value) || $value === []) {
+                continue;
+            }
+            $list = array_is_list($value) ? $value : [$value];
+            $entries = array_values(array_filter(
+                $list,
+                static fn (mixed $entry): bool => is_array($entry) && is_string($entry['file'] ?? null),
+            ));
+            if ($entries !== []) {
+                $normalized[(string) $key] = $entries;
+            }
+        }
+        return $normalized;
+    }
+
+    /** @param list<array<string,mixed>> $shots */
+    private static function catalogCard(array $entry, array $shots): string
+    {
+        $figures = '<p class="gap">No screenshot yet. No built site under <code>projects/</code> has drawn it — '
+            . 'pin it and build: <code>php bin/archetypes.php fill --only=&lt;brief&gt;</code>, then '
+            . '<code>capture</code>.</p>';
+        if ($shots !== []) {
+            $figures = '';
+            foreach ($shots as $shot) {
+                $file = self::esc((string) $shot['file']);
+                $figures .= '<figure><a href="shots/' . $file . '" target="_blank">'
+                    . '<img loading="lazy" src="shots/' . $file . '" alt="'
+                    . self::esc($entry['id'] . ' as built on ' . ($shot['site'] ?? '')) . '"></a>'
+                    . '<figcaption>' . self::esc((string) ($shot['site'] ?? '')) . ' <span>('
+                    . self::esc((string) ($shot['slug'] ?? '')) . ')</span></figcaption></figure>';
+            }
+            if (count($shots) === 1) {
+                $figures .= '<p class="gap thin">One example only — it shows the archetype exists, not how much '
+                    . 'it varies. <code>php bin/archetypes.php fill</code> builds more sites that draw it.</p>';
+            }
         }
         $facts = '';
         foreach (($entry['facts'] ?? []) as $label => $value) {
@@ -105,14 +166,24 @@ final class ArchetypeGallery
         $note = ($entry['note'] ?? '') === ''
             ? ''
             : '<p class="note">' . self::esc((string) $entry['note']) . '</p>';
+        // The brief is the fragment's opening line, so the disclosure is offered
+        // whenever the fragment says more than that — including when the brief
+        // is itself a truncated sentence, which is when it is wanted most.
+        $brief = (string) ($entry['brief'] ?? $entry['summary']);
+        $fragment = $brief === (string) $entry['summary']
+            ? ''
+            : '<details class="fragment"><summary>prompt fragment</summary><p>'
+                . self::esc((string) $entry['summary']) . '</p></details>';
 
-        return '<article class="card' . ($shot === null ? ' is-empty' : '') . '" id="' . self::esc($entry['key']) . '">'
-            . '<div class="meta"><h3>' . self::esc($entry['id']) . '</h3>'
-            . '<p class="summary">' . self::esc((string) $entry['summary']) . '</p>'
+        return '<article class="card' . ($shots === [] ? ' is-empty' : '') . '" id="' . self::esc($entry['key']) . '">'
+            . '<div class="meta"><h3>' . self::esc($entry['id'])
+            . (count($shots) > 1 ? ' <span class="count">' . count($shots) . ' examples</span>' : '') . '</h3>'
+            . '<p class="summary">' . self::esc($brief) . '</p>'
+            . $fragment
             . $note
             . ($facts === '' ? '' : '<dl class="facts">' . $facts . '</dl>')
             . '<p class="source">' . self::esc((string) $entry['source']) . '</p></div>'
-            . '<div class="shots">' . $figure . '</div></article>';
+            . '<div class="shots">' . $figures . '</div></article>';
     }
 
     private static function proposalCard(array $proposal): string
@@ -124,18 +195,37 @@ final class ArchetypeGallery
             ? ''
             : '<p class="prompted">Asked for: “' . self::esc((string) $proposal['prompt']) . '”</p>';
 
-        return '<article class="card proposal" data-id="' . self::esc($proposal['id'])
+        // A settled proposal keeps its card, because a record deleted from disk
+        // is one the variety pass draws again next week. It is not selectable:
+        // the queue is what is still waiting.
+        $status = (string) ($proposal['status'] ?? 'waiting');
+        $settled = $status !== 'waiting';
+        $statusNote = trim((string) ($proposal['status_note'] ?? ''));
+        $badge = $settled
+            ? '<span class="badge badge-' . self::esc($status) . '">' . self::esc($status) . '</span>'
+            : '';
+        $control = $settled
+            ? '<span class="pick settled">not in the queue</span>'
+            : '<label class="pick"><input type="checkbox"> build this</label>';
+        $noteLine = $statusNote === ''
+            ? ''
+            : '<p class="meta-line"><b>Status:</b> ' . self::esc($statusNote) . '</p>';
+
+        return '<article class="card proposal' . ($settled ? ' is-settled' : '') . '" data-id="'
+            . self::esc($proposal['id'])
             . '" data-family="' . self::esc($proposal['family'])
+            . '" data-status="' . self::esc($status)
             . '" data-title="' . self::esc($proposal['title']) . '">'
-            . '<div class="meta"><header><h3>' . self::esc($proposal['id']) . '</h3>'
-            . '<label class="pick"><input type="checkbox"> build this</label></header>'
+            . '<div class="meta"><header><h3>' . self::esc($proposal['id']) . '</h3>' . $badge . $control . '</header>'
             . '<p class="summary">' . self::esc($proposal['idea']) . '</p>'
             . $promptLine
+            . $noteLine
             . '<p class="meta-line"><b>New because:</b> ' . self::esc($proposal['why_new']) . '</p>'
             . '<p class="meta-line"><b>Built from:</b> ' . self::esc($proposal['built_from']) . '</p>'
             . '<p class="meta-line"><b>Risk:</b> ' . self::esc($proposal['risk']) . '</p>'
             . '<p class="source">' . self::esc($origin) . '</p>'
-            . '<textarea placeholder="Notes on ' . self::esc($proposal['id']) . '…"></textarea></div>'
+            . ($settled ? '' : '<textarea placeholder="Notes on ' . self::esc($proposal['id']) . '…"></textarea>')
+            . '</div>'
             . '<div class="shots">' . $proposal['mockup']['html'] . '</div></article>';
     }
 
@@ -180,7 +270,21 @@ final class ArchetypeGallery
     ): string {
         $archetypes = $totals['archetypes'];
         $illustrated = $totals['illustrated'];
+        $samples = $totals['samples'];
         $proposalCount = $totals['proposals'];
+
+        $warnings = '';
+        if ($totals['thin'] !== []) {
+            $warnings .= '<p class="warn"><b>' . count($totals['thin']) . ' archetype(s) have one example only.</b> '
+                . 'One image shows an archetype exists; it cannot show how much it varies. Run '
+                . '<code>php bin/archetypes.php fill</code> to build sites that draw them, then '
+                . '<code>capture</code>. ' . self::esc(implode(', ', $totals['thin'])) . '</p>';
+        }
+        if ($totals['orphans'] !== []) {
+            $warnings .= '<p class="warn"><b>Stale shots.</b> These name archetypes no catalog owns any more, so '
+                . 'nothing below shows them; <code>php bin/archetypes.php capture</code> drops them. '
+                . self::esc(implode(', ', $totals['orphans'])) . '</p>';
+        }
 
         return <<<HTML
 <!doctype html>
@@ -223,13 +327,32 @@ nav.tabs .on { border-color: var(--accent); color: var(--accent); font-weight: 6
 .family h2 { font-size: 1.5rem; margin: 0 0 .3rem; border-top: 1px solid var(--line); padding-top: 1.5rem; }
 .family h2 .count { font-size: .8rem; font-weight: 400; color: var(--muted); }
 .blurb { color: var(--muted); margin: 0 0 1.5rem; max-width: 80ch; }
-.grid { display: grid; gap: 1.5rem; grid-template-columns: repeat(auto-fill, minmax(560px, 1fr)); }
+.grid { display: grid; gap: 1.5rem; }
+/* One catalog card per row: the examples of one archetype belong side by side,
+   because comparing them is the whole point of the page. */
+.grid.catalog { grid-template-columns: 1fr; }
+.grid.proposals { grid-template-columns: repeat(auto-fill, minmax(560px, 1fr)); }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px;
   padding: 1.2rem 1.3rem; display: grid; grid-template-columns: minmax(230px, 300px) 1fr;
   gap: 1.5rem; align-items: start; }
+.grid.catalog .card { grid-template-columns: minmax(260px, 340px) 1fr; }
 .card.is-empty { background: color-mix(in srgb, var(--card) 88%, var(--muted)); }
 .card.is-picked { border-color: var(--pick); box-shadow: 0 0 0 1px var(--pick); }
+.card.is-settled { opacity: .62; }
+.card.is-settled:hover { opacity: 1; }
 .card header { display: flex; align-items: baseline; gap: .8rem; }
+.badge { font: .66rem/1 ui-monospace, monospace; text-transform: uppercase; letter-spacing: .1em;
+  border: 1px solid var(--line); border-radius: 999px; padding: .28rem .6rem; color: var(--muted); }
+.badge-built { border-color: var(--pick); color: var(--pick); }
+.badge-dropped { border-color: var(--accent); color: var(--accent); }
+.pick.settled { font-size: .74rem; font-style: italic; }
+.warn { border: 1px solid var(--accent); border-left-width: 3px; border-radius: 8px;
+  background: color-mix(in srgb, var(--card) 92%, var(--accent)); color: var(--fg);
+  padding: .7rem 1rem; margin: 0 0 1rem; font-size: .82rem; max-width: 100ch; }
+.warn b { font-weight: 600; }
+details.fragment { margin: 0 0 .8rem; }
+details.fragment summary { font-size: .74rem; color: var(--muted); cursor: pointer; }
+details.fragment p { font-size: .82rem; margin: .5rem 0 0; }
 .card h3 { font: 600 1.02rem/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 0; }
 .pick { margin-left: auto; display: flex; align-items: center; gap: .4rem;
   font-size: .76rem; color: var(--muted); white-space: nowrap; cursor: pointer; }
@@ -254,8 +377,13 @@ figure { margin: 0; }
 figure img { width: 100%; height: auto; display: block; border: 1px solid var(--line);
   border-radius: 8px; background: var(--bg); }
 figcaption { font-size: .74rem; color: var(--muted); margin-top: .4rem; }
+/* Several examples of one archetype sit in a row so the variance between them
+   is readable at a glance. */
+.grid.catalog .shots { display: grid; gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); align-items: start; }
 .gap { font-size: .82rem; color: var(--muted); border: 1px dashed var(--line);
   border-radius: 10px; padding: 2rem 1.2rem; text-align: center; margin: 0; }
+.gap.thin { padding: 1rem; align-self: center; }
 .compose { border: 1px solid var(--line); border-radius: 14px; background: var(--card);
   padding: 1.2rem 1.3rem; margin: 0 0 2.5rem; }
 .compose h2 { font-size: 1.15rem; margin: 0 0 .4rem; }
@@ -321,13 +449,16 @@ are committed with the tool. Pick the proposals worth building and copy the prom
 <div class="legend">
 <div><strong>{$archetypes}</strong>archetypes in the generator</div>
 <div><strong>{$illustrated}</strong>illustrated by a real build</div>
+<div><strong>{$samples}</strong>screenshots across them</div>
 <div><strong>{$proposalCount}</strong>proposals waiting</div>
 </div>
+
+{$warnings}
 
 <nav class="tabs">
 <button data-pane="catalog" class="on">What we can build</button>
 <button data-pane="proposals">What we could build</button>
-<a href="#compose">Compose</a>
+<button data-pane="proposals" data-scroll="compose">Compose</button>
 </nav>
 
 <div class="pane on" id="pane-catalog">{$catalog}</div>
@@ -347,7 +478,9 @@ are committed with the tool. Pick the proposals worth building and copy the prom
 
 <script>
 const LIVE = {$liveFlag};
-const cards = [...document.querySelectorAll('.card.proposal')];
+// Only a waiting proposal is in the queue; a built or dropped one keeps its
+// card as a record and carries no checkbox.
+const cards = [...document.querySelectorAll('.card.proposal:not(.is-settled)')];
 const out = document.getElementById('out');
 const copyBtn = document.getElementById('copy');
 const status = document.getElementById('status');
@@ -359,13 +492,21 @@ document.querySelectorAll('nav.tabs button[data-pane]').forEach((tab) => {
     document.querySelectorAll('.pane').forEach((pane) => {
       pane.classList.toggle('on', pane.id === 'pane-' + tab.dataset.pane);
     });
+    // The composer lives inside the proposals pane, so it can only be scrolled
+    // to after that pane is the visible one.
+    if (tab.dataset.scroll) {
+      const target = document.getElementById(tab.dataset.scroll);
+      if (target) target.scrollIntoView({ block: 'start' });
+    }
   });
 });
 
 function buildPrompt() {
   const chosen = picked();
+  const families = [...new Set(chosen.map((c) => c.dataset.family))];
+  const what = families.length === 1 ? families[0] + ' archetypes' : 'layout archetypes';
   const lines = [
-    'Build these hero/section archetypes for the builder2 generator, one Linear issue and one PR each.',
+    'Build these ' + what + ' for the builder2 generator, one Linear issue and one PR each.',
     '',
     'I picked them in the archetype gallery (php bin/archetypes.php serve). For each one:',
     '1. Open a Linear issue in the "Generated themes replace Assembler in Big Sky" project (team Big River), as a sub-issue of BIGR-885.',
@@ -388,8 +529,17 @@ function buildPrompt() {
     lines.push('Before implementing, research current design trends on real sites and tell me which of my picks that changes, if any.');
     lines.push('');
   }
-  const skipped = cards.filter((c) => !c.querySelector('.pick input').checked).map((c) => c.dataset.id);
+  // Qualified by family on purpose: an id is unique inside a family only —
+  // `contact-sheet` is both a proposed hero and a footer already in the catalog.
+  const skipped = cards
+    .filter((c) => !c.querySelector('.pick input').checked)
+    .map((c) => c.dataset.family + '/' + c.dataset.id);
   if (skipped.length) lines.push('Not chosen, do not build: ' + skipped.join(', ') + '.');
+  lines.push('');
+  lines.push('When one is built and merged, record it so the gallery stops offering it:');
+  chosen.forEach((card) => {
+    lines.push('  php bin/archetypes.php status ' + card.dataset.family + '/' + card.dataset.id + ' built');
+  });
   return lines.join('\\n');
 }
 

@@ -48,9 +48,11 @@ For mixed multi-page HTML-first builds, each `design/<slug>.failed` marker route
 
 ## Archetype gallery
 
-`php bin/archetypes.php` renders and serves the gallery of layout archetypes: every entry in the four code-owned catalogs (headers, heroes, sections, footers) illustrated with a screenshot of a real generated site, beside mockups of archetypes nobody has built yet. `list` prints the same coverage, `capture` refreshes the screenshots from the projects under `projects/`, and `propose` asks the model for a new archetype — from your description, or from the standing request to fill the widest gap in the catalog. See `docs/archetypes/README.md`.
+`php bin/archetypes.php` renders and serves the gallery of layout archetypes: every entry in the four code-owned catalogs (headers, heroes, sections, footers) illustrated with screenshots of real generated sites, beside mockups of archetypes nobody has built yet. `list` prints the same coverage, `capture` refreshes the screenshots from the projects under `projects/`, `fill` builds the pinned cohort that reaches archetypes no demo brief selects, `status` records where a proposal ended up, and `propose` asks the model for a new archetype — from your description, or from the standing request to fill the widest gap in the catalog. See `docs/archetypes/README.md`.
 
-The screenshots under `docs/archetypes/shots/` **are committed**, and they are the one exception to the rule below about keeping screenshots out of the repository: they are the tool's own assets rather than review evidence for a PR. They are capped at 1100px and stored as WebP, so the whole set costs under a megabyte. The gallery HTML is generated on every run and is not committed.
+Each archetype keeps several examples rather than one. One image proves an archetype exists; only a set of them shows how much it varies from brief to brief, which is the question a variety review asks. `capture` prefers examples from different sites and drops shots of archetypes the catalogs no longer own.
+
+The screenshots under `docs/archetypes/shots/` **are committed**, and they are the one exception to the rule below about keeping screenshots out of the repository: they are the tool's own assets rather than review evidence for a PR. They are capped at 1100px and stored as WebP. The gallery HTML is generated on every run and is not committed.
 
 ## Site runner
 

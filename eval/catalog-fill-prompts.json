@@ -1,6 +1,6 @@
 {
-  "$comment": "Briefs for the section-catalog fill cohort. The demo cohort in theme-prompts.json exercises whatever archetypes its briefs happen to select, which leaves parts of the catalog with no screenshot and parts with only one. Each entry here pins the three site-wide assignments a build cannot otherwise be told \u2014 the header archetype (HEADER_ARCHETYPE), the hero recipe (HERO_RECIPE), and the footer archetype (patched into pages.json between the plan and the sections step) \u2014 so every archetype in the catalog reaches at least two captures. Build them with: php bin/build-catalog-cohort.php (then php bin/section-catalog.php). Assignment rules the entries respect: centered-masthead is refused over an image-led hero (cover-image media or an image surface); split-nav is refused on a one-page site, so its entries are multi-page; oversized-wordmark is refused whenever a front hero exists, which resolve() always has, so no entry can request it.",
-  "version": 1,
+  "$comment": "Briefs for the archetype-gallery fill cohort. The demo cohort in theme-prompts.json exercises whatever archetypes its briefs happen to select, which leaves parts of the catalog with no screenshot and parts with only one. Each entry here pins the three site-wide assignments a build cannot otherwise be told \u2014 the header archetype (HEADER_ARCHETYPE), the hero recipe (HERO_RECIPE), and the footer archetype (patched into pages.json between the plan and the sections step) \u2014 so every archetype in the catalog reaches at least two captures. Build them with: php bin/archetypes.php fill (then php bin/archetypes.php capture). Assignment rules the entries respect: centered-masthead is refused over an image-led hero (cover-image media or an image surface); split-nav is refused on a one-page site, so its entries are multi-page; minimal-overlay needs a hero recipe whose header_modes include overlay, so it is paired with cinematic-safe-zone or layered-poster and never with foreground-split; oversized-wordmark is refused whenever a front hero exists, which resolve() always has, so no entry can request it.",
+  "version": 2,
   "prompts": [
     {
       "id": "cat-ledger",
@@ -76,6 +76,80 @@
       "header": "standard-row",
       "hero": "foreground-split",
       "prompt": "Create a website for Marta Ili\u0107, a luthier in Zagreb who builds classical guitars to order and restores instruments from the 1930s. One instrument at a time, an eighteen-month waiting list."
+    },
+    {
+      "id": "cat-tidal",
+      "slug": "cat-tidal",
+      "site_type": "research station",
+      "header": "standard-row",
+      "hero": "cinematic-safe-zone",
+      "footer": "cover-coda",
+      "prompt": "Create a website for the Skerry Tidal Observatory, a small research station on the west coast of Ireland that has measured the same stretch of shore every day since 1974. They publish the record, host two visiting researchers a year, and run one open day each spring."
+    },
+    {
+      "id": "cat-forge",
+      "slug": "cat-forge",
+      "site_type": "workshop",
+      "header": "branded-lockup",
+      "hero": "foreground-split",
+      "footer": "diptych",
+      "prompt": "Create a website for Halvorsen Forge, a blacksmith outside Bergen who makes architectural ironwork \u2014 gates, railings, hinges \u2014 for restoration projects on listed buildings. Everything is drawn by hand before it is drawn out on the anvil."
+    },
+    {
+      "id": "cat-choir",
+      "slug": "cat-choir",
+      "site_type": "ensemble",
+      "header": "centered-masthead",
+      "hero": "type-manifesto",
+      "footer": "sunken-wordmark",
+      "prompt": "Create a website for the Cantus Firmus Collective, a sixteen-voice choir in Tallinn that performs only music written before 1600 and only in buildings older than the music. No recordings, no merchandise, four concerts a year."
+    },
+    {
+      "id": "cat-transit",
+      "slug": "cat-transit",
+      "site_type": "civic service",
+      "header": "standard-row",
+      "hero": "type-manifesto",
+      "footer": "status-readout",
+      "prompt": "Create a website for the Kaunas Night Line, a municipal night bus service running four routes between midnight and five. Riders need the times, the stops and the fare, and nothing else on the page."
+    },
+    {
+      "id": "cat-darkroom",
+      "slug": "cat-darkroom",
+      "site_type": "studio",
+      "header": "split-nav",
+      "hero": "layered-poster",
+      "footer": "contact-sheet",
+      "multi_page": true,
+      "pages": "Home, Work, Darkroom, Contact",
+      "prompt": "Create a website for Silver Halide Rooms, a shared analogue darkroom in Porto that rents enlarger time by the hour and prints exhibition work for photographers. Black and white only, three rooms, one dryer that everyone complains about."
+    },
+    {
+      "id": "cat-tiles",
+      "slug": "cat-tiles",
+      "site_type": "manufacturer",
+      "header": "minimal-overlay",
+      "hero": "layered-poster",
+      "footer": "mosaic-tiles",
+      "prompt": "Create a website for Azulejo Nove, a Lisbon workshop that makes hand-painted glazed tiles in nine standing colours and matches historic panels for building restorations. Every batch is fired twice and numbered."
+    },
+    {
+      "id": "cat-pigment",
+      "slug": "cat-pigment",
+      "site_type": "manufacturer",
+      "header": "minimal-overlay",
+      "hero": "cinematic-safe-zone",
+      "footer": "color-field",
+      "prompt": "Create a website for Terra Rossa Pigments, a family mill in Umbria that grinds earth pigments from three local quarries and sells them to conservators and painters. One colour per quarry, unchanged for sixty years."
+    },
+    {
+      "id": "cat-ribbon",
+      "slug": "cat-ribbon",
+      "site_type": "manufacturer",
+      "header": "branded-lockup",
+      "hero": "foreground-split",
+      "footer": "repeat-rail",
+      "prompt": "Create a website for Weft & Selvedge, a narrow-fabrics mill in Lancashire weaving cotton tape and ribbon on looms from the 1950s for bookbinders, milliners and theatre wardrobes. Short runs, fixed widths, no minimum order."
     }
   ]
 }

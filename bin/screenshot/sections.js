@@ -6,7 +6,7 @@
  *
  *   node bin/screenshot/sections.js <url> <outdir> [options]
  *
- * The section catalog (bin/section-catalog.php) needs one image per archetype,
+ * The archetype gallery (bin/archetypes.php capture) needs images per archetype,
  * not one image per page. Every generated part carries the marker class its
  * catalog owns — `hero-composition--<id>`, `section-composition--<id>` — and
  * the header and footer are the template parts around them. This walks those

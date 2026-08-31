@@ -1,145 +1,433 @@
 {
     "width": 1366,
+    "per_archetype": 3,
     "shots": {
-        "footer/conversion-panel": {
-            "file": "footer--conversion-panel.webp",
-            "site": "Alcorta Fotorreportajes",
-            "slug": "portfolio",
-            "captured_width": 1366,
-            "captured_height": 675
-        },
-        "footer/editorial-colophon": {
-            "file": "footer--editorial-colophon.webp",
-            "site": "Northlight Physiotherapy",
-            "slug": "cat-clinic",
-            "captured_width": 1366,
-            "captured_height": 539
-        },
-        "footer/image-plinth": {
-            "file": "footer--image-plinth.webp",
-            "site": "Wrenfield Orchard",
-            "slug": "cat-orchard",
-            "captured_width": 1366,
-            "captured_height": 649
-        },
-        "footer/photographic-split": {
-            "file": "footer--photographic-split.webp",
-            "site": "Atelier Verso",
-            "slug": "cat-atelier",
-            "captured_width": 1366,
-            "captured_height": 1302
-        },
-        "footer/split-ledger": {
-            "file": "footer--split-ledger.webp",
-            "site": "Neon Flux",
-            "slug": "pulso",
-            "captured_width": 1366,
-            "captured_height": 429
-        },
-        "footer/typographic-billboard": {
-            "file": "footer--typographic-billboard.webp",
-            "site": "Lumen Objects",
-            "slug": "lumen",
-            "captured_width": 1366,
-            "captured_height": 675
-        },
-        "header/branded-lockup": {
-            "file": "header--branded-lockup.webp",
-            "site": "Atlas Field",
-            "slug": "atlas",
-            "captured_width": 1366,
-            "captured_height": 259
-        },
-        "header/centered-masthead": {
-            "file": "header--centered-masthead.webp",
-            "site": "Plain Terms",
-            "slug": "cat-manifesto",
-            "captured_width": 1366,
-            "captured_height": 278
-        },
-        "header/minimal-overlay": {
-            "file": "header--minimal-overlay.webp",
-            "site": "Alcorta Fotorreportajes",
-            "slug": "portfolio",
-            "captured_width": 1366,
-            "captured_height": 246
-        },
-        "header/split-nav": {
-            "file": "header--split-nav.webp",
-            "site": "Wrenfield Orchard",
-            "slug": "cat-orchard",
-            "captured_width": 1366,
-            "captured_height": 270
-        },
-        "header/standard-row": {
-            "file": "header--standard-row.webp",
-            "site": "Ledger & Frame",
-            "slug": "cat-ledger",
-            "captured_width": 1366,
-            "captured_height": 248
-        },
-        "hero/cinematic-safe-zone": {
-            "file": "hero--cinematic-safe-zone.webp",
-            "site": "Lumen Objects",
-            "slug": "lumen",
-            "captured_width": 1366,
-            "captured_height": 792
-        },
-        "hero/layered-poster": {
-            "file": "hero--layered-poster.webp",
-            "site": "Alcorta Fotorreportajes",
-            "slug": "portfolio",
-            "captured_width": 1366,
-            "captured_height": 792
-        },
-        "hero/type-manifesto": {
-            "file": "hero--type-manifesto.webp",
-            "site": "Plain Terms",
-            "slug": "cat-manifesto",
-            "captured_width": 1366,
-            "captured_height": 722
-        },
-        "section/asymmetric-split": {
-            "file": "section--asymmetric-split.webp",
-            "site": "Atelier Verso",
-            "slug": "cat-atelier",
-            "captured_width": 1366,
-            "captured_height": 1506
-        },
-        "section/centered-stack": {
-            "file": "section--centered-stack.webp",
-            "site": "Marta Ili\u0107",
-            "slug": "cat-luthier",
-            "captured_width": 1366,
-            "captured_height": 2661
-        },
-        "section/equal-card-grid": {
-            "file": "section--equal-card-grid.webp",
-            "site": "Atlas Field",
-            "slug": "atlas",
-            "captured_width": 1366,
-            "captured_height": 1982
-        },
-        "section/full-bleed-cover": {
-            "file": "section--full-bleed-cover.webp",
-            "site": "Marta Ili\u0107",
-            "slug": "cat-luthier",
-            "captured_width": 1366,
-            "captured_height": 812
-        },
-        "section/list-with-thumbnails": {
-            "file": "section--list-with-thumbnails.webp",
-            "site": "The Quarter Sheet",
-            "slug": "cat-broadsheet",
-            "captured_width": 1366,
-            "captured_height": 3163
-        },
-        "section/offset-grid": {
-            "file": "section--offset-grid.webp",
-            "site": "Alcorta Fotorreportajes",
-            "slug": "portfolio",
-            "captured_width": 1366,
-            "captured_height": 2426
-        }
+        "footer/conversion-panel": [
+            {
+                "file": "footer--conversion-panel.webp",
+                "site": "Alcorta Fotorreportajes",
+                "slug": "portfolio",
+                "captured_width": 1366,
+                "captured_height": 675
+            },
+            {
+                "file": "footer--conversion-panel-2.webp",
+                "site": "Hearth & Crumb",
+                "slug": "hearth",
+                "captured_width": 1366,
+                "captured_height": 618
+            },
+            {
+                "file": "footer--conversion-panel-3.webp",
+                "site": "Atlas Field",
+                "slug": "atlas",
+                "captured_width": 1366,
+                "captured_height": 556
+            }
+        ],
+        "footer/editorial-colophon": [
+            {
+                "file": "footer--editorial-colophon.webp",
+                "site": "Northlight Physiotherapy",
+                "slug": "cat-clinic",
+                "captured_width": 1366,
+                "captured_height": 539
+            },
+            {
+                "file": "footer--editorial-colophon-2.webp",
+                "site": "Ferment",
+                "slug": "ko-bread",
+                "captured_width": 1366,
+                "captured_height": 475
+            },
+            {
+                "file": "footer--editorial-colophon-3.webp",
+                "site": "The Quarter Sheet",
+                "slug": "cat-broadsheet",
+                "captured_width": 1366,
+                "captured_height": 459
+            }
+        ],
+        "footer/image-plinth": [
+            {
+                "file": "footer--image-plinth.webp",
+                "site": "Ledger & Frame",
+                "slug": "bigr912-a",
+                "captured_width": 1366,
+                "captured_height": 746
+            },
+            {
+                "file": "footer--image-plinth-2.webp",
+                "site": "Wrenfield Orchard",
+                "slug": "cat-orchard",
+                "captured_width": 1366,
+                "captured_height": 649
+            },
+            {
+                "file": "footer--image-plinth-3.webp",
+                "site": "Dunes & Pine",
+                "slug": "cat-dunes",
+                "captured_width": 1366,
+                "captured_height": 601
+            }
+        ],
+        "footer/photographic-split": [
+            {
+                "file": "footer--photographic-split.webp",
+                "site": "Atelier Verso",
+                "slug": "cat-atelier",
+                "captured_width": 1366,
+                "captured_height": 1302
+            },
+            {
+                "file": "footer--photographic-split-2.webp",
+                "site": "Ledger & Frame",
+                "slug": "cat-ledger",
+                "captured_width": 1366,
+                "captured_height": 759
+            }
+        ],
+        "footer/split-ledger": [
+            {
+                "file": "footer--split-ledger.webp",
+                "site": "Cold Break",
+                "slug": "ko-surf",
+                "captured_width": 1366,
+                "captured_height": 476
+            },
+            {
+                "file": "footer--split-ledger-2.webp",
+                "site": "Neon Flux",
+                "slug": "pulso",
+                "captured_width": 1366,
+                "captured_height": 429
+            },
+            {
+                "file": "footer--split-ledger-3.webp",
+                "site": "Plain Terms",
+                "slug": "cat-manifesto",
+                "captured_width": 1366,
+                "captured_height": 411
+            }
+        ],
+        "footer/typographic-billboard": [
+            {
+                "file": "footer--typographic-billboard.webp",
+                "site": "Lumen Objects",
+                "slug": "lumen",
+                "captured_width": 1366,
+                "captured_height": 675
+            },
+            {
+                "file": "footer--typographic-billboard-2.webp",
+                "site": "Tbilisi Tavern",
+                "slug": "tbilisi",
+                "captured_width": 1366,
+                "captured_height": 551
+            },
+            {
+                "file": "footer--typographic-billboard-3.webp",
+                "site": "Static Pressing",
+                "slug": "ko-record",
+                "captured_width": 1366,
+                "captured_height": 528
+            }
+        ],
+        "header/branded-lockup": [
+            {
+                "file": "header--branded-lockup.webp",
+                "site": "Atlas Field",
+                "slug": "atlas",
+                "captured_width": 1366,
+                "captured_height": 259
+            },
+            {
+                "file": "header--branded-lockup-2.webp",
+                "site": "Tbilisi Tavern",
+                "slug": "tbilisi",
+                "captured_width": 1366,
+                "captured_height": 250
+            },
+            {
+                "file": "header--branded-lockup-3.webp",
+                "site": "Hearth & Crumb",
+                "slug": "hearth",
+                "captured_width": 1366,
+                "captured_height": 248
+            }
+        ],
+        "header/centered-masthead": [
+            {
+                "file": "header--centered-masthead.webp",
+                "site": "Plain Terms",
+                "slug": "cat-manifesto",
+                "captured_width": 1366,
+                "captured_height": 278
+            },
+            {
+                "file": "header--centered-masthead-2.webp",
+                "site": "The Quarter Sheet",
+                "slug": "cat-broadsheet",
+                "captured_width": 1366,
+                "captured_height": 272
+            }
+        ],
+        "header/minimal-overlay": [
+            {
+                "file": "header--minimal-overlay.webp",
+                "site": "Alcorta Fotorreportajes",
+                "slug": "portfolio",
+                "captured_width": 1366,
+                "captured_height": 246
+            },
+            {
+                "file": "header--minimal-overlay-2.webp",
+                "site": "Lumen Objects",
+                "slug": "lumen",
+                "captured_width": 1366,
+                "captured_height": 240
+            }
+        ],
+        "header/split-nav": [
+            {
+                "file": "header--split-nav.webp",
+                "site": "Wrenfield Orchard",
+                "slug": "cat-orchard",
+                "captured_width": 1366,
+                "captured_height": 270
+            },
+            {
+                "file": "header--split-nav-2.webp",
+                "site": "Atelier Verso",
+                "slug": "cat-atelier",
+                "captured_width": 1366,
+                "captured_height": 250
+            }
+        ],
+        "header/standard-row": [
+            {
+                "file": "header--standard-row.webp",
+                "site": "Cold Break",
+                "slug": "ko-surf",
+                "captured_width": 1366,
+                "captured_height": 250
+            },
+            {
+                "file": "header--standard-row-2.webp",
+                "site": "Ledger & Frame",
+                "slug": "cat-ledger",
+                "captured_width": 1366,
+                "captured_height": 248
+            },
+            {
+                "file": "header--standard-row-3.webp",
+                "site": "Dunes & Pine",
+                "slug": "cat-dunes",
+                "captured_width": 1366,
+                "captured_height": 247
+            }
+        ],
+        "hero/cinematic-safe-zone": [
+            {
+                "file": "hero--cinematic-safe-zone.webp",
+                "site": "Lumen Objects",
+                "slug": "lumen",
+                "captured_width": 1366,
+                "captured_height": 792
+            },
+            {
+                "file": "hero--cinematic-safe-zone-2.webp",
+                "site": "Dunes & Pine",
+                "slug": "cat-dunes",
+                "captured_width": 1366,
+                "captured_height": 721
+            }
+        ],
+        "hero/foreground-split": [
+            {
+                "file": "hero--foreground-split.webp",
+                "site": "Ledger & Frame",
+                "slug": "bigr912-a",
+                "captured_width": 1366,
+                "captured_height": 759
+            },
+            {
+                "file": "hero--foreground-split-2.webp",
+                "site": "Northlight Physiotherapy",
+                "slug": "bigr912-b",
+                "captured_width": 1366,
+                "captured_height": 626
+            }
+        ],
+        "hero/layered-poster": [
+            {
+                "file": "hero--layered-poster.webp",
+                "site": "Alcorta Fotorreportajes",
+                "slug": "portfolio",
+                "captured_width": 1366,
+                "captured_height": 792
+            },
+            {
+                "file": "hero--layered-poster-2.webp",
+                "site": "Atelier Verso",
+                "slug": "cat-atelier",
+                "captured_width": 1366,
+                "captured_height": 720
+            }
+        ],
+        "hero/type-manifesto": [
+            {
+                "file": "hero--type-manifesto.webp",
+                "site": "Plain Terms",
+                "slug": "cat-manifesto",
+                "captured_width": 1366,
+                "captured_height": 722
+            },
+            {
+                "file": "hero--type-manifesto-2.webp",
+                "site": "Neon Flux",
+                "slug": "pulso",
+                "captured_width": 1366,
+                "captured_height": 481
+            }
+        ],
+        "section/asymmetric-split": [
+            {
+                "file": "section--asymmetric-split.webp",
+                "site": "Ferrous",
+                "slug": "ko-foundry",
+                "captured_width": 1366,
+                "captured_height": 1588
+            },
+            {
+                "file": "section--asymmetric-split-2.webp",
+                "site": "Atelier Verso",
+                "slug": "cat-atelier",
+                "captured_width": 1366,
+                "captured_height": 1506
+            },
+            {
+                "file": "section--asymmetric-split-3.webp",
+                "site": "Tbilisi Tavern",
+                "slug": "tbilisi",
+                "captured_width": 1366,
+                "captured_height": 1196
+            }
+        ],
+        "section/centered-stack": [
+            {
+                "file": "section--centered-stack.webp",
+                "site": "Static Pressing",
+                "slug": "ko-record",
+                "captured_width": 1366,
+                "captured_height": 3362
+            },
+            {
+                "file": "section--centered-stack-2.webp",
+                "site": "Ferrous",
+                "slug": "ko-foundry",
+                "captured_width": 1366,
+                "captured_height": 2928
+            },
+            {
+                "file": "section--centered-stack-3.webp",
+                "site": "Marta Ili\u0107",
+                "slug": "cat-luthier",
+                "captured_width": 1366,
+                "captured_height": 2661
+            }
+        ],
+        "section/equal-card-grid": [
+            {
+                "file": "section--equal-card-grid.webp",
+                "site": "Atlas Field",
+                "slug": "atlas",
+                "captured_width": 1366,
+                "captured_height": 1982
+            },
+            {
+                "file": "section--equal-card-grid-2.webp",
+                "site": "Marta Ili\u0107",
+                "slug": "cat-luthier",
+                "captured_width": 1366,
+                "captured_height": 1949
+            },
+            {
+                "file": "section--equal-card-grid-3.webp",
+                "site": "Ledger & Frame",
+                "slug": "cat-ledger",
+                "captured_width": 1366,
+                "captured_height": 1547
+            }
+        ],
+        "section/full-bleed-cover": [
+            {
+                "file": "section--full-bleed-cover.webp",
+                "site": "Northlight Physiotherapy",
+                "slug": "bigr912-b",
+                "captured_width": 1366,
+                "captured_height": 812
+            },
+            {
+                "file": "section--full-bleed-cover-2.webp",
+                "site": "Marta Ili\u0107",
+                "slug": "cat-luthier",
+                "captured_width": 1366,
+                "captured_height": 812
+            },
+            {
+                "file": "section--full-bleed-cover-3.webp",
+                "site": "Neon Flux",
+                "slug": "pulso",
+                "captured_width": 1366,
+                "captured_height": 792
+            }
+        ],
+        "section/list-with-thumbnails": [
+            {
+                "file": "section--list-with-thumbnails.webp",
+                "site": "The Quarter Sheet",
+                "slug": "cat-broadsheet",
+                "captured_width": 1366,
+                "captured_height": 3163
+            },
+            {
+                "file": "section--list-with-thumbnails-2.webp",
+                "site": "Alcorta Fotorreportajes",
+                "slug": "portfolio",
+                "captured_width": 1366,
+                "captured_height": 2789
+            },
+            {
+                "file": "section--list-with-thumbnails-3.webp",
+                "site": "Ledger & Frame",
+                "slug": "bigr912-a",
+                "captured_width": 1366,
+                "captured_height": 1844
+            }
+        ],
+        "section/offset-grid": [
+            {
+                "file": "section--offset-grid.webp",
+                "site": "Alcorta Fotorreportajes",
+                "slug": "portfolio",
+                "captured_width": 1366,
+                "captured_height": 2426
+            },
+            {
+                "file": "section--offset-grid-2.webp",
+                "site": "Naturaleza Sabia",
+                "slug": "naturaleza",
+                "captured_width": 1366,
+                "captured_height": 1361
+            },
+            {
+                "file": "section--offset-grid-3.webp",
+                "site": "Lumen Objects",
+                "slug": "lumen",
+                "captured_width": 1366,
+                "captured_height": 1039
+            }
+        ]
     }
 }

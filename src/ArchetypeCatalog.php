@@ -199,11 +199,35 @@ final class ArchetypeCatalog
             'family' => $family,
             'id' => $id,
             'key' => $key,
+            'brief' => self::brief($summary),
             'summary' => $summary,
             'source' => $source,
             'facts' => $facts,
             'note' => self::REACHABILITY[$key] ?? '',
         ];
+    }
+
+    /**
+     * The one line a reader needs before the picture.
+     *
+     * `summary` is the prompt fragment verbatim, which is written for the model
+     * and carries block names and JSON. That is the right reference text and
+     * the wrong opening line, so the first sentence is lifted out and the rest
+     * stays available behind it.
+     */
+    private static function brief(string $summary): string
+    {
+        if ($summary === '') {
+            return '';
+        }
+        // Split on a sentence end that is followed by a capital, so `wp:group`,
+        // `e.g.` and a decimal ratio never end the sentence early.
+        $sentences = preg_split('~(?<=[.!?])\s+(?=[A-Z])~', $summary) ?: [$summary];
+        $brief = trim((string) $sentences[0]);
+        if (mb_strlen($brief) > 210) {
+            $brief = rtrim(mb_substr($brief, 0, 207), " ,;:—-") . '…';
+        }
+        return $brief;
     }
 
     /**
