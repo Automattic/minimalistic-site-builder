@@ -84,6 +84,47 @@ test('page plan restores the committed pattern and assigns obvious list types on
     assert_eq([], $fixedPointRepairs);
 });
 
+test('quote-led sections never keep a tabular idiom', function (): void {
+    $pages = [[
+        'slug' => 'home',
+        'sections' => [
+            ['slug' => 'voices', 'type' => 'testimonials', 'item_pattern' => 'spec-table'],
+            ['slug' => 'reviews', 'type' => 'customer-reviews', 'item_pattern' => null],
+            ['slug' => 'menu', 'type' => 'menu', 'item_pattern' => null],
+        ],
+    ]];
+    $repairs = [];
+    $delivered = PagePlanStep::reconcileItemPatternAssignments($pages, 'spec-table', $repairs);
+
+    assert_eq([null, null, 'spec-table'], array_column($delivered[0]['sections'], 'item_pattern'));
+    assert_eq(2, count($repairs));
+    assert_contains('sections[0].item_pattern', $repairs[0]);
+    assert_contains('quote-led', $repairs[0]);
+    assert_contains('sections[2].item_pattern', $repairs[1]);
+
+    $fixedPointRepairs = [];
+    assert_eq(
+        $delivered,
+        PagePlanStep::reconcileItemPatternAssignments($delivered, 'spec-table', $fixedPointRepairs),
+    );
+    assert_eq([], $fixedPointRepairs);
+});
+
+test('a card commitment may dress a testimonial but is never forced onto one', function (): void {
+    $pages = [[
+        'slug' => 'home',
+        'sections' => [
+            ['slug' => 'voices', 'type' => 'testimonials', 'item_pattern' => 'card'],
+            ['slug' => 'praise', 'type' => 'testimonials', 'item_pattern' => null],
+        ],
+    ]];
+    $repairs = [];
+    $delivered = PagePlanStep::reconcileItemPatternAssignments($pages, 'card', $repairs);
+
+    assert_eq(['card', null], array_column($delivered[0]['sections'], 'item_pattern'));
+    assert_eq([], $repairs);
+});
+
 test('section request sees exactly the assigned item recipe', function (): void {
     $renderer = new PromptRenderer(repo_path('prompts'));
     $unit = new SectionUnit(new FakeLlm(), $renderer);
