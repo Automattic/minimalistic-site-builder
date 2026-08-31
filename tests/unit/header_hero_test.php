@@ -2790,6 +2790,24 @@ test('ensureSiteLogoMark inserts a tagged site-logo before the site title', func
     assert_eq($out, HeaderHeroStep::ensureSiteLogoMark($out), 'idempotent when a logo already exists');
 });
 
+test('ensureSiteLogoMark inserts inside the root group when there is no site-title', function () {
+    $in = '<!-- wp:group {"layout":{"type":"flex"}} -->' . "\n"
+        . '<div class="wp-block-group"><!-- wp:paragraph --><p>Hearth</p><!-- /wp:paragraph --></div>' . "\n"
+        . '<!-- /wp:group -->';
+    $out = HeaderHeroStep::ensureSiteLogoMark($in);
+    assert_contains('site-logo-mark', $out);
+    assert_contains('Hearth', $out);
+    $groupAt = strpos($out, 'wp:group');
+    $wrapperAt = strpos($out, '<div class="wp-block-group">');
+    $logoAt = strpos($out, 'wp:site-logo');
+    $closeAt = strpos($out, '/wp:group');
+    assert_true($groupAt !== false && $wrapperAt !== false && $logoAt !== false && $closeAt !== false);
+    assert_true(
+        $groupAt < $wrapperAt && $wrapperAt < $logoAt && $logoAt < $closeAt,
+        'logo sits inside the root group wrapper, not between the comment and its saved HTML',
+    );
+});
+
 test('ensureSiteLogoMark does not retag an authored branded-lockup logo', function () {
     $in = hh_header(
         '{"layout":{"type":"flex"}}',

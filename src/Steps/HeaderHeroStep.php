@@ -205,6 +205,15 @@ final class HeaderHeroStep implements Step
         if (preg_match('/<!--\s+wp:site-title\b/', $markup) === 1) {
             return (string) preg_replace('/(<!--\s+wp:site-title\b)/', $comment . "\n\$1", $markup, 1);
         }
+        if (preg_match(
+            '/<!--\s+wp:group\b(?:\s+\{(?:(?!-->).)*?\})?\s+-->\s*<div\b[^>]*>/s',
+            $markup,
+            $m,
+            PREG_OFFSET_CAPTURE
+        ) === 1) {
+            $at = $m[0][1] + strlen($m[0][0]);
+            return substr($markup, 0, $at) . $comment . substr($markup, $at);
+        }
         return $comment . "\n" . $markup;
     }
 
