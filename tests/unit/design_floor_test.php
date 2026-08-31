@@ -227,10 +227,21 @@ test('section prompt bans kickers above headings', function () {
     assert_contains('Never put an eyebrow or kicker line above the row heading', $section);
 });
 
-test('design-direction keeps section-numeral but only for informative sequences', function () {
+test('design-direction offers no numeral device and no numbered-index idiom', function () {
+    // BIGR-949: the model must never add sequence numbers as decoration.
     $direction = (string) file_get_contents(repo_path('prompts/design-direction.md'));
-    assert_contains('`section-numeral` is available ONLY when the sequence carries information the reader needs', $direction);
-    assert_contains('"section-numeral"', $direction);
+    assert_true(!str_contains($direction, 'section-numeral'));
+    assert_true(!str_contains($direction, '`"index"`'));
+    // The bare word "index" is common in prose, so the bare-word check is
+    // scoped to the lines that define the item_pattern vocabulary. The
+    // hyphen-aware lookarounds permit "numbered-index" in the ban prose.
+    foreach (preg_grep('/item_pattern/', explode("\n", $direction)) as $line) {
+        assert_true(
+            preg_match('/(?<![\w-])index(?![\w-])/', $line) === 0,
+            'the item_pattern vocabulary must not offer a bare index token',
+        );
+    }
+    assert_contains('banned unless the SITE BRIEF explicitly asks for visible numbering', $direction);
 });
 
 test('side-tab skips an unnamed group with a thick left border', function () {
