@@ -763,3 +763,83 @@ test('unresolvable source scan ignores path-shaped prose with no media reference
         )
     );
 });
+
+test('collect-images appends a site-logo spec for a business site', function () {
+    [$project, $tmp] = collect_fixture();
+    $project->writeJson('siteSpec.json', [
+        'name'         => 'Hearth & Crumb',
+        'site_type'    => 'business storefront',
+        'area'         => 'bakery',
+        'topic'        => 'artisan bread',
+        'visual_vibe'  => 'warm and rustic',
+        'persona_name' => '',
+    ]);
+    $project->writeJson('meta.json', ['prompt' => 'A neighborhood bakery in Portland']);
+    $project->writeText('theme/parts/page-home--hero.html',
+        '<!-- wp:image --><img src="theme:./assets/hero.jpg" alt="AI_IMAGE: loaves | hero | photo | landscape"><!-- /wp:image -->'
+    );
+
+    (new CollectImagesStep())->run($project);
+
+    $byName = [];
+    foreach ($project->readJson('images.json') as $row) {
+        $byName[$row['filename']] = $row;
+    }
+    assert_true(isset($byName['hero.jpg']));
+    $logo = $byName['site-logo.png'];
+    assert_eq('theme:./assets/site-logo.png', $logo['src']);
+    assert_eq('square', $logo['aspectRatio']);
+    assert_eq('flat', $logo['style']);
+    assert_eq('pending', $logo['status']);
+    assert_eq('site-logo', $logo['role']);
+    assert_eq([], $logo['sources']);
+    assert_contains('bakery', $logo['subject']);
+    assert_contains('no letters', $logo['subject']);
+    assert_true(!str_contains($logo['subject'], 'Hearth'), 'site name stays out of the subject');
+    assert_eq('site logo and site icon, small square mark in the header', $logo['pageContext']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images does not append a site-logo for a personal site', function () {
+    [$project, $tmp] = collect_fixture();
+    $project->writeJson('siteSpec.json', [
+        'name' => 'Ada', 'persona_name' => 'Ada Lovelace',
+        'site_type' => 'portfolio', 'area' => 'studio',
+    ]);
+    $project->writeJson('meta.json', ['prompt' => 'My paintings']);
+    $project->writeText('theme/parts/page-home--hero.html', '<!-- wp:paragraph --><p>Hi</p><!-- /wp:paragraph -->');
+
+    (new CollectImagesStep())->run($project);
+
+    foreach ($project->readJson('images.json') as $row) {
+        assert_true(($row['filename'] ?? '') !== 'site-logo.png');
+    }
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images skips the synthetic mark when site-logo.png was already collected', function () {
+    [$project, $tmp] = collect_fixture();
+    $project->writeJson('siteSpec.json', [
+        'name' => 'Hearth & Crumb', 'site_type' => 'business storefront',
+        'area' => 'bakery', 'persona_name' => '',
+    ]);
+    $project->writeJson('meta.json', ['prompt' => 'bakery']);
+    $project->writeText(
+        'theme/parts/page-home--hero.html',
+        '<img src="theme:./assets/site-logo.png" alt="AI_IMAGE: a sourdough loaf | hero | photo | square">'
+    );
+
+    (new CollectImagesStep())->run($project);
+
+    $rows = $project->readJson('images.json');
+    assert_eq(1, count($rows));
+    assert_eq('site-logo.png', $rows[0]['filename']);
+    assert_true(($rows[0]['role'] ?? null) !== 'site-logo');
+    $warnings = implode("\n", $project->readJson('warnings.json')['collect-images']);
+    assert_contains("file='images.json'", $warnings);
+    assert_contains("asset='site-logo.png'", $warnings);
+    assert_contains('the reserved site-logo filename was already collected from page markup', $warnings);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
