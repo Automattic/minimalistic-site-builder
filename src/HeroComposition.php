@@ -412,8 +412,8 @@ final class HeroComposition
      * identity that picks the recipe restores the spread by construction
      * rather than by asking the model to feel adventurous.
      *
-     * An axis with one allowed value returns it unchanged, so a cover or an
-     * imageless recipe is unaffected.
+     * An axis with one allowed value returns it unchanged, so a cover recipe
+     * is unaffected.
      *
      * @return array{media_aspect:string,media_weight:string}
      */
