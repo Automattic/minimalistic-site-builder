@@ -156,7 +156,7 @@ test('format renders rhythm and density as executable facts the page plan can ac
     assert_contains('full-bleed', $rendered, 'the rhythm states what to actually do');
     assert_contains('**Density**', $rendered);
     assert_contains('compact', $rendered, 'the density names the section value it maps to');
-    assert_contains('lg/xl/xxl section-padding ramp', $rendered, 'the density names its build-owned execution');
+    assert_contains('section-padding ramp, component spacing, and page gutter', $rendered, 'the density names its build-owned execution');
     assert_contains('**Text placement**', $rendered);
     assert_contains('second or third zone', $rendered);
 

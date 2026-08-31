@@ -145,7 +145,7 @@ final class DesignDirectionStep implements Step
      * with — 85% of audited sections came back `standard`. One site-level
      * commitment gives that per-section choice something to express.
      */
-    public const DENSITIES = ['airy', 'measured', 'dense'];
+    public const DENSITIES = ['expansive', 'airy', 'measured', 'dense', 'packed'];
 
     /**
      * Site-level horizontal intent for text below page-opening heroes. The
@@ -1501,11 +1501,13 @@ final class DesignDirectionStep implements Step
             // density, so these clauses must not read as "spacious everywhere"
             // — the page plan caps them and would demote the excess anyway.
             $facts[] = '- **Density**: ' . $density . ' — ' . match ($density) {
-                'airy'     => 'generous vertical breathing room; spend the page\'s spacious pauses and prefer standard over compact elsewhere',
-                'measured' => 'an even, unhurried rhythm; standard throughout, with a spacious pause only where the composition needs one',
-                'dense'    => 'tightly packed; prefer compact wherever the content supports it and let content carry the page',
-                default    => 'the committed page density',
-            } . '. The build derives the lg/xl/xxl section-padding ramp from this commitment.';
+                'expansive' => 'monumental vertical breathing room; spend every allowed spacious pause, keep the rest standard, and let emptiness carry the page',
+                'airy'      => 'generous vertical breathing room; spend the page\'s spacious pauses and prefer standard over compact elsewhere',
+                'measured'  => 'an even, unhurried rhythm; standard throughout, with a spacious pause only where the composition needs one',
+                'dense'     => 'tightly packed; prefer compact wherever the content supports it and let content carry the page',
+                'packed'    => 'maximally compressed; compact everywhere the content permits, no spacious pauses, and the content itself paces the page',
+                default     => 'the committed page density',
+            } . '. The build derives the section-padding ramp, component spacing, and page gutter from this commitment.';
         }
 
         $textPlacement = BoundedChoice::explicit(
