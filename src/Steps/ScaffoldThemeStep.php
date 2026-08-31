@@ -241,6 +241,46 @@ final class ScaffoldThemeStep implements Step
             }
         }
 
+        /* Centered stack (BIGR-952). The archetype's whole composition is one
+           centered column, but its alignment used to live only in prompt
+           prose, so a band could ship with a centered heading and a centered
+           button over start-aligned copy. The rule is owned here for the same
+           reason the pin rule above is: a behavior the archetype requires
+           cannot depend on per-element model choices. `text-align` inherits,
+           so an element that carries its own `has-text-align-*` class still
+           wins. */
+        .section-composition--centered-stack {
+            text-align: center;
+        }
+        /* A wp:buttons row is a flex container, so the inherited text-align
+           cannot move it; an unjustified row stays at the start edge. Only a
+           row with no authored justification is centered here. The
+           `:not(.item-pattern__item *)` guard (BIGR-952 review follow-up)
+           keeps a nested buttons row out of this rule: the item row below is
+           exempt and start-aligned, and a centered buttons row inside it
+           would recreate the mixed-alignment defect this block exists to
+           remove. */
+        .section-composition--centered-stack .wp-block-buttons:not(.is-content-justification-left):not(.is-content-justification-right):not(.is-content-justification-space-between):not(.item-pattern__item *) {
+            justify-content: center;
+        }
+        /* Two exemptions keep the centering from creating new defects. A
+           repeated item row (a centered stack may carry a spec-table item
+           pattern) keeps its own start alignment. A list centers as a block
+           while its items stay start-aligned, because centered lines under
+           start-anchored markers read as a ragged accident. The
+           `:not(.item-pattern__item *)` guard (BIGR-952 review follow-up)
+           keeps a list inside an exempted item row at the row's start edge:
+           without it, the list would still take `margin-inline: auto` and
+           center inside the start-aligned row. */
+        .section-composition--centered-stack .item-pattern__item {
+            text-align: start;
+        }
+        .section-composition--centered-stack :is(ul, ol):not(.item-pattern__item *) {
+            width: fit-content;
+            margin-inline: auto;
+            text-align: start;
+        }
+
         /* Flush-media cards (sections opt in via className="card-flush" on the
            card wp:group): the media is the card's first child at full width and
            only an inner .card-body group carries padding. Reset the card itself
