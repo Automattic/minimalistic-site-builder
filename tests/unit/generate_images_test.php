@@ -1244,3 +1244,108 @@ test('generate-images records a grade clause cut from a repaired subject', funct
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+/** PNG bytes: a $w x $h canvas of $bg with a centered 1/3-size $fg rectangle. */
+function gi_png_fixture(string $bg, string $fg, int $w = 60, int $h = 60): string
+{
+    $im = new Imagick();
+    $im->newImage($w, $h, new ImagickPixel($bg));
+    $draw = new ImagickDraw();
+    $draw->setFillColor(new ImagickPixel($fg));
+    $draw->rectangle($w / 3, $h / 3, 2 * $w / 3, 2 * $h / 3);
+    $im->drawImage($draw);
+    $im->setImageFormat('png');
+    return $im->getImageBlob();
+}
+
+/** [width, height] of PNG bytes. */
+function gi_png_size(string $pngBytes): array
+{
+    $im = new Imagick();
+    $im->readImageBlob($pngBytes);
+    return [$im->getImageWidth(), $im->getImageHeight()];
+}
+
+test('generate-images declaration writes the plugin image manifest', function () {
+    $declaration = (new GenerateImagesStep(new FakeImageClient()))->declaration();
+    assert_true(in_array('plugin/images.json', $declaration->writes, true));
+});
+
+test('generate-images square-pads a keyed site-logo and ships it to the plugin', function () {
+    if (!\Automattic\SiteBuild\ImageTransparency::available()) {
+        skip_test('imagick not loaded');
+    }
+    [$project, $tmp] = generate_fixture();
+    $mark = \Automattic\SiteBuild\ImageTransparency::keyOutBackground(
+        gi_png_fixture('white', 'red', 40, 20)
+    );
+    $project->writeJson('images.json', array_merge($project->readJson('images.json'), [[
+        'filename' => 'site-logo.png',
+        'src' => 'theme:./assets/site-logo.png',
+        'subject' => 'simple geometric brand mark for bakery, no letters',
+        'pageContext' => 'site logo',
+        'style' => 'flat',
+        'aspectRatio' => 'square',
+        'status' => 'pending',
+        'sources' => [],
+        'role' => 'site-logo',
+    ]]));
+    $project->writeJson('plugin/images.json', ['images' => [
+        ['filename' => 'hero.jpg', 'title' => 'A bakery at dawn'],
+        ['filename' => 'site-logo.png', 'title' => 'Site logo', 'role' => 'site-logo'],
+    ]]);
+    $images = new FakeImageClient();
+    $images->bytesByPromptSubstring['brand mark'] = $mark;
+
+    (new GenerateImagesStep($images))->run($project);
+
+    assert_true($project->exists('plugin/images/site-logo.png'));
+    assert_eq([512, 512], gi_png_size($project->readText('theme/assets/site-logo.png')));
+    $logo = null;
+    foreach ($project->readJson('images.json') as $row) {
+        if (($row['filename'] ?? '') === 'site-logo.png') {
+            $logo = $row;
+        }
+    }
+    assert_eq('site-logo', $logo['role']);
+    assert_eq('completed', $logo['status']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images drops the site-logo role when keying wipes out', function () {
+    if (!\Automattic\SiteBuild\ImageTransparency::available()) {
+        skip_test('imagick not loaded');
+    }
+    [$project, $tmp] = generate_fixture();
+    $white = gi_png_fixture('white', 'white', 32, 32);
+    $project->writeJson('images.json', [[
+        'filename' => 'site-logo.png',
+        'src' => 'theme:./assets/site-logo.png',
+        'subject' => 'simple geometric brand mark for bakery, no letters',
+        'pageContext' => 'site logo',
+        'style' => 'flat',
+        'aspectRatio' => 'square',
+        'status' => 'pending',
+        'sources' => [],
+        'role' => 'site-logo',
+    ]]);
+    $project->writeJson('plugin/images.json', ['images' => [
+        ['filename' => 'site-logo.png', 'title' => 'Site logo', 'role' => 'site-logo'],
+    ]]);
+    $images = new FakeImageClient($white);
+
+    (new GenerateImagesStep($images))->run($project);
+
+    assert_true($project->exists('theme/assets/site-logo.png'), 'completed generation still writes the theme copy');
+    assert_true(!$project->exists('plugin/images/site-logo.png'), 'unkeyed mark is not shipped');
+    $logo = $project->readJson('images.json')[0];
+    assert_true(!isset($logo['role']));
+    assert_eq('completed', $logo['status']);
+    assert_eq(['images' => []], $project->readJson('plugin/images.json'));
+    $warnings = implode("\n", $project->readJson('warnings.json')['generate-images']);
+    assert_contains('site-logo.png', $warnings);
+    assert_contains('unkeyed', $warnings);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

@@ -104,6 +104,7 @@ final class GenerateImagesStep implements Step
                 'theme/parts/*',
                 'theme/templates/*',
                 'plugin/images/*',
+                'plugin/images.json',
                 'plugin/pages/*',
                 'warnings.json',
             ],
@@ -266,14 +267,34 @@ final class GenerateImagesStep implements Step
         if (!$project->exists('plugin/images.json')) {
             return; // theme-only composition, or assemble-pages never ran
         }
+        $roles = [];
+        if ($project->exists('images.json')) {
+            foreach ((array) $project->readJson('images.json') as $spec) {
+                if (is_array($spec) && isset($spec['filename'])) {
+                    $roles[(string) $spec['filename']] = (string) ($spec['role'] ?? '');
+                }
+            }
+        }
         $manifest = $project->readJson('plugin/images.json');
+        $kept = [];
         foreach ((array) ($manifest['images'] ?? []) as $image) {
-            $filename = is_array($image) ? (string) ($image['filename'] ?? '') : '';
-            if ($filename === '' || !$project->exists('theme/assets/' . $filename)) {
+            if (!is_array($image)) {
+                continue;
+            }
+            $filename = (string) ($image['filename'] ?? '');
+            if ($filename === '') {
+                continue;
+            }
+            if (($image['role'] ?? '') === 'site-logo' && ($roles[$filename] ?? '') !== 'site-logo') {
+                continue;
+            }
+            if (!$project->exists('theme/assets/' . $filename)) {
                 continue;
             }
             $project->writeText('plugin/images/' . $filename, $project->readText('theme/assets/' . $filename));
+            $kept[] = $image;
         }
+        $project->writeJson('plugin/images.json', ['images' => $kept]);
     }
 
     /**
@@ -573,6 +594,19 @@ final class GenerateImagesStep implements Step
                 // solid white background instead, keyed out here so the asset
                 // gets the transparency its .png promises.
                 $bytes = ImageTransparency::keyOutBackground($bytes);
+                if (($specs[$i]['role'] ?? '') === 'site-logo' && ImageTransparency::available()) {
+                    if (!ImageTransparency::isKeyed($bytes)) {
+                        unset($specs[$i]['role']);
+                        $project->addWarnings($this->id(), [
+                            "file='theme/assets/{$filename}'; asset='site-logo.png'; authored role=site-logo; "
+                            . 'delivered unkeyed opaque PNG kept as a theme asset only; '
+                            . 'disposition=the white-background key wiped out or never ran, so the mark is not a usable logo; '
+                            . 'role dropped, plugin manifest row will be removed, title stays visible',
+                        ]);
+                    } else {
+                        $bytes = ImageTransparency::padToSquare($bytes);
+                    }
+                }
             }
             // ImageTransparency fails soft by returning its input. Verify the
             // post-processed bytes as well before choosing the file extension.
