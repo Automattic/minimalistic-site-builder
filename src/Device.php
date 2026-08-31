@@ -7,12 +7,15 @@ namespace Automattic\SiteBuild;
  * Optional site-wide CSS device. One reviewed utility, used on at most one
  * band per page. Motifs that are not in this list are not promises.
  *
+ * A numeral mark is not a device: sequence numbers on bands or items are
+ * banned unless the site brief asks for them (BIGR-949).
+ *
  * Selectors target the marked section root so a nested heading is not
  * required — a 1px rule on a nested h2 is easy to miss.
  */
 final class Device
 {
-    public const ALL = ['none', 'hairline-rule', 'section-numeral', 'stamp'];
+    public const ALL = ['none', 'hairline-rule', 'stamp'];
 
     public const DEFAULT = 'none';
 
@@ -44,42 +47,6 @@ final class Device
             'hairline-rule' => <<<CSS
                 .device--hairline-rule {
                     box-shadow: inset 0 1px 0 0 currentColor;
-                }
-
-                CSS,
-            'section-numeral' => <<<CSS
-                /* The folio mark is literal, not a CSS counter. Exactly one band
-                   per page carries the device, so a counter could only ever
-                   render 01 — and its counter-reset had to sit on body, which
-                   add_editor_style then leaked into the editor. */
-                /* Mobile-first on purpose. The wide-screen gutter REPLACES the
-                   section's own inset rather than adding to it, so narrowing it
-                   to zero would pull this band's copy tighter to the edge than
-                   its neighbours. Below the breakpoint the kit sets no padding
-                   at all and the theme's inset stands. */
-                .device--section-numeral {
-                    position: relative;
-                }
-                .device--section-numeral::before {
-                    content: "01";
-                    display: block;
-                    margin: 0 0 0.5rem;
-                    font-size: var(--wp--preset--font-size--caption);
-                    font-family: var(--wp--preset--font-family--accent, var(--wp--preset--font-family--heading));
-                    letter-spacing: 0.16em;
-                    color: currentColor;
-                    opacity: 0.65;
-                }
-                @media (min-width: 481px) {
-                    .device--section-numeral {
-                        padding-left: 4.5rem;
-                    }
-                    .device--section-numeral::before {
-                        position: absolute;
-                        left: var(--wp--preset--spacing--md, 1.5rem);
-                        top: var(--wp--preset--spacing--lg, 3rem);
-                        margin: 0;
-                    }
                 }
 
                 CSS,
