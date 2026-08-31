@@ -478,3 +478,56 @@ test('scaffold-theme owns the guaranteed sticky-side pin rule', function () {
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('scaffold-theme owns the guaranteed centered-stack alignment rule', function () {
+    // BIGR-952: the archetype's alignment lived only in prompt prose, so a
+    // band could ship a centered heading over start-aligned copy. The
+    // scaffold ships the rule itself, like the pin rule above.
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_centered_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    (new ScaffoldThemeStep())->run($project);
+    $css = $project->readText('theme/style.css');
+
+    $hook = '.section-composition--centered-stack';
+
+    $matched = preg_match(
+        '~' . preg_quote($hook, '~') . '\s*\{(?<body>[^}]*)\}~',
+        $css,
+        $root
+    );
+    assert_eq(1, $matched, 'the root rule exists');
+    assert_contains('text-align: center', $root['body']);
+
+    // A flex buttons row ignores inherited text-align, so it needs its own
+    // justification — but only when the author set none.
+    $matched = preg_match(
+        '~' . preg_quote($hook, '~')
+            . '\s+\.wp-block-buttons(?<guards>[^\s{]*)\s*\{(?<body>[^}]*)\}~',
+        $css,
+        $buttons
+    );
+    assert_eq(1, $matched, 'the buttons rule exists');
+    assert_contains('justify-content: center', $buttons['body']);
+    assert_contains(':not(.is-content-justification-left)', $buttons['guards'], 'an authored justification survives');
+
+    // Repeated item rows and lists stay start-aligned inside the centered
+    // band; a centered rag on markers or on item rows is a new defect.
+    $matched = preg_match(
+        '~' . preg_quote($hook, '~') . '\s+\.item-pattern__item\s*\{(?<body>[^}]*)\}~',
+        $css,
+        $items
+    );
+    assert_eq(1, $matched, 'the item-row exemption exists');
+    assert_contains('text-align: start', $items['body']);
+
+    $matched = preg_match(
+        '~' . preg_quote($hook, '~') . '\s+:is\(ul, ol\)\s*\{(?<body>[^}]*)\}~',
+        $css,
+        $lists
+    );
+    assert_eq(1, $matched, 'the list exemption exists');
+    assert_contains('text-align: start', $lists['body']);
+    assert_contains('margin-inline: auto', $lists['body'], 'the list block itself still centers');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
