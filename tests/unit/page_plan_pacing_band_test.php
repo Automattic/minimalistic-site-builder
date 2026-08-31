@@ -3,7 +3,12 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\Steps\PagePlanStep;
 
-/** A varied-archetype page so only the background rule is under test. */
+/**
+ * A varied-archetype page so only the background rule is under test. The list
+ * deliberately holds no 'full-bleed-cover': normalize() forces that archetype
+ * onto the 'image' background (BIGR-955), which would satisfy the banded floor
+ * and hide the rule these tests exercise.
+ */
 function pacing_plan(int $sections, string $background = 'base'): array
 {
     $archetypes = [
@@ -11,7 +16,7 @@ function pacing_plan(int $sections, string $background = 'base'): array
         'asymmetric-split',
         'equal-card-grid',
         'list-with-thumbnails',
-        'full-bleed-cover',
+        'equal-card-grid',
         'offset-grid',
         'centered-stack',
         'asymmetric-split',

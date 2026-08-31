@@ -725,6 +725,72 @@ test('PagePlanStep::normalize allows a full-bleed cover opening on the front pag
     ], front: false)));
 });
 
+test('PagePlanStep::normalize forces the image background onto a non-opening full-bleed cover', function () {
+    // BIGR-955: the archetype always delivers one wp:cover band, and only a
+    // planned 'image' background makes the rhythm pass run it edge to edge.
+    // Any other surface framed the delivered cover inside a padded solid band.
+    $warnings = [];
+    $repairs = [];
+    $sections = PagePlanStep::normalize([
+        plan_section(),
+        plan_section(['slug' => 'story', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base']),
+        plan_section(['slug' => 'artist-lineup', 'role' => 'closing', 'layout_archetype' => 'full-bleed-cover', 'background' => 'tinted']),
+    ], true, null, [], $warnings, 'home', $repairs);
+
+    assert_eq('image', $sections[2]['background'], 'the cover band is planned edge to edge');
+    assert_contains('Build correction', $sections[2]['handoff']);
+    assert_contains('"image"', $sections[2]['handoff']);
+    assert_eq(1, count($warnings), 'exactly one durable value-loss row');
+    assert_contains("pages[slug='home'].sections[2].background", $warnings[0]);
+    assert_contains('"tinted"', $warnings[0]);
+    assert_contains('"image"', $warnings[0]);
+    assert_contains('padded solid band', $warnings[0]);
+
+    // The coerced plan is a fixed point: a second pass changes nothing and
+    // records nothing.
+    $againWarnings = [];
+    $againRepairs = [];
+    assert_eq(
+        $sections,
+        PagePlanStep::normalize($sections, true, null, [], $againWarnings, 'home', $againRepairs),
+    );
+    assert_eq([], $againWarnings);
+    assert_eq([], $againRepairs);
+});
+
+test('PagePlanStep::normalize forces the image background on a deeper interior cover too', function () {
+    $warnings = [];
+    $repairs = [];
+    $sections = PagePlanStep::normalize([
+        plan_section(['slug' => 'intro', 'layout_archetype' => 'centered-stack', 'background' => 'tinted']),
+        plan_section(['slug' => 'gallery-band', 'role' => 'closing', 'background' => 'contrast']),
+    ], false, null, [], $warnings, 'about', $repairs);
+
+    assert_eq('image', $sections[1]['background']);
+    assert_contains("pages[slug='about'].sections[1].background", implode("\n", $warnings));
+});
+
+test('PagePlanStep::normalize leaves the projection-owned front opening cover on its solid fallback', function () {
+    // The cover hero recipes review 'contrast' as their no-image fallback
+    // surface; the forced cover/image pairing must not override the
+    // code-owned projection.
+    $projection = [
+        'layout_archetype' => 'full-bleed-cover',
+        'allowed_backgrounds' => ['image', 'contrast'],
+        'default_background' => 'image',
+        'fallback_family' => 'cover',
+    ];
+    $warnings = [];
+    $repairs = [];
+    $sections = PagePlanStep::normalize([
+        plan_section(['background' => 'contrast']),
+        plan_section(['slug' => 'cta', 'role' => 'closing', 'layout_archetype' => 'centered-stack', 'background' => 'base']),
+    ], true, $projection, [], $warnings, 'home', $repairs);
+
+    assert_eq('contrast', $sections[0]['background'], 'the hero recipe projection owns the opening pairing');
+    assert_eq([], $warnings);
+});
+
 test('PagePlanStep::repairVariety demotes an interior page\'s leading full-bleed cover', function () {
     $sections = PagePlanStep::repairVariety([
         plan_section(),

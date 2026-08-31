@@ -1178,8 +1178,12 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      * unknown values, a missing handoff, adjacent duplicate archetypes, too
      * many card grids, or an interior page opening at homepage-cover scale
      * are collected and thrown together in ONE message, so the single repair
-     * call sees every violation at once. The semantic type is intentionally
-     * open-ended. Pure — unit-testable.
+     * call sees every violation at once. One pairing is coerced instead of
+     * rejected: a non-opening 'full-bleed-cover' section is forced onto the
+     * 'image' background with a value-loss warning, because that archetype
+     * always delivers one wp:cover band and any other surface frames it
+     * inside a padded solid band (BIGR-955). The semantic type is
+     * intentionally open-ended. Pure — unit-testable.
      *
      * @param mixed $raw
      * @param bool $front whether the page is the front page (interior pages
@@ -1268,6 +1272,36 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             $handoff = trim((string) ($section['handoff'] ?? ''));
             if ($handoff === '') {
                 $errors[] = "page-plan: section '{$slug}' is missing 'handoff' — describe what sits immediately above and below it";
+            }
+
+            // A 'full-bleed-cover' section always delivers one wp:cover band,
+            // and only a planned 'image' background makes SectionRhythm run
+            // that band edge to edge (root padding 0, breathing room inside
+            // the cover). Any other surface frames the delivered cover inside
+            // a padded solid band (BIGR-955), so the pairing is forced here.
+            // The front page's OPENING section is exempt: the code-owned hero
+            // recipe projection owns that pairing, and its solid fallback
+            // surface is a reviewed hero treatment, not a mismatch.
+            if ($archetype === 'full-bleed-cover'
+                && !($front && $out === [])
+                && $background !== 'image'
+                && in_array($background, self::BACKGROUNDS, true)
+            ) {
+                $warnings[] = self::valueLossWarning(
+                    self::sectionPath($pageSlug, count($out)) . '.background',
+                    $background,
+                    'image',
+                    "section '{$slug}' plans a 'full-bleed-cover', which always delivers one wp:cover band; "
+                        . "only the 'image' treatment renders that band edge to edge, so the planned surface "
+                        . 'would have framed the cover inside a padded solid band',
+                );
+                $background = 'image';
+                $handoff = self::withSeamCorrection(
+                    $handoff,
+                    'this section\'s background is now "image" because its full-bleed-cover archetype delivers '
+                        . 'one wp:cover band that runs edge to edge; this supersedes any background named '
+                        . 'earlier in this line',
+                );
             }
 
             $rawItemPattern = $section['item_pattern'] ?? null;
@@ -2840,7 +2874,12 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         $authoredArchetypes = $archetypes;
 
         $pick = function (int $i, string ...$exclude) use (&$archetypes, $allowOffsetGrid): string {
-            return self::pickArchetype($archetypes, $i, $allowOffsetGrid, ...$exclude);
+            // A mechanical guess never lands on 'full-bleed-cover'. The
+            // archetype walks first in the catalog, but normalize() forces it
+            // onto the 'image' background (BIGR-955), so introducing one here
+            // would demand an image band the plan never budgeted — the same
+            // reason repairFields() and pickLevelRow() exclude it.
+            return self::pickArchetype($archetypes, $i, $allowOffsetGrid, 'full-bleed-cover', ...$exclude);
         };
 
         foreach ($archetypes as $i => $archetype) {
