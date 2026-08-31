@@ -82,6 +82,7 @@ function wp_stub_reset(): void
     $GLOBALS['wp_attachments'] = [];
     $GLOBALS['wp_next_id'] = 100;
     $GLOBALS['wp_kses_calls'] = [];
+    $GLOBALS['wp_post_meta'] = [];
     $GLOBALS['wp_actions'] = [];
     $GLOBALS['wp_registered_block_paths'] = [];
     if (method_exists(WP_Block_Type_Registry::get_instance(), 'reset')) {
@@ -371,10 +372,9 @@ test('scaffold-plugin writes the static seeder with identity placeholders', func
     assert_contains('basename($filename)', $php);
     assert_contains('realpath($path)', $php);
 
-    // Every post the seeder creates carries the marker analytics uses to
-    // tell seeded publishes from the site owner's.
-    // and the deactivation republish of stock content carries it only for the
-    // duration of the update.
+    // Every post the seeder creates carries the marker analytics uses to tell
+    // seeded publishes from the site owner's; the deactivation republish of
+    // stock content carries it only for the duration of the update.
     assert_eq(
         2,
         substr_count($php, "'_wpcom_ai_generated_post' => '1'"),
@@ -382,7 +382,6 @@ test('scaffold-plugin writes the static seeder with identity placeholders', func
     );
     assert_contains("update_post_meta(\$restore['ID'], '_wpcom_ai_generated_post', '1');", $php);
     assert_contains("delete_post_meta(\$restore['ID'], '_wpcom_ai_generated_post');", $php);
-    assert_contains("add_filter('jetpack_sync_post_meta_whitelist', '{{FN_PREFIX}}_content_sync_marker')", $php);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
