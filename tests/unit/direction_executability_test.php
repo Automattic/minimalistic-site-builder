@@ -39,8 +39,8 @@ test('a narrative promising hand-drawn ornament is reported as a delivered defec
     assert_contains('delivered=not executed', $row);
     // The row must name what the build CAN draw, so it is actionable alone.
     assert_contains('hairline-rule', $row);
-    assert_contains('section-numeral', $row);
     assert_contains('stamp', $row);
+    assert_true(!str_contains($row, 'section-numeral'), 'the removed numeral device is not offered');
     assert_contains('hand-drawn ornament', $row);
 });
 

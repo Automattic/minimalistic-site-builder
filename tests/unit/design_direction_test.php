@@ -1908,14 +1908,15 @@ test('unknown or caller-incompatible HERO_RECIPE fails before any LLM spend', fu
 
     $project->writeJson('meta.json', [
         'prompt' => 'A cozy neighborhood bakery',
-        'design_constraints' => ['allowed_hero_media_modes' => ['none']],
+        'design_constraints' => ['allowed_hero_media_modes' => ['cover-image']],
     ]);
     putenv('HERO_RECIPE=foreground-split');
     try {
-        assert_throws(fn () => (new DesignDirectionStep(
+        $e = assert_throws(fn () => (new DesignDirectionStep(
             $llm,
             new PromptRenderer(repo_path('prompts')),
         ))->run($project));
+        assert_contains('incompatible with caller-owned design_constraints', $e->getMessage());
     } finally {
         putenv('HERO_RECIPE');
     }
@@ -1925,10 +1926,14 @@ test('unknown or caller-incompatible HERO_RECIPE fails before any LLM spend', fu
 
 test('caller-incompatible HEADER_ARCHETYPE fails before the design-direction seed call', function () {
     $cases = [
-        ['override' => 'not-a-header', 'constraints' => []],
-        ['override' => 'minimal-overlay', 'constraints' => ['hero_canvas' => 'framed']],
-        ['override' => 'minimal-overlay', 'constraints' => ['allowed_hero_media_modes' => ['none']]],
-        ['override' => 'split-nav', 'constraints' => []],
+        ['override' => 'not-a-header', 'constraints' => [],
+            'message' => "unknown HEADER_ARCHETYPE 'not-a-header'"],
+        ['override' => 'minimal-overlay', 'constraints' => ['hero_canvas' => 'framed'],
+            'message' => "hero_canvas='framed'"],
+        ['override' => 'minimal-overlay', 'constraints' => ['allowed_hero_media_modes' => ['foreground-image']],
+            'message' => 'no compatible cover/overlay hero recipe remains'],
+        ['override' => 'split-nav', 'constraints' => [],
+            'message' => 'one-page scope'],
     ];
     foreach ($cases as $case) {
         [$project, $llm, $tmp] = make_designdir_fixture();
@@ -1939,10 +1944,11 @@ test('caller-incompatible HEADER_ARCHETYPE fails before the design-direction see
         ]);
         putenv('HEADER_ARCHETYPE=' . $case['override']);
         try {
-            assert_throws(fn () => (new DesignDirectionStep(
+            $e = assert_throws(fn () => (new DesignDirectionStep(
                 $llm,
                 new PromptRenderer(repo_path('prompts')),
             ))->run($project), (string) $case['override']);
+            assert_contains($case['message'], $e->getMessage(), (string) $case['override']);
         } finally {
             putenv('HEADER_ARCHETYPE');
             exec('rm -rf ' . escapeshellarg($tmp));
@@ -2066,17 +2072,16 @@ test('legacy signature-device fields are dropped from the normalized direction',
 });
 
 test('automatic hero selection keeps the image gate aligned with each catalog media budget (BIGR-885)', function () {
-    // type-manifesto reopened the imageless shape, so the old "every recipe
-    // bears an image" invariant is gone. The invariant that replaces it: the
-    // image gate always agrees with the selected recipe's own budget, so an
-    // unconstrained build never generates an orphan image and never leaves an
-    // image-bearing recipe without one.
+    // The catalog holds no imageless recipe since the type-manifesto removal.
+    // The invariant that survives it: the image gate always agrees with the
+    // selected recipe's own budget, so an unconstrained build never generates
+    // an orphan image and never leaves an image-bearing recipe without one.
     $imageless = array_values(array_filter(
         Automattic\SiteBuild\HeroComposition::RECIPES,
         fn (string $recipe): bool
             => (int) Automattic\SiteBuild\HeroComposition::metadata($recipe)['max_images'] === 0,
     ));
-    assert_eq(['type-manifesto'], $imageless);
+    assert_eq([], $imageless);
 
     $selected = [];
     foreach (range(1, 16) as $i) {
