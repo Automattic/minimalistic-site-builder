@@ -6,7 +6,10 @@ use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Steps\MotionSanityStep;
 
 test('Device catalog is the bounded utility list', function () {
-    assert_eq(['none', 'hairline-rule', 'section-numeral', 'stamp'], Device::ALL);
+    assert_eq(['none', 'hairline-rule', 'stamp'], Device::ALL);
+    // section-numeral left the catalog with BIGR-949: decorative sequence
+    // numbers are banned unless the site brief asks for them.
+    assert_eq(null, Device::explicit('section-numeral'));
     assert_eq('stamp', Device::explicit(' Stamp '));
     assert_eq(null, Device::explicit('twine'));
     assert_eq(null, Device::className('none'));
@@ -22,20 +25,7 @@ test('Device kitCss is class-gated and absent for none', function () {
     assert_contains('.device--hairline-rule', $rule);
     assert_contains('box-shadow: inset 0 1px 0 0', $rule);
 
-    $numeral = Device::kitCss('section-numeral');
-    assert_true(is_string($numeral));
-    // One band per page carries the device, so the folio mark is literal and
-    // no counter-reset is parked on body for add_editor_style to leak.
-    assert_contains('content: "01"', $numeral);
-    assert_true(!str_contains($numeral, 'counter-increment'), 'no inert counter machinery');
-    assert_true(!str_contains($numeral, 'body {'), 'the kit never restyles body');
-    // Mobile-first: the gutter is only added above the breakpoint, so the kit
-    // never overrides the section's own inset on a narrow screen.
-    assert_contains('@media (min-width: 481px)', $numeral, 'the gutter is gated to wide screens');
-    assert_true(
-        strpos($numeral, 'padding-left') > strpos($numeral, '@media (min-width: 481px)'),
-        'padding-left lives inside the wide-screen block, never at base width',
-    );
+    assert_eq(null, Device::kitCss('section-numeral'), 'the removed numeral device ships no CSS');
 
     $stamp = Device::kitCss('stamp');
     assert_true(is_string($stamp));

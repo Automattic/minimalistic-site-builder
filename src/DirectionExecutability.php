@@ -19,7 +19,7 @@ namespace Automattic\SiteBuild;
  * hand-drawn ornament borrowed from Kakhetian textile borders … thin zigzag
  * chains, grape-leaf tendrils, and small eight-point rosettes … used sparingly
  * as band separators, list bullets, and a repeating border strip". The build
- * ships exactly three marks (`Device::ALL` minus `none`), placed on at most one
+ * ships exactly two marks (`Device::ALL` minus `none`), placed on at most one
  * non-hero band. What arrived was a single 1px rule, and a page for a
  * traditional Georgian tavern that reads as generic (BIGR-884).
  *
