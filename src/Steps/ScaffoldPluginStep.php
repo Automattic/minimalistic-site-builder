@@ -101,11 +101,12 @@ final class ScaffoldPluginStep implements Step
         register_deactivation_hook(__FILE__, '{{FN_PREFIX}}_content_deactivate');
         add_action('init', '{{FN_PREFIX}}_content_register_companion_blocks');
 
-        // The marker has to travel with the content when the site syncs,
-        // so analytics on the receiving end can classify seeded publishes.
         add_filter('jetpack_sync_post_meta_whitelist', '{{FN_PREFIX}}_content_sync_marker');
 
-        /** Whitelist the seeder marker for Jetpack sync. */
+        /**
+         * The marker has to travel with the content when the site syncs, so
+         * analytics on the receiving end can classify seeded publishes.
+         */
         function {{FN_PREFIX}}_content_sync_marker($keys) {
             $keys[] = '_wpcom_ai_generated_post';
             return $keys;
