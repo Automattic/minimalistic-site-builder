@@ -286,6 +286,9 @@ final class CollectImagesStep implements Step
         $siteSpec = $project->readJson('siteSpec.json');
         $prompt = '';
         if ($project->exists('meta.json')) {
+            // RefinePromptStep has already rewritten meta.json['prompt']; the
+            // original lives at original_prompt. Forward the refined text so
+            // PhotographySite sees the same brief later steps see.
             $prompt = (string) ($project->readJson('meta.json')['prompt'] ?? '');
         }
         if (!BusinessSite::matches($siteSpec, $prompt)) {
@@ -305,11 +308,23 @@ final class CollectImagesStep implements Step
      */
     private static function siteLogoSpec(array $siteSpec): array
     {
+        $identities = [
+            trim((string) ($siteSpec['name'] ?? '')),
+            trim((string) ($siteSpec['persona_name'] ?? '')),
+            trim((string) ($siteSpec['email_domain'] ?? '')),
+        ];
         $area = trim((string) ($siteSpec['area'] ?? ''));
         $topic = trim((string) ($siteSpec['topic'] ?? ''));
         $vibe = trim((string) ($siteSpec['visual_vibe'] ?? ''));
-        $about = $area !== '' ? $area : ($topic !== '' ? $topic : 'a small business');
-        $mood = $vibe !== '' ? ", {$vibe} mood" : '';
+        $about = 'a small business';
+        if ($area !== '' && GenerateImagesStep::safeSubjectMatter($area, $identities)) {
+            $about = $area;
+        } elseif ($topic !== '' && GenerateImagesStep::safeSubjectMatter($topic, $identities)) {
+            $about = $topic;
+        }
+        $mood = ($vibe !== '' && GenerateImagesStep::safeSubjectMatter($vibe, $identities))
+            ? ", {$vibe} mood"
+            : '';
         return [
             'filename'    => 'site-logo.png',
             'src'         => 'theme:./assets/site-logo.png',

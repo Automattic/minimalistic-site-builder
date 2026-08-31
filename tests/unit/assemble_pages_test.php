@@ -397,6 +397,19 @@ test('assemble-pages unions a site-logo role into the plugin image manifest', fu
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('contentImages does not overwrite a content row with the site-logo title', function () {
+    $markup = '<!-- wp:image --><img src="theme:./assets/site-logo.png" alt="loaf"><!-- /wp:image -->';
+    $specs = [[
+        'filename' => 'site-logo.png',
+        'subject'  => 'A sourdough loaf',
+        'role'     => 'site-logo',
+    ]];
+    assert_eq([[
+        'filename' => 'site-logo.png',
+        'title'    => 'A sourdough loaf',
+    ]], AssemblePagesStep::contentImages(['home' => $markup], $specs));
+});
+
 test('assemble-pages writes an empty image manifest when pages reference no assets', function () {
     [$project, $tmp] = assemble_fixture();
 

@@ -2808,6 +2808,29 @@ test('ensureSiteLogoMark inserts inside the root group when there is no site-tit
     );
 });
 
+test('ensureSiteLogoMark inserts before a site-title nested in an inner group', function () {
+    $in = '<!-- wp:group {"layout":{"type":"flex"}} -->' . "\n"
+        . '<div class="wp-block-group">'
+        . '<!-- wp:group {"style":{"spacing":{"blockGap":"0"}}} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:site-title /-->'
+        . '<!-- wp:site-tagline /-->'
+        . '</div>'
+        . '<!-- /wp:group -->'
+        . '</div>' . "\n"
+        . '<!-- /wp:group -->';
+    $out = HeaderHeroStep::ensureSiteLogoMark($in);
+    $logoAt = strpos($out, 'wp:site-logo');
+    $titleAt = strpos($out, 'wp:site-title');
+    $innerOpen = strpos($out, 'blockGap');
+    $innerClose = strpos($out, '/wp:group');
+    assert_true($logoAt !== false && $titleAt !== false && $innerOpen !== false && $innerClose !== false);
+    assert_true(
+        $innerOpen < $logoAt && $logoAt < $titleAt && $titleAt < $innerClose,
+        'mark is a sibling of the nested site-title, inside the inner group',
+    );
+});
+
 test('ensureSiteLogoMark does not retag an authored branded-lockup logo', function () {
     $in = hh_header(
         '{"layout":{"type":"flex"}}',

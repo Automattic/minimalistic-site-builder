@@ -902,6 +902,30 @@ test('seeder restore skips logo mods the owner replaced', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('seeder restore clears custom_logo when the owner changed only site_icon', function () {
+    $slug = 'logo-split';
+    [$project, $tmp] = scaffold_plugin_fixture($slug);
+    $project->writeJson('plugin/images.json', ['images' => [
+        ['filename' => 'site-logo.png', 'title' => 'Site logo', 'role' => 'site-logo'],
+    ]]);
+    @mkdir($project->pluginPath('images'), 0777, true);
+    file_put_contents($project->pluginPath('images/site-logo.png'), 'PNG');
+
+    wp_stub_reset();
+    require_once $project->pluginPath('site-content.php');
+    (content_fn($slug, 'activate'))();
+    $seeded = (int) get_theme_mod('custom_logo');
+    update_option('site_icon', 999);
+
+    (content_fn($slug, 'deactivate'))();
+
+    assert_eq(false, get_theme_mod('custom_logo', false), 'still-owned logo is restored');
+    assert_eq(999, (int) get_option('site_icon'), 'owner site_icon is left alone');
+    assert_true(!isset($GLOBALS['wp_attachments'][$seeded]));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('seeder restore puts back previous logo mods when still owned', function () {
     $slug = 'logo-restore';
     [$project, $tmp] = scaffold_plugin_fixture($slug);

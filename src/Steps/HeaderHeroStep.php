@@ -281,6 +281,9 @@ final class HeaderHeroStep implements Step
         $header = $project->readText('theme/' . $headerRel);
         $prompt = '';
         if ($project->exists('meta.json')) {
+            // RefinePromptStep has already rewritten meta.json['prompt']; the
+            // original lives at original_prompt. Forward the refined text so
+            // PhotographySite sees the same brief later steps see.
             $prompt = (string) ($project->readJson('meta.json')['prompt'] ?? '');
         }
         if (BusinessSite::matches($siteSpec, $prompt)) {

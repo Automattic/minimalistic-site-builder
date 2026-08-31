@@ -796,6 +796,7 @@ test('collect-images appends a site-logo spec for a business site', function () 
     assert_contains('bakery', $logo['subject']);
     assert_contains('no letters', $logo['subject']);
     assert_true(!str_contains($logo['subject'], 'Hearth'), 'site name stays out of the subject');
+    assert_contains('warm and rustic', $logo['subject']);
     assert_eq('site logo and site icon, small square mark in the header', $logo['pageContext']);
 
     exec('rm -rf ' . escapeshellarg($tmp));
@@ -815,6 +816,35 @@ test('collect-images does not append a site-logo for a personal site', function 
     foreach ($project->readJson('images.json') as $row) {
         assert_true(($row['filename'] ?? '') !== 'site-logo.png');
     }
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images logo subject drops identity-bearing area, topic, and vibe', function () {
+    [$project, $tmp] = collect_fixture();
+    $project->writeJson('siteSpec.json', [
+        'name'        => 'Hearth & Crumb',
+        'site_type'   => 'business storefront',
+        'area'        => "Hearth & Crumb's sourdough programme",
+        'topic'       => "Hearth & Crumb bakery",
+        'visual_vibe' => 'Hearth & Crumb rustic',
+        'persona_name'=> '',
+    ]);
+    $project->writeJson('meta.json', ['prompt' => 'A neighborhood bakery']);
+    $project->writeText('theme/parts/page-home--hero.html', '<!-- wp:paragraph --><p>Hi</p><!-- /wp:paragraph -->');
+
+    (new CollectImagesStep())->run($project);
+
+    $logo = null;
+    foreach ($project->readJson('images.json') as $row) {
+        if (($row['filename'] ?? '') === 'site-logo.png') {
+            $logo = $row;
+        }
+    }
+    assert_true(is_array($logo));
+    assert_contains('a small business', $logo['subject']);
+    assert_true(!str_contains($logo['subject'], 'Hearth'), 'identity-bearing fields must not steer the mark');
+    assert_true(!str_contains($logo['subject'], 'Crumb'));
+
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

@@ -1060,7 +1060,7 @@ if (!empty($state['changed_logo'])) {
 
 Then delete attachments as today.
 
-Ownership: spec says restore only when live value still equals `logo_attachment_id`. Check both `custom_logo` and `site_icon`. If the owner changed only one, skip restore of both (do not half-restore).
+Ownership: restore `custom_logo` and `site_icon` independently. Each is restored only while its live value still equals `logo_attachment_id`. Changing one must not strand the other pointing at an attachment the deactivate loop is about to delete.
 
 - [ ] **Step 4: `php tests/run.php` — PASS.** `php -l` on a generated `plugin/site-content.php`.
 
@@ -1070,11 +1070,11 @@ Ownership: spec says restore only when live value still equals `logo_attachment_
 
 ### Task 9: Full suite + visual note
 
-- [ ] **Step 1: Run `php tests/run.php`** — Expected: all unit tests PASS.
+- [ ] **Step 1: Run `php tests/run.php`** — Expected: passed count is baseline (3600 on trunk) plus the tests this work added; failed is still exactly the 9 pre-existing names on trunk. A tenth failure is ours. Do not chase the trunk failures.
 
-- [ ] **Step 2: Run `php tests/run-integration.php`** — Expected: PASS, including the re-pinned AssemblePagesStep hash.
+- [ ] **Step 2: Run `php tests/run-integration.php`** — Expected: 33 passed / 1 failed (G4), including the re-pinned AssemblePagesStep hash.
 
-- [ ] **Step 3: Visual check (not a unit test).** On a real business build with `--with-images` (`php bin/build.php "a neighborhood bakery in Portland" --slug=logo-bakery --with-images --no-serve` or the repo's current flags), confirm: header shows the mark not the title; footer still has the title; Media Library has "Site logo"; Site Icon is set. If the mark shoves the nav, that is the accepted geometry cost in the spec — record it in the PR, do not add a new heuristic in this change.
+- [ ] **Step 3: Visual check (not a unit test).** On a real business build: `php bin/build.php "a neighborhood bakery in Portland" --slug=logo-bakery --with-images --no-serve`. Confirm: header shows the mark not the title; footer still has the title; Media Library has "Site logo"; Site Icon is set. If the mark shoves the nav, that is the accepted geometry cost in the spec — record it in the PR, do not add a new heuristic in this change. If the title and tagline sit in an inner `blockGap: 0` group, the 48px mark stacks above them inside that group (the spec's sibling-of-title rule) — if that looks wrong, revisit the insertion rule, not a one-off CSS patch.
 
 - [ ] **Step 4: No extra commit unless a test fix was needed.**
 

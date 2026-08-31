@@ -210,7 +210,7 @@ final class AssemblePagesStep implements Step
                 continue;
             }
             $filename = (string) ($spec['filename'] ?? '');
-            if ($filename === '') {
+            if ($filename === '' || isset($images[$filename])) {
                 continue;
             }
             $images[$filename] = [

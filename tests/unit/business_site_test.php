@@ -13,9 +13,22 @@ test('BusinessSite matches a bakery storefront', function () {
 });
 
 test('BusinessSite matches restaurant, cafe, café, salon, firm, hotel', function () {
-    foreach (['restaurant', 'cafe', 'café', 'hair salon', 'consulting firm', 'hotel'] as $area) {
+    foreach ([
+        'restaurant', 'cafe', 'café', 'hair salon', 'consulting firm', 'hotel',
+        'storefront', 'shop', 'store', 'retail', 'bakery', 'bar', 'spa', 'clinic',
+        'gym', 'studio', 'agency', 'consultancy', 'saas', 'boutique',
+    ] as $area) {
         assert_true(BusinessSite::matches(['area' => $area, 'site_type' => '']), "area={$area}");
     }
+});
+
+test('BusinessSite matches an all-caps café title via Unicode lowercasing', function () {
+    assert_true(BusinessSite::matches(['title' => 'CAFÉ MODERNE']));
+});
+
+test('BusinessSite rejects an empty spec', function () {
+    assert_true(!BusinessSite::matches([]));
+    assert_true(!BusinessSite::matches(['name' => 'Solo']));
 });
 
 test('BusinessSite rejects a personal site with persona_name', function () {

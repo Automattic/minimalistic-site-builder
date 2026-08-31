@@ -196,9 +196,11 @@ final class ImageTransparency
     }
 
     /**
-     * True when all four corner pixels are fully transparent. A successful
-     * keyOutBackground ends in trimToInk(), which leaves a transparent pad,
-     * so opaque corners mean the key was abandoned (or ink runs edge to edge).
+     * True when all four corner pixels are transparent within 0.01. PNG
+     * quantisation does not guarantee exact-zero alpha, so a keyed mark whose
+     * corners land at 1/255 must still count. A successful keyOutBackground
+     * ends in trimToInk(), which leaves a transparent pad, so opaque corners
+     * mean the key was abandoned (or ink runs edge to edge).
      */
     public static function isKeyed(string $pngBytes): bool
     {
@@ -214,7 +216,7 @@ final class ImageTransparency
                 return false;
             }
             foreach ([[0, 0], [$w - 1, 0], [0, $h - 1], [$w - 1, $h - 1]] as [$x, $y]) {
-                if ($im->getImagePixelColor($x, $y)->getColorValue(\Imagick::COLOR_ALPHA) > 0.0) {
+                if ($im->getImagePixelColor($x, $y)->getColorValue(\Imagick::COLOR_ALPHA) > 0.01) {
                     return false;
                 }
             }

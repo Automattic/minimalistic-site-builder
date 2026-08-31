@@ -1349,3 +1349,56 @@ test('generate-images drops the site-logo role when keying wipes out', function 
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('generate-images drops the site-logo role when Imagick is unavailable', function () {
+    if (\Automattic\SiteBuild\ImageTransparency::available()) {
+        skip_test('imagick is loaded; this pin is the no-extension path');
+    }
+    [$project, $tmp] = generate_fixture();
+    // 1x1 opaque white PNG, so the test does not need Imagick to build a fixture.
+    $white = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABAQAAAAA3bvkkAAAAIGNIUk0AAHomAACAhAAA+gAAAIDoAAB1MAAA6mAAADqYAAAXcJy6UTwAAAACYktHRAAB3YoTpAAAAApJREFUCNdjaAAAAIIAgd1DavQAAAAASUVORK5CYII=');
+    $project->writeJson('images.json', [[
+        'filename' => 'site-logo.png',
+        'src' => 'theme:./assets/site-logo.png',
+        'subject' => 'simple geometric brand mark for bakery, no letters',
+        'pageContext' => 'site logo',
+        'style' => 'flat',
+        'aspectRatio' => 'square',
+        'status' => 'pending',
+        'sources' => [],
+        'role' => 'site-logo',
+    ]]);
+    $project->writeJson('plugin/images.json', ['images' => [
+        ['filename' => 'site-logo.png', 'title' => 'Site logo', 'role' => 'site-logo'],
+    ]]);
+    $images = new FakeImageClient($white);
+
+    (new GenerateImagesStep($images))->run($project);
+
+    $logo = $project->readJson('images.json')[0];
+    assert_true(!isset($logo['role']), 'unkeyed path must drop the role when keying never ran');
+    assert_true(!$project->exists('plugin/images/site-logo.png'), 'opaque mark is not shipped');
+    assert_eq(['images' => []], $project->readJson('plugin/images.json'));
+    $warnings = implode("\n", $project->readJson('warnings.json')['generate-images']);
+    assert_contains('unkeyed', $warnings);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images keeps a missing content image in the plugin manifest', function () {
+    [$project, $tmp] = generate_fixture();
+    $project->writeJson('plugin/images.json', ['images' => [
+        ['filename' => 'hero.jpg', 'title' => 'A bakery at dawn'],
+        ['filename' => 'crumb.jpg', 'title' => 'Crumb detail'],
+    ]]);
+    $images = new FakeImageClient('JPEGDATA');
+
+    (new GenerateImagesStep($images))->run($project);
+
+    $names = array_column($project->readJson('plugin/images.json')['images'], 'filename');
+    assert_true(in_array('crumb.jpg', $names, true), 'missing content row stays in the manifest');
+    assert_true($project->exists('plugin/images/hero.jpg'));
+    assert_true(!$project->exists('plugin/images/crumb.jpg'), 'absent theme asset is not copied');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

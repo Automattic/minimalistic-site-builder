@@ -277,6 +277,7 @@ final class GenerateImagesStep implements Step
         }
         $manifest = $project->readJson('plugin/images.json');
         $kept = [];
+        $droppedLogo = false;
         foreach ((array) ($manifest['images'] ?? []) as $image) {
             if (!is_array($image)) {
                 continue;
@@ -286,15 +287,17 @@ final class GenerateImagesStep implements Step
                 continue;
             }
             if (($image['role'] ?? '') === 'site-logo' && ($roles[$filename] ?? '') !== 'site-logo') {
+                $droppedLogo = true;
                 continue;
             }
-            if (!$project->exists('theme/assets/' . $filename)) {
-                continue;
+            if ($project->exists('theme/assets/' . $filename)) {
+                $project->writeText('plugin/images/' . $filename, $project->readText('theme/assets/' . $filename));
             }
-            $project->writeText('plugin/images/' . $filename, $project->readText('theme/assets/' . $filename));
             $kept[] = $image;
         }
-        $project->writeJson('plugin/images.json', ['images' => $kept]);
+        if ($droppedLogo) {
+            $project->writeJson('plugin/images.json', ['images' => $kept]);
+        }
     }
 
     /**
@@ -380,7 +383,7 @@ final class GenerateImagesStep implements Step
      *
      * @param list<string> $identities
      */
-    private static function safeSubjectMatter(string $candidate, array $identities): bool
+    public static function safeSubjectMatter(string $candidate, array $identities): bool
     {
         foreach ($identities as $identity) {
             if ($identity === '') {
@@ -594,7 +597,7 @@ final class GenerateImagesStep implements Step
                 // solid white background instead, keyed out here so the asset
                 // gets the transparency its .png promises.
                 $bytes = ImageTransparency::keyOutBackground($bytes);
-                if (($specs[$i]['role'] ?? '') === 'site-logo' && ImageTransparency::available()) {
+                if (($specs[$i]['role'] ?? '') === 'site-logo') {
                     if (!ImageTransparency::isKeyed($bytes)) {
                         unset($specs[$i]['role']);
                         $project->addWarnings($this->id(), [

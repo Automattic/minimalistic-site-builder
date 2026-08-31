@@ -684,16 +684,16 @@ final class ScaffoldPluginStep implements Step
                 wp_delete_post((int) $id, true);
             }
 
-            if (!empty($state['changed_logo'])) {
-                $owned = isset($state['logo_attachment_id'])
-                    && (int) get_theme_mod('custom_logo') === (int) $state['logo_attachment_id']
-                    && (int) get_option('site_icon') === (int) $state['logo_attachment_id'];
-                if ($owned) {
+            if (!empty($state['changed_logo']) && isset($state['logo_attachment_id'])) {
+                $id = (int) $state['logo_attachment_id'];
+                if ((int) get_theme_mod('custom_logo') === $id) {
                     if (empty($state['custom_logo'])) {
                         remove_theme_mod('custom_logo');
                     } else {
                         set_theme_mod('custom_logo', $state['custom_logo']);
                     }
+                }
+                if ((int) get_option('site_icon') === $id) {
                     if (empty($state['site_icon'])) {
                         delete_option('site_icon');
                     } else {

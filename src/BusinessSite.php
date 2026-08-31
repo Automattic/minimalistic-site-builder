@@ -27,13 +27,13 @@ final class BusinessSite
             return false;
         }
 
-        $kind = strtolower(implode("\n", [
+        $kind = mb_strtolower(implode("\n", [
             (string) ($siteSpec['area'] ?? ''),
             (string) ($siteSpec['topic'] ?? ''),
             (string) ($siteSpec['site_type'] ?? ''),
             (string) ($siteSpec['title'] ?? ''),
             (string) ($siteSpec['name'] ?? ''),
-        ]));
+        ]), 'UTF-8');
 
         return preg_match(
             '/\b(?:business(?:es)?|storefronts?|shops?|stores?|retail(?:ers?)?|restaurants?|cafés?|cafes?|baker(?:y|ies)|bars?|salons?|spas?|clinics?|gyms?|studios?|agenc(?:y|ies)|consultanc(?:y|ies)|firms?|saas|hotels?|boutiques?)\b/u',

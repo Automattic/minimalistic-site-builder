@@ -100,7 +100,7 @@ Shape (same keys as a collected placeholder, plus `role`):
 
 > simple geometric brand mark for a neighborhood bakery, warm rustic mood, single ink, no letters, no numerals, no wordmark, no signage
 
-`GenerateImagesStep::siteContext()` already omits the site name. Do not pass the name into the logo subject.
+`GenerateImagesStep::siteContext()` already omits the site name. Do not pass the name into the logo subject. `topic`, `area`, and `visual_vibe` are free prose and can still carry the identity ("Hearth & Crumb's sourdough programme"); compose the subject through `GenerateImagesStep::safeSubjectMatter()` and fall back to `a small business` (and drop the vibe suffix) when a candidate repeats `name`, `persona_name`, or `email_domain`.
 
 ## Site-logo post-process
 
@@ -120,13 +120,13 @@ New: `ImageTransparency::padToSquare(string $pngBytes, int $minSide = 512): stri
 
 `keyOutBackground()` abandons the key and returns its input when the alpha mean falls under 0.05% of quantum (`ImageTransparency.php:142-144`) — a true wipeout keyed everything away. For a flourish that degrades quietly. For a mark that replaces the site title it delivers an **opaque white square in the header**, with the title hidden behind it.
 
-New: `ImageTransparency::isKeyed(string $pngBytes): bool` — true when all four corner pixels are fully transparent. A successful key always ends in `trimToInk()`, which guarantees a transparent pad of at least 2px on every side, so opaque corners mean the key was abandoned (or the ink runs edge to edge, which is equally unusable as a mark).
+New: `ImageTransparency::isKeyed(string $pngBytes): bool` — true when all four corner pixels have alpha `<= 0.01`. PNG quantisation does not guarantee exact-zero; the same epsilon the rest of `ImageTransparency` tests use. A successful key always ends in `trimToInk()`, which guarantees a transparent pad of at least 2px on every side, so opaque corners mean the key was abandoned (or the ink runs edge to edge, which is equally unusable as a mark). Without Imagick, `isKeyed()` returns false.
 
 When `isKeyed()` is false for the site-logo role: warn, `unset($specs[$i]['role'])` so `images.json` stops claiming it, and let the rest of `finish()` run as normal. The file still lands in `theme/assets/` — it is a completed generation, just not a usable mark.
 
 ### Reconciliation
 
-`shipPluginImages()` (`GenerateImagesStep.php:264`) currently copies every manifest filename that exists. It gains one rule: a `plugin/images.json` row tagged `role: site-logo` survives only while the matching `images.json` spec still carries `role: site-logo`. Otherwise the row is dropped from the manifest and the file is not copied, so the seeder never sees it. `plugin/images.json` joins the step's `writes`.
+`shipPluginImages()` (`GenerateImagesStep.php:264`) currently copies every manifest filename that exists. It gains one rule: a `plugin/images.json` row tagged `role: site-logo` survives only while the matching `images.json` spec still carries `role: site-logo`. Otherwise the row is dropped from the manifest and the file is not copied, so the seeder never sees it. Rewrite the artifact only when a site-logo row was actually dropped — a missing ordinary content file still skips the copy and leaves its manifest row. `plugin/images.json` joins the step's `writes`.
 
 `images.json` is written (`writeJsonAtomic`, `GenerateImagesStep.php:247`) immediately before `shipPluginImages()` runs, so the role is already current by then.
 
@@ -152,7 +152,7 @@ The title is fixed, not the subject. `title` becomes the attachment's `post_titl
 
 `HeaderHeroStep`, business sites only:
 
-- If the header has no `wp:site-logo`, insert `<!-- wp:site-logo {"width":48,"shouldSyncIcon":true,"className":"site-logo-mark"} /-->` immediately before the first `wp:site-title` (sibling, same parent). If there is no site-title, insert at the start of the identity cluster (`site-title` / `site-logo` / `site-tagline` group that `HeaderNav` already treats as chrome).
+- If the header has no `wp:site-logo`, insert `<!-- wp:site-logo {"width":48,"shouldSyncIcon":true,"className":"site-logo-mark"} /-->` immediately before the first `wp:site-title` (sibling, same parent). If there is no site-title, insert at the start of the root group wrapper (after the opening `<div>`), not before the group comment — a prepend there fails the HTML-first safe-wrapper check. This branch only runs when there is no identity cluster to find.
 - Do not remove `wp:site-title`.
 - Non-business headers: do not add an empty logo slot.
 
@@ -183,6 +183,8 @@ Both selectors are needed: `shellClassName()` only emits `site-header-shell` for
 
 The rule is emitted for every theme. It is inert without the class, so no gate on `BusinessSite` is required in this step.
 
+The editor deliberately does **not** get this rule. `add_editor_style` still mirrors `style.css`; the inline hide stays on the front-end `wp_enqueue_scripts` callback so a business header in the site editor keeps the title visible and editable. Removing the custom logo there must still reveal the title the visitor will see.
+
 The `.site-logo-mark` qualifier is what keeps this from being a site-wide behaviour change. Without it the rule fires on any logo a site owner later uploads — including the `branded-lockup` archetype (`prompts/header.md:29`), which deliberately pairs `wp:site-logo` **beside** `wp:site-title` as one unit. A designed lockup keeps its wordmark; only a mark this pipeline injected replaces the title. `header.md:43` ("the wp:site-title always carries the identity") stays true for every header this step did not touch.
 
 Footer uses a `footer` landmark and is unaffected. Tagline is not hidden. Removing the custom logo in the editor removes the `img`; the title returns. The same happens when generation or import never set `custom_logo`.
@@ -204,7 +206,7 @@ Footer uses a `footer` landmark and is unaffected. Tagline is not hidden. Removi
 
 On deactivation, **before** the `wp_delete_attachment()` loop (`ScaffoldPluginStep.php:653-656`), so no mod ever points at a deleted id:
 
-- Only when `changed_logo` is set **and** the live value still equals `logo_attachment_id`. A site owner who picked their own logo after activation keeps it. This is the shape `changed_front` already uses for the front-page restore (`ScaffoldPluginStep.php:684`), extended with an ownership check because a logo, unlike the front page, is a thing owners routinely change.
+- When `changed_logo` is set, restore `custom_logo` and `site_icon` independently: each is restored only while its live value still equals `logo_attachment_id`. An owner who changed only the site icon keeps that icon; the still-owned logo is cleared so the upcoming attachment delete cannot leave a dangling theme mod. This is the shape `changed_front` already uses for the front-page restore (`ScaffoldPluginStep.php:684`), extended with a per-setting ownership check because a logo, unlike the front page, is a thing owners routinely change.
 - Restore the recorded `custom_logo` (`remove_theme_mod('custom_logo')` when there was none) and `site_icon` (`delete_option('site_icon')` when there was none).
 
 Then delete seeded attachments and pages as today.
@@ -223,6 +225,7 @@ Generated-content ladder: never abort the build for a missing or bad mark.
 | `--with-images` skipped | spec sits pending; manifest row has no file; seeder finds nothing; no mods; title visible |
 | `site-logo.png` generate failed | existing generate-images warning; no file; no mods; title visible |
 | Keying wiped out (mark came back opaque) | warn; `role` dropped; manifest row removed; nothing shipped or imported; no mods; title visible |
+| Imagick unavailable | warn; `role` dropped; no mark shipped or imported; no mods; title visible |
 | Import failed | no mods; title visible; no extra abort |
 | Header missing | warn; continue |
 
@@ -232,14 +235,14 @@ Generated-content ladder: never abort the build for a missing or bad mark.
 
 Suites: `tests/run.php` (unit) and `tests/run-integration.php` (integration). Both must pass.
 
-- `BusinessSite` matrix (table above), including the prompt-only photographer case.
-- `collect-images` appends `site-logo.png` + `role` only for a business spec; personal and photography fixtures do not gain the row; a pre-existing `site-logo.png` placeholder is left untagged and warned.
+- `BusinessSite` matrix (table above), including the prompt-only photographer case, an empty spec, an all-caps `CAFÉ` title, and every allowlist token.
+- `collect-images` appends `site-logo.png` + `role` only for a business spec; personal and photography fixtures do not gain the row; a pre-existing `site-logo.png` placeholder is left untagged and warned; identity-bearing `area`/`topic`/`visual_vibe` fall back rather than entering the subject.
 - `ImageTransparency::padToSquare` centres a non-square bitmap on a transparent square at `max(w, h, 512)` without resampling, and returns its input unchanged on failure.
-- `ImageTransparency::isKeyed` is false for a fully opaque PNG and true for one with transparent corners.
+- `ImageTransparency::isKeyed` is false for a fully opaque PNG, true for one with transparent corners, and true when those corners quantise to a small non-zero alpha (`< 0.01`).
 - `generate-images` square-pads only the `site-logo` role, and on an unkeyed mark drops the role, removes the manifest row, and does not copy the file.
-- `assemble-pages` puts the role-tagged row in `plugin/images.json` even when page HTML does not reference it; content-only images stay without `role`; the manifest title is `Site logo`.
-- `generate-images` ships `site-logo.png` to `plugin/images/` when the manifest lists it and the mark is keyed (same as `hero.jpg` today).
-- Scaffolded plugin PHP contains the theme-assets fallback with its own containment guard, the `custom_logo` / `site_icon` writes, and a deactivate restore that is skipped when the live value no longer matches `logo_attachment_id`.
+- `assemble-pages` puts the role-tagged row in `plugin/images.json` even when page HTML does not reference it; content-only images stay without `role`; the manifest title is `Site logo`; a content row whose filename is also tagged `site-logo` keeps its subject title and is not retagged.
+- `generate-images` ships `site-logo.png` to `plugin/images/` when the manifest lists it and the mark is keyed (same as `hero.jpg` today); drops the role and warns when Imagick is missing or the key never ran; leaves missing ordinary content rows in the manifest.
+- Scaffolded plugin PHP contains the theme-assets fallback with its own containment guard, the `custom_logo` / `site_icon` writes, and a deactivate restore that is skipped per setting when the live value no longer matches `logo_attachment_id` (changing only `site_icon` still restores `custom_logo`).
 - `header-hero` inserts `wp:site-logo` with `className: site-logo-mark` before `wp:site-title` for business sites and leaves a personal-site header unchanged.
 - `finalize-theme` emits the `:has(.wp-block-site-logo.site-logo-mark img)` rule, and an authored lockup without the class keeps its title.
 - Re-pin the `src/Steps/AssemblePagesStep.php` sha256 at `tests/integration/dp_slice3_section_mode_test.php:154`. `contentImages()` changes in this work, and that assertion fails until the hash is updated.

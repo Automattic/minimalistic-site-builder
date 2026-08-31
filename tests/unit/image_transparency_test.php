@@ -254,3 +254,23 @@ test('isKeyed is true when every corner is fully transparent', function () {
 test('isKeyed is false for a fully opaque PNG', function () {
     assert_true(!ImageTransparency::isKeyed(transparency_fixture('white', 'red', 60, 60)));
 });
+
+test('isKeyed treats near-transparent corners as keyed', function () {
+    $im = new Imagick();
+    $im->newImage(60, 60, new ImagickPixel('transparent'));
+    $draw = new ImagickDraw();
+    $draw->setFillColor(new ImagickPixel('red'));
+    $draw->rectangle(20, 20, 40, 40);
+    $im->drawImage($draw);
+    $dust = new ImagickPixel('transparent');
+    $dust->setColorValue(Imagick::COLOR_ALPHA, 2 / 255);
+    foreach ([[0, 0], [59, 0], [0, 59], [59, 59]] as [$x, $y]) {
+        $im->setImagePixelColor($x, $y, $dust);
+    }
+    $im->setImageFormat('png');
+    $bytes = $im->getImageBlob();
+
+    assert_true(alpha_at($bytes, 0, 0) > 0.0, 'fixture corner is not exact-zero');
+    assert_true(alpha_at($bytes, 0, 0) < 0.01, 'fixture corner stays inside the 0.01 epsilon');
+    assert_true(ImageTransparency::isKeyed($bytes), 'PNG quantisation dust must not drop a keyed mark');
+});
