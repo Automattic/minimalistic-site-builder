@@ -133,6 +133,38 @@ test('I-G5 site-build Skill creates multi-page projects only at creation time', 
     assert_true(!str_contains($steps[0], '--multi-page'), 'per-step calls inherit the recorded mode');
 });
 
+test('site-build Skill previews on Studio without a build command that can block', function () {
+    $bytes = file_get_contents(plugin_manifest_root() . '/skills/site-build/SKILL.md');
+    assert_true(is_string($bytes));
+
+    // A build that serves Playground blocks until interrupted, so every
+    // step-running build form opts out and preview is its own call.
+    preg_match_all('/^SITE_BUILD_LLM=.*php .*bin\/build\.php.*$/m', $bytes, $matches);
+    $spending = array_values(array_filter(
+        $matches[0],
+        static fn (string $line): bool => !str_contains($line, '--transport')
+            && !str_contains($line, '--list-steps'),
+    ));
+    assert_true($spending !== [], 'Skill includes step-running build commands');
+    foreach ($spending as $line) {
+        assert_contains('--no-serve', $line, 'every step-running build form opts out of the built-in preview');
+    }
+
+    preg_match_all('/\bphp\s+(?<target>\S*bin\/serve\.php\S*)/', $bytes, $serve);
+    assert_true($serve['target'] !== [], 'Skill includes a preview invocation');
+    foreach ($serve['target'] as $target) {
+        assert_eq('"$SITE_BUILD_HOME/bin/serve.php"', $target, 'preview invocation uses the resolved root');
+    }
+
+    // Forcing the runner is what turns an absent Studio into exit 1 instead of
+    // a Playground server the tool call waits on forever.
+    assert_contains('bin/serve.php" PROJECT_SLUG --runner=studio', $bytes);
+    assert_contains('Studio is not available', $bytes);
+    assert_contains('SITE_BUILD_STUDIO_ROOT', $bytes, 'Skill names the Studio workspace override');
+    assert_contains('~/Studio', $bytes, 'Skill names the default Studio workspace');
+    assert_contains('bin/serve.php" PROJECT_SLUG --stop', $bytes);
+});
+
 test('I-G6 site-build Skill states the provisioned image limitation without denying authentication', function () {
     $bytes = file_get_contents(plugin_manifest_root() . '/skills/site-build/SKILL.md');
     assert_true(is_string($bytes));

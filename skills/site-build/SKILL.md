@@ -97,7 +97,7 @@ A concurrent group is one top-level step. Its composite `id` is the value to run
 Take the first object in `steps`. Run the create command as one tool call, using its `id` as the inclusive stop:
 
 ```bash
-SITE_BUILD_LLM=codex-cli php "$SITE_BUILD_HOME/bin/build.php" "<site prompt>" --slug=PROJECT_SLUG --blocks-first --multi-page --until=FIRST_STEP_ID
+SITE_BUILD_LLM=codex-cli php "$SITE_BUILD_HOME/bin/build.php" "<site prompt>" --slug=PROJECT_SLUG --blocks-first --multi-page --no-serve --until=FIRST_STEP_ID
 ```
 
 `--multi-page` is a creation setting. The create call records it in `meta.json`, and every later `--step` call opens that project and inherits the recorded value. Do not repeat `--multi-page` on per-step calls, and do not add `--pages`; page selection remains the caller's choice.
@@ -115,7 +115,7 @@ step 1 of M: <first step label> — succeeded
 For each remaining object in the ordered `steps` array, run one new tool call. Do not put these commands inside one shell loop; separate calls are what make progress visible.
 
 ```bash
-SITE_BUILD_LLM=codex-cli php "$SITE_BUILD_HOME/bin/build.php" --slug=PROJECT_SLUG --step=STEP_ID
+SITE_BUILD_LLM=codex-cli php "$SITE_BUILD_HOME/bin/build.php" --slug=PROJECT_SLUG --no-serve --step=STEP_ID
 ```
 
 After each successful call, report its position and label:
@@ -133,27 +133,51 @@ If any create or step command exits non-zero, do not run later steps. Report `st
 The project can resume from the failed top-level ID because `--from` is inclusive:
 
 ```bash
-SITE_BUILD_LLM=codex-cli php "$SITE_BUILD_HOME/bin/build.php" --slug=PROJECT_SLUG --from=FAILED_STEP_ID
+SITE_BUILD_LLM=codex-cli php "$SITE_BUILD_HOME/bin/build.php" --slug=PROJECT_SLUG --no-serve --from=FAILED_STEP_ID
 ```
 
 For a progress-visible resume, enumerate the recorded project again, find `FAILED_STEP_ID`, and restart the separate `--step` calls at that entry. Never silently continue after a failure or switch transports.
+
+## Spin the finished site up in Studio
+
+Every build command in this Skill passes `--no-serve`. Preview is one explicit call after the last step, so a half-built project is never booted and no build command blocks waiting to be interrupted.
+
+Studio is the site runner whenever it is installed and answering. Run this as its own tool call once the last step succeeds:
+
+```bash
+php "$SITE_BUILD_HOME/bin/serve.php" PROJECT_SLUG --runner=studio
+```
+
+This creates the site inside the Studio workspace — `$SITE_BUILD_STUDIO_ROOT` when that is set, otherwise `~/Studio` — as `<workspace>/PROJECT_SLUG`, installs the generated theme into it, and registers it with Studio so it appears in the Studio app beside hand-made sites. A directory already there is deleted and rebuilt only when site-builder created it under that same slug. Anything else — a hand-made Studio site, a symlink, an unmarked or mismatched directory — is refused, and the command exits telling you to pick a different slug or clear that directory yourself.
+
+`--runner=studio` is required. Without it an absent Studio silently falls back to Playground, whose server holds the foreground until it is interrupted, and the tool call never returns. With it, an absent Studio exits 1 reporting `Studio is not available` and nothing starts.
+
+On success the command prints the site URL, the admin URL, and the stop command, then exits. A Studio site is persistent: it keeps running after the command returns. Report the site URL.
+
+Stop it later with:
+
+```bash
+php "$SITE_BUILD_HOME/bin/serve.php" PROJECT_SLUG --stop
+```
+
+If the command exits 1 because Studio is not available, report that and stop. The generated theme is complete on disk at `$SITE_BUILD_HOME/projects/PROJECT_SLUG/theme`, and the same command previews it once Studio is installed. Never substitute Playground from this Skill.
 
 ## Run the whole build in one call
 
 Use the single-shot form only when the caller does not need progress between steps:
 
 ```bash
-SITE_BUILD_LLM=codex-cli php "$SITE_BUILD_HOME/bin/build.php" "<site prompt>" --slug=PROJECT_SLUG --blocks-first --multi-page
+SITE_BUILD_LLM=codex-cli php "$SITE_BUILD_HOME/bin/build.php" "<site prompt>" --slug=PROJECT_SLUG --blocks-first --multi-page --no-serve
 ```
 
 The ordinary resume and bounded-range forms remain available for non-interactive use:
 
 ```bash
 # Resume an existing project from a selected step through the end.
-SITE_BUILD_LLM=codex-cli php "$SITE_BUILD_HOME/bin/build.php" --slug=PROJECT_SLUG --from=STEP_ID
+SITE_BUILD_LLM=codex-cli php "$SITE_BUILD_HOME/bin/build.php" --slug=PROJECT_SLUG --no-serve --from=STEP_ID
 
 # Resume only an inclusive bounded range.
-SITE_BUILD_LLM=codex-cli php "$SITE_BUILD_HOME/bin/build.php" --slug=PROJECT_SLUG --from=START_STEP_ID --until=STOP_STEP_ID
+SITE_BUILD_LLM=codex-cli php "$SITE_BUILD_HOME/bin/build.php" --slug=PROJECT_SLUG --no-serve --from=START_STEP_ID --until=STOP_STEP_ID
 ```
 
 Replace every uppercase placeholder with the chosen slug or an exact ID from `--list-steps`. Combine these forms with other documented `bin/build.php` flags as needed. Keep invoking the CLI through `"$SITE_BUILD_HOME/bin/build.php"`.
