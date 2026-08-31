@@ -23,6 +23,61 @@ argues for itself: the idea, why the current catalog cannot express it, what it
 would be built from, and the risk it carries. Tick the ones worth building, add
 notes, and the page hands you the prompt that implements them.
 
+## How to use it to improve the designs
+
+The gallery is a review instrument, not a picture book. Open it when you want to
+answer one of three questions about the output of the generator.
+
+### 1. Do our sites look the same as each other?
+
+Open **What we can build** and read one card at a time. Each card shows the same
+archetype as it shipped on two or three different sites. Compare the examples
+inside one card, not the cards against each other.
+
+- The examples look alike. The recipe under-varies. Read its `facts` row first:
+  a recipe with one canvas, one media aspect and one surface can only draw one
+  picture, so widen those axes in `src/HeroComposition.php` or
+  `src/SectionComposition.php`. Then read its prompt fragment, one disclosure
+  below the brief. A fragment that lists example answers at a creative decision
+  herds every site onto the first one; state the constraint instead.
+- The examples look different but wrong. That is a pipeline defect, not a
+  variety defect. Open a Linear issue for the step that made it, and use the
+  screenshot as the evidence.
+- One archetype fills most of your sites. The selection is concentrated. Look at
+  the seed and the compatibility rules that choose it, not at the archetype.
+
+### 2. What can we not draw at all?
+
+Read the `facts` rows across one family and name the shape nobody offers. Then
+open **What we could build**. Every card there argues for itself: the idea, why
+the catalog cannot express it, what it would be built from, and the risk.
+
+- Nothing fits. Press **Add variety** and let the model find the widest gap, or
+  describe the composition you want and press **Draw it**.
+- Something fits. Tick it, write your notes in its box, and press **Copy prompt
+  for Claude Code**. The prompt names your picks, their mockup files, your
+  notes, and the archetypes you did *not* choose.
+
+Paste that prompt into a new session. It carries the whole decision, so the
+session that builds the archetype needs nothing else from you.
+
+### 3. Did the last change help?
+
+Rebuild the evidence and look again:
+
+```bash
+php bin/archetypes.php fill      # build sites that draw the archetypes you changed
+php bin/archetypes.php capture   # photograph what they drew
+php bin/archetypes.php           # look
+```
+
+Then record where each proposal ended up with `status`, so the queue shows real
+work and the model stops offering an idea you already settled.
+
+An empty card and a one-example card are both findings, not gaps in the tool. An
+empty card means the generator will not deliver that archetype from any brief
+you have. A one-example card means you cannot yet judge whether it varies.
+
 ## Commands
 
 | Command | What it does |

@@ -52,6 +52,8 @@ For mixed multi-page HTML-first builds, each `design/<slug>.failed` marker route
 
 Each archetype keeps several examples rather than one. One image proves an archetype exists; only a set of them shows how much it varies from brief to brief, which is the question a variety review asks. `capture` prefers examples from different sites and drops shots of archetypes the catalogs no longer own.
 
+Use it before you change a recipe for variety. Compare the examples **inside** one card: alike examples mean the recipe under-varies, and the fix is its axes in `HeroComposition`/`SectionComposition` or a prompt fragment that names one answer. Different-but-wrong examples are a pipeline defect for the step that made them, not a variety defect. "How to use it to improve the designs" in `docs/archetypes/README.md` walks the loop.
+
 The screenshots under `docs/archetypes/shots/` **are committed**, and they are the one exception to the rule below about keeping screenshots out of the repository: they are the tool's own assets rather than review evidence for a PR. They are capped at 1100px and stored as WebP. The gallery HTML is generated on every run and is not committed.
 
 ## Site runner
