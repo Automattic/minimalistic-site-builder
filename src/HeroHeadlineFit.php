@@ -784,7 +784,13 @@ final class HeroHeadlineFit
                 if (is_string($width)) {
                     $px = self::lengthPx($width);
                     if ($px !== null) {
-                        return $px * $share;
+                        // A px-width column wider than a constrained group it
+                        // holds does not widen that group: core still caps the
+                        // group's children at the global content size, so the
+                        // cap recorded above binds here too (BIGR-951 review
+                        // follow-up).
+                        $measure = $px * $share;
+                        return $globalCap === null ? $measure : min($measure, $globalCap);
                     }
                     if (preg_match('/^([\d.]+)%$/', trim($width), $m) && (float) $m[1] > 0) {
                         $share *= (float) $m[1] / 100.0;

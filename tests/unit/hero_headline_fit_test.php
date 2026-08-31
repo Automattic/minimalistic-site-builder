@@ -149,6 +149,22 @@ test('a constrained ancestor without its own contentSize caps the measure at the
     assert_contains('), 83px)', HeroHeadlineFit::apply($markup, $theme)['markup']);
 });
 
+test('a px-width column wider than the theme content size does not widen a constrained copy group', function () {
+    // The BIGR-951 review case: the copy group is constrained with no
+    // contentSize of its own, inside a column that states an 800px width.
+    // Core still caps the group's children at the 640px global content
+    // size, so the wide column must not become the measure.
+    $markup = hhf_hero(
+        'Two Nights of Electronic Immersion',
+        '"layout":{"type":"constrained"}',
+        '<!-- wp:columns --><div class="wp-block-columns">'
+            . '<!-- wp:column {"width":"800px"} --><div class="wp-block-column">',
+        '</div><!-- /wp:column --></div><!-- /wp:columns -->',
+    );
+    $theme = hhf_theme(['settings' => ['layout' => ['contentSize' => '640px']]]);
+    assert_contains('), 83px)', HeroHeadlineFit::apply($markup, $theme)['markup']);
+});
+
 test('the fit uses the theme content size when no ancestor names one', function () {
     $markup = hhf_hero('Two Nights of Electronic Immersion', '"layout":{"type":"constrained"}');
     $wide = HeroHeadlineFit::apply($markup, hhf_theme(['settings' => ['layout' => ['contentSize' => '1200px']]]));
