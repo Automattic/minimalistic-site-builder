@@ -223,13 +223,14 @@ final class ScaffoldThemeStep implements Step
            choosing to emit it. A site whose page-styles also writes the utility
            simply agrees with this.
 
-           Two guards make the pin safe. `align-self` opts the column out of the
-           row's default stretch, without which a full-height column can never
-           stick. `max-block-size` with a scroll keeps a lead column that
-           outgrew its copy budget reachable: a pinned column taller than the
-           viewport otherwise holds its own bottom permanently off screen. The
-           whole behavior is desktop-only, so the stacked state is an ordinary
-           column in source order. */
+           `align-self` opts the column out of the row's default stretch,
+           without which a full-height column can never stick. The column gets
+           no height clamp and no inner scroll: a nested scroll bar reads as a
+           defect. A pinned column taller than the viewport stays reachable
+           through the page scroll, because sticky positioning releases the
+           column when the section end comes into view. The whole behavior is
+           desktop-only, so the stacked state is an ordinary column in source
+           order. */
         .section-composition--asymmetric-split .wp-block-column.sticky-side {
             align-self: flex-start;
         }
@@ -237,9 +238,6 @@ final class ScaffoldThemeStep implements Step
             .section-composition--asymmetric-split .wp-block-column.sticky-side {
                 position: sticky;
                 top: var(--wp--preset--spacing--lg, 3rem);
-                max-block-size: calc(100vh - (var(--wp--preset--spacing--lg, 3rem) * 2));
-                overflow-y: auto;
-                overscroll-behavior: contain;
             }
         }
 
