@@ -51,6 +51,24 @@ test('finalize-theme writes the deterministic functions.php loader', function ()
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('finalize-theme inlines header title-hiding keyed on site-logo-mark', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fin_logo_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    $project->writeText('theme/style.css', "/*\nTheme Name: Forno Vero\n*/\n");
+    finalize_static_header($project);
+
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+
+    $php = $project->readText('theme/functions.php');
+    assert_contains("wp_add_inline_style('forno-vero-style'", $php);
+    assert_contains('.wp-block-site-logo.site-logo-mark img', $php);
+    assert_contains('.site-header-shell:has(', $php);
+    assert_contains('header:has(', $php);
+    assert_true(!str_contains($php, 'BusinessSite'), 'rule is inert without the class; no matcher in functions.php');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('finalize-theme keeps a hostile pattern category label inert', function () {
     $tmp = sys_get_temp_dir() . '/builder_fin_category_' . uniqid();
     $project = (new ProjectStore($tmp))->create('hostile');
