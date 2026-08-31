@@ -581,17 +581,6 @@ final class ScaffoldThemeStep implements Step
         .hero-composition--layered-poster {
             overflow: hidden;
         }
-        /* type-manifesto carries no image (BIGR-885), so the offset between the
-           wide headline and the narrower standfirst IS the composition. The
-           constrained layout centers every child of the copy region, and that
-           rule and this one have equal specificity, so the offset needs
-           !important to survive it. Logical properties keep the step on the
-           trailing side under both writing directions. */
-        .hero-composition--type-manifesto .hero-composition__standfirst {
-            max-width: 32rem !important;
-            margin-inline-start: auto !important;
-            margin-inline-end: 0 !important;
-        }
         /* Hero headlines wrap whole words (BIGR-864). `hyphens: auto` was
            here to prefer a language break over a mid-word snap, but it
            hyphenates at EVERY line-break opportunity, not only the impossible
@@ -693,12 +682,6 @@ final class ScaffoldThemeStep implements Step
             }
             .hero-mobile--retain-media-overlay .hero-composition__copy {
                 max-width: min(88%, 32rem);
-            }
-            /* One narrow screen cannot hold both a wide headline and an offset
-               column, so the standfirst returns to the reading edge. */
-            .hero-composition--type-manifesto .hero-composition__standfirst {
-                max-width: none !important;
-                margin-inline-start: 0 !important;
             }
         }
 

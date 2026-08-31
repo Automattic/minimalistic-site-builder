@@ -163,9 +163,10 @@ test('header override preflight rejects only incompatibility proven by caller-ow
     assert_throws(fn () => AboveFoldContract::validateHeaderArchetypePreflight('minimal-overlay', [
         'hero_canvas' => 'framed',
     ]));
-    assert_throws(fn () => AboveFoldContract::validateHeaderArchetypePreflight('minimal-overlay', [
-        'allowed_hero_media_modes' => ['none', 'foreground-image'],
+    $e = assert_throws(fn () => AboveFoldContract::validateHeaderArchetypePreflight('minimal-overlay', [
+        'allowed_hero_media_modes' => ['foreground-image'],
     ]));
+    assert_contains('no compatible cover/overlay hero recipe remains', $e->getMessage());
     assert_throws(fn () => AboveFoldContract::validateHeaderArchetypePreflight('minimal-overlay', [
         'max_hero_images' => 0,
     ]));
