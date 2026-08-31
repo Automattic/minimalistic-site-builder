@@ -289,10 +289,12 @@ test('isKeyed treats near-transparent corners as keyed', function () {
     $draw->setFillColor(new ImagickPixel('red'));
     $draw->rectangle(20, 20, 40, 40);
     $im->drawImage($draw);
-    $dust = new ImagickPixel('transparent');
-    $dust->setColorValue(Imagick::COLOR_ALPHA, 2 / 255);
+    // 2/255 alpha. Composite a 1x1 instead of setImagePixelColor(), which is
+    // missing from the Imagick build GitHub Actions ships.
+    $dust = new Imagick();
+    $dust->newImage(1, 1, new ImagickPixel('rgba(255, 255, 255, 0.007843)'));
     foreach ([[0, 0], [59, 0], [0, 59], [59, 59]] as [$x, $y]) {
-        $im->setImagePixelColor($x, $y, $dust);
+        $im->compositeImage($dust, Imagick::COMPOSITE_SRC, $x, $y);
     }
     $im->setImageFormat('png');
     $bytes = $im->getImageBlob();
