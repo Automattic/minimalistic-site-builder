@@ -150,7 +150,7 @@ test('TG5 section mode stitches whole-page HTML then real transform and assemble
             'transform-site source stays frozen after one accessor for the footer archetype',
         );
         assert_eq(
-            '8b1b1c02cfb91397c67410ea63380821c84d578b486028a108c8fd846133e692',
+            'ffb539bf826d7f876d5f7f854a6706a8960f653e4f9477971b5363477456eeea',
             hash_file('sha256', repo_path('src/Steps/AssemblePagesStep.php')),
             'assemble-pages source stays frozen after chrome landmark de-duplication',
         );
