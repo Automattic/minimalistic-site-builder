@@ -63,3 +63,15 @@ test('ImageCrop prompt guidance protects focal content without restating mixed',
     assert_eq('', ImageCrop::promptClause('mixed'));
     assert_eq('', ImageCrop::promptClause('garbled'));
 });
+
+test('ImageCrop prompt guidance speaks of the canvas, never of a frame', function () {
+    // "Frame" and "contained" read as a printed photo to the image model and
+    // sometimes come back as a painted white border (BIGR-956).
+    foreach (['landscape', 'portrait', 'square', 'panoramic'] as $crop) {
+        $clause = ImageCrop::promptClause($crop);
+        assert_contains('canvas out to every edge', $clause, "{$crop} fills its canvas");
+        foreach (['frame', 'border', 'contained'] as $print) {
+            assert_true(!str_contains(strtolower($clause), $print), "{$crop} does not say “{$print}”");
+        }
+    }
+});

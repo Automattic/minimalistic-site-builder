@@ -39,7 +39,7 @@ final class ImageLogger
      * @param string $label the asset filename the request produced, e.g. "hero.jpg"
      * @param array{model?:string,prompt?:string,aspect_ratio?:string,sample_image_size?:string,subject?:string,subject_delivered?:string,page_context?:string,style?:string,image_grade?:string} $request
      *        the composed prompt and every parameter that shaped the request
-     * @param array{path?:string,bytes?:int} $result output asset path and size
+     * @param array{path?:string,bytes?:int,border_trimmed?:int} $result output asset path, size and painted-border trim
      *        (ignored for a failed request)
      * @param ?string $error failure message, or null for a successful request
      */
@@ -60,7 +60,7 @@ final class ImageLogger
      * for a failed request — the error last. Pure — unit-testable.
      *
      * @param array{model?:string,prompt?:string,aspect_ratio?:string,sample_image_size?:string,subject?:string,subject_delivered?:string,page_context?:string,style?:string,image_grade?:string} $request
-     * @param array{path?:string,bytes?:int} $result
+     * @param array{path?:string,bytes?:int,border_trimmed?:int} $result
      * @param ?string $error failure message, or null for a successful request
      */
     public static function format(string $label, array $request, array $result = [], ?string $error = null): string
@@ -94,6 +94,11 @@ final class ImageLogger
                 $headerLines[] = 'Output       : '
                     . ($path !== '' ? $path : '(unknown)')
                     . ($bytes > 0 ? sprintf(' (%d bytes)', $bytes) : '');
+            }
+            $borderTrimmed = (int) ($result['border_trimmed'] ?? 0);
+            if ($borderTrimmed > 0) {
+                $headerLines[] = 'Border trim  : removed a painted '
+                    . $borderTrimmed . 'px print border (BIGR-956)';
             }
         }
         $header = implode("\n", $headerLines);
