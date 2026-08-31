@@ -473,8 +473,10 @@ test('scaffold-theme owns the guaranteed sticky-side pin rule', function () {
     assert_eq(1, $matched, 'the sticky part is gated to desktop widths');
     assert_contains('position: sticky', $rule['body']);
     assert_contains('top: var(--wp--preset--spacing--lg, 3rem)', $rule['body']);
-    assert_contains('max-block-size', $rule['body'], 'a tall pinned column stays reachable');
-    assert_contains('overflow-y: auto', $rule['body']);
+    // The pin must not clamp the column: a height clamp with an inner
+    // scroll draws a nested scroll bar on the lead column.
+    assert_eq(false, str_contains($rule['body'], 'max-block-size'), 'the pinned column has no height clamp');
+    assert_eq(false, str_contains($rule['body'], 'overflow'), 'the pinned column has no inner scroll');
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
