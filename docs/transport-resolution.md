@@ -89,11 +89,25 @@ All three subscription transports extend `HarnessCliLlm`. The base validates req
 
 | Transport | Invocation shape | Prompt delivery | Answer and usage |
 | --- | --- | --- | --- |
-| Claude | `claude -p --safe-mode --output-format json --model <model> --max-turns 2 --tools ""` | Standard input | `.result` and `.usage` from one JSON object |
-| Codex | `codex exec --ignore-user-config --skip-git-repo-check --json -o <file> -m <model>` | Standard input | Final text from the `-o` file; usage from the `turn.completed` JSONL event |
-| Grok | `grok --prompt-file <file> --output-format json -m <model>` | A private per-request prompt file | `.text` and `.usage` from one JSON object |
+| Claude | `claude -p --safe-mode --output-format json --model <model> --max-turns 2 --effort low --tools "" --settings '{"env":{"MAX_THINKING_TOKENS":"0"}}'` | Standard input | `.result` and `.usage` from one JSON object |
+| Codex | `codex exec --ignore-user-config --skip-git-repo-check --json -o <file> -m <model> -c model_reasoning_effort="none"` | Standard input | Final text from the `-o` file; usage from the `turn.completed` JSONL event |
+| Grok | `grok --prompt-file <file> --output-format json -m <model> --reasoning-effort low` | A private per-request prompt file | `.text` and `.usage` from one JSON object |
 
 Claude adds a non-blank `system` value through `--system-prompt` and an optional JSON schema inline through `--json-schema`. Two turns let the model think before producing structured output, while `--tools ""` prevents those additional turns from using coding-agent tools. Codex has no supported private system channel; it writes an optional JSON schema to a private per-request file and passes that file with `--output-schema`. Grok also has no supported private system channel; it passes an optional JSON schema inline with `--json-schema`.
+
+### Thinking and token limits
+
+The API path sends `thinking: {type: "disabled"}` and an explicit `max_tokens`, because the pipeline's latency and token budgets were tuned on non-thinking models. The harness path aims at the same behavior through whatever lever each CLI actually exposes. `HarnessCliLlm::THINKING_OFF` is the single switch; `HarnessCliLlm::REASONING_EFFORT` pins the level for anything that cannot turn thinking off outright.
+
+| CLI | Thinking lever | Result |
+| --- | --- | --- |
+| Claude | `--settings '{"env":{"MAX_THINKING_TOKENS":"0"}}'` | No thinking block emitted, on every model |
+| Codex | `-c model_reasoning_effort="none"` | `reasoning_output_tokens: 0` |
+| Grok | none exists — pinned to `--reasoning-effort low` | Lowest level its enum offers |
+
+`--effort` alone is not enough for Claude. It is accepted and then discarded for models older than Claude 5: a measured `claude-haiku-4-5` call passing `--effort low` recorded `effort: null` and spent 5,268 of its 6,308 output tokens on thinking, while the same call at `MAX_THINKING_TOKENS=0` spent none and returned 4.1x faster. `--effort` is still pinned because it fixes a separate problem — left unset, Claude inherits the developer's own `~/.claude/settings.json` `effortLevel`, so the same commit built at a different speed on a colleague's machine. Grok's effort enum is `xhigh|high|medium|low`; passing `none` exits non-zero with `unknown effort level`, so `low` is its floor and `THINKING_OFF` is unreachable there.
+
+**Token limits cannot be matched, and are deliberately not attempted.** No harness CLI exposes the API path's `max_tokens`. Claude's `CLAUDE_CODE_MAX_OUTPUT_TOKENS` is not equivalent and must not be substituted: exceeding it returns `is_error: true` with an `API Error:` string in place of the result, where `max_tokens` truncates and reports `stop_reason: max_tokens`. Wiring it in would convert a recoverable truncation — which `TextBatchRecovery` handles by doubling the budget and retrying — into a failed build, and would break `SectionsStep`'s deliberate `max_tokens => 1` probe. Codex ignores `-c model_max_output_tokens`, and Grok has no equivalent flag at all. So `max_tokens` stays validated and then disclosed as a degradation, which is the honest report of what the transport can do.
 
 The varying prompt body never appears in argv. Claude and Codex receive it on standard input. Grok receives only a path in argv, and the prompt file lives in a mode-0700 unique scratch directory. Scratch files and directories are removed after success, non-zero exit, parsing failure, or another exception.
 

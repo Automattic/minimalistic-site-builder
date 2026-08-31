@@ -32,9 +32,21 @@ final class ClaudeCliLlm extends HarnessCliLlm
             $model,
             '--max-turns',
             '2',
+            '--effort',
+            self::REASONING_EFFORT,
             '--tools',
             '',
         ];
+
+        if (self::THINKING_OFF) {
+            // --effort is dropped for models older than Claude 5 (Haiku 4.5
+            // records effort:null and thinks anyway); this env lever is not.
+            $argv[] = '--settings';
+            $argv[] = json_encode(
+                ['env' => ['MAX_THINKING_TOKENS' => '0']],
+                JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
+            );
+        }
 
         $system = $request['system'] ?? '';
         if (is_string($system) && trim($system) !== '') {

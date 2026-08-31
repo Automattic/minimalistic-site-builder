@@ -4,6 +4,7 @@ declare(strict_types=1);
 use Automattic\SiteBuild\ClaudeCliLlm;
 use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\HarnessCallFailed;
+use Automattic\SiteBuild\HarnessCliLlm;
 use Automattic\SiteBuild\Narrator;
 
 function claude_cli_fixture(string $name = 'claude-envelope.sh'): string
@@ -106,6 +107,25 @@ test('C-G15/C-G17 Claude allows two turns with all tools disabled and keeps opti
     $schema = array_search('--json-schema', $record['argv'], true);
     assert_true($schema !== false);
     assert_eq(['type' => 'object'], json_decode($record['argv'][$schema + 1], true, 512, JSON_THROW_ON_ERROR));
+});
+
+test('Claude pins reasoning effort instead of inheriting the developer settings', function (): void {
+    $record = claude_cli_record(claude_cli_llm()->complete('prompt'));
+    $indexes = array_keys($record['argv'], '--effort', true);
+    assert_eq(1, count($indexes), 'Claude argv must contain exactly one --effort');
+    assert_eq(HarnessCliLlm::REASONING_EFFORT, $record['argv'][$indexes[0] + 1] ?? null);
+    assert_eq('low', HarnessCliLlm::REASONING_EFFORT);
+});
+
+test('Claude disables thinking through the env lever --effort cannot reach', function (): void {
+    $record = claude_cli_record(claude_cli_llm()->complete('prompt'));
+    $indexes = array_keys($record['argv'], '--settings', true);
+    assert_eq(1, count($indexes), 'Claude argv must contain exactly one --settings');
+    assert_eq(
+        ['env' => ['MAX_THINKING_TOKENS' => '0']],
+        json_decode($record['argv'][$indexes[0] + 1] ?? '', true, 512, JSON_THROW_ON_ERROR),
+    );
+    assert_true(HarnessCliLlm::THINKING_OFF, 'thinking is off on the harness path');
 });
 
 test('W20 Claude honours system exactly without an unsupported-option disclosure', function (): void {

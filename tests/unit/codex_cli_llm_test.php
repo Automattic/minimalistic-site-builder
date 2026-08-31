@@ -384,6 +384,23 @@ test('Codex rejects a missing final output file', function (): void {
     }, 'codex-missing-output.sh');
 });
 
+test('Codex pins reasoning effort instead of inheriting the CLI default', function (): void {
+    codex_cli_environment(function (string $binary): void {
+        (new CodexCliLlm('m', $binary))->complete('effort-probe');
+        $argv = codex_cli_calls($binary)[0]['argv'];
+        $indexes = array_keys($argv, '-c', true);
+        assert_eq(1, count($indexes), 'Codex argv must contain exactly one -c');
+        // The value is parsed as TOML, so the level stays quoted. "none" is a
+        // real enum member, not a fallthrough to the CLI default.
+        assert_eq(
+            'model_reasoning_effort="none"',
+            $argv[$indexes[0] + 1] ?? null
+        );
+        assert_true(HarnessCliLlm::THINKING_OFF, 'thinking is off on the harness path');
+        assert_eq('low', HarnessCliLlm::REASONING_EFFORT);
+    });
+});
+
 test('Codex argv matches the measured exec invocation and carries no prompt', function (): void {
     codex_cli_environment(function (string $binary): void {
         (new CodexCliLlm('m', $binary))->complete('argv-probe');

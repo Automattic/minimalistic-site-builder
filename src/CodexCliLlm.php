@@ -34,6 +34,11 @@ final class CodexCliLlm extends HarnessCliLlm
             $outputPath,
             '-m',
             $model,
+            '-c',
+            // The enum accepts none|minimal|low|medium|high|xhigh|max, so
+            // disabling reasoning is one value rather than a second flag.
+            'model_reasoning_effort="'
+                . (self::THINKING_OFF ? 'none' : self::REASONING_EFFORT) . '"',
         ];
 
         $schema = $prepared['request']['json_schema']['schema'] ?? null;

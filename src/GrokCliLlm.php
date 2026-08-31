@@ -34,6 +34,10 @@ final class GrokCliLlm extends HarnessCliLlm
             'json',
             '-m',
             $model,
+            // Grok's effort enum is xhigh|high|medium|low with no "none", so
+            // THINKING_OFF cannot be honored here; low is the floor it offers.
+            '--reasoning-effort',
+            self::REASONING_EFFORT,
         ];
         $schema = $prepared['request']['json_schema']['schema'] ?? null;
         if (is_array($schema)) {

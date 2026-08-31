@@ -810,6 +810,26 @@ PHP,
 PHP,
     ],
     [
+        '38b harnesses inherit the developer reasoning effort',
+        'src/HarnessCliLlm.php',
+        <<<'PHP'
+    public const REASONING_EFFORT = 'low';
+PHP,
+        <<<'PHP'
+    public const REASONING_EFFORT = 'xhigh';
+PHP,
+    ],
+    [
+        '38c harness thinking is left on',
+        'src/HarnessCliLlm.php',
+        <<<'PHP'
+    public const THINKING_OFF = true;
+PHP,
+        <<<'PHP'
+    public const THINKING_OFF = false;
+PHP,
+    ],
+    [
         '39 Codex argv omits the pinned model',
         'src/CodexCliLlm.php',
         <<<'PHP'

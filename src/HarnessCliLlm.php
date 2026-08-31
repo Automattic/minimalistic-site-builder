@@ -13,6 +13,21 @@ abstract class HarnessCliLlm implements Llm, UsageReporting
 {
     public const DEFAULT_CONCURRENCY = 10;
 
+    /**
+     * Pinned reasoning effort for every harness call. Left unset, Claude reads the
+     * developer's own settings and Grok its per-model default, so one commit built
+     * at a different speed and produced different output on a colleague's machine.
+     */
+    public const REASONING_EFFORT = 'low';
+
+    /**
+     * Harness analogue of the API path's `thinking: {type: "disabled"}` — the
+     * pipeline's latency and token budgets were tuned on non-thinking models.
+     * Each CLI needs a different lever and Grok has no off switch, so it falls
+     * back to REASONING_EFFORT, its lowest level. See docs/transport-resolution.md.
+     */
+    public const THINKING_OFF = true;
+
     /** Child environment is replacement, not inherited; provider keys never enter it. */
     private const ENV_ALLOWLIST = [
         'PATH',

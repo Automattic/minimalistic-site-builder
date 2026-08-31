@@ -283,6 +283,23 @@ test('Grok passes json_schema as exact inline JSON', function (): void {
     });
 });
 
+test('Grok pins reasoning effort instead of inheriting the CLI default', function (): void {
+    with_grok_cli_fixture('grok-envelope.sh', function (string $binary): void {
+        (new GrokCliLlm('grok-4.6', $binary))->complete('success');
+        $argv = grok_cli_records($binary)[0]['argv'];
+        $indexes = array_keys($argv, '--reasoning-effort', true);
+        assert_eq(1, count($indexes), 'Grok argv must contain exactly one --reasoning-effort');
+        assert_eq(HarnessCliLlm::REASONING_EFFORT, $argv[$indexes[0] + 1] ?? null);
+        assert_eq('low', HarnessCliLlm::REASONING_EFFORT);
+        // Grok's enum has no "none", so THINKING_OFF must not leak a value its
+        // CLI rejects with "unknown effort level" and a non-zero exit.
+        assert_true(
+            !in_array('none', $argv, true),
+            'Grok has no none level; low is its floor',
+        );
+    });
+});
+
 test('W7 Grok removes scratch files after success', function (): void {
     with_grok_cli_fixture('grok-envelope.sh', function (string $binary, string $scratchRoot): void {
         $before = grok_cli_scratch_entries($scratchRoot);
