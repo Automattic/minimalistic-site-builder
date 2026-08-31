@@ -2779,3 +2779,73 @@ test('a stale media-aspect marker on an authored hero is replaced, not doubled (
         );
     });
 });
+
+test('ensureSiteLogoMark inserts a tagged site-logo before the site title', function () {
+    $in = hh_header('{"layout":{"type":"flex"}}', '<!-- wp:site-title /-->');
+    $out = HeaderHeroStep::ensureSiteLogoMark($in);
+    assert_contains('<!-- wp:site-logo {"width":48,"shouldSyncIcon":true,"className":"site-logo-mark"} /-->', $out);
+    $logoAt = strpos($out, 'wp:site-logo');
+    $titleAt = strpos($out, 'wp:site-title');
+    assert_true($logoAt !== false && $titleAt !== false && $logoAt < $titleAt);
+    assert_eq($out, HeaderHeroStep::ensureSiteLogoMark($out), 'idempotent when a logo already exists');
+});
+
+test('ensureSiteLogoMark does not retag an authored branded-lockup logo', function () {
+    $in = hh_header(
+        '{"layout":{"type":"flex"}}',
+        '<!-- wp:site-logo {"width":48,"shouldSyncIcon":true} /-->' . "\n" . '<!-- wp:site-title /-->'
+    );
+    $out = HeaderHeroStep::ensureSiteLogoMark($in);
+    assert_eq($in, $out);
+    assert_true(!str_contains($out, 'site-logo-mark'));
+});
+
+test('header-hero injects the mark on a business site and not on a personal site', function () {
+    with_project('builder_hh_logo_', function ($project) {
+        $project->writeJson('siteSpec.json', [
+            'name' => 'Hearth & Crumb', 'site_type' => 'business storefront',
+            'area' => 'bakery', 'persona_name' => '',
+        ]);
+        $project->writeJson('meta.json', ['prompt' => 'A neighborhood bakery']);
+        $project->writeJson('theme/theme.json', hh_theme_json());
+        $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'none']);
+        $pages = [[
+            'slug' => 'home', 'title' => 'Home', 'front' => true,
+            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+        ]];
+        $project->writeJson('pages.json', ['pages' => $pages]);
+        hh_above_fold($project, $pages, 'foreground-split');
+        $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
+        $project->writeText('theme/parts/page-home--hero.html', hh_cover('80') . "\n");
+
+        putenv(\Automattic\SiteBuild\AboveFoldContract::HEADER_ARCHETYPE_ENV);
+        (new HeaderHeroStep())->run($project);
+
+        $header = $project->readText('theme/parts/header.html');
+        assert_contains('site-logo-mark', $header);
+        assert_contains('wp:site-title', $header);
+    });
+
+    with_project('builder_hh_nologo_', function ($project) {
+        $project->writeJson('siteSpec.json', [
+            'name' => 'Ada', 'persona_name' => 'Ada Lovelace',
+            'site_type' => 'portfolio', 'area' => 'studio',
+        ]);
+        $project->writeJson('meta.json', ['prompt' => 'My paintings']);
+        $project->writeJson('theme/theme.json', hh_theme_json());
+        $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'none']);
+        $pages = [[
+            'slug' => 'home', 'title' => 'Home', 'front' => true,
+            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+        ]];
+        $project->writeJson('pages.json', ['pages' => $pages]);
+        hh_above_fold($project, $pages, 'foreground-split');
+        $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
+        $project->writeText('theme/parts/page-home--hero.html', hh_cover('80') . "\n");
+
+        putenv(\Automattic\SiteBuild\AboveFoldContract::HEADER_ARCHETYPE_ENV);
+        (new HeaderHeroStep())->run($project);
+
+        assert_true(!str_contains($project->readText('theme/parts/header.html'), 'wp:site-logo'));
+    });
+});
