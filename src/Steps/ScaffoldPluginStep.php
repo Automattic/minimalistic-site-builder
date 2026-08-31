@@ -101,6 +101,17 @@ final class ScaffoldPluginStep implements Step
         register_deactivation_hook(__FILE__, '{{FN_PREFIX}}_content_deactivate');
         add_action('init', '{{FN_PREFIX}}_content_register_companion_blocks');
 
+        add_filter('jetpack_sync_post_meta_whitelist', '{{FN_PREFIX}}_content_sync_marker');
+
+        /**
+         * The marker has to travel with the content when the site syncs, so
+         * analytics on the receiving end can classify seeded publishes.
+         */
+        function {{FN_PREFIX}}_content_sync_marker($keys) {
+            $keys[] = '_wpcom_ai_generated_post';
+            return $keys;
+        }
+
         /** Register the fixed companion blocks emitted by the transformer. */
         function {{FN_PREFIX}}_content_register_companion_blocks() {
             if (!function_exists('register_block_type') || !class_exists('WP_Block_Type_Registry')) {
@@ -238,6 +249,9 @@ final class ScaffoldPluginStep implements Step
                     // Parents precede children in the manifest, so the id map
                     // already holds the parent when a child is inserted.
                     'post_parent'  => isset($ids[$parent_slug]) ? $ids[$parent_slug] : 0,
+                    // Marks seeder-created content so analytics can tell these
+                    // publishes from the site owner's.
+                    'meta_input'   => array('_wpcom_ai_generated_post' => '1'),
                 ), true);
                 if (is_wp_error($id) || !$id) {
                     continue;
@@ -316,6 +330,7 @@ final class ScaffoldPluginStep implements Step
                     'post_mime_type' => !empty($type['type']) ? (string) $type['type'] : 'image/jpeg',
                     'post_title'     => isset($image['title']) && $image['title'] !== '' ? (string) $image['title'] : $filename,
                     'post_status'    => 'inherit',
+                    'meta_input'     => array('_wpcom_ai_generated_post' => '1'),
                 ), $upload['file']);
                 if (is_wp_error($attachment_id) || !$attachment_id) {
                     continue;
@@ -656,7 +671,13 @@ final class ScaffoldPluginStep implements Step
                     $restore['ID'] = (int) $entry;
                 }
                 if ($restore['ID'] > 0) {
+                    // The republish is this plugin's doing, not the site
+                    // owner's. Carry the marker only for the duration of the
+                    // update so the resulting publish is billed to AI seeding,
+                    // then remove it — the post itself is not ours.
+                    update_post_meta($restore['ID'], '_wpcom_ai_generated_post', '1');
                     wp_update_post($restore);
+                    delete_post_meta($restore['ID'], '_wpcom_ai_generated_post');
                 }
             }
 

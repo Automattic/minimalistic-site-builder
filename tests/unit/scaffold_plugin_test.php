@@ -202,6 +202,16 @@ if (!function_exists('get_option')) {
         $GLOBALS['wp_filters'][$hook][$callback] = $priority;
         return true;
     }
+    function update_post_meta(int $post_id, string $key, $value): bool
+    {
+        $GLOBALS['wp_post_meta'][$post_id][$key] = $value;
+        return true;
+    }
+    function delete_post_meta(int $post_id, string $key): bool
+    {
+        unset($GLOBALS['wp_post_meta'][$post_id][$key]);
+        return true;
+    }
     function flush_rewrite_rules(): void
     {
     }
@@ -360,6 +370,19 @@ test('scaffold-plugin writes the static seeder with identity placeholders', func
     // Path-traversal guard on images.json filenames (basename + charset + realpath).
     assert_contains('basename($filename)', $php);
     assert_contains('realpath($path)', $php);
+
+    // Every post the seeder creates carries the marker analytics uses to
+    // tell seeded publishes from the site owner's.
+    // and the deactivation republish of stock content carries it only for the
+    // duration of the update.
+    assert_eq(
+        2,
+        substr_count($php, "'_wpcom_ai_generated_post' => '1'"),
+        'seeded pages and imported attachments are inserted with the marker',
+    );
+    assert_contains("update_post_meta(\$restore['ID'], '_wpcom_ai_generated_post', '1');", $php);
+    assert_contains("delete_post_meta(\$restore['ID'], '_wpcom_ai_generated_post');", $php);
+    assert_contains("add_filter('jetpack_sync_post_meta_whitelist', '{{FN_PREFIX}}_content_sync_marker')", $php);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -677,12 +700,27 @@ test('the seeder plugin creates, fronts, and removes the site pages', function (
     assert_eq([$attId], $state['attachment_ids'], 'imported attachments recorded');
 
     // Only the post-content kses filter was suspended, and only around the
-    // seeding — it is back in place afterwards.
+    // seeding — it is back in place afterwards. (The log also carries the
+    // plugin's own sync-whitelist registration from load time, so compare
+    // just the content_save_pre entries.)
     assert_eq(
         ['remove:content_save_pre:wp_filter_post_kses', 'add:content_save_pre:wp_filter_post_kses'],
-        $GLOBALS['wp_kses_calls']
+        array_values(array_filter(
+            $GLOBALS['wp_kses_calls'],
+            static fn ($call) => str_contains((string) $call, 'content_save_pre'),
+        )),
     );
     assert_eq(10, has_filter('content_save_pre', 'wp_filter_post_kses'));
+
+    // The marker's sync whitelisting is registered at plugin load.
+    assert_eq(
+        10,
+        has_filter(
+            'jetpack_sync_post_meta_whitelist',
+            \Automattic\SiteBuild\Steps\ApplyIdentityStep::identifierPrefix($slug) . '_content_sync_marker'
+        ),
+        'the seeder whitelists its marker for Jetpack sync',
+    );
 
     // ── A second activation is a no-op (no duplicate pages or attachments). ──
     (content_fn($slug, 'activate'))();
@@ -692,6 +730,13 @@ test('the seeder plugin creates, fronts, and removes the site pages', function (
     // ── Deactivation deletes exactly what was created and restores the rest. ──
     (content_fn($slug, 'deactivate'))();
     assert_eq([2, 3, 4], array_keys($GLOBALS['wp_posts']), 'only the stock content survives');
+    // The republish marker was set for the duration of the update only.
+    foreach ($GLOBALS['wp_post_meta'] ?? [] as $postId => $meta) {
+        assert_true(
+            !isset($meta['_wpcom_ai_generated_post']),
+            "post {$postId} does not keep the seeder marker after deactivation",
+        );
+    }
     assert_eq('publish', $GLOBALS['wp_posts'][2]['post_status'], 'sample page republished');
     assert_eq('publish', $GLOBALS['wp_posts'][3]['post_status'], 'About page republished');
     assert_eq('about', $GLOBALS['wp_posts'][3]['post_name'], 'and it gets its slug back');
