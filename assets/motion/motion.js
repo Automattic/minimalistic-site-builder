@@ -7,7 +7,7 @@
  */
 (function () {
     var root = document.documentElement;
-    var ENTRANCE_SELECTOR = '.reveal, .reveal-up, .reveal-fade, .reveal-scale, .stagger-children > *';
+    var ENTRANCE_SELECTOR = '.reveal, .reveal-up, .reveal-fade, .reveal-scale, .reveal-blur, .reveal-wipe, .stagger-children > *';
 
     // This callback is replaced after setup so keyboard focus can also
     // unobserve a pending target. Before DOMContentLoaded, the default still

@@ -25,6 +25,7 @@ final class Motion
     /** Scroll/entrance classes: revealed by motion.js, or pure-CSS on load. */
     public const SCROLL_CLASSES = [
         'reveal', 'reveal-up', 'reveal-fade', 'reveal-scale',
+        'reveal-blur', 'reveal-wipe',
         'stagger-children', 'hero-entrance',
     ];
 

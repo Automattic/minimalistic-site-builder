@@ -15,6 +15,8 @@
     --motion-rise-keyframe: motion-calm-rise;
     --motion-fade-keyframe: motion-calm-fade;
     --motion-scale-keyframe: motion-calm-scale;
+    --motion-blur-keyframe: motion-kit-blur;
+    --motion-wipe-keyframe: motion-kit-wipe;
     --motion-hero-keyframe: motion-calm-hero;
     --motion-stagger-keyframe: motion-calm-rise;
     --motion-drift-keyframe: motion-calm-drift;
@@ -23,6 +25,7 @@
     --motion-distance: 8px;
     --motion-stagger: 140ms;
     --motion-scale-from: 0.99;
+    --motion-blur-amount: 4px;
     --motion-hero-scale-from: 0.99;
     --motion-ken-burns-scale: 1.03;
     --motion-ambient-distance: 6px;

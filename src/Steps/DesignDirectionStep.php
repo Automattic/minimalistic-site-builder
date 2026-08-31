@@ -1581,8 +1581,8 @@ final class DesignDirectionStep implements Step
                 'minimal' => 'hover micro-interactions only; `hover-lift`/`hover-reveal` are the ONLY motion classes allowed',
                 default   => [
                     'calm'      => 'soft fades and gentle settling',
-                    'energetic' => 'quick diagonal arrivals with spring overshoot',
-                    'dramatic'  => 'long directional masks and a cinematic hero focus pull',
+                    'energetic' => 'quick vertical arrivals with a crisp settle',
+                    'dramatic'  => 'long vertical masks and a cinematic hero focus pull',
                 ][$motion] . ' — place motion classes sparingly, per their budget rules',
             };
             $note = self::formatMotionNote($direction['motion_note'] ?? null);

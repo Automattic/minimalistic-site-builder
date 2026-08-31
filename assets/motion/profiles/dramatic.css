@@ -1,31 +1,36 @@
-/* Motion profile: dramatic — long, sweeping, cinematic reveals. */
+/* Motion profile: dramatic — long, cinematic reveals through vertical masks
+   and a soft-focus hero pull. The travel distance stays modest: the length
+   of the settle carries the drama, not the size of the movement. */
 :root {
-    --motion-enter-duration: 1500ms;
-    --motion-hero-duration: 2100ms;
-    --motion-hero-delay: 150ms;
+    --motion-enter-duration: 1250ms;
+    --motion-hero-duration: 1700ms;
+    --motion-hero-delay: 100ms;
     --motion-hover-duration: 480ms;
     --motion-ambient-duration: 28s;
-    --motion-enter-ease: cubic-bezier(0.65, 0, 0.35, 1);
-    --motion-hero-ease: cubic-bezier(0.65, 0, 0.35, 1);
+    --motion-enter-ease: cubic-bezier(0.45, 0.15, 0.2, 1);
+    --motion-hero-ease: cubic-bezier(0.45, 0.15, 0.2, 1);
     --motion-hover-ease: cubic-bezier(0.22, 1, 0.36, 1);
     --motion-ambient-ease: cubic-bezier(0.65, 0, 0.35, 1);
     --motion-reveal-keyframe: motion-dramatic-reveal;
     --motion-rise-keyframe: motion-dramatic-rise;
     --motion-fade-keyframe: motion-dramatic-fade;
     --motion-scale-keyframe: motion-dramatic-scale;
+    --motion-blur-keyframe: motion-kit-blur;
+    --motion-wipe-keyframe: motion-kit-wipe;
     --motion-hero-keyframe: motion-dramatic-hero;
     --motion-stagger-keyframe: motion-dramatic-rise;
     --motion-drift-keyframe: motion-dramatic-drift;
     --motion-ken-burns-keyframe: motion-dramatic-ken-burns;
     --motion-gradient-keyframe: motion-dramatic-gradient;
-    --motion-distance: 52px;
-    --motion-stagger: 175ms;
-    --motion-scale-from: 0.92;
-    --motion-hero-scale-from: 1.025;
-    --motion-ken-burns-scale: 1.12;
-    --motion-ambient-distance: 20px;
+    --motion-distance: 30px;
+    --motion-stagger: 150ms;
+    --motion-scale-from: 0.96;
+    --motion-blur-amount: 8px;
+    --motion-hero-scale-from: 1.02;
+    --motion-ken-burns-scale: 1.08;
+    --motion-ambient-distance: 14px;
     --motion-hover-lift: -5px;
     --motion-hover-scale: 1.04;
-    --motion-hover-brightness: 0.78;
-    --motion-hover-shadow-opacity: 0.34;
+    --motion-hover-brightness: 0.82;
+    --motion-hover-shadow-opacity: 0.3;
 }

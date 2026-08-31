@@ -796,6 +796,8 @@ final class AboveFoldPartFacts
             'reveal-up',
             'reveal-fade',
             'reveal-scale',
+            'reveal-blur',
+            'reveal-wipe',
             'stagger-children',
             'ambient-drift',
             'custom-motion',
