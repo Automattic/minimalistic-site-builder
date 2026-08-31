@@ -1033,23 +1033,21 @@ test('only a device that paints the ROOT top edge widens a seam', function () {
     $plain = sr_section(['layout' => ['type' => 'constrained']],
         '<!-- wp:paragraph --><p>Body</p><!-- /wp:paragraph -->');
 
-    foreach (['stamp'] as $device) {
-        $marked = sr_section([
-            'className' => 'device--' . $device,
-            'layout' => ['type' => 'constrained'],
-        ], '<!-- wp:paragraph --><p>Body</p><!-- /wp:paragraph -->');
+    $marked = sr_section([
+        'className' => 'device--stamp',
+        'layout' => ['type' => 'constrained'],
+    ], '<!-- wp:paragraph --><p>Body</p><!-- /wp:paragraph -->');
 
-        $result = SectionRhythm::rewrite([
-            ['slug' => 'overview', 'markup' => $plain, 'density' => 'standard', 'background' => 'base'],
-            ['slug' => 'archive', 'markup' => $marked, 'density' => 'standard', 'background' => 'base'],
-        ], null, $device);
+    $result = SectionRhythm::rewrite([
+        ['slug' => 'overview', 'markup' => $plain, 'density' => 'standard', 'background' => 'base'],
+        ['slug' => 'archive', 'markup' => $marked, 'density' => 'standard', 'background' => 'base'],
+    ], null, 'stamp');
 
-        assert_eq(
-            '0',
-            sr_root_attrs($result['markups'][0])['style']['spacing']['padding']['bottom'],
-            "'{$device}' paints no top-edge rule, so the seam still collapses"
-        );
-    }
+    assert_eq(
+        '0',
+        sr_root_attrs($result['markups'][0])['style']['spacing']['padding']['bottom'],
+        "'stamp' paints no top-edge rule, so the seam still collapses"
+    );
 });
 
 test('a device on the hero does not consume the budget the next band claims', function () {

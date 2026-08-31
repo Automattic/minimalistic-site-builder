@@ -232,6 +232,15 @@ test('design-direction offers no numeral device and no numbered-index idiom', fu
     $direction = (string) file_get_contents(repo_path('prompts/design-direction.md'));
     assert_true(!str_contains($direction, 'section-numeral'));
     assert_true(!str_contains($direction, '`"index"`'));
+    // The bare word "index" is common in prose, so the bare-word check is
+    // scoped to the lines that define the item_pattern vocabulary. The
+    // hyphen-aware lookarounds permit "numbered-index" in the ban prose.
+    foreach (preg_grep('/item_pattern/', explode("\n", $direction)) as $line) {
+        assert_true(
+            preg_match('/(?<![\w-])index(?![\w-])/', $line) === 0,
+            'the item_pattern vocabulary must not offer a bare index token',
+        );
+    }
     assert_contains('banned unless the SITE BRIEF explicitly asks for visible numbering', $direction);
 });
 
