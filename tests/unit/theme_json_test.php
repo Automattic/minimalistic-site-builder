@@ -909,13 +909,18 @@ test('normalizeSpacingSettings installs the canonical bounded responsive profile
 
 test('normalizeSpacingSettings scales every component and section role by density', function () {
     $profiles = [];
-    foreach (['airy', 'measured', 'dense'] as $density) {
+    foreach (['expansive', 'airy', 'measured', 'dense', 'packed'] as $density) {
         $profiles[$density] = ThemeJsonStep::normalizeSpacingSettings([], $density)
             ['settings']['spacing']['spacingSizes'];
     }
 
     // Component spacing (xs/sm/md) follows the density with a smaller swing
     // than the section ramp: md also feeds the root inline gutter (BIGR-954).
+    assert_eq([
+        'clamp(0.5rem, 0.75vw, 0.75rem)',
+        'clamp(1.25rem, 1.6vw, 1.5rem)',
+        'clamp(2.5rem, 3vw, 3rem)',
+    ], array_column(array_slice($profiles['expansive'], 0, 3), 'size'));
     assert_eq([
         'clamp(0.375rem, 0.6vw, 0.625rem)',
         'clamp(1rem, 1.25vw, 1.25rem)',
@@ -931,10 +936,21 @@ test('normalizeSpacingSettings scales every component and section role by densit
         'clamp(0.625rem, 0.8vw, 0.875rem)',
         'clamp(1.25rem, 1.5vw, 1.5rem)',
     ], array_column(array_slice($profiles['dense'], 0, 3), 'size'));
+    assert_eq([
+        'clamp(0.25rem, 0.35vw, 0.3125rem)',
+        'clamp(0.5rem, 0.65vw, 0.75rem)',
+        'clamp(1rem, 1.25vw, 1.25rem)',
+    ], array_column(array_slice($profiles['packed'], 0, 3), 'size'));
 
-    assert_eq(['xs', 'sm', 'md', 'lg', 'xl', 'xxl'], array_column($profiles['airy'], 'slug'));
-    assert_eq(['xs', 'sm', 'md', 'lg', 'xl', 'xxl'], array_column($profiles['dense'], 'slug'));
+    foreach ($profiles as $density => $profile) {
+        assert_eq(['xs', 'sm', 'md', 'lg', 'xl', 'xxl'], array_column($profile, 'slug'), $density);
+    }
 
+    assert_eq([
+        'clamp(5rem, 7.5vw, 8rem)',
+        'clamp(6.5rem, 10vw, 12rem)',
+        'clamp(8rem, 13vw, 16rem)',
+    ], array_column(array_slice($profiles['expansive'], 3), 'size'));
     assert_eq([
         'clamp(4rem, 6vw, 6rem)',
         'clamp(5rem, 8vw, 9rem)',
@@ -950,6 +966,23 @@ test('normalizeSpacingSettings scales every component and section role by densit
         'clamp(3rem, 4.5vw, 4.5rem)',
         'clamp(3.75rem, 5.5vw, 5.5rem)',
     ], array_column(array_slice($profiles['dense'], 3), 'size'));
+    assert_eq([
+        'clamp(1.75rem, 2.25vw, 2.25rem)',
+        'clamp(2.25rem, 3.5vw, 3.5rem)',
+        'clamp(3rem, 4.25vw, 4.25rem)',
+    ], array_column(array_slice($profiles['packed'], 3), 'size'));
+
+    // The scale is ordered: at every slug, both clamp bounds shrink (or hold)
+    // from expansive down to packed, so a denser commitment can never deliver
+    // more space than a lighter one at any viewport.
+    foreach ([['expansive', 'airy'], ['airy', 'measured'], ['measured', 'dense'], ['dense', 'packed']] as [$wide, $tight]) {
+        foreach ($profiles[$wide] as $i => $row) {
+            preg_match_all('/([\d.]+)rem/', $row['size'], $w);
+            preg_match_all('/([\d.]+)rem/', $profiles[$tight][$i]['size'], $t);
+            assert_true((float) $t[1][0] <= (float) $w[1][0], "$tight {$row['slug']} min <= $wide");
+            assert_true((float) $t[1][1] <= (float) $w[1][1], "$tight {$row['slug']} max <= $wide");
+        }
+    }
 
     assert_eq($profiles['measured'], ThemeJsonStep::normalizeSpacingSettings([], 'unknown')
         ['settings']['spacing']['spacingSizes']);
@@ -987,7 +1020,7 @@ test('theme-json prompt delegates density-scaled spacing to the build', function
 
     assert_contains('**Density**: airy', $prompt);
     assert_contains('do not emit `spacingSizes`', $prompt);
-    assert_contains('lg/xl/xxl section-padding ramp', $prompt);
+    assert_contains('section-padding ramp, component spacing, and page gutter', $prompt);
     assert_true(!str_contains($prompt, 'clamp(4rem, 6vw, 6rem)'), 'the shared literal ramp is gone');
 
     exec('rm -rf ' . escapeshellarg($tmp));

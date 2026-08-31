@@ -156,6 +156,11 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      * @var array<string,list<array{slug: string, name: string, size: string}>>
      */
     private const COMPONENT_SPACING_PROFILES = [
+        'expansive' => [
+            ['slug' => 'xs', 'name' => 'Extra Small', 'size' => 'clamp(0.5rem, 0.75vw, 0.75rem)'],
+            ['slug' => 'sm', 'name' => 'Small', 'size' => 'clamp(1.25rem, 1.6vw, 1.5rem)'],
+            ['slug' => 'md', 'name' => 'Medium', 'size' => 'clamp(2.5rem, 3vw, 3rem)'],
+        ],
         'airy' => [
             ['slug' => 'xs', 'name' => 'Extra Small', 'size' => 'clamp(0.375rem, 0.6vw, 0.625rem)'],
             ['slug' => 'sm', 'name' => 'Small', 'size' => 'clamp(1rem, 1.25vw, 1.25rem)'],
@@ -171,6 +176,13 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             ['slug' => 'sm', 'name' => 'Small', 'size' => 'clamp(0.625rem, 0.8vw, 0.875rem)'],
             ['slug' => 'md', 'name' => 'Medium', 'size' => 'clamp(1.25rem, 1.5vw, 1.5rem)'],
         ],
+        // The packed xs floor stays at the dense/measured 0.25rem: below 4px
+        // an eyebrow/heading stack reads as a collision, not a rhythm.
+        'packed' => [
+            ['slug' => 'xs', 'name' => 'Extra Small', 'size' => 'clamp(0.25rem, 0.35vw, 0.3125rem)'],
+            ['slug' => 'sm', 'name' => 'Small', 'size' => 'clamp(0.5rem, 0.65vw, 0.75rem)'],
+            ['slug' => 'md', 'name' => 'Medium', 'size' => 'clamp(1rem, 1.25vw, 1.25rem)'],
+        ],
     ];
 
     /**
@@ -180,6 +192,11 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      * @var array<string,list<array{slug: string, name: string, size: string}>>
      */
     private const SECTION_SPACING_PROFILES = [
+        'expansive' => [
+            ['slug' => 'lg', 'name' => 'Compact', 'size' => 'clamp(5rem, 7.5vw, 8rem)'],
+            ['slug' => 'xl', 'name' => 'Standard', 'size' => 'clamp(6.5rem, 10vw, 12rem)'],
+            ['slug' => 'xxl', 'name' => 'Spacious', 'size' => 'clamp(8rem, 13vw, 16rem)'],
+        ],
         'airy' => [
             ['slug' => 'lg', 'name' => 'Compact', 'size' => 'clamp(4rem, 6vw, 6rem)'],
             ['slug' => 'xl', 'name' => 'Standard', 'size' => 'clamp(5rem, 8vw, 9rem)'],
@@ -194,6 +211,11 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             ['slug' => 'lg', 'name' => 'Compact', 'size' => 'clamp(2.25rem, 3vw, 3rem)'],
             ['slug' => 'xl', 'name' => 'Standard', 'size' => 'clamp(3rem, 4.5vw, 4.5rem)'],
             ['slug' => 'xxl', 'name' => 'Spacious', 'size' => 'clamp(3.75rem, 5.5vw, 5.5rem)'],
+        ],
+        'packed' => [
+            ['slug' => 'lg', 'name' => 'Compact', 'size' => 'clamp(1.75rem, 2.25vw, 2.25rem)'],
+            ['slug' => 'xl', 'name' => 'Standard', 'size' => 'clamp(2.25rem, 3.5vw, 3.5rem)'],
+            ['slug' => 'xxl', 'name' => 'Spacious', 'size' => 'clamp(3rem, 4.25vw, 4.25rem)'],
         ],
     ];
     /**
