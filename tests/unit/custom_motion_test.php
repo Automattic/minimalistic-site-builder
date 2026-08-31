@@ -122,6 +122,87 @@ test('custom-motion drops only radius declarations and preserves direct and keyf
     assert_eq([], CustomMotionStep::validate($repaired), 'remaining motion revalidates cleanly');
 });
 
+test('custom-motion drops CTA construction from a tagged button and its referenced keyframes', function () {
+    $css = ".custom-motion {\n"
+        . "    display: inline-flex;\n"
+        . "    background: red;\n"
+        . "    animation: custom-motion-pulse 1s both;\n"
+        . "    transform: translateY(0);\n"
+        . "}\n"
+        . "@keyframes custom-motion-pulse {\n"
+        . "    from { color: white; transform: scale(.98); }\n"
+        . "    to { border-width: 3px; transform: scale(1); }\n"
+        . "}\n"
+        . "@keyframes custom-motion-card { from { color: red; } to { color: blue; } }";
+
+    [$repaired, $dropped] = CustomMotionStep::dropCtaOwnedDeclarations($css, true);
+
+    assert_eq(4, count($dropped), 'direct and referenced-keyframe construction is dropped');
+    assert_true(!str_contains($repaired, 'display: inline-flex'));
+    assert_true(!str_contains($repaired, 'background: red'));
+    assert_true(!str_contains($repaired, 'color: white'));
+    assert_true(!str_contains($repaired, 'border-width: 3px'));
+    assert_contains('transform: scale(.98)', $repaired, 'motion survives');
+    assert_contains('custom-motion-card', $repaired, 'unreferenced keyframe survives');
+    assert_contains('color: red', $repaired, 'unreferenced keyframe construction is not owned');
+    assert_eq([], CustomMotionStep::validate($repaired, false, true));
+});
+
+test('custom-motion CTA ownership does not apply to a tagged non-button wrapper', function () {
+    $css = '.custom-motion { display: inline-block; color: red; transform: none; }';
+    assert_eq([], CustomMotionStep::validate($css, false, false));
+    assert_eq([$css, []], CustomMotionStep::dropCtaOwnedDeclarations($css, false));
+    assert_contains(
+        'CTA-owned button construction',
+        implode('; ', CustomMotionStep::validate($css, false, true)),
+    );
+});
+
+test('custom-motion drops treatment-owned image finish from a tagged image and its keyframes', function () {
+    $css = ".custom-motion {\n"
+        . "    filter: sepia(1);\n"
+        . "    animation: custom-motion-drift 2s both;\n"
+        . "    transform: translateY(0);\n"
+        . "    opacity: 0.9;\n"
+        . "}\n"
+        . ".custom-motion img {\n"
+        . "    mix-blend-mode: multiply;\n"
+        . "}\n"
+        . "@keyframes custom-motion-drift {\n"
+        . "    from { filter: blur(4px); transform: scale(.98); }\n"
+        . "    to { transform: scale(1); }\n"
+        . "}\n"
+        . "@keyframes custom-motion-card { from { filter: none; } to { filter: none; } }";
+
+    [$repaired, $dropped] = CustomMotionStep::dropImageTreatmentOwnedDeclarations($css, true);
+
+    assert_eq(3, count($dropped), 'direct and referenced-keyframe finish is dropped');
+    assert_true(!str_contains($repaired, 'filter: sepia(1)'));
+    assert_true(!str_contains($repaired, 'mix-blend-mode'));
+    assert_true(!str_contains($repaired, 'filter: blur(4px)'));
+    assert_contains('transform: scale(.98)', $repaired, 'motion survives');
+    assert_contains('opacity: 0.9', $repaired, 'fades stay legitimate motion vocabulary');
+    assert_contains('filter: none', $repaired, 'unreferenced keyframe survives untouched');
+    assert_eq([], CustomMotionStep::validate($repaired, false, false, true));
+});
+
+test('custom-motion treatment ownership does not apply to a tagged non-image wrapper', function () {
+    $css = '.custom-motion { filter: brightness(1.05); transform: none; }';
+    assert_eq([], CustomMotionStep::validate($css, false, false, false));
+    assert_eq([$css, []], CustomMotionStep::dropImageTreatmentOwnedDeclarations($css, false));
+    assert_contains(
+        'treatment-owned image finish',
+        implode('; ', CustomMotionStep::validate($css, false, false, true)),
+    );
+    assert_contains(
+        'treatment-owned image finish',
+        implode('; ', CustomMotionStep::validate(
+            '.custom-motion .card-media img { mix-blend-mode: screen; }',
+        )),
+        'a rule naming a treated surface is owned even without a tagged image',
+    );
+});
+
 test('custom-motion drops only profile-owned motion tokens and preserves the animation', function () {
     $css = ".custom-motion {\n"
         . "    --motion-hover-duration: 180ms;\n"
@@ -349,6 +430,38 @@ test('custom-motion removes shape overrides and ships the remaining animation wi
     assert_contains('authored=', $warnings);
     assert_contains('delivered=removed', $warnings);
     assert_contains('disposition=dropped a shape-owned corner declaration', $warnings);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('custom-motion removes CTA overrides and ships tagged-button motion with actionable warnings', function () {
+    [$project, $tmp] = cm_project('builder_cm_cta_salvage_', 'the CTA should lift on hover');
+    $project->writeText(
+        'theme/parts/section-hero.html',
+        '<!-- wp:button {"className":"custom-motion"} --><div class="wp-block-button custom-motion">'
+        . '<a class="wp-block-button__link wp-element-button">Go</a></div><!-- /wp:button -->'
+    );
+    $llm = new FakeLlm();
+    $llm->queueText(
+        ".custom-motion {\n"
+        . "    background: #000;\n"
+        . "    animation: custom-motion-lift 0.8s ease-in-out;\n"
+        . "}\n"
+        . "@keyframes custom-motion-lift {\n"
+        . "    from { color: #fff; transform: translateY(0); }\n"
+        . "    to { padding: 2rem; transform: translateY(-4px); }\n"
+        . "}"
+    );
+
+    quietly(fn () => (new CustomMotionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project));
+
+    $style = $project->readText('theme/style.css');
+    assert_contains('animation: custom-motion-lift 0.8s ease-in-out', $style);
+    assert_contains('transform: translateY(-4px)', $style);
+    assert_true(!str_contains($style, 'background: #000'));
+    assert_true(!str_contains($style, 'color: #fff'));
+    assert_true(!str_contains($style, 'padding: 2rem'));
+    $warnings = implode(' ', $project->readJson('warnings.json')['custom-motion'] ?? []);
+    assert_contains('disposition=dropped a CTA-owned construction declaration', $warnings);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

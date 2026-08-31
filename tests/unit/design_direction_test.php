@@ -2,6 +2,8 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\JsonBatchRecovery;
+use Automattic\SiteBuild\CtaStyle;
+use Automattic\SiteBuild\GroundKey;
 use Automattic\SiteBuild\GroundTint;
 use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
@@ -11,9 +13,11 @@ use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\TypeTreatment;
 use Automattic\SiteBuild\Steps\DesignDirectionStep;
 use Automattic\SiteBuild\Steps\ThemeJsonStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
+use Automattic\SiteBuild\TypeScale;
 
 /** @return array{0:Project,1:FakeLlm,2:string} */
 function make_designdir_fixture(): array
@@ -70,8 +74,12 @@ function designdir_direction(): array
         ],
         'type'             => designdir_type(),
         'image_grade'      => 'warm kodachrome color, soft golden light',
+        'image_treatment'  => 'tinted-overlay',
+        'text_placement'   => 'asymmetric-thirds',
+        'image_crop'       => 'portrait',
         'card_style'       => 'framed',
-        'hero_blueprint'   => HeroBlueprint::defaultFor('editorial-split'),
+        'depth'            => 'soft',
+        'hero_blueprint'   => HeroBlueprint::defaultFor('foreground-split'),
     ];
 }
 
@@ -137,8 +145,15 @@ test('design-direction expands a picked seed into structured designDirection.jso
     assert_eq('Spectral', $written['type']['heading']['family']);
     assert_eq([700, 900], $written['type']['heading']['weights']);
     assert_eq('warm kodachrome color, soft golden light', $written['image_grade']);
+    assert_eq('tinted-overlay', $written['image_treatment']);
+    assert_eq('asymmetric-thirds', $written['text_placement']);
+    assert_eq('portrait', $written['image_crop']);
     assert_eq('framed', $written['card_style']);
+    assert_eq('soft', $written['depth']);
     assert_eq(Measure::DEFAULT, $written['measure']);
+    assert_eq(TypeScale::DEFAULT, $written['type_scale']);
+    assert_eq(TypeTreatment::DEFAULT, $written['type_treatment']);
+    assert_eq(CtaStyle::DEFAULT, $written['cta_style']);
     assert_true(!array_key_exists('signature_device', $written), 'signature_device field is gone');
     assert_true(in_array($written['hero_blueprint']['recipe'], HeroComposition::RECIPES, true));
     assert_contains('Seed ', $written['concept_seed']);
@@ -159,7 +174,7 @@ test('design-direction expands a picked seed into structured designDirection.jso
     assert_contains('cozy neighborhood bakery', $llm->calls[1]['prompt']);
     assert_contains('Hearth & Crumb', $llm->calls[1]['prompt']);
     assert_contains('Seed ', $llm->calls[1]['prompt'], 'a seed reached the expansion prompt');
-    foreach (['palette', 'type', 'image_grade', 'canvas', 'measure', 'card_style', 'hero_blueprint'] as $field) {
+    foreach (['palette', 'type', 'type_scale', 'type_treatment', 'image_grade', 'image_treatment', 'image_crop', 'canvas', 'measure', 'card_style', 'depth', 'cta_style', 'hero_blueprint'] as $field) {
         assert_contains($field, $llm->calls[1]['prompt']);
     }
     assert_contains(
@@ -189,9 +204,16 @@ test('design-direction persists an unmappable motion-note warning and reaches a 
 
     $written = $project->readJson('designDirection.json');
     assert_eq([], $written['motion_note']);
-    foreach (['title', 'palette', 'image_grade', 'card_style'] as $sibling) {
+    foreach (['title', 'image_grade', 'image_treatment', 'image_crop', 'card_style', 'depth'] as $sibling) {
         assert_eq($authored[$sibling], $written[$sibling], "{$sibling} survives motion-note removal");
     }
+    foreach ($authored['palette'] as $slug => $hex) {
+        assert_eq($hex, $written['palette'][$slug], "palette.{$slug} survives motion-note removal");
+    }
+    assert_true(\Automattic\SiteBuild\BandColor::valid(
+        $written['palette']['base'],
+        $written['palette']['band'],
+    ), 'the missing committed band is derived independently of motion-note removal');
     foreach (['heading', 'body'] as $face) {
         assert_eq($authored['type'][$face], $written['type'][$face], "type.{$face} survives motion-note removal");
     }
@@ -441,6 +463,46 @@ test('design-direction records a collapsed round once, without a shared-ground e
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('design-direction records a round of distinct worlds that all lean on one tint', function () {
+    // BIGR-922: tint is not in the dedup key, so three distinct worlds can
+    // still share a family — the audited cohort's cream skew. The lean is
+    // recorded, never blocking.
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $llm->queueJson(['seeds' => [
+        designdir_seed_obj('One', 'light', 'heritage', 'warm') + ['tint' => 'warm'],
+        designdir_seed_obj('Two', 'light', 'modernist', 'cool') + ['tint' => 'warm'],
+        designdir_seed_obj('Three', 'dark', 'noir', 'jewel') + ['tint' => 'warm'],
+    ]]);
+    $llm->queueJson(['direction' => designdir_direction()]);
+
+    (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $joined = implode("\n", $project->readJson('warnings.json')['design-direction'] ?? []);
+    assert_contains('every concept seed is warm-tinted', $joined);
+    assert_contains('disposition tolerated', $joined);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('design-direction stays quiet about tint when the round spreads its families', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $llm->queueJson(['seeds' => [
+        designdir_seed_obj('One', 'light', 'heritage', 'warm') + ['tint' => 'warm'],
+        designdir_seed_obj('Two', 'light', 'modernist', 'cool') + ['tint' => 'cool'],
+        designdir_seed_obj('Three', 'dark', 'noir', 'jewel') + ['tint' => 'violet'],
+    ]]);
+    $llm->queueJson(['direction' => designdir_direction()]);
+
+    (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $joined = $project->exists('warnings.json')
+        ? implode("\n", $project->readJson('warnings.json')['design-direction'] ?? [])
+        : '';
+    assert_true(!str_contains($joined, '-tinted'), 'a spread round earns no tint row');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('design-direction does not warn that every seed is grounded when two left ground unstated', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
     $llm->queueJson(['seeds' => [
@@ -539,7 +601,13 @@ test('normalize keeps valid palette hexes, drops invalid ones, and requires a de
         ],
     ], 'cinematic-safe-zone');
     assert_eq('Forge & Flame', $direction['title']);
-    assert_eq(['base' => '#FDF6EC', 'primary' => '#8A5A2B'], $direction['palette']);
+    assert_eq('#FDF6EC', $direction['palette']['base']);
+    assert_eq('#8A5A2B', $direction['palette']['primary']);
+    assert_true(\Automattic\SiteBuild\BandColor::valid(
+        $direction['palette']['base'],
+        $direction['palette']['band'],
+    ));
+    assert_eq(['base', 'primary', 'band'], array_keys($direction['palette']));
     assert_eq('Spectral', $direction['type']['heading']['family']);
     assert_eq([900], $direction['type']['heading']['weights']);
     assert_eq('', $direction['type']['body']['family']);
@@ -549,15 +617,18 @@ test('normalize keeps valid palette hexes, drops invalid ones, and requires a de
     assert_eq(null, DesignDirectionStep::normalize('not an array', 'cinematic-safe-zone'));
 });
 
-test('format renders the ground tint as a fact, so downstream prompts can cite it', function () {
+test('format renders the ground key and tint as facts, so downstream prompts can cite them', function () {
     // theme-json.md tells the model a **Ground tint** fact may arrive. If
     // format() never emits one, that instruction describes something that
     // does not exist.
     $rendered = DesignDirectionStep::format([
         'description' => 'x',
         'palette'     => ['base' => '#1B2233'],
+        'ground_key'  => 'dark',
         'ground_tint' => 'cool',
     ]);
+    assert_contains('**Ground key**', $rendered);
+    assert_contains('dark', $rendered);
     assert_contains('**Ground tint**', $rendered);
     assert_contains('cool', $rendered);
 
@@ -565,9 +636,10 @@ test('format renders the ground tint as a fact, so downstream prompts can cite i
         !str_contains(DesignDirectionStep::format(['description' => 'x']), 'Ground tint'),
         'an uncommitted ground states nothing',
     );
+    assert_true(!str_contains(DesignDirectionStep::format(['description' => 'x']), 'Ground key'));
 });
 
-test('the seed and expansion prompts ask for the ground tint, and ban treatments not hues', function () {
+test('the seed and expansion prompts ask for both ground coordinates, and ban treatments not hues', function () {
     $renderer = new PromptRenderer(repo_path('prompts'));
 
     $seeds = $renderer->render('design-direction-seeds.md', [
@@ -580,9 +652,11 @@ test('the seed and expansion prompts ask for the ground tint, and ban treatments
 
     $direction = $renderer->render('design-direction.md', [
         'user_prompt' => 'a bakery', 'site_spec' => '{}', 'seed' => 'Seed',
-        'hero_composition' => '', 'ground_tint' => 'violet',
-        'register' => 'editorial', 'type_register' => 'didone',
+        'hero_composition' => '', 'ground_key' => 'dark', 'ground_tint' => 'violet',
+        'register' => 'editorial', 'type_register' => 'didone', 'type_candidates' => '',
     ]);
+    assert_contains('ground_key', $direction, 'the expansion commits the light/dark field the build enforces');
+    assert_contains('dark', $direction, 'and is told which side the seed chose');
     assert_contains('ground_tint', $direction, 'the expansion commits the field the build enforces');
     assert_contains('violet', $direction, 'and is told which family the seed chose');
 
@@ -610,11 +684,89 @@ test('design-direction carries the chosen seed tint into the direction it writes
     (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
 
     $written = $project->readJson('designDirection.json');
+    assert_eq('light', $written['ground_key'], 'the seed light/dark coordinate reaches the written direction');
     assert_eq('cool', $written['ground_tint'], 'the seed coordinate reaches the written direction');
     assert_eq('cool', GroundTint::classify($written['palette']['base']), 'and the cream ground was moved onto it');
     assert_eq('#26221E', $written['palette']['contrast'], 'siblings are untouched');
+    assert_contains(
+        'seed already committed this: **light**',
+        $llm->calls[1]['prompt'],
+        'the expansion sees the selected seed ground instead of deciding it again',
+    );
 
     exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('normalize moves a base that contradicts the light or dark key its seed committed', function () {
+    foreach (
+        [
+            ['key' => 'dark', 'base' => '#F4EBDA', 'tint' => 'warm'],
+            ['key' => 'light', 'base' => '#1B2233', 'tint' => 'cool'],
+        ] as $case
+    ) {
+        $repairs = [];
+        $warnings = [];
+        $direction = DesignDirectionStep::normalize(
+            ['description' => 'x', 'palette' => ['base' => $case['base']]],
+            'cinematic-safe-zone',
+            'committed seed',
+            $repairs,
+            $warnings,
+            $case['tint'],
+            $case['key'],
+        );
+
+        assert_eq($case['key'], $direction['ground_key']);
+        assert_eq($case['key'], GroundKey::classify($direction['palette']['base']));
+        assert_eq($case['tint'], GroundTint::classify($direction['palette']['base']));
+        assert_contains('palette.base', $repairs[0]);
+        assert_contains('committed "' . $case['key'] . '" ground', $repairs[0]);
+
+        $fixedPointRepairs = [];
+        $fixedPointWarnings = [];
+        $again = DesignDirectionStep::normalize(
+            $direction,
+            'cinematic-safe-zone',
+            'committed seed',
+            $fixedPointRepairs,
+            $fixedPointWarnings,
+            $case['tint'],
+            $case['key'],
+        );
+        assert_eq($direction['palette']['base'], $again['palette']['base']);
+        assert_eq([], $fixedPointRepairs);
+        assert_eq([], $fixedPointWarnings);
+    }
+});
+
+test('normalize falls back to the direction own ground_key when the seed committed none', function () {
+    $repairs = [];
+    $warnings = [];
+    $direction = DesignDirectionStep::normalize(
+        ['description' => 'x', 'ground_key' => 'dark', 'palette' => ['base' => '#F4EBDA']],
+        'cinematic-safe-zone',
+        'seed without coordinates',
+        $repairs,
+        $warnings,
+    );
+    assert_eq('dark', $direction['ground_key']);
+    assert_eq('dark', GroundKey::classify($direction['palette']['base']));
+});
+
+test('normalize ignores a ground_key outside the vocabulary', function () {
+    $repairs = [];
+    $warnings = [];
+    $direction = DesignDirectionStep::normalize(
+        ['description' => 'x', 'ground_key' => 'dim', 'palette' => ['base' => '#F4EBDA']],
+        'cinematic-safe-zone',
+        '',
+        $repairs,
+        $warnings,
+    );
+    assert_eq('', $direction['ground_key']);
+    assert_eq('#F4EBDA', $direction['palette']['base']);
+    assert_eq(1, count($repairs), 'the ignored ground_key causes no repair; only the missing band is derived');
+    assert_contains('palette.band', $repairs[0]);
 });
 
 test('normalize moves a base that drifted off the tint its seed committed', function () {
@@ -660,7 +812,12 @@ test('normalize leaves an earned warm ground exactly as authored', function () {
         'warm',
     );
     assert_eq('#F4EBDA', $direction['palette']['base']);
-    assert_eq([], $repairs, 'an honored commitment is not a repair');
+    assert_true(\Automattic\SiteBuild\BandColor::valid(
+        $direction['palette']['base'],
+        $direction['palette']['band'],
+    ));
+    assert_eq(1, count($repairs), 'the honored ground stays untouched; only its missing band is derived');
+    assert_contains('palette.band', $repairs[0]);
 });
 
 test('normalize enforces nothing when no tint was committed', function () {
@@ -675,7 +832,12 @@ test('normalize enforces nothing when no tint was committed', function () {
     );
     assert_eq('#F4EBDA', $direction['palette']['base'], 'nothing was committed, so nothing was violated');
     assert_eq('', $direction['ground_tint']);
-    assert_eq([], $repairs);
+    assert_true(\Automattic\SiteBuild\BandColor::valid(
+        $direction['palette']['base'],
+        $direction['palette']['band'],
+    ));
+    assert_eq(1, count($repairs), 'the independent band contract still derives its missing role');
+    assert_contains('palette.band', $repairs[0]);
 });
 
 test('normalize falls back to the direction own ground_tint when the seed committed none', function () {
@@ -695,6 +857,30 @@ test('normalize falls back to the direction own ground_tint when the seed commit
     );
     assert_eq('violet', GroundTint::classify($direction['palette']['base']));
     assert_eq('violet', $direction['ground_tint']);
+});
+
+test('normalize warns actionably when an impossible tint must remain unresolved', function () {
+    $repairs = [];
+    $warnings = [];
+    $direction = DesignDirectionStep::normalize(
+        ['description' => 'x', 'palette' => ['base' => '#000000']],
+        'cinematic-safe-zone',
+        'an absolute-black warm ground',
+        $repairs,
+        $warnings,
+        'warm',
+        'dark',
+    );
+
+    assert_eq('#000000', $direction['palette']['base']);
+    assert_eq(1, count($repairs), 'the unresolved tint causes no repair; only the missing band is derived');
+    assert_contains('palette.band', $repairs[0]);
+    assert_contains("file='designDirection.json'", $warnings[0]);
+    assert_contains('path="palette.base"', $warnings[0]);
+    assert_contains('authored="#000000"', $warnings[0]);
+    assert_contains('delivered="#000000"', $warnings[0]);
+    assert_contains('ground_tint "warm" cannot be rendered', $warnings[0]);
+    assert_contains('disposition=', $warnings[0]);
 });
 
 test('normalize ignores a ground_tint outside the vocabulary', function () {
@@ -800,13 +986,13 @@ test('format renders the narrative plus the structured fact list', function () {
         ],
         'image_grade'      => 'monochrome documentary',
         'concept_seed' => 'must stay hidden',
-        'hero_blueprint' => HeroBlueprint::defaultFor('editorial-split'),
+        'hero_blueprint' => HeroBlueprint::defaultFor('foreground-split'),
     ]);
     assert_contains('# Archivo Silencioso', $text);
     assert_contains('base #F4F1EA', $text);
     assert_contains('heading — Spectral; weights 900; body — Source Sans 3; weights 400', $text);
     assert_contains('monochrome documentary', $text);
-    assert_true(!str_contains($text, 'editorial-split'), 'general format excludes hero recipe');
+    assert_true(!str_contains($text, 'foreground-split'), 'general format excludes hero recipe');
     assert_true(!str_contains($text, 'must stay hidden'), 'general format excludes concept seed');
 
     // Empty fields are omitted — a bare direction is just the narrative.
@@ -894,6 +1080,41 @@ test('invalid measure degrades to standard with actionable evidence', function (
         assert_eq(1, count($warnings));
         assert_contains('field measure', $warnings[0]);
         assert_contains('delivered "standard"', $warnings[0]);
+        assert_contains('disposition', $warnings[0]);
+    }
+});
+
+test('normalize commits and renders one bounded type treatment', function () {
+    foreach (TypeTreatment::ALL as $treatment) {
+        $warnings = [];
+        $direction = DesignDirectionStep::normalize([
+            'description' => 'x',
+            'type_treatment' => strtoupper($treatment),
+            'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
+        ], 'cinematic-safe-zone', '', warnings: $warnings);
+
+        assert_eq($treatment, $direction['type_treatment']);
+        assert_eq([], $warnings);
+        $rendered = DesignDirectionStep::format($direction);
+        assert_contains('**Type treatment**: ' . $treatment, $rendered);
+        assert_contains(TypeTreatment::typography($treatment)['letterSpacing'], $rendered);
+        assert_contains('preserve its lineHeight', $rendered);
+    }
+});
+
+test('invalid type treatment degrades to sentence with actionable evidence', function () {
+    foreach (['small-caps', ['title'], true] as $authored) {
+        $warnings = [];
+        $direction = DesignDirectionStep::normalize([
+            'description' => 'x',
+            'type_treatment' => $authored,
+            'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
+        ], 'cinematic-safe-zone', '', warnings: $warnings);
+
+        assert_eq(TypeTreatment::DEFAULT, $direction['type_treatment']);
+        assert_eq(1, count($warnings));
+        assert_contains('field type_treatment', $warnings[0]);
+        assert_contains('delivered "sentence"', $warnings[0]);
         assert_contains('disposition', $warnings[0]);
     }
 });
@@ -1060,6 +1281,132 @@ test('format renders the card treatment with its executable meaning', function (
     assert_eq('Just prose.', DesignDirectionStep::format(['description' => 'Just prose.']));
 });
 
+test('normalize and format commit one bounded render-time image treatment', function () {
+    $base = [
+        'description' => 'x',
+        'image_grade' => 'monochrome documentary, lifted highlights, fine grain',
+        'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
+    ];
+    foreach (['natural', 'duotone', 'tinted-overlay', 'high-key-bw'] as $treatment) {
+        $warnings = [];
+        $direction = DesignDirectionStep::normalize(
+            $base + ['image_treatment' => strtoupper($treatment)],
+            'cinematic-safe-zone',
+            warnings: $warnings,
+        );
+        assert_eq($treatment, $direction['image_treatment']);
+        assert_eq([], $warnings);
+        $formatted = DesignDirectionStep::format($direction);
+        assert_contains("**Image treatment**: {$treatment}", $formatted);
+        assert_contains('Do not author a local duotone', $formatted);
+    }
+
+    $warnings = [];
+    $direction = DesignDirectionStep::normalize(
+        $base + ['image_treatment' => 'sepia-ish'],
+        'cinematic-safe-zone',
+        warnings: $warnings,
+    );
+    assert_eq('natural', $direction['image_treatment']);
+    assert_contains('field image_treatment', $warnings[0]);
+    assert_contains('authored "sepia-ish"', $warnings[0]);
+    assert_contains('delivered "natural"', $warnings[0]);
+});
+
+test('normalize commits every bounded image crop and warns on an unsupported system', function () {
+    $base = [
+        'description' => 'x',
+        'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
+    ];
+    foreach (['landscape', 'portrait', 'square', 'panoramic', 'mixed'] as $crop) {
+        $warnings = [];
+        $direction = DesignDirectionStep::normalize(
+            $base + ['image_crop' => strtoupper($crop)],
+            'cinematic-safe-zone',
+            '',
+            warnings: $warnings,
+        );
+        assert_eq($crop, $direction['image_crop']);
+        assert_eq([], $warnings, $crop);
+    }
+
+    $warnings = [];
+    $direction = DesignDirectionStep::normalize(
+        $base + ['image_crop' => 'cinemascope-ish'],
+        'cinematic-safe-zone',
+        '',
+        warnings: $warnings,
+    );
+    assert_eq('mixed', $direction['image_crop']);
+    assert_contains('field image_crop', $warnings[0]);
+    assert_contains('authored "cinemascope-ish"', $warnings[0]);
+    assert_contains('delivered "mixed"', $warnings[0]);
+    assert_contains('disposition ', $warnings[0]);
+});
+
+test('format renders image crop as an executable ratio contract', function () {
+    foreach ([
+        'landscape' => 'ordinary cards 3:2',
+        'portrait' => 'ordinary cards and feature media 4:5',
+        'square' => 'feature-media crop 1:1',
+        'panoramic' => 'feature media 21:9',
+        'mixed' => 'established per-role system',
+    ] as $crop => $meaning) {
+        $rendered = DesignDirectionStep::format(['description' => 'x', 'image_crop' => $crop]);
+        assert_contains("**Image crop**: {$crop}", $rendered);
+        assert_contains($meaning, $rendered);
+        assert_contains('do not author an aspect ratio', $rendered);
+    }
+    assert_eq('Just prose.', DesignDirectionStep::format(['description' => 'Just prose.']));
+});
+
+test('normalize commits every bounded depth and warns on an unsupported treatment', function () {
+    $base = [
+        'description' => 'x',
+        'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
+    ];
+    foreach (['flat', 'soft', 'hard-offset', 'inset', 'glow'] as $depth) {
+        $warnings = [];
+        $direction = DesignDirectionStep::normalize(
+            $base + ['depth' => strtoupper($depth)],
+            'cinematic-safe-zone',
+            '',
+            warnings: $warnings,
+        );
+        assert_eq($depth, $direction['depth']);
+        assert_eq([], $warnings, $depth);
+    }
+
+    $warnings = [];
+    $direction = DesignDirectionStep::normalize(
+        $base + ['depth' => 'floaty'],
+        'cinematic-safe-zone',
+        '',
+        warnings: $warnings,
+    );
+    assert_eq('flat', $direction['depth']);
+    assert_contains('field depth', $warnings[0]);
+    assert_contains('authored "floaty"', $warnings[0]);
+    assert_contains('delivered "flat"', $warnings[0]);
+    assert_contains('disposition ', $warnings[0]);
+});
+
+test('format renders depth as an executable build-owned fact', function () {
+    foreach ([
+        'flat' => 'deliberately shadowless',
+        'soft' => 'restrained, diffuse lift',
+        'hard-offset' => 'poster-like offset plate',
+        'inset' => 'presses cards and contained media',
+        'glow' => 'primary-colored luminous halo',
+    ] as $depth => $meaning) {
+        $rendered = DesignDirectionStep::format(['description' => 'x', 'depth' => $depth]);
+        assert_contains("**Depth**: {$depth}", $rendered);
+        assert_contains($meaning, $rendered);
+        assert_contains('do not add another shadow', $rendered);
+    }
+    assert_eq('Just prose.', DesignDirectionStep::format(['description' => 'Just prose.']));
+});
+
 test('normalize commits a shape while valid normalization and a missing field stay silent', function () {
     $base = [
         'description' => 'x',
@@ -1173,6 +1520,40 @@ test('format renders the shape commitment with its executable meaning', function
     assert_eq('Just prose.', DesignDirectionStep::format(['description' => 'Just prose.', 'shape' => ['round']]));
 });
 
+test('normalize commits and renders one bounded modular type scale', function () {
+    foreach (TypeScale::ALL as $scale) {
+        $warnings = [];
+        $direction = DesignDirectionStep::normalize([
+            'description' => 'x',
+            'type_scale' => strtoupper($scale),
+            'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
+        ], 'cinematic-safe-zone', '', warnings: $warnings);
+
+        assert_eq($scale, $direction['type_scale']);
+        assert_eq([], $warnings);
+        $formatted = DesignDirectionStep::format($direction);
+        assert_contains('**Type scale**: ' . $scale, $formatted);
+        assert_contains('The build owns the six preset values', $formatted);
+    }
+});
+
+test('invalid type scale degrades to classic with actionable evidence', function () {
+    foreach (['heroic', ['editorial'], true] as $authored) {
+        $warnings = [];
+        $direction = DesignDirectionStep::normalize([
+            'description' => 'x',
+            'type_scale' => $authored,
+            'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
+        ], 'cinematic-safe-zone', '', warnings: $warnings);
+
+        assert_eq(TypeScale::DEFAULT, $direction['type_scale']);
+        assert_eq(1, count($warnings));
+        assert_contains('field type_scale', $warnings[0]);
+        assert_contains('delivered "classic"', $warnings[0]);
+        assert_contains('disposition', $warnings[0]);
+    }
+});
+
 test('design-direction delivers the deterministic fallback when the model returns no usable direction', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
     $llm->queueJson(['seeds' => designdir_seeds()]);
@@ -1264,7 +1645,11 @@ test('fallbackDirection builds on the chosen seed, generic brief otherwise', fun
     $generic = DesignDirectionStep::fallbackDirection('', 'cinematic-safe-zone');
     assert_contains('bold', $generic['description']);
     assert_eq(Measure::DEFAULT, $generic['measure']);
+    assert_eq(TypeTreatment::DEFAULT, $generic['type_treatment']);
     assert_eq('calm', $generic['motion']);
+    assert_eq('natural', $generic['image_treatment']);
+    assert_eq('mixed', $generic['image_crop']);
+    assert_eq('flat', $generic['depth']);
 });
 
 test('design-direction throws when meta prompt missing', function () {
@@ -1489,7 +1874,7 @@ test('HERO_RECIPE is exact, persisted, and isolated to one recipe fragment', fun
     $llm->queueJson(['seeds' => designdir_seeds()]);
     $llm->queueJson(['direction' => designdir_direction()]);
 
-    putenv('HERO_RECIPE=focal-subject-stage');
+    putenv('HERO_RECIPE=foreground-split');
     try {
         (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
     } finally {
@@ -1497,11 +1882,11 @@ test('HERO_RECIPE is exact, persisted, and isolated to one recipe fragment', fun
     }
 
     $direction = $project->readJson('designDirection.json');
-    assert_eq('focal-subject-stage', $direction['hero_blueprint']['recipe']);
+    assert_eq('foreground-split', $direction['hero_blueprint']['recipe']);
     assert_eq('foreground-image', $direction['hero_blueprint']['media_mode']);
-    assert_contains('focal-subject-stage', $llm->calls[1]['prompt']);
+    assert_contains('foreground-split', $llm->calls[1]['prompt']);
     foreach (HeroComposition::RECIPES as $recipe) {
-        if ($recipe !== 'focal-subject-stage') {
+        if ($recipe !== 'foreground-split') {
             assert_true(!str_contains($llm->calls[1]['prompt'], $recipe), "{$recipe} is not exposed");
         }
     }
@@ -1525,7 +1910,7 @@ test('unknown or caller-incompatible HERO_RECIPE fails before any LLM spend', fu
         'prompt' => 'A cozy neighborhood bakery',
         'design_constraints' => ['allowed_hero_media_modes' => ['none']],
     ]);
-    putenv('HERO_RECIPE=editorial-split');
+    putenv('HERO_RECIPE=foreground-split');
     try {
         assert_throws(fn () => (new DesignDirectionStep(
             $llm,
@@ -1596,7 +1981,7 @@ test('fallible batch hero assignment remaps incompatibility and warns with reque
     $project->writeJson('meta.json', [
         'prompt' => 'A cozy neighborhood bakery',
         'design_constraints' => ['allowed_hero_media_modes' => ['cover-image']],
-        'hero_assignment' => ['source' => 'batch', 'requested_recipe' => 'editorial-split'],
+        'hero_assignment' => ['source' => 'batch', 'requested_recipe' => 'foreground-split'],
     ]);
     $llm->queueJson(['seeds' => designdir_seeds()]);
     $llm->queueJson(['direction' => designdir_direction()]);
@@ -1609,7 +1994,7 @@ test('fallible batch hero assignment remaps incompatibility and warns with reque
         'foreground request remapped inside the cover-image pool',
     );
     $joined = implode(' ', $project->readJson('warnings.json')['design-direction'] ?? []);
-    assert_contains('editorial-split', $joined);
+    assert_contains('foreground-split', $joined);
     assert_contains($delivered, $joined);
     assert_contains('remapped', $joined);
     exec('rm -rf ' . escapeshellarg($tmp));
@@ -1642,7 +2027,7 @@ test('hero blueprint accessors keep front-page topology out of the general brief
     $project = (new ProjectStore($tmp))->create('demo');
     assert_throws(fn () => DesignDirectionStep::heroBlueprintFor($project));
 
-    $blueprint = HeroBlueprint::defaultFor('framed-portrait');
+    $blueprint = HeroBlueprint::defaultFor('foreground-split');
     $project->writeJson('designDirection.json', [
         'description' => 'A quiet gallery language with warm mineral color.',
         'hero_blueprint' => $blueprint,
@@ -1651,9 +2036,9 @@ test('hero blueprint accessors keep front-page topology out of the general brief
     assert_eq($blueprint, DesignDirectionStep::heroBlueprintFor($project));
     $focused = DesignDirectionStep::formatHeroBlueprint($blueprint);
     assert_contains('Front-page hero blueprint (front page only)', $focused);
-    assert_contains('framed-portrait', $focused);
+    assert_contains('foreground-split', $focused);
     $general = DesignDirectionStep::readFor($project);
-    assert_true(!str_contains($general, 'framed-portrait'));
+    assert_true(!str_contains($general, 'foreground-split'));
     assert_true(!str_contains($general, 'Hidden seed bytes'));
 
     $project->writeJson('designDirection.json', [
@@ -1671,10 +2056,10 @@ test('legacy signature-device fields are dropped from the normalized direction',
         'description' => 'A complete visual direction.',
         'signature_device' => 'One notched color block.',
         'signature_device_slots' => ['hero'],
-        'hero_blueprint' => array_merge(HeroBlueprint::defaultFor('editorial-split'), [
+        'hero_blueprint' => array_merge(HeroBlueprint::defaultFor('foreground-split'), [
             'signature_device_use' => 'Place the notch beside the headline.',
         ]),
-    ], 'editorial-split', 'Seed bytes', $repairs, $warnings);
+    ], 'foreground-split', 'Seed bytes', $repairs, $warnings);
     assert_true(!array_key_exists('signature_device', $direction));
     assert_true(!array_key_exists('signature_device_slots', $direction));
     assert_true(!array_key_exists('signature_device_use', $direction['hero_blueprint']));
@@ -1734,6 +2119,21 @@ test('shapeFor returns only an explicit valid commitment', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('depthFor returns only an explicit valid commitment', function () {
+    $tmp = sys_get_temp_dir() . '/builder_dddepth_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+
+    assert_eq(null, DesignDirectionStep::depthFor($project));
+    $project->writeJson('designDirection.json', ['description' => 'x']);
+    assert_eq(null, DesignDirectionStep::depthFor($project), 'pre-field direction stays uncommitted');
+    $project->writeJson('designDirection.json', ['description' => 'x', 'depth' => ['soft']]);
+    assert_eq(null, DesignDirectionStep::depthFor($project), 'garbled value is not guessed');
+    $project->writeJson('designDirection.json', ['description' => 'x', 'depth' => ' Hard-Offset ']);
+    assert_eq('hard-offset', DesignDirectionStep::depthFor($project));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('measureFor returns only an explicit valid persisted commitment', function () {
     $tmp = sys_get_temp_dir() . '/builder_ddmeasure_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
@@ -1744,6 +2144,95 @@ test('measureFor returns only an explicit valid persisted commitment', function 
     $project->writeJson('designDirection.json', ['measure' => ' Full ']);
     assert_eq('full', DesignDirectionStep::measureFor($project));
 
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('imageTreatmentFor returns only an explicit valid commitment', function () {
+    $tmp = sys_get_temp_dir() . '/builder_ddtreatment_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+
+    assert_eq(null, DesignDirectionStep::imageTreatmentFor($project));
+    $project->writeJson('designDirection.json', ['description' => 'x']);
+    assert_eq(null, DesignDirectionStep::imageTreatmentFor($project), 'pre-field direction stays uncommitted');
+    $project->writeJson('designDirection.json', ['description' => 'x', 'image_treatment' => ['duotone']]);
+    assert_eq(null, DesignDirectionStep::imageTreatmentFor($project), 'garbled value is not guessed');
+    $project->writeJson('designDirection.json', ['description' => 'x', 'image_treatment' => ' Duotone ']);
+    assert_eq('duotone', DesignDirectionStep::imageTreatmentFor($project));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('typeTreatmentFor returns only an explicit valid persisted commitment', function () {
+    $tmp = sys_get_temp_dir() . '/builder_ddtypetreatment_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+
+    assert_eq(null, DesignDirectionStep::typeTreatmentFor($project));
+    $project->writeJson('designDirection.json', ['type_treatment' => ['title']]);
+    assert_eq(null, DesignDirectionStep::typeTreatmentFor($project));
+    $project->writeJson('designDirection.json', ['type_treatment' => ' Caps-Tracked ']);
+    assert_eq('caps-tracked', DesignDirectionStep::typeTreatmentFor($project));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('imageCropFor returns only an explicit valid commitment', function () {
+    $tmp = sys_get_temp_dir() . '/builder_ddcrop_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+
+    assert_eq(null, DesignDirectionStep::imageCropFor($project));
+    $project->writeJson('designDirection.json', ['description' => 'x']);
+    assert_eq(null, DesignDirectionStep::imageCropFor($project), 'pre-field direction stays uncommitted');
+    $project->writeJson('designDirection.json', ['description' => 'x', 'image_crop' => ['portrait']]);
+    assert_eq(null, DesignDirectionStep::imageCropFor($project), 'garbled value is not guessed');
+    $project->writeJson('designDirection.json', ['description' => 'x', 'image_crop' => ' Panoramic ']);
+    assert_eq('panoramic', DesignDirectionStep::imageCropFor($project));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('typeScaleFor returns only an explicit valid commitment', function () {
+    $tmp = sys_get_temp_dir() . '/builder_ddtypescale_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+
+    assert_eq(null, DesignDirectionStep::typeScaleFor($project));
+    $project->writeJson('designDirection.json', ['type_scale' => ['editorial']]);
+    assert_eq(null, DesignDirectionStep::typeScaleFor($project));
+    $project->writeJson('designDirection.json', ['type_scale' => ' Dramatic ']);
+    assert_eq('dramatic', DesignDirectionStep::typeScaleFor($project));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('CTA style normalizes actionably, renders executable meaning, and accessor fails closed', function () {
+    $repairs = [];
+    $warnings = [];
+    $direction = DesignDirectionStep::normalize(
+        ['description' => 'x', 'cta_style' => 'pill',
+            'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone')],
+        'cinematic-safe-zone',
+        '',
+        $repairs,
+        $warnings,
+    );
+    assert_eq('solid', $direction['cta_style']);
+    assert_eq([], $repairs);
+    assert_eq(1, count($warnings));
+    foreach (['field cta_style', 'pill', 'delivered "solid"', 'invalid CTA construction'] as $part) {
+        assert_contains($part, $warnings[0]);
+    }
+
+    $formatted = DesignDirectionStep::format(['description' => 'x', 'cta_style' => 'ghost-arrow']);
+    assert_contains('**CTA style**: ghost-arrow', $formatted);
+    assert_contains('arrow glyph', $formatted);
+    assert_contains('do not restyle those per button', $formatted);
+
+    $tmp = sys_get_temp_dir() . '/builder_cta_accessor_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    assert_eq(null, DesignDirectionStep::ctaStyleFor($project));
+    $project->writeJson('designDirection.json', ['cta_style' => ['block']]);
+    assert_eq(null, DesignDirectionStep::ctaStyleFor($project));
+    $project->writeJson('designDirection.json', ['cta_style' => ' Block ']);
+    assert_eq('block', DesignDirectionStep::ctaStyleFor($project));
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

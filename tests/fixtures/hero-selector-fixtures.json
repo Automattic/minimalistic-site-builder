@@ -59,8 +59,7 @@
         "hero_copy_capacity": "standard"
       },
       "eligible": [
-        "editorial-split",
-        "framed-portrait"
+        "foreground-split"
       ]
     },
     {
@@ -75,8 +74,7 @@
         "hero_copy_capacity": "standard"
       },
       "eligible": [
-        "editorial-split",
-        "framed-portrait"
+        "foreground-split"
       ]
     },
     {
@@ -91,7 +89,7 @@
         "hero_copy_capacity": "compact"
       },
       "eligible": [
-        "focal-subject-stage"
+        "foreground-split"
       ]
     },
     {
@@ -107,7 +105,7 @@
         "hero_copy_capacity": "compact"
       },
       "eligible": [
-        "focal-subject-stage"
+        "foreground-split"
       ]
     },
     {
@@ -122,24 +120,7 @@
         "hero_copy_capacity": "standard"
       },
       "eligible": [
-        "editorial-split",
-        "framed-portrait"
-      ]
-    },
-    {
-      "id": "standard-band",
-      "stable_identifier": "reading-room",
-      "concept_seed": "A short proposition rests over one long horizon.",
-      "constraints": {
-        "hero_canvas": "framed",
-        "allowed_hero_media_modes": [
-          "band-image"
-        ],
-        "max_hero_images": 1,
-        "hero_copy_capacity": "standard"
-      },
-      "eligible": [
-        "stacked-headline-band"
+        "foreground-split"
       ]
     },
     {
@@ -167,7 +148,7 @@
         "hero_copy_capacity": "compact"
       },
       "eligible": [
-        "focal-subject-stage"
+        "foreground-split"
       ]
     }
   ]

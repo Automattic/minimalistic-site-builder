@@ -137,6 +137,9 @@ function openrouter_api_key(): string
  *   - xai       — OpenAI-compatible client pointed at api.x.ai (XAI_API_KEY)
  *   - openai    — OpenAI-compatible client (OPENAI_API_KEY, optional OPENAI_BASE_URL)
  *   - openrouter — OpenAI-compatible client → https://openrouter.ai/api/v1 (OPENROUTER_API_KEY)
+ *   - baseten   — OpenAI-compatible client → Baseten's open-weight models
+ *                 (Kimi, GLM, DeepSeek) via the wpcom AI proxy (BASETEN_API_KEY;
+ *                 BASETEN_BASE_URL to reach Baseten directly instead)
  *
  * Model IDs come from the provider's tiers in config/models.json (StepDefaults),
  * overridable per step via LLM_MODEL_* — so `--provider=openai` swaps the whole
@@ -183,8 +186,30 @@ function make_llm(?string $provider = null): Llm
             // bounded so three sites produce at most 12 simultaneous requests.
             maxConcurrency: 4,
         ),
+        'baseten' => new OpenAiCompatibleClient(
+            apiKey:   Env::getRequired('BASETEN_API_KEY'),
+            model:    default_llm_model(),
+            // The wpcom AI proxy fronts Baseten and is what the Automattic
+            // key opens; Studio's hosted-model family uses this same route.
+            // Set BASETEN_BASE_URL=https://inference.baseten.co/v1 to go direct
+            // with a real Baseten key. Deliberately its own variable rather
+            // than OPENAI_BASE_URL, which openai/xai already share — reusing it
+            // would point a Baseten run at whichever proxy OpenAI was given.
+            baseUrl:  Env::get('BASETEN_BASE_URL', 'https://public-api.wordpress.com/wpcom/v2/ai-api-proxy/v1'),
+            provider: 'baseten',
+            // These are large open-weight models generating whole pages of
+            // block markup, and the proxy adds a hop in front of them. Reasoning
+            // is switched off per model in OpenAiCompatibleClient, so this is
+            // headroom for a long generation, not for hidden thinking.
+            timeoutSeconds: 1200,
+            // The proxy bills and authorises per feature slug. Studio's
+            // `studio-assistant-*` slugs are session-scoped and answer this
+            // key with 403 ai_feature_not_permitted; `site-builder` is ours.
+            // Harmless when BASETEN_BASE_URL points straight at Baseten.
+            extraHeaders: ['X-WPCOM-AI-Feature' => 'site-builder'],
+        ),
         default => throw new RuntimeException(
-            "Unknown LLM_PROVIDER '{$provider}'. Use anthropic, xai, openai, or openrouter."
+            "Unknown LLM_PROVIDER '{$provider}'. Use anthropic, xai, openai, openrouter, or baseten."
         ),
     };
 }

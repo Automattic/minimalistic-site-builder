@@ -41,6 +41,9 @@ function sections_page(string $slug, array $sections, array $overrides = []): ar
         if (is_array($section) && !array_key_exists('primary_action', $section)) {
             $section['primary_action'] = null;
         }
+        if (is_array($section) && !array_key_exists('text_placement', $section)) {
+            $section['text_placement'] = 'left-column';
+        }
         return $section;
     }, $sections);
     return array_merge([
@@ -306,6 +309,14 @@ test('footer prompt renders only its selected high-impact recipe', function () {
         'conversion-panel' => 'Build a bold, offset invitation',
         'editorial-colophon' => 'final plate of a book or',
         'split-ledger' => 'Build a strong 65/35 or 70/30 split',
+        'cover-coda' => 'ONE full-bleed wp:cover closes the page',
+        'diptych' => 'EXACTLY two full-height slabs',
+        'sunken-wordmark' => 'Invert the billboard',
+        'status-readout' => 'quiet status readout',
+        'contact-sheet' => 'A film contact sheet closes the page',
+        'mosaic-tiles' => 'A hard-edged mosaic of flat color tiles',
+        'color-field' => 'One massive inset panel of a single strong palette color',
+        'repeat-rail' => 'The identity as printed tape',
     ];
     assert_contains($recipeMarkers[$archetype], $footer);
     foreach ($recipeMarkers as $otherArchetype => $marker) {
@@ -1375,6 +1386,15 @@ test('page-plan steers pages off the same surface the footer is actually painted
     // test still green.
     [$project, $tmp] = sections_fixture();
     $project->writeJson('meta.json', ['prompt' => 'Demo prompt']);
+    // The closing section must sit on NEITHER footer surface candidate. What
+    // this test pins is the shared seed derivation; a closing section that
+    // happens to match the hashed archetype's preferred surface legitimately
+    // makes resolveSurface() pick the other candidate (the degraded path it
+    // exists for), and which archetype the fixture hashes to moves every time
+    // the catalog grows. A tinted closing keeps the assertion about the seed.
+    $pages = $project->readJson('pages.json');
+    $pages['pages'][0]['sections'][1]['background'] = 'tinted';
+    $project->writeJson('pages.json', $pages);
 
     $planStep = new \Automattic\SiteBuild\Steps\PagePlanStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
     $planRequests = $planStep->requests($project);

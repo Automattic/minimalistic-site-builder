@@ -112,7 +112,8 @@ final class ScaffoldThemeStep implements Step
            produced and left it floating in taller rows (BIGR-777). */
         .card-media img,
         .card-media-tall img,
-        .card-media-thumb img {
+        .card-media-thumb img,
+        .feature-media img {
             width: 100%;
             object-fit: cover;
             display: block;
@@ -139,6 +140,13 @@ final class ScaffoldThemeStep implements Step
         .wp-block-group.copy-flush > * {
             margin-inline-start: 0 !important;
             margin-inline-end: auto !important;
+        }
+        /* The same readable cap, placed on the wide band's trailing edge for
+           an asymmetric-thirds assignment. LayoutFixer respects this authored
+           hook instead of replacing it with copy-flush. */
+        .wp-block-group.copy-end > * {
+            margin-inline-start: auto !important;
+            margin-inline-end: 0 !important;
         }
         /* Equal-height, equal-width card rows (sections opt in via className="equal-cards"). */
         .equal-cards > .wp-block-column {
@@ -202,6 +210,35 @@ final class ScaffoldThemeStep implements Step
         .equal-cards .cta-bottom {
             margin-top: auto;
             justify-content: center;
+        }
+
+        /* Pinned lead region of a split band (BIGR-945). `SectionComposition`
+           asks for this class only where the plan already says one region
+           repeats and the other does not, so the short lead stays in view
+           instead of stranding a blank quadrant beside the long list.
+
+           The rule is owned here rather than left to the page-styles utility
+           of the same name: that utility is model-authored per site, and an
+           archetype that REQUIRES the behavior cannot depend on a CSS pass
+           choosing to emit it. A site whose page-styles also writes the utility
+           simply agrees with this.
+
+           `align-self` opts the column out of the row's default stretch,
+           without which a full-height column can never stick. The column gets
+           no height clamp and no inner scroll: a nested scroll bar reads as a
+           defect. A pinned column taller than the viewport stays reachable
+           through the page scroll, because sticky positioning releases the
+           column when the section end comes into view. The whole behavior is
+           desktop-only, so the stacked state is an ordinary column in source
+           order. */
+        .section-composition--asymmetric-split .wp-block-column.sticky-side {
+            align-self: flex-start;
+        }
+        @media (min-width: 782px) {
+            .section-composition--asymmetric-split .wp-block-column.sticky-side {
+                position: sticky;
+                top: var(--wp--preset--spacing--lg, 3rem);
+            }
         }
 
         /* Flush-media cards (sections opt in via className="card-flush" on the
@@ -485,44 +522,24 @@ final class ScaffoldThemeStep implements Step
         .hero-composition--cinematic-safe-zone .wp-block-columns {
             max-width: none;
         }
-        .hero-composition--editorial-split .wp-block-columns,
-        .hero-composition--framed-portrait .wp-block-columns,
-        .hero-composition--focal-subject-stage .wp-block-columns {
+        .hero-composition--foreground-split .wp-block-columns {
             align-items: center;
         }
-        .hero-composition--editorial-split .hero-composition__media img,
-        .hero-composition--focal-subject-stage .hero-composition__media img {
+        .hero-composition--foreground-split .hero-composition__media img {
             width: 100%;
             height: auto;
             object-fit: cover;
         }
-        .hero-composition--framed-portrait .hero-composition__media img {
-            width: 100%;
+        /* The blueprint's portrait media_aspect (BIGR-912). The build stamps
+           hero-media--<aspect> on the hero root the same way it stamps
+           hero-mobile--<transformation>, so this holds the plate to its ratio
+           even when the delivered image drifts and the contained vertical
+           frame survives a landscape file (BIGR-925). */
+        .hero-composition--foreground-split.hero-media--portrait .hero-composition__media img {
             aspect-ratio: 3 / 4;
-            object-fit: cover;
         }
         .hero-composition--layered-poster {
             overflow: hidden;
-        }
-        /* stacked-headline-band stacks the copy ABOVE a full-width image band
-           (BIGR-885). The band is cropped to a letterbox ratio and capped
-           against the viewport, because the headline, the support line, the
-           action AND a meaningful share of the band share one first viewport.
-           An uncapped 16:9 image at full width is taller than half the
-           desktop viewport on its own and pushes the band out of the fold.
-           `max-width: none` is the fallback for a band a generator wrapped in
-           a constrained group: HeroUnit repairs that wrapper to align:full,
-           and this keeps a wrapper it could not reach off the reading
-           measure. */
-        .hero-composition--stacked-headline-band .hero-composition__media {
-            max-width: none;
-        }
-        .hero-composition--stacked-headline-band .hero-composition__media img {
-            display: block;
-            width: 100%;
-            aspect-ratio: 21 / 9;
-            max-height: 52vh;
-            object-fit: cover;
         }
         /* type-manifesto carries no image (BIGR-885), so the offset between the
            wide headline and the narrower standfirst IS the composition. The
@@ -636,14 +653,6 @@ final class ScaffoldThemeStep implements Step
             }
             .hero-mobile--retain-media-overlay .hero-composition__copy {
                 max-width: min(88%, 32rem);
-            }
-            /* The band recipe already stacks on desktop, so its mobile
-               transformation is the crop, not the order: a 21:9 band at phone
-               width is a 160px sliver that reads as a rule, not a picture.
-               Trade width for height and keep the same cap on the fold. */
-            .hero-composition--stacked-headline-band .hero-composition__media img {
-                aspect-ratio: 3 / 2;
-                max-height: 44vh;
             }
             /* One narrow screen cannot hold both a wide headline and an offset
                column, so the standfirst returns to the reading edge. */

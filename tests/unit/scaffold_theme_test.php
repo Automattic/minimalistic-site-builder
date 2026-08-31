@@ -25,6 +25,7 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     // fixed 110px height letterboxed its square image at whatever ratio the
     // column width produced (BIGR-777).
     assert_contains('.card-media img', $css);
+    assert_contains('.feature-media img', $css);
     assert_contains('.card-media img { aspect-ratio: 3 / 2; height: auto; }', $css);
     assert_contains('.card-media-tall img { aspect-ratio: 4 / 5; height: auto; }', $css);
     assert_contains('.card-media-thumb img { aspect-ratio: 1 / 1; height: auto; }', $css);
@@ -36,6 +37,9 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     // through (the image block supports no textColor of its own, BIGR-784).
     assert_contains('.caption-text-base > figcaption { color: var(--wp--preset--color--base); }', $css);
     assert_contains('.caption-text-contrast > figcaption { color: var(--wp--preset--color--contrast); }', $css);
+    assert_contains('.wp-block-group.copy-end > * {', $css);
+    assert_contains('margin-inline-start: auto !important;', $css);
+    assert_contains('margin-inline-end: 0 !important;', $css);
 
     // Flush list-thumb rows: the zeroed row padding must beat generated inline
     // padding, the row clips the bleeding thumb under its border radius, and
@@ -277,9 +281,9 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     // consume only the transformation marker normalized by HeroUnit.
     foreach ([
         'cinematic-safe-zone',
-        'editorial-split',
-        'framed-portrait',
-        'focal-subject-stage',
+        'foreground-split',
+        'foreground-split',
+        'foreground-split',
         'layered-poster',
     ] as $recipe) {
         assert_contains('.hero-composition--' . $recipe, $css);
@@ -433,6 +437,55 @@ test('scaffold hero headings wrap at word boundaries and never snap mid-word', f
     assert_true(
         !str_contains($rule['body'], 'anywhere'),
         'hero headings must not overflow-wrap:anywhere'
+    );
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('scaffold-theme owns the guaranteed sticky-side pin rule', function () {
+    // BIGR-945: `SectionComposition::PIN_CLASS` REQUIRES this behavior. The
+    // page-styles appendix is model-authored and can be dropped, so the
+    // scaffold ships the rule itself.
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_pin_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    (new ScaffoldThemeStep())->run($project);
+    $css = $project->readText('theme/style.css');
+
+    $hook = '.section-composition--asymmetric-split .wp-block-column.sticky-side';
+    assert_contains($hook . ' {', $css, 'the pin rule targets the archetype root and the pin class');
+
+    // The stretch opt-out applies at every width; the sticky part is
+    // desktop-only.
+    $matched = preg_match(
+        '~' . preg_quote($hook, '~') . '\s*\{(?<base>[^}]*)\}~',
+        $css,
+        $base
+    );
+    assert_eq(1, $matched, 'the base pin rule exists');
+    assert_contains('align-self: flex-start', $base['base']);
+
+    $matched = preg_match(
+        '~@media \(min-width: 782px\)\s*\{\s*'
+            . preg_quote($hook, '~') . '\s*\{(?<body>[^}]*)\}~',
+        $css,
+        $rule
+    );
+    assert_eq(1, $matched, 'the sticky part is gated to desktop widths');
+    assert_contains('position: sticky', $rule['body']);
+    assert_contains('top: var(--wp--preset--spacing--lg, 3rem)', $rule['body']);
+    // The pin must not clamp the column: a height clamp with an inner
+    // scroll draws a nested scroll bar on the lead column.
+    assert_true(
+        !str_contains($rule['body'], 'max-block-size'),
+        'the pinned column has no height clamp'
+    );
+    assert_true(
+        !str_contains($rule['body'], 'overflow'),
+        'the pinned column has no inner scroll'
+    );
+    assert_true(
+        !str_contains($rule['body'], 'overscroll'),
+        'the pinned column has no overscroll trap'
     );
 
     exec('rm -rf ' . escapeshellarg($tmp));

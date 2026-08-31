@@ -779,3 +779,37 @@ test('isMotionCapableProperty separates choreography from ordinary design', func
         assert_true(!CssChecks::isMotionCapableProperty($property), $property);
     }
 });
+
+test('image treatment ownership covers owned surfaces and their image/pseudo layers only', function () {
+    foreach ([
+        '.wp-block-image',
+        '.masonry-3 .wp-block-gallery img',
+        '.card-media::after',
+        '.wp-block-cover > .wp-block-cover__background::after',
+        '.card-media-tall picture',
+        '.feature-strip .card-media-thumb img',
+        ':is(.card-media, .panel)',
+    ] as $selector) {
+        assert_true(CssChecks::selectorTargetsImageTreatment($selector), "owned: {$selector}");
+    }
+    foreach ([
+        '.card-media figcaption',
+        '.overlap-up .card',
+        '.cardigan-media img',
+        'img',
+        '.custom-motion .caption',
+        '.masonry-3 :not(.card-media)',
+    ] as $selector) {
+        assert_true(!CssChecks::selectorTargetsImageTreatment($selector), "not owned: {$selector}");
+    }
+
+    assert_true(CssChecks::isImageTreatmentAffectingDeclaration('filter', 'sepia(1)'));
+    assert_true(CssChecks::isImageTreatmentAffectingDeclaration('-webkit-filter', 'grayscale(1)'));
+    assert_true(CssChecks::isImageTreatmentAffectingDeclaration('mix-blend-mode', 'multiply'));
+    assert_true(CssChecks::isImageTreatmentAffectingDeclaration('all', 'initial'));
+    assert_true(!CssChecks::isImageTreatmentAffectingDeclaration('all', '1s ease'));
+    assert_true(!CssChecks::isImageTreatmentAffectingDeclaration('opacity', '0.5'));
+    assert_true(CssChecks::isImageTreatmentAffectingDeclaration('opacity', '0.5', true));
+    assert_true(!CssChecks::isImageTreatmentAffectingDeclaration('--filter', 'blur(2px)'));
+    assert_true(!CssChecks::isImageTreatmentAffectingDeclaration('transform', 'scale(1.1)'));
+});

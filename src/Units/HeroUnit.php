@@ -109,9 +109,6 @@ final class HeroUnit extends AbstractPageSectionUnit
         if ((string) $recipeMeta['layout_archetype'] === 'full-bleed-cover') {
             $markup = GeneratedMarkup::fullBleedCoverAlignment($markup, $key, $repairs);
         }
-        if (in_array('band-image', (array) $recipeMeta['media_modes'], true)) {
-            $markup = GeneratedMarkup::bandMediaAlignment($markup, $key, $repairs);
-        }
         $markup = GeneratedMarkup::centerHeroCopy(
             $markup,
             (string) ($context['blueprint']['text_anchor'] ?? ''),
@@ -121,6 +118,14 @@ final class HeroUnit extends AbstractPageSectionUnit
             $warnings,
         );
         $markup = GeneratedMarkup::clampHeroTopPadding($markup, $key, $repairs);
+        $band = BandSurfaceContract::enforce(
+            $markup,
+            $this->sectionString($context['section'], 'background'),
+            $key,
+        );
+        $markup = $band->markup;
+        array_push($repairs, ...$band->repairs);
+        array_push($warnings, ...$band->warnings);
         $before = $markup;
         $markup = GeneratedMarkup::constrainedPart($markup);
         if ($markup !== $before) {
@@ -132,7 +137,7 @@ final class HeroUnit extends AbstractPageSectionUnit
         }
         array_push(
             $warnings,
-            ...HeroComposition::markupWarnings($markup, $context['recipe'], $key),
+            ...HeroComposition::markupWarnings($markup, $context['recipe'], $key, $context['blueprint']),
         );
         return new MarkupResult($markup, $repairs, $warnings);
     }

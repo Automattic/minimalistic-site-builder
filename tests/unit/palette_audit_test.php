@@ -68,7 +68,7 @@ test('palette-audit --fixtures prints G5 counts and exits 0 after repair', funct
     foreach ([
         'fixtures: 10',
         'pre-repair violating palettes: 6',
-        'pre-repair findings: 13',
+        'pre-repair findings: 12',
         'post-repair remaining: 0',
     ] as $line) {
         assert_true(in_array($line, $run['lines'], true), $text);
@@ -86,7 +86,7 @@ test('palette-audit with no args prints usage on stderr and exits 1', function (
     assert_contains('Usage: php bin/palette-audit.php <slug>', $run['stderr']);
 });
 
-test('palette-audit --projects reports residuals and black/white repairs', function () {
+test('palette-audit --projects repairs a mid-grey palette under the AA floor', function () {
     $dir = sys_get_temp_dir() . '/palette_audit_projects_' . getmypid() . '_' . str_replace('.', '', uniqid('', true));
     assert_true(mkdir($dir . '/mid/theme', 0775, true));
     file_put_contents($dir . '/mid/theme/theme.json', json_encode([
@@ -104,9 +104,13 @@ test('palette-audit --projects reports residuals and black/white repairs', funct
         $text = $run['stdout'] . $run['stderr'];
         assert_eq(0, $run['exit'], $text);
         assert_contains('projects palettes: 1', $run['stdout']);
-        assert_contains('residual palettes: 1', $run['stdout']);
+        // Under the AA floor (BIGR-923) every base reaches 4.5:1 with black
+        // or white, so the mid-grey palette repairs instead of stalling; a
+        // residual now needs the raised surface floor, which project-level
+        // audits do not carry.
+        assert_contains('residual palettes: 0', $run['stdout']);
         assert_contains('residuals missing unrepaired warning: 0', $run['stdout']);
-        assert_contains('warning=unrepaired', $run['stdout']);
+        assert_true(!str_contains($run['stdout'], 'warning=unrepaired'), $text);
     } finally {
         remove_tree($dir);
     }

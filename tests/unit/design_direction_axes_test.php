@@ -24,6 +24,19 @@ test('the chosen seed carries its two traditions into the expansion prompt', fun
     assert_contains('noir', $expansion, 'the design tradition reaches the expansion');
     assert_contains('didone', $expansion, 'so does the letterform tradition');
 
+    // The renderer throws on an unresolved placeholder but is silent about
+    // an unused variable, so deleting {{type_candidates}} from the template
+    // would disable the shortlist without failing anything else (BIGR-920).
+    $candidates = \Automattic\SiteBuild\FontShortlist::candidates(
+        'didone',
+        'demo',
+        \Automattic\SiteBuild\FontCatalog::load(),
+    );
+    assert_true($candidates !== [], 'the didone shelf yields a sample');
+    foreach ($candidates as $family) {
+        assert_contains($family, $expansion, 'the shortlist sample reaches the expansion prompt');
+    }
+
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -60,6 +73,17 @@ test('the expansion prompt names the five reflex fonts without banning them', fu
     );
 });
 
+test('the seeds prompt demands topic-defensible letterform traditions', function () {
+    // BIGR-921: the tbilisi demo (a traditional Georgian tavern) received
+    // type_register "slab" and shipped a techy web face, because the prompt
+    // asked the three seeds to differ without asking each tradition to fit
+    // the subject. Spread stays; random tradition assignment goes.
+    $prompt = (string) file_get_contents(repo_path('prompts/design-direction-seeds.md'));
+    assert_contains('defend for THIS brief', $prompt);
+    assert_contains('Differentiate among the defensible traditions, never past them', $prompt);
+    assert_contains('The three seeds should not all name the same tradition', $prompt);
+});
+
 test('normalize reads the page rhythm and density the direction commits to', function () {
     $repairs = [];
     $warnings = [];
@@ -69,6 +93,7 @@ test('normalize reads the page rhythm and density the direction commits to', fun
             'palette'     => ['base' => '#F4EBDA'],
             'rhythm'      => ' Interrupted ',
             'density'     => 'DENSE',
+            'text_placement' => ' Asymmetric-Thirds ',
         ],
         'cinematic-safe-zone',
         '',
@@ -77,6 +102,7 @@ test('normalize reads the page rhythm and density the direction commits to', fun
     );
     assert_eq('interrupted', $direction['rhythm'], 'rhythm is case and space insensitive');
     assert_eq('dense', $direction['density']);
+    assert_eq('asymmetric-thirds', $direction['text_placement']);
 
     foreach (DesignDirectionStep::RHYTHMS as $rhythm) {
         $read = DesignDirectionStep::normalize(
@@ -97,6 +123,7 @@ test('a direction that forgot the rhythm does not silently re-elect the uniform 
     );
     assert_eq('alternating', $direction['rhythm']);
     assert_eq('measured', $direction['density']);
+    assert_eq('left-column', $direction['text_placement']);
     assert_true($direction['rhythm'] !== 'stacked', 'the fallback is never the do-nothing value');
 });
 
@@ -122,6 +149,7 @@ test('format renders rhythm and density as executable facts the page plan can ac
         'palette'     => ['base' => '#1B2233'],
         'rhythm'      => 'interrupted',
         'density'     => 'dense',
+        'text_placement' => 'asymmetric-thirds',
     ]);
     assert_contains('**Rhythm**', $rendered);
     assert_contains('interrupted', $rendered);
@@ -129,10 +157,13 @@ test('format renders rhythm and density as executable facts the page plan can ac
     assert_contains('**Density**', $rendered);
     assert_contains('compact', $rendered, 'the density names the section value it maps to');
     assert_contains('lg/xl/xxl section-padding ramp', $rendered, 'the density names its build-owned execution');
+    assert_contains('**Text placement**', $rendered);
+    assert_contains('second or third zone', $rendered);
 
     $bare = DesignDirectionStep::format(['description' => 'x']);
     assert_true(!str_contains($bare, 'Rhythm'), 'an uncommitted rhythm states nothing');
     assert_true(!str_contains($bare, 'Density'), 'an uncommitted density states nothing');
+    assert_true(!str_contains($bare, 'Text placement'), 'an uncommitted placement states nothing');
 });
 
 test('densityFor reads only a valid persisted density and otherwise stays measured', function () {
@@ -153,7 +184,33 @@ test('the page plan is told to act on the rhythm and density facts', function ()
     $plan = (string) file_get_contents(repo_path('prompts/page-plan.md'));
     assert_contains('**Rhythm**', $plan, 'the planner is pointed at the rhythm commitment');
     assert_contains('**Density**', $plan, 'and at the density commitment');
+    assert_contains('**Text placement**', $plan, 'and at the horizontal placement commitment');
     foreach (DesignDirectionStep::RHYTHMS as $rhythm) {
         assert_contains('`' . $rhythm . '`', $plan, "the planner knows what {$rhythm} means");
     }
+});
+
+test('text placement is bounded and unsupported intent degrades loudly', function () {
+    foreach (DesignDirectionStep::TEXT_PLACEMENTS as $placement) {
+        $warnings = [];
+        $direction = DesignDirectionStep::normalize(
+            ['description' => 'x', 'palette' => ['base' => '#F4EBDA'], 'text_placement' => $placement],
+            'cinematic-safe-zone',
+            warnings: $warnings,
+        );
+        assert_eq($placement, $direction['text_placement']);
+        assert_true(
+            !str_contains(implode("\n", $warnings), 'text_placement'),
+            "{$placement} is not degraded",
+        );
+    }
+
+    $warnings = [];
+    $direction = DesignDirectionStep::normalize(
+        ['description' => 'x', 'palette' => ['base' => '#F4EBDA'], 'text_placement' => 'random-right'],
+        'cinematic-safe-zone',
+        warnings: $warnings,
+    );
+    assert_eq('left-column', $direction['text_placement']);
+    assert_contains('text_placement', implode("\n", $warnings));
 });

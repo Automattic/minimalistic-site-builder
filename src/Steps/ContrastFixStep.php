@@ -43,8 +43,6 @@ final class ContrastFixStep implements Step
 {
     private const REPORT_FILE = 'contrast-report.txt';
 
-    /** base↔contrast should be comfortably readable, not borderline. */
-    private const PALETTE_TARGET = 7.0;
 
     public function __construct(private bool $htmlFirst = false) {}
 
@@ -90,8 +88,11 @@ final class ContrastFixStep implements Step
         $warnings = 0;
 
         // Theme-level pairs first: the global link repair below changes the
-        // default that the per-file walk then inherits.
-        $themeChanged = $this->fixThemeLevel($themeJson, $palette, $report, $repaired, $warnings);
+        // default that the per-file walk then inherits. The target above the
+        // 4.5 minimum exists only when a committed surface texture demands
+        // headroom for its overlay (BIGR-923).
+        $paletteTarget = Surface::contrastFloor(DesignDirectionStep::surfaceFor($project));
+        $themeChanged = $this->fixThemeLevel($themeJson, $palette, $paletteTarget, $report, $repaired, $warnings);
         if ($themeChanged) {
             $project->writeJson('theme/theme.json', $themeJson);
         }
@@ -281,8 +282,14 @@ final class ContrastFixStep implements Step
      * @param array<string,string> $palette
      * @param list<string> $report
      */
-    private function fixThemeLevel(array &$themeJson, array $palette, array &$report, int &$repaired, int &$warnings): bool
-    {
+    private function fixThemeLevel(
+        array &$themeJson,
+        array $palette,
+        float $paletteTarget,
+        array &$report,
+        int &$repaired,
+        int &$warnings,
+    ): bool {
         $changed = false;
         $base = self::rgb($palette, 'base');
         $contrast = self::rgb($palette, 'contrast');
@@ -295,10 +302,10 @@ final class ContrastFixStep implements Step
                     $ratio, ContrastMath::NORMAL_TEXT
                 );
                 $warnings++;
-            } elseif ($ratio < self::PALETTE_TARGET) {
+            } elseif ($ratio < $paletteTarget) {
                 $report[] = sprintf(
-                    '[theme.json] palette base/contrast ratio %.2f is below the %.1f target (warning)',
-                    $ratio, self::PALETTE_TARGET
+                    '[theme.json] palette base/contrast ratio %.2f is below the %.1f surface-texture target (warning)',
+                    $ratio, $paletteTarget
                 );
                 $warnings++;
             }
@@ -322,13 +329,21 @@ final class ContrastFixStep implements Step
             ) || $changed;
         }
 
-        // Button label on the button background.
-        $btnBgValue = $themeJson['styles']['elements']['button']['color']['background'] ?? null;
-        $btnBg = is_string($btnBgValue) ? self::resolve($palette, $btnBgValue) : null;
-        if ($btnBg !== null) {
+        // Button label on every opaque button background. Transparent CTA
+        // constructions use `inherit` and are covered by the rendered band's
+        // repaired text color; solid/outline/block interaction states each get
+        // their own explicit 4.5:1 check here.
+        foreach (['' => 'button text', ':hover' => 'button hover text',
+            ':focus' => 'button focus text', ':active' => 'button active text'] as $state => $label) {
+            $prefix = 'styles.elements.button' . ($state === '' ? '' : '.' . $state);
+            $btnBgValue = self::pathValue($themeJson, $prefix . '.color.background');
+            $btnBg = is_string($btnBgValue) ? self::resolve($palette, $btnBgValue) : null;
+            if ($btnBg === null) {
+                continue;
+            }
             $changed = $this->repairThemePair(
-                $themeJson, $palette, 'styles.elements.button.color.text',
-                'button text', $btnBg, ['base', 'contrast'], true,
+                $themeJson, $palette, $prefix . '.color.text',
+                $label, $btnBg, ['base', 'contrast'], true,
                 $report, $repaired, $warnings
             ) || $changed;
         }
@@ -405,6 +420,19 @@ final class ContrastFixStep implements Step
             $warnings++;
         }
         return true;
+    }
+
+    /** Read one dot-separated theme.json path without emitting notices. */
+    private static function pathValue(array $theme, string $path): mixed
+    {
+        $value = $theme;
+        foreach (explode('.', $path) as $key) {
+            if (!is_array($value) || !array_key_exists($key, $value)) {
+                return null;
+            }
+            $value = $value[$key];
+        }
+        return $value;
     }
 
     // ── theme.json readers (public: CoverContrastStep reuses them) ────────

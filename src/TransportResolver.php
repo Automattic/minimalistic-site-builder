@@ -50,6 +50,7 @@ final class TransportResolver
         'openai'     => ['OPENAI_API_KEY'],
         'xai'        => ['XAI_API_KEY'],
         'openrouter' => ['OPENROUTER_API_KEY', 'OPEN_ROUTER_API_KEY'],
+        'baseten'    => ['BASETEN_API_KEY'],
     ];
 
     private const COMPILED_DEFAULT_PROVIDER = 'anthropic';
@@ -138,7 +139,7 @@ final class TransportResolver
             if ($choice->provider === null || trim($choice->provider) === '') {
                 throw new TransportUnavailable(
                     'Transport api has no resolved provider. Obtain the choice from TransportResolver::decide(), '
-                    . 'or construct it with a canonical provider: anthropic, openai, xai, or openrouter.'
+                    . 'or construct it with a canonical provider: anthropic, openai, xai, openrouter, or baseten.'
                 );
             }
             $provider = self::normalizeProvider($choice->provider, 'resolved API provider');

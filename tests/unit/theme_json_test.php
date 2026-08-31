@@ -11,6 +11,126 @@ use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\Steps\ThemeJsonStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
+use Automattic\SiteBuild\TypeTreatment;
+
+test('repairTypeTreatment owns heading case and tracking while preserving line height and siblings', function () {
+    $authored = ['styles' => [
+        'elements' => [
+            'heading' => ['typography' => [
+                'lineHeight' => '1.17',
+                'fontWeight' => '700',
+                'textTransform' => 'none',
+                'letterSpacing' => '-0.02em',
+            ]],
+            'h1' => [
+                'typography' => [
+                    'lineHeight' => '1.04',
+                    'fontSize' => 'var:preset|font-size|display',
+                    'textTransform' => 'lowercase',
+                    'letterSpacing' => '0.2em',
+                ],
+                '@media (max-width: 600px)' => ['typography' => ['letterSpacing' => '0']],
+            ],
+        ],
+        'blocks' => [
+            'core/heading' => ['typography' => [
+                'fontWeight' => '600',
+                'textTransform' => 'capitalize',
+            ]],
+        ],
+        'variations' => [
+            'poster' => ['elements' => [
+                'h2' => ['typography' => ['lineHeight' => '1.1', 'letterSpacing' => '-0.04em']],
+            ]],
+        ],
+    ]];
+
+    [$theme, $repairs] = ThemeJsonStep::repairTypeTreatment($authored, 'caps-tracked');
+    assert_eq([
+        'lineHeight' => '1.17',
+        'fontWeight' => '700',
+        'textTransform' => 'uppercase',
+        'letterSpacing' => '0.08em',
+    ], $theme['styles']['elements']['heading']['typography']);
+    assert_eq('1.04', $theme['styles']['elements']['h1']['typography']['lineHeight']);
+    assert_eq('var:preset|font-size|display', $theme['styles']['elements']['h1']['typography']['fontSize']);
+    assert_true(!isset($theme['styles']['elements']['h1']['typography']['textTransform']));
+    assert_true(!isset($theme['styles']['elements']['h1']['typography']['letterSpacing']));
+    assert_true(!isset($theme['styles']['elements']['h1']['@media (max-width: 600px)']['typography']));
+    assert_eq('600', $theme['styles']['blocks']['core/heading']['typography']['fontWeight']);
+    assert_true(!isset($theme['styles']['blocks']['core/heading']['typography']['textTransform']));
+    assert_eq(
+        ['lineHeight' => '1.1'],
+        $theme['styles']['variations']['poster']['elements']['h2']['typography'],
+    );
+    assert_true(count($repairs) >= 7);
+
+    [$fixed, $fixedRepairs] = ThemeJsonStep::repairTypeTreatment($theme, 'caps-tracked');
+    assert_eq($theme, $fixed);
+    assert_eq([], $fixedRepairs);
+});
+
+test('repairTypeTreatment rebuilds a malformed heading element instead of silently dropping the treatment', function () {
+    foreach (['oops', [['a' => 1]], 7] as $authored) {
+        [$theme, $repairs] = ThemeJsonStep::repairTypeTreatment(
+            ['styles' => ['elements' => ['heading' => $authored]]],
+            'caps-tight',
+        );
+        assert_eq(
+            TypeTreatment::typography('caps-tight'),
+            $theme['styles']['elements']['heading']['typography'],
+        );
+        assert_true(count($repairs) >= 3, 'malformed node replacement and pair installation are recorded');
+        assert_contains('replaced malformed heading element', implode(' ', $repairs));
+
+        [$fixed, $fixedRepairs] = ThemeJsonStep::repairTypeTreatment($theme, 'caps-tight');
+        assert_eq($theme, $fixed);
+        assert_eq([], $fixedRepairs);
+    }
+
+    [$theme, $repairs] = ThemeJsonStep::repairTypeTreatment(
+        ['styles' => ['elements' => 'broken']],
+        'caps-tight',
+    );
+    assert_eq(
+        TypeTreatment::typography('caps-tight'),
+        $theme['styles']['elements']['heading']['typography'],
+    );
+    assert_contains('replaced malformed elements container', implode(' ', $repairs));
+});
+
+test('repairTypeTreatment strips competing case/tracking from post-title and site-title blocks', function () {
+    [$theme, $repairs] = ThemeJsonStep::repairTypeTreatment(['styles' => ['blocks' => [
+        'core/post-title' => ['typography' => [
+            'textTransform' => 'lowercase',
+            'letterSpacing' => '0.2em',
+            'lineHeight' => '1.05',
+        ]],
+        'core/site-title' => ['typography' => [
+            'letterSpacing' => '0.3em',
+            'fontWeight' => '800',
+        ]],
+    ]]], 'caps-tight');
+
+    assert_eq(['lineHeight' => '1.05'], $theme['styles']['blocks']['core/post-title']['typography']);
+    assert_eq(['fontWeight' => '800'], $theme['styles']['blocks']['core/site-title']['typography']);
+    assert_contains('styles.blocks.core/post-title.typography.textTransform', implode(' ', $repairs));
+    assert_contains('styles.blocks.core/site-title.typography.letterSpacing', implode(' ', $repairs));
+
+    [$fixed, $fixedRepairs] = ThemeJsonStep::repairTypeTreatment($theme, 'caps-tight');
+    assert_eq($theme, $fixed);
+    assert_eq([], $fixedRepairs);
+});
+
+test('repairTypeTreatment is a no-op without an explicit commitment and repairs malformed base typography', function () {
+    $legacy = ['styles' => ['elements' => ['heading' => ['typography' => 'broken']]]];
+    assert_eq([$legacy, []], ThemeJsonStep::repairTypeTreatment($legacy, ''));
+
+    [$repaired, $repairs] = ThemeJsonStep::repairTypeTreatment($legacy, 'lowercase');
+    assert_eq(TypeTreatment::typography('lowercase'), $repaired['styles']['elements']['heading']['typography']);
+    assert_true(count($repairs) >= 3);
+    assert_contains('malformed typography container', implode(' ', $repairs));
+});
 
 test('repairShapeWiring installs every explicit corner language and leaves a missing commitment alone', function () {
     [$soft, $repairs] = ThemeJsonStep::repairShapeWiring([], 'soft');
@@ -310,6 +430,55 @@ test('repairShapeWiring isolates malformed radius containers with actionable rep
     assert_eq([], $fixedWarnings, 'fixed point produces no warnings');
 });
 
+test('theme-json writes the committed type treatment and keeps the model line height', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tjtypetreatment_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'An archival technical journal']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project, overrides: ['type_treatment' => 'caps-tracked']);
+
+    $payload = valid_theme_payload();
+    $payload['styles']['elements']['heading']['typography'] = [
+        'fontWeight' => '700',
+        'lineHeight' => '1.19',
+        'textTransform' => 'none',
+        'letterSpacing' => '-0.02em',
+    ];
+    $payload['styles']['elements']['h1']['typography']['letterSpacing'] = '-0.04em';
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $theme = $project->readJson('theme/theme.json');
+    assert_eq('1.19', $theme['styles']['elements']['heading']['typography']['lineHeight']);
+    assert_eq('uppercase', $theme['styles']['elements']['heading']['typography']['textTransform']);
+    assert_eq('0.08em', $theme['styles']['elements']['heading']['typography']['letterSpacing']);
+    assert_true(!isset($theme['styles']['elements']['h1']['typography']['letterSpacing']));
+    $report = $project->readText('logs/theme-json-direction-bind.txt');
+    assert_contains('committed caps-tracked heading treatment', $report);
+    assert_contains('styles.elements.h1.typography.letterSpacing', $report);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json prompt delegates heading case and tracking to type treatment', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tjtypetreatment_prompt_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'An expressive craft studio']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project, overrides: ['type_treatment' => 'lowercase']);
+
+    $prompt = (new ThemeJsonStep(
+        new FakeLlm(),
+        new PromptRenderer(repo_path('prompts')),
+    ))->requests($project)['theme-json']['prompt'];
+
+    assert_contains('**Type treatment**: lowercase', $prompt);
+    assert_contains('relaxed 0.01em tracking', $prompt);
+    assert_contains('owns `textTransform` and `letterSpacing`', $prompt);
+    assert_contains('preserving every line-height choice', $prompt);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('theme-json wires the direction-committed shape into the written theme', function () {
     $tmp = sys_get_temp_dir() . '/builder_tjshape_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
@@ -334,8 +503,34 @@ test('theme-json wires the direction-committed shape into the written theme', fu
     $report = $project->readText('logs/theme-json-shape.txt');
     assert_contains('styles.blocks.core/image.border.radius: authored "2px"; delivered "1.25rem"', $report);
     assert_contains('styles.elements.button.border.radius: authored "3px"; delivered "9999px"', $report);
-    $warnings = implode(' ', $project->readJson('warnings.json')['theme-json'] ?? []);
+    $warnings = $project->exists('warnings.json')
+        ? implode(' ', $project->readJson('warnings.json')['theme-json'] ?? [])
+        : '';
     assert_true(!str_contains($warnings, 'border.radius'), 'successful shape repairs stay out of warnings.json');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json wires the direction-committed depth preset into the written theme', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tjdepth_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A neon night market']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project, 'cinematic-safe-zone', ['depth' => 'glow']);
+
+    $payload = valid_theme_payload();
+    $payload['settings']['shadow']['presets'] = [
+        ['slug' => 'depth', 'name' => 'Drifted', 'shadow' => 'none'],
+    ];
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $presets = $project->readJson('theme/theme.json')['settings']['shadow']['presets'];
+    assert_eq('depth', $presets[0]['slug']);
+    assert_eq('Glow', $presets[0]['name']);
+    assert_contains('var(--wp--preset--color--primary)', $presets[0]['shadow']);
+    assert_contains('wired committed depth', $project->readText('logs/theme-json-depth.txt'));
+
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -398,6 +593,31 @@ test('theme-json writes valid theme.json and forces version 3', function () {
     assert_eq(false, $theme['settings']['color']['defaultDuotone']);
     assert_eq(false, $theme['settings']['typography']['defaultFontSizes']);
     assert_eq(false, $theme['settings']['spacing']['defaultSpacingSizes']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json derives the committed duotone preset after palette repair', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tjtreatment_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A monochrome archive']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project, overrides: ['image_treatment' => 'duotone']);
+
+    $payload = valid_theme_payload();
+    $payload['settings']['color']['duotone'] = [[
+        'slug' => 'model-authored',
+        'name' => 'Model authored',
+        'colors' => ['#123456', '#abcdef'],
+    ]];
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $presets = $project->readJson('theme/theme.json')['settings']['color']['duotone'];
+    assert_eq(1, count($presets));
+    assert_eq('site-image-treatment', $presets[0]['slug']);
+    assert_eq(['#111', '#FFF'], $presets[0]['colors']);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -488,7 +708,7 @@ test('theme-json delivers a deterministic base theme when repaired model JSON is
     $theme = $project->readJson('theme/theme.json');
     assert_eq(3, $theme['version']);
     assert_eq(
-        ['base', 'contrast', 'primary', 'secondary', 'accent'],
+        ['base', 'contrast', 'primary', 'secondary', 'accent', 'band'],
         array_column($theme['settings']['color']['palette'], 'slug'),
     );
     assert_true(!isset($theme['styles']['blocks']['core/image']['border']['radius']));
@@ -642,6 +862,34 @@ test('disableCoreDefaultPresets forces the flags even when the model re-enables 
     assert_eq('base', $theme['settings']['color']['palette'][0]['slug'], 'palette preserved');
     assert_eq(true, $theme['settings']['typography']['fluid'], 'other typography settings preserved');
     assert_true(!isset($theme['settings']['shadow']['defaultPresets']), 'core shadow presets stay enabled');
+});
+
+test('repairDepthPreset publishes one committed preset and preserves unrelated generated presets', function () {
+    $theme = ['settings' => ['shadow' => ['presets' => [
+        ['slug' => 'editorial-lift', 'name' => 'Editorial lift', 'shadow' => '0 1px 2px #0003'],
+        ['slug' => 'depth', 'name' => 'Drifted', 'shadow' => '0 99px red'],
+        ['slug' => 'DEPTH', 'name' => 'Duplicate', 'shadow' => 'none'],
+    ]]]];
+
+    [$repaired, $repairs] = ThemeJsonStep::repairDepthPreset($theme, 'hard-offset');
+    $presets = $repaired['settings']['shadow']['presets'];
+    assert_eq('editorial-lift', $presets[0]['slug']);
+    assert_eq('depth', $presets[1]['slug']);
+    assert_contains('0.55rem 0.55rem 0', $presets[1]['shadow']);
+    assert_eq(2, count($presets), 'duplicate depth slugs collapse to one');
+    assert_eq(1, count($repairs));
+    assert_contains('disposition', $repairs[0]);
+
+    [$fixed, $fixedPointRepairs] = ThemeJsonStep::repairDepthPreset($repaired, 'hard-offset');
+    assert_eq($repaired, $fixed);
+    assert_eq([], $fixedPointRepairs);
+});
+
+test('repairDepthPreset is a no-op without an explicit commitment', function () {
+    $theme = ['settings' => ['color' => ['palette' => []]]];
+    [$same, $repairs] = ThemeJsonStep::repairDepthPreset($theme, null);
+    assert_eq($theme, $same);
+    assert_eq([], $repairs);
 });
 
 test('normalizeSpacingSettings installs the canonical bounded responsive profile', function () {
@@ -944,7 +1192,11 @@ test('repairFonts drops a third family the direction never committed', function 
         ],
     );
     $slugs = array_column($theme['settings']['typography']['fontFamilies'], 'slug');
-    assert_eq(['heading', 'body'], $slugs, 'only the two committed families ship');
+    assert_eq(
+        ['heading', 'body', 'mono'],
+        $slugs,
+        'the two committed families plus the code-owned mono ship'
+    );
     $joined = implode(' ', $warnings);
     assert_contains("fontFamilies slug 'accent'", $joined);
     assert_contains('Caveat', $joined);
@@ -1093,6 +1345,7 @@ test('repairColors keeps a model hex the direction would make unreadable', funct
             ['slug' => 'primary', 'color' => '#111111', 'name' => 'Primary'],
             ['slug' => 'secondary', 'color' => '#555555', 'name' => 'Secondary'],
             ['slug' => 'accent', 'color' => '#B4541E', 'name' => 'Accent'],
+            ['slug' => 'band', 'color' => '#E6E6E6', 'name' => 'Band'],
         ]]]],
         $preferred,
     );
@@ -1120,6 +1373,7 @@ test('repairColors will not fill a missing slug with an unreadable direction hex
             ['slug' => 'contrast', 'color' => '#111111', 'name' => 'Contrast'],
             ['slug' => 'primary', 'color' => '#111111', 'name' => 'Primary'],
             ['slug' => 'accent', 'color' => '#B4541E', 'name' => 'Accent'],
+            ['slug' => 'band', 'color' => '#E6E6E6', 'name' => 'Band'],
         ]]]],
         ['secondary' => '#777777'],
     );
@@ -1306,6 +1560,30 @@ test('repairColors and repairFonts replace object-shaped required entries with n
         implode(' ', $fontWarnings),
     );
     assert_contains("fontFamilies missing slug 'heading'; filled with the system stack", implode(' ', $fontWarnings));
+});
+
+test('repairFonts ships the code-owned mono preset silently', function () {
+    [$theme, $fontWarnings] = ThemeJsonStep::repairFonts(valid_theme_payload());
+    $bySlug = array_column($theme['settings']['typography']['fontFamilies'], 'fontFamily', 'slug');
+    assert_eq('ui-monospace, Menlo, Consolas, monospace', $bySlug['mono']);
+    assert_true(
+        !str_contains(implode(' ', $fontWarnings), "'mono'"),
+        'a code-owned preset fills without a warning'
+    );
+});
+
+test('repairFonts keeps an authored mono family', function () {
+    $theme = valid_theme_payload();
+    $theme['settings']['typography']['fontFamilies'][] = [
+        'slug' => 'mono', 'name' => 'Mono', 'fontFamily' => '"JetBrains Mono", monospace',
+    ];
+    [$theme] = ThemeJsonStep::repairFonts($theme);
+    $monoEntries = array_values(array_filter(
+        $theme['settings']['typography']['fontFamilies'],
+        static fn ($entry) => ($entry['slug'] ?? null) === 'mono',
+    ));
+    assert_eq(1, count($monoEntries), 'the authored entry is not duplicated');
+    assert_eq('"JetBrains Mono", monospace', $monoEntries[0]['fontFamily']);
 });
 
 test('theme-json forces useRootPaddingAwareAlignments when root side padding is set', function () {
@@ -1607,7 +1885,13 @@ function theme_json_preset(array $presets, string $slug): array
 test('theme-json declares every artifact it writes', function () {
     $step = new ThemeJsonStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
     assert_eq(
-        ['theme/theme.json', 'logs/theme-json-shape.txt', 'logs/theme-json-direction-bind.txt', 'warnings.json'],
+        [
+            'theme/theme.json',
+            'logs/theme-json-shape.txt',
+            'logs/theme-json-depth.txt',
+            'logs/theme-json-direction-bind.txt',
+            'warnings.json',
+        ],
         $step->declaration()->writes,
     );
 });
@@ -1643,20 +1927,22 @@ test('theme-json font-size repair preserves model sizes and fills each omission'
     $sizes = $theme['settings']['typography']['fontSizes'];
     assert_eq('1rem', theme_json_preset($sizes, 'caption')['size'], 'usable model size preserved');
     assert_eq(false, theme_json_preset($sizes, 'caption')['fluid'], 'model metadata preserved');
-    assert_eq('1.75rem', theme_json_preset($sizes, 'heading')['size'], 'unusable size refilled from the profile');
+    assert_eq('2rem', theme_json_preset($sizes, 'heading')['size'], 'unusable size refilled from the classic profile');
     assert_eq('9rem', theme_json_preset($sizes, 'poster')['size'], 'unrelated preset preserved');
-    assert_eq('clamp(3rem, 7vw, 6rem)', theme_json_preset($sizes, 'display')['size']);
+    assert_eq('clamp(3.1rem, 5vw, 4rem)', theme_json_preset($sizes, 'display')['size']);
     assert_eq(true, $theme['settings']['typography']['fluid'], 'sibling typography settings survive');
     assert_true($warnings !== [], 'every repair is warned');
 });
 
-test('theme-json font-size repair fills the whole scale when the model omits it', function () {
+test('theme-json font-size repair fills a wholly omitted scale without warnings', function () {
+    // The prompt forbids the model to emit fontSizes, so full omission is
+    // compliance: the deterministic fill is the build's own contract.
     [$theme, $warnings] = ThemeJsonStep::repairFontSizes([]);
     assert_eq(
         ['caption', 'body', 'lead', 'heading', 'section-title', 'display'],
         array_column($theme['settings']['typography']['fontSizes'], 'slug'),
     );
-    assert_eq(6, count($warnings));
+    assert_eq([], $warnings);
 });
 
 test('theme-json font-size repair rejects invalid CSS and duplicate slugs', function () {
@@ -1678,7 +1964,7 @@ test('theme-json font-size repair rejects invalid CSS and duplicate slugs', func
     ]);
 
     $sizes = $theme['settings']['typography']['fontSizes'];
-    assert_eq('1.125rem', theme_json_preset($sizes, 'body')['size'], 'invalid required size replaced');
+    assert_eq('1rem', theme_json_preset($sizes, 'body')['size'], 'invalid required size replaced');
     assert_eq('1rem', theme_json_preset($sizes, 'caption')['size'], 'first valid duplicate wins');
     assert_eq(
         1,
@@ -1706,6 +1992,166 @@ test('theme-json font-size repair rejects invalid CSS and duplicate slugs', func
     [$fixedPoint, $fixedPointWarnings] = ThemeJsonStep::repairFontSizes($theme);
     assert_eq($theme, $fixedPoint, 'repair reaches a fixed point');
     assert_eq([], $fixedPointWarnings, 'fixed point produces no warnings');
+});
+
+test('committed type scale replaces model sizes exactly and reaches a fixed point', function () {
+    $authored = [
+        'settings' => ['typography' => [
+            'fluid' => true,
+            'fontSizes' => [
+                ['slug' => 'body', 'name' => 'Copied example', 'size' => '1.125rem'],
+                ['slug' => 'poster', 'name' => 'Invented extra', 'size' => '9rem'],
+            ],
+        ]],
+    ];
+
+    [$theme, $repairs] = ThemeJsonStep::applyTypeScale($authored, 'brutal');
+    $sizes = $theme['settings']['typography']['fontSizes'];
+    assert_eq(
+        ['caption', 'body', 'lead', 'heading', 'section-title', 'display'],
+        array_column($sizes, 'slug'),
+    );
+    assert_eq('1rem', theme_json_preset($sizes, 'body')['size']);
+    assert_eq('clamp(5.369rem, 12vw, 12rem)', theme_json_preset($sizes, 'display')['size']);
+    assert_eq([], theme_json_preset($sizes, 'poster'), 'model-invented steps are removed');
+    assert_eq(1, count($repairs));
+    assert_contains('committed "brutal" modular scale', $repairs[0]);
+
+    [$fixed, $fixedRepairs] = ThemeJsonStep::applyTypeScale($theme, 'brutal');
+    assert_eq($theme, $fixed);
+    assert_eq([], $fixedRepairs);
+});
+
+test('absent type-scale commitment leaves authored sizes byte-identical', function () {
+    $theme = ['settings' => ['typography' => ['fontSizes' => [
+        ['slug' => 'poster', 'name' => 'Poster', 'size' => '9rem'],
+    ]]]];
+    assert_eq([$theme, []], ThemeJsonStep::applyTypeScale($theme, null));
+});
+
+test('committed type scale replaces malformed typography containers atomically', function () {
+    foreach ([['settings' => 'broken'], ['settings' => ['typography' => 'broken']]] as $theme) {
+        [$delivered, $repairs] = ThemeJsonStep::applyTypeScale($theme, 'compact');
+        assert_eq(
+            'clamp(2.451rem, 4vw, 2.5rem)',
+            theme_json_preset($delivered['settings']['typography']['fontSizes'], 'display')['size'],
+        );
+        // A malformed container carries no authored fontSizes, so the ramp
+        // fills an absent slot and displaces nothing: no writeback evidence.
+        assert_eq([], $repairs);
+    }
+});
+
+test('type scale written into an absent slot reports no replacement', function () {
+    [$delivered, $repairs] = ThemeJsonStep::applyTypeScale(
+        ['settings' => ['typography' => ['fluid' => true]]],
+        'brutal',
+    );
+    assert_eq(
+        'clamp(5.369rem, 12vw, 12rem)',
+        theme_json_preset($delivered['settings']['typography']['fontSizes'], 'display')['size'],
+    );
+    assert_eq([], $repairs, 'nothing authored means nothing replaced');
+});
+
+test('theme-json writes the direction-committed scale without a fabricated writeback', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_type_scale_write_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'An experimental theatre']);
+    $project->writeJson('siteSpec.json', ['name' => 'The Voltage']);
+    seed_test_design_direction($project, 'cinematic-safe-zone', ['type_scale' => 'dramatic']);
+
+    $llm = new FakeLlm();
+    $llm->queueJson(valid_theme_payload());
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $sizes = $project->readJson('theme/theme.json')['settings']['typography']['fontSizes'];
+    assert_eq('clamp(4.384rem, 9vw, 8rem)', theme_json_preset($sizes, 'display')['size']);
+    // The payload authors no fontSizes (the prompt forbids it), so the ramp
+    // fills an absent slot: the bind report must not claim a replacement.
+    assert_true(
+        !str_contains($project->readText('logs/theme-json-direction-bind.txt'), 'modular scale'),
+        'an obeyed prompt produces no type-scale writeback line',
+    );
+    $warnings = $project->exists('warnings.json')
+        ? implode(' ', $project->readJson('warnings.json')['theme-json'] ?? [])
+        : '';
+    assert_true(!str_contains($warnings, 'fontSizes'), 'successful ownership fill is not a defect');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json records the writeback when the model authored a competing scale', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_type_scale_displace_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'An experimental theatre']);
+    $project->writeJson('siteSpec.json', ['name' => 'The Voltage']);
+    seed_test_design_direction($project, 'cinematic-safe-zone', ['type_scale' => 'dramatic']);
+
+    $payload = valid_theme_payload();
+    $payload['settings']['typography']['fontSizes'] = [
+        ['slug' => 'body', 'name' => 'Body', 'size' => '1.125rem'],
+    ];
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $sizes = $project->readJson('theme/theme.json')['settings']['typography']['fontSizes'];
+    assert_eq('1rem', theme_json_preset($sizes, 'body')['size']);
+    assert_contains(
+        'delivered committed "dramatic" modular scale',
+        $project->readText('logs/theme-json-direction-bind.txt'),
+    );
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json keeps HTML-first design typography authoritative over the committed scale', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_type_scale_html_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A screen-filling gallery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project, overrides: ['type_scale' => 'brutal']);
+    $project->writeText(
+        'design/site.css',
+        file_get_contents(repo_path('tests/fixtures/design/tokens-rich.css')) ?: '',
+    );
+
+    $payload = valid_theme_payload();
+    $payload['settings']['typography']['fontSizes'] = [
+        ['slug' => 'caption', 'name' => 'Caption', 'size' => '0.875rem'],
+        ['slug' => 'body', 'name' => 'Body', 'size' => '1.0625rem'],
+        ['slug' => 'lead', 'name' => 'Lead', 'size' => '1.3rem'],
+        ['slug' => 'heading', 'name' => 'Heading', 'size' => '1.9rem'],
+        ['slug' => 'section-title', 'name' => 'Section Title', 'size' => '2.6rem'],
+        ['slug' => 'display', 'name' => 'Display', 'size' => '5rem'],
+    ];
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+    (new ThemeJsonStep(
+        $llm,
+        new PromptRenderer(repo_path('prompts')),
+        htmlFirst: true,
+    ))->run($project);
+
+    $sizes = $project->readJson('theme/theme.json')['settings']['typography']['fontSizes'];
+    assert_eq('5rem', theme_json_preset($sizes, 'display')['size'], 'design-derived size survives');
+    assert_eq('1.0625rem', theme_json_preset($sizes, 'body')['size']);
+    assert_true(
+        !str_contains($project->readText('logs/theme-json-direction-bind.txt'), 'modular scale'),
+        'HTML-first type ownership does not report a scale replacement',
+    );
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('absent authored fontSizes fill silently from the default scale', function () {
+    [$theme, $warnings] = ThemeJsonStep::repairFontSizes(['settings' => ['typography' => []]]);
+    assert_eq(
+        ['caption', 'body', 'lead', 'heading', 'section-title', 'display'],
+        array_column($theme['settings']['typography']['fontSizes'], 'slug'),
+    );
+    assert_eq([], $warnings, 'prompt-commanded absence is compliance, not a defect');
 });
 
 test('theme-json keeps an authored preset value when only its name is missing', function () {
@@ -2495,6 +2941,26 @@ test('theme-json request makes both committed shape radii build-owned', function
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('theme-json request delegates the committed type scale to the build', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_type_scale_prompt_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A brutalist music festival']);
+    $project->writeJson('siteSpec.json', ['name' => 'Noise Field']);
+    seed_test_design_direction($project, 'cinematic-safe-zone', ['type_scale' => 'brutal']);
+
+    $prompt = (new ThemeJsonStep(
+        new FakeLlm(),
+        new PromptRenderer(repo_path('prompts')),
+    ))->requests($project)['theme-json']['prompt'];
+
+    assert_contains('**Type scale**: brutal', $prompt);
+    assert_contains('Do not emit `settings.typography.fontSizes`', $prompt);
+    assert_true(!str_contains($prompt, '0.875rem / 1.125rem / 1.375rem'), 'copied example scale is gone');
+    assert_true(!str_contains($prompt, 'roughly 5–7rem'), 'model no longer chooses the display ceiling');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('theme-json run wires the scaffold into the written theme', function () {
     $tmp = sys_get_temp_dir() . '/builder_tj_scaffold_run_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
@@ -2535,10 +3001,13 @@ test('theme-json never fails on an empty model response', function () {
     $theme = $project->readJson('theme/theme.json');
     assert_eq(3, $theme['version']);
     assert_eq(
-        ['base', 'contrast', 'primary', 'secondary', 'accent'],
+        ['base', 'contrast', 'primary', 'secondary', 'accent', 'band'],
         array_column($theme['settings']['color']['palette'], 'slug'),
     );
-    assert_eq(['heading', 'body'], array_column($theme['settings']['typography']['fontFamilies'], 'slug'));
+    assert_eq(
+        ['heading', 'body', 'mono'],
+        array_column($theme['settings']['typography']['fontFamilies'], 'slug'),
+    );
     assert_eq('var:preset|color|base', $theme['styles']['color']['background'], 'scaffold still wires');
     assert_true(($project->readJson('warnings.json')['theme-json'] ?? []) !== [], 'every fill is warned');
     exec('rm -rf ' . escapeshellarg($tmp));
@@ -3182,6 +3651,9 @@ test('applyPaletteFloor leaves a clean C1 palette unchanged', function () {
 });
 
 test('applyPaletteFloor records unrepaired when a contrast floor cannot be met', function () {
+    // 4.5:1 is reachable from any base (black or white always measures at
+    // least ~4.58:1), so the unreachable branch now exists only under the
+    // raised surface-texture floor a committed surface passes in (BIGR-923).
     $theme = [
         'settings' => ['color' => ['palette' => [
             ['slug' => 'base', 'color' => '#808080', 'name' => 'Base'],
@@ -3192,7 +3664,7 @@ test('applyPaletteFloor records unrepaired when a contrast floor cannot be met',
         ]]],
     ];
 
-    [$out, $warnings] = ThemeJsonStep::applyPaletteFloor($theme);
+    [$out, $warnings] = ThemeJsonStep::applyPaletteFloor($theme, 7.0);
     $bySlug = array_column($out['settings']['color']['palette'], 'color', 'slug');
     assert_eq('#AAAAAA', $bySlug['contrast'], 'authored contrast kept');
     $joined = implode(' ', $warnings);

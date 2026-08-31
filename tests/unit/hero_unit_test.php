@@ -16,7 +16,7 @@ use Automattic\SiteBuild\Units\SectionUnit;
  * @return array<string,mixed>
  */
 function hero_unit_contract_input(
-    string $recipe = 'editorial-split',
+    string $recipe = 'foreground-split',
     ?array $action = [
         'label' => 'Explore the work',
         'intent' => 'Help visitors reach the current work',
@@ -86,12 +86,18 @@ function hero_unit_contract_input(
 
 function hero_unit_root(string $body): string
 {
-    return '<!-- wp:group {"anchor":"hero","className":"keep hero-composition--editorial-split hero-mobile--stack-copy-first","layout":{"type":"constrained"}} -->'
-        . '<div id="hero" class="wp-block-group keep hero-composition--editorial-split hero-mobile--stack-copy-first">'
+    return '<!-- wp:group {"anchor":"hero","className":"keep hero-composition--foreground-split hero-mobile--stack-copy-first","layout":{"type":"constrained"}} -->'
+        . '<div id="hero" class="wp-block-group keep hero-composition--foreground-split hero-mobile--stack-copy-first">'
         . '<!-- wp:group {"className":"hero-composition__copy"} --><div class="wp-block-group hero-composition__copy">'
         . $body . '</div><!-- /wp:group -->'
         . '<!-- wp:group {"className":"hero-composition__media"} --><div class="wp-block-group hero-composition__media">'
-        . '<!-- wp:image --><figure class="wp-block-image"><img src="AI_IMAGE: editorial subject | home hero | natural light | 4:3" alt="" /></figure><!-- /wp:image -->'
+        // The image request lives in alt, as prompts/image-generation.md
+        // specifies, and its aspect matches the blueprint default. The old
+        // fixture carried the request in src with an empty alt, which the
+        // aspect check reads as a missing request (BIGR-912 made that check
+        // reach the contained-split recipe, which it never covered before).
+        . '<!-- wp:image --><figure class="wp-block-image"><img src="theme:./assets/subject.jpg"'
+        . ' alt="AI_IMAGE: editorial subject | home hero | natural light | landscape" /></figure><!-- /wp:image -->'
         . '</div><!-- /wp:group -->'
         . '</div><!-- /wp:group -->';
 }
@@ -112,11 +118,8 @@ test('HeroUnit exposes one isolated assigned recipe behind the shared site layer
     $renderer = new PromptRenderer(repo_path('prompts'));
     $markers = [
         'cinematic-safe-zone' => 'landscape cover stage',
-        'editorial-split' => 'deliberately unequal copy and foreground-media regions',
-        'framed-portrait' => 'contained vertical foreground image',
-        'focal-subject-stage' => 'singular subject as an opaque foreground content image',
+        'foreground-split' => 'deliberately unequal copy and foreground-media regions',
         'layered-poster' => 'cover image beneath controlled block-built type',
-        'stacked-headline-band' => 'Stack the proposition above one full-width image band',
         'type-manifesto' => 'one imageless, type-led band',
     ];
 
@@ -268,7 +271,7 @@ test('HeroUnit rejects partial blueprints and contradictory portable contract pr
             return $input;
         },
         'partial-blueprint-json' => static function (array $input): array {
-            $input['hero_blueprint'] = '{"version":1,"recipe":"editorial-split","mobile_transformation":"stack-copy-first"}';
+            $input['hero_blueprint'] = '{"version":1,"recipe":"foreground-split","mobile_transformation":"stack-copy-first"}';
             return $input;
         },
         'viewport-drift' => static function (array $input): array {
@@ -334,7 +337,7 @@ test('HeroUnit warns for removed eyebrow and separator content while preserving 
     $raw = hero_unit_root($eyebrowShell . $support . $headline);
     $unit = new HeroUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
 
-    $first = $unit->finish($raw, hero_unit_contract_input('editorial-split', null));
+    $first = $unit->finish($raw, hero_unit_contract_input('foreground-split', null));
 
     assert_true(!str_contains($first->markup, 'Tbilisi Old Town'));
     assert_true(!str_contains($first->markup, 'wp:separator'));
@@ -353,7 +356,7 @@ test('HeroUnit warns for removed eyebrow and separator content while preserving 
         assert_contains($context, $warnings);
     }
 
-    $second = $unit->finish($first->markup, hero_unit_contract_input('editorial-split', null));
+    $second = $unit->finish($first->markup, hero_unit_contract_input('foreground-split', null));
     assert_eq($first->markup, $second->markup);
     assert_eq([], $second->repairs);
     assert_eq([], $second->warnings);
@@ -361,21 +364,21 @@ test('HeroUnit warns for removed eyebrow and separator content while preserving 
 
 test('HeroUnit normalizes recipe and mobile root markers while preserving unrelated classes', function () {
     $unit = new HeroUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
-    $input = hero_unit_contract_input('editorial-split', null);
+    $input = hero_unit_contract_input('foreground-split', null);
     $raw = '<!-- wp:group {"className":"keep hero-composition--old hero-mobile--old hero-mobile--stale","layout":{"type":"constrained"}} -->'
         . '<div class="wp-block-group keep hero-composition--old hero-mobile--old">'
         . '<!-- wp:group {"className":"hero-composition__copy"} --><div class="wp-block-group hero-composition__copy">'
         . '<!-- wp:heading {"level":1} --><h1>Hero</h1><!-- /wp:heading -->'
         . '</div><!-- /wp:group -->'
         . '<!-- wp:group {"className":"hero-composition__media"} --><div class="wp-block-group hero-composition__media">'
-        . '<!-- wp:image --><figure class="wp-block-image"><img src="AI_IMAGE: subject | home | editorial | 4:3" alt="" /></figure><!-- /wp:image -->'
+        . '<!-- wp:image --><figure class="wp-block-image"><img src="theme:./assets/subject.jpg" alt="AI_IMAGE: subject | home | editorial | landscape" /></figure><!-- /wp:image -->'
         . '</div><!-- /wp:group -->'
         . '</div>'
         . '<!-- /wp:group -->';
 
     $first = $unit->finish($raw, $input);
 
-    assert_hero_unit_root_marker($first->markup, 'hero-composition--editorial-split');
+    assert_hero_unit_root_marker($first->markup, 'hero-composition--foreground-split');
     assert_hero_unit_root_marker($first->markup, 'hero-mobile--stack-copy-first');
     assert_true(!str_contains($first->markup, 'hero-composition--old'));
     assert_true(!str_contains($first->markup, 'hero-mobile--old'));
@@ -390,9 +393,29 @@ test('HeroUnit normalizes recipe and mobile root markers while preserving unrela
     assert_eq([], $second->warnings);
 });
 
+test('HeroUnit executes a tinted hero assignment with the committed band surface', function () {
+    $unit = new HeroUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    $raw = hero_unit_root(
+        '<!-- wp:heading {"level":1} --><h1>Portrait hero</h1><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>Copy survives on its planned band.</p><!-- /wp:paragraph -->',
+    );
+    // foreground-split defaults to the base surface, so the tinted band this
+    // test is about comes from the section assignment, not the recipe.
+    $input = hero_unit_contract_input('foreground-split', null);
+    $input['section']['background'] = 'tinted';
+
+    $result = $unit->finish($raw, $input);
+
+    assert_contains('"backgroundColor":"band"', $result->markup);
+    assert_contains('has-band-background-color', $result->markup);
+    assert_contains('Copy survives on its planned band.', $result->markup);
+    assert_true(in_array('tinted-band-surface-enforced', array_column($result->repairs, 'code'), true));
+    assert_eq([], $result->warnings);
+});
+
 test('HeroUnit wraps complete roots without changing their bytes and reaches a fixed point', function () {
     $unit = new HeroUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
-    $input = hero_unit_contract_input('focal-subject-stage', null);
+    $input = hero_unit_contract_input('foreground-split', null);
     $raw = '<!-- wp:group {"className":"hero-composition__copy"} --><div class="wp-block-group hero-composition__copy">'
         . '<!-- wp:heading {"level":1} --><h1>Hero survives.</h1><!-- /wp:heading -->'
         . '</div><!-- /wp:group -->'
@@ -404,8 +427,8 @@ test('HeroUnit wraps complete roots without changing their bytes and reaches a f
     $first = $unit->finish($raw, $input);
 
     assert_contains($raw, $first->markup, 'the complete generated roots survive byte-for-byte inside the envelope');
-    assert_hero_unit_root_marker($first->markup, 'hero-composition--focal-subject-stage');
-    assert_hero_unit_root_marker($first->markup, 'hero-mobile--stack-media-first');
+    assert_hero_unit_root_marker($first->markup, 'hero-composition--foreground-split');
+    assert_hero_unit_root_marker($first->markup, 'hero-mobile--stack-copy-first');
     assert_contains('"layout":{"type":"constrained"}', $first->markup);
     assert_eq(['root-group-wrapped', 'root-marker-normalized', 'root-marker-normalized', 'root-layout-constrained'], array_column($first->repairs, 'code'));
     assert_eq([], $first->warnings);
@@ -418,9 +441,9 @@ test('HeroUnit wraps complete roots without changing their bytes and reaches a f
 
 test('HeroUnit preserves safe recipe-internal defects and warns with repair-ready context', function () {
     $unit = new HeroUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
-    $input = hero_unit_contract_input('editorial-split', null);
-    $raw = '<!-- wp:group {"anchor":"hero","className":"hero-composition--editorial-split hero-mobile--stack-copy-first","layout":{"type":"constrained"}} -->'
-        . '<div id="hero" class="wp-block-group hero-composition--editorial-split hero-mobile--stack-copy-first">'
+    $input = hero_unit_contract_input('foreground-split', null);
+    $raw = '<!-- wp:group {"anchor":"hero","className":"hero-composition--foreground-split hero-mobile--stack-copy-first","layout":{"type":"constrained"}} -->'
+        . '<div id="hero" class="wp-block-group hero-composition--foreground-split hero-mobile--stack-copy-first">'
         . '<!-- wp:paragraph --><p>Safe authored copy and siblings survive.</p><!-- /wp:paragraph -->'
         . '</div><!-- /wp:group -->';
 
@@ -535,7 +558,7 @@ test('HeroUnit removes unplanned button blocks when the authoritative action is 
     $button = '<!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="/work/">Invented CTA</a></div><!-- /wp:button -->';
     $raw = hero_unit_root($headline . $sibling . '<!-- wp:buttons --><div class="wp-block-buttons">' . $button . '</div><!-- /wp:buttons -->');
 
-    $first = $unit->finish($raw, hero_unit_contract_input('editorial-split', null));
+    $first = $unit->finish($raw, hero_unit_contract_input('foreground-split', null));
 
     assert_contains($sibling, $first->markup);
     assert_true(!str_contains($first->markup, $button));
@@ -554,7 +577,7 @@ test('HeroUnit removes unplanned button blocks when the authoritative action is 
     }
     assert_contains("block='wp:buttons[1]'", $first->warnings[1]);
 
-    $second = $unit->finish($first->markup, hero_unit_contract_input('editorial-split', null));
+    $second = $unit->finish($first->markup, hero_unit_contract_input('foreground-split', null));
     assert_eq($first->markup, $second->markup);
     assert_eq([], $second->warnings, 'the isolated removal reaches a fixed point');
 });

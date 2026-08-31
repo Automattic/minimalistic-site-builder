@@ -15,19 +15,37 @@ final class HeroComposition
     /** @var list<string> */
     public const RECIPES = [
         'cinematic-safe-zone',
-        'editorial-split',
-        'framed-portrait',
-        'focal-subject-stage',
+        'foreground-split',
         'layered-poster',
-        'stacked-headline-band',
         'type-manifesto',
     ];
+
+    /**
+     * The shape of the media slot, and how much of the composition it takes.
+     *
+     * Both were recipe identities until BIGR-912. `editorial-split`,
+     * `framed-portrait` and `focal-subject-stage` were one topology — a copy
+     * column beside one contained foreground image — separated only by the
+     * image aspect and the media scale. Three of six recipes drew the same
+     * composition, so half of all sites opened with it. They are one recipe
+     * now, and these two axes carry the differences the visitor could see.
+     *
+     * 'none' belongs to a recipe that carries no image at all; a cover recipe
+     * has one landscape plate that IS the band, so it pins both axes to their
+     * only meaningful value.
+     *
+     * @var list<string>
+     */
+    public const MEDIA_ASPECTS = ['portrait', 'landscape', 'square', 'none'];
+
+    /** @var list<string> */
+    public const MEDIA_WEIGHTS = ['balanced', 'dominant', 'none'];
 
     // Caller-constraint enum. 'none' became requestable with type-manifesto
     // (BIGR-885), the first cataloged recipe that carries no image. It stays a
     // valid HeroBlueprint media_mode for the delivered value of a media-loss
     // degradation too, so an image-bearing recipe can still degrade to it.
-    public const MEDIA_MODES = ['none', 'cover-image', 'foreground-image', 'band-image'];
+    public const MEDIA_MODES = ['none', 'cover-image', 'foreground-image'];
 
     /**
      * The media modes that put real pixels on the page, so the build must
@@ -38,7 +56,7 @@ final class HeroComposition
      *
      * @var list<string>
      */
-    public const IMAGE_MEDIA_MODES = ['cover-image', 'foreground-image', 'band-image'];
+    public const IMAGE_MEDIA_MODES = ['cover-image', 'foreground-image'];
     public const COPY_CAPACITIES = ['compact', 'standard', 'expanded'];
     public const CANVASES = ['full-bleed', 'framed'];
 
@@ -76,6 +94,9 @@ final class HeroComposition
             // a corner of the frame.
             'headline_registers' => ['restrained'],
             'height_profiles' => ['standard', 'immersive'],
+            // The cover plate is the band, so both media axes pin.
+            'media_aspects' => ['landscape'],
+            'media_weights' => ['dominant'],
             'defaults' => [
                 'media_mode' => 'cover-image', 'headline_register' => 'restrained',
                 'text_anchor' => 'center',
@@ -83,9 +104,13 @@ final class HeroComposition
                 'focal_region' => 'end', 'text_safe_region' => 'center',
                 'height_profile' => 'immersive', 'cta_treatment' => 'prominent',
                 'mobile_transformation' => 'stack-media-first',
+                'media_aspect' => 'landscape', 'media_weight' => 'dominant',
             ],
         ],
-        'editorial-split' => [
+        // BIGR-912: the one contained-split recipe. It replaced
+        // editorial-split, framed-portrait and focal-subject-stage, which
+        // shared this topology and differed only in the two media axes below.
+        'foreground-split' => [
             'canvases' => ['full-bleed', 'framed'],
             'media_modes' => ['foreground-image'],
             'min_images' => 1,
@@ -94,14 +119,22 @@ final class HeroComposition
             'default_background' => 'base',
             'fallback_background' => 'base',
             'header_modes' => ['stacked'],
-            'copy_capacity' => 'standard',
+            // What it delivers, not what it claimed: the three recipes this
+            // replaced all declared their budget as one heading, at most one
+            // paragraph and one button, which is the compact capacity. Two of
+            // them said 'standard' and shipped compact.
+            'copy_capacity' => 'compact',
             'mobile_transformations' => ['stack-copy-first', 'stack-media-first'],
             'layout_archetype' => 'asymmetric-split',
             'fallback_family' => 'foreground-split',
-            'root_hook' => '.hero-composition--editorial-split',
-            'prompt' => 'hero-compositions/editorial-split.md',
+            'root_hook' => '.hero-composition--foreground-split',
+            'prompt' => 'hero-compositions/foreground-split.md',
             'headline_registers' => ['restrained', 'display'],
-            'height_profiles' => ['compact', 'standard'],
+            // The retired trio spanned compact..immersive between them; the
+            // merged recipe keeps that whole range rather than the narrowest.
+            'height_profiles' => ['compact', 'standard', 'immersive'],
+            'media_aspects' => ['portrait', 'landscape', 'square'],
+            'media_weights' => ['balanced', 'dominant'],
             'defaults' => [
                 'media_mode' => 'foreground-image', 'headline_register' => 'display',
                 'text_anchor' => 'center-start',
@@ -109,58 +142,7 @@ final class HeroComposition
                 'focal_region' => 'none', 'text_safe_region' => 'full',
                 'height_profile' => 'standard', 'cta_treatment' => 'prominent',
                 'mobile_transformation' => 'stack-copy-first',
-            ],
-        ],
-        'framed-portrait' => [
-            'canvases' => ['full-bleed', 'framed'],
-            'media_modes' => ['foreground-image'],
-            'min_images' => 1,
-            'max_images' => 1,
-            'backgrounds' => ['base', 'tinted', 'contrast'],
-            'default_background' => 'tinted',
-            'fallback_background' => 'base',
-            'header_modes' => ['stacked'],
-            'copy_capacity' => 'standard',
-            'mobile_transformations' => ['stack-media-first', 'stack-copy-first'],
-            'layout_archetype' => 'asymmetric-split',
-            'fallback_family' => 'foreground-split',
-            'root_hook' => '.hero-composition--framed-portrait',
-            'prompt' => 'hero-compositions/framed-portrait.md',
-            'headline_registers' => ['restrained', 'display'],
-            'height_profiles' => ['compact', 'standard'],
-            'defaults' => [
-                'media_mode' => 'foreground-image', 'headline_register' => 'restrained',
-                'text_anchor' => 'center-start',
-                'headline_line_target' => ['desktop' => [1, 3], 'mobile' => [2, 5]],
-                'focal_region' => 'none', 'text_safe_region' => 'full',
-                'height_profile' => 'standard', 'cta_treatment' => 'quiet',
-                'mobile_transformation' => 'stack-media-first',
-            ],
-        ],
-        'focal-subject-stage' => [
-            'canvases' => ['full-bleed', 'framed'],
-            'media_modes' => ['foreground-image'],
-            'min_images' => 1,
-            'max_images' => 1,
-            'backgrounds' => ['base', 'tinted', 'contrast'],
-            'default_background' => 'base',
-            'fallback_background' => 'base',
-            'header_modes' => ['stacked'],
-            'copy_capacity' => 'compact',
-            'mobile_transformations' => ['stack-media-first', 'stack-copy-first'],
-            'layout_archetype' => 'asymmetric-split',
-            'fallback_family' => 'foreground-split',
-            'root_hook' => '.hero-composition--focal-subject-stage',
-            'prompt' => 'hero-compositions/focal-subject-stage.md',
-            'headline_registers' => ['restrained', 'display'],
-            'height_profiles' => ['standard', 'immersive'],
-            'defaults' => [
-                'media_mode' => 'foreground-image', 'headline_register' => 'display',
-                'text_anchor' => 'center-start',
-                'headline_line_target' => ['desktop' => [1, 3], 'mobile' => [2, 4]],
-                'focal_region' => 'none', 'text_safe_region' => 'full',
-                'height_profile' => 'immersive', 'cta_treatment' => 'prominent',
-                'mobile_transformation' => 'stack-media-first',
+                'media_aspect' => 'landscape', 'media_weight' => 'balanced',
             ],
         ],
         'layered-poster' => [
@@ -182,6 +164,9 @@ final class HeroComposition
             'prompt' => 'hero-compositions/layered-poster.md',
             'headline_registers' => ['display', 'poster'],
             'height_profiles' => ['standard', 'immersive'],
+            // The cover plate is the band, so both media axes pin.
+            'media_aspects' => ['landscape'],
+            'media_weights' => ['dominant'],
             'defaults' => [
                 'media_mode' => 'cover-image', 'headline_register' => 'poster',
                 // BIGR-775 follow-up: a top-pinned safe zone left a dead band
@@ -192,51 +177,7 @@ final class HeroComposition
                 'focal_region' => 'end', 'text_safe_region' => 'start',
                 'height_profile' => 'immersive', 'cta_treatment' => 'prominent',
                 'mobile_transformation' => 'flatten-layers',
-            ],
-        ],
-        // BIGR-885: the catalog put copy either OVER a cover or BESIDE a
-        // constrained plate. This recipe stacks copy ABOVE a full-width image
-        // band, so no text ever meets a photograph. That makes it the only
-        // recipe with zero overlay-contrast risk, and the safest choice when
-        // the direction commits to a framed canvas.
-        'stacked-headline-band' => [
-            'canvases' => ['full-bleed', 'framed'],
-            'media_modes' => ['band-image'],
-            'min_images' => 1,
-            'max_images' => 1,
-            // Solid surfaces only. The copy sits on the surface, never on the
-            // image, so 'image' would contradict the recipe: the plan wraps an
-            // 'image' band in a wp:cover and puts the copy back over pixels.
-            'backgrounds' => ['base', 'tinted', 'contrast'],
-            'default_background' => 'base',
-            'fallback_background' => 'base',
-            // No overlay header: the section's first element is copy, so an
-            // overlay header would float over the headline, not over media.
-            'header_modes' => ['stacked'],
-            'copy_capacity' => 'standard',
-            'mobile_transformations' => ['stack-copy-first'],
-            // The recipe mixes one reading-measure copy stack with one
-            // full-width band, which is the width mix this archetype names.
-            // 'full-bleed-cover' is wrong twice over: it promises overlaid
-            // text, and both PagePlanStep and ThemeValidator special-case it.
-            'layout_archetype' => 'mixed-width-editorial',
-            'fallback_family' => 'typographic',
-            'root_hook' => '.hero-composition--stacked-headline-band',
-            'prompt' => 'hero-compositions/stacked-headline-band.md',
-            'headline_registers' => ['restrained', 'display'],
-            // The band must stay short: the headline, the standfirst, the
-            // action AND a meaningful share of the band share one viewport.
-            'height_profiles' => ['compact', 'standard'],
-            'defaults' => [
-                'media_mode' => 'band-image', 'headline_register' => 'display',
-                // The copy leads the section, so it is anchored to the top and
-                // to the reading edge. A vertically centered anchor would ask
-                // the deterministic pass to center copy that has no frame.
-                'text_anchor' => 'top-start',
-                'headline_line_target' => ['desktop' => [1, 2], 'mobile' => [2, 4]],
-                'focal_region' => 'none', 'text_safe_region' => 'full',
-                'height_profile' => 'compact', 'cta_treatment' => 'prominent',
-                'mobile_transformation' => 'stack-copy-first',
+                'media_aspect' => 'landscape', 'media_weight' => 'dominant',
             ],
         ],
         // BIGR-885: the catalog's first imageless recipe. Type and negative
@@ -266,6 +207,9 @@ final class HeroComposition
             // No image means no media plate to balance, so an immersive band
             // would only add empty canvas under the copy.
             'height_profiles' => ['compact', 'standard'],
+            // No media slot at all, so neither axis has a shape to describe.
+            'media_aspects' => ['none'],
+            'media_weights' => ['none'],
             'defaults' => [
                 'media_mode' => 'none', 'headline_register' => 'display',
                 'text_anchor' => 'center-start',
@@ -276,6 +220,7 @@ final class HeroComposition
                 'focal_region' => 'none', 'text_safe_region' => 'full',
                 'height_profile' => 'standard', 'cta_treatment' => 'prominent',
                 'mobile_transformation' => 'stack-copy-first',
+                'media_aspect' => 'none', 'media_weight' => 'none',
             ],
         ],
     ];
@@ -447,12 +392,28 @@ final class HeroComposition
                 && $meta['max_images'] > $constraints['max_hero_images']) {
                 return false;
             }
+            // A ceiling, not an exact match (BIGR-912). Every other constraint
+            // here reads as a caller capability the recipe must fit inside —
+            // max_hero_images directly above is the same shape — and a caller
+            // that can host a standard copy region can obviously host a
+            // compact one. Exact matching also made the enum fragile: merging
+            // the three contained-split recipes left NO recipe at 'standard',
+            // so that value would have emptied the pool and aborted the build
+            // for a flag the CLI still offers.
             if (isset($constraints['hero_copy_capacity'])
-                && $meta['copy_capacity'] !== $constraints['hero_copy_capacity']) {
+                && self::copyCapacityRank($meta['copy_capacity'])
+                    > self::copyCapacityRank($constraints['hero_copy_capacity'])) {
                 return false;
             }
             return true;
         }));
+    }
+
+    /** Position of one capacity on the compact..expanded scale. */
+    private static function copyCapacityRank(string $capacity): int
+    {
+        $rank = array_search($capacity, self::COPY_CAPACITIES, true);
+        return $rank === false ? 0 : (int) $rank;
     }
 
     /** Whether a known recipe satisfies a validated constraint set. */
@@ -487,15 +448,67 @@ final class HeroComposition
     }
 
     /**
+     * Select this build's media axes inside the recipe's own allowed values.
+     *
+     * The recipe is code-owned and seeded; the axes must be too (BIGR-912).
+     * They carry the differences the three merged contained-split recipes used
+     * to carry as separate ids, and a fixed default would retire that variety
+     * the moment the merge landed: the design-direction prompt is told to
+     * preserve the defaults it is handed, so every site would open with the
+     * same landscape plate at the same scale. Seeding them from the same site
+     * identity that picks the recipe restores the spread by construction
+     * rather than by asking the model to feel adventurous.
+     *
+     * An axis with one allowed value returns it unchanged, so a cover or an
+     * imageless recipe is unaffected.
+     *
+     * @return array{media_aspect:string,media_weight:string}
+     */
+    public static function selectMediaAxes(
+        string $stableIdentifier,
+        string $conceptSeed,
+        string $recipe,
+    ): array {
+        $meta = self::metadata($recipe);
+        $identity = mb_strtolower(trim($stableIdentifier), 'UTF-8');
+        $pick = static function (array $values, string $axis) use ($identity, $conceptSeed): string {
+            if (count($values) === 1) {
+                return (string) $values[0];
+            }
+            $context = json_encode(
+                [$identity, $conceptSeed, $axis],
+                JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR,
+            );
+            $index = (int) (hexdec(substr(hash('sha256', $context), 0, 8)) % count($values));
+            return (string) $values[$index];
+        };
+
+        return [
+            'media_aspect' => $pick(array_values((array) $meta['media_aspects']), 'media_aspect'),
+            'media_weight' => $pick(array_values((array) $meta['media_weights']), 'media_weight'),
+        ];
+    }
+
+    /**
      * Advisory objective checks for safe, parseable recipe internals. Root
      * shape and identity are repaired by GeneratedMarkup; these checks keep a
      * missing/extra media slot or helper region actionable without rewriting a
      * valid authored composition toward a different recipe.
      *
+     * $blueprint is the delivered blueprint when the caller has it. It sharpens
+     * the image-aspect check for a recipe whose slot accepts several aspects
+     * (BIGR-912); every other check reads the catalog alone, so a caller
+     * without a blueprint keeps all of them.
+     *
+     * @param array<string,mixed> $blueprint
      * @return list<string>
      */
-    public static function markupWarnings(string $markup, string $recipe, string $part): array
-    {
+    public static function markupWarnings(
+        string $markup,
+        string $recipe,
+        string $part,
+        array $blueprint = [],
+    ): array {
         self::assertKnown($recipe);
         $meta = self::metadata($recipe);
         $document = BlockMarkup::parse($markup);
@@ -506,11 +519,6 @@ final class HeroComposition
         $mediaRegions = 0;
         $directCovers = 0;
         $covers = 0;
-        // BIGR-885: the band recipe promises copy ABOVE the image and a band
-        // that reaches both viewport edges. Both facts are objective, so they
-        // are counted here beside the media/copy region hooks.
-        $textInMedia = 0;
-        $fullWidthMedia = 0;
         foreach ($document->indices() as $index) {
             $name = $document->name($index);
             $attrs = $document->attrs($index) ?? [];
@@ -526,19 +534,8 @@ final class HeroComposition
             if (in_array('hero-composition__copy', $classes, true)) {
                 $copyRegions++;
             }
-            $isMediaRegion = in_array('hero-composition__media', $classes, true);
-            if ($isMediaRegion) {
+            if (in_array('hero-composition__media', $classes, true)) {
                 $mediaRegions++;
-            }
-            $inMedia = $isMediaRegion || self::hasAncestorClass($document, $index, 'hero-composition__media');
-            // The REGION itself must be full width. An `align:full` image
-            // inside a constrained wrapper still renders at the reading
-            // measure, because the wrapper caps it (audited: bindery-en).
-            if ($isMediaRegion && (string) ($attrs['align'] ?? '') === 'full') {
-                $fullWidthMedia++;
-            }
-            if ($inMedia && in_array($name, ['heading', 'paragraph', 'buttons'], true)) {
-                $textInMedia++;
             }
             if ($root !== null && $document->parent($index) === $root && $name === 'cover') {
                 $directCovers++;
@@ -600,16 +597,6 @@ final class HeroComposition
                 ['matching_regions' => $mediaRegions],
                 'safe parseable hero was retained; restore only the missing assigned foreground-media region hooks',
             );
-        } elseif (in_array('band-image', $mediaModes, true)
-            && $mediaRegions < $minImages
-        ) {
-            $warnings[] = self::markupWarning(
-                $part,
-                'recipe band media region',
-                ['required_class' => 'hero-composition__media', 'minimum' => $minImages],
-                ['matching_regions' => $mediaRegions],
-                'safe parseable hero was retained; restore only the missing assigned image-band region hook',
-            );
         }
         if (in_array('foreground-image', $mediaModes, true)
             && $covers > 0
@@ -621,39 +608,6 @@ final class HeroComposition
                 ['wp_cover_count' => $covers],
                 'safe parseable hero was retained; replace only the background cover with the assigned foreground-media block',
             );
-        }
-        // BIGR-885 objective failures for the band recipe. A wp:cover and any
-        // text inside the media region both put copy over the photograph,
-        // which is the one thing this recipe exists to prevent. A band that
-        // stops short of the viewport edge is the recipe's other failure.
-        if (in_array('band-image', $mediaModes, true)) {
-            if ($covers > 0) {
-                $warnings[] = self::markupWarning(
-                    $part,
-                    'band recipe cover usage',
-                    ['wp_cover_count' => 0, 'media_modes' => $mediaModes],
-                    ['wp_cover_count' => $covers],
-                    'safe parseable hero was retained; replace only the cover with a plain full-width image band under the copy',
-                );
-            }
-            if ($textInMedia > 0) {
-                $warnings[] = self::markupWarning(
-                    $part,
-                    'band recipe text over media',
-                    ['text_blocks_inside_media' => 0],
-                    ['text_blocks_inside_media' => $textInMedia],
-                    'safe parseable hero was retained; move only the copy blocks out of the image band and back above it',
-                );
-            }
-            if ($mediaRegions > 0 && $fullWidthMedia < 1) {
-                $warnings[] = self::markupWarning(
-                    $part,
-                    'band recipe media width',
-                    ['align' => 'full on the hero-composition__media block itself'],
-                    ['align' => 'the media region is capped below full width'],
-                    'safe parseable hero was retained; restore only the band alignment so the image reaches both viewport edges',
-                );
-            }
         }
         // BIGR-775 advisory copy-budget check: every hero holds at most the
         // headline plus ONE supporting paragraph (naturaleza9's three stacked
@@ -696,16 +650,23 @@ final class HeroComposition
         }
 
         $images = self::imageFacts($markup);
-        // BIGR-885: a recipe may accept more than one aspect. The band runs
-        // edge to edge, so `ultrawide` fits its letterbox crop as well as
-        // `landscape` does, and image-generation.md permits both for a band
-        // that spans the viewport.
-        $expectedAspects = match ($recipe) {
-            'framed-portrait' => ['portrait'],
-            'cinematic-safe-zone', 'layered-poster' => ['landscape'],
-            'stacked-headline-band' => ['landscape', 'ultrawide'],
-            default => [],
-        };
+        // The aspect a recipe can serve is catalog metadata, not a name: a
+        // recipe pinned to one aspect checks against that, and a recipe whose
+        // slot can take several (foreground-split, BIGR-912) checks against the
+        // ONE the delivered blueprint committed to. Without a blueprint the
+        // catalog list still bounds the check, so a caller that has no
+        // blueprint to hand loses precision rather than the check.
+        $committed = is_string($blueprint['media_aspect'] ?? null)
+            ? trim((string) $blueprint['media_aspect'])
+            : '';
+        $expectedAspects = in_array($committed, (array) $meta['media_aspects'], true)
+            ? [$committed]
+            : array_values((array) $meta['media_aspects']);
+        // A recipe with no media slot has no aspect to check; its images are
+        // already an objective failure of the imageless rule above.
+        if ($expectedAspects === ['none']) {
+            $expectedAspects = [];
+        }
         if ($expectedAspects !== [] && $images !== []) {
             $aspects = array_values(array_map(
                 static fn (array $image): string => self::imageAspect($image['alt']),

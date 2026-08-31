@@ -9,7 +9,7 @@ function pacing_plan(int $sections, string $background = 'base'): array
     $archetypes = [
         'centered-stack',
         'asymmetric-split',
-        'mixed-width-editorial',
+        'equal-card-grid',
         'list-with-thumbnails',
         'full-bleed-cover',
         'offset-grid',
@@ -27,6 +27,7 @@ function pacing_plan(int $sections, string $background = 'base'): array
             'layout_archetype' => $archetypes[$i % count($archetypes)],
             'background'       => $background,
             'vertical_density' => 'standard',
+            'text_placement'   => 'left-column',
             'handoff'          => 'Sits between the hero above and the story below.',
             'primary_action'   => null,
         ];

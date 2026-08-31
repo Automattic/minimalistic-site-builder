@@ -9,11 +9,16 @@ use Automattic\SiteBuild\BlockSerializer\Html\HtmlNode;
 use Automattic\SiteBuild\BlockSerializer\Html\Selector;
 use Automattic\SiteBuild\BoundedChoice;
 use Automattic\SiteBuild\CssTokenExtractor;
+use Automattic\SiteBuild\Depth;
 use Automattic\SiteBuild\FontCatalog;
 use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\GeneratedJsonFallbackStep;
+use Automattic\SiteBuild\ImageTreatment;
+use Automattic\SiteBuild\BandColor;
 use Automattic\SiteBuild\ContrastMath;
+use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\CssChecks;
+use Automattic\SiteBuild\CtaStyle;
 use Automattic\SiteBuild\PaletteFloor;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
@@ -23,6 +28,8 @@ use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\TypeScale;
+use Automattic\SiteBuild\TypeTreatment;
 use Automattic\SiteBuild\Warnings;
 use Throwable;
 
@@ -34,7 +41,7 @@ use Throwable;
  *         The model translates that direction into theme.json tokens.
  * Output: theme/theme.json — palette, typography, spacing, layout, element styles.
  *
- * Validates the structure the templates depend on (version 3, the five color
+ * Validates the structure the templates depend on (version 3, the six color
  * slugs, the heading/body font slugs, and an optional accent family) and
  * repairs drift deterministically: missing slugs are filled from the design
  * direction's committed values, then neutral defaults, and heading/body
@@ -52,7 +59,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
 {
     use LlmOptions;
 
-    private const REQUIRED_COLORS = ['base', 'contrast', 'primary', 'secondary', 'accent'];
+    private const REQUIRED_COLORS = ['base', 'contrast', 'primary', 'secondary', 'accent', 'band'];
 
     /**
      * The per-slug contrast floors against `base` that prompts/theme-json.md
@@ -60,13 +67,21 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      * tell a model hex that was moved to clear one from ordinary drift.
      */
     private const CONTRAST_FLOORS = [
-        'contrast' => 7.0,
+        'contrast' => ContrastMath::NORMAL_TEXT,
         'primary' => ContrastMath::NORMAL_TEXT,
         'secondary' => ContrastMath::NORMAL_TEXT,
         'accent' => ContrastMath::NORMAL_TEXT,
     ];
     private const REQUIRED_FONTS = ['heading', 'body'];
     private const OPTIONAL_FONTS = ['accent'];
+    /**
+     * Code-owned font presets every theme ships. The status-readout footer
+     * archetype sets its rows in `mono`, and a pure system stack needs no
+     * bundled font file, so the preset is deterministic and free.
+     */
+    private const PIPELINE_FONTS = [
+        'mono' => 'ui-monospace, Menlo, Consolas, monospace',
+    ];
 
     /** @var array{contentSize:string,wideSize:string} */
     private const FALLBACK_LAYOUT_WIDTHS = [
@@ -108,6 +123,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         'primary'   => '#111111',
         'secondary' => '#444444',
         'accent'    => '#111111',
+        'band'      => '#E6E6E6',
     ];
 
     /**
@@ -127,25 +143,6 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         // Caveat is cursive, Bebas Neue is not — and guessing the wrong
         // generic is worse than degrading to the same stack as the siblings.
         'accent'  => 'system-ui, sans-serif',
-    ];
-    /**
-     * The type scale the scaffold wires roles to. Every slug SCAFFOLD does
-     * reference must exist here, or it would leave a dangling
-     * var:preset|font-size|… — PresetReferences does scan theme.json's own
-     * strings and would report it, but as a build-time problem rather than a
-     * rendered site. `lead` is deliberately unreferenced by SCAFFOLD: it stays
-     * in the scale as an editor choice, but nothing is wired to it, because
-     * choosing which blocks are larger than body text is the design's call.
-     *
-     * @var list<array{slug: string, name: string, size: string}>
-     */
-    private const FONT_SIZE_PROFILE = [
-        ['slug' => 'caption', 'name' => 'Caption', 'size' => '0.875rem'],
-        ['slug' => 'body', 'name' => 'Body', 'size' => '1.125rem'],
-        ['slug' => 'lead', 'name' => 'Lead', 'size' => '1.375rem'],
-        ['slug' => 'heading', 'name' => 'Heading', 'size' => '1.75rem'],
-        ['slug' => 'section-title', 'name' => 'Section Title', 'size' => 'clamp(2.25rem, 3vw, 3rem)'],
-        ['slug' => 'display', 'name' => 'Display', 'size' => 'clamp(3rem, 7vw, 6rem)'],
     ];
     /**
      * Stable component spacing shared by every page density.
@@ -186,11 +183,12 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     /**
      * Build-supplied wiring the model no longer writes. It maps presets to
      * roles and makes zero aesthetic choices — every value is a var:preset
-     * token whose actual color, family and size the model chose, so sites stay
-     * visually distinct. No borders, radii, shadows or decorative treatment.
-     * (The direction-committed shape wiring in repairShapeWiring() is the one
-     * deliberate exception, and it executes an explicit design commitment
-     * rather than making a choice here.)
+     * token whose actual color/family the model chose and whose type size the
+     * committed direction selected, so sites stay visually distinct. No
+     * borders, radii, shadows or decorative treatment.
+     * (The direction-committed type treatment, CTA and shape wiring are
+     * deliberate exceptions, and execute explicit design commitments rather
+     * than making choices here.)
      *
      * Context-free block/caption text colors are deliberately absent:
      * ContrastFixStep evaluates rendered backgrounds but cannot see
@@ -336,6 +334,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
 
     private const REQ = 'theme-json';
     private const SHAPE_REPORT_FILE = 'theme-json-shape.txt';
+    private const DEPTH_REPORT_FILE = 'theme-json-depth.txt';
 
     /**
      * Applied direction writebacks. warnings.json is the list of defects the
@@ -377,6 +376,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             writes: [
                 'theme/theme.json',
                 'logs/' . self::SHAPE_REPORT_FILE,
+                'logs/' . self::DEPTH_REPORT_FILE,
                 'logs/' . self::BIND_REPORT_FILE,
                 'warnings.json',
             ],
@@ -526,18 +526,38 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         [$theme, $colorWarnings, $colorRepairs] = self::repairColors($theme, $preferred);
         $preferredType = is_array($direction['type'] ?? null) ? $direction['type'] : [];
         [$theme, $fontWarnings, $fontRepairs] = self::repairFonts($theme, $preferredType);
+        // Mirrors the applyMeasure gate above: on the HTML-first path the
+        // carried design CSS owns the rendered typography, so the committed
+        // ramp never displaces the sizes the design authored.
+        [$theme, $typeScaleRepairs] = self::applyTypeScale(
+            $theme,
+            $this->htmlFirst ? null : DesignDirectionStep::typeScaleFor($project),
+        );
         [$theme, $sizeWarnings] = self::repairFontSizes($theme);
 
         // Last: the scaffold references the preset slugs repaired above. The
-        // committed shape is then authoritative over model-authored radii.
+        // committed heading treatment, CTA construction and shape are then
+        // authoritative over their model-authored leaves.
         [$theme, $scaffoldWarnings] = self::repairScaffold($theme);
         if ($this->htmlFirst) {
             $theme = self::removeGeneratedControlTypography($theme);
         }
         [$theme, $accentCaptionWarnings] = self::repairAccentCaption($theme);
+        [$theme, $typeTreatmentRepairs] = self::repairTypeTreatment(
+            $theme,
+            DesignDirectionStep::typeTreatmentFor($project) ?? '',
+        );
+        [$theme, $ctaRepairs] = self::repairCtaStyle(
+            $theme,
+            DesignDirectionStep::ctaStyleFor($project) ?? '',
+        );
         [$theme, $shapeRepairs, $shapeWarnings] = self::repairShapeWiring(
             $theme,
             DesignDirectionStep::shapeFor($project) ?? '',
+        );
+        [$theme, $depthRepairs] = self::repairDepthPreset(
+            $theme,
+            DesignDirectionStep::depthFor($project),
         );
         [$theme, $groupPaddingWarnings] = self::repairGroupBlockPadding($theme);
         $warnings = array_merge(
@@ -552,11 +572,30 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $shapeWarnings,
         );
 
-        // Floors run on the palette about to be written, after every other repair.
-        [$theme, $floorWarnings] = self::applyPaletteFloor($theme);
+        // Floors run on the palette about to be written, after every other
+        // repair. A committed surface texture raises the body-ink floor to
+        // 7:1 so the overlay's sheet leaves 4.5:1 (Surface::contrastFloor).
+        [$theme, $floorWarnings] = self::applyPaletteFloor(
+            $theme,
+            Surface::contrastFloor(DesignDirectionStep::surfaceFor($project)),
+        );
         $warnings = array_merge($warnings, $floorWarnings);
 
-        $bindRepairs = array_merge($colorRepairs, $fontRepairs, $measureRepairs);
+        // The bounded render-time treatment owns the duotone catalog after
+        // palette repair/floors, so its preset uses the colors that ship.
+        $theme = ImageTreatment::applyThemeJson(
+            $theme,
+            $direction['image_treatment'] ?? null,
+        );
+
+        $bindRepairs = array_merge(
+            $colorRepairs,
+            $fontRepairs,
+            $measureRepairs,
+            $typeScaleRepairs,
+            $typeTreatmentRepairs,
+            $ctaRepairs,
+        );
         $bindReport = ['Successful design-direction writebacks: ' . count($bindRepairs)];
         foreach ($bindRepairs as $repair) {
             $bindReport[] = '- ' . $repair;
@@ -575,6 +614,16 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         if ($shapeRepairs !== []) {
             Narrator::write('  [theme-json] repaired ' . count($shapeRepairs)
                 . " conflicting shape declaration(s); see logs/" . self::SHAPE_REPORT_FILE . "\n");
+        }
+
+        $depthReport = ['Successful deterministic depth preset repairs: ' . count($depthRepairs)];
+        foreach ($depthRepairs as $repair) {
+            $depthReport[] = '- ' . $repair;
+        }
+        $project->writeText('logs/' . self::DEPTH_REPORT_FILE, implode("\n", $depthReport) . "\n");
+        if ($depthRepairs !== []) {
+            Narrator::write('  [theme-json] wired the committed depth preset; see logs/'
+                . self::DEPTH_REPORT_FILE . "\n");
         }
 
         if ($warnings !== []) {
@@ -1497,7 +1546,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      * @param array<mixed> $theme
      * @return array{0:array<mixed>,1:list<string>} theme, warnings
      */
-    public static function applyPaletteFloor(array $theme): array
+    public static function applyPaletteFloor(array $theme, ?float $contrastOnBase = null): array
     {
         $palette = $theme['settings']['color']['palette'] ?? null;
         if (!is_array($palette)) {
@@ -1519,7 +1568,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $map[$slug] = trim($color);
         }
         $warnings = [];
-        $fixed = PaletteFloor::repair($map, $warnings);
+        $fixed = PaletteFloor::repair($map, $warnings, $contrastOnBase);
         foreach ($theme['settings']['color']['palette'] as $i => $entry) {
             if (!is_array($entry)) {
                 continue;
@@ -1560,8 +1609,11 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $palette = [];
         }
         // The background every other slug is judged against, resolved before the
-        // loop because `base` may sit after the entry being decided.
+        // loop because `base` may sit after the entry being decided. The
+        // contrast ink is resolved the same way: accent is a fill, and its
+        // floor holds for the better of its two label inks (base or contrast).
         $deliveredBase = self::deliveredBase($palette, $preferredHexes);
+        $deliveredContrast = self::deliveredSlugHex($palette, $preferredHexes, 'contrast');
         $entries = [];
         $nonObjects = 0;
         foreach ($palette as $entry) {
@@ -1588,17 +1640,22 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $current = self::normalizeHex($entry['color']);
             if ($preferred !== null && $current !== null && $current !== $preferred) {
                 $authored = $entry['color'];
-                if (self::writebackWouldBlind($slug, $current, $preferred, $deliveredBase)) {
+                if (self::writebackWouldBlind($slug, $current, $preferred, $deliveredBase, $deliveredContrast)) {
                     // The model's hex clears WCAG on the delivered base and the
                     // direction's does not. Keep the readable one and say so;
                     // ContrastFixStep only reports on the base/contrast pair and
                     // is skipped outright on the HTML-first path, so nothing
                     // downstream would catch this.
+                    $against = $slug === 'accent'
+                        ? 'its best label ink (base or contrast)'
+                        : 'base ' . $deliveredBase;
                     $warnings[] = "theme.json palette slug '{$slug}': authored {$authored}; delivered {$authored}"
                         . "; disposition kept the model hex because the design-direction hex {$preferred} scored "
-                        . self::ratioLabel($preferred, $deliveredBase) . ':1 on base ' . $deliveredBase
+                        . self::slugRatioLabel($slug, $preferred, $deliveredBase, $deliveredContrast)
+                        . ':1 on ' . $against
                         . ', below the ' . self::CONTRAST_FLOORS[$slug] . ':1 floor for this slug, '
-                        . 'which the model hex clears at ' . self::ratioLabel($current, $deliveredBase) . ':1'
+                        . 'which the model hex clears at '
+                        . self::slugRatioLabel($slug, $current, $deliveredBase, $deliveredContrast) . ':1'
                         . self::hueDriftNote($slug, $current, $preferred);
                 } else {
                     $entry['color'] = $preferred;
@@ -1622,27 +1679,65 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $rawPreferred = $preferredHexes[$needed] ?? null;
             $preferred = is_string($rawPreferred) ? strtoupper(trim($rawPreferred)) : '';
             $fromDirection = preg_match('/^#[0-9A-F]{6}$/', $preferred) === 1 ? $preferred : null;
-            $neutral = self::FALLBACK_COLORS[$needed];
-            if ($fromDirection === null || self::clearsFloor($needed, $fromDirection, $deliveredBase)) {
+            $neutral = $needed === 'band'
+                ? (BandColor::fromBase($deliveredBase) ?? self::FALLBACK_COLORS[$needed])
+                : self::FALLBACK_COLORS[$needed];
+            if (
+                $fromDirection === null
+                || self::clearsFloor($needed, $fromDirection, $deliveredBase, $deliveredContrast)
+            ) {
                 $hex = $fromDirection ?? $neutral;
-                $warnings[] = "theme.json palette missing slug '{$needed}'; filled with {$hex}";
+                if ($needed === 'band') {
+                    $repairs[] = "palette missing slug 'band': delivered {$hex}; disposition derived the "
+                        . 'committed large-area surface from base';
+                } else {
+                    $warnings[] = "theme.json palette missing slug '{$needed}'; filled with {$hex}";
+                }
             } else {
                 // Same floor the writeback above enforces, applied to the one
                 // other way a direction hex reaches the palette. There is no
                 // model hex to keep here, so the choice is the direction's own
-                // against the neutral default: take whichever actually reads on
-                // the delivered base, and never make the slug less readable.
-                $hex = (self::ratioOn($neutral, $deliveredBase) ?? 0.0)
-                    > (self::ratioOn($fromDirection, $deliveredBase) ?? 0.0)
+                // against the neutral default: take whichever actually reads
+                // (per the slug's own measurement), and never make the slug
+                // less readable.
+                $hex = (self::slugRatio($needed, $neutral, $deliveredBase, $deliveredContrast) ?? 0.0)
+                    > (self::slugRatio($needed, $fromDirection, $deliveredBase, $deliveredContrast) ?? 0.0)
                     ? $neutral
                     : $fromDirection;
+                $against = $needed === 'accent'
+                    ? 'its best label ink (base or contrast)'
+                    : 'base ' . $deliveredBase;
                 $warnings[] = "theme.json palette missing slug '{$needed}': authored {$fromDirection}"
                     . "; delivered {$hex}; disposition the design-direction hex scored "
-                    . self::ratioLabel($fromDirection, $deliveredBase) . ':1 on base ' . $deliveredBase
+                    . self::slugRatioLabel($needed, $fromDirection, $deliveredBase, $deliveredContrast)
+                    . ':1 on ' . $against
                     . ', below the ' . self::CONTRAST_FLOORS[$needed] . ':1 floor for this slug'
                     . self::hueDriftNote($needed, $fromDirection, $hex);
             }
             $palette[] = ['slug' => $needed, 'color' => $hex, 'name' => ucfirst($needed)];
+        }
+
+        $baseIndex = null;
+        $bandIndex = null;
+        foreach ($palette as $index => $entry) {
+            if (($entry['slug'] ?? null) === 'base') {
+                $baseIndex = $index;
+            } elseif (($entry['slug'] ?? null) === 'band') {
+                $bandIndex = $index;
+            }
+        }
+        if ($baseIndex !== null && $bandIndex !== null) {
+            $base = (string) $palette[$baseIndex]['color'];
+            $band = (string) $palette[$bandIndex]['color'];
+            if (!BandColor::valid($base, $band)) {
+                $fixedBand = BandColor::fromBase($base);
+                if ($fixedBand !== null) {
+                    $palette[$bandIndex]['color'] = $fixedBand;
+                    $repairs[] = "palette slug 'band': authored {$band}; delivered {$fixedBand}; "
+                        . 'disposition enforced a same-family surface 10 lightness points from base '
+                        . 'without crossing the page light/dark key';
+                }
+            }
         }
         $theme['settings']['color']['palette'] = $palette;
         return [$theme, $warnings, $repairs];
@@ -1746,6 +1841,13 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                 ? "theme.json fontFamilies missing slug '{$needed}'; filled from designDirection.json with {$stack}"
                 : "theme.json fontFamilies missing slug '{$needed}'; filled with the system stack";
         }
+        // Code-owned presets fill silently: nothing the model authored was
+        // lost, so a warning row here would be noise on every build.
+        foreach (self::PIPELINE_FONTS as $slug => $stack) {
+            if (!in_array($slug, array_column($families, 'slug'), true)) {
+                $families[] = ['slug' => $slug, 'name' => ucfirst($slug), 'fontFamily' => $stack];
+            }
+        }
 
         $theme['settings']['typography']['fontFamilies'] = $families;
         return [$theme, $warnings, $repairs];
@@ -1777,36 +1879,85 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
 
     /**
      * True when the direction's hex would drop a slug the model had made
-     * compliant below the floor prompts/theme-json.md:36-39 states for it.
+     * compliant below the floor prompts/theme-json.md states for it.
      *
      * `base` is exempt: it is the reference background, and replacing it is a
-     * design decision rather than a readability one. The floors below are the
-     * prompt's own, and the ratio is symmetric, so `accent`'s requirement —
-     * "base on accent >= 4.5:1" for button labels — is the same measurement.
+     * design decision rather than a readability one. Text roles measure
+     * against base; `accent` is a fill and measures against its best label
+     * ink (base or contrast) — the same measurement PaletteFloor holds.
      */
     private static function writebackWouldBlind(
         string $slug,
         string $authored,
         string $preferred,
         string $base,
+        ?string $contrast,
     ): bool {
-        return self::clearsFloor($slug, $authored, $base)
-            && !self::clearsFloor($slug, $preferred, $base);
+        return self::clearsFloor($slug, $authored, $base, $contrast)
+            && !self::clearsFloor($slug, $preferred, $base, $contrast);
     }
 
     /**
-     * Whether one hex meets the floor its slug carries on the delivered base.
-     * A slug with no floor, and a hex we cannot measure, both pass: this gate
-     * exists to catch a measured failure, not to reject unfamiliar input.
+     * Whether one hex meets the floor its slug carries. A slug with no
+     * floor, and a hex we cannot measure, both pass: this gate exists to
+     * catch a measured failure, not to reject unfamiliar input.
      */
-    private static function clearsFloor(string $slug, string $hex, string $base): bool
+    private static function clearsFloor(string $slug, string $hex, string $base, ?string $contrast): bool
     {
         $floor = self::CONTRAST_FLOORS[$slug] ?? null;
         if ($floor === null) {
             return true;
         }
-        $ratio = self::ratioOn($hex, $base);
+        $ratio = self::slugRatio($slug, $hex, $base, $contrast);
         return $ratio === null || $ratio >= $floor;
+    }
+
+    /**
+     * The measurement a slug's floor holds: text roles read on base, the
+     * accent fill is read BY its better label ink. Null when unmeasurable.
+     */
+    private static function slugRatio(string $slug, string $hex, string $base, ?string $contrast): ?float
+    {
+        $onBase = self::ratioOn($hex, $base);
+        if ($slug !== 'accent') {
+            return $onBase;
+        }
+        $onContrast = $contrast === null ? null : self::ratioOn($hex, $contrast);
+        if ($onBase === null) {
+            return $onContrast;
+        }
+        return $onContrast === null ? $onBase : max($onBase, $onContrast);
+    }
+
+    private static function slugRatioLabel(string $slug, string $hex, string $base, ?string $contrast): string
+    {
+        $ratio = self::slugRatio($slug, $hex, $base, $contrast);
+        return $ratio === null ? 'an unmeasurable' : number_format($ratio, 2);
+    }
+
+    /**
+     * One delivered slug hex, preferring the direction's commitment and
+     * falling back to the model's palette entry — the same resolution order
+     * deliveredBase() uses. Null when neither names a readable hex.
+     */
+    private static function deliveredSlugHex(mixed $palette, array $preferredHexes, string $slug): ?string
+    {
+        $fromDirection = is_string($preferredHexes[$slug] ?? null)
+            ? self::normalizeHex($preferredHexes[$slug])
+            : null;
+        if ($fromDirection !== null) {
+            return $fromDirection;
+        }
+        foreach (is_array($palette) ? $palette : [] as $entry) {
+            if (!is_array($entry) || ($entry['slug'] ?? null) !== $slug) {
+                continue;
+            }
+            $hex = is_string($entry['color'] ?? null) ? self::normalizeHex($entry['color']) : null;
+            if ($hex !== null) {
+                return $hex;
+            }
+        }
+        return null;
     }
 
     /**
@@ -1959,6 +2110,10 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     {
         $warnings = [];
         $sizes = $theme['settings']['typography']['fontSizes'] ?? null;
+        // The prompt tells the model not to emit fontSizes, so a wholly absent
+        // array is compliance, not a defect: the deterministic fill below is
+        // the build honoring its own contract and needs no warning rows.
+        $authoredAbsent = $sizes === null;
         if (!is_array($sizes) || ($sizes !== [] && !array_is_list($sizes))) {
             if ($sizes !== null) {
                 $warnings[] = 'theme.json settings.typography.fontSizes: invalid container '
@@ -2007,17 +2162,57 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         }
 
         $slugs = array_column($entries, 'slug');
-        foreach (self::FONT_SIZE_PROFILE as $fallback) {
+        $fallbackProfile = TypeScale::fontSizes(TypeScale::DEFAULT) ?? [];
+        foreach ($fallbackProfile as $fallback) {
             if (in_array($fallback['slug'], $slugs, true)) {
                 continue;
             }
             $entries[] = $fallback;
-            $warnings[] = "theme.json fontSizes missing slug '{$fallback['slug']}'; "
-                . "filled with {$fallback['size']}";
+            if (!$authoredAbsent) {
+                $warnings[] = "theme.json fontSizes missing slug '{$fallback['slug']}'; "
+                    . "filled with {$fallback['size']}";
+            }
         }
 
         $theme['settings']['typography']['fontSizes'] = $entries;
         return [$theme, $warnings];
+    }
+
+    /**
+     * Replace every model-authored size with the committed modular ramp.
+     * Displacing an authored scale is repair-report evidence, never a
+     * warning: the authored scale was deliberately outside the model's
+     * ownership. Writing the ramp into an absent slot reports nothing,
+     * because nothing was replaced.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>}
+     */
+    public static function applyTypeScale(array $theme, ?string $scale): array
+    {
+        $profile = TypeScale::fontSizes($scale);
+        if ($profile === null) {
+            return [$theme, []];
+        }
+
+        $settings = is_array($theme['settings'] ?? null) ? $theme['settings'] : [];
+        $typography = is_array($settings['typography'] ?? null) ? $settings['typography'] : [];
+        $authored = $typography['fontSizes'] ?? null;
+        $theme['settings'] = $settings;
+        $theme['settings']['typography'] = $typography;
+        $theme['settings']['typography']['fontSizes'] = $profile;
+
+        // The prompt forbids the model to author sizes, so the normal case is
+        // an absent array: the build supplies the ramp and replaces nothing.
+        // A writeback line exists only when an authored scale was displaced.
+        if ($authored === null || $authored === $profile) {
+            return [$theme, []];
+        }
+        return [$theme, [
+            'theme/theme.json: settings.typography.fontSizes authored '
+                . Warnings::value($authored) . ' delivered committed "' . $scale
+                . '" modular scale; disposition replaced model-authored scale with deterministic direction token',
+        ]];
     }
 
     /**
@@ -2427,6 +2622,730 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $node[$mapKey] = $map;
         }
         return true;
+    }
+
+    /**
+     * Publish the one build-owned shadow preset consumed by Depth::kitCss().
+     * Unrelated generated presets are left intact because removing one after
+     * generation could invalidate a reference in the same build. The prompt
+     * no longer asks the model to spend tokens inventing them. Duplicate or
+     * conflicting `depth` slugs collapse to the committed definition.
+     *
+     * A direction without an explicit commitment is a no-op, matching
+     * depthFor(): an isolated run must not invent a visual choice.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>} theme, successful repairs
+     */
+    public static function repairDepthPreset(array $theme, mixed $depth): array
+    {
+        $preset = Depth::preset($depth);
+        if ($preset === null) {
+            return [$theme, []];
+        }
+
+        $repairs = [];
+        if (!is_array($theme['settings'] ?? null)
+            || (($theme['settings'] ?? []) !== [] && array_is_list($theme['settings']))) {
+            $theme['settings'] = [];
+            $repairs[] = 'theme/theme.json settings authored malformed; delivered object for depth preset';
+        }
+        if (!is_array($theme['settings']['shadow'] ?? null)
+            || (($theme['settings']['shadow'] ?? []) !== [] && array_is_list($theme['settings']['shadow']))) {
+            $theme['settings']['shadow'] = [];
+            $repairs[] = 'theme/theme.json settings.shadow authored malformed; delivered object for depth preset';
+        }
+
+        $authored = $theme['settings']['shadow']['presets'] ?? [];
+        if (!is_array($authored) || ($authored !== [] && !array_is_list($authored))) {
+            $authored = [];
+            $repairs[] = 'theme/theme.json settings.shadow.presets authored malformed; delivered bounded preset list';
+        }
+
+        $delivered = [];
+        $inserted = false;
+        foreach ($authored as $entry) {
+            if (is_array($entry) && strtolower(trim((string) ($entry['slug'] ?? ''))) === 'depth') {
+                if (!$inserted) {
+                    $delivered[] = $preset;
+                    $inserted = true;
+                }
+                continue;
+            }
+            $delivered[] = $entry;
+        }
+        if (!$inserted) {
+            $delivered[] = $preset;
+        }
+        if ($delivered !== $authored) {
+            $repairs[] = 'theme/theme.json settings.shadow.presets.depth authored '
+                . Warnings::value(array_values(array_filter(
+                    $authored,
+                    static fn (mixed $entry): bool => is_array($entry)
+                        && strtolower(trim((string) ($entry['slug'] ?? ''))) === 'depth',
+                )))
+                . '; delivered ' . Warnings::value($preset)
+                . '; disposition wired committed depth and collapsed duplicate slug definitions';
+        }
+        $theme['settings']['shadow']['presets'] = $delivered;
+
+        return [$theme, $repairs];
+    }
+
+    /**
+     * Execute the committed CTA construction at styles.elements.button while
+     * preserving model-authored typography and shape-owned border.radius.
+     * Competing core/button, variation, nested-element, responsive and
+     * interaction construction is removed before the authoritative base and
+     * states are installed. A pre-field direction is a complete no-op.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>} theme, successful repair notes
+     */
+    public static function repairCtaStyle(array $theme, string $style): array
+    {
+        $desired = CtaStyle::themeStyle($style);
+        if ($desired === null) {
+            return [$theme, []];
+        }
+
+        $authoredTheme = $theme;
+        $repairs = [];
+        $styles = $theme['styles'] ?? null;
+        if (!is_array($styles) || ($styles !== [] && array_is_list($styles))) {
+            $styles = [];
+        }
+        $authoredLabel = $styles['elements']['button']['color']['text'] ?? null;
+        $styles = self::stripCompetingCtaStyles($styles, 'styles', null, $style, $repairs);
+
+        $elements = $styles['elements'] ?? null;
+        if (!is_array($elements) || ($elements !== [] && array_is_list($elements))) {
+            $elements = [];
+        }
+        $button = $elements['button'] ?? null;
+        if (!is_array($button) || ($button !== [] && array_is_list($button))) {
+            if (array_key_exists('button', $elements)) {
+                $repairs[] = 'theme/theme.json styles.elements.button: authored '
+                    . Warnings::value($button)
+                    . '; delivered object; disposition replaced malformed button style to enforce committed '
+                    . $style . ' CTA construction';
+            }
+            $button = [];
+        }
+        $committedCss = is_string($desired['css'] ?? null) ? $desired['css'] : null;
+        unset($desired['css']);
+        $button = self::mergeCommittedCtaStyle(
+            $button,
+            $desired,
+            'styles.elements.button',
+            $style,
+            $repairs,
+        );
+        if ($committedCss !== null) {
+            $residualCss = is_string($button['css'] ?? null) ? trim($button['css']) : '';
+            $deliveredCss = $residualCss === '' ? $committedCss : $residualCss . "\n" . $committedCss;
+            if (($button['css'] ?? null) !== $deliveredCss) {
+                $repairs[] = 'theme/theme.json styles.elements.button.css: authored '
+                    . Warnings::value($button['css'] ?? null)
+                    . ' delivered ' . Warnings::value($deliveredCss)
+                    . '; disposition appended build-owned CSS for committed ' . $style . ' CTA construction';
+            }
+            $button['css'] = $deliveredCss;
+        }
+
+        // Solid's accent can be light or dark, so ContrastFixStep owns the
+        // exact readable label choice. Preserve only a prior deterministic
+        // base/contrast result; arbitrary model colors are not part of the
+        // bounded construction and are replaced before that later check.
+        if ($style === 'solid') {
+            $label = is_string($authoredLabel) && in_array($authoredLabel, [
+                'var:preset|color|base',
+                'var:preset|color|contrast',
+            ], true)
+                ? $authoredLabel
+                : 'var:preset|color|base';
+            if (($button['color']['text'] ?? null) !== $label) {
+                $repairs[] = 'theme/theme.json styles.elements.button.color.text: authored '
+                    . Warnings::value($button['color']['text'] ?? null)
+                    . ' delivered ' . Warnings::value($label)
+                    . '; disposition supplied a label color for deterministic contrast repair';
+            }
+            $button['color']['text'] = $label;
+        }
+
+        // The `block` wrapper needs one rule theme.json cannot express as
+        // structured style (see CtaStyle::BLOCK_VERTICAL_WRAPPER_CSS). Ship it
+        // through top-level styles.css, strip a stale copy first so a changed
+        // commitment converges, and touch nothing when neither applies.
+        $authoredRootCss = $styles['css'] ?? null;
+        $hasStaleRule = is_string($authoredRootCss)
+            && str_contains($authoredRootCss, CtaStyle::BLOCK_VERTICAL_WRAPPER_CSS);
+        if ($style === 'block' || $hasStaleRule) {
+            $stripped = trim(str_replace(
+                CtaStyle::BLOCK_VERTICAL_WRAPPER_CSS,
+                '',
+                is_string($authoredRootCss) ? $authoredRootCss : '',
+            ));
+            $deliveredRoot = $stripped;
+            if ($style === 'block') {
+                $deliveredRoot = $stripped === ''
+                    ? CtaStyle::BLOCK_VERTICAL_WRAPPER_CSS
+                    : $stripped . "\n" . CtaStyle::BLOCK_VERTICAL_WRAPPER_CSS;
+            }
+            $deliveredValue = $deliveredRoot === '' ? null : $deliveredRoot;
+            if ($deliveredValue !== $authoredRootCss) {
+                $repairs[] = 'theme/theme.json styles.css: authored '
+                    . Warnings::value($authoredRootCss)
+                    . ' delivered ' . Warnings::value($deliveredValue)
+                    . '; disposition ' . ($style === 'block'
+                        ? 'appended build-owned vertical-container width rule for committed block CTA construction'
+                        : 'removed stale block CTA wrapper rule for committed ' . $style . ' CTA construction');
+            }
+            if ($deliveredValue === null) {
+                unset($styles['css']);
+            } else {
+                $styles['css'] = $deliveredValue;
+            }
+        }
+
+        $elements['button'] = $button;
+        $styles['elements'] = $elements;
+        $theme['styles'] = $styles;
+        if (self::sameJsonValue($theme, $authoredTheme)) {
+            return [$theme, []];
+        }
+        return [$theme, $repairs];
+    }
+
+    /** Compare decoded JSON values without treating object-key order as data. */
+    private static function sameJsonValue(mixed $left, mixed $right): bool
+    {
+        return self::canonicalJsonValue($left) === self::canonicalJsonValue($right);
+    }
+
+    /** Recursively sort object-shaped arrays while preserving list order and scalar types. */
+    private static function canonicalJsonValue(mixed $value): mixed
+    {
+        if (!is_array($value)) {
+            return $value;
+        }
+        if (array_is_list($value)) {
+            return array_map(self::canonicalJsonValue(...), $value);
+        }
+        ksort($value, SORT_STRING);
+        foreach ($value as $key => $child) {
+            $value[$key] = self::canonicalJsonValue($child);
+        }
+        return $value;
+    }
+
+    /**
+     * @param array<mixed> $node
+     * @param ?string $target button | null
+     * @param list<string> $repairs
+     * @return array<mixed>
+     */
+    private static function stripCompetingCtaStyles(
+        array $node,
+        string $path,
+        ?string $target,
+        string $style,
+        array &$repairs,
+    ): array {
+        if ($target === 'button') {
+            $preserveSolidLabel = $style === 'solid' && $path === 'styles.elements.button';
+            $color = $node['color'] ?? null;
+            if (is_array($color) && ($color === [] || !array_is_list($color))) {
+                foreach (['background', 'gradient', 'text'] as $property) {
+                    if ($property === 'text' && $preserveSolidLabel) {
+                        continue;
+                    }
+                    self::removeCtaLeaf(
+                        $color,
+                        $property,
+                        $path . '.color.' . $property,
+                        $style,
+                        $repairs,
+                    );
+                }
+                if ($color === []) {
+                    unset($node['color']);
+                } else {
+                    $node['color'] = $color;
+                }
+            } elseif (array_key_exists('color', $node)) {
+                self::removeCtaLeaf($node, 'color', $path . '.color', $style, $repairs);
+            }
+
+            $border = $node['border'] ?? null;
+            if (is_array($border) && ($border === [] || !array_is_list($border))) {
+                foreach (array_keys($border) as $property) {
+                    if ($property === 'radius') {
+                        continue;
+                    }
+                    self::removeCtaLeaf(
+                        $border,
+                        (string) $property,
+                        $path . '.border.' . $property,
+                        $style,
+                        $repairs,
+                    );
+                }
+                if ($border === []) {
+                    unset($node['border']);
+                } else {
+                    $node['border'] = $border;
+                }
+            } elseif (array_key_exists('border', $node)) {
+                self::removeCtaLeaf($node, 'border', $path . '.border', $style, $repairs);
+            }
+
+            $spacing = $node['spacing'] ?? null;
+            if (is_array($spacing) && ($spacing === [] || !array_is_list($spacing))) {
+                self::removeCtaLeaf($spacing, 'padding', $path . '.spacing.padding', $style, $repairs);
+                if ($spacing === []) {
+                    unset($node['spacing']);
+                } else {
+                    $node['spacing'] = $spacing;
+                }
+            }
+
+            $typography = $node['typography'] ?? null;
+            if (is_array($typography) && ($typography === [] || !array_is_list($typography))) {
+                self::removeCtaLeaf(
+                    $typography,
+                    'textDecoration',
+                    $path . '.typography.textDecoration',
+                    $style,
+                    $repairs,
+                );
+                if ($typography === []) {
+                    unset($node['typography']);
+                } else {
+                    $node['typography'] = $typography;
+                }
+            }
+            if (is_string($node['css'] ?? null)) {
+                $css = rtrim($node['css']);
+                $ownedCss = CtaStyle::themeStyle($style)['css'] ?? null;
+                if (is_string($ownedCss) && str_ends_with($css, $ownedCss)) {
+                    $css = rtrim(substr($css, 0, -strlen($ownedCss)));
+                }
+                [$deliveredCss, $dropped] = CssChecks::dropDeclarations(
+                    $css,
+                    static fn (array $declaration): bool => CssChecks::isCtaAffectingDeclaration(
+                        $declaration['property'],
+                        $declaration['value'],
+                    ),
+                    true,
+                );
+                if ($dropped !== [] || $css !== rtrim($node['css'])) {
+                    if (trim($deliveredCss) === '') {
+                        unset($node['css']);
+                    } else {
+                        $node['css'] = $deliveredCss;
+                    }
+                    foreach ($dropped as $declaration) {
+                        $repairs[] = 'theme/theme.json ' . $path . '.css: authored declaration '
+                            . Warnings::value(trim($declaration['raw']))
+                            . '; delivered removed; disposition removed competing custom CSS for committed '
+                            . $style . ' CTA construction';
+                    }
+                }
+            } elseif (array_key_exists('css', $node)) {
+                self::removeCtaLeaf($node, 'css', $path . '.css', $style, $repairs);
+            }
+        }
+
+        foreach ([['blocks', 'core/button'], ['elements', 'button']] as [$family, $ownedName]) {
+            $children = $node[$family] ?? null;
+            if (!is_array($children) || ($children !== [] && array_is_list($children))) {
+                continue;
+            }
+            foreach ($children as $name => $child) {
+                if (!is_string($name)
+                    || !is_array($child)
+                    || ($child !== [] && array_is_list($child))
+                ) {
+                    continue;
+                }
+                $childPath = $path . '.' . $family . '.' . $name;
+                $child = self::stripCompetingCtaStyles(
+                    $child,
+                    $childPath,
+                    $name === $ownedName ? 'button' : null,
+                    $style,
+                    $repairs,
+                );
+                if ($child === []) {
+                    unset($children[$name]);
+                } else {
+                    $children[$name] = $child;
+                }
+            }
+            if ($children === []) {
+                unset($node[$family]);
+            } else {
+                $node[$family] = $children;
+            }
+        }
+
+        $variations = $node['variations'] ?? null;
+        if (is_array($variations) && ($variations === [] || !array_is_list($variations))) {
+            foreach ($variations as $name => $child) {
+                if (!is_string($name)
+                    || !is_array($child)
+                    || ($child !== [] && array_is_list($child))
+                ) {
+                    continue;
+                }
+                $child = self::stripCompetingCtaStyles(
+                    $child,
+                    $path . '.variations.' . $name,
+                    $target,
+                    $style,
+                    $repairs,
+                );
+                if ($child === []) {
+                    unset($variations[$name]);
+                } else {
+                    $variations[$name] = $child;
+                }
+            }
+            if ($variations === []) {
+                unset($node['variations']);
+            } else {
+                $node['variations'] = $variations;
+            }
+        }
+
+        foreach (array_keys($node) as $state) {
+            $child = $node[$state] ?? null;
+            if (!is_string($state)
+                || (!str_starts_with($state, ':')
+                    && !str_starts_with($state, '@')
+                    && !in_array($state, ['mobile', 'tablet', 'desktop'], true))
+                || !is_array($child)
+                || ($child !== [] && array_is_list($child))
+            ) {
+                continue;
+            }
+            $child = self::stripCompetingCtaStyles(
+                $child,
+                $path . '.' . $state,
+                $target,
+                $style,
+                $repairs,
+            );
+            if ($child === []) {
+                unset($node[$state]);
+            } else {
+                $node[$state] = $child;
+            }
+        }
+        return $node;
+    }
+
+    /** @param array<mixed> $node @param list<string> $repairs */
+    private static function removeCtaLeaf(
+        array &$node,
+        string $property,
+        string $path,
+        string $style,
+        array &$repairs,
+    ): void {
+        if (!array_key_exists($property, $node)) {
+            return;
+        }
+        $repairs[] = 'theme/theme.json ' . $path . ': authored '
+            . Warnings::value($node[$property])
+            . '; delivered removed; disposition removed competing declaration for committed '
+            . $style . ' CTA construction';
+        unset($node[$property]);
+    }
+
+    /**
+     * @param array<mixed> $delivered
+     * @param array<mixed> $committed
+     * @param list<string> $repairs
+     * @return array<mixed>
+     */
+    private static function mergeCommittedCtaStyle(
+        array $delivered,
+        array $committed,
+        string $path,
+        string $style,
+        array &$repairs,
+    ): array {
+        foreach ($committed as $property => $value) {
+            $childPath = $path . '.' . $property;
+            if (is_array($value) && ($value === [] || !array_is_list($value))) {
+                $existing = $delivered[$property] ?? null;
+                if (!is_array($existing) || ($existing !== [] && array_is_list($existing))) {
+                    if (array_key_exists($property, $delivered)) {
+                        $repairs[] = 'theme/theme.json ' . $childPath . ': authored '
+                            . Warnings::value($existing)
+                            . '; delivered object; disposition replaced malformed container for committed '
+                            . $style . ' CTA construction';
+                    }
+                    $existing = [];
+                }
+                $delivered[$property] = self::mergeCommittedCtaStyle(
+                    $existing,
+                    $value,
+                    $childPath,
+                    $style,
+                    $repairs,
+                );
+                continue;
+            }
+            if (($delivered[$property] ?? null) !== $value) {
+                $repairs[] = 'theme/theme.json ' . $childPath . ': authored '
+                    . Warnings::value($delivered[$property] ?? null)
+                    . ' delivered ' . Warnings::value($value)
+                    . '; disposition enforced committed ' . $style . ' CTA construction';
+            }
+            $delivered[$property] = $value;
+        }
+        return $delivered;
+    }
+
+    /**
+     * Execute the committed site-wide heading case/tracking language while
+     * preserving every other typography choice, especially lineHeight.
+     * Per-level, core/heading, core/post-title, core/site-title, variation,
+     * and responsive structured leaves are removed so the authoritative
+     * styles.elements.heading pair can inherit. A malformed styles.elements or
+     * styles.elements.heading node (scalar or list) is rebuilt so the pair
+     * always lands; each rebuild is recorded as a repair. A direction
+     * persisted before this field existed remains a complete no-op.
+     *
+     * Scope: this repair owns structured theme.json leaves only. Generated
+     * page CSS is guarded separately by PageStylesStep's declaration checks;
+     * wp:heading block ATTRIBUTES stay outside both guards as a documented
+     * boundary — prompts/section.md forbids them and SupportDomainGuard's
+     * reviewed typography domain deliberately keeps the keys available to
+     * other blocks.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>} theme, successful repair notes
+     */
+    public static function repairTypeTreatment(array $theme, string $treatment): array
+    {
+        $committed = TypeTreatment::typography($treatment);
+        if ($committed === null) {
+            return [$theme, []];
+        }
+
+        $repairs = [];
+        $styles = is_array($theme['styles'] ?? null)
+            && (($theme['styles'] ?? []) === [] || !array_is_list($theme['styles']))
+                ? $theme['styles']
+                : [];
+        $theme['styles'] = self::repairTypeTreatmentStyleNode(
+            $styles,
+            'styles',
+            null,
+            false,
+            $treatment,
+            $committed,
+            $repairs,
+        );
+        return [$theme, $repairs];
+    }
+
+    /**
+     * @param array<mixed> $node
+     * @param ?string $target heading | null
+     * @param array{textTransform:string,letterSpacing:string} $committed
+     * @param list<string> $repairs
+     * @return array<mixed>
+     */
+    private static function repairTypeTreatmentStyleNode(
+        array $node,
+        string $path,
+        ?string $target,
+        bool $authoritative,
+        string $treatment,
+        array $committed,
+        array &$repairs,
+    ): array {
+        if ($target === 'heading') {
+            $typography = $node['typography'] ?? null;
+            if ($authoritative) {
+                if (!is_array($typography)
+                    || ($typography !== [] && array_is_list($typography))
+                ) {
+                    if (array_key_exists('typography', $node)) {
+                        $repairs[] = "theme/theme.json {$path}.typography: authored "
+                            . Warnings::value($typography)
+                            . '; delivered object containing the committed heading treatment'
+                            . '; disposition replaced malformed typography container';
+                    }
+                    $typography = [];
+                }
+                foreach ($committed as $property => $value) {
+                    if (($typography[$property] ?? null) !== $value) {
+                        $repairs[] = "theme/theme.json {$path}.typography.{$property}: authored "
+                            . Warnings::value($typography[$property] ?? null)
+                            . ' delivered ' . Warnings::value($value)
+                            . "; disposition enforced committed {$treatment} heading treatment";
+                    }
+                    $typography[$property] = $value;
+                }
+                $node['typography'] = $typography;
+            } elseif (is_array($typography)
+                && ($typography === [] || !array_is_list($typography))
+            ) {
+                foreach (array_keys($committed) as $property) {
+                    if (!array_key_exists($property, $typography)) {
+                        continue;
+                    }
+                    $repairs[] = "theme/theme.json {$path}.typography.{$property}: authored "
+                        . Warnings::value($typography[$property])
+                        . '; delivered removed; disposition inherited the committed '
+                        . $treatment . ' heading treatment';
+                    unset($typography[$property]);
+                }
+                if ($typography === []) {
+                    unset($node['typography']);
+                } else {
+                    $node['typography'] = $typography;
+                }
+            }
+        }
+
+        $blocks = $node['blocks'] ?? null;
+        if (is_array($blocks) && ($blocks === [] || !array_is_list($blocks))) {
+            foreach ($blocks as $block => $child) {
+                if (!is_string($block)
+                    || !is_array($child)
+                    || ($child !== [] && array_is_list($child))
+                ) {
+                    continue;
+                }
+                $blocks[$block] = self::repairTypeTreatmentStyleNode(
+                    $child,
+                    $path . '.blocks.' . $block,
+                    in_array($block, ['core/heading', 'core/post-title', 'core/site-title'], true)
+                        ? 'heading'
+                        : null,
+                    false,
+                    $treatment,
+                    $committed,
+                    $repairs,
+                );
+            }
+            $node['blocks'] = $blocks;
+        }
+
+        $elements = $node['elements'] ?? null;
+        if (is_array($elements) && ($elements === [] || !array_is_list($elements))) {
+            foreach ($elements as $element => $child) {
+                if (!is_string($element)
+                    || !is_array($child)
+                    || ($child !== [] && array_is_list($child))
+                ) {
+                    continue;
+                }
+                $isHeading = in_array($element, ['heading', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'], true);
+                $childPath = $path . '.elements.' . $element;
+                $elements[$element] = self::repairTypeTreatmentStyleNode(
+                    $child,
+                    $childPath,
+                    $isHeading ? 'heading' : null,
+                    $childPath === 'styles.elements.heading',
+                    $treatment,
+                    $committed,
+                    $repairs,
+                );
+            }
+            $rootHeading = $elements['heading'] ?? null;
+            $rootHeadingMalformed = array_key_exists('heading', $elements)
+                && (!is_array($rootHeading)
+                    || ($rootHeading !== [] && array_is_list($rootHeading)));
+            if ($path === 'styles' && ($rootHeadingMalformed || !isset($elements['heading']))) {
+                if ($rootHeadingMalformed) {
+                    $repairs[] = 'theme/theme.json styles.elements.heading: authored '
+                        . Warnings::value($rootHeading)
+                        . '; delivered object containing the committed heading treatment'
+                        . '; disposition replaced malformed heading element';
+                }
+                $elements['heading'] = self::repairTypeTreatmentStyleNode(
+                    [],
+                    $path . '.elements.heading',
+                    'heading',
+                    true,
+                    $treatment,
+                    $committed,
+                    $repairs,
+                );
+            }
+            $node['elements'] = $elements;
+        } elseif ($path === 'styles') {
+            if (array_key_exists('elements', $node)) {
+                $repairs[] = 'theme/theme.json styles.elements: authored '
+                    . Warnings::value($node['elements'])
+                    . '; delivered object containing the committed heading treatment'
+                    . '; disposition replaced malformed elements container';
+            }
+            $node['elements'] = [
+                'heading' => self::repairTypeTreatmentStyleNode(
+                    [],
+                    'styles.elements.heading',
+                    'heading',
+                    true,
+                    $treatment,
+                    $committed,
+                    $repairs,
+                ),
+            ];
+        }
+
+        $variations = $node['variations'] ?? null;
+        if (is_array($variations) && ($variations === [] || !array_is_list($variations))) {
+            foreach ($variations as $variation => $child) {
+                if (!is_string($variation)
+                    || !is_array($child)
+                    || ($child !== [] && array_is_list($child))
+                ) {
+                    continue;
+                }
+                $variations[$variation] = self::repairTypeTreatmentStyleNode(
+                    $child,
+                    $path . '.variations.' . $variation,
+                    $target,
+                    false,
+                    $treatment,
+                    $committed,
+                    $repairs,
+                );
+            }
+            $node['variations'] = $variations;
+        }
+
+        foreach ($node as $state => $child) {
+            if (!is_string($state)
+                || (!str_starts_with($state, ':')
+                    && !str_starts_with($state, '@')
+                    && !in_array($state, ['mobile', 'tablet', 'desktop'], true))
+                || !is_array($child)
+                || ($child !== [] && array_is_list($child))
+            ) {
+                continue;
+            }
+            $node[$state] = self::repairTypeTreatmentStyleNode(
+                $child,
+                $path . '.' . $state,
+                $target,
+                false,
+                $treatment,
+                $committed,
+                $repairs,
+            );
+        }
+
+        return $node;
     }
 
     /**

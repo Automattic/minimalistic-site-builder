@@ -10,6 +10,7 @@ use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\BlockSerializer\AlignmentClassLoss;
 use Automattic\SiteBuild\BlockSerializer\AlignmentClassLossDetector;
 use Automattic\SiteBuild\BlockSerializer\Repair;
+use Automattic\SiteBuild\CtaStyleMarkup;
 use Automattic\SiteBuild\ImageCaptions;
 use Automattic\SiteBuild\LayoutFixer;
 use Automattic\SiteBuild\PhotographySite;
@@ -27,8 +28,8 @@ use Automattic\SiteBuild\Units\GeneratedMarkup;
  * Input:  theme/templates/*.html + theme/parts/*.html + pre-existing theme/pages/*.html
  * Output: the same files, re-serialized to match WordPress save() exactly.
  *
- * Runs the LayoutFixer width/rhythm and design-direction shape normalization
- * FIRST. Both edit block-comment JSON attributes, and the block
+ * Runs LayoutFixer width/rhythm plus design-direction shape and CTA
+ * normalization FIRST. They edit block-comment JSON attributes, and the block
  * re-serialization right after syncs saved HTML with those attributes.
  *
  * Delegates the effectful repair to an injected BlockFixer.
@@ -77,13 +78,16 @@ final class FixBlocksStep implements Step
         $outcomes = [];
         $failedFiles = [];
         $shape = DesignDirectionStep::shapeFor($project);
+        $ctaStyle = DesignDirectionStep::ctaStyleFor($project);
         // A failed file is restored to these exact step-entry bytes. Keep the
         // shape defects observable in that snapshot separate from changes
         // exposed by LayoutFixer or a successful first fixer pass: only the
         // former can truthfully describe the file ultimately delivered after
         // rollback.
         $entryShapeChanges = self::shapeChangesInSnapshot($beforeInitialPass, $shape);
+        $entryCtaChanges = self::ctaChangesInSnapshot($beforeInitialPass, $ctaStyle);
         $shapeChanges = [];
+        $ctaChanges = [];
         $designCss = $this->htmlFirst && $project->exists('design/site.css')
             ? $project->readText('design/site.css')
             : null;
@@ -111,6 +115,7 @@ final class FixBlocksStep implements Step
                 $wideClassTokens,
             );
             $shapeChanges = self::normalizeShapes($project, $shape);
+            $ctaChanges = self::normalizeCtas($project, $ctaStyle);
             $alignmentBaselines[] = self::snapshotThemeFiles($project);
             $blockedFailures = [];
             foreach ($listBlocked as $blocked) {
@@ -168,14 +173,20 @@ final class FixBlocksStep implements Step
                 $shape,
                 self::failurePaths($failedFiles),
             );
+            $postRepairCtaChanges = self::normalizeCtas(
+                $project,
+                $ctaStyle,
+                self::failurePaths($failedFiles),
+            );
             $layoutNotes = array_merge($layoutNotes, $postRepairLayoutNotes);
             $shapeChanges = array_merge($shapeChanges, $postRepairShapeChanges);
-            if ($postRepairLayoutNotes !== [] || $postRepairShapeChanges !== []) {
+            $ctaChanges = array_merge($ctaChanges, $postRepairCtaChanges);
+            if ($postRepairLayoutNotes !== [] || $postRepairShapeChanges !== [] || $postRepairCtaChanges !== []) {
                 $alignmentBaselines[] = self::snapshotThemeFiles($project);
                 $followUpOutcome = BlockFixerOutcome::run($this->fixer, $project->themePath());
                 $outcomes[] = $followUpOutcome;
                 $followUpSummary = $followUpOutcome->formatted;
-                $summary .= "\n[layout/shape] post-repair normalization required a second block-fixer pass:\n  "
+                $summary .= "\n[layout/design-tokens] post-repair normalization required a second block-fixer pass:\n  "
                     . str_replace("\n", "\n  ", $followUpSummary);
                 self::appendFailures($failedFiles, $followUpOutcome);
                 self::restoreFailedThemeFiles($project, $beforeInitialPass, self::failurePaths($failedFiles));
@@ -198,7 +209,7 @@ final class FixBlocksStep implements Step
             // repair can require two fixer passes. A failed follow-up must not
             // leave the first pass committed as a partial step result.
             self::restoreThemeFiles($project, $beforeInitialPass);
-            $summary .= "\n[layout/shape] post-repair normalization required a second block-fixer pass, which failed:\n  "
+            $summary .= "\n[layout/design-tokens] post-repair normalization required a second block-fixer pass, which failed:\n  "
                 . str_replace("\n", "\n  ", $e->getMessage());
             if ($layoutNotes !== []) {
                 $summary .= "\n[layout] " . count($layoutNotes) . " width/rhythm fix(es):\n  "
@@ -302,6 +313,28 @@ final class FixBlocksStep implements Step
                 . implode("\n  ", $shapeRollbackWarnings);
         }
 
+        $ctaChanges = self::uniqueShapeChanges($ctaChanges);
+        $failedCtaChanges = self::onlyFailedShapeChanges($entryCtaChanges, $failedPaths);
+        $ctaChanges = self::uniqueShapeChanges(
+            self::withoutFailedShapeChanges($ctaChanges, $failedPaths),
+        );
+        if ($ctaChanges !== []) {
+            $summary .= "\n[cta-style] " . count($ctaChanges) . " CTA construction normalization(s):\n  "
+                . implode("\n  ", array_map(self::shapeChangeSummary(...), $ctaChanges));
+        }
+        $ctaRollbackWarnings = array_map(
+            static fn (array $change): string => self::ctaRollbackWarning(
+                $change,
+                $failedFiles[$change['file']][1] ?? 'unknown transformation failure',
+            ),
+            $failedCtaChanges,
+        );
+        if ($ctaRollbackWarnings !== []) {
+            $summary .= "\n[cta-style] WARNING: " . count($ctaRollbackWarnings)
+                . " CTA normalization(s) rolled back with failed file transactions:\n  "
+                . implode("\n  ", $ctaRollbackWarnings);
+        }
+
         // The fixer can silently migrate a mismatched group through a
         // deprecated block version whose schema predates "layout". Re-assert
         // the header/footer layout contract on files whose transaction
@@ -350,6 +383,7 @@ final class FixBlocksStep implements Step
             $paragraphStyleWarnings,
             $shapeDeliveryWarnings,
             $shapeRollbackWarnings,
+            $ctaRollbackWarnings,
         );
         foreach ($rhythmDrops as $drop) {
             $warnings[] = "block re-serialization dropped vertical rhythm CSS `{$drop}`; "
@@ -758,6 +792,42 @@ final class FixBlocksStep implements Step
     }
 
     /**
+     * Remove per-button construction that outranks styles.elements.button.
+     * Successful repairs stay in the step report; failed file transactions
+     * are restored and surfaced through actionable warnings by run().
+     *
+     * @param list<string> $excluded fixer-relative paths
+     * @return list<array{file:string,blockPath:string,blockName:string,property:string,
+     *     authored:mixed,delivered:mixed,disposition:string}>
+     */
+    public static function normalizeCtas(
+        Project $project,
+        ?string $style,
+        array $excluded = [],
+    ): array {
+        if ($style === null) {
+            return [];
+        }
+
+        $changes = [];
+        $excluded = array_fill_keys($excluded, true);
+        foreach ($project->themeFiles() as $rel) {
+            if (isset($excluded[$rel])) {
+                continue;
+            }
+            $markup = $project->readText('theme/' . $rel);
+            $result = CtaStyleMarkup::normalize($markup, $style);
+            if ($result['markup'] !== $markup) {
+                $project->writeText('theme/' . $rel, $result['markup']);
+            }
+            foreach ($result['changes'] as $change) {
+                $changes[] = ['file' => $rel] + $change;
+            }
+        }
+        return $changes;
+    }
+
+    /**
      * Inspect exact step-entry bytes without mutating them. A later fixer pass
      * can expose or synthesize additional shape state, but a failed file is
      * restored from this snapshot, so intermediate state must never be
@@ -790,6 +860,28 @@ final class FixBlocksStep implements Step
                 continue;
             }
             foreach (ShapeMarkup::normalize($markup, $shape)['changes'] as $change) {
+                $changes[] = ['file' => $rel] + $change;
+            }
+        }
+        return self::uniqueShapeChanges($changes);
+    }
+
+    /**
+     * @param array<string,string> $snapshot theme-relative path => exact bytes
+     * @return list<array{file:string,blockPath:string,blockName:string,property:string,
+     *     authored:mixed,delivered:mixed,disposition:string}>
+     */
+    private static function ctaChangesInSnapshot(array $snapshot, ?string $style): array
+    {
+        if ($style === null) {
+            return [];
+        }
+        $changes = [];
+        foreach ($snapshot as $rel => $markup) {
+            if (!str_starts_with($rel, 'parts/') && !str_starts_with($rel, 'templates/')) {
+                continue;
+            }
+            foreach (CtaStyleMarkup::normalize($markup, $style)['changes'] as $change) {
                 $changes[] = ['file' => $rel] + $change;
             }
         }
@@ -910,6 +1002,28 @@ final class FixBlocksStep implements Step
         return sprintf(
             '%s block %s (%s): corner property %s; authored %s; delivered %s '
                 . '(pre-step value restored); disposition shape normalization rolled back '
+                . 'because block re-serialization abandoned this file (%s); see logs/%s',
+            $change['file'],
+            $change['blockPath'],
+            $change['blockName'],
+            $change['property'],
+            $authored,
+            $authored,
+            $failure,
+            self::LOG_FILE,
+        );
+    }
+
+    /**
+     * @param array{file:string,blockPath:string,blockName:string,property:string,
+     *     authored:mixed,delivered:mixed,disposition:string} $change
+     */
+    private static function ctaRollbackWarning(array $change, string $failure): string
+    {
+        $authored = self::shapeValue($change['authored']);
+        return sprintf(
+            '%s block %s (%s): CTA property %s; authored %s; delivered %s '
+                . '(pre-step value restored); disposition CTA normalization rolled back '
                 . 'because block re-serialization abandoned this file (%s); see logs/%s',
             $change['file'],
             $change['blockPath'],

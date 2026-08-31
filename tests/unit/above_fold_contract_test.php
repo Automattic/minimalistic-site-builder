@@ -4,6 +4,7 @@ declare(strict_types=1);
 use Automattic\SiteBuild\AboveFoldContract;
 use Automattic\SiteBuild\AboveFoldPartFacts;
 use Automattic\SiteBuild\HeroBlueprint;
+use Automattic\SiteBuild\HeroComposition;
 
 /** @param array{label:string,intent:string,destination:string}|null $action */
 function above_fold_pages(?array $action = null, string $heroSurface = 'image', string $menuSurface = 'contrast'): array
@@ -40,7 +41,7 @@ function above_fold_pages(?array $action = null, string $heroSurface = 'image', 
                 [
                     'slug' => 'menu-opening',
                     'title' => 'Menu',
-                    'layout_archetype' => 'mixed-width-editorial',
+                    'layout_archetype' => 'asymmetric-split',
                     'background' => $menuSurface,
                     'primary_action' => null,
                 ],
@@ -204,7 +205,7 @@ test('above-fold assignment is stable and honors one exact compatible forced arc
 
 test('centered-masthead and split-nav are never auto-assigned (BIGR-872)', function () {
     $pages = above_fold_pages(null, 'base', 'base');
-    foreach (['focal-subject-stage', 'editorial-split'] as $recipe) {
+    foreach (HeroComposition::RECIPES as $recipe) {
         foreach (range(1, 40) as $seed) {
             $contract = AboveFoldContract::resolve(
                 $pages,
@@ -221,15 +222,15 @@ test('centered-masthead and split-nav are never auto-assigned (BIGR-872)', funct
         }
     }
 
-    $forcedMasthead = above_fold_resolve($pages, recipe: 'editorial-split', forced: 'centered-masthead');
+    $forcedMasthead = above_fold_resolve($pages, recipe: 'foreground-split', forced: 'centered-masthead');
     assert_eq('centered-masthead', $forcedMasthead['header']['archetype']);
-    $forcedSplit = above_fold_resolve($pages, recipe: 'editorial-split', forced: 'split-nav');
+    $forcedSplit = above_fold_resolve($pages, recipe: 'foreground-split', forced: 'split-nav');
     assert_eq('split-nav', $forcedSplit['header']['archetype']);
 });
 
 test('double-decker is removed from the catalog: never assigned, rejected as an override', function () {
     $pages = above_fold_pages(null, 'base', 'base');
-    foreach (['focal-subject-stage', 'editorial-split'] as $recipe) {
+    foreach (HeroComposition::RECIPES as $recipe) {
         foreach (range(1, 40) as $seed) {
             $contract = AboveFoldContract::resolve(
                 $pages,
@@ -248,7 +249,7 @@ test('double-decker is removed from the catalog: never assigned, rejected as an 
 
     assert_throws(fn () => AboveFoldContract::resolve(
         $pages,
-        HeroBlueprint::defaultFor('editorial-split'),
+        HeroBlueprint::defaultFor('foreground-split'),
         'full-bleed',
         ['base' => '#FFFFFF', 'contrast' => '#111111'],
         ['stable_id' => 'retired-forced', 'writing_direction' => 'ltr', 'page_count' => count($pages)],
@@ -274,8 +275,8 @@ test('overlay requires an image-led recipe, every protected opening, an unframed
     )['header']['mode']);
 
     $solidStacked = above_fold_pages(null, 'contrast', 'contrast');
-    $solidStacked[0]['sections'][0]['layout_archetype'] = 'mixed-width-editorial';
-    assert_eq('stacked', above_fold_resolve($solidStacked, recipe: 'focal-subject-stage')['header']['mode']);
+    $solidStacked[0]['sections'][0]['layout_archetype'] = 'asymmetric-split';
+    assert_eq('stacked', above_fold_resolve($solidStacked, recipe: 'foreground-split')['header']['mode']);
 });
 
 test('logical hero regions resolve to physical RTL sides once', function () {
@@ -288,7 +289,7 @@ test('logical hero regions resolve to physical RTL sides once', function () {
     // A start-anchored foreground recipe still resolves to a physical side.
     $split = above_fold_resolve(
         above_fold_pages(null, 'base', 'base'),
-        recipe: 'editorial-split',
+        recipe: 'foreground-split',
         direction: 'rtl',
     );
     assert_eq('full', $split['regions']['text_safe']['logical']);
@@ -314,7 +315,7 @@ test('front serialization is canonical while the interior opening subset is reci
 
 test('delivery and markup phases reject misuse and reach a fixed point without reselection', function () {
     $pages = [above_fold_pages(null, 'contrast', 'contrast')[0]];
-    $contract = above_fold_resolve($pages, recipe: 'focal-subject-stage', forced: 'standard-row');
+    $contract = above_fold_resolve($pages, recipe: 'foreground-split', forced: 'standard-row');
     $parts = ['page-home--hero' => above_fold_solid_part('hero', 'contrast')];
     $facts = AboveFoldPartFacts::inspect($pages, $parts, $contract);
 
@@ -533,8 +534,8 @@ test('lost overlay support degrades to one reviewed stacked relation with an act
 
 test('split navigation and removed neighbors degrade only enumerated delivery facts', function () {
     $pages = above_fold_pages(null, 'contrast', 'contrast');
-    $pages[0]['sections'][0]['layout_archetype'] = 'mixed-width-editorial';
-    $contract = above_fold_resolve($pages, recipe: 'focal-subject-stage', forced: 'split-nav');
+    $pages[0]['sections'][0]['layout_archetype'] = 'asymmetric-split';
+    $contract = above_fold_resolve($pages, recipe: 'foreground-split', forced: 'split-nav');
     assert_eq('split-nav', $contract['header']['archetype']);
 
     $deliveredPages = [$pages[0]];
@@ -654,7 +655,7 @@ test('downstream consumers reject corrupt header relations and unverified token 
 
     $stacked = above_fold_resolve(
         above_fold_pages(null, 'contrast', 'contrast'),
-        recipe: 'focal-subject-stage',
+        recipe: 'foreground-split',
         forced: 'standard-row',
     );
     $stacked['header']['archetype'] = 'minimal-overlay';
@@ -667,7 +668,7 @@ test('header text-shape facts follow the archetype and the stated tagline (BIGR-
     // branded-lockup + a stated tagline: the lockup renders it, two text rows.
     $lockup = above_fold_resolve(
         $pages,
-        recipe: 'editorial-split',
+        recipe: 'foreground-split',
         forced: 'branded-lockup',
         tagline: 'Handmade ceramic lamps from Copenhagen',
     );
@@ -677,7 +678,7 @@ test('header text-shape facts follow the archetype and the stated tagline (BIGR-
     assert_eq(2, $lockup['header']['text_rows']);
 
     // branded-lockup with no stated tagline: nothing to render — one text row.
-    $bare = above_fold_resolve($pages, recipe: 'editorial-split', forced: 'branded-lockup');
+    $bare = above_fold_resolve($pages, recipe: 'foreground-split', forced: 'branded-lockup');
     assert_eq(false, $bare['header']['displays_tagline']);
     assert_eq(null, $bare['header']['tagline_text']);
     assert_eq(1, $bare['header']['text_rows']);
@@ -686,7 +687,7 @@ test('header text-shape facts follow the archetype and the stated tagline (BIGR-
     // (wordmark row + nav row), so the hero eyebrow gate still engages.
     $masthead = above_fold_resolve(
         $pages,
-        recipe: 'editorial-split',
+        recipe: 'foreground-split',
         forced: 'centered-masthead',
         tagline: 'Handmade ceramic lamps from Copenhagen',
     );
@@ -696,7 +697,7 @@ test('header text-shape facts follow the archetype and the stated tagline (BIGR-
     assert_eq(2, $masthead['header']['text_rows']);
 
     // A single-row bar without a stated tagline stays one text row.
-    $row = above_fold_resolve($pages, recipe: 'editorial-split', forced: 'standard-row');
+    $row = above_fold_resolve($pages, recipe: 'foreground-split', forced: 'standard-row');
     assert_eq(false, $row['header']['displays_tagline']);
     assert_eq(1, $row['header']['text_rows']);
 
@@ -704,7 +705,7 @@ test('header text-shape facts follow the archetype and the stated tagline (BIGR-
     // longer carries an eyebrow, so orientation copy lives in the header.
     $rowTagline = above_fold_resolve(
         $pages,
-        recipe: 'editorial-split',
+        recipe: 'foreground-split',
         forced: 'standard-row',
         tagline: 'Handmade ceramic lamps from Copenhagen',
     );
@@ -715,7 +716,7 @@ test('header text-shape facts follow the archetype and the stated tagline (BIGR-
     // Header degradation resets the text-shape facts with the archetype.
     $split = above_fold_resolve(
         above_fold_pages(null, 'contrast', 'contrast'),
-        recipe: 'focal-subject-stage',
+        recipe: 'foreground-split',
         forced: 'split-nav',
         tagline: 'Handmade ceramic lamps from Copenhagen',
     );
@@ -972,7 +973,7 @@ test('final header text-shape facts reflect whether the promised tagline was del
     $pages = above_fold_pages(null, 'base', 'base');
     $contract = above_fold_resolve(
         $pages,
-        recipe: 'editorial-split',
+        recipe: 'foreground-split',
         forced: 'standard-row',
         tagline: 'Handmade ceramic lamps from Copenhagen',
     );
@@ -1090,7 +1091,7 @@ test('final header text-shape facts reflect whether the promised tagline was del
 
     $noTaglineContract = above_fold_resolve(
         $pages,
-        recipe: 'editorial-split',
+        recipe: 'foreground-split',
         forced: 'standard-row',
     );
     $residualFacts = AboveFoldPartFacts::inspect($pages, [
@@ -1161,4 +1162,41 @@ test('headerFacts reads overlay mode from the classes delivery actually emits (B
         . '<div class="wp-block-group header-archetype--minimal-columns has-base-background-color '
         . 'has-background"><!-- wp:site-title /--></div><!-- /wp:group -->';
     assert_eq('stacked', AboveFoldPartFacts::headerFacts($static)['mode']);
+});
+
+test('the contract carries the committed media aspect and rejects an incompatible one (BIGR-925)', function () {
+    $pages = above_fold_pages(null, 'base', 'base');
+
+    // The blueprint's committed aspect reaches the contract verbatim.
+    $blueprint = HeroBlueprint::defaultFor('foreground-split');
+    $blueprint['media_aspect'] = 'portrait';
+    $contract = AboveFoldContract::resolve(
+        $pages,
+        $blueprint,
+        'full-bleed',
+        ['base' => '#FFFFFF', 'contrast' => '#111111'],
+        ['stable_id' => 'aspect-carry', 'writing_direction' => 'ltr', 'page_count' => count($pages)],
+        ['archetype' => 'minimal-columns', 'surface' => 'base'],
+    );
+    assert_eq('portrait', $contract['media_aspect']);
+    AboveFoldContract::assertPhase($contract, AboveFoldContract::PHASE_DELIVERY);
+
+    // A recipe with one aspect pins it whatever the blueprint says.
+    $cover = HeroBlueprint::defaultFor('cinematic-safe-zone');
+    $cover['media_aspect'] = 'portrait';
+    $pinned = AboveFoldContract::resolve(
+        $pages,
+        $cover,
+        'full-bleed',
+        ['base' => '#FFFFFF', 'contrast' => '#111111'],
+        ['stable_id' => 'aspect-pin', 'writing_direction' => 'ltr', 'page_count' => count($pages)],
+        ['archetype' => 'minimal-columns', 'surface' => 'base'],
+    );
+    assert_eq('landscape', $pinned['media_aspect'], 'a cover recipe cannot be talked into a portrait plate');
+
+    // A hand-edited contract naming an aspect its recipe has no slot for is
+    // rejected, the same way an incompatible mobile transformation is.
+    $broken = $contract;
+    $broken['media_aspect'] = 'none';
+    assert_throws(fn () => AboveFoldContract::assertPhase($broken, AboveFoldContract::PHASE_DELIVERY));
 });

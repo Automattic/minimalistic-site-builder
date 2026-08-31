@@ -218,6 +218,56 @@ test('validate rejects motion overrides even under an allowed layout selector', 
     assert_contains('profile-owned', implode('; ', $problems));
 });
 
+test('validate rejects a depth-variable redeclaration even under an allowed layout selector', function () {
+    $problems = PageStylesStep::validate(
+        ".overlap-up {\n    --wp--preset--shadow--depth: 0 0 9px var(--wp--preset--color--accent);\n    margin-top: -4rem;\n}"
+    );
+    assert_contains('build-owned', implode('; ', $problems));
+});
+
+test('dropOffendingDeclarations drops only the depth-variable redeclaration and keeps an innocent shadow', function () {
+    $css = ".overlap-up {\n"
+        . "    --wp--preset--shadow--depth: 0 0 9px var(--wp--preset--color--accent);\n"
+        . "    box-shadow: var(--wp--preset--shadow--natural);\n"
+        . "    margin-top: -4rem;\n"
+        . "}";
+    [$salvaged, $dropped] = PageStylesStep::dropOffendingDeclarations($css);
+
+    assert_eq(1, count($dropped), 'only the redeclaration is dropped');
+    assert_contains('build-owned', implode('; ', $dropped));
+    assert_true(!str_contains($salvaged, '--wp--preset--shadow--depth'), 'depth variable gone');
+    assert_contains('box-shadow: var(--wp--preset--shadow--natural)', $salvaged, 'innocent preset shadow survives');
+    assert_contains('margin-top: -4rem', $salvaged, 'sibling declarations survive');
+    assert_eq([], PageStylesStep::validate($salvaged), 'salvaged CSS validates clean');
+});
+
+test('run drops a generated depth-variable redeclaration with a durable warning and ships the rest', function () {
+    [$project, $tmp] = ps_project('builder_ps_depthvar_');
+    $project->writeText(
+        'theme/parts/section-work.html',
+        '<!-- wp:group {"className":"overlap-up"} --><div class="wp-block-group overlap-up"></div><!-- /wp:group -->'
+    );
+    $llm = new FakeLlm();
+    $llm->queueText(
+        ".overlap-up {\n"
+        . "    --wp--preset--shadow--depth: 0 0 9px var(--wp--preset--color--accent);\n"
+        . "    margin-top: -4rem;\n"
+        . "}"
+    );
+
+    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $style = $project->readText('theme/style.css');
+    assert_true(!str_contains($style, '--wp--preset--shadow--depth'), 'redeclaration does not ship');
+    assert_contains('margin-top: -4rem', $style, 'the rest of the appendix ships');
+    assert_contains(
+        '--wp--preset--shadow--depth',
+        implode("\n", ps_warning_rows($project, 'page-styles')),
+        'the drop is a durable actionable warning',
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('validate rejects corner setters and all resets only on owned image/button selectors', function () {
     foreach ([
         'border-radius',
@@ -271,6 +321,93 @@ test('shape scanning ignores declaration-looking text inside quoted and custom-p
     [$salvaged, $dropped] = PageStylesStep::dropOffendingDeclarations($css);
     assert_eq($css, $salvaged);
     assert_eq([], $dropped);
+});
+
+test('page styles drops CTA-owned construction but keeps row layout utilities', function () {
+    $css = '.cta-bottom .wp-block-button__link { background:var(--wp--preset--color--primary); '
+        . 'padding:2rem; transform:translateY(-2px); }'
+        . '.cta-bottom .wp-block-buttons { justify-content:center; margin-top:auto; }';
+    $problems = implode('; ', PageStylesStep::validate($css));
+    assert_contains('CTA-style-owned', $problems);
+
+    [$salvaged, $dropped] = PageStylesStep::dropOffendingDeclarations($css);
+    assert_true(!str_contains($salvaged, 'background:'));
+    assert_true(!str_contains($salvaged, 'padding:'));
+    assert_contains('transform:translateY(-2px)', $salvaged);
+    assert_contains('justify-content:center', $salvaged);
+    assert_contains('margin-top:auto', $salvaged);
+    assert_eq(2, count($dropped));
+    assert_contains('CTA-style-owned', implode('; ', $dropped));
+});
+
+test('page styles drops treatment-owned image finish but keeps layout and captions on treated surfaces', function () {
+    $css = '.masonry-3 .card-media img { filter: sepia(1); mix-blend-mode: multiply; width: 100%; }'
+        . '.masonry-3 .card-media { opacity: 0.8; margin: 0; }'
+        . '.masonry-3 .card-media figcaption { opacity: 0.7; }';
+    $problems = implode('; ', PageStylesStep::validate($css));
+    assert_contains('treatment-owned', $problems);
+
+    [$salvaged, $dropped] = PageStylesStep::dropOffendingDeclarations($css);
+    assert_true(!str_contains($salvaged, 'filter: sepia(1)'), 'local filter is dropped');
+    assert_true(!str_contains($salvaged, 'mix-blend-mode'), 'blend mode is dropped');
+    assert_true(!str_contains($salvaged, 'opacity: 0.8'), 'surface opacity is dropped');
+    assert_contains('width: 100%', $salvaged, 'layout on the treated surface survives');
+    assert_contains('margin: 0', $salvaged, 'sibling declarations survive');
+    assert_contains('opacity: 0.7', $salvaged, 'caption opacity is not the treated layer');
+    assert_eq(3, count($dropped));
+    assert_contains('treatment-owned', implode('; ', $dropped));
+    assert_eq([], PageStylesStep::validate($salvaged), 'salvaged CSS validates clean');
+});
+
+test('run drops a generated treatment-owned filter with a durable warning and ships the rest', function () {
+    [$project, $tmp] = ps_project('builder_ps_treatfilter_');
+    $project->writeText(
+        'theme/parts/section-work.html',
+        '<!-- wp:group {"className":"overlap-up"} --><div class="wp-block-group overlap-up">'
+        . '<figure class="wp-block-image card-media"><img src="x.jpg"/></figure>'
+        . '</div><!-- /wp:group -->'
+    );
+    $llm = new FakeLlm();
+    $llm->queueText(
+        ".overlap-up .card-media img {\n"
+        . "    filter: sepia(1);\n"
+        . "    width: 100%;\n"
+        . "}"
+    );
+
+    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $style = $project->readText('theme/style.css');
+    assert_true(!str_contains($style, 'sepia'), 'the local filter does not ship');
+    assert_contains('width: 100%', $style, 'the rest of the appendix ships');
+    assert_contains(
+        'filter',
+        implode("\n", ps_warning_rows($project, 'page-styles')),
+        'the drop is a durable actionable warning',
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('page styles drops type-treatment-owned heading case/tracking but keeps sibling typography', function () {
+    $css = '.masonry-3 h2 { text-transform: uppercase; letter-spacing: 0.2em; line-height: 1.1; }'
+        . '.masonry-3 .wp-block-site-title { letter-spacing: 0.12em; font-weight: 700; }'
+        . '.masonry-3 .card { letter-spacing: 0.05em; }';
+    $problems = implode('; ', PageStylesStep::validate($css));
+    assert_contains('type-treatment-owned', $problems);
+
+    [$salvaged, $dropped] = PageStylesStep::dropOffendingDeclarations($css);
+    assert_true(!str_contains($salvaged, 'text-transform'));
+    assert_true(!str_contains($salvaged, 'letter-spacing: 0.2em'));
+    assert_true(!str_contains($salvaged, 'letter-spacing: 0.12em'));
+    assert_contains('line-height: 1.1', $salvaged);
+    assert_contains('font-weight: 700', $salvaged);
+    assert_contains('letter-spacing: 0.05em', $salvaged, 'non-heading tracking survives');
+    assert_eq(3, count($dropped));
+    assert_contains('type-treatment-owned', implode('; ', $dropped));
+
+    [$again, $droppedAgain] = PageStylesStep::dropOffendingDeclarations($salvaged);
+    assert_eq($salvaged, $again, 'salvage reaches a fixed point');
+    assert_eq([], $droppedAgain);
 });
 
 test('validate rejects CSS that hides generated content', function () {
@@ -529,7 +666,7 @@ test('legacy mode ignores stale site CSS and keeps the recorded call trace and s
     assert_eq(0, $llm->completeBatchCalls, 'legacy path makes no batch call');
     assert_eq(1, count($llm->calls), 'legacy call trace count');
     assert_eq(
-        '62969b1b61e6493b111cb9e479a46888b3e97d9c4741076b9d8210c1ce7f4ac6',
+        '0c444b9ad39563b081eb7679b4c36def91f9df2855e4a1ba5e563db74f3c46eb',
         hash('sha256', $llm->calls[0]['prompt']),
         'legacy prompt bytes'
     );

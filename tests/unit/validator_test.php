@@ -69,12 +69,12 @@ function validator_above_fold_project(): array
         'sections' => [[
             'slug' => 'hero',
             'title' => 'Home',
-            'layout_archetype' => 'mixed-width-editorial',
+            'layout_archetype' => 'asymmetric-split',
             'background' => 'contrast',
             'primary_action' => null,
         ]],
     ]];
-    $blueprint = HeroBlueprint::defaultFor('focal-subject-stage');
+    $blueprint = HeroBlueprint::defaultFor('foreground-split');
     $delivery = AboveFoldContract::resolve(
         $pages,
         $blueprint,
@@ -87,8 +87,8 @@ function validator_above_fold_project(): array
     $header = '<!-- wp:group {"className":"header-archetype--standard-row","backgroundColor":"base","textColor":"contrast"} -->'
         . '<div class="wp-block-group header-archetype--standard-row has-base-background-color has-contrast-color"></div>'
         . '<!-- /wp:group -->';
-    $hero = '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage","layout":{"type":"constrained"}} -->'
-        . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage"></div><!-- /wp:group -->';
+    $hero = '<!-- wp:group {"anchor":"hero","className":"hero-composition--foreground-split","layout":{"type":"constrained"}} -->'
+        . '<div id="hero" class="wp-block-group hero-composition--foreground-split"></div><!-- /wp:group -->';
     $final = AboveFoldContract::finalizeMarkup($delivery, $pages, [
         'part_keys' => ['header', 'page-home--hero'],
         'opening_overlay_support' => ['page-home--hero' => false],
@@ -256,7 +256,7 @@ test('final above-fold validator checks saved Cover paint for an earned clear he
 test('final above-fold validator reports downstream drift without mutating markup', function () {
     [$project, $tmp] = validator_above_fold_project();
     $header = str_replace('header-archetype--standard-row', 'header-archetype--split-nav', $project->readText('theme/parts/header.html'));
-    $hero = str_replace('hero-composition--focal-subject-stage', 'hero-composition--editorial-split', $project->readText('plugin/pages/home.html'));
+    $hero = str_replace('hero-composition--foreground-split', 'hero-composition--layered-poster', $project->readText('plugin/pages/home.html'));
     $project->writeText('theme/parts/header.html', $header);
     $project->writeText('plugin/pages/home.html', $hero);
 
@@ -280,8 +280,8 @@ test('final above-fold validator reports competing stacked chrome and an over-bu
         '"backgroundColor":"base","gradient":"invented-gradient"',
         $project->readText('theme/parts/header.html'),
     );
-    $opening = '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage","layout":{"type":"constrained"}} -->'
-        . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage">'
+    $opening = '<!-- wp:group {"anchor":"hero","className":"hero-composition--foreground-split","layout":{"type":"constrained"}} -->'
+        . '<div id="hero" class="wp-block-group hero-composition--foreground-split">'
         . '<!-- wp:cover {"minHeight":92,"minHeightUnit":"vh"} --><div class="wp-block-cover" style="min-height:92vh"></div><!-- /wp:cover -->'
         . '</div><!-- /wp:group -->';
     $project->writeText('theme/parts/header.html', $header);
@@ -324,6 +324,63 @@ test('typography warnings flag hardcoded font sizes and an unused display preset
     assert_contains('hardcoded font-size', $joined);
     assert_contains('section-hero.html', $joined);
     assert_contains('"display" fontSize', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('typography warnings verify the committed type treatment and per-level inheritance', function () {
+    [$project, $tmp] = validator_project();
+    seed_test_design_direction($project, overrides: ['type_treatment' => 'lowercase']);
+    [$theme] = ThemeJsonStep::repairTypeTreatment([
+        'version' => 3,
+        'styles' => ['elements' => ['heading' => ['typography' => ['lineHeight' => '1.2']]]],
+    ], 'lowercase');
+    $project->writeJson('theme/theme.json', $theme);
+
+    assert_true(
+        !str_contains(implode(' ', ThemeValidator::typographyWarnings($project)), 'type treatment drift'),
+        'the committed pair with inherited per-level headings passes',
+    );
+
+    $theme['styles']['elements']['heading']['typography']['letterSpacing'] = '-0.02em';
+    $theme['styles']['elements']['h2']['typography'] = [
+        'lineHeight' => '1.1',
+        'textTransform' => 'uppercase',
+    ];
+    $project->writeJson('theme/theme.json', $theme);
+    $warnings = implode(' ', ThemeValidator::typographyWarnings($project));
+    assert_contains('committed "lowercase" type treatment drift', $warnings);
+    assert_contains('styles.elements.heading.typography.letterSpacing', $warnings);
+    assert_contains('styles.elements.h2.typography.textTransform', $warnings);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('CTA warnings verify theme binding and local override inheritance', function () {
+    [$project, $tmp] = validator_project();
+    seed_test_design_direction($project, overrides: ['cta_style' => 'outline']);
+    [$theme] = ThemeJsonStep::repairCtaStyle([
+        'version' => 3,
+        'styles' => ['elements' => ['button' => ['typography' => ['fontWeight' => '700']]]],
+    ], 'outline');
+    $project->writeJson('theme/theme.json', $theme);
+    $project->writeText(
+        'theme/parts/section-cta.html',
+        '<!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link wp-element-button">Go</a></div><!-- /wp:button -->',
+    );
+    assert_eq([], ThemeValidator::ctaWarnings($project));
+
+    $theme['styles']['elements']['button']['border']['width'] = '1px';
+    $project->writeJson('theme/theme.json', $theme);
+    $project->writeText(
+        'theme/parts/section-cta.html',
+        '<!-- wp:button {"backgroundColor":"accent"} --><div class="wp-block-button">'
+            . '<a class="wp-block-button__link has-accent-background-color has-background wp-element-button">Go</a>'
+            . '</div><!-- /wp:button -->',
+    );
+    $warnings = implode(' ', ThemeValidator::ctaWarnings($project));
+    assert_contains('committed "outline" CTA style drift', $warnings);
+    assert_contains('styles.elements.button.border.width', $warnings);
+    assert_contains('CTA local override drift', $warnings);
+    assert_contains('backgroundColor', $warnings);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

@@ -62,6 +62,7 @@ test('markup generation units share one output-only contract', function () {
                 'layout_archetype' => 'centered-stack',
                 'background' => 'base',
                 'vertical_density' => 'standard',
+                'text_placement' => 'left-column',
                 'handoff' => 'Between the header and the next section.',
             ],
             'neighbors' => 'Above: header. Below: content.',
@@ -88,7 +89,7 @@ test('markup generation units share one output-only contract', function () {
                 'primary_action' => null,
             ],
             'neighbors' => 'Above: header. Below: content.',
-            'hero_blueprint' => HeroBlueprint::defaultFor('focal-subject-stage'),
+            'hero_blueprint' => HeroBlueprint::defaultFor('foreground-split'),
             'above_fold_contract' => test_above_fold_contract(),
         ]),
     ];

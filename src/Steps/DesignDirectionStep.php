@@ -4,18 +4,27 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\AboveFoldContract;
+use Automattic\SiteBuild\BandColor;
 use Automattic\SiteBuild\CardStyle;
 use Automattic\SiteBuild\ConceptSeeds;
+use Automattic\SiteBuild\CtaStyle;
+use Automattic\SiteBuild\Depth;
 use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\DirectionExecutability;
 use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\FontCatalog;
 use Automattic\SiteBuild\FontMonoculture;
+use Automattic\SiteBuild\FontShortlist;
 use Automattic\SiteBuild\Surface;
+use Automattic\SiteBuild\TypeTreatment;
 use Automattic\SiteBuild\GeneratedJsonException;
+use Automattic\SiteBuild\GroundKey;
 use Automattic\SiteBuild\GroundTint;
 use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
+use Automattic\SiteBuild\ImageTreatment;
+use Automattic\SiteBuild\ImageCrop;
+use Automattic\SiteBuild\ItemPattern;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\Measure;
 use Automattic\SiteBuild\Motion;
@@ -25,6 +34,7 @@ use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\TypeScale;
 use Automattic\SiteBuild\BoundedChoice;
 use Automattic\SiteBuild\Warnings;
 
@@ -35,9 +45,10 @@ use Automattic\SiteBuild\Warnings;
  * Input:  meta.json (the user prompt) + siteSpec.json (factual info).
  * Output: designDirection.json — the chosen direction as structured data:
  *         title + vivid description plus the explicit fields downstream steps
- *         execute instead of re-interpreting (palette hexes, type pairing,
- *         image grade, canvas/measure layout commitments, and a separately
- *         consumed structured front-page hero blueprint).
+ *         execute instead of re-interpreting (palette hexes, type pairing and
+ *         treatment, image grade, canvas/measure layout commitments, the
+ *         repeated-item idiom, and a separately consumed structured front-page
+ *         hero blueprint).
  *
  * Two calls. First, a cheap seed call (small model, hot sampling) brainstorms
  * THREE concept seeds — each an object: an evocative title plus one vivid
@@ -87,7 +98,7 @@ final class DesignDirectionStep implements Step
     private const REPORT_FILE = 'design-direction.txt';
 
     /** Palette roles a direction commits to — the same slugs theme.json requires. */
-    public const PALETTE_ROLES = ['base', 'contrast', 'primary', 'secondary', 'accent'];
+    public const PALETTE_ROLES = ['base', 'contrast', 'primary', 'secondary', 'accent', 'band'];
 
     /**
      * The corner languages a direction may commit to. `sharp` is the default
@@ -109,6 +120,15 @@ final class DesignDirectionStep implements Step
      */
     public const CARD_STYLES = CardStyle::ALL;
 
+    /** Render-time treatments tying delivered photos to the committed palette. */
+    public const IMAGE_TREATMENTS = ImageTreatment::ALL;
+
+    /** Repeated-item idioms the planner may assign to list-like sections. */
+    public const ITEM_PATTERNS = ItemPattern::ALL;
+
+    /** Site-wide image proportion system for crop-role class hooks. */
+    public const IMAGE_CROPS = ImageCrop::ALL;
+
     /**
      * How the page's bands follow one another. The page plan already assigns a
      * layout archetype and background per section, but with no site-level
@@ -126,6 +146,13 @@ final class DesignDirectionStep implements Step
      * commitment gives that per-section choice something to express.
      */
     public const DENSITIES = ['airy', 'measured', 'dense'];
+
+    /**
+     * Site-level horizontal intent for text below page-opening heroes. The
+     * page planner turns this bias into one explicit placement per section;
+     * section authors move the readable column without widening its measure.
+     */
+    public const TEXT_PLACEMENTS = ['left-column', 'centered', 'split', 'asymmetric-thirds'];
 
     public function __construct(
         private Llm $llm,
@@ -178,10 +205,14 @@ final class DesignDirectionStep implements Step
 
         $spec = $project->readText('siteSpec.json');
         $specData = $project->readJson('siteSpec.json');
+        // Loaded once: the expansion prompt samples its font shortlist from
+        // it, and the monoculture floor below substitutes against it.
+        $fontCatalog = FontCatalog::load();
 
         $warnings = [];
         [
             'text'          => $seed,
+            'ground'        => $seedGround,
             'tint'          => $seedTint,
             'register'      => $seedRegister,
             'type_register' => $seedTypeRegister,
@@ -192,7 +223,18 @@ final class DesignDirectionStep implements Step
             $seed,
             $warnings,
         );
-        $blueprintDefaults = HeroBlueprint::defaultFor($recipe, $constraints);
+        // The recipe is code-owned and seeded, and so are its media axes
+        // (BIGR-912). The prompt below tells the model to preserve the defaults
+        // it is handed, so handing every site the same aspect and weight would
+        // make the merged contained-split recipe draw one composition forever.
+        $blueprintDefaults = array_merge(
+            HeroBlueprint::defaultFor($recipe, $constraints),
+            HeroComposition::selectMediaAxes(
+                (string) ($specData['slug'] ?? $project->slug()),
+                $seed,
+                $recipe,
+            ),
+        );
         $heroComposition = $this->renderer->render('hero-composition.md', [
             'recipe' => $recipe,
             'blueprint_defaults' => json_encode(
@@ -209,6 +251,10 @@ final class DesignDirectionStep implements Step
             'user_prompt' => $prompt,
             'site_spec'   => $spec,
             'seed'        => $seed,
+            // Empty when a degraded seed committed no light/dark coordinate.
+            'ground_key'  => $seedGround === ''
+                ? 'not committed by the seed — choose one and say which'
+                : $seedGround,
             // Empty when the seed round degraded and committed no ground; the
             // prompt then asks for the field without naming a family, and
             // normalize() enforces the direction's own answer instead.
@@ -221,6 +267,14 @@ final class DesignDirectionStep implements Step
             'type_register' => $seedTypeRegister === ''
                 ? 'not committed by the seed — read the letterform tradition off the seed sentence'
                 : $seedTypeRegister,
+            // A rotating per-site shortlist of real families in the committed
+            // tradition. Naming the tradition alone lands every build on its
+            // one famous face (BIGR-920); empty for a degraded seed.
+            'type_candidates' => FontShortlist::promptParagraph(
+                $seedTypeRegister,
+                (string) ($specData['slug'] ?? $project->slug()),
+                $fontCatalog,
+            ),
             'hero_composition' => $heroComposition,
         ]);
         try {
@@ -243,6 +297,7 @@ final class DesignDirectionStep implements Step
             $repairs,
             $warnings,
             $seedTint,
+            $seedGround,
         );
         if ($direction === null) {
             // A build without a committed direction still works — every
@@ -279,7 +334,7 @@ final class DesignDirectionStep implements Step
         $direction = self::substituteMonocultureFonts(
             $direction,
             (string) ($specData['slug'] ?? $project->slug()),
-            FontCatalog::load(),
+            $fontCatalog,
             $warnings,
         );
 
@@ -348,21 +403,30 @@ final class DesignDirectionStep implements Step
             'title'            => '',
             'description'      => $description,
             'palette'          => [],
+            'ground_key'       => '',
             'ground_tint'      => '',
             'type'             => [
                 'heading' => self::emptyTypeSlot(),
                 'body'    => self::emptyTypeSlot(),
                 'accent'  => self::emptyTypeSlot(),
             ],
+            'type_scale'       => TypeScale::DEFAULT,
             'image_grade'      => '',
+            'image_treatment'  => ImageTreatment::DEFAULT,
+            'image_crop'       => ImageCrop::DEFAULT,
             'canvas'           => $canvas,
             'measure'          => Measure::DEFAULT,
+            'type_treatment'   => TypeTreatment::DEFAULT,
             'card_style'       => 'flush',
+            'item_pattern'     => ItemPattern::DEFAULT,
+            'depth'            => Depth::DEFAULT,
+            'cta_style'        => CtaStyle::DEFAULT,
             'shape'            => 'sharp',
             'surface'          => Surface::DEFAULT,
             'device'           => Device::DEFAULT,
             'rhythm'           => 'alternating',
             'density'          => 'measured',
+            'text_placement'    => 'left-column',
             'motion'           => Motion::DEFAULT_PROFILE,
             'motion_note'      => [],
             'concept_seed'     => $seed,
@@ -387,7 +451,7 @@ final class DesignDirectionStep implements Step
      * sampling.
      *
      * @param list<string> $warnings
-     * @return array{text:string,tint:string,register:string,type_register:string}
+     * @return array{text:string,ground:string,tint:string,register:string,type_register:string}
      */
     private function chooseSeed(string $brief, string $spec, array &$warnings = []): array
     {
@@ -436,24 +500,38 @@ final class DesignDirectionStep implements Step
         }
 
         if ($seeds === []) {
-            return ['text' => self::SEED_FALLBACK, 'tint' => '', 'register' => '', 'type_register' => ''];
+            return [
+                'text' => self::SEED_FALLBACK,
+                'ground' => '',
+                'tint' => '',
+                'register' => '',
+                'type_register' => '',
+            ];
         }
         $pool = ConceptSeeds::distinct($seeds, $warnings);
-        $sharedGround = ConceptSeeds::sharedGround($pool);
-        if ($sharedGround !== null) {
-            $triples = [];
-            foreach ($pool as $seed) {
-                $key = ConceptSeeds::axisKey($seed);
-                if ($key !== null) {
-                    $triples[$key] = true;
-                }
+        $triples = [];
+        foreach ($pool as $seed) {
+            $key = ConceptSeeds::axisKey($seed);
+            if ($key !== null) {
+                $triples[$key] = true;
             }
-            // distinct() already records a collapsed round (one world, kept
-            // whole). A second row that restates the shared ground is the
-            // same event, and "open brief" is a claim this step never checked.
-            if (count($triples) > 1) {
+        }
+        // distinct() already records a collapsed round (one world, kept
+        // whole). A second row that restates the shared axis is the same
+        // event, and "open brief" is a claim this step never checked.
+        if (count($triples) > 1) {
+            $sharedGround = ConceptSeeds::sharedGround($pool);
+            if ($sharedGround !== null) {
                 $warnings[] = 'design-direction: every concept seed is ' . $sharedGround
                     . '-grounded; picked from it anyway; disposition tolerated';
+            }
+            // The tint is not in the dedup key, so a round of three distinct
+            // worlds can still lean one way — the audited cohort's cream
+            // skew (BIGR-922). Visible in the report, never blocking.
+            $sharedTint = ConceptSeeds::sharedTint($pool);
+            if ($sharedTint !== null) {
+                $warnings[] = 'design-direction: every concept seed is ' . $sharedTint
+                    . '-tinted; picked from the one-family round anyway; disposition tolerated';
             }
         }
         return self::chosen($pool[random_int(0, count($pool) - 1)]);
@@ -471,12 +549,13 @@ final class DesignDirectionStep implements Step
      * than bookkeeping.
      *
      * @param array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string} $seed
-     * @return array{text:string,tint:string,register:string,type_register:string}
+     * @return array{text:string,ground:string,tint:string,register:string,type_register:string}
      */
     private static function chosen(array $seed): array
     {
         return [
             'text'          => $seed['text'],
+            'ground'        => $seed['ground'] ?? '',
             'tint'          => $seed['tint'] ?? '',
             'register'      => $seed['register'] ?? '',
             'type_register' => $seed['type_register'] ?? '',
@@ -657,6 +736,7 @@ final class DesignDirectionStep implements Step
         array &$repairs = [],
         array &$warnings = [],
         string $conceptTint = '',
+        string $conceptGround = '',
     ): ?array {
         if (!is_array($raw)) {
             return null;
@@ -679,12 +759,28 @@ final class DesignDirectionStep implements Step
             }
         }
 
-        // The ground the concept committed to, preferring the seed's own
-        // coordinate over the direction's restatement of it — the seed is the
-        // creative commitment, the direction is what drifted from it. A base
-        // outside that family is moved into it at equal relative luminance,
-        // so every contrast floor stated against this color still holds. An
-        // uncommitted tint enforces nothing: nothing was violated.
+        // The seed's light/dark coordinate is authoritative over the
+        // expansion's restatement. Move only palette.base across the shared
+        // luminance boundary; the later palette floor repairs contrast pairs.
+        // A degraded seed may leave the coordinate to the expansion instead.
+        $groundKey = BoundedChoice::explicit($conceptGround, GroundKey::ALL)
+            ?? BoundedChoice::explicit($raw['ground_key'] ?? null, GroundKey::ALL);
+        if ($groundKey !== null && isset($palette['base'])) {
+            $authored = $palette['base'];
+            if (GroundKey::classify($authored) !== $groundKey) {
+                $moved = GroundKey::move($authored, $groundKey);
+                if ($moved !== null) {
+                    $palette['base'] = $moved;
+                    $repairs[] = 'designDirection.json: field palette.base authored '
+                        . self::describe($authored) . ' delivered ' . self::describe($moved)
+                        . '; disposition moved onto the committed "' . $groundKey . '" ground';
+                }
+            }
+        }
+
+        // The tint is the orthogonal hue coordinate. Apply it after the
+        // luminance repair so retint() preserves the committed light/dark key
+        // as it rotates the ground into the seed's family.
         $groundTint = BoundedChoice::explicit($conceptTint, GroundTint::ALL)
             ?? BoundedChoice::explicit($raw['ground_tint'] ?? null, GroundTint::ALL);
         if ($groundTint !== null && isset($palette['base'])) {
@@ -696,11 +792,38 @@ final class DesignDirectionStep implements Step
                     $repairs[] = 'designDirection.json: field palette.base authored '
                         . self::describe($authored) . ' delivered ' . self::describe($moved)
                         . '; disposition moved onto the committed "' . $groundTint . '" ground';
+                } else {
+                    $warnings[] = "file='designDirection.json'; path=\"palette.base\"; authored="
+                        . self::describe($authored) . '; delivered=' . self::describe($authored)
+                        . '; disposition=committed ground_tint "' . $groundTint
+                        . '" cannot be rendered at this luminance; retained authored value';
+                }
+            }
+        }
+
+        if (isset($palette['base'])) {
+            $authoredBand = $palette['band'] ?? null;
+            if (!is_string($authoredBand) || !BandColor::valid($palette['base'], $authoredBand)) {
+                $band = BandColor::fromBase($palette['base']);
+                if ($band !== null) {
+                    $palette['band'] = $band;
+                    $repairs[] = 'designDirection.json: field palette.band authored '
+                        . self::describe($authoredBand) . ' delivered ' . self::describe($band)
+                        . '; disposition derived a same-family surface 10 lightness points from base '
+                        . 'without crossing the page light/dark key';
                 }
             }
         }
 
         $type = is_array($raw['type'] ?? null) ? $raw['type'] : [];
+        $typeScale = BoundedChoice::normalize(
+            $raw['type_scale'] ?? null,
+            TypeScale::ALL,
+            TypeScale::DEFAULT,
+            'type_scale',
+            $warnings,
+            'invalid modular scale replaced by deterministic classic fallback',
+        );
 
         HeroComposition::assertKnown($assignedRecipe);
 
@@ -726,12 +849,33 @@ final class DesignDirectionStep implements Step
             $warnings,
             'invalid layout measure replaced by deterministic standard fallback',
         );
+        $typeTreatment = BoundedChoice::normalize(
+            $raw['type_treatment'] ?? null,
+            TypeTreatment::ALL,
+            TypeTreatment::DEFAULT,
+            'type_treatment',
+            $warnings,
+            'invalid heading treatment replaced by deterministic sentence fallback',
+        );
 
         $cardStyle = self::normalizeCardStyle($raw['card_style'] ?? null, $warnings);
+        $imageTreatment = self::normalizeImageTreatment($raw['image_treatment'] ?? null, $warnings);
+        $itemPattern = ItemPattern::normalize($raw['item_pattern'] ?? null, $warnings);
+        $imageCrop = self::normalizeImageCrop($raw['image_crop'] ?? null, $warnings);
+        $depth = self::normalizeDepth($raw['depth'] ?? null, $warnings);
+        $ctaStyle = BoundedChoice::normalize(
+            $raw['cta_style'] ?? null,
+            CtaStyle::ALL,
+            CtaStyle::DEFAULT,
+            'cta_style',
+            $warnings,
+            'invalid CTA construction replaced by deterministic solid fallback',
+        );
         $surface = self::normalizeSurface($raw['surface'] ?? null, $warnings);
         $device = self::normalizeDevice($raw['device'] ?? null, $warnings);
         $rhythm = self::normalizeRhythm($raw['rhythm'] ?? null, $warnings);
         $density = self::normalizeDensity($raw['density'] ?? null, $warnings);
+        $textPlacement = self::normalizeTextPlacement($raw['text_placement'] ?? null, $warnings);
 
         $motion = self::motionProfile($raw['motion'] ?? null);
         $rawMotion = is_string($raw['motion'] ?? null)
@@ -801,21 +945,29 @@ final class DesignDirectionStep implements Step
             'title'            => trim((string) ($raw['title'] ?? '')),
             'description'      => $description,
             'palette'          => $palette,
+            'ground_key'       => $groundKey ?? '',
             'ground_tint'      => $groundTint ?? '',
             'type'             => [
                 'heading' => self::normalizeTypeSlot($type['heading'] ?? null, 'heading', $warnings),
                 'body'    => self::normalizeTypeSlot($type['body'] ?? null, 'body', $warnings),
                 'accent'  => self::normalizeTypeSlot($type['accent'] ?? null, 'accent', $warnings),
             ],
+            'type_scale'       => $typeScale,
             'image_grade'      => trim((string) ($raw['image_grade'] ?? '')),
+            'image_treatment'  => $imageTreatment,
+            'image_crop'       => $imageCrop,
             // Anything that isn't an explicit "framed" commitment is full-bleed:
             // an accidental frame reads as a rendering bug, not a design choice.
             'canvas'           => $canvas,
             'measure'          => $measure,
+            'type_treatment'   => $typeTreatment,
             // Anything outside the bounded card constructions delivers the
             // flush default — inset media must be an explicit opt-in, never
             // the accidental look every site gets.
             'card_style'       => $cardStyle,
+            'item_pattern'     => $itemPattern,
+            'depth'            => $depth,
+            'cta_style'        => $ctaStyle,
             'shape'            => $shape,
             'surface'          => $surface,
             'device'           => $device,
@@ -823,6 +975,7 @@ final class DesignDirectionStep implements Step
             // RHYTHMS / DENSITIES for why the rhythm default is not `stacked`.
             'rhythm'           => $rhythm,
             'density'          => $density,
+            'text_placement'   => $textPlacement,
             // The motion profile is a fixed list (the kit ships exactly these);
             // anything unrecognized falls back to the default so every build
             // commits to ONE profile the downstream steps can gate on.
@@ -850,6 +1003,62 @@ final class DesignDirectionStep implements Step
             'card_style',
             $warnings,
             'unsupported generated card treatment replaced by default',
+        );
+    }
+
+    /**
+     * Normalize the build-owned render-time image treatment. Natural is the
+     * honest fallback: an accidental filter changes every delivered photo.
+     *
+     * @param list<string> $warnings
+     */
+    public static function normalizeImageTreatment(mixed $authored, array &$warnings = []): string
+    {
+        return BoundedChoice::normalize(
+            $authored,
+            ImageTreatment::ALL,
+            ImageTreatment::DEFAULT,
+            'image_treatment',
+            $warnings,
+            'unsupported render-time image treatment replaced by natural',
+        );
+    }
+
+    /**
+     * Normalize the build-owned image proportion contract. Mixed preserves the
+     * established per-role ratios and is the safe behavior for a pre-field
+     * direction; invalid authored intent is durable-warning material.
+     *
+     * @param list<string> $warnings
+     */
+    public static function normalizeImageCrop(mixed $authored, array &$warnings = []): string
+    {
+        return BoundedChoice::normalize(
+            $authored,
+            ImageCrop::ALL,
+            ImageCrop::DEFAULT,
+            'image_crop',
+            $warnings,
+            'unsupported image proportion system replaced by mixed',
+        );
+    }
+
+    /**
+     * Normalize the build-owned elevation contract. Flat is a fully authored
+     * visual choice as well as the safe behavior for a pre-field direction;
+     * an invalid non-empty model value remains durable-warning material.
+     *
+     * @param list<string> $warnings
+     */
+    public static function normalizeDepth(mixed $authored, array &$warnings = []): string
+    {
+        return BoundedChoice::normalize(
+            $authored,
+            Depth::ALL,
+            Depth::DEFAULT,
+            'depth',
+            $warnings,
+            'unsupported elevation treatment replaced by flat',
         );
     }
 
@@ -926,6 +1135,21 @@ final class DesignDirectionStep implements Step
             'density',
             $warnings,
             'unsupported generated page density replaced by default',
+        );
+    }
+
+    /**
+     * @param list<string> $warnings
+     */
+    public static function normalizeTextPlacement(mixed $authored, array &$warnings = []): string
+    {
+        return BoundedChoice::normalize(
+            $authored,
+            self::TEXT_PLACEMENTS,
+            'left-column',
+            'text_placement',
+            $warnings,
+            'unsupported horizontal text placement replaced by left-column',
         );
     }
 
@@ -1136,6 +1360,12 @@ final class DesignDirectionStep implements Step
             $facts[] = '- **Palette**: ' . implode(' · ', $swatches);
         }
 
+        $groundKey = BoundedChoice::explicit($direction['ground_key'] ?? null, GroundKey::ALL);
+        if ($groundKey !== null) {
+            $facts[] = '- **Ground key**: ' . $groundKey
+                . ' — keep the page background on this side of the light/dark luminance split.';
+        }
+
         // Stated alongside the hexes because downstream steps re-pick colors
         // from this block; without it they only see a base hex and read the
         // family back out of it, which is how a committed ground drifts.
@@ -1178,6 +1408,19 @@ final class DesignDirectionStep implements Step
             $facts[] = '- **Type**: ' . implode('; ', $pair);
         }
 
+        $typeScale = TypeScale::explicit($direction['type_scale'] ?? null);
+        if ($typeScale !== null) {
+            $facts[] = '- **Type scale**: ' . $typeScale . ' — '
+                . TypeScale::meaning($typeScale) . '. The build owns the six preset values.';
+        }
+
+        $typeTreatment = TypeTreatment::explicit($direction['type_treatment'] ?? null);
+        if ($typeTreatment !== null) {
+            $facts[] = '- **Type treatment**: ' . $typeTreatment . ' — '
+                . TypeTreatment::meaning($typeTreatment)
+                . '. The build owns heading textTransform and letterSpacing; preserve its lineHeight.';
+        }
+
         // Render the canvas commitment with its executable meaning, so the
         // section/header prompts act on it instead of re-interpreting a bare
         // keyword. Directions persisted before the field existed carry none.
@@ -1210,6 +1453,25 @@ final class DesignDirectionStep implements Step
                 'borderless' => 'cards have no box at all; media above a plain text stack — use the `borderless` construction from the card anatomy',
             };
             $facts[] = "- **Card treatment**: {$cardStyle} — {$meaning}.";
+        }
+
+        $itemPattern = ItemPattern::explicit($direction['item_pattern'] ?? null);
+        if ($itemPattern !== null) {
+            $meaning = match ($itemPattern) {
+                'card'        => 'list-like sections repeat discrete bounded cards',
+                'rule-row'    => 'list-like sections use compact name/detail rows joined by a purposeful hairline',
+                'index'       => 'list-like sections use a strong numbered or lettered scan column',
+                'spec-table'  => 'list-like sections align compact label/value pairs for comparison',
+                'tag-cluster' => 'list-like sections wrap short categorical labels as compact inline chips',
+            };
+            $facts[] = "- **Item pattern**: {$itemPattern} — {$meaning}.";
+        }
+
+        $ctaStyle = CtaStyle::explicit($direction['cta_style'] ?? null);
+        if ($ctaStyle !== null) {
+            $facts[] = '- **CTA style**: ' . $ctaStyle . ' — ' . CtaStyle::meaning($ctaStyle)
+                . '. The build owns button fill, border, padding, interaction construction, and any arrow glyph;'
+                . ' do not restyle those per button.';
         }
 
         // The page plan reads these two and assigns its per-section archetype,
@@ -1245,6 +1507,31 @@ final class DesignDirectionStep implements Step
                 'dense'    => 'tightly packed; prefer compact wherever the content supports it and let content carry the page',
                 default    => 'the committed page density',
             } . '. The build derives the lg/xl/xxl section-padding ramp from this commitment.';
+        }
+
+        $textPlacement = BoundedChoice::explicit(
+            $direction['text_placement'] ?? null,
+            self::TEXT_PLACEMENTS,
+        );
+        if ($textPlacement !== null) {
+            $facts[] = '- **Text placement**: ' . $textPlacement . ' — ' . match ($textPlacement) {
+                'left-column' => 'below page-opening heroes, place readable copy on the wide band\'s leading column rather than auto-centering every stack',
+                'centered' => 'below page-opening heroes, center the readable copy column as a composition while keeping wrapped paragraphs start-aligned',
+                'split' => 'below page-opening heroes, make copy one side of an intentional two-zone composition and alternate the occupied side where the page flow supports it',
+                'asymmetric-thirds' => 'below page-opening heroes, offset readable copy into the second or third zone of wide bands instead of repeating the leading edge',
+                default => 'the committed horizontal intent',
+            } . '. The page plan assigns each section its own placement against this intent; move the column, never widen its readable measure.';
+        }
+
+        $depth = Depth::explicit($direction['depth'] ?? null);
+        if ($depth !== null) {
+            $facts[] = '- **Depth**: ' . $depth . ' — ' . match ($depth) {
+                'flat'        => 'cards, contained images, contained covers, and media-text surfaces stay deliberately shadowless',
+                'soft'        => 'the build gives cards and contained media one restrained, diffuse lift',
+                'hard-offset' => 'the build gives cards and contained media one crisp poster-like offset plate',
+                'inset'       => 'the build presses cards and contained media into their surfaces with an inset edge and shade',
+                'glow'        => 'the build gives cards and contained media one primary-colored luminous halo',
+            } . '. Full-bleed media stays unelevated; do not add another shadow.';
         }
 
         // Render the shape commitment with its executable meaning. The build
@@ -1302,9 +1589,30 @@ final class DesignDirectionStep implements Step
             $facts[] = "- **Motion**: {$motion} — {$meaning}." . ($note !== '' ? " Motion note: {$note}" : '');
         }
 
+        $imageCrop = ImageCrop::explicit($direction['image_crop'] ?? null);
+        if ($imageCrop !== null) {
+            $facts[] = '- **Image crop**: ' . $imageCrop . ' — ' . match ($imageCrop) {
+                'landscape' => 'the build makes ordinary cards 3:2, dominant cards and thumbs 4:3, and feature media 16:9',
+                'portrait'  => 'the build makes ordinary cards and feature media 4:5, dominant cards 2:3, and thumbs 3:4',
+                'square'    => 'the build makes every card, thumbnail, and feature-media crop 1:1',
+                'panoramic' => 'the build makes ordinary cards and thumbs 16:9, dominant cards 3:2, and feature media 21:9',
+                'mixed'     => 'the build keeps the established per-role system: ordinary cards 3:2, dominant cards 4:5, and thumbs 1:1',
+            } . '. Full-bleed media remains wide; use the documented crop role classes and do not author an aspect ratio.';
+        }
+
         $imageGrade = trim((string) ($direction['image_grade'] ?? ''));
         if ($imageGrade !== '') {
             $facts[] = "- **Image grade (all imagery)**: {$imageGrade}";
+        }
+
+        $imageTreatment = ImageTreatment::explicit($direction['image_treatment'] ?? null);
+        if ($imageTreatment !== null) {
+            $facts[] = '- **Image treatment**: ' . $imageTreatment . ' — ' . match ($imageTreatment) {
+                'natural' => 'the build leaves delivered image pixels untreated',
+                'duotone' => 'the build maps content-image shadows and highlights onto the delivered contrast/base palette pair',
+                'tinted-overlay' => 'the build places one low-opacity primary-color tint above Cover and card media pixels but below their copy',
+                'high-key-bw' => 'the build forces content imagery into a bright, low-contrast grayscale treatment',
+            } . '. Do not author a local duotone, filter, blend mode, or image overlay.';
         }
 
         return $head . ($facts === [] ? '' : "\n\n" . implode("\n", $facts));
@@ -1447,6 +1755,19 @@ final class DesignDirectionStep implements Step
     }
 
     /**
+     * The authoritative repeated-item idiom, with the card default for a
+     * missing or pre-field direction. Callers persist any invalid-value
+     * warning at their own step boundary.
+     *
+     * @param list<string> $warnings
+     */
+    public static function itemPatternFor(Project $project, array &$warnings = []): string
+    {
+        $direction = self::dataFor($project);
+        return ItemPattern::normalize($direction['item_pattern'] ?? null, $warnings);
+    }
+
+    /**
      * The committed direction's image grade — the one-sentence photographic
      * treatment shared by ALL of the site's imagery, consumed verbatim by
      * GenerateImagesStep. Returns '' when no direction (or no grade) was
@@ -1459,6 +1780,24 @@ final class DesignDirectionStep implements Step
             return '';
         }
         return trim((string) ($project->readJson(self::FILE)['image_grade'] ?? ''));
+    }
+
+    /** Explicit committed render-time image treatment, or null for pre-field artifacts. */
+    public static function imageTreatmentFor(Project $project): ?string
+    {
+        if (!$project->exists(self::FILE)) {
+            return null;
+        }
+        return ImageTreatment::explicit($project->readJson(self::FILE)['image_treatment'] ?? null);
+    }
+
+    /** Explicit committed image crop, or null for a pre-field/garbled artifact. */
+    public static function imageCropFor(Project $project): ?string
+    {
+        if (!$project->exists(self::FILE)) {
+            return null;
+        }
+        return ImageCrop::explicit($project->readJson(self::FILE)['image_crop'] ?? null);
     }
 
     /**
@@ -1514,6 +1853,15 @@ final class DesignDirectionStep implements Step
         return self::explicitShape($project->readJson(self::FILE)['shape'] ?? null);
     }
 
+    /** Explicit committed depth, or null for a pre-field/garbled artifact. */
+    public static function depthFor(Project $project): ?string
+    {
+        if (!$project->exists(self::FILE)) {
+            return null;
+        }
+        return Depth::explicit($project->readJson(self::FILE)['depth'] ?? null);
+    }
+
     /** The persisted page density, measured when absent or not a committed value. */
     public static function densityFor(Project $project): string
     {
@@ -1524,6 +1872,33 @@ final class DesignDirectionStep implements Step
             $project->readJson(self::FILE)['density'] ?? null,
             self::DENSITIES,
         ) ?? 'measured';
+    }
+
+    /** The explicit modular type-scale commitment, or null when absent/garbled. */
+    public static function typeScaleFor(Project $project): ?string
+    {
+        if (!$project->exists(self::FILE)) {
+            return null;
+        }
+        return TypeScale::explicit($project->readJson(self::FILE)['type_scale'] ?? null);
+    }
+
+    /** The explicit site-wide CTA construction, or null for a pre-field artifact. */
+    public static function ctaStyleFor(Project $project): ?string
+    {
+        if (!$project->exists(self::FILE)) {
+            return null;
+        }
+        return CtaStyle::explicit($project->readJson(self::FILE)['cta_style'] ?? null);
+    }
+
+    /** The explicit heading case/tracking commitment, or null for a pre-field artifact. */
+    public static function typeTreatmentFor(Project $project): ?string
+    {
+        if (!$project->exists(self::FILE)) {
+            return null;
+        }
+        return TypeTreatment::explicit($project->readJson(self::FILE)['type_treatment'] ?? null);
     }
 
     /**

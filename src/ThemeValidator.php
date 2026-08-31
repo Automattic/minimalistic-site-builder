@@ -1084,6 +1084,26 @@ final class ThemeValidator
         $theme = $project->exists('theme/theme.json')
             ? json_decode($project->readText('theme/theme.json'), true)
             : null;
+        // readJson throws on a corrupt direction, and this is the last step of
+        // the build. DirectionFidelity::problems already degrades that same
+        // artifact to a warning rather than aborting the rest of validate-theme.
+        try {
+            $typeTreatment = Steps\DesignDirectionStep::typeTreatmentFor($project);
+        } catch (\Throwable $e) {
+            $typeTreatment = null;
+            $warnings[] = 'committed type treatment drift check skipped: '
+                . 'designDirection.json could not be read (' . $e->getMessage() . ')';
+        }
+        if (is_array($theme) && $typeTreatment !== null) {
+            [, $treatmentRepairs] = Steps\ThemeJsonStep::repairTypeTreatment(
+                $theme,
+                $typeTreatment,
+            );
+            foreach ($treatmentRepairs as $repair) {
+                $warnings[] = 'committed "' . $typeTreatment
+                    . '" type treatment drift: ' . $repair;
+            }
+        }
         $sizeBySlug = [];
         foreach ($theme['settings']['typography']['fontSizes'] ?? [] as $entry) {
             if (isset($entry['slug'], $entry['size'])) {
@@ -1130,6 +1150,39 @@ final class ThemeValidator
             $warnings[] = 'theme.json defines a "display" fontSize that no template or part uses';
         }
 
+        return $warnings;
+    }
+
+    /** Verify the committed CTA construction and absence of local overrides. */
+    public static function ctaWarnings(Project $project): array
+    {
+        $style = Steps\DesignDirectionStep::ctaStyleFor($project);
+        if ($style === null) {
+            return [];
+        }
+
+        $warnings = [];
+        $theme = $project->exists('theme/theme.json')
+            ? json_decode($project->readText('theme/theme.json'), true)
+            : null;
+        if (is_array($theme)) {
+            [, $repairs] = Steps\ThemeJsonStep::repairCtaStyle($theme, $style);
+            foreach ($repairs as $repair) {
+                $warnings[] = 'committed "' . $style . '" CTA style drift: ' . $repair;
+            }
+        }
+
+        foreach ($project->markupFiles() as $file) {
+            $markup = (string) file_get_contents($file);
+            foreach (CtaStyleMarkup::normalize($markup, $style)['changes'] as $change) {
+                $warnings[] = 'committed "' . $style . '" CTA local override drift: file='
+                    . basename($file) . '; block=' . $change['blockPath']
+                    . '; property=' . $change['property']
+                    . '; authored=' . Warnings::value($change['authored'])
+                    . '; delivered=' . Warnings::value($change['delivered'])
+                    . '; disposition=' . $change['disposition'];
+            }
+        }
         return $warnings;
     }
 

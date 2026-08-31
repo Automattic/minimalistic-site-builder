@@ -59,14 +59,14 @@ function final_validation_project(): array
         'sections' => [[
             'slug' => 'hero',
             'title' => 'Home',
-            'layout_archetype' => 'mixed-width-editorial',
+            'layout_archetype' => 'asymmetric-split',
             'background' => 'contrast',
             'vertical_density' => 'standard',
             'primary_action' => null,
         ]],
     ]];
-    $hero = '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage","layout":{"type":"constrained"}} -->'
-        . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage"></div><!-- /wp:group -->';
+    $hero = '<!-- wp:group {"anchor":"hero","className":"hero-composition--foreground-split","layout":{"type":"constrained"}} -->'
+        . '<div id="hero" class="wp-block-group hero-composition--foreground-split"></div><!-- /wp:group -->';
     $hero = SectionRhythm::rewrite([[
         'slug' => 'hero',
         'markup' => $hero,
@@ -75,7 +75,7 @@ function final_validation_project(): array
     ]])['markups'][0];
     $delivery = AboveFoldContract::resolve(
         $pages,
-        HeroBlueprint::defaultFor('focal-subject-stage'),
+        HeroBlueprint::defaultFor('foreground-split'),
         'full-bleed',
         ['base' => '#FFFFFF', 'contrast' => '#111111'],
         ['stable_id' => 'validate-step', 'writing_direction' => 'ltr', 'page_count' => 1],

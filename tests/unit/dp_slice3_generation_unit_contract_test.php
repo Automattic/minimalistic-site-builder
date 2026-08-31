@@ -127,6 +127,7 @@ function dp3_contract_section(
         'layout_archetype' => $archetype,
         'background' => $background,
         'vertical_density' => 'standard',
+        'text_placement' => 'left-column',
         'handoff' => "Connect {$title} to adjacent sections.",
     ];
 }
@@ -146,6 +147,8 @@ function dp3_contract_planned_sections(array $sections): array
             'layout_archetype' => $section['layout_archetype'],
             'background' => $section['background'],
             'vertical_density' => $section['vertical_density'],
+            'item_pattern' => null,
+            'text_placement' => $section['text_placement'],
             'handoff' => $section['handoff'],
             'primary_action' => null,
         ];

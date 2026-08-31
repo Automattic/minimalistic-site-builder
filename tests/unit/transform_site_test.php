@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
@@ -877,5 +878,39 @@ test('transform-site threads shared site.css shape rules into image aspectRatio/
     $part = $project->readText('theme/parts/page-home--hero.html');
     assert_contains('"aspectRatio":"3/2"', $part);
     assert_contains('"scale":"contain"', $part);
+    transform_site_cleanup($tmp);
+});
+
+test('transform-site stamps the committed media aspect on the delivered hero root (BIGR-925)', function () {
+    // The HTML-first path rebuilds the delivery contract after it writes the
+    // parts, then stamps the hero-composition--, hero-mobile-- and
+    // hero-media-- markers on the hero root, in the same way HeaderHeroStep
+    // does on the blocks path. The authored page carries none of the markers,
+    // so the stamp is the only source of the CSS hook.
+    [$project, $llm, $tmp] = transform_site_fixture(
+        '<!doctype html><html><body>'
+        . '<header><p>Header</p></header>'
+        . '<main><section id="hero"><h1>Hero</h1>'
+        . '<img src="hero.jpg" alt="Hero portrait"></section></main>'
+        . '<footer><p>Footer</p></footer>'
+        . '</body></html>',
+    );
+    $blueprint = HeroBlueprint::defaultFor('foreground-split');
+    $blueprint['media_aspect'] = 'portrait';
+    $project->writeJson('designDirection.json', test_design_direction('foreground-split', [
+        'hero_blueprint' => $blueprint,
+    ]));
+
+    transform_site_run($project, $llm);
+
+    $delivery = $project->readJson('aboveFold.json');
+    assert_eq('portrait', $delivery['media_aspect'], 'the delivery contract carries the committed aspect');
+    assert_eq('page-home--hero', $delivery['hero_part']);
+    $hero = $project->readText('theme/parts/page-home--hero.html');
+    // Once in the rendered class attribute; the block comment's JSON escapes
+    // the `--`, which is illegal inside an HTML comment.
+    assert_eq(1, substr_count($hero, 'hero-media--portrait'), 'the hero root carries one aspect stamp');
+    assert_contains('hero-composition--foreground-split', $hero);
+    assert_contains('hero-mobile--stack-copy-first', $hero);
     transform_site_cleanup($tmp);
 });

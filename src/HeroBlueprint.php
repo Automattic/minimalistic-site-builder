@@ -14,7 +14,7 @@ namespace Automattic\SiteBuild;
 final class HeroBlueprint
 {
     public const VERSION = 1;
-    public const MEDIA_MODES = ['none', 'cover-image', 'foreground-image', 'band-image'];
+    public const MEDIA_MODES = ['none', 'cover-image', 'foreground-image'];
     public const HEADLINE_REGISTERS = ['restrained', 'display', 'poster'];
     public const TEXT_ANCHORS = [
         'top-start', 'center-start', 'bottom-start', 'center',
@@ -28,6 +28,13 @@ final class HeroBlueprint
         'retain-media-overlay', 'stack-copy-first', 'stack-media-first',
         'flatten-layers',
     ];
+    /**
+     * The two media axes the merged contained-split recipe carries (BIGR-912).
+     * The catalog owns which values each recipe may take; these are the whole
+     * vocabulary a blueprint may spell.
+     */
+    public const MEDIA_ASPECTS = HeroComposition::MEDIA_ASPECTS;
+    public const MEDIA_WEIGHTS = HeroComposition::MEDIA_WEIGHTS;
 
     /**
      * Complete reviewed blueprint for one assigned recipe.
@@ -62,6 +69,8 @@ final class HeroBlueprint
             'height_profile' => $defaults['height_profile'],
             'cta_treatment' => $defaults['cta_treatment'],
             'mobile_transformation' => $defaults['mobile_transformation'],
+            'media_aspect' => $defaults['media_aspect'],
+            'media_weight' => $defaults['media_weight'],
         ];
     }
 
@@ -195,6 +204,37 @@ final class HeroBlueprint
                 $out['mobile_transformation'],
                 'recipe compatibility',
             );
+        }
+
+        // The two media axes (BIGR-912). Each follows the same two steps as
+        // every other enum above: spell a value from the whole vocabulary, then
+        // fall back to the recipe default when the catalog row does not offer
+        // it. A cover or an imageless recipe therefore cannot be talked into a
+        // portrait plate or a balanced split it has no slot for.
+        $out['media_aspect'] = self::enum(
+            $raw['media_aspect'] ?? null,
+            self::MEDIA_ASPECTS,
+            $defaults['media_aspect'],
+            'media_aspect',
+            $repairs,
+        );
+        if (!in_array($out['media_aspect'], $meta['media_aspects'], true)) {
+            $authored = $out['media_aspect'];
+            $out['media_aspect'] = $defaults['media_aspect'];
+            self::repair($repairs, 'media_aspect', $authored, $out['media_aspect'], 'recipe compatibility');
+        }
+
+        $out['media_weight'] = self::enum(
+            $raw['media_weight'] ?? null,
+            self::MEDIA_WEIGHTS,
+            $defaults['media_weight'],
+            'media_weight',
+            $repairs,
+        );
+        if (!in_array($out['media_weight'], $meta['media_weights'], true)) {
+            $authored = $out['media_weight'];
+            $out['media_weight'] = $defaults['media_weight'];
+            self::repair($repairs, 'media_weight', $authored, $out['media_weight'], 'recipe compatibility');
         }
 
         $targets = is_array($raw['headline_line_target'] ?? null)

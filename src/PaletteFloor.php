@@ -17,20 +17,51 @@ namespace Automattic\SiteBuild;
  */
 final class PaletteFloor
 {
-    /** contrast on base — prompts/theme-json.md CONTRAST REQUIREMENTS. */
-    public const CONTRAST_ON_BASE = 7.0;
+    /**
+     * contrast on base — prompts/theme-json.md CONTRAST REQUIREMENTS.
+     *
+     * WCAG AA for normal text, not AAA (BIGR-923). The old 7:1 floor pushed
+     * every ink toward near-black on light grounds and near-white on dark
+     * ones, and forbade legitimate mid-dark inks (a warm brown on cream at
+     * ~6:1). Rendered-content checks already run at 4.5, and a committed
+     * `surface` texture raises the requirement to 7:1 through
+     * Surface::contrastFloor so the overlay leaves 4.5 after its sheet —
+     * callers pass that raised floor into check()/repair().
+     */
+    public const CONTRAST_ON_BASE = 4.5;
 
     /** primary on base, secondary on base. */
     public const ROLE_ON_BASE = 4.5;
 
-    /** base on accent (button labels). Ratio is symmetric. */
-    public const BASE_ON_ACCENT = 4.5;
+    /**
+     * Label ink on accent (button labels). The accent is a fill, not a text
+     * color: its label ink is whichever of base/contrast reads better on it
+     * (ContrastFixStep repairs `styles.elements.button` text between exactly
+     * those two slugs), so the floor holds for the BETTER of the two pairs,
+     * never for base alone. Judging base alone is what turned every warm
+     * light-ground accent into the same dark olive (BIGR-918): a vivid amber
+     * fails against cream, and a yellow darkened at fixed hue is mud.
+     */
+    public const LABEL_ON_ACCENT = 4.5;
 
     /** Primary/accent closer than this, with chroma on both, is a miss. */
     public const HUE_TOO_CLOSE = 25.0;
 
-    /** Accent is rotated to at least this many degrees from primary. */
-    public const HUE_SEPARATION = 40.0;
+    /**
+     * Accent is rotated to this many degrees from primary.
+     *
+     * Held just above HUE_TOO_CLOSE rather than well past it (BIGR-943). The
+     * rotation exists to clear that line, and every degree beyond it is a
+     * degree further from the hue the model actually chose. At 40 the overshoot
+     * was 15 degrees, which pushed a warm primary's accent into the 50-70 band
+     * where a saturated color reads as acid yellow: a terracotta bakery
+     * authored `#C05617` and shipped `#DDCB1A`.
+     *
+     * 8-bit rounding costs at most ~1.3 degrees of the target, measured over
+     * 1560 hue/lightness/saturation probes, so this delivers at least 30
+     * degrees of real separation — a 5 degree cushion over the 25 degree line.
+     */
+    public const HUE_SEPARATION = 32.0;
 
     /** Below this chroma a hue is too faint to count as a competing color. */
     public const CHROMA_MIN = 0.1;
@@ -54,10 +85,11 @@ final class PaletteFloor
      *     floor: float
      * }>
      */
-    public static function check(array $palette): array
+    public static function check(array $palette, ?float $contrastOnBase = null): array
     {
+        $contrastOnBase ??= self::CONTRAST_ON_BASE;
         $findings = [];
-        foreach (self::contrastPairs() as [$role, $against, $floor]) {
+        foreach (self::contrastPairs($contrastOnBase) as [$role, $against, $floor]) {
             $hex = self::hexOf($palette, $role);
             $other = self::hexOf($palette, $against);
             if ($hex === null || $other === null) {
@@ -76,8 +108,20 @@ final class PaletteFloor
             }
         }
 
-        $primary = self::hexOf($palette, 'primary');
         $accent = self::hexOf($palette, 'accent');
+        $ink = self::labelInk($palette);
+        if ($accent !== null && $ink !== null && $ink['ratio'] < self::LABEL_ON_ACCENT) {
+            $findings[] = [
+                'class' => 'contrast',
+                'role' => 'accent',
+                'against' => $ink['slug'],
+                'authored' => $accent,
+                'metric' => $ink['ratio'],
+                'floor' => self::LABEL_ON_ACCENT,
+            ];
+        }
+
+        $primary = self::hexOf($palette, 'primary');
         if ($primary !== null && $accent !== null) {
             $cPrimary = self::chroma($primary);
             $cAccent = self::chroma($accent);
@@ -139,16 +183,17 @@ final class PaletteFloor
      *        authored=/delivered=/disposition= shape
      * @return array<string,string>
      */
-    public static function repair(array $palette, array &$warnings): array
+    public static function repair(array $palette, array &$warnings, ?float $contrastOnBase = null): array
     {
+        $contrastOnBase ??= self::CONTRAST_ON_BASE;
         $authored = $palette;
         /** @var array<string, list<array{kind:string,text:string}>> $notes */
         $notes = [];
-        $out = self::repairContrast($palette, $notes);
+        $out = self::repairContrast($palette, $notes, $contrastOnBase);
         $out = self::repairHue($out, $notes);
         $out = self::repairChroma($out, $notes);
-        $out = self::repairContrast($out, $notes);
-        self::warnResiduals($out, $notes);
+        $out = self::repairContrast($out, $notes, $contrastOnBase);
+        self::warnResiduals($out, $notes, $contrastOnBase);
         self::emitNotes($authored, $out, $notes, $warnings);
         return $out;
     }
@@ -182,9 +227,17 @@ final class PaletteFloor
     public static function chroma(string $hex): ?float
     {
         $rgb = ContrastMath::hexToRgb($hex);
-        if ($rgb === null) {
-            return null;
-        }
+        return $rgb === null ? null : self::chromaOf($rgb);
+    }
+
+    /**
+     * The same quantity for an RGB triple the caller already holds, so the
+     * chroma search does not round-trip through hex on every probe.
+     *
+     * @param array{0:int,1:int,2:int} $rgb
+     */
+    private static function chromaOf(array $rgb): float
+    {
         [$r, $g, $b] = [$rgb[0] / 255.0, $rgb[1] / 255.0, $rgb[2] / 255.0];
         return max($r, $g, $b) - min($r, $g, $b);
     }
@@ -202,16 +255,43 @@ final class PaletteFloor
     }
 
     /**
+     * The text roles judged against base. Accent is absent on purpose: it is
+     * a fill judged against its best label ink — see labelInk().
+     *
      * @return list<array{0:string,1:string,2:float}> role, against, floor
      */
-    private static function contrastPairs(): array
+    private static function contrastPairs(float $contrastOnBase): array
     {
         return [
-            ['contrast', 'base', self::CONTRAST_ON_BASE],
+            ['contrast', 'base', $contrastOnBase],
             ['primary', 'base', self::ROLE_ON_BASE],
             ['secondary', 'base', self::ROLE_ON_BASE],
-            ['accent', 'base', self::BASE_ON_ACCENT],
         ];
+    }
+
+    /**
+     * The accent's best label-ink pair: the higher of base-on-accent and
+     * contrast-on-accent, with the slug that produced it. Null when the
+     * accent or both inks are missing or unreadable.
+     *
+     * @param array<string,string> $palette
+     * @return array{slug:string,ratio:float}|null
+     */
+    private static function labelInk(array $palette): ?array
+    {
+        $accent = self::hexOf($palette, 'accent');
+        if ($accent === null) {
+            return null;
+        }
+        $best = null;
+        foreach (['base', 'contrast'] as $slug) {
+            $hex = self::hexOf($palette, $slug);
+            $ratio = $hex === null ? null : self::ratio($accent, $hex);
+            if ($ratio !== null && ($best === null || $ratio > $best['ratio'])) {
+                $best = ['slug' => $slug, 'ratio' => $ratio];
+            }
+        }
+        return $best;
     }
 
     /**
@@ -219,13 +299,13 @@ final class PaletteFloor
      * @param array<string, list<array{kind:string,text:string}>> $notes
      * @return array<string,string>
      */
-    private static function repairContrast(array $palette, array &$notes): array
+    private static function repairContrast(array $palette, array &$notes, float $contrastOnBase): array
     {
         $base = self::hexOf($palette, 'base');
         if ($base === null) {
             return $palette;
         }
-        foreach (self::contrastPairs() as [$role, $against, $floor]) {
+        foreach (self::contrastPairs($contrastOnBase) as [$role, $against, $floor]) {
             // The pair is always judged against base, but the slug we
             // move is never base: GroundTint owns that family's hue.
             $hex = self::hexOf($palette, $role);
@@ -269,6 +349,63 @@ final class PaletteFloor
                 ),
             );
         }
+        return self::repairAccentInk($palette, $notes);
+    }
+
+    /**
+     * Hold the label-ink floor on the accent fill. The accent moves only when
+     * NEITHER base nor contrast reads on it — a mid-tone fill no ink can
+     * label — and then only as far as the nearer ink needs. A fill one ink
+     * already reads on is left exactly as authored: the fill's own contrast
+     * against the page is a design choice, not a floor.
+     *
+     * @param array<string,string> $palette
+     * @param array<string, list<array{kind:string,text:string}>> $notes
+     * @return array<string,string>
+     */
+    private static function repairAccentInk(array $palette, array &$notes): array
+    {
+        $hex = self::hexOf($palette, 'accent');
+        $ink = self::labelInk($palette);
+        if ($hex === null || $ink === null || $ink['ratio'] >= self::LABEL_ON_ACCENT) {
+            return $palette;
+        }
+        $inkHex = self::hexOf($palette, $ink['slug']);
+        $fixed = $inkHex === null
+            ? $hex
+            : self::meetContrast($hex, $inkHex, self::LABEL_ON_ACCENT);
+        $after = self::labelInk([...$palette, 'accent' => $fixed]);
+        if (
+            $after !== null
+            && $after['ratio'] >= self::LABEL_ON_ACCENT
+            && !self::sameHex($fixed, $hex)
+        ) {
+            $palette['accent'] = $fixed;
+            self::note(
+                $notes,
+                'accent',
+                'repaired',
+                sprintf(
+                    'contrast floor %s:1 for the %s label ink on the accent fill, lightness moved at fixed hue',
+                    self::floorLabel(self::LABEL_ON_ACCENT),
+                    $ink['slug'],
+                ),
+            );
+            return $palette;
+        }
+        $achieved = $inkHex === null
+            ? $ink['ratio']
+            : self::bestAchievedRatio($hex, $inkHex, $fixed);
+        self::note(
+            $notes,
+            'accent',
+            'unrepaired',
+            sprintf(
+                'unrepaired — label-ink contrast floor %s:1 on the accent fill unreachable, best achieved %s:1',
+                self::floorLabel(self::LABEL_ON_ACCENT),
+                self::ratioLabel($achieved),
+            ),
+        );
         return $palette;
     }
 
@@ -365,11 +502,15 @@ final class PaletteFloor
     }
 
     /**
-     * Move LIGHTNESS at fixed hue/saturation until the pair meets $floor.
-     * Tries both directions (lighter and darker). When both pass, keeps
-     * the higher-chroma candidate, then the smaller luminance move.
-     * When neither passes, returns the authored hex — the caller must
-     * not record disposition=repaired.
+     * Move LIGHTNESS at fixed hue until the pair meets $floor. Tries both
+     * directions (lighter and darker). When both pass, keeps the
+     * higher-chroma candidate, then the smaller luminance move. When
+     * neither passes, returns the authored hex — the caller must not
+     * record disposition=repaired.
+     *
+     * Saturation is a starting point rather than an invariant: each passing
+     * candidate is re-solved to carry as much of the AUTHORED chroma as its
+     * own luminance allows (BIGR-941).
      */
     private static function meetContrast(string $hex, string $other, float $floor): string
     {
@@ -385,6 +526,7 @@ final class PaletteFloor
         [$hue, $saturation] = self::toHsl($rgb);
         $y = ContrastMath::luminance($rgb);
         $yOther = ContrastMath::luminance($otherRgb);
+        $authoredChroma = self::chromaOf($rgb);
 
         // A hair past the exact inversion so 8-bit rounding still clears.
         $margin = 0.004;
@@ -394,8 +536,8 @@ final class PaletteFloor
         $passers = [];
         foreach (
             [
-                self::probeContrast($hue, $saturation, $yHigh, 1.0, $other, $floor),
-                self::probeContrast($hue, $saturation, $yLow, -1.0, $other, $floor),
+                self::probeContrast($hue, $saturation, $yHigh, 1.0, $other, $floor, $authoredChroma),
+                self::probeContrast($hue, $saturation, $yLow, -1.0, $other, $floor, $authoredChroma),
             ] as $candidate
         ) {
             if ($candidate !== null) {
@@ -418,8 +560,13 @@ final class PaletteFloor
 
     /**
      * Walk lightness from $startY toward white (direction +1) or black
-     * (direction -1) at fixed hue/saturation. Null when this side cannot
-     * meet $floor — including when the inversion clamps at 0 or 1.
+     * (direction -1) at fixed hue and saturation. Null when this side
+     * cannot meet $floor — including when the inversion clamps at 0 or 1.
+     *
+     * The walk holds saturation because it is only looking for the first
+     * luminance that clears $floor. The candidate it finds is then re-solved
+     * against $targetChroma, which is the step that keeps the color's
+     * saturation (BIGR-941).
      *
      * @return array{hex:string,ratio:float,chroma:float,y:float}|null
      */
@@ -430,6 +577,7 @@ final class PaletteFloor
         float $direction,
         string $other,
         float $floor,
+        float $targetChroma,
     ): ?array {
         $y = min(1.0, max(0.0, $startY));
         $hex = self::toHex(self::atLuminance($hue, $saturation, $y));
@@ -439,7 +587,13 @@ final class PaletteFloor
             $chroma = self::chroma($hex);
             $yNow = self::luminance($hex);
             if ($now !== null && $now >= $floor && $chroma !== null && $yNow !== null) {
-                return ['hex' => $hex, 'ratio' => $now, 'chroma' => $chroma, 'y' => $yNow];
+                return self::withRestoredChroma(
+                    ['hex' => $hex, 'ratio' => $now, 'chroma' => $chroma, 'y' => $yNow],
+                    $hue,
+                    $targetChroma,
+                    $other,
+                    $floor,
+                );
             }
             $nextY = min(1.0, max(0.0, ($yNow ?? $y) + $direction * 0.012));
             if ($yNow !== null && abs($nextY - $yNow) < 1e-9) {
@@ -452,6 +606,8 @@ final class PaletteFloor
             $hex = $next;
         }
         $extreme = $direction > 0.0 ? 1.0 : 0.0;
+        // This fallback skips the chroma re-solve on purpose: at Y near 0 or
+        // 1 the reachable chroma is near zero, so a re-solve cannot gain any.
         $hex = self::toHex(self::atLuminance($hue, $saturation, $extreme));
         $now = self::ratio($hex, $other);
         $chroma = self::chroma($hex);
@@ -460,6 +616,76 @@ final class PaletteFloor
             return ['hex' => $hex, 'ratio' => $now, 'chroma' => $chroma, 'y' => $yNow];
         }
         return null;
+    }
+
+    /**
+     * One passing candidate, re-solved to carry as much of the authored
+     * chroma as its own luminance allows.
+     *
+     * The WCAG ratio is a function of relative luminance alone, so holding
+     * the luminance and moving only the saturation cannot drop the pair back
+     * below the floor. 8-bit rounding can still shift the luminance a little,
+     * so the re-solve is kept only when it measures clear AND actually gained
+     * chroma; otherwise the walk's own candidate stands.
+     *
+     * @param  array{hex:string,ratio:float,chroma:float,y:float} $row
+     * @return array{hex:string,ratio:float,chroma:float,y:float}
+     */
+    private static function withRestoredChroma(
+        array $row,
+        float $hue,
+        float $targetChroma,
+        string $other,
+        float $floor,
+    ): array {
+        if ($row['chroma'] >= $targetChroma) {
+            return $row;
+        }
+        $hex = self::toHex(self::atLuminanceNearChroma($hue, $targetChroma, $row['y']));
+        $ratio = self::ratio($hex, $other);
+        $chroma = self::chroma($hex);
+        $y = self::luminance($hex);
+        if (
+            $ratio === null || $chroma === null || $y === null
+            || $ratio < $floor || $chroma <= $row['chroma']
+        ) {
+            return $row;
+        }
+        return ['hex' => $hex, 'ratio' => $ratio, 'chroma' => $chroma, 'y' => $y];
+    }
+
+    /**
+     * The RGB at $target luminance whose chroma is nearest $targetChroma
+     * without going above it, found by moving saturation.
+     *
+     * HSL chroma is `(1 - |2L - 1|) * S`, so it collapses toward zero at both
+     * lightness extremes whatever S is. Reusing the authored saturation while
+     * walking lightness therefore sheds chroma the luminance target never
+     * asked for. Chroma rises monotonically with saturation at a fixed hue
+     * and target luminance, so a bisection finds the nearest saturation.
+     *
+     * Never returns more chroma than $targetChroma: the goal is to preserve
+     * what the model authored, not to saturate a muted color.
+     *
+     * @return array{0:int,1:int,2:int}
+     */
+    private static function atLuminanceNearChroma(float $hue, float $targetChroma, float $target): array
+    {
+        $full = self::atLuminance($hue, 1.0, $target);
+        if (self::chromaOf($full) <= $targetChroma) {
+            return $full;
+        }
+        $lo = 0.0;
+        $hi = 1.0;
+        for ($i = 0; $i < 24; $i++) {
+            $mid = ($lo + $hi) / 2;
+            if (self::chromaOf(self::atLuminance($hue, $mid, $target)) > $targetChroma) {
+                $hi = $mid;
+            } else {
+                $lo = $mid;
+            }
+        }
+        return self::atLuminance($hue, $lo, $target);
     }
 
     /**
@@ -552,7 +778,7 @@ final class PaletteFloor
      * @param array<string,string> $palette
      * @param array<string, list<array{kind:string,text:string}>> $notes
      */
-    private static function warnResiduals(array $palette, array &$notes): void
+    private static function warnResiduals(array $palette, array &$notes, float $contrastOnBase): void
     {
         $covered = [];
         foreach ($notes as $role => $items) {
@@ -566,7 +792,7 @@ final class PaletteFloor
                 $covered[$class . ':' . $role] = true;
             }
         }
-        foreach (self::check($palette) as $finding) {
+        foreach (self::check($palette, $contrastOnBase) as $finding) {
             $key = $finding['class'] . ':' . $finding['role'];
             if (isset($covered[$key])) {
                 continue;
@@ -801,6 +1027,6 @@ final class PaletteFloor
 
     private static function floorLabel(float $floor): string
     {
-        return $floor === self::CONTRAST_ON_BASE ? '7.0' : '4.5';
+        return number_format($floor, 1);
     }
 }

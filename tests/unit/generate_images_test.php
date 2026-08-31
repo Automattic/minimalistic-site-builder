@@ -122,6 +122,24 @@ test('I-G9 a preconstructed image client still powers post-build generation', fu
     }
 });
 
+test('generate-images aligns source ratio and prompt composition with image_crop', function () {
+    [$project, $tmp] = generate_fixture();
+    $project->writeJson('designDirection.json', ['image_crop' => 'portrait']);
+    $specs = $project->readJson('images.json');
+    $specs[0]['pageContext'] = 'product card in a repeated grid';
+    $specs[0]['aspectRatio'] = 'landscape';
+    $project->writeJson('images.json', $specs);
+    $images = new FakeImageClient('JPEGDATA');
+
+    (new GenerateImagesStep($images))->run($project);
+
+    assert_eq('4:5', $images->calls[0]['opts']['aspect_ratio']);
+    assert_contains('Site-wide crop direction:', $images->calls[0]['prompt']);
+    assert_contains('central portrait safe area', $images->calls[0]['prompt']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('generate-images rewrites theme: placeholders in assembled plugin/pages', function () {
     [$project, $tmp] = generate_fixture();
     // Simulate post-assemble multipage content: section covers live in the

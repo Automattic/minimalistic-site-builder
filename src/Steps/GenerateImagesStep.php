@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\ImageClient;
+use Automattic\SiteBuild\ImageCrop;
 use Automattic\SiteBuild\ImageLogger;
 use Automattic\SiteBuild\GeminiImage;
 use Automattic\SiteBuild\ImagePromptComposer;
@@ -141,6 +142,7 @@ final class GenerateImagesStep implements Step
         // The design direction's photographic grade, injected into EVERY prompt
         // so the independently generated images read as one photographic series.
         $imageGrade = DesignDirectionStep::imageGradeFor($project);
+        $imageCrop = DesignDirectionStep::imageCropFor($project) ?? '';
 
         $assetDir = $project->themePath('assets');
         if (!is_dir($assetDir) && !mkdir($assetDir, 0775, true) && !is_dir($assetDir)) {
@@ -180,7 +182,7 @@ final class GenerateImagesStep implements Step
             // Map original images.json indices to generation specs (order kept).
             $indices = array_keys($pending);
             $batchSpecs = array_map(
-                fn (array $spec): array => self::generationSpec($spec, $siteContext, $imageGrade),
+                fn (array $spec): array => self::generationSpec($spec, $siteContext, $imageGrade, $imageCrop),
                 array_values($pending)
             );
 
@@ -193,7 +195,7 @@ final class GenerateImagesStep implements Step
             // else finishes and persists immediately, so progress survives an
             // interruption while the rest of the batch is still generating.
             $this->drainBatch($batchSpecs, function (int $pos, array $result) use (
-                $project, &$specs, $indices, $batchSpecs, $imageGrade, &$resolved, &$repairs
+                $project, &$specs, $indices, $batchSpecs, $imageGrade, $imageCrop, &$resolved, &$repairs
             ): void {
                 $i = $indices[$pos];
                 $filename = (string) $specs[$i]['filename'];
@@ -201,17 +203,39 @@ final class GenerateImagesStep implements Step
                 if ($this->llm !== null && !($result['ok'] ?? false) && ($result['filtered'] ?? false)) {
                     $error = (string) ($result['error'] ?? 'safety-filtered');
                     Narrator::write("    FILTERED {$filename}: {$error}\n");
-                    ImageLogger::log($filename, $this->requestLog($specs[$i], $batchSpecs[$pos], $imageGrade), [], $error);
+                    ImageLogger::log($filename, $this->requestLog(
+                        $specs[$i],
+                        $batchSpecs[$pos],
+                        $imageGrade,
+                        $imageCrop,
+                    ), [], $error);
                     $repairs[$i] = $error;
                     return;
                 }
 
-                $this->finish($project, $specs, $i, $batchSpecs[$pos], $result, $resolved, $imageGrade);
+                $this->finish(
+                    $project,
+                    $specs,
+                    $i,
+                    $batchSpecs[$pos],
+                    $result,
+                    $resolved,
+                    $imageGrade,
+                    $imageCrop,
+                );
                 $project->writeJsonAtomic('images.json', $specs);
             });
 
             if ($repairs !== []) {
-                $this->repairFiltered($project, $specs, $repairs, $siteContext, $imageGrade, $resolved);
+                $this->repairFiltered(
+                    $project,
+                    $specs,
+                    $repairs,
+                    $siteContext,
+                    $imageGrade,
+                    $imageCrop,
+                    $resolved,
+                );
             }
         }
 
@@ -360,9 +384,18 @@ final class GenerateImagesStep implements Step
      * @param array<string,mixed> $spec one images.json row
      * @return array{prompt:string,aspect_ratio:string,sample_image_size:string,mime:string}
      */
-    private static function generationSpec(array $spec, string $siteContext, string $imageGrade, ?string $subject = null): array
-    {
-        $ratio = GeminiImage::aspectRatio((string) ($spec['aspectRatio'] ?? 'landscape'));
+    private static function generationSpec(
+        array $spec,
+        string $siteContext,
+        string $imageGrade,
+        string $imageCrop = '',
+        ?string $subject = null,
+    ): array {
+        $ratio = ImageCrop::generationRatio(
+            $imageCrop,
+            (string) ($spec['aspectRatio'] ?? 'landscape'),
+            (string) ($spec['pageContext'] ?? ''),
+        );
         // A .png placeholder is a transparent-background asset: request PNG
         // bytes, prompt for a flat white background (the image model cannot render
         // alpha), and key that background out after generation.
@@ -375,6 +408,7 @@ final class GenerateImagesStep implements Step
                 $siteContext,
                 $imageGrade,
                 $mime === 'image/png',
+                imageCrop: $imageCrop,
             ),
             'aspect_ratio'      => $ratio,
             // Wide images are the full-bleed ones (heroes, banners) — render
@@ -456,8 +490,13 @@ final class GenerateImagesStep implements Step
      * @param array{prompt:string,aspect_ratio:string,sample_image_size:string,mime:string} $genSpec
      * @return array<string,string>
      */
-    private function requestLog(array $spec, array $genSpec, string $imageGrade, ?string $subject = null): array
-    {
+    private function requestLog(
+        array $spec,
+        array $genSpec,
+        string $imageGrade,
+        string $imageCrop = '',
+        ?string $subject = null,
+    ): array {
         return [
             'model'             => $this->images->model(),
             'prompt'            => $genSpec['prompt'],
@@ -468,7 +507,8 @@ final class GenerateImagesStep implements Step
             'page_context'      => (string) ($spec['pageContext'] ?? ''),
             'style'             => (string) ($spec['style'] ?? ''),
             'image_grade'       => $imageGrade,
-        ] + self::deliveredSubjectLog($spec, $imageGrade, $subject);
+        ] + ($imageCrop !== '' ? ['image_crop' => $imageCrop] : [])
+          + self::deliveredSubjectLog($spec, $imageGrade, $subject);
     }
 
     /**
@@ -513,10 +553,11 @@ final class GenerateImagesStep implements Step
         array $result,
         array &$resolved,
         string $imageGrade,
+        string $imageCrop = '',
         ?string $subject = null
     ): void {
         $filename = (string) $specs[$i]['filename'];
-        $logRequest = $this->requestLog($specs[$i], $genSpec, $imageGrade, $subject);
+        $logRequest = $this->requestLog($specs[$i], $genSpec, $imageGrade, $imageCrop, $subject);
         try {
             if (!($result['ok'] ?? false) || !isset($result['bytes'])) {
                 throw new \RuntimeException((string) ($result['error'] ?? 'unknown error'));
@@ -579,6 +620,7 @@ final class GenerateImagesStep implements Step
         array $repairs,
         string $siteContext,
         string $imageGrade,
+        string $imageCrop,
         array &$resolved
     ): void {
         Narrator::write(sprintf(
@@ -640,7 +682,13 @@ final class GenerateImagesStep implements Step
                 continue;
             }
             $subjects[$i] = $subject;
-            $regenSpecs[$i] = self::generationSpec($specs[$i], $siteContext, $imageGrade, $subject);
+            $regenSpecs[$i] = self::generationSpec(
+                $specs[$i],
+                $siteContext,
+                $imageGrade,
+                $imageCrop,
+                $subject,
+            );
         }
         if ($regenSpecs === []) {
             return;
@@ -668,7 +716,7 @@ final class GenerateImagesStep implements Step
         $indices = array_keys($regenSpecs);
         $batchSpecs = array_values($regenSpecs);
         $this->drainBatch($batchSpecs, function (int $pos, array $result) use (
-            $project, &$specs, $indices, $batchSpecs, $imageGrade, &$resolved, $subjects
+            $project, &$specs, $indices, $batchSpecs, $imageGrade, $imageCrop, &$resolved, $subjects
         ): void {
             $i = $indices[$pos];
             $this->finish(
@@ -679,6 +727,7 @@ final class GenerateImagesStep implements Step
                 $result,
                 $resolved,
                 $imageGrade,
+                $imageCrop,
                 $subjects[$i]
             );
             $project->writeJsonAtomic('images.json', $specs);

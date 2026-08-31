@@ -702,7 +702,7 @@ test('the opening hero top cap is sm for media-led roots and leaves later sectio
     // media-led heroes after HeroUnit had already clamped them (naturaleza8's
     // panorama band opened ~160px under the header, rail below the fold).
     $mediaHero = sr_section([
-        'className' => 'hero-composition--focal-subject-stage',
+        'className' => 'hero-composition--foreground-split',
         'layout' => ['type' => 'constrained'],
     ], '<!-- wp:image {"className":"hero-composition__media"} -->'
         . '<figure class="wp-block-image hero-composition__media"><img src="theme:./assets/x.jpg" alt=""/></figure>'
@@ -737,7 +737,7 @@ test('the opening hero keeps a lg bottom floor on a shared seam; other seams sti
     // so the hero's bottom collapsed to 0 and the whole below-hero gap was
     // the next section's compact top — the hero crowded the following band.
     $copyHero = sr_section([
-        'className' => 'hero-composition--editorial-split',
+        'className' => 'hero-composition--foreground-split',
         'layout' => ['type' => 'constrained'],
     ], '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Split headline</h1><!-- /wp:heading -->');
     $plain = sr_section(['layout' => ['type' => 'constrained']],
@@ -820,7 +820,7 @@ test('a top-edge rule that lives only in saved HTML still protects the seam abov
 
 test('an opening hero above a ruled section takes the larger of the two floors', function () {
     $hero = sr_section([
-        'className' => 'hero-composition--editorial-split',
+        'className' => 'hero-composition--foreground-split',
         'layout' => ['type' => 'constrained'],
     ], '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Split headline</h1><!-- /wp:heading -->');
     $ruled = sr_section([
@@ -934,7 +934,7 @@ test('a device on the page-opening hero never widens the seam above it', functio
     $plain = sr_section(['layout' => ['type' => 'constrained']],
         '<!-- wp:paragraph --><p>Body</p><!-- /wp:paragraph -->');
     $ruledHero = sr_section([
-        'className' => 'hero-composition--editorial-split device--hairline-rule',
+        'className' => 'hero-composition--foreground-split device--hairline-rule',
         'layout' => ['type' => 'constrained'],
     ], '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Headline</h1><!-- /wp:heading -->');
 
@@ -1060,7 +1060,7 @@ test('a device on the hero does not consume the budget the next band claims', fu
     $plain = sr_section(['layout' => ['type' => 'constrained']],
         '<!-- wp:paragraph --><p>Body</p><!-- /wp:paragraph -->');
     $ruledHero = sr_section([
-        'className' => 'hero-composition--editorial-split device--hairline-rule',
+        'className' => 'hero-composition--foreground-split device--hairline-rule',
         'layout' => ['type' => 'constrained'],
     ], '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Headline</h1><!-- /wp:heading -->');
     $ruled = sr_section([

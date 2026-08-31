@@ -291,7 +291,19 @@ test('billing M4: grok is normalized to xai before key lookup and audit', functi
     assert_true(!str_contains($c->reason, 'provider: grok'));
 
     $providers = (new ReflectionClass(TransportResolver::class))->getConstant('PROVIDER_KEYS');
-    assert_eq(['anthropic', 'openai', 'xai', 'openrouter'], array_keys($providers));
+    assert_eq(['anthropic', 'openai', 'xai', 'openrouter', 'baseten'], array_keys($providers));
+
+    // A provider added to config/models.json but not here resolves to a
+    // TransportUnavailable at build time, not a test failure, so the two lists
+    // are asserted equal rather than each pinned on its own.
+    $configured = json_decode(
+        (string) file_get_contents(dirname(__DIR__, 2) . '/config/models.json'),
+        true,
+        512,
+        JSON_THROW_ON_ERROR,
+    );
+    $missing = array_diff(array_keys($configured['providers']), array_keys($providers));
+    assert_eq([], array_values($missing), 'every configured provider has a credential entry');
 });
 
 test('billing M5: empty caller default is unset and uses the compiled default', function (): void {
