@@ -371,8 +371,8 @@ test('scaffold-plugin writes the static seeder with identity placeholders', func
     assert_contains('basename($filename)', $php);
     assert_contains('realpath($path)', $php);
 
-    // Every post the seeder creates carries the marker WordPress.com uses to
-    // bill these publishes to AI seeding instead of the human publish events,
+    // Every post the seeder creates carries the marker analytics uses to
+    // tell seeded publishes from the site owner's.
     // and the deactivation republish of stock content carries it only for the
     // duration of the update.
     assert_eq(

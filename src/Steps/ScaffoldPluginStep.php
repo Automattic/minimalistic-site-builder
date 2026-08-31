@@ -101,7 +101,8 @@ final class ScaffoldPluginStep implements Step
         register_deactivation_hook(__FILE__, '{{FN_PREFIX}}_content_deactivate');
         add_action('init', '{{FN_PREFIX}}_content_register_companion_blocks');
 
-        // The marker must sync for WordPress.com to classify these publishes.
+        // The marker has to travel with the content when the site syncs,
+        // so analytics on the receiving end can classify seeded publishes.
         add_filter('jetpack_sync_post_meta_whitelist', '{{FN_PREFIX}}_content_sync_marker');
 
         /** Whitelist the seeder marker for Jetpack sync. */
@@ -247,8 +248,8 @@ final class ScaffoldPluginStep implements Step
                     // Parents precede children in the manifest, so the id map
                     // already holds the parent when a child is inserted.
                     'post_parent'  => isset($ids[$parent_slug]) ? $ids[$parent_slug] : 0,
-                    // The marker lets WordPress.com bill these publishes to AI
-                    // seeding instead of the human publish events.
+                    // Marks seeder-created content so analytics can tell these
+                    // publishes from the site owner's.
                     'meta_input'   => array('_wpcom_ai_generated_post' => '1'),
                 ), true);
                 if (is_wp_error($id) || !$id) {
