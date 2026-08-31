@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\ImageClient;
 use Automattic\SiteBuild\ImageCrop;
 use Automattic\SiteBuild\ImageLogger;
@@ -96,6 +97,7 @@ final class GenerateImagesStep implements Step
                 'theme/templates/*',
                 // After assemble-pages, multipage section covers live here.
                 'plugin/pages/*',
+                'theme/theme.json',
             ],
             writes: [
                 'images.json',
@@ -110,6 +112,54 @@ final class GenerateImagesStep implements Step
             ],
             concurrent: true,
         );
+    }
+
+    /**
+     * Hex color the header site-title actually paints. Walks from the title
+     * block up to the header root for `textColor`, then maps the slug through
+     * theme.json. A white title on a dark header must produce a white mark.
+     */
+    public static function headerTitleInkHex(Project $project): ?string
+    {
+        if (!$project->exists('theme/theme.json') || !$project->exists('theme/parts/header.html')) {
+            return null;
+        }
+        $palette = ContrastFixStep::paletteMap($project->readJson('theme/theme.json'));
+        $slug = self::headerTitleInkSlug($project->readText('theme/parts/header.html'));
+        if ($slug === '' || !isset($palette[$slug])) {
+            $slug = isset($palette['contrast']) ? 'contrast' : '';
+        }
+        if ($slug === '' || !isset($palette[$slug])) {
+            return null;
+        }
+        $hex = trim((string) $palette[$slug]);
+        return $hex !== '' ? $hex : null;
+    }
+
+    /** Palette slug the site-title inherits, walking parents then the header root. */
+    private static function headerTitleInkSlug(string $markup): string
+    {
+        $doc = BlockMarkup::parse($markup);
+        $start = null;
+        foreach ($doc->indices() as $i) {
+            if ($doc->name($i) === 'site-title') {
+                $start = $i;
+                break;
+            }
+        }
+        $i = $start;
+        while ($i !== null) {
+            $slug = trim((string) (($doc->attrs($i) ?? [])['textColor'] ?? ''));
+            if ($slug !== '') {
+                return $slug;
+            }
+            $i = $doc->parent($i);
+        }
+        $top = $doc->topLevel();
+        if ($top === null) {
+            return '';
+        }
+        return trim((string) (($doc->attrs($top) ?? [])['textColor'] ?? ''));
     }
 
     public function run(Project $project): void
@@ -608,6 +658,10 @@ final class GenerateImagesStep implements Step
                         ]);
                     } else {
                         $bytes = ImageTransparency::padToSquare($bytes);
+                        $ink = self::headerTitleInkHex($project);
+                        if ($ink !== null) {
+                            $bytes = ImageTransparency::recolorInk($bytes, $ink);
+                        }
                     }
                 }
             }

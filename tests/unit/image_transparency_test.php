@@ -38,6 +38,19 @@ function alpha_at(string $pngBytes, int $x, int $y): float
     return $im->getImagePixelColor($x, $y)->getColorValue(Imagick::COLOR_ALPHA);
 }
 
+/** [r, g, b] of the pixel at ($x, $y), each 0..1. */
+function rgb_at(string $pngBytes, int $x, int $y): array
+{
+    $im = new Imagick();
+    $im->readImageBlob($pngBytes);
+    $px = $im->getImagePixelColor($x, $y);
+    return [
+        $px->getColorValue(Imagick::COLOR_RED),
+        $px->getColorValue(Imagick::COLOR_GREEN),
+        $px->getColorValue(Imagick::COLOR_BLUE),
+    ];
+}
+
 /** [width, height] of PNG bytes. */
 function png_size(string $pngBytes): array
 {
@@ -253,6 +266,20 @@ test('isKeyed is true when every corner is fully transparent', function () {
 
 test('isKeyed is false for a fully opaque PNG', function () {
     assert_true(!ImageTransparency::isKeyed(transparency_fixture('white', 'red', 60, 60)));
+});
+
+test('recolorInk paints keyed ink to the header title color and keeps corners transparent', function () {
+    $keyed = ImageTransparency::keyOutBackground(transparency_fixture('white', 'red', 60, 60));
+    $out = ImageTransparency::recolorInk($keyed, '#ffffff');
+    assert_true(ImageTransparency::isKeyed($out));
+    $rgb = rgb_at($out, 30, 30);
+    assert_true($rgb[0] > 0.95 && $rgb[1] > 0.95 && $rgb[2] > 0.95, 'ink follows the white title color');
+    assert_true(alpha_at($out, 0, 0) < 0.01, 'transparent pad is unchanged');
+});
+
+test('recolorInk returns its input on a bad hex', function () {
+    $keyed = ImageTransparency::keyOutBackground(transparency_fixture('white', 'red', 40, 40));
+    assert_eq($keyed, ImageTransparency::recolorInk($keyed, 'not-a-color'));
 });
 
 test('isKeyed treats near-transparent corners as keyed', function () {

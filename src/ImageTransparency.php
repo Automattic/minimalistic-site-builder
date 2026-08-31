@@ -227,6 +227,31 @@ final class ImageTransparency
     }
 
     /**
+     * Paint every surviving ink pixel to $hex and keep the alpha mask.
+     * The site title's color is the source of truth: a white title on a dark
+     * header must produce a white mark, not the model's default black ink.
+     * Fails soft: missing Imagick, a bad hex, or any Imagick error returns
+     * the input bytes.
+     */
+    public static function recolorInk(string $pngBytes, string $hex): string
+    {
+        if (!self::available() || ContrastMath::hexToRgb($hex) === null) {
+            return $pngBytes;
+        }
+        try {
+            $im = new \Imagick();
+            $im->readImageBlob($pngBytes);
+            $canvas = new \Imagick();
+            $canvas->newImage($im->getImageWidth(), $im->getImageHeight(), new \ImagickPixel($hex));
+            $canvas->setImageFormat('png');
+            $canvas->compositeImage($im, \Imagick::COMPOSITE_COPYOPACITY, 0, 0);
+            return $canvas->getImageBlob();
+        } catch (\Throwable) {
+            return $pngBytes;
+        }
+    }
+
+    /**
      * Turn the white anti-aliasing baked into surviving pixels into real
      * translucency (see the class docblock). Per pixel: ink coverage
      * t = max(1-R, 1-G, 1-B) scaled so t >= SOLID_INK_COVERAGE is 1, alpha

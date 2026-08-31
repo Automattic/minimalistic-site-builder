@@ -1350,6 +1350,84 @@ test('generate-images drops the site-logo role when keying wipes out', function 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('headerTitleInkHex follows the site-title color, inherited from the header', function () {
+    $tmp = sys_get_temp_dir() . '/builder_gi_ink_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('theme/theme.json', [
+        'version' => 3,
+        'settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#171717'],
+            ['slug' => 'contrast', 'color' => '#F4F1EA'],
+        ]]],
+    ]);
+    $project->writeText(
+        'theme/parts/header.html',
+        '<!-- wp:group {"backgroundColor":"base","textColor":"contrast"} -->'
+        . '<div class="wp-block-group"><!-- wp:site-title /--></div><!-- /wp:group -->'
+    );
+    assert_eq('#F4F1EA', GenerateImagesStep::headerTitleInkHex($project));
+
+    $project->writeText(
+        'theme/parts/header.html',
+        '<!-- wp:group {"backgroundColor":"contrast","textColor":"base"} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:site-title {"textColor":"base"} /-->'
+        . '</div><!-- /wp:group -->'
+    );
+    assert_eq('#171717', GenerateImagesStep::headerTitleInkHex($project));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images recolors a site-logo to the header title ink', function () {
+    if (!\Automattic\SiteBuild\ImageTransparency::available()) {
+        skip_test('imagick not loaded');
+    }
+    [$project, $tmp] = generate_fixture();
+    $mark = \Automattic\SiteBuild\ImageTransparency::keyOutBackground(
+        gi_png_fixture('white', 'red', 40, 20)
+    );
+    $project->writeJson('theme/theme.json', [
+        'version' => 3,
+        'settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#111111'],
+            ['slug' => 'contrast', 'color' => '#FFFFFF'],
+        ]]],
+    ]);
+    $project->writeText(
+        'theme/parts/header.html',
+        '<!-- wp:group {"backgroundColor":"base","textColor":"contrast"} -->'
+        . '<div class="wp-block-group"><!-- wp:site-title /--></div><!-- /wp:group -->'
+    );
+    $project->writeJson('images.json', [[
+        'filename' => 'site-logo.png',
+        'src' => 'theme:./assets/site-logo.png',
+        'subject' => 'simple geometric brand mark for bakery, no letters',
+        'pageContext' => 'site logo',
+        'style' => 'flat',
+        'aspectRatio' => 'square',
+        'status' => 'pending',
+        'sources' => [],
+        'role' => 'site-logo',
+    ]]);
+    $project->writeJson('plugin/images.json', ['images' => [
+        ['filename' => 'site-logo.png', 'title' => 'Site logo', 'role' => 'site-logo'],
+    ]]);
+    $images = new FakeImageClient($mark);
+
+    (new GenerateImagesStep($images))->run($project);
+
+    $out = $project->readText('theme/assets/site-logo.png');
+    $im = new Imagick();
+    $im->readImageBlob($out);
+    $px = $im->getImagePixelColor(256, 256);
+    assert_true($px->getColorValue(Imagick::COLOR_RED) > 0.95, 'white title → white mark');
+    assert_true($px->getColorValue(Imagick::COLOR_GREEN) > 0.95);
+    assert_true($px->getColorValue(Imagick::COLOR_BLUE) > 0.95);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('generate-images drops the site-logo role when Imagick is unavailable', function () {
     if (\Automattic\SiteBuild\ImageTransparency::available()) {
         skip_test('imagick is loaded; this pin is the no-extension path');

@@ -26,7 +26,9 @@ header-hero
 assemble-pages
     → copy role:site-logo into plugin/images.json
 generate-images
-    → key out white, square-pad the mark, write theme/assets/site-logo.png
+    → key out white, square-pad the mark
+    → recolor the ink to the header site-title color (the same token the name uses)
+    → write theme/assets/site-logo.png
     → opaque (keying wiped out)? drop the role row, ship nothing
     → copy surviving manifest files to plugin/images/
 plugin activation
