@@ -125,6 +125,40 @@ test('a card commitment may dress a testimonial but is never forced onto one', f
     assert_eq([], $repairs);
 });
 
+test('an unknown authored value on a quote-led section is released with a repair line', function (): void {
+    $pages = [[
+        'slug' => 'home',
+        'sections' => [
+            ['slug' => 'voices', 'type' => 'testimonials', 'item_pattern' => 'ledger'],
+        ],
+    ]];
+    $repairs = [];
+    $delivered = PagePlanStep::reconcileItemPatternAssignments($pages, 'index', $repairs);
+
+    assert_eq([null], array_column($delivered[0]['sections'], 'item_pattern'));
+    assert_eq(1, count($repairs));
+    assert_contains('sections[0].item_pattern', $repairs[0]);
+    assert_contains('quote-led', $repairs[0]);
+    assert_contains('ledger', $repairs[0]);
+});
+
+test('a compound type with both a quote-led and a list-like token takes the quote-led path', function (): void {
+    $pages = [[
+        'slug' => 'home',
+        'sections' => [
+            ['slug' => 'reviews', 'type' => 'reviews-index', 'item_pattern' => 'index'],
+        ],
+    ]];
+    $repairs = [];
+    $delivered = PagePlanStep::reconcileItemPatternAssignments($pages, 'index', $repairs);
+
+    assert_eq([null], array_column($delivered[0]['sections'], 'item_pattern'));
+    assert_eq(1, count($repairs));
+    assert_contains('sections[0].item_pattern', $repairs[0]);
+    assert_contains('quote-led', $repairs[0]);
+    assert_contains("'reviews-index'", $repairs[0]);
+});
+
 test('section request sees exactly the assigned item recipe', function (): void {
     $renderer = new PromptRenderer(repo_path('prompts'));
     $unit = new SectionUnit(new FakeLlm(), $renderer);

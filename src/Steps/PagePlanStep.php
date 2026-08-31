@@ -797,14 +797,15 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 $listLike = self::isListLikeType($type);
                 if (self::isQuoteLedType($type) && $committed !== 'card') {
                     $pages[$pageIndex]['sections'][$sectionIndex]['item_pattern'] = null;
-                    if ($explicit !== null) {
+                    $authoredValue = is_string($authored) ? trim($authored) !== '' : $authored !== null;
+                    if ($authoredValue) {
                         $slug = (string) ($page['slug'] ?? '');
                         $repairs[] = self::successfulRepair(
                             self::sectionPath($slug, (int) $sectionIndex) . '.item_pattern',
                             $authored,
                             null,
                             "released quote-led section type '{$type}' from the '{$committed}' idiom: "
-                            . 'a testimonial repeats voices with attributions, not label/value facts, '
+                            . 'a quote-led section repeats voices with attributions, not label/value facts, '
                             . 'so only the card idiom may dress it',
                         );
                     }
