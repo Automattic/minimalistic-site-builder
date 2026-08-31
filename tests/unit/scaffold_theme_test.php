@@ -502,13 +502,16 @@ test('scaffold-theme owns the guaranteed centered-stack alignment rule', functio
     // justification — but only when the author set none.
     $matched = preg_match(
         '~' . preg_quote($hook, '~')
-            . '\s+\.wp-block-buttons(?<guards>[^\s{]*)\s*\{(?<body>[^}]*)\}~',
+            . '\s+\.wp-block-buttons(?<guards>[^{]*)\{(?<body>[^}]*)\}~',
         $css,
         $buttons
     );
     assert_eq(1, $matched, 'the buttons rule exists');
     assert_contains('justify-content: center', $buttons['body']);
     assert_contains(':not(.is-content-justification-left)', $buttons['guards'], 'an authored justification survives');
+    // BIGR-952 review follow-up: a buttons row inside an exempted item row
+    // must not center, or the start-aligned row gets a mixed alignment again.
+    assert_contains(':not(.item-pattern__item *)', $buttons['guards'], 'a buttons row inside an item row stays exempt');
 
     // Repeated item rows and lists stay start-aligned inside the centered
     // band; a centered rag on markers or on item rows is a new defect.
@@ -521,13 +524,17 @@ test('scaffold-theme owns the guaranteed centered-stack alignment rule', functio
     assert_contains('text-align: start', $items['body']);
 
     $matched = preg_match(
-        '~' . preg_quote($hook, '~') . '\s+:is\(ul, ol\)\s*\{(?<body>[^}]*)\}~',
+        '~' . preg_quote($hook, '~') . '\s+:is\(ul, ol\)(?<guards>[^{]*)\{(?<body>[^}]*)\}~',
         $css,
         $lists
     );
     assert_eq(1, $matched, 'the list exemption exists');
     assert_contains('text-align: start', $lists['body']);
     assert_contains('margin-inline: auto', $lists['body'], 'the list block itself still centers');
+    // BIGR-952 review follow-up: a list inside an exempted item row must not
+    // take the fit-content centering, or it centers inside the start-aligned
+    // row.
+    assert_contains(':not(.item-pattern__item *)', $lists['guards'], 'a list inside an item row stays exempt');
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
