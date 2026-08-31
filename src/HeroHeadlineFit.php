@@ -7,7 +7,7 @@ namespace Automattic\SiteBuild;
  * Guarantees the hero headline is set at the masthead scale, and that its
  * longest word fits its copy measure.
  *
- * Two passes, in that order.
+ * Three passes, in that order.
  *
  * PROMOTION. The `display` preset exists for exactly one thing — the hero
  * masthead — and the hero model picks the H1's preset itself. When it picks
@@ -42,6 +42,19 @@ namespace Automattic\SiteBuild;
  * `min(var(--wp--preset--font-size--display), <cap>px)` — fluid behaviour
  * below the cap is untouched, and headings whose words already fit are left
  * byte-identical.
+ *
+ * LINE TARGET. Since BIGR-900 the hero model authors `display` on the H1
+ * itself, so the promotion above declines and its line-target bound stopped
+ * running for every delivered hero: the only remaining check was the
+ * single-word fit, which a headline of many short words sails past. The
+ * cohort showed the result — tbilisi and atlas (layered-poster, `dramatic`
+ * scale) rendered 9-word headlines at the full 128px display maximum, one
+ * to two lines past their 3- and 4-line blueprints (BIGR-951). So the
+ * masthead H1 is bounded by the blueprint's desktop line target even when
+ * it already authors `display`, with the same `min(display, <cap>px)` pin
+ * the promotion writes. A target no size above the pin threshold can hold
+ * stays unpinned: that target is already lost, and a sub-threshold masthead
+ * is worse than an extra wrapped line.
  *
  * Two deliberate limits:
  *
@@ -117,8 +130,8 @@ final class HeroHeadlineFit
 
     /**
      * @param list<int>|null $desktopLineTarget the blueprint's desktop
-     *        [min, max] headline line target; without it a promoted heading
-     *        gets the plain preset and only the word-fit pass bounds it.
+     *        [min, max] headline line target; without it only the word-fit
+     *        pass bounds the headline.
      * @return array{markup:string, notes:list<string>}
      */
     public static function apply(string $markup, array $theme, ?array $desktopLineTarget = null): array
@@ -134,6 +147,7 @@ final class HeroHeadlineFit
 
         $notes = [];
         self::promoteMasthead($doc, $theme, $displayMax, $desktopLineTarget, $notes);
+        $masthead = self::mastheadIndex($doc);
         foreach ($doc->indices() as $i) {
             if ($doc->name($i) !== 'heading' || !$doc->isStructurallySafe($i)) {
                 continue;
@@ -148,16 +162,11 @@ final class HeroHeadlineFit
                 continue;
             }
             $fit = self::wordFit($doc, $i, $theme, $attrs, $displayMax);
-            if ($fit === null || $fit['cap'] === null) {
+            if ($fit === null) {
                 continue;
             }
-            $word = $fit['word'];
-            $chars = $fit['chars'];
-            $uppercase = $fit['uppercase'];
-            $wordEm = $fit['wordEm'];
-            $measure = $fit['measure'];
-            $cap = $fit['cap'];
-            if ($cap < self::MINIMUM_CAP_PX) {
+            $wordCap = $fit['cap'];
+            if ($wordCap !== null && $wordCap < self::MINIMUM_CAP_PX) {
                 // A word this long in a measure this narrow has no size worth
                 // pinning. This is the one case where a hyphen beats a bare
                 // mid-word snap, so opt this heading — and only this heading —
@@ -165,6 +174,26 @@ final class HeroHeadlineFit
                 self::optIntoHyphenation($doc, $i, $attrs, $fit, $notes);
                 continue;
             }
+            // The masthead authors `display` itself since BIGR-900, so the
+            // promotion above declines and its line-target bound never runs;
+            // apply the same bound here (BIGR-951). A target no size above
+            // the pin threshold can hold stays unpinned: that target is
+            // already lost, and a sub-threshold masthead is worse than an
+            // extra wrapped line.
+            $lineCap = $i === $masthead
+                ? self::lineTargetCapPx($doc, $i, $theme, $attrs, $desktopLineTarget, $displayMax)
+                : null;
+            if ($lineCap !== null && ($lineCap < self::MINIMUM_CAP_PX || $lineCap >= $displayMax)) {
+                $lineCap = null;
+            }
+            $caps = array_values(array_filter(
+                [$wordCap, $lineCap],
+                static fn (?int $value): bool => $value !== null,
+            ));
+            if ($caps === []) {
+                continue;
+            }
+            $cap = min($caps);
             // The preset class must go with the preset attr: WordPress
             // renders `.has-display-font-size` with !important, which would
             // beat the pinned inline size. The min() keeps the preset var,
@@ -176,20 +205,46 @@ final class HeroHeadlineFit
             );
             $doc->setAttrs($i, $attrs);
             $doc->removeClassTokenInOwnHtml($i, 'has-display-font-size');
-            $notes[] = sprintf(
-                "headline word-fit: '%s' (%d chars%s, ~%.2fem) cannot fit the %dpx measure at the display "
-                    . 'maximum %dpx; heading pinned to min(display, %dpx)',
-                $word,
-                $chars,
-                $uppercase ? ', uppercase' : '',
-                $wordEm,
-                (int) round($measure),
-                (int) round($displayMax),
-                $cap,
-            );
+            $notes[] = $cap === $wordCap
+                ? sprintf(
+                    "headline word-fit: '%s' (%d chars%s, ~%.2fem) cannot fit the %dpx measure at the display "
+                        . 'maximum %dpx; heading pinned to min(display, %dpx)',
+                    $fit['word'],
+                    $fit['chars'],
+                    $fit['uppercase'] ? ', uppercase' : '',
+                    $fit['wordEm'],
+                    (int) round($fit['measure']),
+                    (int) round($displayMax),
+                    $cap,
+                )
+                : sprintf(
+                    'headline line-fit: the headline cannot hold the desktop line target inside the %dpx '
+                        . 'measure at the display maximum %dpx; heading pinned to min(display, %dpx)',
+                    (int) round($fit['measure']),
+                    (int) round($displayMax),
+                    $cap,
+                );
         }
 
         return ['markup' => $doc->isMutated() ? $doc->render() : $markup, 'notes' => $notes];
+    }
+
+    /**
+     * The page's masthead: its FIRST level-1 heading, or null without one.
+     * The blueprint's line target describes this one heading, so no heading
+     * below it is line-bounded.
+     */
+    private static function mastheadIndex(BlockMarkup $doc): ?int
+    {
+        foreach ($doc->indices() as $i) {
+            if ($doc->name($i) !== 'heading') {
+                continue;
+            }
+            if ((int) (($doc->attrs($i) ?? [])['level'] ?? 2) === 1) {
+                return $i;
+            }
+        }
+        return null;
     }
 
     /**
@@ -689,6 +744,16 @@ final class HeroHeadlineFit
     private static function measurePx(BlockMarkup $doc, int $heading, array $theme): ?float
     {
         $share = 1.0;
+        // A constrained ancestor with NO contentSize of its own still
+        // constrains: core caps its children at the theme's global content
+        // size. atlas walked past its copy group to the cover's poster-wide
+        // 1560px contentSize while the group rendered the h1 at 960px, so
+        // the line bound cleared a measure half again as wide as the real
+        // one (BIGR-951). Record the cap such a group imposes at its depth,
+        // and never return a measure above the tightest one seen.
+        $global = $theme['settings']['layout']['contentSize'] ?? null;
+        $globalPx = is_string($global) ? self::lengthPx($global) : null;
+        $globalCap = null;
         for ($i = $doc->parent($heading); $i !== null; $i = $doc->parent($i)) {
             $attrs = $doc->attrs($i) ?? [];
             $name = $doc->name($i);
@@ -698,14 +763,20 @@ final class HeroHeadlineFit
                 $size = $layout['contentSize'] ?? null;
                 $px = is_string($size) ? self::lengthPx($size) : null;
                 if ($px !== null) {
-                    return $px * $share;
+                    $measure = $px * $share;
+                    return $globalCap === null ? $measure : min($measure, $globalCap);
+                }
+                if ($globalPx !== null) {
+                    $capHere = $globalPx * $share;
+                    $globalCap = $globalCap === null ? $capHere : min($globalCap, $capHere);
                 }
             }
 
             $flexSize = $attrs['style']['layout']['flexSize'] ?? null;
             $px = is_string($flexSize) ? self::lengthPx($flexSize) : null;
             if ($px !== null) {
-                return $px * $share;
+                $measure = $px * $share;
+                return $globalCap === null ? $measure : min($measure, $globalCap);
             }
 
             if ($name === 'column') {
@@ -713,7 +784,13 @@ final class HeroHeadlineFit
                 if (is_string($width)) {
                     $px = self::lengthPx($width);
                     if ($px !== null) {
-                        return $px * $share;
+                        // A px-width column wider than a constrained group it
+                        // holds does not widen that group: core still caps the
+                        // group's children at the global content size, so the
+                        // cap recorded above binds here too (BIGR-951 review
+                        // follow-up).
+                        $measure = $px * $share;
+                        return $globalCap === null ? $measure : min($measure, $globalCap);
                     }
                     if (preg_match('/^([\d.]+)%$/', trim($width), $m) && (float) $m[1] > 0) {
                         $share *= (float) $m[1] / 100.0;
@@ -730,9 +807,11 @@ final class HeroHeadlineFit
             }
         }
 
-        $global = $theme['settings']['layout']['contentSize'] ?? null;
-        $px = is_string($global) ? self::lengthPx($global) : null;
-        return $px === null ? null : $px * $share;
+        if ($globalPx === null) {
+            return null;
+        }
+        $measure = $globalPx * $share;
+        return $globalCap === null ? $measure : min($measure, $globalCap);
     }
 
     private static function effectiveTransform(array $attrs, array $theme, int $level): ?string
