@@ -171,7 +171,7 @@ test('ProcessPool resolves an explicit relative executable from the child cwd', 
     assert_eq('relative-ok', trim($out['relative']['stdout']));
 });
 
-test('ProcessPool proc_open failure includes its underlying diagnostic', function (): void {
+test('ProcessPool refuses a missing working directory rather than running elsewhere', function (): void {
     $missingCwd = sys_get_temp_dir() . '/process-pool-missing-cwd-' . bin2hex(random_bytes(8));
     $out = ProcessPool::run(
         ['cwd' => ['argv' => [PHP_BINARY, '-r', 'echo "unreachable";'], 'cwd' => $missingCwd]],
@@ -179,13 +179,16 @@ test('ProcessPool proc_open failure includes its underlying diagnostic', functio
         2,
     );
 
+    // The outcome must not depend on the PHP version: 8.1's proc_open ignores a
+    // missing cwd and runs the child in the parent's directory, where 8.3+ fails
+    // the spawn. Asserting the child produced nothing is what separates the two.
     assert_true($out['cwd']['exit'] !== 0, 'bad cwd must fail');
-    assert_contains(PHP_BINARY, $out['cwd']['stderr']);
     assert_true(
-        str_contains(strtolower($out['cwd']['stderr']), 'no such file')
-            || str_contains(strtolower($out['cwd']['stderr']), 'chdir'),
-        'proc_open diagnostic was discarded',
+        !str_contains($out['cwd']['stdout'], 'unreachable'),
+        'the child ran despite a working directory that does not exist',
     );
+    assert_contains(PHP_BINARY, $out['cwd']['stderr']);
+    assert_contains($missingCwd, $out['cwd']['stderr']);
 });
 
 test('ProcessPool grandchild-held stdout preserves the direct child exit without timeout', function (): void {

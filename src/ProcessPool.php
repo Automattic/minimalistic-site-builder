@@ -47,10 +47,22 @@ final class ProcessPool
         $start = static function (string|int $key, array $job) use (&$live, $timeoutSeconds): void {
             $started = microtime(true);
             $requestedBinary = (string) ($job['argv'][0] ?? '');
+            $cwd = $job['cwd'] ?? null;
+            if ($cwd !== null && !is_dir($cwd)) {
+                // PHP 8.1's proc_open ignores a missing cwd and runs the child in
+                // the parent's directory; 8.3+ fails the spawn. Checked here so a
+                // job either runs where it asked to or does not run at all.
+                $live[$key] = [
+                    'failed' => "could not start child process '{$requestedBinary}': "
+                        . "working directory does not exist: {$cwd}",
+                    'start' => $started,
+                ];
+                return;
+            }
             $resolvedBinary = self::resolveExecutable(
                 $requestedBinary,
                 $job['env'] ?? null,
-                $job['cwd'] ?? null,
+                $cwd,
             );
             if ($resolvedBinary === null) {
                 $name = $requestedBinary === '' ? '(empty argv[0])' : $requestedBinary;
@@ -72,7 +84,7 @@ final class ProcessPool
                 $job['argv'],
                 $descriptors,
                 $pipes,
-                $job['cwd'] ?? null,
+                $cwd,
                 $job['env'] ?? null,
             );
             if (!is_resource($proc)) {

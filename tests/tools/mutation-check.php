@@ -682,7 +682,7 @@ PHP,
             $resolvedBinary = self::resolveExecutable(
                 $requestedBinary,
                 $job['env'] ?? null,
-                $job['cwd'] ?? null,
+                $cwd,
             );
             if ($resolvedBinary === null) {
                 $name = $requestedBinary === '' ? '(empty argv[0])' : $requestedBinary;
@@ -695,6 +695,16 @@ PHP,
             $job['argv'][0] = $resolvedBinary;
 PHP,
         '',
+    ],
+    [
+        '28b missing working directory is left to the platform',
+        'src/ProcessPool.php',
+        <<<'PHP'
+            if ($cwd !== null && !is_dir($cwd)) {
+PHP,
+        <<<'PHP'
+            if (false) {
+PHP,
     ],
     [
         '29 Claude argv omits the pinned model',
