@@ -11,8 +11,13 @@ namespace Automattic\SiteBuild;
  * enforces. Profile stylesheets own motion timing and choreography; generated
  * page CSS cannot override them.
  *
- * Keep the class lists in sync with assets/motion/motion.css and the "Motion
- * classes" section of prompts/section.md, where sections learn them.
+ * Keep the class lists in sync with every hand-written copy of the
+ * vocabulary: assets/motion/motion.css, the ENTRANCE_SELECTOR in
+ * assets/motion/motion.js, settleMotion() in bin/screenshot/screenshot.js,
+ * the effect-class list in src/AboveFoldPartFacts.php, and the prompts that
+ * teach the classes (section.md, hero.md, design-direction.md,
+ * page-styles.md, theme-json.md). motion_assets_test.php pins the two JS
+ * selector copies to SCROLL_CLASSES.
  */
 final class Motion
 {

@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\Motion;
+
 /**
  * Static motion assets are the executable profile contract. PageStyles must
  * not be able to flatten these choices after the profile stylesheet loads.
@@ -418,8 +420,13 @@ test('motion kit moves only vertically and never springs past rest', function ()
     assert_true(!str_contains($withoutComments, 'translatex('), 'no keyframe or rule translates horizontally');
     assert_true(!str_contains($withoutComments, 'translate3d('), 'no keyframe hides horizontal travel inside translate3d');
     assert_true(!str_contains($withoutComments, 'rotate('), 'no keyframe rotates content');
-    foreach (preg_match_all('/background-position:\s*([\d.]+%)/', $withoutComments, $m) ? $m[1] : [] as $x) {
-        assert_eq('50%', $x, 'gradient drift holds its horizontal position');
+    // Parse the whole background-position value so a keyword form (`left`,
+    // `right center`) cannot slip past a digits-only pattern.
+    preg_match_all('/background-position:\s*([^;}]+)/', $withoutComments, $m);
+    assert_true(count($m[1]) > 0, 'gradient keyframes declare background-position');
+    foreach ($m[1] as $position) {
+        $parts = preg_split('/\s+/', trim($position)) ?: [];
+        assert_eq('50%', $parts[0] ?? '', 'gradient drift holds its horizontal position');
     }
 
     // Masks may only wipe vertically: every animated clip-path keeps its left
@@ -430,6 +437,31 @@ test('motion kit moves only vertically and never springs past rest', function ()
         if (count($parts) === 4) {
             assert_eq('0', $parts[1], 'clip mask keeps its right inset at zero');
             assert_eq('0', $parts[3], 'clip mask keeps its left inset at zero');
+        }
+    }
+});
+
+test('the JS driver and the screenshot harness observe every entrance class', function () {
+    // Motion::SCROLL_CLASSES is the source of the entrance vocabulary, but
+    // motion.js (ENTRANCE_SELECTOR) and bin/screenshot/screenshot.js
+    // (settleMotion) each keep a hand-written selector copy. A class missing
+    // from motion.js never reveals; a class missing from settleMotion lets a
+    // full-page screenshot capture a section that is still at opacity:0.
+    $sources = [
+        'assets/motion/motion.js',
+        'bin/screenshot/screenshot.js',
+    ];
+    foreach ($sources as $file) {
+        $js = (string) file_get_contents(repo_path($file));
+        foreach (Motion::SCROLL_CLASSES as $class) {
+            if ($class === 'hero-entrance') {
+                continue; // pure CSS on load; neither file needs to observe it
+            }
+            $needle = $class === 'stagger-children' ? '.stagger-children > *' : ".{$class}";
+            assert_true(
+                preg_match('/' . preg_quote($needle, '/') . '(?![\w-])/', $js) === 1,
+                "{$file} observes {$needle}"
+            );
         }
     }
 });
