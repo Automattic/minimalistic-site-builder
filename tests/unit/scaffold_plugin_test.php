@@ -266,10 +266,12 @@ if (!function_exists('get_option')) {
         $ext = strtolower((string) pathinfo($file, PATHINFO_EXTENSION));
         return ['ext' => $ext, 'type' => $ext === 'png' ? 'image/png' : 'image/jpeg'];
     }
+    // Routes through wp_insert_post() in core, so it shares the slash
+    // contract: expects slashed data, unslashes before it stores.
     function wp_insert_attachment(array $args, string $file): int
     {
         $id = $GLOBALS['wp_next_id']++;
-        $GLOBALS['wp_attachments'][$id] = $args + ['file' => $file];
+        $GLOBALS['wp_attachments'][$id] = wp_unslash($args) + ['file' => $file];
         return $id;
     }
     function wp_generate_attachment_metadata(int $id, string $file): array
@@ -618,7 +620,9 @@ test('the seeder plugin creates, fronts, and removes the site pages', function (
     // but absent (a build without --with-images), so it must fall back to the
     // theme's assets URL.
     $project->writeJson('plugin/images.json', ['images' => [
-        ['filename' => 'hero.jpg', 'title' => 'A bakery at dawn'],
+        // The backslash probes the slash contract: without wp_slash() around
+        // wp_insert_attachment(), the unslash inside core eats it (BIGR-960).
+        ['filename' => 'hero.jpg', 'title' => 'A bakery at dawn \\ dusk'],
         ['filename' => 'never-generated.jpg', 'title' => 'Skipped'],
     ]]);
     $project->writeText('plugin/images/hero.jpg', 'JPEGDATA');
@@ -677,7 +681,7 @@ test('the seeder plugin creates, fronts, and removes the site pages', function (
     assert_eq(1, count($GLOBALS['wp_attachments']), 'one bundled image imported');
     $attId = array_keys($GLOBALS['wp_attachments'])[0];
     $att = $GLOBALS['wp_attachments'][$attId];
-    assert_eq('A bakery at dawn', $att['post_title']);
+    assert_eq('A bakery at dawn \\ dusk', $att['post_title'], 'title backslash survives the insert');
     assert_eq('inherit', $att['post_status']);
     assert_eq(['file' => 'hero.jpg'], $att['meta'], 'attachment metadata generated');
 

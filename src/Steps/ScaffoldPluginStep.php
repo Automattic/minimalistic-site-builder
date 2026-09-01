@@ -333,12 +333,15 @@ final class ScaffoldPluginStep implements Step
                 }
 
                 $type = wp_check_filetype($upload['file']);
-                $attachment_id = wp_insert_attachment(array(
+                // wp_insert_attachment() routes through wp_insert_post(), so it
+                // expects slashed data too; a backslash in an images.json title
+                // would otherwise be eaten by the unslash inside core.
+                $attachment_id = wp_insert_attachment(wp_slash(array(
                     'post_mime_type' => !empty($type['type']) ? (string) $type['type'] : 'image/jpeg',
                     'post_title'     => isset($image['title']) && $image['title'] !== '' ? (string) $image['title'] : $filename,
                     'post_status'    => 'inherit',
                     'meta_input'     => array('_wpcom_ai_generated_post' => '1'),
-                ), $upload['file']);
+                )), $upload['file']);
                 if (is_wp_error($attachment_id) || !$attachment_id) {
                     continue;
                 }
