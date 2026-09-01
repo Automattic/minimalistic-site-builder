@@ -23,16 +23,16 @@
     --motion-drift-keyframe: motion-calm-drift;
     --motion-ken-burns-keyframe: motion-calm-ken-burns;
     --motion-gradient-keyframe: motion-calm-gradient;
-    --motion-distance: 14px;
+    --motion-distance: 10px;
     --motion-stagger: 150ms;
     --motion-scale-from: 0.99;
-    --motion-blur-amount: 5px;
-    --motion-zoom-from: 1.025;
+    --motion-blur-amount: 4px;
+    --motion-zoom-from: 1.02;
     --motion-hero-scale-from: 0.997;
-    --motion-ken-burns-scale: 1.045;
-    --motion-ambient-distance: 8px;
-    --motion-hover-lift: -3px;
-    --motion-hover-scale: 1.025;
-    --motion-hover-brightness: 0.94;
-    --motion-hover-shadow-opacity: 0.16;
+    --motion-ken-burns-scale: 1.035;
+    --motion-ambient-distance: 6px;
+    --motion-hover-lift: -2px;
+    --motion-hover-scale: 1.02;
+    --motion-hover-brightness: 0.95;
+    --motion-hover-shadow-opacity: 0.12;
 }

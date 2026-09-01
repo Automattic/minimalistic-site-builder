@@ -25,16 +25,16 @@
     --motion-drift-keyframe: motion-dramatic-drift;
     --motion-ken-burns-keyframe: motion-dramatic-ken-burns;
     --motion-gradient-keyframe: motion-dramatic-gradient;
-    --motion-distance: 30px;
+    --motion-distance: 22px;
     --motion-stagger: 150ms;
-    --motion-scale-from: 0.96;
-    --motion-blur-amount: 8px;
-    --motion-zoom-from: 1.05;
-    --motion-hero-scale-from: 1.02;
-    --motion-ken-burns-scale: 1.08;
-    --motion-ambient-distance: 14px;
-    --motion-hover-lift: -5px;
-    --motion-hover-scale: 1.04;
-    --motion-hover-brightness: 0.82;
-    --motion-hover-shadow-opacity: 0.3;
+    --motion-scale-from: 0.97;
+    --motion-blur-amount: 6px;
+    --motion-zoom-from: 1.035;
+    --motion-hero-scale-from: 1.015;
+    --motion-ken-burns-scale: 1.06;
+    --motion-ambient-distance: 10px;
+    --motion-hover-lift: -3px;
+    --motion-hover-scale: 1.03;
+    --motion-hover-brightness: 0.86;
+    --motion-hover-shadow-opacity: 0.24;
 }
