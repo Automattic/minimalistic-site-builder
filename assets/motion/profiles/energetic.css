@@ -17,6 +17,9 @@
     --motion-scale-keyframe: motion-energetic-scale;
     --motion-blur-keyframe: motion-kit-blur;
     --motion-wipe-keyframe: motion-kit-wipe;
+    --motion-wipe-up-keyframe: motion-kit-wipe-up;
+    --motion-aperture-keyframe: motion-kit-aperture;
+    --motion-zoom-keyframe: motion-kit-zoom;
     --motion-hero-keyframe: motion-energetic-hero;
     --motion-stagger-keyframe: motion-energetic-rise;
     --motion-drift-keyframe: motion-energetic-drift;
@@ -26,6 +29,7 @@
     --motion-stagger: 80ms;
     --motion-scale-from: 0.97;
     --motion-blur-amount: 4px;
+    --motion-zoom-from: 1.04;
     --motion-hero-scale-from: 0.98;
     --motion-ken-burns-scale: 1.06;
     --motion-ambient-distance: 12px;

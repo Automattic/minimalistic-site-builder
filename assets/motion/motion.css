@@ -49,6 +49,9 @@
     --motion-scale-keyframe: motion-calm-scale;
     --motion-blur-keyframe: motion-kit-blur;
     --motion-wipe-keyframe: motion-kit-wipe;
+    --motion-wipe-up-keyframe: motion-kit-wipe-up;
+    --motion-aperture-keyframe: motion-kit-aperture;
+    --motion-zoom-keyframe: motion-kit-zoom;
     --motion-hero-keyframe: motion-calm-hero;
     --motion-stagger-keyframe: motion-calm-rise;
     --motion-drift-keyframe: motion-calm-drift;
@@ -58,6 +61,7 @@
     --motion-stagger: 160ms;
     --motion-scale-from: 0.97;
     --motion-blur-amount: 6px;
+    --motion-zoom-from: 1.03;
     --motion-hero-scale-from: 0.98;
     --motion-ken-burns-scale: 1.06;
     --motion-ambient-distance: 12px;
@@ -81,6 +85,9 @@
     html.motion-js:not(.motion-ready) .reveal-scale,
     html.motion-js:not(.motion-ready) .reveal-blur,
     html.motion-js:not(.motion-ready) .reveal-wipe,
+    html.motion-js:not(.motion-ready) .reveal-wipe-up,
+    html.motion-js:not(.motion-ready) .reveal-aperture,
+    html.motion-js:not(.motion-ready) .reveal-zoom,
     html.motion-js:not(.motion-ready) .stagger-children > *,
     html.motion-js.motion-ready .reveal.motion-target:not(.is-visible),
     html.motion-js.motion-ready .reveal-up.motion-target:not(.is-visible),
@@ -88,6 +95,9 @@
     html.motion-js.motion-ready .reveal-scale.motion-target:not(.is-visible),
     html.motion-js.motion-ready .reveal-blur.motion-target:not(.is-visible),
     html.motion-js.motion-ready .reveal-wipe.motion-target:not(.is-visible),
+    html.motion-js.motion-ready .reveal-wipe-up.motion-target:not(.is-visible),
+    html.motion-js.motion-ready .reveal-aperture.motion-target:not(.is-visible),
+    html.motion-js.motion-ready .reveal-zoom.motion-target:not(.is-visible),
     html.motion-js.motion-ready .stagger-children > *.motion-target:not(.is-visible) {
         opacity: 0;
     }
@@ -134,6 +144,27 @@
         animation-timing-function: var(--motion-enter-ease);
         animation-fill-mode: backwards;
     }
+    html.motion-js .reveal-wipe-up.motion-target.is-visible {
+        opacity: 1;
+        animation-name: var(--motion-wipe-up-keyframe);
+        animation-duration: var(--motion-enter-duration);
+        animation-timing-function: var(--motion-enter-ease);
+        animation-fill-mode: backwards;
+    }
+    html.motion-js .reveal-aperture.motion-target.is-visible {
+        opacity: 1;
+        animation-name: var(--motion-aperture-keyframe);
+        animation-duration: var(--motion-enter-duration);
+        animation-timing-function: var(--motion-enter-ease);
+        animation-fill-mode: backwards;
+    }
+    html.motion-js .reveal-zoom.motion-target.is-visible {
+        opacity: 1;
+        animation-name: var(--motion-zoom-keyframe);
+        animation-duration: var(--motion-enter-duration);
+        animation-timing-function: var(--motion-enter-ease);
+        animation-fill-mode: backwards;
+    }
 
     /* Staggered card/column reveals: the CONTAINER carries the authored class,
        while motion.js observes each direct child. Cards that share a row enter
@@ -169,6 +200,34 @@
         }
         40% { opacity: 1; }
         to { opacity: 1; clip-path: inset(0); }
+    }
+    /* Inverse curtain: the content is unmasked bottom-to-top in place. */
+    @keyframes motion-kit-wipe-up {
+        from {
+            opacity: 0;
+            clip-path: inset(100% 0 0 0);
+        }
+        40% { opacity: 1; }
+        to { opacity: 1; clip-path: inset(0); }
+    }
+    /* Letterbox: the mask opens from the vertical center to both edges. */
+    @keyframes motion-kit-aperture {
+        from {
+            opacity: 0;
+            clip-path: inset(50% 0 50% 0);
+        }
+        40% { opacity: 1; }
+        to { opacity: 1; clip-path: inset(0); }
+    }
+    /* Zoom settle: arrives slightly enlarged and eases down to rest —
+       the inverse of reveal-scale, suited to photography and covers. */
+    @keyframes motion-kit-zoom {
+        from {
+            opacity: 0;
+            transform: scale(var(--motion-zoom-from));
+        }
+        40% { opacity: 1; }
+        to { opacity: 1; transform: none; }
     }
 
     /* Calm: soft fades and measured settling. */
@@ -312,6 +371,9 @@
     .reveal-scale.motion-skip,
     .reveal-blur.motion-skip,
     .reveal-wipe.motion-skip,
+    .reveal-wipe-up.motion-skip,
+    .reveal-aperture.motion-skip,
+    .reveal-zoom.motion-skip,
     .stagger-children > *.motion-skip,
     .hero-entrance.motion-skip {
         opacity: 1 !important;
@@ -326,6 +388,9 @@
     html.motion-js .reveal-scale:focus-within,
     html.motion-js .reveal-blur:focus-within,
     html.motion-js .reveal-wipe:focus-within,
+    html.motion-js .reveal-wipe-up:focus-within,
+    html.motion-js .reveal-aperture:focus-within,
+    html.motion-js .reveal-zoom:focus-within,
     html.motion-js .stagger-children > *:focus-within,
     .hero-entrance:focus-within {
         opacity: 1 !important;

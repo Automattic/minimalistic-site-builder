@@ -44,6 +44,9 @@ function fakeElement(classes, top, parent, left) {
                 || this.classList.contains('reveal-scale')
                 || this.classList.contains('reveal-blur')
                 || this.classList.contains('reveal-wipe')
+                || this.classList.contains('reveal-wipe-up')
+                || this.classList.contains('reveal-aperture')
+                || this.classList.contains('reveal-zoom')
                 || Boolean(this.parentElement
                     && this.parentElement.classList
                     && this.parentElement.classList.contains('stagger-children'));
