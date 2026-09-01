@@ -142,10 +142,26 @@ if (!function_exists('get_option')) {
         unset($GLOBALS['wp_options'][$key]);
         return true;
     }
+    function wp_slash($value)
+    {
+        if (is_array($value)) {
+            return array_map('wp_slash', $value);
+        }
+        return is_string($value) ? addslashes($value) : $value;
+    }
+    function wp_unslash($value)
+    {
+        if (is_array($value)) {
+            return array_map('wp_unslash', $value);
+        }
+        return is_string($value) ? stripslashes($value) : $value;
+    }
+    // Like core, expects slashed data and unslashes before it stores — this
+    // is what eats the backslashes when a caller forgets wp_slash().
     function wp_insert_post(array $post, bool $wp_error = false): int
     {
         $id = $GLOBALS['wp_next_id']++;
-        $GLOBALS['wp_posts'][$id] = $post;
+        $GLOBALS['wp_posts'][$id] = wp_unslash($post);
         return $id;
     }
     function wp_delete_post(int $id, bool $force = false): bool
@@ -155,6 +171,7 @@ if (!function_exists('get_option')) {
     }
     function wp_update_post(array $post): int
     {
+        $post = wp_unslash($post);
         $id = (int) ($post['ID'] ?? 0);
         if (isset($GLOBALS['wp_posts'][$id])) {
             $GLOBALS['wp_posts'][$id] = array_merge($GLOBALS['wp_posts'][$id], $post);
@@ -574,7 +591,12 @@ test('the seeder plugin creates, fronts, and removes the site pages', function (
         ['slug' => 'menu', 'title' => 'Menu', 'front' => false, 'menu_order' => 10, 'parent' => null],
         ['slug' => 'breads', 'title' => 'Breads', 'front' => false, 'menu_order' => 20, 'parent' => 'menu'],
     ]]);
-    $project->writeText('plugin/pages/home.html', '<!-- wp:heading --><h2>Welcome</h2><!-- /wp:heading -->' . "\n"
+    // The H1 attribute carries the \u002d\u002d escapes the serializer
+    // writes for `--` inside block-comment JSON; the seeder must store them
+    // byte-for-byte or the editor fails block validation (BIGR-960).
+    $project->writeText('plugin/pages/home.html', '<!-- wp:heading {"level":1,"style":{"typography":{"fontSize":"min(var(\u002d\u002dwp\u002d\u002dpreset\u002d\u002dfont-size\u002d\u002ddisplay), 88px)"}}} -->'
+        . '<h1 class="wp-block-heading" style="font-size:min(var(--wp--preset--font-size--display), 88px)">Pull Up A Stool</h1><!-- /wp:heading -->' . "\n"
+        . '<!-- wp:heading --><h2>Welcome</h2><!-- /wp:heading -->' . "\n"
         . '<!-- wp:image {"sizeSlug":"full"} --><figure class="wp-block-image size-full">'
         . '<img src="theme:./assets/hero.jpg" alt="AI_IMAGE: a bakery | hero | photo | landscape"/></figure><!-- /wp:image -->' . "\n"
         . '<!-- wp:cover {"url":"theme:./assets/hero.jpg"} -->'
@@ -660,6 +682,12 @@ test('the seeder plugin creates, fronts, and removes the site pages', function (
     assert_eq(['file' => 'hero.jpg'], $att['meta'], 'attachment metadata generated');
 
     $home = $byName['home']['post_content'];
+    // The block-comment escapes for `--` keep their backslashes. Without
+    // wp_slash() around the insert, wp_insert_post() strips them, the stored
+    // attribute reads "u002du002d", and the editor fails block validation
+    // (BIGR-960).
+    assert_contains('min(var(\u002d\u002dwp', $home);
+    assert_true(!str_contains($home, 'var(u002d'), 'escape backslashes survive the insert');
     // The wp:image block carries the attachment id (unknown until import) and
     // the paired wp-image class, and loads from the media library.
     assert_contains('"id":' . $attId, $home);
