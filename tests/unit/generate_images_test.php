@@ -1379,6 +1379,35 @@ test('headerTitleInkHex follows the site-title color, inherited from the header'
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('headerBackgroundHex follows the header background, falling back to base', function () {
+    $tmp = sys_get_temp_dir() . '/builder_gi_bg_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('theme/theme.json', [
+        'version' => 3,
+        'settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#171717'],
+            ['slug' => 'contrast', 'color' => '#F4F1EA'],
+            ['slug' => 'accent', 'color' => '#8A5A2B'],
+        ]]],
+    ]);
+    $project->writeText(
+        'theme/parts/header.html',
+        '<!-- wp:group {"backgroundColor":"accent","textColor":"contrast"} -->'
+        . '<div class="wp-block-group"><!-- wp:site-title /--></div><!-- /wp:group -->'
+    );
+    assert_eq('#8A5A2B', GenerateImagesStep::headerBackgroundHex($project));
+
+    // No backgroundColor anywhere: the icon ground falls back to base, which is
+    // what an unstyled header paints.
+    $project->writeText(
+        'theme/parts/header.html',
+        '<!-- wp:group --><div class="wp-block-group"><!-- wp:site-title /--></div><!-- /wp:group -->'
+    );
+    assert_eq('#171717', GenerateImagesStep::headerBackgroundHex($project));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('generate-images recolors a site-logo to the header title ink', function () {
     if (!\Automattic\SiteBuild\ImageTransparency::available()) {
         skip_test('imagick not loaded');
@@ -1424,6 +1453,106 @@ test('generate-images recolors a site-logo to the header title ink', function ()
     assert_true($px->getColorValue(Imagick::COLOR_RED) > 0.95, 'white title → white mark');
     assert_true($px->getColorValue(Imagick::COLOR_GREEN) > 0.95);
     assert_true($px->getColorValue(Imagick::COLOR_BLUE) > 0.95);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images ships an opaque site icon beside the transparent logo', function () {
+    if (!\Automattic\SiteBuild\ImageTransparency::available()) {
+        skip_test('imagick not loaded');
+    }
+    [$project, $tmp] = generate_fixture();
+    $mark = \Automattic\SiteBuild\ImageTransparency::keyOutBackground(
+        gi_png_fixture('white', 'red', 60, 60)
+    );
+    $project->writeJson('theme/theme.json', [
+        'version' => 3,
+        'settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#111111'],
+            ['slug' => 'contrast', 'color' => '#FFFFFF'],
+        ]]],
+    ]);
+    $project->writeText(
+        'theme/parts/header.html',
+        '<!-- wp:group {"backgroundColor":"base","textColor":"contrast"} -->'
+        . '<div class="wp-block-group"><!-- wp:site-title /--></div><!-- /wp:group -->'
+    );
+    $project->writeJson('images.json', [[
+        'filename' => 'site-logo.png',
+        'src' => 'theme:./assets/site-logo.png',
+        'subject' => 'simple geometric brand mark for bakery, no letters',
+        'pageContext' => 'site logo',
+        'style' => 'flat',
+        'aspectRatio' => 'square',
+        'status' => 'pending',
+        'sources' => [],
+        'role' => 'site-logo',
+    ]]);
+    $project->writeJson('plugin/images.json', ['images' => [
+        ['filename' => 'site-logo.png', 'title' => 'Site logo', 'role' => 'site-logo'],
+    ]]);
+
+    (new GenerateImagesStep(new FakeImageClient($mark)))->run($project);
+
+    // The logo stays transparent: the header composites it over its own bar.
+    $logo = $project->readText('theme/assets/site-logo.png');
+    assert_true(\Automattic\SiteBuild\ImageTransparency::isKeyed($logo), 'the logo keeps its transparency');
+
+    // The icon does not: a transparent favicon vanishes on a light tab.
+    assert_true($project->exists('theme/assets/site-icon.png'), 'a site icon is generated');
+    $icon = $project->readText('theme/assets/site-icon.png');
+    assert_eq(gi_png_size($logo), gi_png_size($icon), 'icon matches the padded square');
+    $im = new Imagick();
+    $im->readImageBlob($icon);
+    $corner = $im->getImagePixelColor(0, 0);
+    assert_true($corner->getColorValue(Imagick::COLOR_ALPHA) > 0.99, 'the icon is opaque');
+    assert_true($corner->getColorValue(Imagick::COLOR_RED) < 0.15, 'ground is the dark header background');
+    $centre = $im->getImagePixelColor(
+        intdiv($im->getImageWidth(), 2),
+        intdiv($im->getImageHeight(), 2),
+    );
+    assert_true($centre->getColorValue(Imagick::COLOR_RED) > 0.95, 'the mark keeps the white title ink');
+
+    assert_true($project->exists('plugin/images/site-icon.png'), 'the icon ships with the plugin');
+    $roles = [];
+    foreach ($project->readJson('plugin/images.json')['images'] as $row) {
+        $roles[$row['filename']] = ['role' => $row['role'] ?? null, 'title' => $row['title'] ?? null];
+    }
+    assert_eq('site-logo', $roles['site-logo.png']['role'] ?? null);
+    assert_eq('site-icon', $roles['site-icon.png']['role'] ?? null);
+    assert_eq('Site icon', $roles['site-icon.png']['title'] ?? null);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images ships no site icon when the mark was dropped', function () {
+    if (!\Automattic\SiteBuild\ImageTransparency::available()) {
+        skip_test('imagick not loaded');
+    }
+    [$project, $tmp] = generate_fixture();
+    $project->writeJson('images.json', [[
+        'filename' => 'site-logo.png',
+        'src' => 'theme:./assets/site-logo.png',
+        'subject' => 'simple geometric brand mark for bakery, no letters',
+        'pageContext' => 'site logo',
+        'style' => 'flat',
+        'aspectRatio' => 'square',
+        'status' => 'pending',
+        'sources' => [],
+        'role' => 'site-logo',
+    ]]);
+    $project->writeJson('plugin/images.json', ['images' => [
+        ['filename' => 'site-logo.png', 'title' => 'Site logo', 'role' => 'site-logo'],
+    ]]);
+    // An opaque render: the key wipes out, the role is dropped, and an icon
+    // built from it would be a flat rectangle of header background.
+    (new GenerateImagesStep(new FakeImageClient(gi_png_fixture('white', 'white', 40, 40))))->run($project);
+
+    assert_true(!$project->exists('theme/assets/site-icon.png'), 'no icon without a usable mark');
+    assert_true(!$project->exists('plugin/images/site-icon.png'));
+    foreach ($project->readJson('plugin/images.json')['images'] as $row) {
+        assert_true(($row['role'] ?? '') !== 'site-icon', 'no icon row reaches the seeder');
+    }
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

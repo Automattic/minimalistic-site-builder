@@ -5,7 +5,7 @@
 
 ## Goal
 
-For business-like sites, generate one small square brand mark during image generation, import it into the media library, and set it as both the WordPress custom logo and the site icon. In the header, the mark replaces the site title while it is set; if the mark is missing or later removed, the title shows again. The footer still shows the site title.
+For business-like sites, generate one small square brand mark during image generation, import it into the media library, and set it as the WordPress custom logo. A flattened, opaque copy of the same mark becomes the site icon. In the header, the mark replaces the site title while it is set; if the mark is missing or later removed, the title shows again. The footer still shows the site title.
 
 ## Scope
 
@@ -28,12 +28,15 @@ assemble-pages
 generate-images
     → key out white, square-pad the mark
     → recolor the ink to the header site-title color (the same token the name uses)
-    → write theme/assets/site-logo.png
+    → write theme/assets/site-logo.png (transparent, for custom_logo)
+    → flatten a copy onto the header background
+    → write theme/assets/site-icon.png (opaque, for site_icon)
     → opaque (keying wiped out)? drop the role row, ship nothing
     → copy surviving manifest files to plugin/images/
 plugin activation
     → import (plugin/images/, else theme/assets/)
-    → custom_logo + site_icon = that attachment
+    → custom_logo = the site-logo attachment
+    → site_icon   = the site-icon attachment
     → CSS hides header site-title while the injected mark renders an img
 ```
 
@@ -132,9 +135,15 @@ When `isKeyed()` is false for the site-logo role: warn, `unset($specs[$i]['role'
 
 `images.json` is written (`writeJsonAtomic`, `GenerateImagesStep.php:247`) immediately before `shipPluginImages()` runs, so the role is already current by then.
 
-### Known limitation
+### Site icon: a second, opaque file
 
-The single attachment stays transparent, which is right for the header mark and fine for a browser tab. iOS composites a transparent Apple touch icon onto black. Shipping a second, flattened `site-icon.png` would mean a second attachment and a second manifest role; not worth it for this change.
+`custom_logo` and `site_icon` want opposite things, and the recolor is what forces the issue. The header composites the mark over its own bar, so the logo must stay transparent and must carry the title's ink — a dark mark on a dark header is the bug the recolor fixed. A browser tab has no bar behind it: that same light mark on transparency is invisible in light mode, and iOS composites a transparent touch icon onto black.
+
+So the icon is its own file. After the recolor, `ImageTransparency::flattenOver()` composites the square mark onto the header's **background** colour (`GenerateImagesStep::headerBackgroundHex()`, the `backgroundColor` sibling of the ink walk, falling back to `base`) and drops the alpha channel. The result is written to `theme/assets/site-icon.png`.
+
+The icon reads exactly as the header reads — same ink, same ground — wherever the tab paints it. One generation, one recolor, two files.
+
+No icon is produced when the mark was dropped, or when the header background cannot be resolved. In that case `site_icon` is left untouched: an unset icon is better than an invisible one, and the transparent mark is never borrowed for it.
 
 ## plugin/images.json
 
@@ -144,7 +153,10 @@ Each manifest row:
 
 ```json
 { "filename": "site-logo.png", "title": "Site logo", "role": "site-logo" }
+{ "filename": "site-icon.png", "title": "Site icon", "role": "site-icon" }
 ```
+
+`assemble-pages` unions only the `site-logo` row. The icon has no `images.json` spec — it is derived in `generate-images` after the mark survives keying — so `shipPluginImages()` appends its row, and only alongside a surviving logo row.
 
 The title is fixed, not the subject. `title` becomes the attachment's `post_title` at import (`ScaffoldPluginStep.php:331`), and the subject is prompt prose — "simple geometric brand mark for a neighborhood bakery, warm rustic mood, single ink, no letters…" is a bad media-library title.
 
@@ -197,18 +209,14 @@ Footer uses a `footer` landmark and is unaffected. Tagline is not hidden. Removi
 
 1. Import as today (`wp_upload_bits`, `wp_insert_attachment`, `_wpcom_ai_generated_post`, attachment metadata).
 2. File path: `plugin/images/{basename}` if present, else `get_stylesheet_directory() . '/assets/' . {basename}`. Both roots get the **same** guards the single root has today (`ScaffoldPluginStep.php:305-321`): basename-only, `/^[a-z0-9-]+\.(?:jpe?g|png)$/i`, and a `realpath()` that must still sit inside the root it was resolved against. The theme fallback is a second allowed root, not a relaxation. Theme is activated before this plugin on wpcom (`wp theme activate` then `wp plugin activate`).
-3. After a successful import of a row with `role === 'site-logo'`, record on the plugin state before writing anything:
-   - `changed_logo => true`
-   - `logo_attachment_id => $attachment_id`
-   - `custom_logo => get_theme_mod('custom_logo')` (null when unset)
-   - `site_icon => get_option('site_icon')`
-
-   then `set_theme_mod('custom_logo', $attachment_id)` and `update_option('site_icon', $attachment_id)`.
-4. Same attachment id for both.
+3. After a successful import, walk the map once and act per role, recording the previous value before writing:
+   - `role === 'site-logo'` → `changed_logo => true`, `logo_attachment_id`, `custom_logo => get_theme_mod('custom_logo')`, then `set_theme_mod('custom_logo', $id)`.
+   - `role === 'site-icon'` → `changed_logo => true`, `icon_attachment_id`, `site_icon => get_option('site_icon')`, then `update_option('site_icon', $id)`.
+4. Two attachment ids, never shared. With no `site-icon` row, `site_icon` is left untouched — the transparent mark is not borrowed for it.
 
 On deactivation, **before** the `wp_delete_attachment()` loop (`ScaffoldPluginStep.php:653-656`), so no mod ever points at a deleted id:
 
-- When `changed_logo` is set, restore `custom_logo` and `site_icon` independently: each is restored only while its live value still equals `logo_attachment_id`. An owner who changed only the site icon keeps that icon; the still-owned logo is cleared so the upcoming attachment delete cannot leave a dangling theme mod. This is the shape `changed_front` already uses for the front-page restore (`ScaffoldPluginStep.php:684`), extended with a per-setting ownership check because a logo, unlike the front page, is a thing owners routinely change.
+- When `changed_logo` is set, restore `custom_logo` and `site_icon` independently: each is restored only while its live value still equals **its own** recorded id (`logo_attachment_id` / `icon_attachment_id`). An owner who changed only the site icon keeps that icon; the still-owned logo is cleared so the upcoming attachment delete cannot leave a dangling theme mod. This is the shape `changed_front` already uses for the front-page restore (`ScaffoldPluginStep.php:684`), extended with a per-setting ownership check because a logo, unlike the front page, is a thing owners routinely change.
 - Restore the recorded `custom_logo` (`remove_theme_mod('custom_logo')` when there was none) and `site_icon` (`delete_option('site_icon')` when there was none).
 
 Then delete seeded attachments and pages as today.
@@ -228,6 +236,7 @@ Generated-content ladder: never abort the build for a missing or bad mark.
 | `site-logo.png` generate failed | existing generate-images warning; no file; no mods; title visible |
 | Keying wiped out (mark came back opaque) | warn; `role` dropped; manifest row removed; nothing shipped or imported; no mods; title visible |
 | Imagick unavailable | warn; `role` dropped; no mark shipped or imported; no mods; title visible |
+| Header background unresolvable | logo ships as usual; no `site-icon.png`; `site_icon` left untouched |
 | Import failed | no mods; title visible; no extra abort |
 | Header missing | warn; continue |
 
@@ -242,6 +251,9 @@ Suites: `tests/run.php` (unit) and `tests/run-integration.php` (integration). Bo
 - `ImageTransparency::padToSquare` centres a non-square bitmap on a transparent square at `max(w, h, 512)` without resampling, and returns its input unchanged on failure.
 - `ImageTransparency::isKeyed` is false for a fully opaque PNG, true for one with transparent corners, and true when those corners quantise to a small non-zero alpha (`< 0.01`).
 - `generate-images` square-pads only the `site-logo` role, and on an unkeyed mark drops the role, removes the manifest row, and does not copy the file.
+- `ImageTransparency::flattenOver` paints the mark onto an opaque ground and returns its input on a bad hex; `headerBackgroundHex` follows `backgroundColor` and falls back to `base`.
+- `generate-images` writes an opaque `site-icon.png` beside the transparent logo, ships it, and adds the `site-icon` manifest row; no icon is produced when the mark was dropped.
+- The seeder sets `custom_logo` and `site_icon` from **different** attachments, and leaves `site_icon` untouched when no `site-icon` row shipped.
 - `assemble-pages` puts the role-tagged row in `plugin/images.json` even when page HTML does not reference it; content-only images stay without `role`; the manifest title is `Site logo`; a content row whose filename is also tagged `site-logo` keeps its subject title and is not retagged.
 - `generate-images` ships `site-logo.png` to `plugin/images/` when the manifest lists it and the mark is keyed (same as `hero.jpg` today); drops the role and warns when Imagick is missing or the key never ran; leaves missing ordinary content rows in the manifest.
 - Scaffolded plugin PHP contains the theme-assets fallback with its own containment guard, the `custom_logo` / `site_icon` writes, and a deactivate restore that is skipped per setting when the live value no longer matches `logo_attachment_id` (changing only `site_icon` still restores `custom_logo`).
@@ -254,6 +266,5 @@ Suites: `tests/run.php` (unit) and `tests/run-integration.php` (integration). Bo
 - Easy Editor empty-logo placeholder UI.
 - wpcom delivery allowlist for `plugin/images/*`.
 - Wordmarks or letter-bearing logos.
-- A second, flattened `site-icon.png` attachment for iOS home screens.
 - Hiding footer `wp:site-title`.
 - New pipeline step or `postImages()` change.

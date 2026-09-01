@@ -49,6 +49,9 @@ final class GenerateImagesStep implements Step
     /** Written only once this step has completed all generation and rewrites. */
     public const COMPLETION_ARTIFACT = 'images.generated.json';
 
+    /** The opaque square derived from the keyed mark, for `site_icon` only. */
+    public const SITE_ICON_FILE = 'site-icon.png';
+
     /** Web-artifact wording is a design-comp cue, not subject matter. */
     private const WEB_ARTIFACT_CONTEXT = '/\b(?:web[- ]?sites?|web[- ]?pages?|home[- ]?pages?'
         . '|landing[- ]?(?:pages?|sites?)|(?:one|single)[- ]page\s+sites?'
@@ -121,13 +124,34 @@ final class GenerateImagesStep implements Step
      */
     public static function headerTitleInkHex(Project $project): ?string
     {
+        return self::headerPaletteHex($project, 'textColor', 'contrast');
+    }
+
+    /**
+     * Hex color the header bar paints behind the title — the ground the site
+     * icon is flattened onto. The mark is recolored to the title ink, so the
+     * icon needs that ink's own background to stay legible; a transparent
+     * favicon disappears on a light browser tab. Falls back to `base`, which
+     * is what an unstyled header paints.
+     */
+    public static function headerBackgroundHex(Project $project): ?string
+    {
+        return self::headerPaletteHex($project, 'backgroundColor', 'base');
+    }
+
+    /**
+     * One header color, resolved through theme.json: the slug the site-title
+     * inherits for $attr, else $fallbackSlug.
+     */
+    private static function headerPaletteHex(Project $project, string $attr, string $fallbackSlug): ?string
+    {
         if (!$project->exists('theme/theme.json') || !$project->exists('theme/parts/header.html')) {
             return null;
         }
         $palette = ContrastFixStep::paletteMap($project->readJson('theme/theme.json'));
-        $slug = self::headerTitleInkSlug($project->readText('theme/parts/header.html'));
+        $slug = self::headerIdentitySlug($project->readText('theme/parts/header.html'), $attr);
         if ($slug === '' || !isset($palette[$slug])) {
-            $slug = isset($palette['contrast']) ? 'contrast' : '';
+            $slug = isset($palette[$fallbackSlug]) ? $fallbackSlug : '';
         }
         if ($slug === '' || !isset($palette[$slug])) {
             return null;
@@ -136,8 +160,8 @@ final class GenerateImagesStep implements Step
         return $hex !== '' ? $hex : null;
     }
 
-    /** Palette slug the site-title inherits, walking parents then the header root. */
-    private static function headerTitleInkSlug(string $markup): string
+    /** Palette slug the site-title inherits for $attr, walking parents then the header root. */
+    private static function headerIdentitySlug(string $markup, string $attr): string
     {
         $doc = BlockMarkup::parse($markup);
         $start = null;
@@ -149,7 +173,7 @@ final class GenerateImagesStep implements Step
         }
         $i = $start;
         while ($i !== null) {
-            $slug = trim((string) (($doc->attrs($i) ?? [])['textColor'] ?? ''));
+            $slug = trim((string) (($doc->attrs($i) ?? [])[$attr] ?? ''));
             if ($slug !== '') {
                 return $slug;
             }
@@ -159,7 +183,7 @@ final class GenerateImagesStep implements Step
         if ($top === null) {
             return '';
         }
-        return trim((string) (($doc->attrs($top) ?? [])['textColor'] ?? ''));
+        return trim((string) (($doc->attrs($top) ?? [])[$attr] ?? ''));
     }
 
     public function run(Project $project): void
@@ -345,7 +369,32 @@ final class GenerateImagesStep implements Step
             }
             $kept[] = $image;
         }
-        if ($droppedLogo) {
+
+        // The icon is derived here, after the mark survived keying, so it has
+        // no images.json spec and assemble-pages never saw it. Add its row now
+        // — only alongside a logo row that survived, since an icon without a
+        // usable mark would be a flat rectangle of header background.
+        $addedIcon = false;
+        $hasLogo = false;
+        $hasIcon = false;
+        foreach ($kept as $image) {
+            $hasLogo = $hasLogo || ($image['role'] ?? '') === 'site-logo';
+            $hasIcon = $hasIcon || ($image['role'] ?? '') === 'site-icon';
+        }
+        if ($hasLogo && !$hasIcon && $project->exists('theme/assets/' . self::SITE_ICON_FILE)) {
+            $project->writeText(
+                'plugin/images/' . self::SITE_ICON_FILE,
+                $project->readText('theme/assets/' . self::SITE_ICON_FILE),
+            );
+            $kept[] = [
+                'filename' => self::SITE_ICON_FILE,
+                'title'    => 'Site icon',
+                'role'     => 'site-icon',
+            ];
+            $addedIcon = true;
+        }
+
+        if ($droppedLogo || $addedIcon) {
             $project->writeJson('plugin/images.json', ['images' => $kept]);
         }
     }
@@ -632,6 +681,7 @@ final class GenerateImagesStep implements Step
     ): void {
         $filename = (string) $specs[$i]['filename'];
         $logRequest = $this->requestLog($specs[$i], $genSpec, $imageGrade, $imageCrop, $subject);
+        $iconBytes = null;
         try {
             if (!($result['ok'] ?? false) || !isset($result['bytes'])) {
                 throw new \RuntimeException((string) ($result['error'] ?? 'unknown error'));
@@ -662,6 +712,21 @@ final class GenerateImagesStep implements Step
                         if ($ink !== null) {
                             $bytes = ImageTransparency::recolorInk($bytes, $ink);
                         }
+                        // custom_logo and site_icon want opposite things. The
+                        // header composites the mark over its own bar, so the
+                        // logo stays transparent; a browser tab has no such bar,
+                        // and a mark recolored to a light title would vanish on
+                        // it (iOS composites a transparent touch icon onto
+                        // black). Flatten a second copy onto the header's own
+                        // background so the icon reads the same way the header
+                        // does, wherever it is painted.
+                        $ground = self::headerBackgroundHex($project);
+                        if ($ground !== null) {
+                            $flattened = ImageTransparency::flattenOver($bytes, $ground);
+                            if ($flattened !== $bytes) {
+                                $iconBytes = $flattened;
+                            }
+                        }
                     }
                 }
             }
@@ -679,6 +744,9 @@ final class GenerateImagesStep implements Step
 
         // Do not classify persistence failures as generated-content defects.
         $project->writeText('theme/assets/' . $filename, $bytes);
+        if ($iconBytes !== null) {
+            $project->writeText('theme/assets/' . self::SITE_ICON_FILE, $iconBytes);
+        }
         $specs[$i]['status'] = 'completed';
         $specs[$i]['url']    = $this->servedUrl($project, $filename);
         unset($specs[$i]['error']);

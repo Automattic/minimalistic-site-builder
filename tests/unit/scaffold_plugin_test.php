@@ -854,24 +854,32 @@ test('seeder imports from theme assets when plugin/images is empty and sets logo
     $project->writeJson('plugin/images.json', ['images' => [
         ['filename' => 'hero.jpg', 'title' => 'Loaves'],
         ['filename' => 'site-logo.png', 'title' => 'Site logo', 'role' => 'site-logo'],
+        ['filename' => 'site-icon.png', 'title' => 'Site icon', 'role' => 'site-icon'],
     ]]);
     $themeDir = sys_get_temp_dir() . '/wp-stub-theme-' . uniqid();
     @mkdir($themeDir . '/assets', 0777, true);
     file_put_contents($themeDir . '/assets/hero.jpg', 'JPEG');
     file_put_contents($themeDir . '/assets/site-logo.png', 'PNG');
+    file_put_contents($themeDir . '/assets/site-icon.png', 'PNGICON');
 
     wp_stub_reset();
     $GLOBALS['wp_stylesheet_directory'] = $themeDir;
     require_once $project->pluginPath('site-content.php');
     (content_fn($slug, 'activate'))();
 
-    assert_eq(2, count($GLOBALS['wp_attachments']));
+    assert_eq(3, count($GLOBALS['wp_attachments']));
     $logoId = (int) get_theme_mod('custom_logo');
+    $iconId = (int) get_option('site_icon');
     assert_true($logoId > 0, 'custom_logo set');
-    assert_eq($logoId, (int) get_option('site_icon'));
+    assert_true($iconId > 0, 'site_icon set');
+    assert_true(
+        $logoId !== $iconId,
+        'the icon is its own opaque attachment, not the transparent header mark',
+    );
     $state = get_option(ApplyIdentityStep::identifierPrefix($slug) . '_content_state');
     assert_true($state['changed_logo']);
     assert_eq($logoId, $state['logo_attachment_id']);
+    assert_eq($iconId, $state['icon_attachment_id']);
 
     exec('rm -rf ' . escapeshellarg($tmp));
     exec('rm -rf ' . escapeshellarg($themeDir));
@@ -882,9 +890,11 @@ test('seeder restore skips logo mods the owner replaced', function () {
     [$project, $tmp] = scaffold_plugin_fixture($slug);
     $project->writeJson('plugin/images.json', ['images' => [
         ['filename' => 'site-logo.png', 'title' => 'Site logo', 'role' => 'site-logo'],
+        ['filename' => 'site-icon.png', 'title' => 'Site icon', 'role' => 'site-icon'],
     ]]);
     @mkdir($project->pluginPath('images'), 0777, true);
     file_put_contents($project->pluginPath('images/site-logo.png'), 'PNG');
+    file_put_contents($project->pluginPath('images/site-icon.png'), 'PNGICON');
 
     wp_stub_reset();
     require_once $project->pluginPath('site-content.php');
@@ -907,9 +917,11 @@ test('seeder restore clears custom_logo when the owner changed only site_icon', 
     [$project, $tmp] = scaffold_plugin_fixture($slug);
     $project->writeJson('plugin/images.json', ['images' => [
         ['filename' => 'site-logo.png', 'title' => 'Site logo', 'role' => 'site-logo'],
+        ['filename' => 'site-icon.png', 'title' => 'Site icon', 'role' => 'site-icon'],
     ]]);
     @mkdir($project->pluginPath('images'), 0777, true);
     file_put_contents($project->pluginPath('images/site-logo.png'), 'PNG');
+    file_put_contents($project->pluginPath('images/site-icon.png'), 'PNGICON');
 
     wp_stub_reset();
     require_once $project->pluginPath('site-content.php');
@@ -931,9 +943,11 @@ test('seeder restore puts back previous logo mods when still owned', function ()
     [$project, $tmp] = scaffold_plugin_fixture($slug);
     $project->writeJson('plugin/images.json', ['images' => [
         ['filename' => 'site-logo.png', 'title' => 'Site logo', 'role' => 'site-logo'],
+        ['filename' => 'site-icon.png', 'title' => 'Site icon', 'role' => 'site-icon'],
     ]]);
     @mkdir($project->pluginPath('images'), 0777, true);
     file_put_contents($project->pluginPath('images/site-logo.png'), 'PNG');
+    file_put_contents($project->pluginPath('images/site-icon.png'), 'PNGICON');
 
     wp_stub_reset();
     require_once $project->pluginPath('site-content.php');
@@ -945,6 +959,29 @@ test('seeder restore puts back previous logo mods when still owned', function ()
 
     assert_eq(false, get_theme_mod('custom_logo', false));
     assert_eq(false, get_option('site_icon', false));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('seeder leaves site_icon alone when no opaque icon shipped', function () {
+    $slug = 'logo-only';
+    [$project, $tmp] = scaffold_plugin_fixture($slug);
+    $project->writeJson('plugin/images.json', ['images' => [
+        ['filename' => 'site-logo.png', 'title' => 'Site logo', 'role' => 'site-logo'],
+    ]]);
+    @mkdir($project->pluginPath('images'), 0777, true);
+    file_put_contents($project->pluginPath('images/site-logo.png'), 'PNG');
+
+    wp_stub_reset();
+    require_once $project->pluginPath('site-content.php');
+    (content_fn($slug, 'activate'))();
+
+    assert_true((int) get_theme_mod('custom_logo') > 0, 'the header still gets its mark');
+    assert_eq(
+        false,
+        get_option('site_icon', false),
+        'a transparent mark is never borrowed as the favicon',
+    );
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

@@ -252,6 +252,34 @@ final class ImageTransparency
     }
 
     /**
+     * Composite the keyed mark onto an opaque $hex ground and drop the alpha.
+     * The header wants a transparent mark; a favicon wants the opposite. A
+     * white-on-transparent PNG is invisible on a light browser tab, and iOS
+     * composites a transparent touch icon onto black — so the site icon gets
+     * the same mark on the header's own background instead of sharing the
+     * logo's transparency. Fails soft like the rest of the class.
+     */
+    public static function flattenOver(string $pngBytes, string $hex): string
+    {
+        if (!self::available() || ContrastMath::hexToRgb($hex) === null) {
+            return $pngBytes;
+        }
+        try {
+            $im = new \Imagick();
+            $im->readImageBlob($pngBytes);
+            $canvas = new \Imagick();
+            $canvas->newImage($im->getImageWidth(), $im->getImageHeight(), new \ImagickPixel($hex));
+            $canvas->setImageFormat('png');
+            $canvas->compositeImage($im, \Imagick::COMPOSITE_OVER, 0, 0);
+            // Leave no alpha for a browser or an iOS home screen to fill in.
+            $canvas->setImageAlphaChannel(\Imagick::ALPHACHANNEL_OPAQUE);
+            return $canvas->getImageBlob();
+        } catch (\Throwable) {
+            return $pngBytes;
+        }
+    }
+
+    /**
      * Turn the white anti-aliasing baked into surviving pixels into real
      * translucency (see the class docblock). Per pixel: ink coverage
      * t = max(1-R, 1-G, 1-B) scaled so t >= SOLID_INK_COVERAGE is 1, alpha

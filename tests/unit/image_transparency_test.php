@@ -277,6 +277,25 @@ test('recolorInk paints keyed ink to the header title color and keeps corners tr
     assert_true(alpha_at($out, 0, 0) < 0.01, 'transparent pad is unchanged');
 });
 
+test('flattenOver paints the mark onto an opaque ground for the site icon', function () {
+    $keyed = ImageTransparency::keyOutBackground(transparency_fixture('white', 'red', 60, 60));
+    $mark = ImageTransparency::recolorInk($keyed, '#ffffff');
+    $out = ImageTransparency::flattenOver($mark, '#111111');
+
+    [$w, $h] = png_size($out);
+    assert_true(alpha_at($out, 0, 0) > 0.99, 'the transparent pad becomes opaque ground');
+    $ground = rgb_at($out, 0, 0);
+    assert_true($ground[0] < 0.15 && $ground[1] < 0.15 && $ground[2] < 0.15, 'ground is the header background');
+    $ink = rgb_at($out, intdiv($w, 2), intdiv($h, 2));
+    assert_true($ink[0] > 0.95 && $ink[1] > 0.95 && $ink[2] > 0.95, 'the mark keeps its title ink');
+    assert_true(!ImageTransparency::isKeyed($out), 'a flattened icon is not keyed');
+});
+
+test('flattenOver returns its input on a bad hex', function () {
+    $keyed = ImageTransparency::keyOutBackground(transparency_fixture('white', 'red', 40, 40));
+    assert_eq($keyed, ImageTransparency::flattenOver($keyed, 'not-a-color'));
+});
+
 test('recolorInk returns its input on a bad hex', function () {
     $keyed = ImageTransparency::keyOutBackground(transparency_fixture('white', 'red', 40, 40));
     assert_eq($keyed, ImageTransparency::recolorInk($keyed, 'not-a-color'));
