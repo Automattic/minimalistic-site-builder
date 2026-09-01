@@ -35,7 +35,7 @@ if ($args['unknown'] !== null) {
 }
 $structuralOnly = $args['flags']['--structural'] ?? false;
 
-$llm = make_llm();
+$llm = resolve_llm();
 $findings = LlmConformance::run($llm, includeLive: !$structuralOnly);
 
 // Rendering and the verdict live on LlmConformance, where they are testable

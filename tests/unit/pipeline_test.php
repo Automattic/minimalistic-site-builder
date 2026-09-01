@@ -148,3 +148,33 @@ test('--from null preserves running from the first step', function () {
     assert_eq(['a', 'b', 'c'], RecorderStep::$ran, 'default runs the full graph');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('O-G8d top-level orchestration runs a concurrent group once while stopIds runs it twice', function () {
+    $run = static function (bool $topLevel): int {
+        $tmp = sys_get_temp_dir() . '/builder_pl_orchestration_' . uniqid();
+        $project = (new ProjectStore($tmp))->create('demo');
+        $llm = new FakeLlm();
+        for ($i = 0; $i < ($topLevel ? 2 : 4); $i++) {
+            $llm->queueJson(['v' => $i]);
+        }
+        $group = new ConcurrentGroup($llm, [
+            new RecordingConcurrentStep('theme-json', ['out' => ['prompt' => 'P']]),
+            new RecordingConcurrentStep('page-plan', ['out' => ['prompt' => 'P']]),
+        ]);
+        $pipeline = new Pipeline([$group]);
+        $ids = $topLevel ? $pipeline->stepIds() : $pipeline->stopIds();
+
+        try {
+            foreach ($ids as $id) {
+                $target = explode(ConcurrentGroup::ID_SEPARATOR, $id)[0];
+                $pipeline->runThrough($project, $target, fromId: $target);
+            }
+            return $llm->completeJsonBatchCalls;
+        } finally {
+            remove_tree($tmp);
+        }
+    };
+
+    assert_eq(1, $run(true), 'the emitted top-level list pays for the group once');
+    assert_eq(2, $run(false), 'the expanded stopIds list pays for the whole group per member');
+});

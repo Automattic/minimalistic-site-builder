@@ -1,0 +1,20 @@
+{
+  "name": "site-builder",
+  "interface": {
+    "displayName": "Site Builder"
+  },
+  "plugins": [
+    {
+      "name": "site-builder",
+      "source": {
+        "source": "local",
+        "path": "./plugins/site-builder"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Coding"
+    }
+  ]
+}
