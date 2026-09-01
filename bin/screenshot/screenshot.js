@@ -192,6 +192,11 @@ async function settleMotion(page, timeout) {
       '.reveal-up',
       '.reveal-fade',
       '.reveal-scale',
+      '.reveal-blur',
+      '.reveal-wipe',
+      '.reveal-wipe-up',
+      '.reveal-aperture',
+      '.reveal-zoom',
       '.stagger-children > *',
     ].join(',');
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));

@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\Motion;
+
 /**
  * Static motion assets are the executable profile contract. PageStyles must
  * not be able to flatten these choices after the profile stylesheet loads.
@@ -75,6 +77,11 @@ test('motion profiles own a complete token set with distinct choreography', func
         '--motion-rise-keyframe',
         '--motion-fade-keyframe',
         '--motion-scale-keyframe',
+        '--motion-blur-keyframe',
+        '--motion-wipe-keyframe',
+        '--motion-wipe-up-keyframe',
+        '--motion-aperture-keyframe',
+        '--motion-zoom-keyframe',
         '--motion-hero-keyframe',
         '--motion-stagger-keyframe',
         '--motion-drift-keyframe',
@@ -83,6 +90,8 @@ test('motion profiles own a complete token set with distinct choreography', func
         '--motion-distance',
         '--motion-stagger',
         '--motion-scale-from',
+        '--motion-blur-amount',
+        '--motion-zoom-from',
         '--motion-hero-scale-from',
         '--motion-ken-burns-scale',
         '--motion-ambient-distance',
@@ -134,37 +143,33 @@ test('motion profiles own a complete token set with distinct choreography', func
         );
     }
 
-    // The old dramatic curve had y1=1 and completed most of its visible travel
-    // in the first quarter despite a long nominal duration. Calm and dramatic
-    // must begin gradually; energetic is intentionally allowed to spring.
-    foreach (['calm', 'dramatic'] as $profile) {
-        $ease = $profiles[$profile]['--motion-enter-ease'];
-        assert_true(
-            preg_match(
-                '/^cubic-bezier\(\s*[-\d.]+\s*,\s*([-\d.]+)\s*,\s*[-\d.]+\s*,\s*[-\d.]+\s*\)$/',
-                $ease,
-                $match
-            ) === 1,
-            "{$profile} easing is a parseable cubic-bezier"
-        );
-        assert_true((float) $match[1] <= 0.2, "{$profile} easing does not front-load its first control point");
-    }
-
+    // Team feedback: entrances that spring past their rest position read as
+    // artificial, and strong ones read as dizzying. EVERY easing in EVERY
+    // profile must therefore be a monotonic cubic-bezier — no control point
+    // may leave [0, 1], on any clock, entrance and hover included.
     foreach (['energetic', 'calm', 'dramatic', 'minimal'] as $profile) {
-        $ease = $profiles[$profile]['--motion-ambient-ease'];
-        assert_true(
-            preg_match(
-                '/^cubic-bezier\(\s*[-\d.]+\s*,\s*([-\d.]+)\s*,\s*[-\d.]+\s*,\s*([-\d.]+)\s*\)$/',
-                $ease,
-                $match
-            ) === 1,
-            "{$profile} ambient easing is a parseable cubic-bezier"
-        );
-        assert_true(
-            (float) $match[1] >= 0 && (float) $match[1] <= 1
-                && (float) $match[2] >= 0 && (float) $match[2] <= 1,
-            "{$profile} ambient easing is monotonic without spring overshoot"
-        );
+        foreach ([
+            '--motion-enter-ease',
+            '--motion-hero-ease',
+            '--motion-hover-ease',
+            '--motion-ambient-ease',
+        ] as $token) {
+            $ease = $profiles[$profile][$token];
+            assert_true(
+                preg_match(
+                    '/^cubic-bezier\(\s*([-\d.]+)\s*,\s*([-\d.]+)\s*,\s*([-\d.]+)\s*,\s*([-\d.]+)\s*\)$/',
+                    $ease,
+                    $match
+                ) === 1,
+                "{$profile} {$token} is a parseable cubic-bezier"
+            );
+            foreach ([1, 2, 3, 4] as $point) {
+                assert_true(
+                    (float) $match[$point] >= 0 && (float) $match[$point] <= 1,
+                    "{$profile} {$token} is monotonic without spring overshoot"
+                );
+            }
+        }
     }
 
     // Choreography is profile-owned too, not merely a duration rename. These
@@ -243,6 +248,11 @@ test('motion kit consumes dedicated profile tokens for each motion family', func
         '--motion-rise-keyframe',
         '--motion-fade-keyframe',
         '--motion-scale-keyframe',
+        '--motion-blur-keyframe',
+        '--motion-wipe-keyframe',
+        '--motion-wipe-up-keyframe',
+        '--motion-aperture-keyframe',
+        '--motion-zoom-keyframe',
         '--motion-hero-keyframe',
         '--motion-stagger-keyframe',
         '--motion-drift-keyframe',
@@ -251,6 +261,8 @@ test('motion kit consumes dedicated profile tokens for each motion family', func
         '--motion-distance',
         '--motion-stagger',
         '--motion-scale-from',
+        '--motion-blur-amount',
+        '--motion-zoom-from',
         '--motion-hero-scale-from',
         '--motion-ken-burns-scale',
         '--motion-ambient-distance',
@@ -294,6 +306,11 @@ test('motion kit consumes dedicated profile tokens for each motion family', func
         '.reveal-up.motion-target.is-visible' => '--motion-rise-keyframe',
         '.reveal-fade.motion-target.is-visible' => '--motion-fade-keyframe',
         '.reveal-scale.motion-target.is-visible' => '--motion-scale-keyframe',
+        '.reveal-blur.motion-target.is-visible' => '--motion-blur-keyframe',
+        '.reveal-wipe.motion-target.is-visible' => '--motion-wipe-keyframe',
+        '.reveal-wipe-up.motion-target.is-visible' => '--motion-wipe-up-keyframe',
+        '.reveal-aperture.motion-target.is-visible' => '--motion-aperture-keyframe',
+        '.reveal-zoom.motion-target.is-visible' => '--motion-zoom-keyframe',
         '.stagger-children > *.motion-target.is-visible' => '--motion-stagger-keyframe',
         '.hero-entrance' => '--motion-hero-keyframe',
         '.ambient-drift' => '--motion-drift-keyframe',
@@ -316,6 +333,11 @@ test('motion kit consumes dedicated profile tokens for each motion family', func
         '--motion-rise-keyframe',
         '--motion-fade-keyframe',
         '--motion-scale-keyframe',
+        '--motion-blur-keyframe',
+        '--motion-wipe-keyframe',
+        '--motion-wipe-up-keyframe',
+        '--motion-aperture-keyframe',
+        '--motion-zoom-keyframe',
         '--motion-hero-keyframe',
         '--motion-stagger-keyframe',
         '--motion-drift-keyframe',
@@ -334,6 +356,11 @@ test('motion kit consumes dedicated profile tokens for each motion family', func
             '--motion-rise-keyframe',
             '--motion-fade-keyframe',
             '--motion-scale-keyframe',
+            '--motion-blur-keyframe',
+            '--motion-wipe-keyframe',
+            '--motion-wipe-up-keyframe',
+            '--motion-aperture-keyframe',
+            '--motion-zoom-keyframe',
             '--motion-hero-keyframe',
         ] as $token) {
             $name = $profiles[$profile][$token];
@@ -377,9 +404,66 @@ test('motion kit consumes dedicated profile tokens for each motion family', func
         );
     }
     assert_contains('filter: blur(3px)', $heroMotifs['calm'], 'calm hero uses a soft-focus settle');
-    assert_contains('68%', $heroMotifs['energetic'], 'energetic hero has an overshoot phase');
-    assert_contains('clip-path:', $heroMotifs['dramatic'], 'dramatic hero uses a cinematic mask');
+    assert_contains('translateY(var(--motion-distance))', $heroMotifs['energetic'], 'energetic hero rises');
+    assert_contains('filter: blur(var(--motion-blur-amount))', $heroMotifs['dramatic'], 'dramatic hero is a focus pull');
+    assert_true(!str_contains($heroMotifs['dramatic'], 'clip-path'), 'dramatic hero no longer wipes across the viewport');
     assert_eq(3, count(array_unique($heroMotifs)), 'hero profiles contain genuinely different choreography');
+});
+
+test('motion kit moves only vertically and never springs past rest', function () {
+    $css = (string) file_get_contents(repo_path('assets/motion/motion.css'));
+    $withoutComments = strtolower((string) preg_replace('~/\*.*?\*/~s', '', $css));
+
+    // Team feedback (aug28test): sideways arrivals read as disorienting.
+    // The kit may fade, rise, settle, mask, zoom, and sharpen — it may not
+    // translate on the horizontal axis, rotate, or pan a background sideways.
+    assert_true(!str_contains($withoutComments, 'translatex('), 'no keyframe or rule translates horizontally');
+    assert_true(!str_contains($withoutComments, 'translate3d('), 'no keyframe hides horizontal travel inside translate3d');
+    assert_true(!str_contains($withoutComments, 'rotate('), 'no keyframe rotates content');
+    // Parse the whole background-position value so a keyword form (`left`,
+    // `right center`) cannot slip past a digits-only pattern.
+    preg_match_all('/background-position:\s*([^;}]+)/', $withoutComments, $m);
+    assert_true(count($m[1]) > 0, 'gradient keyframes declare background-position');
+    foreach ($m[1] as $position) {
+        $parts = preg_split('/\s+/', trim($position)) ?: [];
+        assert_eq('50%', $parts[0] ?? '', 'gradient drift holds its horizontal position');
+    }
+
+    // Masks may only wipe vertically: every animated clip-path keeps its left
+    // and right insets at zero.
+    preg_match_all('/clip-path:\s*inset\(([^)]*)\)/', $withoutComments, $insets);
+    foreach ($insets[1] as $inset) {
+        $parts = preg_split('/\s+/', trim($inset)) ?: [];
+        if (count($parts) === 4) {
+            assert_eq('0', $parts[1], 'clip mask keeps its right inset at zero');
+            assert_eq('0', $parts[3], 'clip mask keeps its left inset at zero');
+        }
+    }
+});
+
+test('the JS driver and the screenshot harness observe every entrance class', function () {
+    // Motion::SCROLL_CLASSES is the source of the entrance vocabulary, but
+    // motion.js (ENTRANCE_SELECTOR) and bin/screenshot/screenshot.js
+    // (settleMotion) each keep a hand-written selector copy. A class missing
+    // from motion.js never reveals; a class missing from settleMotion lets a
+    // full-page screenshot capture a section that is still at opacity:0.
+    $sources = [
+        'assets/motion/motion.js',
+        'bin/screenshot/screenshot.js',
+    ];
+    foreach ($sources as $file) {
+        $js = (string) file_get_contents(repo_path($file));
+        foreach (Motion::SCROLL_CLASSES as $class) {
+            if ($class === 'hero-entrance') {
+                continue; // pure CSS on load; neither file needs to observe it
+            }
+            $needle = $class === 'stagger-children' ? '.stagger-children > *' : ".{$class}";
+            assert_true(
+                preg_match('/' . preg_quote($needle, '/') . '(?![\w-])/', $js) === 1,
+                "{$file} observes {$needle}"
+            );
+        }
+    }
 });
 
 test('motion kit owns both hover utilities inside the reduced-motion guard', function () {
@@ -438,6 +522,11 @@ test('motion kit persistently skips entrances reached by keyboard focus', functi
         'html.motion-js .reveal-up:focus-within',
         'html.motion-js .reveal-fade:focus-within',
         'html.motion-js .reveal-scale:focus-within',
+        'html.motion-js .reveal-blur:focus-within',
+        'html.motion-js .reveal-wipe:focus-within',
+        'html.motion-js .reveal-wipe-up:focus-within',
+        'html.motion-js .reveal-aperture:focus-within',
+        'html.motion-js .reveal-zoom:focus-within',
         'html.motion-js .stagger-children > *:focus-within',
         '.hero-entrance:focus-within',
     ] as $selector) {
@@ -455,6 +544,11 @@ test('motion kit persistently skips entrances reached by keyboard focus', functi
         '.reveal-up.motion-skip',
         '.reveal-fade.motion-skip',
         '.reveal-scale.motion-skip',
+        '.reveal-blur.motion-skip',
+        '.reveal-wipe.motion-skip',
+        '.reveal-wipe-up.motion-skip',
+        '.reveal-aperture.motion-skip',
+        '.reveal-zoom.motion-skip',
         '.stagger-children > *.motion-skip',
         '.hero-entrance.motion-skip',
     ] as $selector) {
