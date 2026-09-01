@@ -59,7 +59,7 @@ test('compose recasts web-layout page context into photographic language', funct
     // The design-comp idiom that triggers painted-in title blocks (BIGR-768)
     // becomes a purely photographic brief before it reaches the model.
     assert_contains(
-        'Composition: full-frame editorial photograph with the left third kept as open, low-detail negative space.',
+        'Composition: editorial photograph with the left third kept as open, low-detail negative space.',
         $out
     );
     foreach (['hero', 'cover', 'bleed', 'website', 'used as'] as $webTerm) {
@@ -82,7 +82,7 @@ test('compose recasts named overlay copy as reserved negative space', function (
         );
 
         assert_contains(
-            'Composition: full-frame editorial photograph with the left side kept as open, low-detail negative space.',
+            'Composition: editorial photograph with the left side kept as open, low-detail negative space.',
             $out
         );
         foreach (['photographer', 'name and tagline', 'overlaid', 'hero'] as $trigger) {
@@ -100,7 +100,7 @@ test('compose drops website and arbitrary multi-item overlay copy', function () 
     );
 
     assert_contains(
-        'Composition: full-frame editorial photograph with the upper-right area kept as open, low-detail negative space.',
+        'Composition: editorial photograph with the upper-right area kept as open, low-detail negative space.',
         $out
     );
     foreach (['website', 'hero', 'headline', 'cta', 'overlaid'] as $trigger) {
@@ -117,7 +117,7 @@ test('compose fail-closes a non-English overlay context to fixed literals', func
     );
 
     assert_contains(
-        'Composition: full-frame editorial photograph with the lower-left third kept as open, low-detail negative space.',
+        'Composition: editorial photograph with the lower-left third kept as open, low-detail negative space.',
         $out
     );
     foreach (['sección', 'hero', 'titular', 'superpuesto', 'izquierdo'] as $trigger) {
@@ -137,8 +137,8 @@ test('compose drops unknown page prose and its canonical result is a fixed point
     assert_true(!str_contains($out, $sentinel), 'unknown generated prose is never forwarded');
 
     $canonicalContexts = [
-        'full-frame editorial photograph with the left third kept as open, low-detail negative space',
-        'compact editorial photograph, one of a set of matching scenes composed alike',
+        'editorial photograph with the left third kept as open, low-detail negative space',
+        'editorial photograph, one of a set of matching scenes composed alike',
         'editorial photograph',
     ];
     foreach ($canonicalContexts as $canonical) {
@@ -235,25 +235,24 @@ test('compose recognizes bounded copy-reservation phrasings', function () {
     }
 });
 
-test('compose lets explicit containment outrank weak background nouns', function () {
+test('compose emits no placement adjective for any slot wording', function () {
+    // BIGR-958: an A/B run measured "full-frame" and "compact" changing
+    // nothing they were meant to steer, so no slot wording may reintroduce
+    // a placement adjective — including the strong edge-to-edge idiom.
     $cases = [
         'contained card image on a neutral background' => 'editorial photograph',
-        'book cover thumbnail in a grid' => 'compact editorial photograph, one of a set of matching scenes composed alike',
+        'book cover thumbnail in a grid' => 'editorial photograph, one of a set of matching scenes composed alike',
         'banner detail inside a card' => 'editorial photograph',
+        'edge-to-edge background with a status card overlaid on the left' => 'editorial photograph',
+        'compact thumbnail in a stacked index' => 'editorial photograph',
     ];
     foreach ($cases as $context => $composition) {
         $out = ImagePromptComposer::compose('A documentary scene', $context, 'photorealistic', '');
-        assert_contains("Composition: {$composition}.", $out);
-        assert_true(!str_contains($out, 'full-frame'), "contained context “{$context}” is not full-frame");
+        assert_contains("Composition: {$composition}", $out);
+        foreach (['full-frame', 'compact', 'contained'] as $adjective) {
+            assert_true(!str_contains($out, $adjective), "“{$context}” does not emit “{$adjective}”");
+        }
     }
-
-    $edge = ImagePromptComposer::compose(
-        'A documentary scene',
-        'edge-to-edge background with a status card overlaid on the left',
-        'photorealistic',
-        ''
-    );
-    assert_contains('Composition: full-frame editorial photograph', $edge);
 });
 
 test('compose scopes negative-space direction to the empty-space clause', function () {
@@ -314,7 +313,7 @@ test('compose phrases the no-text guard positively', function () {
 
     assert_contains('Purely pictorial imagery', $out);
     // The overlay slot is described as what the region IS…
-    assert_contains('full-frame editorial photograph with a reserved area kept as open, low-detail negative space', $out);
+    assert_contains('editorial photograph with a reserved area kept as open, low-detail negative space', $out);
     // …and the guard never enumerates the forbidden text artifacts, which
     // would plant those very concepts into the prompt context (BIGR-768).
     foreach (['headline', 'watermark', 'logo', 'lettering', 'caption', 'render no', 'website'] as $artifact) {

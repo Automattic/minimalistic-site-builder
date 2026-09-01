@@ -24,8 +24,8 @@ namespace Automattic\SiteBuild;
  * tagline, gibberish URL) into the very region reserved for the site's real
  * HTML copy. So web-layout vocabulary is rewritten into pictorial
  * vocabulary: the generated page-context prose is reduced to a closed set of
- * pictorial placement facts (canvas fill, matching-set role and reserved
- * negative-space region), the site is described only by safe subject
+ * pictorial placement facts (matching-set role and reserved negative-space
+ * region), the site is described only by safe subject
  * matter — its identity never appears (GenerateImagesStep::siteContext) — and
  * the no-text guard states what a reserved region IS (continuous empty scenery)
  * instead of enumerating forbidden text artifacts, which image models follow
@@ -533,48 +533,21 @@ final class ImagePromptComposer
             return 'isolated pictorial asset';
         }
 
-        $edgeToEdge = preg_match(
-            '/\b(?:full[- ](?:bleed|frame|width)|edge[- ]bleeding|edge[- ]to[- ]edge)\b'
-            . '|\ba\s+sangre(?:\s+completa)?\b/iu',
-            $pageContext
-        ) === 1;
-        $compact = !$edgeToEdge && preg_match(
-            '/\b(?:compact|thumbnail|small|miniature|miniatura|accent|pequeñ[oa])\b/iu',
-            $pageContext
-        ) === 1;
-        $contained = !$edgeToEdge && !$compact && preg_match(
-            '/\b(?:contained|cards?|insets?|columns?|grids?|frames?|panels?|tiles?'
-            . '|tarjetas?|recuadros?|columnas?|grillas?|cuadrículas?|marcos?)\b/iu',
-            $pageContext
-        ) === 1;
-        // Bare surface nouns are weak full-frame hints: a contained card may
-        // have a background or show a book cover. Strong edge-to-edge wording
-        // still wins when generated prose contains both kinds of term.
-        $fullFrame = $edgeToEdge || (!$compact && !$contained && preg_match(
-            '/\b(?:cover|banner|background|backdrop|fondo)\b/iu',
-            $pageContext
-        ) === 1);
-
-        $parts = [];
-        if ($fullFrame) {
-            $parts[] = 'full-frame';
-        } elseif ($compact) {
-            $parts[] = 'compact';
-        }
-        // A contained slot adds no placement word (BIGR-956): "contained" is
-        // containment vocabulary the model can literalize as a painted border,
-        // and the default composition already reads as a bounded scene. The
-        // $contained flag still matters above — it keeps a weak full-frame
-        // noun inside card prose from claiming the full-frame fact.
-        // Orientation comes from the structured aspect-ratio parameter. Page
-        // prose is untrusted and sometimes calls a subject a "portrait" even
-        // when the requested canvas is landscape, so it must not compete with
-        // the actual generation setting here.
-        $parts[] = preg_match('/\b(?:photorealistic|photo|photographic)\b/i', $style) === 1
+        // No placement adjective (BIGR-958). An A/B run measured "full-frame"
+        // and "compact" changing nothing the adjectives were meant to steer:
+        // copy-reservation adherence and thumbnail composition were identical
+        // with and without them. The negative-space clause below carries the
+        // reservation, the structured aspect ratio owns the canvas, and
+        // "full-frame" was the last "frame" token the builder emitted
+        // (BIGR-956). Slot wording still matters elsewhere: the ratio choice
+        // reads it in ImageCrop::generationRatio.
+        // Orientation likewise comes from the structured aspect-ratio
+        // parameter. Page prose is untrusted and sometimes calls a subject a
+        // "portrait" even when the requested canvas is landscape, so it must
+        // not compete with the actual generation setting here.
+        $result = preg_match('/\b(?:photorealistic|photo|photographic)\b/i', $style) === 1
             ? 'editorial photograph'
             : 'pictorial composition';
-
-        $result = implode(' ', $parts);
         if (preg_match(
             '/\b(?:grid|gallery|row|series|sequence|collection|matching\s+scenes'
             . '|grilla|cuadrícula|galería|fila|serie|secuencia|colección)\b/iu',
