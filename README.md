@@ -22,18 +22,27 @@ cp .env.example .env
 # Text/code LLM (default Anthropic): ANTHROPIC_API_KEY
 # Or xAI Grok: LLM_PROVIDER=xai, XAI_API_KEY, LLM_MODEL=grok-4.6 (and per-step models)
 # Or OpenRouter: LLM_PROVIDER=openrouter, OPENROUTER_API_KEY (models come from config/models.json)
+# Or Baseten (Kimi/GLM/DeepSeek via the wpcom AI proxy): LLM_PROVIDER=baseten, BASETEN_API_KEY
 # Images (optional): GOOGLE_VERTEX_API_TOKEN
 
+composer install
 npm ci   # optional; installs Playground, screenshot helpers, and block-fixer oracle tooling
 ```
 
-Theme generation and block fixing require PHP 8.1+ only. No Composer is needed:
-the source set autoloads through the dependency-free PSR-4 loader
-`autoload.php`, loaded by `src/bootstrap.php`.
+Standalone theme generation and block fixing require PHP 8.1+ and the Composer
+dependencies installed in `vendor/`. Embedding hosts may provide those
+dependencies through their own autoloader instead.
 
 The block fixer is implemented entirely in PHP and needs neither Node nor
 `node_modules`. WordPress Playground previews and screenshot tooling still use
 Node. Use `php bin/build.php "…" --no-serve` for a PHP-only build.
+
+## Install as a plugin
+
+Use [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json) as the
+marketplace entry point and install the `site-builder` plugin. The plugin ships
+the [`site-build` Skill](skills/site-build/SKILL.md) for driving this repository
+from a supported coding-agent harness.
 
 > **Breaking change for downstream consumers:** the Node block fixer is gone —
 > `NodeBlockFixer` and `Package::blockFixerScript()` no longer exist. Any host
@@ -114,7 +123,7 @@ host-specific aliases to this package.
 
 ### Choosing the model / provider
 
-`--provider=<anthropic|openai|xai|openrouter>` (or the `LLM_PROVIDER` env var) picks a whole
+`--provider=<anthropic|openai|xai|openrouter|baseten>` (or the `LLM_PROVIDER` env var) picks a whole
 model set at once. Each provider defines a **large** (quality-critical steps) and
 **small** (fast/cheap structural steps) model in
 [`config/models.json`](config/models.json), and each pipeline step is mapped to a
@@ -126,6 +135,26 @@ tier there — so switching providers needs no per-step configuration. Defaults:
 | `openai` | `gpt-5.5` | `gpt-5.4-mini` |
 | `xai` | `grok-4.6` | `grok-4.6` |
 | `openrouter` | `moonshotai/kimi-k3` | `moonshotai/kimi-k2.5:nitro` |
+| `baseten` | `moonshotai/Kimi-K3` | `zai-org/GLM-5.2-Fast` |
+
+`baseten` reaches Baseten's open-weight models through the WordPress.com AI
+proxy (`https://public-api.wordpress.com/wpcom/v2/ai-api-proxy/v1`, feature slug
+`site-builder`) — the route Studio's "hosted" models use. Set
+`BASETEN_BASE_URL=https://inference.baseten.co/v1` to go direct with a real
+Baseten key. Besides the two tier defaults, `LLM_MODEL` / `LLM_MODEL_<STEP>`
+accept `deepseek-ai/DeepSeek-V4-Pro`, `deepseek-ai/DeepSeek-V4-Flash-0731`,
+`zai-org/GLM-5.2` and `zai-org/GLM-5.3-Flash`. Model ids are case-sensitive.
+
+Most of these models reason by default, and those tokens come out of the same
+completion budget as the answer — asked for 24 tokens, Kimi K3 and both DeepSeek
+V4 models spend every one on hidden thinking and return an empty answer with
+`finish_reason: length`. The client therefore sends `reasoning_effort: none` for
+every Baseten model, including K3 on the large tier, and `low` for GLM 5.3 Flash,
+which cannot be switched off. This differs from the `openrouter` profile, which
+keeps K3's max effort and leans on a large token floor — a floor any caller
+pinning its own smaller budget defeats. To reason on a step instead, remove that
+model from `BASETEN_REASONING_EFFORT` in `src/OpenAiCompatibleClient.php` and
+give the step a budget that fits the thinking.
 
 Edit `config/models.json` to change those model ids. To override just one run or
 one step (any model id, wins over the config):
@@ -217,7 +246,7 @@ booted headless in WordPress Playground and a full-page screenshot is saved to
 build goes to the next free slug (`tbilisi` → `tbilisi2` → …).
 
 Needs a text LLM key (`ANTHROPIC_API_KEY`, `XAI_API_KEY`, `OPENAI_API_KEY`, or
-`OPENROUTER_API_KEY`, with the matching `LLM_PROVIDER`)
+`OPENROUTER_API_KEY`, or `BASETEN_API_KEY`, with the matching `LLM_PROVIDER`)
 and `GOOGLE_VERTEX_API_TOKEN` in `.env`, plus Node.js (for Playground) and a
 Chrome/Chromium binary (for the screenshot).
 

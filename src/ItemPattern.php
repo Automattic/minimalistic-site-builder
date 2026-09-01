@@ -13,8 +13,14 @@ namespace Automattic\SiteBuild;
  */
 final class ItemPattern
 {
-    /** @var list<string> */
-    public const ALL = ['card', 'rule-row', 'index', 'spec-table', 'tag-cluster'];
+    /**
+     * A numbered/lettered index is deliberately absent: identifier columns
+     * ("01", "02", …) are banned unless the site brief asks for them
+     * (BIGR-949). Legacy 'index' commitments normalize to the default.
+     *
+     * @var list<string>
+     */
+    public const ALL = ['card', 'rule-row', 'spec-table', 'tag-cluster'];
 
     public const DEFAULT = 'card';
     public const MARKER_PREFIX = 'item-pattern--';
@@ -24,7 +30,6 @@ final class ItemPattern
     private const RECIPES = [
         'card'        => 'item-patterns/card.md',
         'rule-row'    => 'item-patterns/rule-row.md',
-        'index'       => 'item-patterns/index.md',
         'spec-table'  => 'item-patterns/spec-table.md',
         'tag-cluster' => 'item-patterns/tag-cluster.md',
     ];

@@ -30,7 +30,9 @@ final class PlaygroundRunner implements SiteRunner
         if (!command_exists('node')) {
             throw new \RuntimeException('Node.js is required to run WordPress Playground.');
         }
-        $playgroundCli = repo_path('node_modules/.bin/wp-playground-cli');
+        // repo_path() lives in bootstrap.php, which the WPCom host never loads.
+        // This file is src/, so dirname(__DIR__) is the same repo root.
+        $playgroundCli = dirname(__DIR__) . '/node_modules/.bin/wp-playground-cli';
         if (!is_file($playgroundCli)) {
             throw new \RuntimeException('WordPress Playground CLI is not installed. Run `npm ci` at the repository root.');
         }
@@ -101,7 +103,7 @@ final class PlaygroundRunner implements SiteRunner
             $cmd,
             [0 => ['file', '/dev/null', 'r'], 1 => ['file', $logPath, 'w']],
             $pipes,
-            repo_path()
+            dirname(__DIR__)
         );
         if (!is_resource($proc)) {
             @unlink($blueprintPath);

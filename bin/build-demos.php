@@ -2,16 +2,13 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\Narrator;
+use Automattic\SiteBuild\ProcessPool;
 use Automattic\SiteBuild\ProjectStore;
-use Automattic\SiteBuild\RunnerResolver;
-use Automattic\SiteBuild\SiteRunner;
-use Automattic\SiteBuild\StudioAppRunner;
-use Automattic\SiteBuild\StudioCli;
 
 /**
  * Build every demo website listed in eval/theme-prompts.json in one command.
  *
- *   php bin/build-demos.php [--with-images] [--html-first|--blocks-first|--html-islands] [--provider=<name>] [--no-screenshot] [--motion] [--only=<slug>] [--parallel=<n>] [--serve] [--stop] [--port=<n>] [--file=<path>]
+ *   php bin/build-demos.php [--with-images] [--html-first|--blocks-first|--html-islands] [--provider=<name>] [--no-screenshot] [--only=<slug>] [--parallel=<n>] [--serve] [--port=<n>] [--file=<path>]
  *
  * Each entry in the prompts file becomes a project under projects/. If a folder
  * with that entry's slug already exists, a fresh sibling is created by appending
@@ -30,8 +27,8 @@ use Automattic\SiteBuild\StudioCli;
  * its LLM client, so each demo's logs/project.log carries exactly its own
  * numbers, and one demo failing never aborts the others. Slugs are reserved in
  * this parent before spawning (concurrent children calling freeSlug() would
- * race to the same folder name). Each child's output is streamed here with a
- * [slug] prefix.
+ * race to the same folder name). Each child's captured output is replayed here
+ * with a [slug] prefix after that child completes.
  *
  * Note: each build normally fires up to ~10 concurrent LLM requests (the
  * OpenRouter transport caps its own fan-out at 4), so outer parallelism still
@@ -56,22 +53,10 @@ use Automattic\SiteBuild\StudioCli;
  *                   OpenRouter is bounded at 3).
  *   --screenshot    capture the post-build home-page screenshots (the default).
  *   --no-screenshot skip the post-build home-page screenshots.
- *   --motion        capture those screenshots with prefers-reduced-motion:
- *                   no-preference — the branch a default visitor gets. The
- *                   capture emulates reduced motion otherwise, which switches
- *                   off every rule inside
- *                   `@media (prefers-reduced-motion: no-preference)`, so this
- *                   cohort cannot photograph a defect that lives only there
- *                   (BIGR-881 shipped exactly that way). The capture visits
- *                   every reveal target and waits for finite entrances before
- *                   saving, so scroll timing does not manufacture omissions.
- *   --serve         after the batch, serve ALL built sites. Studio sites are
- *                   daemons: URLs print and the command returns. Playground
- *                   still blocks until Ctrl-C. Off by default.
+ *   --serve         after the batch, serve ALL built sites simultaneously in
+ *                   WordPress Playground, each on its own port, and print every
+ *                   URL. A single Ctrl-C stops all servers. Off by default.
  *   --no-serve      build only, don't boot any previews (the default).
- *   --stop          stop every Studio site built from the current --file.
- *                   Does not call `studio stop --all` (that would also stop
- *                   hand-made sites).
  *   --port=<n>      base Playground port (default 9400); site i gets the port
  *                   window base+50i, and playground.php auto-bumps busy ports.
  *   --file=<path>   override the prompts file (default eval/theme-prompts.json).
@@ -85,9 +70,8 @@ require_once __DIR__ . '/../src/bootstrap.php';
 // die with EADDRINUSE). Spacing the per-site base ports by that same scan
 // range keeps the windows disjoint, so no two children can collide.
 const PORT_STRIDE = 50;
-
 // File-scope functions below stay registered when this file is required as a
-// library (W3 / tests). Skip the CLI body unless we are the entry script.
+// library (tests). Skip the CLI body unless we are the entry script.
 $siteBuildDemosIsMain = isset($argv[0]) && is_string($argv[0])
     && ($argv0 = realpath($argv[0])) !== false
     && $argv0 === realpath(__FILE__);
@@ -109,11 +93,10 @@ $args = parse_cli_args($argv, [
     '--serve'        => 'toggle',
     '--screenshot'   => 'toggle',
     '--motion'       => 'bool',
-    '--stop'         => 'bool',
 ]);
 if ($args['unknown'] !== null) {
     fwrite(STDERR, "Unknown argument: {$args['unknown']}\n");
-    fwrite(STDERR, "Usage: php bin/build-demos.php [--html-first|--blocks-first|--html-islands] [--multi-page] [--pages=\"Home, Menu, About\"] [--with-images] [--only=<slug>] [--provider=anthropic|openai|xai|openrouter] [--parallel=<n>] [--no-screenshot] [--motion] [--serve] [--stop] [--port=9400] [--no-serve] [--file=<path>]\n");
+    fwrite(STDERR, "Usage: php bin/build-demos.php [--html-first|--blocks-first|--html-islands] [--multi-page] [--pages=\"Home, Menu, About\"] [--with-images] [--only=<slug>] [--provider=anthropic|openai|xai|openrouter] [--parallel=<n>] [--no-screenshot] [--motion] [--serve] [--port=9400] [--no-serve] [--file=<path>]\n");
     exit(1);
 }
 $flags = $args['flags'];
@@ -132,11 +115,6 @@ $parallel = isset($flags['--parallel']) ? max(1, (int) $flags['--parallel']) : 0
 $port = (int) ($flags['--port'] ?? 9400);
 $provider = $flags['--provider'] ?? null;
 $file = $flags['--file'] ?? repo_path('eval/theme-prompts.json');
-
-if (!empty($flags['--stop'])) {
-    stop_demo_sites($file);
-    exit(0);
-}
 
 if ((int) $htmlFirst + (int) $blocksFirst + (int) $htmlIslands > 1) {
     Narrator::write("--html-first, --blocks-first, and --html-islands are mutually exclusive; pass one.\n");
@@ -226,17 +204,21 @@ foreach ($entries as $i => $entry) {
     $jobs[] = [
         'slug' => $project->slug(),
         'path' => $project->path(),
-        'cmd'  => 'exec php ' . escapeshellarg(repo_path('bin/build.php'))
-            . ' ' . escapeshellarg($prompt)
-            . ' --slug=' . escapeshellarg($project->slug())
-            . ' --no-serve'
-            . ($provider !== null ? ' --provider=' . escapeshellarg($provider) : '')
-            . ($withImages ? ' --with-images' : '')
-            . ($htmlFirst ? ' --html-first' : '')
-            . ($blocksFirst ? ' --blocks-first' : '')
-            . ($htmlIslands ? ' --html-islands' : '')
-            . ($multiPage ? ' --multi-page' : '')
-            . ($pagesArg !== null ? ' --pages=' . escapeshellarg($pagesArg) : ''),
+        'argv' => [
+            'php',
+            repo_path('bin/build.php'),
+            $prompt,
+            '--slug=' . $project->slug(),
+            '--no-serve',
+            ...($provider !== null ? ['--provider=' . $provider] : []),
+            ...($withImages ? ['--with-images'] : []),
+            ...($htmlFirst ? ['--html-first'] : []),
+            ...($blocksFirst ? ['--blocks-first'] : []),
+            ...($htmlIslands ? ['--html-islands'] : []),
+            ...($multiPage ? ['--multi-page'] : []),
+            ...($pagesArg !== null ? ['--pages=' . $pagesArg] : []),
+        ],
+        'cwd' => repo_path(),
     ];
 }
 
@@ -251,13 +233,25 @@ $cap = $parallel > 0
     : ($activeProvider === 'openrouter' ? min(3, count($jobs)) : count($jobs));
 echo "\nBuilding " . count($jobs) . ' demo(s), up to ' . $cap . " in parallel…\n\n";
 
-$results = run_jobs($jobs, $cap);
+$results = ProcessPool::run($jobs, $cap, 3600);
+foreach ($results as $idx => $result) {
+    if ($result['stdout'] !== '') {
+        print(prefix_child_lines($jobs[$idx]['slug'], $result['stdout']));
+    }
+    if ($result['stderr'] !== '') {
+        Narrator::write(prefix_child_lines($jobs[$idx]['slug'], $result['stderr']));
+    }
+}
 
 $built = [];
 foreach ($jobs as $i => $job) {
     $r = $results[$i];
     if ($r['exit'] !== 0) {
-        fwrite(STDERR, "  ✗ FAILED: {$job['slug']} (exit {$r['exit']}) — see {$job['path']}/logs/\n");
+        if ($r['timedOut']) {
+            Narrator::write("  ✗ TIMED OUT: {$job['slug']} — see {$job['path']}/logs/\n");
+        } else {
+            Narrator::write("  ✗ FAILED: {$job['slug']} (exit {$r['exit']}) — see {$job['path']}/logs/\n");
+        }
         $failures++;
         continue;
     }
@@ -268,6 +262,7 @@ foreach ($jobs as $i => $job) {
         'screenshot' => null,
     ];
 }
+
 
 // Capture a full-page screenshot of each home page as visual testing evidence
 // (projects/<slug>/logs/home.png). Each child boots its site headless in
@@ -280,25 +275,36 @@ if ($screenshot && $built !== []) {
     foreach ($built as $i => $b) {
         $shotJobs[] = [
             'slug' => $b['slug'],
-            'cmd'  => demo_screenshot_command(
+            'argv' => demo_screenshot_argv(
                 $b['slug'],
                 $b['path'] . '/logs/home.png',
                 $port + $i * PORT_STRIDE,
-                $shotMotion,
+                $shotMotion
             ),
+            'cwd' => repo_path(),
         ];
     }
     // The provider-aware OpenRouter cap protects LLM generation only. Keep
     // independent screenshots parallel unless the caller explicitly supplied
     // --parallel to cap every batch in this command.
     $shotCap = $parallel > 0 ? $parallel : count($shotJobs);
-    $shotResults = run_jobs($shotJobs, $shotCap);
+    $shotResults = ProcessPool::run($shotJobs, $shotCap, 3600);
+    foreach ($shotResults as $idx => $result) {
+        if ($result['stdout'] !== '') {
+            print(prefix_child_lines($shotJobs[$idx]['slug'], $result['stdout']));
+        }
+        if ($result['stderr'] !== '') {
+            Narrator::write(prefix_child_lines($shotJobs[$idx]['slug'], $result['stderr']));
+        }
+    }
     foreach ($built as $i => &$b) {
         $shot = $b['path'] . '/logs/home.png';
         if ($shotResults[$i]['exit'] === 0 && is_file($shot)) {
             $b['screenshot'] = $shot;
+        } elseif ($shotResults[$i]['timedOut']) {
+            Narrator::write("  ({$b['slug']}: screenshot timed out — continuing)\n");
         } else {
-            fwrite(STDERR, "  ({$b['slug']}: screenshot failed — continuing)\n");
+            Narrator::write("  ({$b['slug']}: screenshot failed — continuing)\n");
         }
     }
     unset($b);
@@ -318,8 +324,8 @@ foreach ($built as $b) {
 
 $exitCode = $failures > 0 ? 1 : 0;
 
-// Serve all built sites. Studio: start each, print URLs, return (daemons).
-// Playground: today's concurrent spawn + Ctrl-C teardown.
+// Serve all built sites simultaneously, one Playground server per site on its
+// own port, and block until Ctrl-C stops them all.
 if ($serve && $built !== []) {
     serve_all(array_column($built, 'slug'), $port, $exitCode);
 }
@@ -328,80 +334,44 @@ exit($exitCode);
 
 }
 
-/** Build one screenshot child command; pure so option forwarding is testable. */
-function demo_screenshot_command(string $slug, string $out, int $port, bool $motion): string
-{
-    return 'exec php ' . escapeshellarg(repo_path('bin/screenshot.php'))
-        . ' ' . escapeshellarg($slug)
-        . ' --port=' . $port
-        . ' --out=' . escapeshellarg($out)
-        . ($motion ? ' --motion' : '');
-}
-
 /**
- * Run each job's shell command as a child process, at most $cap at a time,
- * streaming stdout/stderr line-by-line with a [slug] prefix so interleaved
- * output from concurrent children stays attributable. Returns, per job index:
- * ['exit' => int, 'secs' => float wall-clock].
+ * Build one screenshot child argv; pure so option forwarding is testable.
+ * These go to ProcessPool as an argv list, never a shell string, so each
+ * element is passed through verbatim and needs no quoting.
  *
- * @param list<array{slug: string, cmd: string}> $jobs
- * @return array<int, array{exit: int, secs: float}>
+ * @return list<string>
  */
-function run_jobs(array $jobs, int $cap): array
+function demo_screenshot_argv(string $slug, string $out, int $port, bool $motion): array
 {
-    $pending = array_keys($jobs);
-    $running = [];
-    $results = [];
+    return [
+        'php',
+        repo_path('bin/screenshot.php'),
+        $slug,
+        '--port=' . $port,
+        '--out=' . $out,
+        ...($motion ? ['--motion'] : []),
+    ];
+}
 
-    while ($pending !== [] || $running !== []) {
-        while (count($running) < $cap && $pending !== []) {
-            $idx = array_shift($pending);
-            $proc = proc_open(
-                $jobs[$idx]['cmd'],
-                [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
-                $pipes,
-                repo_path()
-            );
-            if (!is_resource($proc)) {
-                fwrite(STDERR, "[{$jobs[$idx]['slug']}] failed to start child process\n");
-                $results[$idx] = ['exit' => 1, 'secs' => 0.0];
-                continue;
-            }
-            stream_set_blocking($pipes[1], false);
-            stream_set_blocking($pipes[2], false);
-            $running[$idx] = [
-                'proc'  => $proc,
-                'pipes' => [1 => $pipes[1], 2 => $pipes[2]],
-                'buf'   => [1 => '', 2 => ''],
-                'start' => microtime(true),
-            ];
-        }
-
-        pump_children($running, static function (int $idx, int $fd, string $line) use ($jobs): void {
-            $out = "[{$jobs[$idx]['slug']}] " . $line;
-            $fd === 2 ? fwrite(STDERR, $out) : print($out);
-        });
-
-        foreach ($running as $idx => $r) {
-            $status = proc_get_status($r['proc']);
-            if ($status['running'] || $r['pipes'][1] !== null || $r['pipes'][2] !== null) {
-                continue;
-            }
-            $results[$idx] = ['exit' => $status['exitcode'], 'secs' => microtime(true) - $r['start']];
-            proc_close($r['proc']);
-            unset($running[$idx]);
-        }
+/** Prefix every non-terminal line without inventing output after a trailing newline. */
+function prefix_child_lines(string $slug, string $output): string
+{
+    if ($output === '') {
+        return '';
     }
-
-    ksort($results);
-    return $results;
+    $prefix = "[{$slug}] ";
+    return preg_replace_callback(
+        '/\A|(?<=\n)(?!\z)/',
+        static fn (): string => $prefix,
+        $output,
+    ) ?? $prefix . $output;
 }
 
 /**
- * One multiplexing pass over all running children: wait briefly for output on
- * any pipe, then drain complete lines through $emit(idx, fd, line). Closed
- * pipes are set to null in place; a trailing unterminated line is flushed when
- * its pipe closes.
+ * One multiplexing pass over long-lived Playground servers: wait briefly for
+ * output on any pipe, then drain complete lines through $emit(idx, fd, line).
+ * Closed pipes are set to null in place; a trailing unterminated line is flushed
+ * when its pipe closes.
  *
  * @param array<int, array{proc: resource, pipes: array<int, resource|null>, buf: array<int, string>, start: float}> $running
  */
@@ -450,119 +420,6 @@ function pump_children(array &$running, callable $emit): void
 }
 
 /**
- * Boot one site per slug. Studio creates are serialized (N concurrent creates
- * against one daemon is unverified; twenty sites is about 1.2GB). Playground
- * keeps today's concurrent spawn + Ctrl-C teardown.
- *
- * @param list<string> $slugs
- */
-function serve_all(array $slugs, int $basePort, int $exitCode): void
-{
-    $cli = new StudioCli();
-    $runner = RunnerResolver::resolve(
-        null,
-        $cli,
-        static function (string $message): void {
-            fwrite(STDERR, $message . "\n");
-        }
-    );
-    if ($runner->name() === 'studio') {
-        if ($basePort !== 9400) {
-            echo "--port applies to Playground only; ignored for Studio.\n";
-        }
-        serve_all_studio($runner, $slugs);
-        return;
-    }
-    serve_all_playground($slugs, $basePort, $exitCode);
-}
-
-/**
- * Start each Studio site in series, print URLs, return. No pcntl, no
- * register_shutdown teardown, no pkill — the sites are daemons.
- *
- * @param list<string> $slugs
- */
-function serve_all_studio(SiteRunner $runner, array $slugs): void
-{
-    $store = new ProjectStore(repo_path('projects'));
-    echo "\nStarting " . count($slugs) . " Studio site(s)…\n\n";
-    $sites = [];
-    foreach ($slugs as $slug) {
-        try {
-            $project = $store->open($slug);
-            $site = $runner->start($project);
-            $sites[] = ['slug' => $slug, 'site' => $site];
-        } catch (Throwable $e) {
-            fwrite(STDERR, "  could not start Studio for '{$slug}': {$e->getMessage()}\n");
-        }
-    }
-    if ($sites === []) {
-        return;
-    }
-    announce_sites_up($sites, $sites[0]['site']->persistent);
-}
-
-/**
- * Stop every Studio site built from $file: projects whose meta.demo_source
- * matches, plus the prompt slugs listed in that file. Never `studio stop --all`.
- */
-function stop_demo_sites(string $file): void
-{
-    $runner = new StudioAppRunner(new StudioCli(), StudioAppRunner::defaultRoot(), repo_path());
-    $want = realpath($file) ?: $file;
-    $slugs = [];
-
-    $prompts = is_file($file) ? json_decode((string) file_get_contents($file), true) : null;
-    if (is_array($prompts) && isset($prompts['prompts']) && is_array($prompts['prompts'])) {
-        foreach ($prompts['prompts'] as $entry) {
-            if (!is_array($entry)) {
-                continue;
-            }
-            $raw = (string) ($entry['slug'] ?? $entry['id'] ?? '');
-            if ($raw !== '') {
-                $slugs[ProjectStore::slugify($raw)] = true;
-            }
-        }
-    }
-
-    $projectsDir = repo_path('projects');
-    foreach (glob($projectsDir . '/*', GLOB_ONLYDIR) ?: [] as $dir) {
-        $metaFile = $dir . '/meta.json';
-        if (!is_file($metaFile)) {
-            continue;
-        }
-        $meta = json_decode((string) file_get_contents($metaFile), true);
-        $source = is_array($meta) ? ($meta['demo_source'] ?? null) : null;
-        if (!is_string($source) || ($source !== $want && $source !== $file)) {
-            continue;
-        }
-        $slugs[basename($dir)] = true;
-    }
-
-    foreach (array_keys($slugs) as $slug) {
-        $runner->stopSite($slug);
-        echo "stopped {$slug}\n";
-    }
-}
-
-/**
- * @param list<array{slug:string,site:\Automattic\SiteBuild\RunningSite}> $sites
- */
-function announce_sites_up(array $sites, bool $persistent): void
-{
-    echo "\n── all sites up ─────────────────\n";
-    echo $persistent
-        ? "  stop them with: php bin/build-demos.php --stop\n"
-        : "  Ctrl-C stops everything\n";
-    foreach ($sites as $row) {
-        $url = $row['site']->url;
-        printf("  %-32s %s\n", $row['slug'], $url);
-        echo "      ↳ admin: {$row['site']->adminUrl} (auto-logged in)\n";
-    }
-    echo "\n";
-}
-
-/**
  * Boot one Playground server per slug (site i on $basePort + i*PORT_STRIDE),
  * print every URL
  * once all are ready, then block until they exit. A single Ctrl-C stops the
@@ -573,7 +430,7 @@ function announce_sites_up(array $sites, bool $persistent): void
  *
  * @param list<string> $slugs
  */
-function serve_all_playground(array $slugs, int $basePort, int $exitCode): void
+function serve_all(array $slugs, int $basePort, int $exitCode): void
 {
     echo "\nStarting " . count($slugs) . " Playground server(s)…\n\n";
 
@@ -646,8 +503,7 @@ function serve_all_playground(array $slugs, int $basePort, int $exitCode): void
         }
         if (!$announced && $allReady) {
             $announced = true;
-            echo "\n── all sites up ─────────────────\n";
-            echo "  Ctrl-C stops everything\n";
+            echo "\n── all sites up — Ctrl-C stops everything ─────────────────\n";
             foreach ($servers as $s) {
                 printf("  %-32s %s\n", $s['slug'], $s['url']);
                 echo "      ↳ admin: {$s['url']}wp-admin/ (auto-logged in)\n";

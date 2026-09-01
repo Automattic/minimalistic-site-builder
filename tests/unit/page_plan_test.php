@@ -435,13 +435,13 @@ test('PagePlanStep still removes the action when the only anchor candidate is th
 
 test('PagePlanStep fallback preserves the recipe projection and always nulls actions', function () {
     $projection = [
-        'layout_archetype' => 'mixed-width-editorial',
+        'layout_archetype' => 'equal-card-grid',
         'allowed_backgrounds' => ['base', 'tinted', 'contrast'],
         'default_background' => 'tinted',
         'fallback_family' => 'typographic',
     ];
     $fallback = PagePlanStep::fallbackSections(true, $projection);
-    assert_eq('mixed-width-editorial', $fallback[0]['layout_archetype']);
+    assert_eq('equal-card-grid', $fallback[0]['layout_archetype']);
     assert_eq('tinted', $fallback[0]['background']);
     assert_eq(null, $fallback[0]['primary_action']);
 });
@@ -472,7 +472,7 @@ test('PagePlanStep removes template-owned footer identities without touching sib
         'slug' => 'legal-team',
         'title' => 'Contact the legal team',
         'type' => 'team',
-        'layout_archetype' => 'mixed-width-editorial',
+        'layout_archetype' => 'equal-card-grid',
     ]);
     $siteGuide = plan_section([
         'slug' => 'site-details',
@@ -611,7 +611,7 @@ test('PagePlanStep::normalize rations spacious density across the page', functio
             plan_section(['slug' => 'one', 'layout_archetype' => 'centered-stack', 'vertical_density' => 'spacious']),
             plan_section(['slug' => 'two', 'layout_archetype' => 'asymmetric-split', 'vertical_density' => 'standard']),
             plan_section(['slug' => 'three', 'layout_archetype' => 'offset-grid', 'vertical_density' => 'spacious']),
-            plan_section(['slug' => 'four', 'layout_archetype' => 'mixed-width-editorial', 'vertical_density' => 'compact']),
+            plan_section(['slug' => 'four', 'layout_archetype' => 'equal-card-grid', 'vertical_density' => 'compact']),
             plan_section(['slug' => 'five', 'layout_archetype' => 'centered-stack', 'vertical_density' => 'spacious']),
         ]);
     }, 'more than two spacious sections must be rejected');
@@ -644,7 +644,7 @@ test('PagePlanStep::normalize rejects spacious density for content-dense section
     $shortCta = PagePlanStep::normalize([
         plan_section([
             'type' => 'cta',
-            'layout_archetype' => 'mixed-width-editorial',
+            'layout_archetype' => 'equal-card-grid',
             'vertical_density' => 'spacious',
         ]),
     ]);
@@ -818,7 +818,7 @@ test('PagePlanStep::repairVariety demotes spacious pauses that break the density
         plan_section(['slug' => 'a', 'type' => 'gallery', 'layout_archetype' => 'offset-grid', 'vertical_density' => 'spacious']),
         plan_section(['slug' => 'b', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'vertical_density' => 'spacious']),
         plan_section(['slug' => 'c', 'role' => 'content', 'layout_archetype' => 'asymmetric-split', 'vertical_density' => 'spacious']),
-        plan_section(['slug' => 'd', 'role' => 'content', 'layout_archetype' => 'mixed-width-editorial', 'vertical_density' => 'spacious']),
+        plan_section(['slug' => 'd', 'role' => 'content', 'layout_archetype' => 'equal-card-grid', 'vertical_density' => 'spacious']),
         plan_section(['slug' => 'e', 'role' => 'closing', 'layout_archetype' => 'centered-stack', 'vertical_density' => 'spacious']),
     ]);
 
@@ -1210,8 +1210,8 @@ test('page-plan repairs every invalid page in ONE batched round', function () {
         plan_section(['slug' => 'm2', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']),
     ]]);
     $llm->queueJson(['sections' => [
-        plan_section(['slug' => 'a1', 'layout_archetype' => 'mixed-width-editorial', 'background' => 'base']),
-        plan_section(['slug' => 'a2', 'layout_archetype' => 'mixed-width-editorial', 'background' => 'contrast']),
+        plan_section(['slug' => 'a1', 'layout_archetype' => 'equal-card-grid', 'background' => 'base']),
+        plan_section(['slug' => 'a2', 'layout_archetype' => 'equal-card-grid', 'background' => 'contrast']),
     ]]);
     // Both repairs come back fixed, in page order.
     $llm->queueJson(['sections' => [
@@ -1219,7 +1219,7 @@ test('page-plan repairs every invalid page in ONE batched round', function () {
         plan_section(['slug' => 'm2', 'layout_archetype' => 'asymmetric-split', 'background' => 'contrast']),
     ]]);
     $llm->queueJson(['sections' => [
-        plan_section(['slug' => 'a1', 'layout_archetype' => 'mixed-width-editorial', 'background' => 'base']),
+        plan_section(['slug' => 'a1', 'layout_archetype' => 'equal-card-grid', 'background' => 'base']),
         plan_section(['slug' => 'a2', 'layout_archetype' => 'list-with-thumbnails', 'background' => 'contrast']),
     ]]);
 
@@ -1928,13 +1928,13 @@ test('PagePlanStep remaps ineligible offset-grid to a level row, never a cover',
     $sections = PagePlanStep::normalize([
         plan_section(['slug' => 'story', 'layout_archetype' => 'centered-stack', 'background' => 'base']),
         plan_section(['slug' => 'proof', 'layout_archetype' => 'offset-grid', 'background' => 'contrast']),
-        plan_section(['slug' => 'visit', 'layout_archetype' => 'mixed-width-editorial', 'background' => 'base']),
+        plan_section(['slug' => 'visit', 'layout_archetype' => 'list-with-thumbnails', 'background' => 'base']),
     ], true, null, [], $warnings, 'home', allowOffsetGrid: false);
 
     assert_eq('equal-card-grid', $sections[1]['layout_archetype']);
     assert_true($sections[1]['layout_archetype'] !== 'full-bleed-cover');
     assert_eq('centered-stack', $sections[0]['layout_archetype']);
-    assert_eq('mixed-width-editorial', $sections[2]['layout_archetype']);
+    assert_eq('list-with-thumbnails', $sections[2]['layout_archetype']);
 });
 
 test('PagePlanStep honors the equal-card-grid cap when remapping offset-grid', function () {
@@ -1945,7 +1945,7 @@ test('PagePlanStep honors the equal-card-grid cap when remapping offset-grid', f
         plan_section(['slug' => 'c', 'layout_archetype' => 'equal-card-grid', 'background' => 'base']),
     ], true, null, [], $warnings, 'home', allowOffsetGrid: false);
 
-    assert_eq('mixed-width-editorial', $sections[1]['layout_archetype']);
+    assert_eq('asymmetric-split', $sections[1]['layout_archetype']);
     assert_eq(2, count(array_filter($sections, fn ($s) => $s['layout_archetype'] === 'equal-card-grid')));
 });
 
@@ -2228,7 +2228,7 @@ test('an authored full-bleed cover on a contact page survives the trim', functio
         'front' => false,
         'sections' => [
             plan_section(['slug' => 'hero', 'title' => 'Hello', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'role' => 'hero']),
-            plan_section(['slug' => 'story', 'title' => 'Story', 'layout_archetype' => 'mixed-width-editorial', 'background' => 'base', 'role' => 'content']),
+            plan_section(['slug' => 'story', 'title' => 'Story', 'layout_archetype' => 'equal-card-grid', 'background' => 'base', 'role' => 'content']),
             plan_section(['slug' => 'gallery', 'title' => 'Gallery', 'layout_archetype' => 'offset-grid', 'background' => 'base', 'role' => 'content']),
             plan_section(['slug' => 'form', 'title' => 'Write us', 'type' => 'contact', 'purpose' => 'The contact form', 'layout_archetype' => 'asymmetric-split', 'background' => 'base', 'role' => 'content']),
             plan_section(['slug' => 'hours', 'title' => 'Hours', 'purpose' => 'Harbor office hours and address', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'role' => 'content']),

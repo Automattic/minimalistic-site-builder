@@ -889,7 +889,7 @@ test('an uncommitted device never widens a seam — motion-sanity will strip it'
         ['slug' => 'archive', 'markup' => $ruled, 'density' => 'compact', 'background' => 'base'],
     ];
 
-    foreach ([null, 'none', 'stamp', 'section-numeral'] as $committed) {
+    foreach ([null, 'none', 'stamp'] as $committed) {
         $result = SectionRhythm::rewrite($entries, null, $committed);
         assert_eq(
             '0',
@@ -1026,30 +1026,28 @@ test('a device class on a NESTED element does not widen the seam', function () {
 
 test('only a device that paints the ROOT top edge widens a seam', function () {
     // The floor is an allowlist, not "the committed device is on the band".
-    // `stamp` and `section-numeral` are inset marks (Device::kitCss): they draw
-    // inside the band's own top padding, so the seam below the section above
-    // them still collapses. Without this, widening TOP_EDGE_DEVICE_CLASSES to
-    // a mark that paints nothing at the boundary fails no test.
+    // `stamp` is an inset mark (Device::kitCss): it draws inside the band's
+    // own top padding, so the seam below the section above it still collapses.
+    // Without this, widening TOP_EDGE_DEVICE_CLASSES to a mark that paints
+    // nothing at the boundary fails no test.
     $plain = sr_section(['layout' => ['type' => 'constrained']],
         '<!-- wp:paragraph --><p>Body</p><!-- /wp:paragraph -->');
 
-    foreach (['stamp', 'section-numeral'] as $device) {
-        $marked = sr_section([
-            'className' => 'device--' . $device,
-            'layout' => ['type' => 'constrained'],
-        ], '<!-- wp:paragraph --><p>Body</p><!-- /wp:paragraph -->');
+    $marked = sr_section([
+        'className' => 'device--stamp',
+        'layout' => ['type' => 'constrained'],
+    ], '<!-- wp:paragraph --><p>Body</p><!-- /wp:paragraph -->');
 
-        $result = SectionRhythm::rewrite([
-            ['slug' => 'overview', 'markup' => $plain, 'density' => 'standard', 'background' => 'base'],
-            ['slug' => 'archive', 'markup' => $marked, 'density' => 'standard', 'background' => 'base'],
-        ], null, $device);
+    $result = SectionRhythm::rewrite([
+        ['slug' => 'overview', 'markup' => $plain, 'density' => 'standard', 'background' => 'base'],
+        ['slug' => 'archive', 'markup' => $marked, 'density' => 'standard', 'background' => 'base'],
+    ], null, 'stamp');
 
-        assert_eq(
-            '0',
-            sr_root_attrs($result['markups'][0])['style']['spacing']['padding']['bottom'],
-            "'{$device}' paints no top-edge rule, so the seam still collapses"
-        );
-    }
+    assert_eq(
+        '0',
+        sr_root_attrs($result['markups'][0])['style']['spacing']['padding']['bottom'],
+        "'stamp' paints no top-edge rule, so the seam still collapses"
+    );
 });
 
 test('a device on the hero does not consume the budget the next band claims', function () {

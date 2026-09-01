@@ -9,7 +9,7 @@ function pacing_plan(int $sections, string $background = 'base'): array
     $archetypes = [
         'centered-stack',
         'asymmetric-split',
-        'mixed-width-editorial',
+        'equal-card-grid',
         'list-with-thumbnails',
         'full-bleed-cover',
         'offset-grid',

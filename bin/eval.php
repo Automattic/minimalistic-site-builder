@@ -42,7 +42,7 @@ if ($only === '--report') {
     exit(0);
 }
 
-$llm = make_llm();
+$llm = resolve_llm();
 $builder = make_site_builder($llm);
 
 $results = [];

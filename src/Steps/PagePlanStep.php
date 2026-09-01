@@ -65,9 +65,17 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         'directory', 'events', 'faq', 'features', 'genres', 'index', 'ingredients',
         'lineup', 'locations', 'menu', 'offerings', 'posts', 'pricing', 'process',
         'products', 'program', 'projects', 'rooms', 'schedule', 'services', 'skills',
-        'specifications', 'steps', 'studies', 'team', 'testimonials', 'tiers',
+        'specifications', 'steps', 'studies', 'team', 'tiers',
         'timeline', 'workshops',
     ];
+
+    /**
+     * Semantic type words for quote-led sections. A testimonial repeats, but
+     * its item is a voice with an attribution, not a label/value fact, so the
+     * tabular idioms (rule-row, index, spec-table, tag-cluster) never fit it.
+     * Only the card idiom may dress a quote (BIGR-953).
+     */
+    private const QUOTE_LED_TYPES = ['testimonials', 'reviews', 'quotes', 'endorsements'];
 
     /** Per-section copy positions assigned against the site-level intent. */
     public const TEXT_PLACEMENTS = DesignDirectionStep::TEXT_PLACEMENTS;
@@ -87,6 +95,12 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      * of its archetype budget on `mixed-width-editorial` while never once
      * breaking adjacency — the rule held and the page was uniform anyway. Only
      * a count over the whole page catches that.
+     *
+     * BIGR-945 retired `mixed-width-editorial` into `asymmetric-split`, so that
+     * name no longer exists. The measurement stands and the cap still earns its
+     * place: a merge removes the vaguest option, it does not decide who picks.
+     * Watch the same share on the merged name — if 77% simply moves there, the
+     * concentration was never about having two names for one shape.
      */
     private const ARCHETYPE_SHARE_DIVISOR = 3;
 
@@ -96,7 +110,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      */
     private const LEVEL_ROW_ARCHETYPES = [
         'equal-card-grid',
-        'mixed-width-editorial',
+        'asymmetric-split',
         'list-with-thumbnails',
     ];
 
@@ -781,6 +795,22 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 $explicit = ItemPattern::explicit($authored);
                 $type = strtolower(trim((string) ($section['type'] ?? '')));
                 $listLike = self::isListLikeType($type);
+                if (self::isQuoteLedType($type) && $committed !== 'card') {
+                    $pages[$pageIndex]['sections'][$sectionIndex]['item_pattern'] = null;
+                    $authoredValue = is_string($authored) ? trim($authored) !== '' : $authored !== null;
+                    if ($authoredValue) {
+                        $slug = (string) ($page['slug'] ?? '');
+                        $repairs[] = self::successfulRepair(
+                            self::sectionPath($slug, (int) $sectionIndex) . '.item_pattern',
+                            $authored,
+                            null,
+                            "released quote-led section type '{$type}' from the '{$committed}' idiom: "
+                            . 'a quote-led section repeats voices with attributions, not label/value facts, '
+                            . 'so only the card idiom may dress it',
+                        );
+                    }
+                    continue;
+                }
                 if ($explicit === null && !$listLike) {
                     $pages[$pageIndex]['sections'][$sectionIndex]['item_pattern'] = null;
                     continue;
@@ -803,12 +833,23 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         return $pages;
     }
 
+    private static function isQuoteLedType(string $type): bool
+    {
+        return self::matchesTypeCatalog($type, self::QUOTE_LED_TYPES);
+    }
+
     private static function isListLikeType(string $type): bool
+    {
+        return self::matchesTypeCatalog($type, self::LIST_LIKE_TYPES);
+    }
+
+    /** @param list<string> $catalog */
+    private static function matchesTypeCatalog(string $type, array $catalog): bool
     {
         $tokens = preg_split('/[^a-z0-9]+/', strtolower($type), -1, PREG_SPLIT_NO_EMPTY) ?: [];
         foreach ($tokens as $token) {
             $singular = str_ends_with($token, 's') ? substr($token, 0, -1) : $token;
-            foreach (self::LIST_LIKE_TYPES as $candidate) {
+            foreach ($catalog as $candidate) {
                 $candidateSingular = str_ends_with($candidate, 's') ? substr($candidate, 0, -1) : $candidate;
                 if ($token === $candidate || $singular === $candidateSingular) {
                     return true;
@@ -2101,7 +2142,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             // variety rule holds by construction.
             $safeArchetypes = self::archetypeEligible('offset-grid', $allowOffsetGrid)
                 ? ['centered-stack', 'asymmetric-split', 'offset-grid']
-                : ['centered-stack', 'asymmetric-split', 'mixed-width-editorial'];
+                : ['centered-stack', 'asymmetric-split', 'equal-card-grid'];
             $briefs = [
                 [
                     'slug'          => 'overview',

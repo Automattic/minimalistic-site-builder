@@ -18,6 +18,10 @@
         "openrouter": {
             "large": "moonshotai/kimi-k3",
             "small": "moonshotai/kimi-k2.5:nitro"
+        },
+        "baseten": {
+            "large": "moonshotai/Kimi-K3",
+            "small": "zai-org/GLM-5.2-Fast"
         }
     },
     "step_tiers": {

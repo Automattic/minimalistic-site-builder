@@ -25,11 +25,11 @@ function cap_section(string $slug, string $archetype, string $density = 'standar
 function cap_alternating_plan(): array
 {
     return [
-        cap_section('hero', 'mixed-width-editorial'),
+        cap_section('hero', 'asymmetric-split'),
         cap_section('a', 'centered-stack'),
-        cap_section('b', 'mixed-width-editorial'),
+        cap_section('b', 'asymmetric-split'),
         cap_section('c', 'centered-stack'),
-        cap_section('d', 'mixed-width-editorial'),
+        cap_section('d', 'asymmetric-split'),
         cap_section('e', 'centered-stack'),
     ];
 }
@@ -66,7 +66,7 @@ test('a page that alternates two archetypes is rejected even with no adjacent du
         PagePlanStep::normalize($plan, true, null, [], $warnings, 'home', $repairs, true);
     } catch (\RuntimeException $e) {
         $rejected = true;
-        assert_contains("'mixed-width-editorial' is used 3 times across 6 sections", $e->getMessage());
+        assert_contains("'asymmetric-split' is used 3 times across 6 sections", $e->getMessage());
         assert_contains('no archetype may carry more than 2', $e->getMessage());
     }
     assert_true($rejected, 'an alternating page is a rejection, not an accepted plan');
@@ -139,11 +139,11 @@ test('the dominance pass respects the interior page opening rule', function () {
     // so without the exclusion an interior page would get the second homepage
     // hero normalize() rejects.
     $plan = [
-        cap_section('hero', 'mixed-width-editorial'),
+        cap_section('hero', 'asymmetric-split'),
         cap_section('a', 'centered-stack'),
-        cap_section('b', 'mixed-width-editorial'),
+        cap_section('b', 'asymmetric-split'),
         cap_section('c', 'centered-stack'),
-        cap_section('d', 'mixed-width-editorial'),
+        cap_section('d', 'asymmetric-split'),
     ];
     $warnings = [];
     $repairs = [];

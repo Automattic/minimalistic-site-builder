@@ -441,3 +441,112 @@ test('scaffold hero headings wrap at word boundaries and never snap mid-word', f
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('scaffold-theme owns the guaranteed sticky-side pin rule', function () {
+    // BIGR-945: `SectionComposition::PIN_CLASS` REQUIRES this behavior. The
+    // page-styles appendix is model-authored and can be dropped, so the
+    // scaffold ships the rule itself.
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_pin_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    (new ScaffoldThemeStep())->run($project);
+    $css = $project->readText('theme/style.css');
+
+    $hook = '.section-composition--asymmetric-split .wp-block-column.sticky-side';
+    assert_contains($hook . ' {', $css, 'the pin rule targets the archetype root and the pin class');
+
+    // The stretch opt-out applies at every width; the sticky part is
+    // desktop-only.
+    $matched = preg_match(
+        '~' . preg_quote($hook, '~') . '\s*\{(?<base>[^}]*)\}~',
+        $css,
+        $base
+    );
+    assert_eq(1, $matched, 'the base pin rule exists');
+    assert_contains('align-self: flex-start', $base['base']);
+
+    $matched = preg_match(
+        '~@media \(min-width: 782px\)\s*\{\s*'
+            . preg_quote($hook, '~') . '\s*\{(?<body>[^}]*)\}~',
+        $css,
+        $rule
+    );
+    assert_eq(1, $matched, 'the sticky part is gated to desktop widths');
+    assert_contains('position: sticky', $rule['body']);
+    assert_contains('top: var(--wp--preset--spacing--lg, 3rem)', $rule['body']);
+    // The pin must not clamp the column: a height clamp with an inner
+    // scroll draws a nested scroll bar on the lead column.
+    assert_true(
+        !str_contains($rule['body'], 'max-block-size'),
+        'the pinned column has no height clamp'
+    );
+    assert_true(
+        !str_contains($rule['body'], 'overflow'),
+        'the pinned column has no inner scroll'
+    );
+    assert_true(
+        !str_contains($rule['body'], 'overscroll'),
+        'the pinned column has no overscroll trap'
+    );
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('scaffold-theme owns the guaranteed centered-stack alignment rule', function () {
+    // BIGR-952: the archetype's alignment lived only in prompt prose, so a
+    // band could ship a centered heading over start-aligned copy. The
+    // scaffold ships the rule itself, like the pin rule above.
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_centered_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    (new ScaffoldThemeStep())->run($project);
+    $css = $project->readText('theme/style.css');
+
+    $hook = '.section-composition--centered-stack';
+
+    $matched = preg_match(
+        '~' . preg_quote($hook, '~') . '\s*\{(?<body>[^}]*)\}~',
+        $css,
+        $root
+    );
+    assert_eq(1, $matched, 'the root rule exists');
+    assert_contains('text-align: center', $root['body']);
+
+    // A flex buttons row ignores inherited text-align, so it needs its own
+    // justification — but only when the author set none.
+    $matched = preg_match(
+        '~' . preg_quote($hook, '~')
+            . '\s+\.wp-block-buttons(?<guards>[^{]*)\{(?<body>[^}]*)\}~',
+        $css,
+        $buttons
+    );
+    assert_eq(1, $matched, 'the buttons rule exists');
+    assert_contains('justify-content: center', $buttons['body']);
+    assert_contains(':not(.is-content-justification-left)', $buttons['guards'], 'an authored justification survives');
+    // BIGR-952 review follow-up: a buttons row inside an exempted item row
+    // must not center, or the start-aligned row gets a mixed alignment again.
+    assert_contains(':not(.item-pattern__item *)', $buttons['guards'], 'a buttons row inside an item row stays exempt');
+
+    // Repeated item rows and lists stay start-aligned inside the centered
+    // band; a centered rag on markers or on item rows is a new defect.
+    $matched = preg_match(
+        '~' . preg_quote($hook, '~') . '\s+\.item-pattern__item\s*\{(?<body>[^}]*)\}~',
+        $css,
+        $items
+    );
+    assert_eq(1, $matched, 'the item-row exemption exists');
+    assert_contains('text-align: start', $items['body']);
+
+    $matched = preg_match(
+        '~' . preg_quote($hook, '~') . '\s+:is\(ul, ol\)(?<guards>[^{]*)\{(?<body>[^}]*)\}~',
+        $css,
+        $lists
+    );
+    assert_eq(1, $matched, 'the list exemption exists');
+    assert_contains('text-align: start', $lists['body']);
+    assert_contains('margin-inline: auto', $lists['body'], 'the list block itself still centers');
+    // BIGR-952 review follow-up: a list inside an exempted item row must not
+    // take the fit-content centering, or it centers inside the start-aligned
+    // row.
+    assert_contains(':not(.item-pattern__item *)', $lists['guards'], 'a list inside an item row stays exempt');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

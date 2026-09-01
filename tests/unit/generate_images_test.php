@@ -102,6 +102,26 @@ test('generate-images writes assets, rewrites src/url, and marks completed', fun
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('I-G9 a preconstructed image client still powers post-build generation', function () {
+    [$project, $tmp] = generate_fixture();
+    $images = new FakeImageClient('JPEGDATA');
+
+    try {
+        $step = make_generate_images_step(null, $images);
+        $property = new ReflectionProperty(GenerateImagesStep::class, 'images');
+        $property->setAccessible(true);
+        assert_true($property->getValue($step) === $images, 'the preflight client instance is reused');
+
+        $step->run($project);
+
+        assert_eq(1, count($images->calls));
+        assert_true($project->exists('theme/assets/hero.jpg'));
+        assert_eq('completed', $project->readJson('images.json')[0]['status'] ?? null);
+    } finally {
+        remove_tree($tmp);
+    }
+});
+
 test('generate-images aligns source ratio and prompt composition with image_crop', function () {
     [$project, $tmp] = generate_fixture();
     $project->writeJson('designDirection.json', ['image_crop' => 'portrait']);

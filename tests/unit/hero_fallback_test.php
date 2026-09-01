@@ -191,3 +191,18 @@ test('header fallback rides its title in a wide row so worst-case chrome stays b
         );
     }
 });
+
+test('the fallback hero carries the committed media aspect marker (BIGR-925)', function () {
+    // The fallback builds its root classes directly rather than through
+    // withRootClassMarker, so it needs the aspect stamped here too — otherwise
+    // a transport failure on a portrait build loses the plate ratio.
+    $contract = hero_fallback_contract();
+    $contract['media_aspect'] = 'portrait';
+    $markup = HeroFallback::render(hero_fallback_input(), $contract, 'transport failed')->markup;
+    assert_contains('hero-media--portrait', $markup);
+
+    // An aspect the recipe cannot serve never reaches the markup: render()
+    // asserts the contract first, and that is where it is rejected.
+    $contract['media_aspect'] = 'none';
+    assert_throws(fn () => HeroFallback::render(hero_fallback_input(), $contract, 'transport failed'));
+});

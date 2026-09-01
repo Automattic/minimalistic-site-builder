@@ -425,7 +425,7 @@ final class TransformSiteStep implements Step
                     'type' => 'content',
                     'purpose' => '',
                     'content_notes' => '',
-                    'layout_archetype' => 'mixed-width-editorial',
+                    'layout_archetype' => 'asymmetric-split',
                     'background' => 'base',
                     'vertical_density' => 'standard',
                     'handoff' => '',
@@ -448,7 +448,7 @@ final class TransformSiteStep implements Step
                     'type' => 'content',
                     'purpose' => '',
                     'content_notes' => '',
-                    'layout_archetype' => 'mixed-width-editorial',
+                    'layout_archetype' => 'asymmetric-split',
                     'background' => 'base',
                     'vertical_density' => 'standard',
                     'handoff' => '',
@@ -594,6 +594,13 @@ final class TransformSiteStep implements Step
                 $heroMarkup,
                 'hero-mobile--',
                 'hero-mobile--' . (string) $delivery['mobile_transformation'],
+                $heroPart,
+                $stampRepairs,
+            );
+            $heroMarkup = GeneratedMarkup::withRootClassMarker(
+                $heroMarkup,
+                'hero-media--',
+                'hero-media--' . (string) $delivery['media_aspect'],
                 $heroPart,
                 $stampRepairs,
             );

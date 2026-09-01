@@ -9,7 +9,11 @@ use Automattic\SiteBuild\Tests\FakeLlm;
 use Automattic\SiteBuild\Units\SectionUnit;
 
 test('item-pattern catalog is bounded and owns one recipe per value', function (): void {
-    assert_eq(['card', 'rule-row', 'index', 'spec-table', 'tag-cluster'], ItemPattern::ALL);
+    assert_eq(['card', 'rule-row', 'spec-table', 'tag-cluster'], ItemPattern::ALL);
+    // 'index' left the catalog with BIGR-949: an identifier column of
+    // sequence numbers is banned unless the site brief asks for it.
+    assert_true(!ItemPattern::isKnown('index'));
+    assert_eq(null, ItemPattern::explicit('index'));
     foreach (ItemPattern::ALL as $pattern) {
         assert_true(ItemPattern::isKnown($pattern));
         assert_contains("item-patterns/{$pattern}.md", ItemPattern::recipeTemplate($pattern));
@@ -69,9 +73,9 @@ test('page plan restores the committed pattern and assigns obvious list types on
         ],
     ]];
     $repairs = [];
-    $delivered = PagePlanStep::reconcileItemPatternAssignments($pages, 'index', $repairs);
+    $delivered = PagePlanStep::reconcileItemPatternAssignments($pages, 'rule-row', $repairs);
 
-    assert_eq([null, 'index', 'index', 'index', null], array_column($delivered[0]['sections'], 'item_pattern'));
+    assert_eq([null, 'rule-row', 'rule-row', 'rule-row', null], array_column($delivered[0]['sections'], 'item_pattern'));
     assert_eq(3, count($repairs));
     assert_contains("sections[1].item_pattern", $repairs[0]);
     assert_contains("sections[2].item_pattern", $repairs[1]);
@@ -79,9 +83,84 @@ test('page plan restores the committed pattern and assigns obvious list types on
     $fixedPointRepairs = [];
     assert_eq(
         $delivered,
-        PagePlanStep::reconcileItemPatternAssignments($delivered, 'index', $fixedPointRepairs),
+        PagePlanStep::reconcileItemPatternAssignments($delivered, 'rule-row', $fixedPointRepairs),
     );
     assert_eq([], $fixedPointRepairs);
+});
+
+test('quote-led sections never keep a tabular idiom', function (): void {
+    $pages = [[
+        'slug' => 'home',
+        'sections' => [
+            ['slug' => 'voices', 'type' => 'testimonials', 'item_pattern' => 'spec-table'],
+            ['slug' => 'reviews', 'type' => 'customer-reviews', 'item_pattern' => null],
+            ['slug' => 'menu', 'type' => 'menu', 'item_pattern' => null],
+        ],
+    ]];
+    $repairs = [];
+    $delivered = PagePlanStep::reconcileItemPatternAssignments($pages, 'spec-table', $repairs);
+
+    assert_eq([null, null, 'spec-table'], array_column($delivered[0]['sections'], 'item_pattern'));
+    assert_eq(2, count($repairs));
+    assert_contains('sections[0].item_pattern', $repairs[0]);
+    assert_contains('quote-led', $repairs[0]);
+    assert_contains('sections[2].item_pattern', $repairs[1]);
+
+    $fixedPointRepairs = [];
+    assert_eq(
+        $delivered,
+        PagePlanStep::reconcileItemPatternAssignments($delivered, 'spec-table', $fixedPointRepairs),
+    );
+    assert_eq([], $fixedPointRepairs);
+});
+
+test('a card commitment may dress a testimonial but is never forced onto one', function (): void {
+    $pages = [[
+        'slug' => 'home',
+        'sections' => [
+            ['slug' => 'voices', 'type' => 'testimonials', 'item_pattern' => 'card'],
+            ['slug' => 'praise', 'type' => 'testimonials', 'item_pattern' => null],
+        ],
+    ]];
+    $repairs = [];
+    $delivered = PagePlanStep::reconcileItemPatternAssignments($pages, 'card', $repairs);
+
+    assert_eq(['card', null], array_column($delivered[0]['sections'], 'item_pattern'));
+    assert_eq([], $repairs);
+});
+
+test('an unknown authored value on a quote-led section is released with a repair line', function (): void {
+    $pages = [[
+        'slug' => 'home',
+        'sections' => [
+            ['slug' => 'voices', 'type' => 'testimonials', 'item_pattern' => 'ledger'],
+        ],
+    ]];
+    $repairs = [];
+    $delivered = PagePlanStep::reconcileItemPatternAssignments($pages, 'spec-table', $repairs);
+
+    assert_eq([null], array_column($delivered[0]['sections'], 'item_pattern'));
+    assert_eq(1, count($repairs));
+    assert_contains('sections[0].item_pattern', $repairs[0]);
+    assert_contains('quote-led', $repairs[0]);
+    assert_contains('ledger', $repairs[0]);
+});
+
+test('a compound type with both a quote-led and a list-like token takes the quote-led path', function (): void {
+    $pages = [[
+        'slug' => 'home',
+        'sections' => [
+            ['slug' => 'reviews', 'type' => 'reviews-index', 'item_pattern' => 'spec-table'],
+        ],
+    ]];
+    $repairs = [];
+    $delivered = PagePlanStep::reconcileItemPatternAssignments($pages, 'spec-table', $repairs);
+
+    assert_eq([null], array_column($delivered[0]['sections'], 'item_pattern'));
+    assert_eq(1, count($repairs));
+    assert_contains('sections[0].item_pattern', $repairs[0]);
+    assert_contains('quote-led', $repairs[0]);
+    assert_contains("'reviews-index'", $repairs[0]);
 });
 
 test('section request sees exactly the assigned item recipe', function (): void {
@@ -102,16 +181,16 @@ test('section request sees exactly the assigned item recipe', function (): void 
 test('item-pattern delivery repairs only the root marker and advises on missing repeated hooks', function (): void {
     $renderer = new PromptRenderer(repo_path('prompts'));
     $unit = new SectionUnit(new FakeLlm(), $renderer);
-    $input = item_pattern_unit_input('index');
+    $input = item_pattern_unit_input('spec-table');
     $raw = '<!-- wp:group {"className":"section-composition--centered-stack"} -->'
         . '<div class="section-composition--centered-stack">'
         . '<!-- wp:group {"className":"item-pattern__item"} --><div class="item-pattern__item">'
-        . '<!-- wp:paragraph --><p>01</p><!-- /wp:paragraph --></div><!-- /wp:group -->'
+        . '<!-- wp:paragraph --><p>Material</p><!-- /wp:paragraph --></div><!-- /wp:group -->'
         . '<!-- wp:group {"className":"item-pattern__item"} --><div class="item-pattern__item">'
-        . '<!-- wp:paragraph --><p>02</p><!-- /wp:paragraph --></div><!-- /wp:group -->'
+        . '<!-- wp:paragraph --><p>Weight</p><!-- /wp:paragraph --></div><!-- /wp:group -->'
         . '</div><!-- /wp:group -->';
     $result = $unit->finish($raw, $input);
-    assert_contains('item-pattern--index', $result->markup);
+    assert_contains('item-pattern--spec-table', $result->markup);
     assert_eq([], array_values(array_filter(
         $result->warnings,
         static fn (string $warning): bool => str_contains($warning, 'item-pattern'),
@@ -131,7 +210,7 @@ function item_pattern_unit_input(?string $pattern): array
         'site_spec' => '{"name":"Demo","language":"en"}',
         'language' => 'en',
         'theme_json' => '{"version":3}',
-        'design_direction' => 'A numbered archival system.',
+        'design_direction' => 'An archival system.',
         'card_style' => 'flush',
         'outline' => '- Archive [#archive]',
         'site_pages' => '- "Home" — / (front page): Welcome',
