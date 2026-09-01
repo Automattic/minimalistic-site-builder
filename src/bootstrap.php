@@ -12,6 +12,7 @@ use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\ImageClient;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\ModelConfig;
+use Automattic\SiteBuild\ModelSpec;
 use Automattic\SiteBuild\OpenAiCompatibleClient;
 use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\ProjectStore;
@@ -125,25 +126,27 @@ function openrouter_api_key(): string
  *   - baseten   — OpenAI-compatible client → Baseten's open-weight models
  *                 (Kimi, GLM, DeepSeek) via the wpcom AI proxy (BASETEN_API_KEY;
  *                 BASETEN_BASE_URL to reach Baseten directly instead)
- *   - hybrid    — Baseten for the run, Anthropic for the steps config/models.json
+ *   - hybrid    — Baseten for the run, OpenAI for the steps config/models.json
  *                 pins to it, dispatched per request by RoutingLlm
  *
  * Model IDs come from the provider's tiers in config/models.json (StepDefaults),
  * overridable per step via LLM_MODEL_* — so `--provider=openai` swaps the whole
  * model set without extra flags.
  *
- * A provider that pins steps to another transport (only `hybrid` does today)
- * gets a RoutingLlm over one client per transport instead of a single client.
- * Every other provider keeps exactly the client it had before.
+ * A run where some LLM_MODEL_<STEP> carries a `transport:` prefix gets a
+ * RoutingLlm over one client per transport instead of a single client. A run
+ * with no such override keeps exactly the client it had before.
  */
 function make_llm(): Llm
 {
-    $provider = strtolower((string) Env::get('LLM_PROVIDER', ModelConfig::defaultProvider()));
-    $default = ModelConfig::hasProvider($provider) ? ModelConfig::transport($provider) : $provider;
+    // StepDefaults owns provider resolution. Recomputing it here would let the
+    // transport this builds disagree with the models the steps are given, which
+    // is how a Baseten model ends up addressed to an Anthropic client.
+    $provider = StepDefaults::provider();
     $routes = ModelConfig::hasProvider($provider) ? StepDefaults::modelTransports() : [];
 
     if ($routes === []) {
-        return make_llm_transport($default, default_llm_model());
+        return make_llm_transport($provider, default_llm_model());
     }
 
     // One client per distinct transport. Each is given a default model its own
@@ -151,12 +154,12 @@ function make_llm(): Llm
     // client, not default_llm_model(), which LLM_MODEL may have pointed at
     // another provider entirely. RoutingLlm names the model on every request
     // anyway, so these are a fallback that should never be reached.
-    $clients = [$default => make_llm_transport($default, ModelConfig::tierModel($provider, 'large'))];
+    $clients = [$provider => make_llm_transport($provider, ModelConfig::tierModel($provider, 'large'))];
     foreach ($routes as $model => $transport) {
         $clients[$transport] ??= make_llm_transport($transport, $model);
     }
 
-    return new RoutingLlm($clients, $routes, $default, default_llm_model());
+    return new RoutingLlm($clients, $routes, $provider, default_llm_model());
 }
 
 /**
@@ -221,9 +224,11 @@ function make_llm_transport(string $transport, string $model): Llm
             // Harmless when BASETEN_BASE_URL points straight at Baseten.
             extraHeaders: ['X-WPCOM-AI-Feature' => 'site-builder'],
         ),
+        // Transports, not providers: a provider is a whole model set in
+        // config/models.json, a transport is a wire client. They happen to be
+        // one-to-one today, but the prefix accepts transports.
         default => throw new RuntimeException(
-            "Unknown LLM_PROVIDER '{$transport}'. Known: "
-            . implode(', ', ModelConfig::providerNames())
+            "Unknown LLM transport '{$transport}'. Known: " . implode(', ', ModelSpec::TRANSPORTS) . '.'
         ),
     };
 }

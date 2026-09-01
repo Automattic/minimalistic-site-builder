@@ -9,16 +9,16 @@ namespace Automattic\SiteBuild;
  * The pipeline already hands every step its own model (StepComposition passes
  * $models['<step>'] into the step, which LlmOptions attaches to the request),
  * so the model id is the only routing key needed: no step has to know that more
- * than one provider is in play. That is what makes `--provider=hybrid` possible
- * without touching a single step.
+ * than one provider is in play. That is what lets an LLM_MODEL_<STEP> override
+ * move one step to another provider without touching a single step.
  *
  * A request naming no model at all is given $defaultModel before it is routed.
  * That is not a corner case — design-preview and transform-site are constructed
  * with a null model unless the active provider pins one, and LlmOptions omits
  * the key entirely rather than sending null. Naming the model here rather than
  * leaving it to whichever client happens to be picked is what keeps
- * `LLM_MODEL=claude-opus-5 --provider=hybrid` honest: those steps then route to
- * Anthropic too, instead of asking Baseten for a model it has never heard of.
+ * `LLM_MODEL=<a model from another provider>` honest: those steps follow it
+ * instead of asking the default transport for a model it has never heard of.
  *
  * Batches are split by transport and each group is sent whole, so a batch whose
  * members all share one model — every batch the pipeline actually issues, since
