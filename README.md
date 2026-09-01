@@ -115,7 +115,7 @@ host-specific aliases to this package.
 
 ### Choosing the model / provider
 
-`--provider=<anthropic|openai|xai|openrouter|baseten|hybrid>` (or the `LLM_PROVIDER` env var) picks a whole
+`--provider=<anthropic|openai|xai|openrouter|baseten>` (or the `LLM_PROVIDER` env var) picks a whole
 model set at once. Each provider defines a **large** (quality-critical steps) and
 **small** (fast/cheap structural steps) model in
 [`config/models.json`](config/models.json), and each pipeline step is mapped to a
@@ -127,8 +127,7 @@ tier there — so switching providers needs no per-step configuration. Defaults:
 | `openai` | `gpt-5.5` | `gpt-5.4-mini` |
 | `xai` | `grok-4.6` | `grok-4.6` |
 | `openrouter` | `moonshotai/kimi-k3` | `moonshotai/kimi-k2.5:nitro` |
-| `baseten` | `moonshotai/Kimi-K3` | `zai-org/GLM-5.2-Fast` |
-| `hybrid` | `moonshotai/Kimi-K3` | `zai-org/GLM-5.2-Fast` |
+| `baseten` | `zai-org/GLM-5.3-Flash` | `zai-org/GLM-5.3-Flash` |
 
 `baseten` reaches Baseten's open-weight models through the WordPress.com AI
 proxy (`https://public-api.wordpress.com/wpcom/v2/ai-api-proxy/v1`, feature slug
@@ -138,36 +137,30 @@ Baseten key. Besides the two tier defaults, `LLM_MODEL` / `LLM_MODEL_<STEP>`
 accept `deepseek-ai/DeepSeek-V4-Pro`, `deepseek-ai/DeepSeek-V4-Flash-0731`,
 `zai-org/GLM-5.2` and `zai-org/GLM-5.3-Flash`. Model ids are case-sensitive.
 
-### `hybrid`: Baseten for the run, Claude for the sections
+### Running one step on a different provider
 
-`--provider=hybrid` runs on Baseten but sends every step that writes page markup
-or its CSS to OpenAI. It needs `BASETEN_API_KEY` and `OPENAI_API_KEY`.
+`LLM_MODEL_<STEP>` has always overridden a single step's model. It also accepts
+an optional `transport:` prefix, which moves that one step to another provider:
 
-| Step | Model | Transport |
-|------|-------|-----------|
-| `inner-pages-design`, `sections`, `page-styles` | `gpt-5.6-sol` | OpenAI |
-| `design-direction`, `theme-json`, `custom-motion` | `moonshotai/Kimi-K3` | Baseten |
-| `refine-prompt`, `site-spec`, `design-direction-seeds`, `page-plan`, `image-prompt-repair` | `zai-org/GLM-5.2-Fast` | Baseten |
-| `design-preview`, `transform-site` | large tier | Baseten |
+```bash
+LLM_PROVIDER=anthropic
+LLM_MODEL_THEME_JSON=claude-opus-5                    # model only, as always
+LLM_MODEL_SECTIONS=baseten:zai-org/GLM-5.3-Flash      # this step runs on Baseten
+```
 
-No step knows more than one provider is in play. `StepComposition` already
-hands every step its own model, so `RoutingLlm` dispatches each request on the
-model id alone, splitting a batch across transports when one genuinely mixes
-models and re-merging it in request order. `inner-pages-design` has no tier in
-`step_tiers`, so no other provider gives it a model at all — the pin in
-`config/models.json` is what puts it under one.
+The build then uses one client per transport, dispatching each request on its
+model id. No step knows more than one provider is in play, and a run with no
+prefixed override builds exactly the single client it always did.
 
-`gpt-5.6-sol` is reached on the OpenAI API directly. The wpcom proxy serves
-OpenAI over `/v1/responses`, which this client does not speak, so that model
-404s on the Baseten route.
+Transports are `anthropic`, `xai`, `openai`, `openrouter` and `baseten`. The
+prefix is recognised only when the text before the first colon **is** one of
+them, because model ids contain colons too: `moonshotai/kimi-k2.5:nitro` is an
+ordinary OpenRouter id and is read as a model, not as a transport. Model ids are
+passed through verbatim — Baseten's are case-sensitive.
 
-Which steps go where is data, not code: edit the `steps` map under `hybrid` in
-[`config/models.json`](config/models.json). `LLM_MODEL_<STEP>` still overrides a
-pin, and the model id is what routes, so `LLM_MODEL_THEME_JSON=gpt-5.6-sol`
-moves that step to OpenAI without any further configuration. Only transports the
-provider already builds are available, though: an id belonging to a provider no
-`steps` entry names has no client to reach, so adding one means adding a `steps`
-entry rather than only setting an env var.
+`design-preview`, `inner-pages-design` and `transform-site` have no tier, so an
+`LLM_MODEL_<STEP>` override is the only thing that ever gives them a model;
+without one they use the client's default.
 
 Most of these models reason by default, and those tokens come out of the same
 completion budget as the answer — asked for 24 tokens, Kimi K3 and both DeepSeek
