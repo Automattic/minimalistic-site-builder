@@ -133,6 +133,9 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      */
     private const MIN_BANDED_SECTIONS = 5;
 
+    /** Long pages may spend at most two deliberate beats off the base surface. */
+    private const MAX_NON_BASE_SECTIONS = 2;
+
     /**
      * Content-dense section roles must not compound their height with the
      * largest edge. "type" is free-form model output, so these are matched as
@@ -706,6 +709,18 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             FooterComposition::surface($footerArchetype),
             $warnings,
         );
+        // Apply the surface budget after the footer has settled the closing seam.
+        foreach ($out as $index => $page) {
+            if (!is_array($page) || !is_array($page['sections'] ?? null)) {
+                continue;
+            }
+            $out[$index]['sections'] = self::withSurfaceRestraint(
+                $page['sections'],
+                (string) ($page['slug'] ?? ''),
+                $warnings,
+                !empty($page['front']),
+            );
+        }
 
         $project->addWarnings($this->id(), $warnings);
         $project->writeJson('pages.json', [
@@ -3279,6 +3294,104 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     }
 
     /**
+     * Demote excess bands by kind (tinted, then contrast, then image), top to
+     * bottom within a kind. The closing section is never touched because
+     * withClosingBandOffFooterSurface() has already settled it against the
+     * footer; a locked front hero and image-backed full-bleed covers stay too.
+     *
+     * @param array<int,array<string,mixed>> $sections
+     * @param list<string> $warnings
+     * @return array<int,array<string,mixed>>
+     */
+    public static function withSurfaceRestraint(
+        array $sections,
+        string $pageSlug,
+        array &$warnings = [],
+        bool $frontHeroLocked = false,
+    ): array {
+        $count = count($sections);
+        if ($count < self::MIN_BANDED_SECTIONS) {
+            return $sections;
+        }
+        $excess = self::bandedCount($sections) - self::MAX_NON_BASE_SECTIONS;
+        if ($excess <= 0) {
+            return $sections;
+        }
+
+        foreach (['tinted', 'contrast', 'image'] as $background) {
+            foreach ($sections as $index => $section) {
+                if ($excess <= 0) {
+                    break 2;
+                }
+                if (($section['background'] ?? null) !== $background
+                    || ($frontHeroLocked && $index === 0)
+                    || $index === $count - 1
+                    || ($background === 'image'
+                        && ($section['layout_archetype'] ?? null) === 'full-bleed-cover')
+                ) {
+                    continue;
+                }
+
+                $title = trim((string) ($section['title'] ?? '')) ?: "section {$index}";
+                $sections[$index]['background'] = 'base';
+                $sections[$index]['handoff'] = self::withSeamCorrection(
+                    $section['handoff'] ?? '',
+                    'this section now uses the page base so non-base surfaces remain limited to two purposeful beats',
+                );
+                $sections = self::withNeighborSeamCorrections(
+                    $sections,
+                    (int) $index,
+                    'the "' . $title . '" section beside it now uses the page base',
+                );
+                $warnings[] = self::valueLossWarning(
+                    self::sectionPath($pageSlug, (int) $index) . '.background',
+                    $background,
+                    'base',
+                    'demoted an excess color band so the page keeps at most two purposeful non-base surface beats',
+                );
+                $excess--;
+            }
+        }
+
+        $remaining = self::bandedCount($sections);
+        if ($remaining > self::MAX_NON_BASE_SECTIONS) {
+            $path = $pageSlug === '' ? 'pages[].sections' : "pages[slug='{$pageSlug}'].sections";
+            $warnings[] = self::valueLossWarning(
+                $path,
+                "{$remaining} non-base surfaces",
+                "{$remaining} non-base surfaces",
+                'surface budget could not be met without changing a locked hero, closing seam, or structural '
+                    . 'full-bleed image; delivered those sections intact',
+            );
+        }
+
+        return $sections;
+    }
+
+    /**
+     * Each neighbor's handoff names the section's background, and both the
+     * section author and its neighbors' authors read that line. Correcting
+     * it in place beats regenerating every seam and losing the planner's
+     * reasoning for each one.
+     *
+     * @param array<int,array<string,mixed>> $sections
+     * @return array<int,array<string,mixed>>
+     */
+    private static function withNeighborSeamCorrections(array $sections, int $index, string $correction): array
+    {
+        foreach ([$index - 1, $index + 1] as $neighbor) {
+            if (!isset($sections[$neighbor]) || !is_array($sections[$neighbor])) {
+                continue;
+            }
+            $sections[$neighbor]['handoff'] = self::withSeamCorrection(
+                $sections[$neighbor]['handoff'] ?? '',
+                $correction,
+            );
+        }
+        return $sections;
+    }
+
+    /**
      * Give a long all-base page one contrast band, so it is not one unbroken
      * scroll of page background. See MIN_BANDED_SECTIONS for the audit.
      *
@@ -3317,20 +3430,12 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 . 'background; this supersedes any background named earlier in this line',
         );
 
-        // Each neighbor's handoff names this section's background, and both the
-        // section author and its neighbors' authors read that line. Correcting
-        // it in place beats regenerating every seam and losing the planner's
-        // reasoning for each one.
-        foreach ([$target - 1, $target + 1] as $neighbor) {
-            if (!isset($sections[$neighbor]) || !is_array($sections[$neighbor])) {
-                continue;
-            }
-            $sections[$neighbor]['handoff'] = self::withSeamCorrection(
-                $sections[$neighbor]['handoff'] ?? '',
-                'the "' . $title . '" section beside it is now a contrast band; this supersedes the background '
-                    . 'named for it earlier in this line',
-            );
-        }
+        $sections = self::withNeighborSeamCorrections(
+            $sections,
+            $target,
+            'the "' . $title . '" section beside it is now a contrast band; this supersedes the background '
+                . 'named for it earlier in this line',
+        );
 
         $warnings[] = self::valueLossWarning(
             self::sectionPath($pageSlug, $target) . '.background',

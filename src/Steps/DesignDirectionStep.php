@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\AboveFoldContract;
 use Automattic\SiteBuild\BandColor;
 use Automattic\SiteBuild\CardStyle;
+use Automattic\SiteBuild\ColorEconomy;
 use Automattic\SiteBuild\ConceptSeeds;
 use Automattic\SiteBuild\CtaStyle;
 use Automattic\SiteBuild\Depth;
@@ -216,6 +217,7 @@ final class DesignDirectionStep implements Step
             'tint'          => $seedTint,
             'register'      => $seedRegister,
             'type_register' => $seedTypeRegister,
+            'color_economy' => $seedColorEconomy,
         ] = $this->chooseSeed($prompt, $spec, $warnings);
         $recipe = self::selectHeroRecipe(
             $meta,
@@ -267,6 +269,9 @@ final class DesignDirectionStep implements Step
             'type_register' => $seedTypeRegister === ''
                 ? 'not committed by the seed — read the letterform tradition off the seed sentence'
                 : $seedTypeRegister,
+            'color_economy' => $seedColorEconomy === ''
+                ? 'not committed by the seed — choose the most restrained economy that serves the concept'
+                : $seedColorEconomy,
             // A rotating per-site shortlist of real families in the committed
             // tradition. Naming the tradition alone lands every build on its
             // one famous face (BIGR-920); empty for a degraded seed.
@@ -298,6 +303,7 @@ final class DesignDirectionStep implements Step
             $warnings,
             $seedTint,
             $seedGround,
+            $seedColorEconomy,
         );
         if ($direction === null) {
             // A build without a committed direction still works — every
@@ -405,6 +411,7 @@ final class DesignDirectionStep implements Step
             'palette'          => [],
             'ground_key'       => '',
             'ground_tint'      => '',
+            'color_economy'    => ColorEconomy::DEFAULT,
             'type'             => [
                 'heading' => self::emptyTypeSlot(),
                 'body'    => self::emptyTypeSlot(),
@@ -451,7 +458,7 @@ final class DesignDirectionStep implements Step
      * sampling.
      *
      * @param list<string> $warnings
-     * @return array{text:string,ground:string,tint:string,register:string,type_register:string}
+     * @return array{text:string,ground:string,tint:string,register:string,type_register:string,color_economy:string}
      */
     private function chooseSeed(string $brief, string $spec, array &$warnings = []): array
     {
@@ -506,6 +513,7 @@ final class DesignDirectionStep implements Step
                 'tint' => '',
                 'register' => '',
                 'type_register' => '',
+                'color_economy' => '',
             ];
         }
         $pool = ConceptSeeds::distinct($seeds, $warnings);
@@ -548,8 +556,8 @@ final class DesignDirectionStep implements Step
      * prose. Passing them through is what makes the vocabularies levers rather
      * than bookkeeping.
      *
-     * @param array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string} $seed
-     * @return array{text:string,ground:string,tint:string,register:string,type_register:string}
+     * @param array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string,color_economy:?string} $seed
+     * @return array{text:string,ground:string,tint:string,register:string,type_register:string,color_economy:string}
      */
     private static function chosen(array $seed): array
     {
@@ -559,6 +567,7 @@ final class DesignDirectionStep implements Step
             'tint'          => $seed['tint'] ?? '',
             'register'      => $seed['register'] ?? '',
             'type_register' => $seed['type_register'] ?? '',
+            'color_economy' => $seed['color_economy'] ?? '',
         ];
     }
 
@@ -737,6 +746,7 @@ final class DesignDirectionStep implements Step
         array &$warnings = [],
         string $conceptTint = '',
         string $conceptGround = '',
+        string $conceptColorEconomy = '',
     ): ?array {
         if (!is_array($raw)) {
             return null;
@@ -783,6 +793,8 @@ final class DesignDirectionStep implements Step
         // as it rotates the ground into the seed's family.
         $groundTint = BoundedChoice::explicit($conceptTint, GroundTint::ALL)
             ?? BoundedChoice::explicit($raw['ground_tint'] ?? null, GroundTint::ALL);
+        $colorEconomy = ColorEconomy::explicit($conceptColorEconomy)
+            ?? ColorEconomy::normalize($raw['color_economy'] ?? null, $warnings);
         if ($groundTint !== null && isset($palette['base'])) {
             $authored = $palette['base'];
             if (GroundTint::classify($authored) !== $groundTint) {
@@ -947,6 +959,7 @@ final class DesignDirectionStep implements Step
             'palette'          => $palette,
             'ground_key'       => $groundKey ?? '',
             'ground_tint'      => $groundTint ?? '',
+            'color_economy'    => $colorEconomy,
             'type'             => [
                 'heading' => self::normalizeTypeSlot($type['heading'] ?? null, 'heading', $warnings),
                 'body'    => self::normalizeTypeSlot($type['body'] ?? null, 'body', $warnings),
@@ -1373,6 +1386,12 @@ final class DesignDirectionStep implements Step
         if ($groundTint !== null) {
             $facts[] = '- **Ground tint**: ' . $groundTint
                 . ' — the page background belongs to this family; do not re-hue it.';
+        }
+
+        $colorEconomy = ColorEconomy::explicit($direction['color_economy'] ?? null);
+        if ($colorEconomy !== null) {
+            $facts[] = '- **Color economy**: ' . $colorEconomy . ' ('
+                . ColorEconomy::meaning($colorEconomy) . ').';
         }
 
         $type = is_array($direction['type'] ?? null) ? $direction['type'] : [];
@@ -1872,6 +1891,17 @@ final class DesignDirectionStep implements Step
             $project->readJson(self::FILE)['density'] ?? null,
             self::DENSITIES,
         ) ?? 'measured';
+    }
+
+    /** The palette's hue budget; missing commitments use the restrained default. */
+    public static function colorEconomyFor(Project $project): string
+    {
+        if (!$project->exists(self::FILE)) {
+            return ColorEconomy::DEFAULT;
+        }
+        return ColorEconomy::explicit(
+            $project->readJson(self::FILE)['color_economy'] ?? null,
+        ) ?? ColorEconomy::DEFAULT;
     }
 
     /** The explicit modular type-scale commitment, or null when absent/garbled. */

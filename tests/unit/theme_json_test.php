@@ -5,6 +5,7 @@ use Automattic\SiteBuild\ConcurrentGroup;
 use Automattic\SiteBuild\ConcurrentStep;
 use Automattic\SiteBuild\JsonBatchRecovery;
 use Automattic\SiteBuild\Llm;
+use Automattic\SiteBuild\PaletteFloor;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
@@ -3700,6 +3701,29 @@ test('applyPaletteFloor leaves a clean C1 palette unchanged', function () {
 
     assert_eq([], $warnings);
     assert_eq($before, $out, 'hexes unchanged');
+});
+
+test('applyPaletteFloor forwards the complete color-economy commitment', function () {
+    $theme = [
+        'settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#F5EDE5', 'name' => 'Base'],
+            ['slug' => 'contrast', 'color' => '#2A2018', 'name' => 'Contrast'],
+            ['slug' => 'primary', 'color' => '#6B2C1F', 'name' => 'Primary'],
+            ['slug' => 'secondary', 'color' => '#1F5C6B', 'name' => 'Secondary'],
+            ['slug' => 'accent', 'color' => '#1667C5', 'name' => 'Accent'],
+        ]]],
+    ];
+
+    [$singleAccent, $singleAccentWarnings] = ThemeJsonStep::applyPaletteFloor($theme, null, 'single-accent');
+    $singleBySlug = array_column($singleAccent['settings']['color']['palette'], 'color', 'slug');
+
+    assert_true(
+        (PaletteFloor::hueDistance($singleBySlug['primary'], $singleBySlug['secondary']) ?? 360.0)
+            <= PaletteFloor::ECONOMY_HUE_TOLERANCE,
+        'single-accent consolidates its foundation',
+    );
+    assert_eq('#1667C5', $singleBySlug['accent'], 'single-accent leaves its independent hue alone');
+    assert_contains('single-accent color economy', implode("\n", $singleAccentWarnings));
 });
 
 test('applyPaletteFloor records unrepaired when a contrast floor cannot be met', function () {
