@@ -60,7 +60,7 @@ Rules:
 - Hard facts — dates, times, prices, street addresses, phone numbers, email addresses, URLs, capacities — come only from the SITE SPEC, verbatim. Never invent an email, street address, phone number, or URL. Sections are authored independently, so an invented specific WILL contradict a sibling section. When the spec lacks the value, write copy that does not need it instead of inventing one.
 
 Hero motion (optional; the DESIGN DIRECTION's Motion value is authoritative):
-- `none` means no motion classes; `minimal` permits only a quiet hover response. Otherwise, `hero-entrance` may appear once on the primary copy group, and `reveal-up` or `reveal-scale` may be used instead when that better fits the committed profile.
+- `none` means no motion classes; `minimal` permits only a quiet hover response. Otherwise, `hero-entrance` may appear once on the primary copy group, and `reveal-up`, `reveal-scale`, `reveal-blur`, or `reveal-zoom` may be used instead when that better fits the committed profile.
 - At most one ambient effect may appear in the hero: `ken-burns` on image media, `gradient-shift` on a gradient surface, or `ambient-drift` on one decorative visual. Do NOT automatically pair `hero-entrance` with `ken-burns`; zero motion classes is valid.
 - Add these only through block `className`; never write animation CSS, runtime `is-visible`/`motion-*` state, or more than one motion class on a block.
 

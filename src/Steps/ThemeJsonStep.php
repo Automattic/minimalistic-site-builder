@@ -618,6 +618,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         [$theme, $floorWarnings] = self::applyPaletteFloor(
             $theme,
             Surface::contrastFloor(DesignDirectionStep::surfaceFor($project)),
+            DesignDirectionStep::colorEconomyFor($project),
         );
         $warnings = array_merge($warnings, $floorWarnings);
 
@@ -1586,7 +1587,11 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      * @param array<mixed> $theme
      * @return array{0:array<mixed>,1:list<string>} theme, warnings
      */
-    public static function applyPaletteFloor(array $theme, ?float $contrastOnBase = null): array
+    public static function applyPaletteFloor(
+        array $theme,
+        ?float $contrastOnBase = null,
+        ?string $colorEconomy = null,
+    ): array
     {
         $palette = $theme['settings']['color']['palette'] ?? null;
         if (!is_array($palette)) {
@@ -1608,7 +1613,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $map[$slug] = trim($color);
         }
         $warnings = [];
-        $fixed = PaletteFloor::repair($map, $warnings, $contrastOnBase);
+        $fixed = PaletteFloor::repair($map, $warnings, $contrastOnBase, $colorEconomy);
         foreach ($theme['settings']['color']['palette'] as $i => $entry) {
             if (!is_array($entry)) {
                 continue;

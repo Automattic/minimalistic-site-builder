@@ -654,11 +654,14 @@ test('the seed and expansion prompts ask for both ground coordinates, and ban tr
         'user_prompt' => 'a bakery', 'site_spec' => '{}', 'seed' => 'Seed',
         'hero_composition' => '', 'ground_key' => 'dark', 'ground_tint' => 'violet',
         'register' => 'editorial', 'type_register' => 'didone', 'type_candidates' => '',
+        'color_economy' => 'monochrome',
     ]);
     assert_contains('ground_key', $direction, 'the expansion commits the light/dark field the build enforces');
     assert_contains('dark', $direction, 'and is told which side the seed chose');
     assert_contains('ground_tint', $direction, 'the expansion commits the field the build enforces');
     assert_contains('violet', $direction, 'and is told which family the seed chose');
+    assert_contains('color_economy', $direction, 'the expansion commits a bounded hue budget');
+    assert_contains('monochrome', $direction, 'and sees the budget selected by the seed');
 
     // No hue may be forbidden outright — only the cliche treatment.
     foreach ([$direction, $renderer->render('theme-json.md', [
@@ -677,7 +680,8 @@ test('design-direction carries the chosen seed tint into the direction it writes
     // ground; the expansion hands back the usual cream anyway.
     $llm->queueJson(['seeds' => [
         ['seed' => 'Ink & Brass — a deep blue reading room.', 'ground' => 'light',
-            'register' => 'editorial', 'accent' => 'cool', 'tint' => 'cool'],
+            'register' => 'editorial', 'accent' => 'cool', 'tint' => 'cool',
+            'color_economy' => 'monochrome'],
     ]]);
     $llm->queueJson(['direction' => designdir_direction()]);
 
@@ -686,12 +690,18 @@ test('design-direction carries the chosen seed tint into the direction it writes
     $written = $project->readJson('designDirection.json');
     assert_eq('light', $written['ground_key'], 'the seed light/dark coordinate reaches the written direction');
     assert_eq('cool', $written['ground_tint'], 'the seed coordinate reaches the written direction');
+    assert_eq('monochrome', $written['color_economy'], 'the seed hue budget outranks expansion drift');
     assert_eq('cool', GroundTint::classify($written['palette']['base']), 'and the cream ground was moved onto it');
     assert_eq('#26221E', $written['palette']['contrast'], 'siblings are untouched');
     assert_contains(
         'seed already committed this: **light**',
         $llm->calls[1]['prompt'],
         'the expansion sees the selected seed ground instead of deciding it again',
+    );
+    assert_contains(
+        '**monochrome**',
+        $llm->calls[1]['prompt'],
+        'the expansion sees the selected seed economy instead of inventing a color count later',
     );
 
     exec('rm -rf ' . escapeshellarg($tmp));
@@ -2346,4 +2356,36 @@ test('normalize commits optional accent type and leaves an empty accent valid', 
     assert_eq('', $empty['type']['accent']['family']);
     assert_true(!str_contains(DesignDirectionStep::format($empty), 'accent —'));
     assert_eq([], $warnings, 'valid empty accent emits no durable warning');
+});
+
+test('color economy is normalized, formatted, and read with a restrained default', function () {
+    $repairs = [];
+    $warnings = [];
+    $direction = DesignDirectionStep::normalize([
+        'description' => 'A deliberately one-family palette.',
+        'color_economy' => 'multicolor',
+    ], 'cinematic-safe-zone', '', $repairs, $warnings, '', '', 'monochrome');
+    assert_eq('monochrome', $direction['color_economy'], 'the chosen seed outranks expansion drift');
+    assert_contains('**Color economy**: monochrome', DesignDirectionStep::format($direction));
+
+    $default = DesignDirectionStep::normalize(['description' => 'An old artifact shape.']);
+    assert_eq('single-accent', $default['color_economy'], 'missing fields receive the restrained default');
+
+    $invalidWarnings = [];
+    $invalidRepairs = [];
+    $invalid = DesignDirectionStep::normalize(
+        ['description' => 'x', 'color_economy' => 'rainbow'],
+        'cinematic-safe-zone',
+        '',
+        $invalidRepairs,
+        $invalidWarnings,
+    );
+    assert_eq('single-accent', $invalid['color_economy']);
+    assert_contains('color_economy', implode(' ', $invalidWarnings));
+
+    with_project('builder_color_economy_', function ($project): void {
+        assert_eq('single-accent', DesignDirectionStep::colorEconomyFor($project));
+        $project->writeJson('designDirection.json', ['color_economy' => 'multicolor']);
+        assert_eq('multicolor', DesignDirectionStep::colorEconomyFor($project));
+    });
 });

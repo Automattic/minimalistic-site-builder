@@ -24,13 +24,20 @@ namespace Automattic\SiteBuild;
  * tagline, gibberish URL) into the very region reserved for the site's real
  * HTML copy. So web-layout vocabulary is rewritten into pictorial
  * vocabulary: the generated page-context prose is reduced to a closed set of
- * pictorial placement facts (frame, repeated-series role and reserved
- * negative-space region), the site is described only by safe subject
+ * pictorial placement facts (matching-set role and reserved negative-space
+ * region), the site is described only by safe subject
  * matter — its identity never appears (GenerateImagesStep::siteContext) — and
  * the no-text guard states what a reserved region IS (continuous empty scenery)
  * instead of enumerating forbidden text artifacts, which image models follow
  * unreliably as negations while the enumeration plants those very concepts
  * into the prompt.
+ *
+ * The same literalization risk applies to PRINT vocabulary (BIGR-956): a
+ * prompt that stacks "frame", "contained" and a repeated "series" of
+ * photographs over a film grade sometimes comes back with a painted-in white
+ * print border. Placement and crop guidance therefore describe the scene as
+ * filling its canvas to all four edges, and never name frames, borders or a
+ * series of photographs.
  *
  * The SUBJECT itself is the remaining text vector (BIGR-781): a subject whose
  * focal object is a text carrier — a storefront, sign, menu board, screen,
@@ -191,8 +198,12 @@ final class ImagePromptComposer
                 . ' only and are never depicted literally: '
                 . $where;
         } else {
-            $guidance = 'Purely pictorial imagery: every part of the frame is the'
-                . ' scene itself, and any region described below as open, calm or'
+            // "Canvas", never "frame" (BIGR-956): the model sometimes paints
+            // "frame" literally as a white print border. The edge sentence is
+            // the positive form of "no border" — it states what the edges ARE.
+            $guidance = 'Purely pictorial imagery: the scene itself fills every'
+                . ' part of the canvas and reaches all four edges, and any region'
+                . ' described below as open, calm or'
                 . ' low-detail is continuous unbroken scenery — open sky, plain wall,'
                 . ' still water, bare ground or soft-focus depth — left completely'
                 . ' empty. The notes below steer subject, mood and composition only'
@@ -522,49 +533,31 @@ final class ImagePromptComposer
             return 'isolated pictorial asset';
         }
 
-        $edgeToEdge = preg_match(
-            '/\b(?:full[- ](?:bleed|frame|width)|edge[- ]bleeding|edge[- ]to[- ]edge)\b'
-            . '|\ba\s+sangre(?:\s+completa)?\b/iu',
-            $pageContext
-        ) === 1;
-        $compact = !$edgeToEdge && preg_match(
-            '/\b(?:compact|thumbnail|small|miniature|miniatura|accent|pequeñ[oa])\b/iu',
-            $pageContext
-        ) === 1;
-        $contained = !$edgeToEdge && !$compact && preg_match(
-            '/\b(?:contained|card|inset|column|grid|frame|panel|tile|tarjeta|recuadro|columna|grilla|cuadrícula|marco)\b/iu',
-            $pageContext
-        ) === 1;
-        // Bare surface nouns are weak full-frame hints: a contained card may
-        // have a background or show a book cover. Strong edge-to-edge wording
-        // still wins when generated prose contains both kinds of term.
-        $fullFrame = $edgeToEdge || (!$compact && !$contained && preg_match(
-            '/\b(?:cover|banner|background|backdrop|fondo)\b/iu',
-            $pageContext
-        ) === 1);
-
-        $parts = [];
-        if ($fullFrame) {
-            $parts[] = 'full-frame';
-        } elseif ($compact) {
-            $parts[] = 'compact';
-        } elseif ($contained) {
-            $parts[] = 'contained';
-        }
-        // Orientation comes from the structured aspect-ratio parameter. Page
-        // prose is untrusted and sometimes calls a subject a "portrait" even
-        // when the requested canvas is landscape, so it must not compete with
-        // the actual generation setting here.
-        $parts[] = preg_match('/\b(?:photorealistic|photo|photographic)\b/i', $style) === 1
+        // No placement adjective (BIGR-958). An A/B run measured "full-frame"
+        // and "compact" changing nothing the adjectives were meant to steer:
+        // copy-reservation adherence and thumbnail composition were identical
+        // with and without them. The negative-space clause below carries the
+        // reservation, the structured aspect ratio owns the canvas, and
+        // "full-frame" was the last "frame" token the builder emitted
+        // (BIGR-956). Slot wording still matters elsewhere: the ratio choice
+        // reads it in ImageCrop::generationRatio.
+        // Orientation likewise comes from the structured aspect-ratio
+        // parameter. Page prose is untrusted and sometimes calls a subject a
+        // "portrait" even when the requested canvas is landscape, so it must
+        // not compete with the actual generation setting here.
+        $result = preg_match('/\b(?:photorealistic|photo|photographic)\b/i', $style) === 1
             ? 'editorial photograph'
             : 'pictorial composition';
-
-        $result = implode(' ', $parts);
         if (preg_match(
-            '/\b(?:grid|gallery|row|series|sequence|collection|grilla|cuadrícula|galería|fila|serie|secuencia|colección)\b/iu',
+            '/\b(?:grid|gallery|row|series|sequence|collection|matching\s+scenes'
+            . '|grilla|cuadrícula|galería|fila|serie|secuencia|colección)\b/iu',
             $pageContext
         ) === 1) {
-            $result .= ' within a repeated image series';
+            // Not "within a repeated image series" (BIGR-956): a "series" of
+            // "photographs" plus a film grade evokes a contact sheet, and the
+            // model sometimes paints the print border between its frames. Say
+            // the sibling-consistency intent in scene vocabulary instead.
+            $result .= ', one of a set of matching scenes composed alike';
         }
 
         $negativeSpaceCue = self::negativeSpaceCue($pageContext);
