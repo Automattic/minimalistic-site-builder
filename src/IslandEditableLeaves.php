@@ -1235,6 +1235,62 @@ final class IslandEditableLeaves
         return ['blocks' => $blocks, 'citation' => $citation];
     }
 
+    /**
+     * Block types whose List View row shows only the block title, so several
+     * siblings read identically. core/heading and core/list-item are absent on
+     * purpose: their label hook returns customName || content, so naming one
+     * would REPLACE its own text with a generic word.
+     */
+    private const GENERIC_LIST_VIEW_LABEL = [
+        'core/paragraph',
+        'core/list',
+        'core/table',
+        'core/quote',
+        'core/image',
+    ];
+
+    /**
+     * Name a leaf after the class the design already gave it (eyebrow, lede,
+     * plate), which is stable under editing in a way that copied content is
+     * not. No usable class means no name — a generic name is not an
+     * improvement on the generic title WP already shows.
+     *
+     * @param array<string,mixed> $blockAttrs
+     * @return array<string,mixed>
+     */
+    private static function withListViewName(string $name, array $blockAttrs): array
+    {
+        if (isset($blockAttrs['metadata']) || !in_array($name, self::GENERIC_LIST_VIEW_LABEL, true)) {
+            return $blockAttrs;
+        }
+        $label = self::labelFromClasses((string) ($blockAttrs['className'] ?? ''));
+        if ($label === '') {
+            return $blockAttrs;
+        }
+        $blockAttrs['metadata'] = ['name' => $label];
+        return $blockAttrs;
+    }
+
+    /** First authored class that reads as a role, Title Cased; '' when none does. */
+    private static function labelFromClasses(string $className): string
+    {
+        $synthetic = [self::BARE_WRAPPER_CLASS, self::BARE_TABLE_CLASS];
+        foreach (preg_split('/\s+/', trim($className)) ?: [] as $token) {
+            if ($token === '' || str_starts_with($token, 'wp-') || str_contains($token, '--')) {
+                continue;
+            }
+            // Our own layout shims are plumbing, not the design's vocabulary.
+            if (in_array($token, $synthetic, true)) {
+                continue;
+            }
+            if (preg_match('/^[A-Za-z][A-Za-z0-9_-]*$/', $token) !== 1) {
+                continue;
+            }
+            return ucwords(str_replace(['-', '_'], ' ', strtolower($token)));
+        }
+        return '';
+    }
+
     private static function emit(
         string $name,
         array $blockAttrs,
@@ -1243,6 +1299,7 @@ final class IslandEditableLeaves
         Serializer $serializer,
         string $innerBlocks = '',
     ): ?string {
+        $blockAttrs = self::withListViewName($name, $blockAttrs);
         try {
             $saved = $saves->save($name, $blockAttrs, $innerBlocks);
             $typed = new JsonObject();

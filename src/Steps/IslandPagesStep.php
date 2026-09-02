@@ -9,6 +9,9 @@ use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\BlockSerializer\Json\JsonObject;
+use Automattic\SiteBuild\BlockSerializer\Json\JsonValue;
+use Automattic\SiteBuild\BlockSerializer\Json\JsJsonEncoder;
 use DOMElement;
 
 /**
@@ -321,7 +324,10 @@ final class IslandPagesStep implements Step
                 $nonSection++;
             }
             $partRel = 'theme/parts/' . SectionsStep::partSlug($slug, $sectionSlug) . '.html';
-            $project->writeText($partRel, self::htmlBlock($markup, $css, $rel, $context, $warnings));
+            $project->writeText(
+                $partRel,
+                self::htmlBlock($markup, $css, $rel, $context, $sectionSlug, $warnings),
+            );
             $sections[] = [
                 'slug'  => $sectionSlug,
                 'title' => self::headingTitle($element, $sectionSlug),
@@ -403,10 +409,30 @@ final class IslandPagesStep implements Step
         string $css,
         string $path,
         string $context,
+        string $sectionSlug,
         array &$warnings,
     ): string {
         $inner = IslandEditableLeaves::wrap($inner, $css, $path, $context, $warnings);
-        return "<!-- wp:html -->\n{$inner}\n<!-- /wp:html -->\n";
+        $attrs = self::listViewName($sectionSlug);
+        return "<!-- wp:html {$attrs}-->\n{$inner}\n<!-- /wp:html -->\n";
+    }
+
+    /**
+     * Every island is a core/html block, and List View labels them all
+     * "Custom HTML". metadata.name is what WP shows instead (its label hook
+     * reads it for context "list-view"), so each section names itself.
+     * Serialized through JsJsonEncoder because a name containing "--" would
+     * otherwise terminate the block comment.
+     */
+    private static function listViewName(string $slug): string
+    {
+        $name = trim(ucwords(str_replace('-', ' ', $slug)));
+        if ($name === '') {
+            return '';
+        }
+        $attributes = new JsonObject();
+        $attributes->set('metadata', JsonValue::fromNative(['name' => $name]));
+        return JsJsonEncoder::serializeAttributes($attributes) . ' ';
     }
 
     private static function ensureBareWrapperCss(Project $project): void

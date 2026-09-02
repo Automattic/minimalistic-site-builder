@@ -302,10 +302,10 @@ test('island-pages: each part is exactly one core/html block', function () {
         ip_project($project, ['home' => ip_doc('<section id="hero"><h1>Hi</h1></section>')]);
         (new IslandPagesStep())->run($project);
         $part = ip_part_text($project, 'home', 'hero');
-        assert_eq(1, substr_count($part, '<!-- wp:html -->'), 'exactly one opening html block delimiter');
+        assert_eq(1, substr_count($part, '<!-- wp:html {'), 'exactly one opening html block delimiter');
         assert_eq(1, substr_count($part, '<!-- /wp:html -->'), 'exactly one closing html block delimiter');
         $trim = trim($part);
-        assert_true(str_starts_with($trim, '<!-- wp:html -->'), 'the island\'s only top-level block is core/html');
+        assert_true(str_starts_with($trim, '<!-- wp:html {'), 'the island\'s only top-level block is core/html');
         assert_true(str_ends_with($trim, '<!-- /wp:html -->'), 'the island closes the core/html wrapper');
         assert_contains('<!-- wp:heading', $part, 'phrasing headings become editable inner blocks');
     });
@@ -331,7 +331,7 @@ test('island-pages: island markup is tag-balanced', function () {
         ip_project($project, ['home' => ip_wrapper_page()]);
         (new IslandPagesStep())->run($project);
         $slugs = ip_section_slugs($project, 'home');
-        $inner = trim(str_replace(['<!-- wp:html -->', '<!-- /wp:html -->'], '', ip_part_text($project, 'home', $slugs[0])));
+        $inner = trim(preg_replace('/<!-- \/?wp:html[^>]*-->/', '', ip_part_text($project, 'home', $slugs[0])) ?? '');
         $prev = libxml_use_internal_errors(true);
         $frag = new DOMDocument();
         $frag->loadHTML('<?xml encoding="UTF-8"><body>' . $inner . '</body>', LIBXML_NONET);
@@ -557,7 +557,7 @@ test('island-pages then assemble-pages delivers every section, in order, in post
             strpos($delivered, 'First') < strpos($delivered, 'Last'),
             'islands are concatenated in document order',
         );
-        assert_eq(3, substr_count($delivered, '<!-- wp:html -->'), 'three islands, three core/html blocks');
+        assert_eq(3, substr_count($delivered, '<!-- wp:html {'), 'three islands, three core/html blocks');
     });
 });
 
@@ -646,5 +646,52 @@ test('island-pages: does not write aboveFold.json', function () {
         ip_project($project, ['home' => ip_doc('<section id="hero"><h1>Hi</h1></section>')]);
         (new IslandPagesStep())->run($project);
         assert_true(!$project->exists('aboveFold.json'), 'aboveFold.json belongs to the next slice');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// block names: every island and generically-labelled leaf identifies itself
+// in the editor List View (WP resolves metadata.name for context "list-view").
+// ---------------------------------------------------------------------------
+
+test('island-pages: each island carries a List View name derived from its slug', function () {
+    with_project('island-pages', function ($project) {
+        ip_project($project, ['home' => ip_doc(
+            '<section id="studio-hours"><h2>When The Door Is Open</h2></section>'
+        )]);
+        (new IslandPagesStep())->run($project);
+        $part = ip_part_text($project, 'home', 'studio-hours');
+        assert_contains('<!-- wp:html {"metadata":{"name":"Studio Hours"}} -->', $part,
+            'the core/html island names itself so List View does not show seven identical "Custom HTML" rows');
+    });
+});
+
+test('island-pages: a leaf whose List View label is generic is named from its class', function () {
+    with_project('island-pages', function ($project) {
+        ip_project($project, ['home' => ip_doc(
+            '<section id="hero"><p class="eyebrow">Asheville, North Carolina</p></section>'
+        )]);
+        (new IslandPagesStep())->run($project);
+        $part = ip_part_text($project, 'home', 'hero');
+        assert_contains('"metadata":{"name":"Eyebrow"}', $part,
+            'core/paragraph shows only its block title in List View, so a semantic class is the useful name');
+    });
+});
+
+test('island-pages: a heading is NOT named, because its own text is the better label', function () {
+    with_project('island-pages', function ($project) {
+        ip_project($project, ['home' => ip_doc(
+            '<section id="about"><h2 class="section-title">Two Pairs Of Hands</h2></section>'
+        )]);
+        (new IslandPagesStep())->run($project);
+        $part = ip_part_text($project, 'home', 'about');
+        // core/heading's __experimentalLabel returns customName || content, so a
+        // name would REPLACE the heading text in List View — strictly worse.
+        // Scoped to the heading's own delimiter: the island above it is named,
+        // and asserting on the whole part would just re-measure that.
+        preg_match('/<!-- wp:heading[^>]*-->/', $part, $m);
+        assert_true($m !== [], 'the heading block must be present at all: ' . $part);
+        assert_true(!str_contains($m[0], 'metadata'), 'no name on the heading itself: ' . $m[0]);
+        assert_contains('Two Pairs Of Hands', $part, 'the heading text is what List View should show');
     });
 });

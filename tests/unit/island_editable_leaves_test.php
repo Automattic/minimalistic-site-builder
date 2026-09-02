@@ -80,7 +80,7 @@ test('serializer keeps a core/html island with no inner blocks', function () {
 test('wrapped island parts survive a serializer pass', function () {
     $part = editable_leaves_part('<h2 class="sec-title">Title</h2><p>Copy</p>');
     $out = (new Serializer())->transform($part)->html;
-    assert_contains('<!-- wp:html -->', $out);
+    assert_contains('<!-- wp:html {"metadata":{"name":"Hero"}} -->', $out);
     assert_contains('<!-- wp:heading {"className":"sec-title"} -->', $out);
     assert_contains('<h2 class="wp-block-heading sec-title">Title</h2>', $out);
     assert_contains('<!-- wp:paragraph -->', $out);
@@ -96,7 +96,7 @@ test('an element with an unsupported inline style is left inert', function () {
 
 test('a figure with an img wraps as core/image matching the registry save', function () {
     $html = IslandEditableLeaves::wrap('<figure class="hero-media"><img src="theme:hero.jpg" alt="Hero"></figure>');
-    assert_contains('<!-- wp:image {"className":"hero-media"} -->', $html);
+    assert_contains('<!-- wp:image {"className":"hero-media","metadata":{"name":"Hero Media"}} -->', $html);
     assert_contains('<figure class="wp-block-image hero-media"><img src="theme:hero.jpg" alt="Hero"/></figure>', $html);
     assert_contains('<!-- /wp:image -->', $html);
     $saves = new SaveStrategyRegistry(new BlockRegistry());
@@ -167,7 +167,11 @@ test('a page whose CSS contains a child combinator on img leaves bare images ine
         'page home island hero',
         $warnings,
     );
-    assert_contains('<!-- wp:image {"className":"ok"} -->', $html, 'figures still wrap when combinators are present');
+    assert_contains(
+        '<!-- wp:image {"className":"ok","metadata":{"name":"Ok"}} -->',
+        $html,
+        'figures still wrap when combinators are present'
+    );
     assert_true(!str_contains($html, 'island-bare-image'), 'bare image is not wrapped');
     assert_contains('<img src="bare.jpg" alt="B">', $html);
     assert_eq(1, count($warnings), 'one combinator warning for the page');
@@ -257,7 +261,7 @@ test('a table keeps authored class on the table and row text boundaries', functi
         '<table class="hours"><thead><tr><th>Days</th><th>Open</th></tr></thead>'
         . '<tbody><tr><th>Wed</th><td>7am</td></tr></tbody></table>'
     );
-    assert_contains('<!-- wp:table {"hasFixedLayout":false,"className":"island-bare-table hours"} -->', $html);
+    assert_contains('<!-- wp:table {"hasFixedLayout":false,"className":"island-bare-table hours","metadata":{"name":"Hours"}} -->', $html);
     assert_contains('<figure class="wp-block-table island-bare-table hours">', $html);
     assert_contains('<table class="hours">', $html);
     $stripped = preg_replace('/<!--\s*\/?wp:[a-z-]+[^>]*-->/', '', $html) ?? $html;
@@ -271,7 +275,7 @@ test('a pretty-printed table wraps and keeps row text boundaries', function () {
         "<table class=\"hours\">\n<thead>\n<tr><th scope=\"col\">Days</th><th scope=\"col\">Counter open</th></tr>\n</thead>\n"
         . "<tbody>\n<tr><th scope=\"row\">Wed</th><td>7am</td></tr>\n</tbody>\n</table>"
     );
-    assert_contains('<!-- wp:table {"hasFixedLayout":false,"className":"island-bare-table hours"} -->', $html);
+    assert_contains('<!-- wp:table {"hasFixedLayout":false,"className":"island-bare-table hours","metadata":{"name":"Hours"}} -->', $html);
     assert_contains('scope="row"', $html);
     assert_contains('<table class="hours">', $html);
     $stripped = preg_replace('/<!--\s*\/?wp:[a-z-]+[^>]*-->/', '', $html) ?? $html;
@@ -416,4 +420,13 @@ test('a page whose CSS contains a child combinator on table leaves tables inert 
     assert_eq(1, count($warnings), 'one combinator warning for the page');
     assert_contains('combinator targeting table', $warnings[0]);
     assert_contains('delivered bare tables inert', $warnings[0]);
+});
+
+test('a synthetic island wrapper class is never used as a block name', function () {
+    // island-bare-image is OUR layout shim, not something the design authored.
+    // Naming a block "Island Bare Image" in List View would surface internal
+    // plumbing as if it were the section's own vocabulary.
+    $html = IslandEditableLeaves::wrap('<img src="theme:a.jpg" alt="A">');
+    assert_contains('"className":"island-bare-image"', $html, 'the shim class still ships');
+    assert_true(!str_contains($html, 'metadata'), 'no name derived from the shim: ' . $html);
 });
