@@ -248,14 +248,9 @@ final class PaletteFloor
     private static function repairEconomy(array $palette, array &$notes, string $economy): array
     {
         foreach (self::economyOutliers($palette, $economy) as $outlier) {
-            $rgb = ContrastMath::hexToRgb($outlier['authored']);
-            if ($rgb === null) {
-                continue;
-            }
-            [, $saturation, $lightness] = self::toHsl($rgb);
-            $fixed = self::toHex(self::hslToRgb($outlier['target'], $saturation, $lightness));
+            $fixed = self::withHue($outlier['authored'], $outlier['target']);
             $role = $outlier['role'];
-            if (self::sameHex($fixed, $outlier['authored'])) {
+            if ($fixed === null || self::sameHex($fixed, $outlier['authored'])) {
                 continue;
             }
             $palette[$role] = $fixed;
@@ -283,19 +278,18 @@ final class PaletteFloor
         [$anchorRole, $anchorHue] = $anchor;
         $outliers = [];
         foreach ($roles as $role) {
-            $hex = self::hexOf($palette, $role);
-            if ($role === $anchorRole || $hex === null || (self::chroma($hex) ?? 0.0) <= self::CHROMA_MIN) {
+            $hue = $role === $anchorRole ? null : self::chromaticHue($palette, $role);
+            if ($hue === null) {
                 continue;
             }
-            $hue = self::hue($hex);
-            $delta = $hue === null ? null : self::hueDistanceDegrees($anchorHue, $hue);
-            if ($delta === null || $delta <= self::ECONOMY_HUE_TOLERANCE) {
+            $delta = self::hueDistanceDegrees($anchorHue, $hue);
+            if ($delta <= self::ECONOMY_HUE_TOLERANCE) {
                 continue;
             }
             $outliers[] = [
                 'role' => $role,
                 'against' => $anchorRole,
-                'authored' => $hex,
+                'authored' => (string) self::hexOf($palette, $role),
                 'metric' => $delta,
                 'target' => $anchorHue,
             ];
@@ -303,19 +297,26 @@ final class PaletteFloor
         return $outliers;
     }
 
-    /** @return list<string> */
+    /**
+     * The roles one economy keeps in a single hue family, in anchor priority:
+     * base first so a ground that visibly carries a hue keeps GroundTint's
+     * family, then primary as the clearest foundation statement.
+     *
+     * @return list<string>
+     */
     private static function economyRoles(string $economy): array
     {
         return match ($economy) {
-            'monochrome' => ['base', 'contrast', 'primary', 'secondary', 'accent'],
-            'single-accent' => ['base', 'contrast', 'primary', 'secondary'],
+            'monochrome' => ['base', 'primary', 'secondary', 'contrast', 'accent'],
+            'single-accent' => ['base', 'primary', 'secondary', 'contrast'],
             default => [],
         };
     }
 
     /**
-     * Bare audit calls keep the pre-commitment behavior. Production always
-     * supplies the direction's explicit economy.
+     * A missing economy means no consolidation, the behavior from before the
+     * commitment existed. Build paths never omit it: they pass
+     * DesignDirectionStep::colorEconomyFor(), which defaults to ColorEconomy::DEFAULT.
      */
     private static function normalizeEconomy(?string $economy): string
     {
@@ -323,25 +324,44 @@ final class PaletteFloor
     }
 
     /**
+     * The first role in `$roles` whose chroma clears CHROMA_MIN. Pale grounds
+     * rarely do (GroundTint::retint only raises chroma past its own 0.02
+     * threshold), so on most light sites the anchor is primary.
+     *
      * @param array<string,string> $palette
      * @param list<string> $roles
      * @return array{0:string,1:float}|null role, hue
      */
     private static function economyAnchor(array $palette, array $roles): ?array
     {
-        // Base wins whenever it visibly carries a hue, preserving GroundTint's
-        // family. Otherwise primary is the clearest foundation statement.
-        foreach (array_intersect(['base', 'primary', 'secondary', 'contrast', 'accent'], $roles) as $role) {
-            $hex = self::hexOf($palette, $role);
-            if ($hex === null || (self::chroma($hex) ?? 0.0) <= self::CHROMA_MIN) {
-                continue;
-            }
-            $hue = self::hue($hex);
+        foreach ($roles as $role) {
+            $hue = self::chromaticHue($palette, $role);
             if ($hue !== null) {
                 return [$role, $hue];
             }
         }
         return null;
+    }
+
+    /** A role's hue, or null when it is missing, unreadable, or too grey to name one. */
+    private static function chromaticHue(array $palette, string $role): ?float
+    {
+        $hex = self::hexOf($palette, $role);
+        if ($hex === null || (self::chroma($hex) ?? 0.0) <= self::CHROMA_MIN) {
+            return null;
+        }
+        return self::hue($hex);
+    }
+
+    /** The same color moved to `$hue`, saturation and lightness held; null for a non-hex. */
+    private static function withHue(string $hex, float $hue): ?string
+    {
+        $rgb = ContrastMath::hexToRgb($hex);
+        if ($rgb === null) {
+            return null;
+        }
+        [, $saturation, $lightness] = self::toHsl($rgb);
+        return self::toHex(self::hslToRgb($hue, $saturation, $lightness));
     }
 
     /** WCAG relative luminance, or null when the value is not a hex color. */
@@ -581,11 +601,9 @@ final class PaletteFloor
 
         $primaryHue = self::hue($primary);
         $accentHue = self::hue($accent);
-        $rgb = ContrastMath::hexToRgb($accent);
-        if ($primaryHue === null || $accentHue === null || $rgb === null) {
+        if ($primaryHue === null || $accentHue === null) {
             return $palette;
         }
-        [, $saturation, $lightness] = self::toHsl($rgb);
 
         $plus = self::wrapHue($primaryHue + self::HUE_SEPARATION);
         $minus = self::wrapHue($primaryHue - self::HUE_SEPARATION);
@@ -594,8 +612,8 @@ final class PaletteFloor
             ? $plus
             : $minus;
 
-        $fixed = self::toHex(self::hslToRgb($target, $saturation, $lightness));
-        if (self::sameHex($fixed, $accent)) {
+        $fixed = self::withHue($accent, $target);
+        if ($fixed === null || self::sameHex($fixed, $accent)) {
             return $palette;
         }
         $palette['accent'] = $fixed;

@@ -212,7 +212,7 @@ final class ConceptSeeds
      * in how the ground leans or which face sets the headline, are still one
      * world.
      *
-     * @param array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string,color_economy?:?string} $seed
+     * @param array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string,color_economy:?string} $seed
      */
     public static function axisKey(array $seed): ?string
     {
@@ -236,9 +236,9 @@ final class ConceptSeeds
      * the spread keeps collapsing is visible in the build's warnings instead of
      * only in the sameness of the finished sites.
      *
-     * @param list<array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string,color_economy?:?string}> $seeds
+     * @param list<array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string,color_economy:?string}> $seeds
      * @param list<string> $warnings
-     * @return list<array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string,color_economy?:?string}>
+     * @return list<array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string,color_economy:?string}>
      */
     public static function distinct(array $seeds, array &$warnings = []): array
     {
@@ -303,7 +303,7 @@ final class ConceptSeeds
      * misspelling `ground` on two of three is not exotic, and "every seed is
      * light-grounded" must not be derived from a single vote.
      *
-     * @param list<array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string,color_economy?:?string}> $seeds
+     * @param list<array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string,color_economy:?string}> $seeds
      */
     public static function sharedGround(array $seeds): ?string
     {
@@ -326,7 +326,7 @@ final class ConceptSeeds
      * arrived. Same guards as sharedGround: a single named tint is not a
      * round-wide claim (BIGR-922).
      *
-     * @param list<array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string,color_economy?:?string}> $seeds
+     * @param list<array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string,color_economy:?string}> $seeds
      */
     public static function sharedTint(array $seeds): ?string
     {

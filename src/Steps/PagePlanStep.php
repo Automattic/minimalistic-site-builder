@@ -719,7 +719,6 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 (string) ($page['slug'] ?? ''),
                 $warnings,
                 !empty($page['front']),
-                true,
             );
         }
 
@@ -3295,8 +3294,10 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     }
 
     /**
-     * Demote excess bands in increasing order of visual importance. Locked
-     * page seams and image-backed full-bleed covers remain intact.
+     * Demote excess bands by kind (tinted, then contrast, then image), top to
+     * bottom within a kind. The closing section is never touched because
+     * withClosingBandOffFooterSurface() has already settled it against the
+     * footer; a locked front hero and image-backed full-bleed covers stay too.
      *
      * @param array<int,array<string,mixed>> $sections
      * @param list<string> $warnings
@@ -3307,7 +3308,6 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         string $pageSlug,
         array &$warnings = [],
         bool $frontHeroLocked = false,
-        bool $closingSurfaceLocked = false,
     ): array {
         $count = count($sections);
         if ($count < self::MIN_BANDED_SECTIONS) {
@@ -3325,7 +3325,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 }
                 if (($section['background'] ?? null) !== $background
                     || ($frontHeroLocked && $index === 0)
-                    || ($closingSurfaceLocked && $index === $count - 1)
+                    || $index === $count - 1
                     || ($background === 'image'
                         && ($section['layout_archetype'] ?? null) === 'full-bleed-cover')
                 ) {
@@ -3338,15 +3338,11 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                     $section['handoff'] ?? '',
                     'this section now uses the page base so non-base surfaces remain limited to two purposeful beats',
                 );
-                foreach ([$index - 1, $index + 1] as $neighbor) {
-                    if (!isset($sections[$neighbor]) || !is_array($sections[$neighbor])) {
-                        continue;
-                    }
-                    $sections[$neighbor]['handoff'] = self::withSeamCorrection(
-                        $sections[$neighbor]['handoff'] ?? '',
-                        'the "' . $title . '" section beside it now uses the page base',
-                    );
-                }
+                $sections = self::withNeighborSeamCorrections(
+                    $sections,
+                    (int) $index,
+                    'the "' . $title . '" section beside it now uses the page base',
+                );
                 $warnings[] = self::valueLossWarning(
                     self::sectionPath($pageSlug, (int) $index) . '.background',
                     $background,
@@ -3369,6 +3365,29 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             );
         }
 
+        return $sections;
+    }
+
+    /**
+     * Each neighbor's handoff names the section's background, and both the
+     * section author and its neighbors' authors read that line. Correcting
+     * it in place beats regenerating every seam and losing the planner's
+     * reasoning for each one.
+     *
+     * @param array<int,array<string,mixed>> $sections
+     * @return array<int,array<string,mixed>>
+     */
+    private static function withNeighborSeamCorrections(array $sections, int $index, string $correction): array
+    {
+        foreach ([$index - 1, $index + 1] as $neighbor) {
+            if (!isset($sections[$neighbor]) || !is_array($sections[$neighbor])) {
+                continue;
+            }
+            $sections[$neighbor]['handoff'] = self::withSeamCorrection(
+                $sections[$neighbor]['handoff'] ?? '',
+                $correction,
+            );
+        }
         return $sections;
     }
 
@@ -3411,20 +3430,12 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 . 'background; this supersedes any background named earlier in this line',
         );
 
-        // Each neighbor's handoff names this section's background, and both the
-        // section author and its neighbors' authors read that line. Correcting
-        // it in place beats regenerating every seam and losing the planner's
-        // reasoning for each one.
-        foreach ([$target - 1, $target + 1] as $neighbor) {
-            if (!isset($sections[$neighbor]) || !is_array($sections[$neighbor])) {
-                continue;
-            }
-            $sections[$neighbor]['handoff'] = self::withSeamCorrection(
-                $sections[$neighbor]['handoff'] ?? '',
-                'the "' . $title . '" section beside it is now a contrast band; this supersedes the background '
-                    . 'named for it earlier in this line',
-            );
-        }
+        $sections = self::withNeighborSeamCorrections(
+            $sections,
+            $target,
+            'the "' . $title . '" section beside it is now a contrast band; this supersedes the background '
+                . 'named for it earlier in this line',
+        );
 
         $warnings[] = self::valueLossWarning(
             self::sectionPath($pageSlug, $target) . '.background',
