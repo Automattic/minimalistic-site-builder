@@ -45,35 +45,42 @@ A common failure: three seeds that all orbit the topic's OBVIOUS mood — for a 
 
 Respond with ONLY a JSON object. No explanation, no commentary, no text before or after.
 
+The angle-bracket strings below demonstrate the JSON shape only. They are not
+legal output values and they do not recommend any label. Replace every one with
+content grounded in the brief and one exact value from the allowed vocabulary
+above. Array position has no aesthetic meaning: candidate 1 is not the light,
+traditional, warm, or otherwise "safe" candidate, and candidates 2 and 3 have
+no preset character either.
+
 ```json
 {
   "seeds": [
     {
-      "seed": "First Title — one vivid sentence committing palette, typography, imagery, and mood.",
-      "ground": "light",
-      "register": "heritage",
-      "accent": "warm",
-      "tint": "green",
-      "type_register": "transitional",
-      "color_economy": "<replace with one allowed color_economy label>"
+      "seed": "<candidate 1 title> — <candidate 1 sentence>",
+      "ground": "<allowed ground label chosen for candidate 1>",
+      "register": "<allowed register label chosen for candidate 1>",
+      "accent": "<allowed accent label chosen for candidate 1>",
+      "tint": "<allowed tint label chosen for candidate 1>",
+      "type_register": "<allowed type_register label chosen for candidate 1>",
+      "color_economy": "<allowed color_economy label chosen for candidate 1>"
     },
     {
-      "seed": "Second Title — one vivid sentence committing palette, typography, imagery, and mood.",
-      "ground": "dark",
-      "register": "noir",
-      "accent": "jewel",
-      "tint": "violet",
-      "type_register": "didone",
-      "color_economy": "<replace with one allowed color_economy label>"
+      "seed": "<candidate 2 title> — <candidate 2 sentence>",
+      "ground": "<allowed ground label chosen for candidate 2>",
+      "register": "<allowed register label chosen for candidate 2>",
+      "accent": "<allowed accent label chosen for candidate 2>",
+      "tint": "<allowed tint label chosen for candidate 2>",
+      "type_register": "<allowed type_register label chosen for candidate 2>",
+      "color_economy": "<allowed color_economy label chosen for candidate 2>"
     },
     {
-      "seed": "Third Title — one vivid sentence committing palette, typography, imagery, and mood.",
-      "ground": "light",
-      "register": "poster",
-      "accent": "cool",
-      "tint": "neutral",
-      "type_register": "condensed",
-      "color_economy": "<replace with one allowed color_economy label>"
+      "seed": "<candidate 3 title> — <candidate 3 sentence>",
+      "ground": "<allowed ground label chosen for candidate 3>",
+      "register": "<allowed register label chosen for candidate 3>",
+      "accent": "<allowed accent label chosen for candidate 3>",
+      "tint": "<allowed tint label chosen for candidate 3>",
+      "type_register": "<allowed type_register label chosen for candidate 3>",
+      "color_economy": "<allowed color_economy label chosen for candidate 3>"
     }
   ]
 }
