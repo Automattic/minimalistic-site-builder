@@ -709,18 +709,6 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             FooterComposition::surface($footerArchetype),
             $warnings,
         );
-        // Apply the surface budget after the footer has settled the closing seam.
-        foreach ($out as $index => $page) {
-            if (!is_array($page) || !is_array($page['sections'] ?? null)) {
-                continue;
-            }
-            $out[$index]['sections'] = self::withSurfaceRestraint(
-                $page['sections'],
-                (string) ($page['slug'] ?? ''),
-                $warnings,
-                !empty($page['front']),
-            );
-        }
 
         $project->addWarnings($this->id(), $warnings);
         $project->writeJson('pages.json', [
@@ -2995,6 +2983,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         }
 
         $sections = self::withPacingBand($sections, $pageSlug, $warnings);
+        $sections = self::withSurfaceRestraint($sections, $pageSlug, $warnings, $front);
 
         // When the recipe-locked hero and its following section collided,
         // the following section—not the hero—moved. Replace only the now-stale
@@ -3256,15 +3245,21 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             }
         }
 
-        // Background floor — see MIN_BANDED_SECTIONS. Deliberately not a cap on
-        // 'base': base should dominate, and capping it would produce the
-        // alternating stripes the prompt rejects.
-        if (count($sections) >= self::MIN_BANDED_SECTIONS
-            && self::bandedCount($sections) === 0
-        ) {
+        // Background floor and cap — see MIN_BANDED_SECTIONS and
+        // MAX_NON_BASE_SECTIONS. Neither is a cap on 'base': base should
+        // dominate, and capping it would produce the alternating stripes the
+        // prompt rejects.
+        $banded = self::bandedCount($sections);
+        if (count($sections) >= self::MIN_BANDED_SECTIONS && $banded === 0) {
             $errors[] = 'page-plan: all ' . count($sections) . " sections use background 'base' — a page this "
                 . "long needs at least one 'contrast', 'tinted' or 'image' band to pace it; place one for "
                 . 'pacing (under the hero\'s fold, or before the closing next step)';
+        }
+        if (count($sections) >= self::MIN_BANDED_SECTIONS && $banded > self::MAX_NON_BASE_SECTIONS) {
+            $errors[] = "page-plan: {$banded} of " . count($sections) . " sections sit on a non-base background — "
+                . 'a page this long may spend at most ' . self::MAX_NON_BASE_SECTIONS
+                . " 'contrast', 'tinted' or 'image' beats; move the rest back to 'base' and keep the two "
+                . 'transitions that matter most';
         }
 
         $spacious = count(array_filter($sections, fn (array $s) => $s['vertical_density'] === 'spacious'));
@@ -3295,9 +3290,12 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
 
     /**
      * Demote excess bands by kind (tinted, then contrast, then image), top to
-     * bottom within a kind. The closing section is never touched because
-     * withClosingBandOffFooterSurface() has already settled it against the
-     * footer; a locked front hero and image-backed full-bleed covers stay too.
+     * bottom within a kind, so a page keeps at most MAX_NON_BASE_SECTIONS
+     * planner-chosen beats. A locked front hero and image-backed full-bleed
+     * covers stay. This is the deterministic backstop for the validate() cap,
+     * the same pairing as withPacingBand() and the floor; it runs before
+     * withClosingBandOffFooterSurface(), whose one closing correction is
+     * structural and sits outside the budget.
      *
      * @param array<int,array<string,mixed>> $sections
      * @param list<string> $warnings
@@ -3309,8 +3307,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         array &$warnings = [],
         bool $frontHeroLocked = false,
     ): array {
-        $count = count($sections);
-        if ($count < self::MIN_BANDED_SECTIONS) {
+        if (count($sections) < self::MIN_BANDED_SECTIONS) {
             return $sections;
         }
         $excess = self::bandedCount($sections) - self::MAX_NON_BASE_SECTIONS;
@@ -3325,7 +3322,6 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 }
                 if (($section['background'] ?? null) !== $background
                     || ($frontHeroLocked && $index === 0)
-                    || $index === $count - 1
                     || ($background === 'image'
                         && ($section['layout_archetype'] ?? null) === 'full-bleed-cover')
                 ) {
@@ -3360,8 +3356,8 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 $path,
                 "{$remaining} non-base surfaces",
                 "{$remaining} non-base surfaces",
-                'surface budget could not be met without changing a locked hero, closing seam, or structural '
-                    . 'full-bleed image; delivered those sections intact',
+                'surface budget could not be met without changing a locked hero or a structural full-bleed '
+                    . 'image; delivered those sections intact',
             );
         }
 
