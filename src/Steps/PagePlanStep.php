@@ -133,6 +133,9 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      */
     private const MIN_BANDED_SECTIONS = 5;
 
+    /** Long pages may spend at most two deliberate beats off the base surface. */
+    private const MAX_NON_BASE_SECTIONS = 2;
+
     /**
      * Content-dense section roles must not compound their height with the
      * largest edge. "type" is free-form model output, so these are matched as
@@ -706,6 +709,19 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             FooterComposition::surface($footerArchetype),
             $warnings,
         );
+        // Apply the surface budget after the footer has settled the closing seam.
+        foreach ($out as $index => $page) {
+            if (!is_array($page) || !is_array($page['sections'] ?? null)) {
+                continue;
+            }
+            $out[$index]['sections'] = self::withSurfaceRestraint(
+                $page['sections'],
+                (string) ($page['slug'] ?? ''),
+                $warnings,
+                !empty($page['front']),
+                true,
+            );
+        }
 
         $project->addWarnings($this->id(), $warnings);
         $project->writeJson('pages.json', [
@@ -3276,6 +3292,84 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             }
         }
         return $banded;
+    }
+
+    /**
+     * Demote excess bands in increasing order of visual importance. Locked
+     * page seams and image-backed full-bleed covers remain intact.
+     *
+     * @param array<int,array<string,mixed>> $sections
+     * @param list<string> $warnings
+     * @return array<int,array<string,mixed>>
+     */
+    public static function withSurfaceRestraint(
+        array $sections,
+        string $pageSlug,
+        array &$warnings = [],
+        bool $frontHeroLocked = false,
+        bool $closingSurfaceLocked = false,
+    ): array {
+        $count = count($sections);
+        if ($count < self::MIN_BANDED_SECTIONS) {
+            return $sections;
+        }
+        $excess = self::bandedCount($sections) - self::MAX_NON_BASE_SECTIONS;
+        if ($excess <= 0) {
+            return $sections;
+        }
+
+        foreach (['tinted', 'contrast', 'image'] as $background) {
+            foreach ($sections as $index => $section) {
+                if ($excess <= 0) {
+                    break 2;
+                }
+                if (($section['background'] ?? null) !== $background
+                    || ($frontHeroLocked && $index === 0)
+                    || ($closingSurfaceLocked && $index === $count - 1)
+                    || ($background === 'image'
+                        && ($section['layout_archetype'] ?? null) === 'full-bleed-cover')
+                ) {
+                    continue;
+                }
+
+                $title = trim((string) ($section['title'] ?? '')) ?: "section {$index}";
+                $sections[$index]['background'] = 'base';
+                $sections[$index]['handoff'] = self::withSeamCorrection(
+                    $section['handoff'] ?? '',
+                    'this section now uses the page base so non-base surfaces remain limited to two purposeful beats',
+                );
+                foreach ([$index - 1, $index + 1] as $neighbor) {
+                    if (!isset($sections[$neighbor]) || !is_array($sections[$neighbor])) {
+                        continue;
+                    }
+                    $sections[$neighbor]['handoff'] = self::withSeamCorrection(
+                        $sections[$neighbor]['handoff'] ?? '',
+                        'the "' . $title . '" section beside it now uses the page base',
+                    );
+                }
+                $warnings[] = self::valueLossWarning(
+                    self::sectionPath($pageSlug, (int) $index) . '.background',
+                    $background,
+                    'base',
+                    'demoted an excess color band so the page keeps at most two purposeful non-base surface beats',
+                );
+                $excess--;
+            }
+        }
+
+        $remaining = self::bandedCount($sections);
+        if ($remaining > self::MAX_NON_BASE_SECTIONS) {
+            $path = $pageSlug === '' ? 'pages[].sections' : "pages[slug='{$pageSlug}'].sections";
+            $warnings[] = self::valueLossWarning(
+                $path,
+                "{$remaining} non-base surfaces",
+                "{$remaining} non-base surfaces",
+                'surface budget could not be met without changing a locked hero, closing seam, or structural '
+                    . 'full-bleed image; delivered those sections intact',
+            );
+        }
+
+        return $sections;
     }
 
     /**

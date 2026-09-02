@@ -938,3 +938,90 @@ test('8-bit rounding never drags a rotated accent back under the too-close line 
         sprintf('worst delivered separation %.2f fell under the %.1f line', $worst, PaletteFloor::HUE_TOO_CLOSE),
     );
 });
+
+test('color economy consolidates exactly the roles promised by each commitment', function () {
+    $palette = [
+        'base' => '#F5EDE5',
+        'contrast' => '#2A2018',
+        'primary' => '#6B2C1F',
+        'secondary' => '#1F5C6B',
+        'accent' => '#1667C5',
+    ];
+
+    $monochromeWarnings = [];
+    $monochrome = PaletteFloor::repair($palette, $monochromeWarnings, null, 'monochrome');
+    assert_eq('#F5EDE5', $monochrome['base'], 'the GroundTint-owned base never moves');
+    foreach (['secondary', 'accent'] as $role) {
+        assert_true(
+            (PaletteFloor::hueDistance($monochrome['primary'], $monochrome[$role]) ?? 360.0)
+                <= PaletteFloor::ECONOMY_HUE_TOLERANCE,
+            "monochrome {$role} joins the foundation hue",
+        );
+    }
+    assert_eq([], PaletteFloor::check($monochrome, null, 'monochrome'));
+    assert_contains('monochrome color economy', implode("\n", $monochromeWarnings));
+    $secondWarnings = [];
+    assert_eq($monochrome, PaletteFloor::repair($monochrome, $secondWarnings, null, 'monochrome'));
+    assert_eq([], $secondWarnings, 'the economy repair reaches a fixed point');
+
+    $singleWarnings = [];
+    $single = PaletteFloor::repair($palette, $singleWarnings, null, 'single-accent');
+    assert_true(
+        (PaletteFloor::hueDistance($single['primary'], $single['secondary']) ?? 360.0)
+            <= PaletteFloor::ECONOMY_HUE_TOLERANCE,
+        'single-accent consolidates the foundation roles',
+    );
+    assert_eq($palette['accent'], $single['accent'], 'the sole independent accent hue is preserved');
+    assert_eq([], PaletteFloor::check($single, null, 'single-accent'));
+
+    $multiWarnings = [];
+    $multi = PaletteFloor::repair($palette, $multiWarnings, null, 'multicolor');
+    assert_eq($palette, $multi, 'purposeful independent hues survive multicolor');
+    assert_eq([], $multiWarnings);
+});
+
+test('monochrome economy aligns a formerly close accent instead of manufacturing a counter-hue', function () {
+    $palette = [
+        'base' => '#F7F1E7',
+        'contrast' => '#241D16',
+        'primary' => '#7A4A21',
+        'secondary' => '#6E6153',
+        'accent' => '#9A571C',
+    ];
+
+    assert_true(
+        palette_floor_finding(
+            PaletteFloor::check($palette, null, 'monochrome'),
+            'hue-separation',
+            'accent',
+        ) === null,
+        'a one-family palette is valid when the direction explicitly commits to monochrome',
+    );
+    $monochromeWarnings = [];
+    $monochrome = PaletteFloor::repair($palette, $monochromeWarnings, null, 'monochrome');
+    assert_true(
+        (PaletteFloor::hueDistance($monochrome['accent'], $monochrome['primary']) ?? 360.0)
+            <= PaletteFloor::ECONOMY_HUE_TOLERANCE,
+        'monochrome consolidates rather than separates the accent',
+    );
+    assert_eq([], PaletteFloor::check($monochrome, null, 'monochrome'));
+
+    foreach (['single-accent', 'multicolor'] as $economy) {
+        assert_true(
+            palette_floor_finding(
+                PaletteFloor::check($palette, null, $economy),
+                'hue-separation',
+                'accent',
+            ) !== null,
+            "{$economy} keeps the existing independent-accent requirement",
+        );
+        $warnings = [];
+        $out = PaletteFloor::repair($palette, $warnings, null, $economy);
+        assert_true($out['accent'] !== $palette['accent']);
+        assert_contains('hue separation', $warnings[0]);
+    }
+
+    $defaultWarnings = [];
+    $default = PaletteFloor::repair($palette, $defaultWarnings);
+    assert_true($default['accent'] !== $palette['accent'], 'a bare floor call preserves its former multicolor behavior');
+});

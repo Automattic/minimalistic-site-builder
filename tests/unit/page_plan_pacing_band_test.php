@@ -159,4 +159,62 @@ test('the page-plan prompt states the floor, not only the "mostly base" bias', f
     assert_contains('"Mostly base" is not "all base"', $prompt);
     assert_contains('5 or more sections MUST carry at least one', $prompt);
     assert_contains('every section on "base"', $prompt, 'the final re-check covers it too');
+    assert_contains('AT MOST TWO non-base backgrounds', $prompt);
+    assert_contains('More content does not earn more colors', $prompt);
+});
+
+test('surface restraint demotes excess bands to an absolute two-beat budget', function () {
+    $plan = pacing_plan(6);
+    foreach (['image', 'base', 'tinted', 'contrast', 'image', 'tinted'] as $i => $background) {
+        $plan[$i]['background'] = $background;
+    }
+    $warnings = [];
+    $out = PagePlanStep::withSurfaceRestraint($plan, 'home', $warnings);
+
+    assert_eq(
+        ['image', 'base', 'base', 'base', 'image', 'base'],
+        array_column($out, 'background'),
+        'subtle tints are demoted before contrast, and ordinary image bands are kept until last',
+    );
+    assert_eq(4, count(array_filter(array_column($out, 'background'), fn (string $b) => $b === 'base')));
+    assert_eq(3, count($warnings), 'each delivered-value change is recorded once');
+    assert_contains('at most two purposeful', implode("\n", $warnings));
+    assert_contains('Build correction', $out[2]['handoff']);
+    assert_contains('now uses the page base', $out[1]['handoff'], 'neighbor seam facts are corrected');
+});
+
+test('surface restraint preserves locked seams and structural covers', function () {
+    $plan = pacing_plan(6);
+    foreach (['image', 'tinted', 'image', 'contrast', 'tinted', 'contrast'] as $i => $background) {
+        $plan[$i]['background'] = $background;
+    }
+    $plan[0]['layout_archetype'] = 'full-bleed-cover';
+    $plan[2]['layout_archetype'] = 'full-bleed-cover';
+    $warnings = [];
+    $out = PagePlanStep::withSurfaceRestraint($plan, 'home', $warnings, true, true);
+
+    assert_eq('image', $out[0]['background'], 'the recipe-locked front hero is preserved');
+    assert_eq('image', $out[2]['background'], 'a full-bleed cover keeps its required image surface');
+    assert_eq('contrast', $out[5]['background'], 'the settled closing/footer seam is preserved');
+    assert_eq(
+        3,
+        count(array_filter(array_column($out, 'background'), fn (string $b) => $b !== 'base')),
+        'protected structure may exceed the visual budget rather than being damaged',
+    );
+    $joined = implode("\n", $warnings);
+    assert_contains('surface budget could not be met', $joined);
+    assert_contains('delivered those sections intact', $joined);
+});
+
+test('surface restraint leaves short pages and already restrained pages byte-identical', function () {
+    foreach ([pacing_plan(4, 'contrast'), pacing_plan(6)] as $plan) {
+        if (count($plan) === 6) {
+            $plan[1]['background'] = 'tinted';
+            $plan[4]['background'] = 'contrast';
+        }
+        $warnings = [];
+        $out = PagePlanStep::withSurfaceRestraint($plan, 'page', $warnings);
+        assert_eq($plan, $out);
+        assert_eq([], $warnings);
+    }
 });

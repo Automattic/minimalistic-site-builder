@@ -15,11 +15,13 @@ test('ConceptSeeds::normalize reads the object shape and its coordinates', funct
         'ground'   => 'Dark',
         'register' => ' heritage ',
         'accent'   => 'EARTH',
+        'color_economy' => ' Monochrome ',
     ]);
     assert_eq('Forge & Flame — a dark smithy of a page.', $seed['text']);
     assert_eq('dark', $seed['ground'], 'axis values are case and space insensitive');
     assert_eq('heritage', $seed['register']);
     assert_eq('earth', $seed['accent']);
+    assert_eq('monochrome', $seed['color_economy']);
 });
 
 test('ConceptSeeds::normalize still accepts a bare string, with no coordinates', function () {
@@ -28,14 +30,21 @@ test('ConceptSeeds::normalize still accepts a bare string, with no coordinates',
     assert_eq(null, $seed['ground']);
     assert_eq(null, $seed['register']);
     assert_eq(null, $seed['accent']);
+    assert_eq(null, $seed['color_economy']);
 });
 
-test('ConceptSeeds::normalize drops an axis outside its vocabulary instead of trusting it', function () {
+test('ConceptSeeds::normalize drops axes outside their vocabularies instead of trusting them', function () {
     // An invented word must never make two identical seeds look like two ideas.
-    $seed = ConceptSeeds::normalize(['seed' => 'Sea Glass', 'ground' => 'twilight', 'accent' => 'pastel']);
+    $seed = ConceptSeeds::normalize([
+        'seed' => 'Sea Glass',
+        'ground' => 'twilight',
+        'accent' => 'pastel',
+        'color_economy' => 'rainbow',
+    ]);
     assert_eq('Sea Glass', $seed['text']);
     assert_eq(null, $seed['ground']);
     assert_eq(null, $seed['accent']);
+    assert_eq(null, $seed['color_economy']);
 });
 
 test('ConceptSeeds::normalize rejects what carries no seed text', function () {

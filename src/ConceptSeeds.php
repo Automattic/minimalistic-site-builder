@@ -91,7 +91,8 @@ final class ConceptSeeds
     ];
 
     /**
-     * Coerce one raw seed into `{text, ground, register, accent, tint, type_register}`.
+     * Coerce one raw seed into
+     * `{text, ground, register, accent, tint, type_register, color_economy}`.
      *
      * The prompt asks for an object; a bare string (the older shape, and what
      * a small model falls back to under load) still parses, with no
@@ -104,7 +105,7 @@ final class ConceptSeeds
      *
      * @param mixed $raw
      * @param array{registers?:list<string>,accents?:list<string>} $locked
-     * @return array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string}|null
+     * @return array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string,color_economy:?string}|null
      */
     public static function normalize($raw, array $locked = []): ?array
     {
@@ -119,6 +120,7 @@ final class ConceptSeeds
                     'accent'        => null,
                     'tint'          => null,
                     'type_register' => null,
+                    'color_economy' => null,
                 ];
         }
         if (!is_array($raw)) {
@@ -149,6 +151,7 @@ final class ConceptSeeds
             'accent'        => self::axis($raw['accent'] ?? null, $accents),
             'tint'          => self::axis($raw['tint'] ?? null, self::TINTS),
             'type_register' => self::axis($raw['type_register'] ?? null, self::TYPE_REGISTERS),
+            'color_economy' => self::axis($raw['color_economy'] ?? null, ColorEconomy::ALL),
         ];
     }
 
@@ -209,7 +212,7 @@ final class ConceptSeeds
      * in how the ground leans or which face sets the headline, are still one
      * world.
      *
-     * @param array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string} $seed
+     * @param array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string,color_economy?:?string} $seed
      */
     public static function axisKey(array $seed): ?string
     {
@@ -233,9 +236,9 @@ final class ConceptSeeds
      * the spread keeps collapsing is visible in the build's warnings instead of
      * only in the sameness of the finished sites.
      *
-     * @param list<array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string}> $seeds
+     * @param list<array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string,color_economy?:?string}> $seeds
      * @param list<string> $warnings
-     * @return list<array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string}>
+     * @return list<array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string,color_economy?:?string}>
      */
     public static function distinct(array $seeds, array &$warnings = []): array
     {
@@ -300,7 +303,7 @@ final class ConceptSeeds
      * misspelling `ground` on two of three is not exotic, and "every seed is
      * light-grounded" must not be derived from a single vote.
      *
-     * @param list<array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string}> $seeds
+     * @param list<array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string,color_economy?:?string}> $seeds
      */
     public static function sharedGround(array $seeds): ?string
     {
@@ -323,7 +326,7 @@ final class ConceptSeeds
      * arrived. Same guards as sharedGround: a single named tint is not a
      * round-wide claim (BIGR-922).
      *
-     * @param list<array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string}> $seeds
+     * @param list<array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string,color_economy?:?string}> $seeds
      */
     public static function sharedTint(array $seeds): ?string
     {

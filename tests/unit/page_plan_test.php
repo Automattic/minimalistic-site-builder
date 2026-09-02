@@ -1060,6 +1060,54 @@ test('page-plan writes pages.json with sections per page', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('page-plan delivery applies surface restraint after settling the footer seam', function () {
+    $tmp = sys_get_temp_dir() . '/builder_pp_surface_restraint_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A restrained bakery']);
+    seed_test_design_direction($project);
+    $project->writeJson('siteSpec.json', plan_spec(['pages' => [
+        ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome', 'children' => []],
+    ]]));
+    $archetypes = [
+        'full-bleed-cover',
+        'centered-stack',
+        'asymmetric-split',
+        'equal-card-grid',
+        'list-with-thumbnails',
+        'centered-stack',
+    ];
+    $backgrounds = ['image', 'tinted', 'contrast', 'tinted', 'image', 'contrast'];
+    $sections = [];
+    foreach ($archetypes as $index => $archetype) {
+        $sections[] = plan_section([
+            'slug' => "section-{$index}",
+            'title' => "Section {$index}",
+            'type' => $index === 0 ? 'hero' : 'content',
+            'layout_archetype' => $archetype,
+            'background' => $backgrounds[$index],
+            'handoff' => 'Sits between its assigned neighbors.',
+        ]);
+    }
+
+    (new PagePlanStep(new FakeLlm(), new PromptRenderer(repo_path('prompts'))))->consume(
+        $project,
+        ['home' => ['sections' => $sections]],
+    );
+
+    $delivered = $project->readJson('pages.json')['pages'][0]['sections'];
+    $nonBase = array_values(array_filter(
+        array_column($delivered, 'background'),
+        static fn (string $background): bool => $background !== 'base',
+    ));
+    assert_true(count($nonBase) <= 2, 'the final artifact, not only the pure helper, obeys the budget');
+    assert_eq('image', $delivered[0]['background'], 'the locked front hero survives delivery restraint');
+    assert_contains(
+        'demoted an excess color band',
+        implode("\n", $project->readJson('warnings.json')['page-plan'] ?? []),
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('page-plan removes a generated footer before recomputing variety and roles', function () {
     $tmp = sys_get_temp_dir() . '/builder_pp_footer_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');

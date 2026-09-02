@@ -4,8 +4,8 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild;
 
 /**
- * Deterministic palette floors: WCAG contrast, primary/accent hue
- * separation, and a chroma ceiling at extreme lightness.
+ * Deterministic palette floors: WCAG contrast, committed hue economy,
+ * primary/accent separation, and a chroma ceiling at extreme lightness.
  *
  * Pure. No I/O. Palette maps are slug => "#RRGGBB" (or 3-digit hex).
  * Relative luminance and contrast ratio come from ContrastMath; this
@@ -69,6 +69,9 @@ final class PaletteFloor
     /** Chroma above this at extreme luminance is the garish-lime failure. */
     public const CHROMA_CEILING = 0.55;
 
+    /** Tonal roles farther apart than this spend a second hue family. */
+    public const ECONOMY_HUE_TOLERANCE = 18.0;
+
     public const LUMA_HIGH = 0.6;
     public const LUMA_LOW = 0.06;
 
@@ -77,7 +80,7 @@ final class PaletteFloor
      *
      * @param array<string,string> $palette slug => hex
      * @return list<array{
-     *     class: 'contrast'|'hue-separation'|'chroma-ceiling',
+     *     class: 'contrast'|'hue-separation'|'chroma-ceiling'|'color-economy',
      *     role: string,
      *     against: string,
      *     authored: string,
@@ -85,9 +88,14 @@ final class PaletteFloor
      *     floor: float
      * }>
      */
-    public static function check(array $palette, ?float $contrastOnBase = null): array
+    public static function check(
+        array $palette,
+        ?float $contrastOnBase = null,
+        ?string $colorEconomy = null,
+    ): array
     {
         $contrastOnBase ??= self::CONTRAST_ON_BASE;
+        $colorEconomy = self::normalizeEconomy($colorEconomy);
         $findings = [];
         foreach (self::contrastPairs($contrastOnBase) as [$role, $against, $floor]) {
             $hex = self::hexOf($palette, $role);
@@ -121,8 +129,14 @@ final class PaletteFloor
             ];
         }
 
+        array_push($findings, ...self::economyFindings($palette, $colorEconomy));
+
         $primary = self::hexOf($palette, 'primary');
-        if ($primary !== null && $accent !== null) {
+        if (
+            ColorEconomy::requiresAccentHueSeparation($colorEconomy)
+            && $primary !== null
+            && $accent !== null
+        ) {
             $cPrimary = self::chroma($primary);
             $cAccent = self::chroma($accent);
             $delta = self::hueDistance($primary, $accent);
@@ -171,8 +185,8 @@ final class PaletteFloor
     }
 
     /**
-     * Repair in spec order: contrast, hue separation, chroma ceiling,
-     * then contrast again so a rotation or chroma cut cannot leave a
+     * Repair in spec order: contrast, color economy, hue separation, chroma
+     * ceiling, then contrast again so a hue or chroma change cannot leave a
      * pair under its floor.
      *
      * Never moves `base` — that slug belongs to a GroundTint family.
@@ -183,19 +197,151 @@ final class PaletteFloor
      *        authored=/delivered=/disposition= shape
      * @return array<string,string>
      */
-    public static function repair(array $palette, array &$warnings, ?float $contrastOnBase = null): array
+    public static function repair(
+        array $palette,
+        array &$warnings,
+        ?float $contrastOnBase = null,
+        ?string $colorEconomy = null,
+    ): array
     {
         $contrastOnBase ??= self::CONTRAST_ON_BASE;
+        $colorEconomy = self::normalizeEconomy($colorEconomy);
         $authored = $palette;
         /** @var array<string, list<array{kind:string,text:string}>> $notes */
         $notes = [];
         $out = self::repairContrast($palette, $notes, $contrastOnBase);
-        $out = self::repairHue($out, $notes);
+        $out = self::repairEconomy($out, $notes, $colorEconomy);
+        if (ColorEconomy::requiresAccentHueSeparation($colorEconomy)) {
+            $out = self::repairHue($out, $notes);
+        }
         $out = self::repairChroma($out, $notes);
         $out = self::repairContrast($out, $notes, $contrastOnBase);
-        self::warnResiduals($out, $notes, $contrastOnBase);
+        self::warnResiduals($out, $notes, $contrastOnBase, $colorEconomy);
         self::emitNotes($authored, $out, $notes, $warnings);
         return $out;
+    }
+
+    /** @return list<array{class:string,role:string,against:string,authored:string,metric:float,floor:float}> */
+    private static function economyFindings(array $palette, string $economy): array
+    {
+        return array_map(
+            static fn (array $outlier): array => [
+                'class' => 'color-economy',
+                'role' => $outlier['role'],
+                'against' => $outlier['against'],
+                'authored' => $outlier['authored'],
+                'metric' => $outlier['metric'],
+                'floor' => self::ECONOMY_HUE_TOLERANCE,
+            ],
+            self::economyOutliers($palette, $economy),
+        );
+    }
+
+    /**
+     * Align tonal roles with their foundation hue. Neutral roles stay neutral,
+     * base never moves, and the final contrast pass may adjust lightness.
+     *
+     * @param array<string,string> $palette
+     * @param array<string, list<array{kind:string,text:string}>> $notes
+     * @return array<string,string>
+     */
+    private static function repairEconomy(array $palette, array &$notes, string $economy): array
+    {
+        foreach (self::economyOutliers($palette, $economy) as $outlier) {
+            $rgb = ContrastMath::hexToRgb($outlier['authored']);
+            if ($rgb === null) {
+                continue;
+            }
+            [, $saturation, $lightness] = self::toHsl($rgb);
+            $fixed = self::toHex(self::hslToRgb($outlier['target'], $saturation, $lightness));
+            $role = $outlier['role'];
+            if (self::sameHex($fixed, $outlier['authored'])) {
+                continue;
+            }
+            $palette[$role] = $fixed;
+            self::note(
+                $notes,
+                $role,
+                'repaired',
+                "{$economy} color economy, hue aligned with {$outlier['against']} while saturation and lightness held",
+            );
+        }
+        return $palette;
+    }
+
+    /**
+     * @param array<string,string> $palette
+     * @return list<array{role:string,against:string,authored:string,metric:float,target:float}>
+     */
+    private static function economyOutliers(array $palette, string $economy): array
+    {
+        $roles = self::economyRoles($economy);
+        $anchor = self::economyAnchor($palette, $roles);
+        if ($anchor === null) {
+            return [];
+        }
+        [$anchorRole, $anchorHue] = $anchor;
+        $outliers = [];
+        foreach ($roles as $role) {
+            $hex = self::hexOf($palette, $role);
+            if ($role === $anchorRole || $hex === null || (self::chroma($hex) ?? 0.0) <= self::CHROMA_MIN) {
+                continue;
+            }
+            $hue = self::hue($hex);
+            $delta = $hue === null ? null : self::hueDistanceDegrees($anchorHue, $hue);
+            if ($delta === null || $delta <= self::ECONOMY_HUE_TOLERANCE) {
+                continue;
+            }
+            $outliers[] = [
+                'role' => $role,
+                'against' => $anchorRole,
+                'authored' => $hex,
+                'metric' => $delta,
+                'target' => $anchorHue,
+            ];
+        }
+        return $outliers;
+    }
+
+    /** @return list<string> */
+    private static function economyRoles(string $economy): array
+    {
+        return match ($economy) {
+            'monochrome' => ['base', 'contrast', 'primary', 'secondary', 'accent'],
+            'single-accent' => ['base', 'contrast', 'primary', 'secondary'],
+            default => [],
+        };
+    }
+
+    /**
+     * Bare audit calls keep the pre-commitment behavior. Production always
+     * supplies the direction's explicit economy.
+     */
+    private static function normalizeEconomy(?string $economy): string
+    {
+        return ColorEconomy::explicit($economy) ?? 'multicolor';
+    }
+
+    /**
+     * @param array<string,string> $palette
+     * @param list<string> $roles
+     * @return array{0:string,1:float}|null role, hue
+     */
+    private static function economyAnchor(array $palette, array $roles): ?array
+    {
+        // Base wins whenever it visibly carries a hue, preserving GroundTint's
+        // family. Otherwise primary is the clearest foundation statement.
+        foreach (array_intersect(['base', 'primary', 'secondary', 'contrast', 'accent'], $roles) as $role) {
+            $hex = self::hexOf($palette, $role);
+            if ($hex === null || (self::chroma($hex) ?? 0.0) <= self::CHROMA_MIN) {
+                continue;
+            }
+            $hue = self::hue($hex);
+            if ($hue !== null) {
+                return [$role, $hue];
+            }
+        }
+        return null;
     }
 
     /** WCAG relative luminance, or null when the value is not a hex color. */
@@ -778,7 +924,12 @@ final class PaletteFloor
      * @param array<string,string> $palette
      * @param array<string, list<array{kind:string,text:string}>> $notes
      */
-    private static function warnResiduals(array $palette, array &$notes, float $contrastOnBase): void
+    private static function warnResiduals(
+        array $palette,
+        array &$notes,
+        float $contrastOnBase,
+        string $colorEconomy,
+    ): void
     {
         $covered = [];
         foreach ($notes as $role => $items) {
@@ -786,13 +937,16 @@ final class PaletteFloor
                 if ($item['kind'] !== 'unrepaired') {
                     continue;
                 }
-                $class = str_contains($item['text'], 'hue separation')
-                    ? 'hue-separation'
-                    : (str_contains($item['text'], 'chroma ceiling') ? 'chroma-ceiling' : 'contrast');
+                $class = match (true) {
+                    str_contains($item['text'], 'color economy') => 'color-economy',
+                    str_contains($item['text'], 'hue separation') => 'hue-separation',
+                    str_contains($item['text'], 'chroma ceiling') => 'chroma-ceiling',
+                    default => 'contrast',
+                };
                 $covered[$class . ':' . $role] = true;
             }
         }
-        foreach (self::check($palette, $contrastOnBase) as $finding) {
+        foreach (self::check($palette, $contrastOnBase, $colorEconomy) as $finding) {
             $key = $finding['class'] . ':' . $finding['role'];
             if (isset($covered[$key])) {
                 continue;
@@ -819,6 +973,12 @@ final class PaletteFloor
             'hue-separation' => sprintf(
                 'unrepaired — hue separation still %s degrees (floor %s)',
                 $metric,
+                self::ratioLabel((float) $finding['floor']),
+            ),
+            'color-economy' => sprintf(
+                'unrepaired — color economy still spends a second hue %s degrees from %s (maximum %s)',
+                $metric,
+                $finding['against'],
                 self::ratioLabel((float) $finding['floor']),
             ),
             default => sprintf(
