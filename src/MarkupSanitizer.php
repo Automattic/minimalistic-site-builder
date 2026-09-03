@@ -26,6 +26,16 @@ final class MarkupSanitizer
     ];
 
     /**
+     * Elements whose source attributes the browser fetches on view. The build
+     * generates every site image itself, so a source on another host is never
+     * legitimate generated markup: it is a fetch from a model-chosen host on
+     * every page view (BIGR-975).
+     */
+    private const MEDIA_ELEMENTS = ['img', 'source', 'video', 'audio', 'track', 'picture', 'input'];
+    private const MEDIA_SOURCE_ATTRIBUTES = ['src', 'srcset', 'poster'];
+    private const BLOCK_MEDIA_KEYS = 'url|src|poster|mediaUrl';
+
+    /**
      * @param list<string> $notes out-param: one line per class of removal, so
      *        callers can record the delivered-content change durably
      *        (warnings.json) instead of the strip staying silent.
@@ -81,10 +91,11 @@ final class MarkupSanitizer
         $handlers = 0;
         $urls = 0;
         $styles = 0;
+        $media = 0;
         $markup = HtmlBlockContext::rewriteOpeningTags(
             $markup,
-            static function (string $tag) use (&$handlers, &$urls, &$styles): string {
-                return self::sanitizeOpeningTag($tag, $handlers, $urls, $styles);
+            static function (string $tag) use (&$handlers, &$urls, &$styles, &$media): string {
+                return self::sanitizeOpeningTag($tag, $handlers, $urls, $styles, $media);
             },
         );
         if ($handlers > 0) {
@@ -96,6 +107,16 @@ final class MarkupSanitizer
         if ($styles > 0) {
             $notes[] = "removed resource-loading declarations from {$styles} inline style attribute(s)";
         }
+        if ($media > 0) {
+            $notes[] = "removed {$media} media source attribute(s) on a foreign host";
+        }
+        // The editor acts on the same sources in block-comment JSON: a cover's
+        // "url" is what it loads when the page opens for editing.
+        $blockMedia = 0;
+        $markup = self::neutralizeForeignBlockMedia($markup, $blockMedia);
+        if ($blockMedia > 0) {
+            $notes[] = "removed {$blockMedia} block attribute media source(s) on a foreign host";
+        }
         return $markup;
     }
 
@@ -104,8 +125,11 @@ final class MarkupSanitizer
         int &$handlers = 0,
         int &$urls = 0,
         int &$styles = 0,
+        int &$media = 0,
     ): string {
         $attributes = self::attributes($tag);
+        preg_match('/\A<([a-zA-Z][^\x09\x0A\x0C\x0D\x20\/>]*)/', $tag, $nameMatch);
+        $name = strtolower($nameMatch[1] ?? '');
         $eventStarts = [];
         foreach ($attributes as $attribute) {
             if (self::isEventAttribute($attribute['name'])) {
@@ -130,6 +154,32 @@ final class MarkupSanitizer
                     'replacement' => $needsSeparator ? ' ' : '',
                 ];
                 $handlers++;
+                continue;
+            }
+
+            if ($attribute['valueStart'] !== null
+                && in_array($name, self::MEDIA_ELEMENTS, true)
+                && in_array($attribute['name'], self::MEDIA_SOURCE_ATTRIBUTES, true)
+                && self::isForeignSource($attribute['name'], substr(
+                    $tag,
+                    $attribute['valueStart'],
+                    $attribute['valueEnd'] - $attribute['valueStart'],
+                ))
+            ) {
+                // A source on another host fetches on every view. The
+                // attribute goes; the element stays with its alt text, and
+                // the image pipeline owns whatever the section still needs.
+                $next = $tag[$attribute['end']] ?? '>';
+                $needsSeparator = !self::isSpaceByte($next)
+                    && $next !== '/'
+                    && $next !== '>'
+                    && !array_key_exists($attribute['end'], $eventStarts);
+                $edits[] = [
+                    'start' => $attribute['start'],
+                    'end' => $attribute['end'],
+                    'replacement' => $needsSeparator ? ' ' : '',
+                ];
+                $media++;
                 continue;
             }
 
@@ -467,7 +517,89 @@ final class MarkupSanitizer
         return $attributes;
     }
 
+    /**
+     * Remove media sources on a foreign host from block-comment JSON. Two
+     * passes keep the JSON valid: a key after a comma goes with its comma, and
+     * a key in first position goes with the comma that follows it.
+     */
+    private static function neutralizeForeignBlockMedia(string $markup, int &$count): string
+    {
+        $foreign = '"((?:[a-zA-Z][a-zA-Z0-9+.\-]*:)?\\\\?\/\\\\?\/(?:[^"\\\\]|\\\\.)*)"';
+        $key = '"(?:' . self::BLOCK_MEDIA_KEYS . ')"';
+        $result = preg_replace_callback(
+            '/<!--\s*wp:[a-zA-Z0-9\/-]+\s+\{.*?\}\s*\/?-->/s',
+            static function (array $match) use (&$count, $foreign, $key): string {
+                $comment = $match[0];
+                foreach ([
+                    '/,\s*' . $key . '\s*:\s*' . $foreign . '/',
+                    '/' . $key . '\s*:\s*' . $foreign . '\s*,?/',
+                ] as $pattern) {
+                    $comment = (string) preg_replace_callback(
+                        $pattern,
+                        static function () use (&$count): string {
+                            $count++;
+                            return '';
+                        },
+                        $comment,
+                    );
+                }
+                return $comment;
+            },
+            $markup,
+        );
+        return $result ?? $markup;
+    }
+
+    /**
+     * Whether a media source names another host: a scheme with an authority,
+     * a protocol-relative `//`, or an absolute http/https/ftp URL. Root
+     * relative paths, the build's `theme:./assets/` placeholders, and data:
+     * (judged separately as executable) are not foreign. Fails closed.
+     */
+    private static function isForeignSource(string $attribute, string $value): bool
+    {
+        $decoded = self::decodedUrl($value);
+        if ($decoded === null) {
+            return true;
+        }
+        $candidates = $attribute === 'srcset'
+            ? array_map(
+                static fn (string $candidate): string => preg_split('/\s+/', trim($candidate), 2)[0] ?? '',
+                explode(',', $decoded),
+            )
+            : [$decoded];
+        foreach ($candidates as $candidate) {
+            $stripped = preg_replace('/[\x00-\x20\x7F]+/', '', $candidate);
+            if ($stripped === null) {
+                return true;
+            }
+            if (preg_match('#\A(?:[a-z][a-z0-9+.\-]*:)?//#i', $stripped) === 1
+                || preg_match('#\A(?:https?|ftp):#i', $stripped) === 1
+            ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static function hasExecutableScheme(string $value): bool
+    {
+        $decoded = self::decodedUrl($value);
+        if ($decoded === null) {
+            return true;
+        }
+        $stripped = preg_replace('/[\x00-\x20\x7F]+/', '', $decoded);
+        if ($stripped === null) {
+            return true;
+        }
+        return preg_match('/\A(?:javascript|vbscript|data):/i', $stripped) !== 0;
+    }
+
+    /**
+     * The attribute value as the browser reads it, or null on a PCRE failure
+     * so every caller fails closed.
+     */
+    private static function decodedUrl(string $value): ?string
     {
         // PHP requires semicolons on numeric references; HTML does not. Decode
         // the ASCII subset explicitly first, then named/terminated references.
@@ -494,18 +626,13 @@ final class MarkupSanitizer
             $value,
         );
         if ($decoded === null) {
-            return true;
+            return null;
         }
-        $decoded = html_entity_decode(
+        return html_entity_decode(
             $decoded,
             ENT_QUOTES | ENT_HTML5 | ENT_SUBSTITUTE,
             'UTF-8',
         );
-        $stripped = preg_replace('/[\x00-\x20\x7F]+/', '', $decoded);
-        if ($stripped === null) {
-            return true;
-        }
-        return preg_match('/\A(?:javascript|vbscript|data):/i', $stripped) !== 0;
     }
 
     private static function isSpaceByte(string $char): bool
