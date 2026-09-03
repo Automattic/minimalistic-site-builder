@@ -1375,7 +1375,7 @@ test('normalize commits every bounded depth and warns on an unsupported treatmen
         'description' => 'x',
         'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
     ];
-    foreach (['flat', 'soft', 'hard-offset', 'inset', 'glow'] as $depth) {
+    foreach (['flat', 'ring', 'soft', 'hard-offset', 'inset', 'glow'] as $depth) {
         $warnings = [];
         $direction = DesignDirectionStep::normalize(
             $base + ['depth' => strtoupper($depth)],
@@ -1404,6 +1404,7 @@ test('normalize commits every bounded depth and warns on an unsupported treatmen
 test('format renders depth as an executable build-owned fact', function () {
     foreach ([
         'flat' => 'deliberately shadowless',
+        'ring' => '1px hairline ring and no lift',
         'soft' => 'restrained, diffuse lift',
         'hard-offset' => 'poster-like offset plate',
         'inset' => 'presses cards and contained media',
