@@ -1349,12 +1349,33 @@ test('generate-images keeps the first hero when its regeneration fails', functio
     (new GenerateImagesStep($images, $llm, 'small-model'))->run($project);
 
     assert_eq(1, count($llm->imageCalls), 'nothing to look at a second time');
-    assert_eq('completed', $project->readJson('images.json')[0]['status'], 'a failed regeneration never removes a delivered image');
+    $spec = $project->readJson('images.json')[0];
+    assert_eq('completed', $spec['status'], 'a failed regeneration never removes a delivered image');
+    assert_eq(['regenerated' => false, 'finding' => 'camera not upright (scene rotated or tilted)'], $spec['qa'], 'the row says the first image ships with its finding');
     assert_true($project->exists('theme/assets/hero.jpg'));
     $rows = $project->readJson('warnings.json')['generate-images'];
     assert_eq(1, count($rows));
     assert_contains('regeneration failed: fake image failure', $rows[0]);
     assert_contains('camera not upright', $rows[0]);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images delivers a regenerated hero unverified when the second look is unreadable', function () {
+    [$project, $tmp] = generate_fixture();
+    $images = new FakeImageClient('JPEGDATA');
+    $llm = new FakeLlm();
+    $llm->queueText(GI_QA_ROTATED);
+    $llm->queueText('I cannot tell.');
+
+    (new GenerateImagesStep($images, $llm, 'small-model'))->run($project);
+
+    assert_eq(2, count($images->batches), 'one regeneration');
+    assert_eq(2, count($llm->imageCalls), 'two looks');
+    $spec = $project->readJson('images.json')[0];
+    assert_eq('completed', $spec['status']);
+    assert_eq(true, $spec['qa']['regenerated'], 'the regenerated image ships');
+    assert_true(!$project->exists('warnings.json'), 'no verdict is not a defect');
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

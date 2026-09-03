@@ -700,6 +700,7 @@ final class GenerateImagesStep implements Step
             $error = $this->regenerate($project, $spec, $rel, $genSpec, $imageGrade, $imageCrop, $subject, $finding);
             if ($error !== null) {
                 Narrator::write("    QA {$filename}: regeneration failed ({$error}); keeping the first image\n");
+                $specs[$i]['qa'] = ['regenerated' => false, 'finding' => $finding];
                 $project->addWarnings($this->id(), [ImageQa::warningRow(
                     $filename,
                     $authored,
