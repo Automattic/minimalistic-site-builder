@@ -253,6 +253,10 @@ $designPreviewDeterministicDependencyRemovals = [
     // The design engine drops an inline style that loads a resource at the
     // write, so no repair call is spent on it (BIGR-970).
     'inline style attribute with remote URL' => true,
+    // A media source that names another host, in any spelling the browser
+    // resolves, is removed at the write (BIGR-975).
+    'image https colon without slashes src' => true,
+    'image backslash scheme src' => true,
 ];
 
 foreach ($designPreviewDependencyDefects as $name => $mutate) {
