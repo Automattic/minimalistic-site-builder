@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\AnthropicClient;
 use Automattic\SiteBuild\ClaudeCliLlm;
 use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\HarnessCallFailed;
@@ -103,7 +104,7 @@ test('C-G15/C-G17 Claude allows two turns with all tools disabled and keeps opti
     assert_eq('', $record['argv'][$tools + 1]);
     $system = array_search('--system-prompt', $record['argv'], true);
     assert_true($system !== false);
-    assert_eq('system text', $record['argv'][$system + 1]);
+    assert_eq(AnthropicClient::systemPreamble() . "\n\nsystem text", $record['argv'][$system + 1]);
     $schema = array_search('--json-schema', $record['argv'], true);
     assert_true($schema !== false);
     assert_eq(['type' => 'object'], json_decode($record['argv'][$schema + 1], true, 512, JSON_THROW_ON_ERROR));
@@ -140,7 +141,7 @@ test('W20 Claude honours system exactly without an unsupported-option disclosure
         $record = claude_cli_record($result->texts['job']);
         $indexes = array_keys($record['argv'], '--system-prompt', true);
         assert_eq(1, count($indexes));
-        assert_eq($system, $record['argv'][$indexes[0] + 1] ?? null);
+        assert_eq(AnthropicClient::systemPreamble() . "\n\n" . $system, $record['argv'][$indexes[0] + 1] ?? null);
         assert_eq('claude-system-prompt', $record['stdin']);
         assert_eq([], $result->notesFor('job'));
         rewind($stream);
@@ -262,4 +263,13 @@ test('T14 completeBatch does not retry truncated text and returns a degradation 
     assert_eq('partial', $result->texts['cut']);
     assert_eq(1, $llm->usageTotals()['requests'], 'zero retries means one process');
     assert_contains('truncated', implode("\n", $result->notesFor('cut')));
+});
+
+test('Claude sends the build preamble alone when the caller sets no system', function (): void {
+    $record = claude_cli_record(claude_cli_llm()->complete('prompt'));
+    $indexes = array_keys($record['argv'], '--system-prompt', true);
+    assert_eq(1, count($indexes), 'exactly one --system-prompt');
+    assert_eq(AnthropicClient::systemPreamble(), $record['argv'][$indexes[0] + 1] ?? null);
+    assert_contains('<user_brief>', $record['argv'][$indexes[0] + 1] ?? '', 'the untrusted-brief rule reaches the CLI');
+    assert_eq('prompt', $record['stdin'], 'the prompt body is untouched');
 });

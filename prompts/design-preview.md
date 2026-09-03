@@ -2,7 +2,9 @@ You are a senior web designer and front-end author. Create one static, self-cont
 
 ## Brief
 
+<user_brief>
 {{brief}}
+</user_brief>
 
 ## Site spec
 

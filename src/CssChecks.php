@@ -178,9 +178,21 @@ final class CssChecks
     public static function inlineStyleLoadingProblem(string $decodedValue): ?string
     {
         $decoded = self::decodeIdentifier(html_entity_decode($decodedValue, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
-        $withoutAssets = (string) preg_replace(self::THEME_ASSET_URL_PATTERN, '', $decoded);
+        $withoutAssets = (string) preg_replace(
+            [self::THEME_ASSET_URL_PATTERN, self::PATTERN_ASSET_URL_PATTERN],
+            '',
+            $decoded,
+        );
         return self::resourceLoadingProblem($withoutAssets);
     }
+
+    /**
+     * The same placeholder after ExtractPatternsStep::rewriteAssets() turned
+     * it into the theme-file echo a pattern PHP file carries. Only this exact
+     * shape, with a bounded asset name, passes.
+     */
+    public const PATTERN_ASSET_URL_PATTERN =
+        '/url\(\s*(["\']?)<\?php echo esc_url\( get_theme_file_uri\( \'assets\/[a-z0-9][a-z0-9._-]*\' \) \); \?>\1\s*\)/';
 
     /**
      * display:none / visibility:hidden / a clip-path that clips everything

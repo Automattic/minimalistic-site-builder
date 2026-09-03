@@ -818,48 +818,94 @@ final class ScaffoldPluginStep implements Step
         }
 
         /**
-         * Remove media sources on a foreign host from the comment JSON of
-         * media blocks only: a navigation-link or social-link "url" is a
-         * destination, not a fetch, and stays. The same two passes the build
-         * runs: a key after a comma goes with its comma, a key in first
-         * position goes with the comma that follows.
+         * Neutralize comment-JSON sources, the same way the build does. The
+         * attribute object of every block is decoded and walked. On every
+         * block, a destination or source key with an executable scheme
+         * goes. On a media block, a source key on a foreign host goes too; a
+         * navigation-link or social-link "url" is a destination, and stays.
+         * On every block, a foreign url inside a backgroundImage object
+         * goes, because WordPress renders it as background-image from the
+         * JSON. A block that lost a key is re-serialized the way WordPress
+         * does, so the JSON stays valid; a block that lost nothing keeps its
+         * bytes.
          */
         function {{FN_PREFIX}}_content_neutralize_block_media($content) {
-            // One authority slash in JSON is `/`, `\/`, or the escaped
-            // backslash `\\` a browser reads as a slash.
-            $slash = '(?:\\\\?\/|\\\\\\\\)';
-            $foreign = '"((?:[a-zA-Z][a-zA-Z0-9+.\-]*:)?' . $slash . $slash . '(?:[^"\\\\]|\\\\.)*)"';
-            $key = '"(?:url|src|poster|mediaUrl)"';
             $result = preg_replace_callback(
-                '/<!--\s*wp:(?:core\/)?(?:cover|image|video|audio|media-text|gallery)\s+\{.*?\}\s*\/?-->/s',
-                function ($match) use ($foreign, $key) {
-                    $comment = $match[0];
-                    $comment = (string) preg_replace('/,\s*' . $key . '\s*:\s*' . $foreign . '/', '', $comment);
-                    $comment = (string) preg_replace('/' . $key . '\s*:\s*' . $foreign . '\s*,?/', '', $comment);
-                    return $comment;
-                },
-                $content
-            );
-            $content = $result === null ? $content : $result;
-
-            // Any block may carry style.background.backgroundImage.url, and
-            // WordPress renders it as background-image from the JSON.
-            $result = preg_replace_callback(
-                '/<!--\s*wp:[a-zA-Z0-9\/-]+\s+\{.*?\}\s*\/?-->/s',
-                function ($match) use ($foreign) {
-                    $replaced = preg_replace_callback(
-                        '/"backgroundImage"\s*:\s*\{[^{}]*\}/',
-                        function ($object) use ($foreign) {
-                            $inner = (string) preg_replace('/,\s*"url"\s*:\s*' . $foreign . '/', '', $object[0]);
-                            return (string) preg_replace('/"url"\s*:\s*' . $foreign . '\s*,?/', '', $inner);
-                        },
-                        $match[0]
-                    );
-                    return $replaced === null ? $match[0] : $replaced;
+                '/<!--\s*wp:([a-zA-Z0-9-]+(?:\/[a-zA-Z0-9-]+)?)\s+(\{.*?\})\s*(\/?)-->/s',
+                function ($match) {
+                    $attrs = json_decode($match[2], true);
+                    if (!is_array($attrs)) {
+                        return $match[0];
+                    }
+                    // WordPress serializes a core block without its
+                    // namespace; any other namespace stays on the name.
+                    $name = (string) preg_replace('#^core/#', '', $match[1]);
+                    $media_block = preg_match('/^(?:cover|image|video|audio|media-text|gallery)$/', $name) === 1;
+                    $changed = false;
+                    $attrs = {{FN_PREFIX}}_content_walk_block_json($attrs, $media_block, null, $changed);
+                    if (!$changed) {
+                        return $match[0];
+                    }
+                    if ($attrs === array()) {
+                        $json = '';
+                    } elseif (function_exists('serialize_block_attributes')) {
+                        $json = serialize_block_attributes($attrs) . ' ';
+                    } else {
+                        $json = str_replace('--', '\\u002d\\u002d', (string) json_encode(
+                            $attrs,
+                            JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP
+                            | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+                        )) . ' ';
+                    }
+                    return '<!-- wp:' . $name . ' ' . $json . $match[3] . '-->';
                 },
                 $content
             );
             return $result === null ? $content : $result;
+        }
+
+        /**
+         * One recursive pass over a decoded attribute object. An object that
+         * loses its last key goes with it.
+         */
+        function {{FN_PREFIX}}_content_walk_block_json($node, $media_block, $parent_key, &$changed) {
+            foreach ($node as $key => $value) {
+                $own_key = is_string($key) ? $key : $parent_key;
+                if (is_array($value)) {
+                    $child_changed = false;
+                    $child = {{FN_PREFIX}}_content_walk_block_json($value, $media_block, $own_key, $child_changed);
+                    if ($child_changed) {
+                        $changed = true;
+                        if ($child === array() && is_string($key)) {
+                            unset($node[$key]);
+                        } else {
+                            $node[$key] = $child;
+                        }
+                    }
+                    continue;
+                }
+                if (!is_string($key) || !is_string($value)) {
+                    continue;
+                }
+                $source_key = in_array($key, array('url', 'src', 'poster', 'mediaUrl', 'href', 'textLinkHref'), true);
+                if ($source_key
+                    && preg_match(
+                        '/\A(?:javascript|vbscript|data)\s*:/i',
+                        (string) preg_replace('/[\x00-\x20\x7F]+/', '', $value)
+                    ) === 1
+                ) {
+                    unset($node[$key]);
+                    $changed = true;
+                    continue;
+                }
+                $fetches = ($media_block && in_array($key, array('url', 'src', 'poster', 'mediaUrl'), true))
+                    || ($key === 'url' && $parent_key === 'backgroundImage');
+                if ($fetches && {{FN_PREFIX}}_content_source_is_foreign('src', $value)) {
+                    unset($node[$key]);
+                    $changed = true;
+                }
+            }
+            return $node;
         }
 
         /** Whether the current token sits inside a code-bearing element. */

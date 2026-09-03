@@ -443,8 +443,8 @@ test('sanitize removes media sources on a foreign host and the matching block-JS
     );
     assert_true(!str_contains($out, 'evil.example'), 'no foreign host survives');
     assert_contains('<!-- wp:cover {"dimRatio":50,"id":3} -->', $out, 'the key after a comma goes with its comma');
-    assert_contains('<!-- wp:image {} -->', $out, 'a lone key leaves an empty object');
-    assert_contains('<!-- wp:video {} /-->', $out, 'a void block keeps its closer');
+    assert_contains('<!-- wp:image --><figure>', $out, 'a lone key leaves no attribute object');
+    assert_contains('<!-- wp:video /-->', $out, 'a void block keeps its closer');
     assert_contains('<!-- wp:media-text {"mediaType":"image"} -->', $out, 'a key in first position goes with the comma after it');
     assert_contains('<img class="wp-block-cover__image-background" alt="Oven">', $out, 'the element and its alt stay');
     assert_contains('<video poster="/p.jpg"></video>', $out, 'a root-relative poster stays');
@@ -507,11 +507,35 @@ test('sanitize removes the fetch forms browsers still honor beyond img and video
     assert_contains('removed 2 block attribute media source(s) on a foreign host', $joined);
 });
 
+test('sanitize keeps block JSON valid when adjacent keys go and re-serializes only changed blocks', function () {
+    $notes = [];
+    $out = MarkupSanitizer::sanitize(
+        '<!-- wp:image {"id":1,"url":"https://evil.example/x.png","href":"javascript:x()","sizeSlug":"large"} --><figure></figure><!-- /wp:image -->'
+        . '<!-- wp:gallery {"images":[{"url":"https://evil.example/g.png","id":2},{"url":"/a.png","id":3}],"columns":2} --><figure></figure><!-- /wp:gallery -->'
+        . '<!-- wp:paragraph {"placeholder":"kept  --  as authored","align":"center"} --><p></p><!-- /wp:paragraph -->'
+        . '<!-- wp:navigation-link {"url":"javascript:x()","label":"x"} /-->'
+        . '<!-- wp:core/cover {"url":"https://evil.example/c.png","dimRatio":30} --><div></div><!-- /wp:cover -->'
+        . '<!-- wp:acme/promo {"href":"javascript:x()","title":"t"} /-->',
+        $notes,
+    );
+    assert_contains('<!-- wp:cover {"dimRatio":30} -->', $out, 'a core/ prefix is judged and serialized the WordPress way');
+    assert_contains('<!-- wp:acme/promo {"title":"t"} /-->', $out, 'another namespace is judged and keeps its name');
+    assert_contains('<!-- wp:image {"id":1,"sizeSlug":"large"} -->', $out, 'two adjacent drops leave valid JSON');
+    assert_contains('<!-- wp:gallery {"images":[{"id":2},{"url":"/a.png","id":3}],"columns":2} -->', $out, 'a nested list keeps its shape');
+    assert_contains('<!-- wp:paragraph {"placeholder":"kept  --  as authored","align":"center"} -->', $out, 'an untouched block keeps its bytes');
+    assert_contains('<!-- wp:navigation-link {"label":"x"} /-->', $out, 'an executable destination goes on any block');
+    preg_match_all('/<!--\s*wp:[a-z-]+\s+(\{.*?\})\s*\/?-->/s', $out, $blocks);
+    foreach ($blocks[1] as $json) {
+        assert_true(json_decode($json, true) !== null, "delivered JSON decodes: {$json}");
+    }
+    assert_eq($out, MarkupSanitizer::sanitize($out), 'fixed point');
+});
+
 test('sanitize keeps a theme asset in a block background image and the JSON valid', function () {
     $html = '<!-- wp:group {"style":{"background":{"backgroundImage":{"url":"theme:./assets/g.png","source":"file"}}}} --><div></div><!-- /wp:group -->';
     assert_eq($html, MarkupSanitizer::sanitize($html));
     $out = MarkupSanitizer::sanitize('<!-- wp:group {"style":{"background":{"backgroundImage":{"url":"https://evil.example/g.png"}}}} --><div></div><!-- /wp:group -->');
-    assert_contains('<!-- wp:group {"style":{"background":{"backgroundImage":{}}}} -->', $out, 'a lone url leaves an empty object');
+    assert_contains('<!-- wp:group --><div>', $out, 'an object that lost its last key goes with it');
 });
 
 test('design sanitizer removes a media source on a foreign host with its own disposition', function () {
@@ -536,6 +560,24 @@ test('design sanitizer removes a media source on a foreign host with its own dis
     assert_contains('<img alt="AI_IMAGE: oven | hero | photo | landscape">', $out, 'the alt stays for the image pipeline');
     assert_contains('<img src="/a.jpg" alt="kept">', $out);
     assert_contains('disposition removed media source on a foreign host', implode(' ', $warnings));
+});
+
+test('sanitize removes block-JSON destinations and sources with an executable scheme on any block', function () {
+    $notes = [];
+    $out = MarkupSanitizer::sanitize(
+        '<!-- wp:button {"url":"javascript:alert(1)","className":"x"} --><div class="wp-block-button"><a class="wp-block-button__link" href="javascript:alert(1)">Go</a></div><!-- /wp:button -->'
+        . '<!-- wp:navigation-link {"label":"Go","url":"\\u006aavascript:alert(2)","kind":"custom"} /-->'
+        . '<!-- wp:image {"href":"data:text/html,x","linkDestination":"custom"} --><figure><img src="/a.jpg"></figure><!-- /wp:image -->'
+        . '<!-- wp:navigation-link {"label":"Fine","url":"https://example.com/","kind":"custom"} /-->',
+        $notes,
+    );
+    assert_true(!str_contains(strtolower($out), 'javascript'), 'no executable scheme survives in JSON or HTML');
+    assert_contains('<!-- wp:button {"className":"x"} -->', $out);
+    assert_contains('<!-- wp:navigation-link {"label":"Go","kind":"custom"} /-->', $out);
+    assert_contains('<!-- wp:image {"linkDestination":"custom"} -->', $out);
+    assert_contains('href="#"', $out, 'the rendered href is neutralized as before');
+    assert_contains('{"label":"Fine","url":"https://example.com/","kind":"custom"}', $out, 'a plain destination stays');
+    assert_contains('block attribute(s) with an executable URL', implode(' | ', $notes));
 });
 
 test('sanitize notes name the authored value behind every removal class', function () {

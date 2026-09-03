@@ -844,6 +844,15 @@ test('scrubInlineStyle keeps the build\'s own theme asset placeholder and nothin
     assert_eq('', CssChecks::scrubInlineStyle('background-image:url(theme:./assets/hero.svg)'), 'only the image types the build writes');
 });
 
+test('scrubInlineStyle also keeps the pattern-file asset echo inside url()', function () {
+    $echo = "<?php echo esc_url( get_theme_file_uri( 'assets/hero.jpg' ) ); ?>";
+    assert_eq(null, CssChecks::scrubInlineStyle("background-image:url({$echo})"));
+    assert_eq(null, CssChecks::scrubInlineStyle("background-image:url('{$echo}');min-height:60vh"));
+    assert_eq('', CssChecks::scrubInlineStyle("background-image:url({$echo}) url(https://evil.example/px)"));
+    assert_eq('', CssChecks::scrubInlineStyle("background-image:url(<?php echo esc_url( get_theme_file_uri( 'assets/../x.jpg' ) ); ?>)"));
+    assert_eq('', CssChecks::scrubInlineStyle("background-image:url(<?php system('id'); ?>)"));
+});
+
 test('resourceLoadingProblem ignores comments and string contents but never a real function', function () {
     foreach ([
         '.a::before { content: "url("; color: red }',
