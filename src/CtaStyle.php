@@ -35,13 +35,20 @@ final class CtaStyle
      * block-library stylesheet and wins the source-order tie. Horizontal
      * containers never hit the var() rule and need no help.
      *
-     * Rule 2, the mobile fill: below the core column-stacking breakpoint every
+     * Rule 2, the slab minimum: the wrapper is a flex item of the buttons
+     * container, so its percentage min-width resolves against a definite
+     * width. Core gives the link `width:100%` of the wrapper. A min-width on
+     * the link itself would resolve against the content-sized wrapper and
+     * never widen a short label (measured: a "Go" slab stayed 64px wide).
+     *
+     * Rule 3, the mobile fill: below the core column-stacking breakpoint every
      * content button sits in a container at most one phone wide, so the slab
      * fills it there. Header and footer chrome is outside post content and
      * keeps intrinsic width.
      */
     public const BLOCK_WRAPPER_CSS =
         '.wp-block-buttons.is-vertical > .wp-block-button.wp-block-button__width-100{width:100%;}'
+        . '.wp-block-buttons > .wp-block-button{min-width:min(12rem,100%);}'
         . '@media (max-width:781px){'
         . '.wp-block-post-content .wp-block-buttons > .wp-block-button{flex-basis:100%;width:100%;}'
         . '.wp-block-post-content .wp-block-button > .wp-block-button__link{width:100%;}'
@@ -139,11 +146,11 @@ final class CtaStyle
                 'color' => $safeDark,
                 'border' => ['color' => 'var:preset|color|contrast', 'style' => 'solid', 'width' => '2px'],
                 'spacing' => ['padding' => $boxPadding],
-                // Intrinsic width with a slab minimum. Full width is a
-                // container decision (CtaStyleMarkup keeps the width-100 class
-                // only in a narrow container; BLOCK_WRAPPER_CSS fills at
-                // mobile widths), never an element rule.
-                'css' => 'min-width:min(12rem,100%);box-sizing:border-box;text-align:center;',
+                // Intrinsic width. Width is a container decision, never an
+                // element rule: CtaStyleMarkup keeps the width-100 class only
+                // in a narrow container, and BLOCK_WRAPPER_CSS owns the slab
+                // minimum and the mobile fill.
+                'css' => 'box-sizing:border-box;text-align:center;',
                 ':hover' => ['color' => $safeLight, 'border' => ['color' => 'var:preset|color|base']],
                 ':focus' => ['color' => $safeLight, 'border' => ['color' => 'var:preset|color|base']],
                 ':active' => ['color' => $safeLight, 'border' => ['color' => 'var:preset|color|base']],

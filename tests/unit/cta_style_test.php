@@ -41,7 +41,8 @@ test('CTA style maps every bounded commitment to a distinct executable construct
     $block = CtaStyle::themeStyle('block');
     assert_true(!str_contains($block['css'], 'width:100%'), 'block is a slab construction, not a width rule');
     assert_true(!str_contains($block['css'], 'display:block'), 'the slab keeps its intrinsic width');
-    assert_contains('min-width:min(12rem,100%)', $block['css']);
+    assert_true(!str_contains($block['css'], 'min-width'), 'the slab minimum lives on the wrapper, where a percentage resolves');
+    assert_contains('.wp-block-buttons > .wp-block-button{min-width:min(12rem,100%);}', CtaStyle::BLOCK_WRAPPER_CSS);
     assert_contains('text-align:center', $block['css']);
     assert_eq('var:preset|color|contrast', $block['color']['background']);
     assert_contains('narrow container', CtaStyle::meaning('block'));
