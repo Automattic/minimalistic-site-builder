@@ -91,6 +91,7 @@ final class MarkupSanitizer
         // until stable. This terminates because a pass that changes anything
         // strictly shortens the markup.
         $removedBytes = 0;
+        preg_match_all('/<(' . implode('|', $tags) . ')\b/i', $markup, $removedNames);
         do {
             $before = $markup;
             $markup = HtmlBlockContext::removeElements($markup, $containers);
@@ -98,7 +99,10 @@ final class MarkupSanitizer
             $removedBytes += strlen($before) - strlen($markup);
         } while ($markup !== $before);
         if ($removedBytes > 0) {
-            $notes[] = "removed script-capable element markup ({$removedBytes} byte(s))";
+            $notes[] = self::note(
+                "removed script-capable element markup ({$removedBytes} byte(s))",
+                array_values(array_unique(array_map('strtolower', $removedNames[1]))),
+            );
         }
         // Attribute tokens follow browser-like quote, whitespace, and slash
         // states. This matters for malformed-but-active forms such as
@@ -107,32 +111,57 @@ final class MarkupSanitizer
         $urls = 0;
         $styles = 0;
         $media = 0;
+        // Every note names what went, so the warning row a caller writes
+        // carries the authored value and not only a count.
+        $samples = [];
         $markup = HtmlBlockContext::rewriteOpeningTags(
             $markup,
-            static function (string $tag) use (&$handlers, &$urls, &$styles, &$media): string {
-                return self::sanitizeOpeningTag($tag, $handlers, $urls, $styles, $media);
+            static function (string $tag) use (&$handlers, &$urls, &$styles, &$media, &$samples): string {
+                return self::sanitizeOpeningTag($tag, $handlers, $urls, $styles, $media, $samples);
             },
         );
         if ($handlers > 0) {
-            $notes[] = "removed {$handlers} inline event handler attribute(s)";
+            $notes[] = self::note("removed {$handlers} inline event handler attribute(s)", $samples['handlers'] ?? []);
         }
         if ($urls > 0) {
-            $notes[] = "neutralized {$urls} executable URL value(s)";
+            $notes[] = self::note("neutralized {$urls} executable URL value(s)", $samples['urls'] ?? []);
         }
         if ($styles > 0) {
-            $notes[] = "removed resource-loading declarations from {$styles} inline style attribute(s)";
+            $notes[] = self::note(
+                "removed resource-loading declarations from {$styles} inline style attribute(s)",
+                $samples['styles'] ?? [],
+            );
         }
         if ($media > 0) {
-            $notes[] = "removed {$media} media source attribute(s) on a foreign host";
+            $notes[] = self::note("removed {$media} media source attribute(s) on a foreign host", $samples['media'] ?? []);
         }
         // The editor acts on the same sources in block-comment JSON: a cover's
         // "url" is what it loads when the page opens for editing.
         $blockMedia = 0;
-        $markup = self::neutralizeForeignBlockMedia($markup, $blockMedia);
+        $blockSamples = [];
+        $markup = self::neutralizeForeignBlockMedia($markup, $blockMedia, $blockSamples);
         if ($blockMedia > 0) {
-            $notes[] = "removed {$blockMedia} block attribute media source(s) on a foreign host";
+            $notes[] = self::note("removed {$blockMedia} block attribute media source(s) on a foreign host", $blockSamples);
         }
         return $markup;
+    }
+
+    /**
+     * One note: the class summary, then the authored values it stands for,
+     * each clipped, at most five, so a warning row stays one readable line.
+     *
+     * @param list<string> $samples
+     */
+    private static function note(string $summary, array $samples): string
+    {
+        if ($samples === []) {
+            return $summary;
+        }
+        $shown = array_map(
+            static fn (string $sample): string => strlen($sample) > 120 ? substr($sample, 0, 117) . '...' : $sample,
+            array_slice($samples, 0, 5),
+        );
+        return $summary . ': ' . implode(', ', $shown) . (count($samples) > 5 ? ', ...' : '');
     }
 
     private static function sanitizeOpeningTag(
@@ -141,6 +170,7 @@ final class MarkupSanitizer
         int &$urls = 0,
         int &$styles = 0,
         int &$media = 0,
+        array &$samples = [],
     ): string {
         $attributes = self::attributes($tag);
         preg_match('/\A<([a-zA-Z][^\x09\x0A\x0C\x0D\x20\/>]*)/', $tag, $nameMatch);
@@ -169,6 +199,7 @@ final class MarkupSanitizer
                     'replacement' => $needsSeparator ? ' ' : '',
                 ];
                 $handlers++;
+                $samples['handlers'][] = trim(substr($tag, $attribute['start'], $attribute['end'] - $attribute['start']));
                 continue;
             }
 
@@ -195,6 +226,7 @@ final class MarkupSanitizer
                     'replacement' => $needsSeparator ? ' ' : '',
                 ];
                 $media++;
+                $samples['media'][] = trim(substr($tag, $attribute['start'], $attribute['end'] - $attribute['start']));
                 continue;
             }
 
@@ -239,6 +271,7 @@ final class MarkupSanitizer
                     ];
                 }
                 $styles++;
+                $samples['styles'][] = 'style=' . $raw;
                 continue;
             }
 
@@ -258,6 +291,7 @@ final class MarkupSanitizer
                     'replacement' => '#',
                 ];
                 $urls++;
+                $samples['urls'][] = substr($tag, $attribute['valueStart'], $attribute['valueEnd'] - $attribute['valueStart']);
             }
         }
 
@@ -538,7 +572,8 @@ final class MarkupSanitizer
      * its comma, and a key in first position goes with the comma that
      * follows it.
      */
-    private static function neutralizeForeignBlockMedia(string $markup, int &$count): string
+    /** @param list<string> $samples out-param: the authored key/value pairs that went */
+    private static function neutralizeForeignBlockMedia(string $markup, int &$count, array &$samples = []): string
     {
         // One authority slash in JSON is `/`, `\/`, or the escaped
         // backslash `\\` a browser reads as a slash.
@@ -547,7 +582,7 @@ final class MarkupSanitizer
         $key = '"(?:' . self::BLOCK_MEDIA_KEYS . ')"';
         $result = preg_replace_callback(
             '/<!--\s*wp:(?:core\/)?(?:' . self::BLOCK_MEDIA_NAMES . ')\s+\{.*?\}\s*\/?-->/s',
-            static function (array $match) use (&$count, $foreign, $key): string {
+            static function (array $match) use (&$count, &$samples, $foreign, $key): string {
                 $comment = $match[0];
                 foreach ([
                     '/,\s*' . $key . '\s*:\s*' . $foreign . '/',
@@ -555,8 +590,9 @@ final class MarkupSanitizer
                 ] as $pattern) {
                     $comment = (string) preg_replace_callback(
                         $pattern,
-                        static function () use (&$count): string {
+                        static function (array $pair) use (&$count, &$samples): string {
                             $count++;
+                            $samples[] = trim($pair[0], ", \t\n");
                             return '';
                         },
                         $comment,
@@ -575,10 +611,10 @@ final class MarkupSanitizer
         $urlKey = '"url"';
         $result = preg_replace_callback(
             '/<!--\s*wp:[a-zA-Z0-9\/-]+\s+\{.*?\}\s*\/?-->/s',
-            static function (array $match) use (&$count, $foreign, $urlKey): string {
+            static function (array $match) use (&$count, &$samples, $foreign, $urlKey): string {
                 $replaced = preg_replace_callback(
                     '/"backgroundImage"\s*:\s*\{[^{}]*\}/',
-                    static function (array $object) use (&$count, $foreign, $urlKey): string {
+                    static function (array $object) use (&$count, &$samples, $foreign, $urlKey): string {
                         $inner = $object[0];
                         foreach ([
                             '/,\s*' . $urlKey . '\s*:\s*' . $foreign . '/',
@@ -586,8 +622,9 @@ final class MarkupSanitizer
                         ] as $pattern) {
                             $inner = (string) preg_replace_callback(
                                 $pattern,
-                                static function () use (&$count): string {
+                                static function (array $pair) use (&$count, &$samples): string {
                                     $count++;
+                                    $samples[] = trim($pair[0], ", \t\n");
                                     return '';
                                 },
                                 $inner,

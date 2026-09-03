@@ -843,3 +843,26 @@ test('scrubInlineStyle keeps the build\'s own theme asset placeholder and nothin
     assert_eq('', CssChecks::scrubInlineStyle('background-image:url(theme:./assets/../../evil.jpg)'));
     assert_eq('', CssChecks::scrubInlineStyle('background-image:url(theme:./assets/hero.svg)'), 'only the image types the build writes');
 });
+
+test('resourceLoadingProblem ignores comments and string contents but never a real function', function () {
+    foreach ([
+        '.a::before { content: "url("; color: red }',
+        ".a::before { content: 'image-set('; }",
+        '/* background: url(https://e/x.png) */ .a { color: red }',
+        '[data-x="paint("] { color: red }',
+        '.a { content: "a\\"url(b" }',
+        '/* it\'s */ .a { color: red }',
+    ] as $clean) {
+        assert_eq(null, CssChecks::resourceLoadingProblem($clean), "clean: {$clean}");
+    }
+    foreach ([
+        '.a { background: url("https://e/x.png") }',
+        ".a { background: image-set('a.png' 1x) }",
+        '.a { content: "/*"; background: url(https://e/x.png) }',
+        '/* " */ .a { background: url(https://e/x.png) } /* " */',
+        '.a { content: "unterminated; background: url(https://e/x.png) }',
+        '.a { background: url(https://e/x.png) /* trailing',
+    ] as $loading) {
+        assert_true(CssChecks::resourceLoadingProblem($loading) !== null, "loading: {$loading}");
+    }
+});
