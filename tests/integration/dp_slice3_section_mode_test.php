@@ -150,9 +150,9 @@ test('TG5 section mode stitches whole-page HTML then real transform and assemble
             'transform-site source stays frozen after one accessor for the footer archetype',
         );
         assert_eq(
-            '8b1b1c02cfb91397c67410ea63380821c84d578b486028a108c8fd846133e692',
+            'da340cb5566303c52c3f26667a361e221ca38f1aef7f0aa80deaaaed68de35ef',
             hash_file('sha256', repo_path('src/Steps/AssemblePagesStep.php')),
-            'assemble-pages source stays frozen after chrome landmark de-duplication',
+            'assemble-pages source stays frozen after site-logo union and content-row preserve',
         );
         $llm = new FakeLlm();
         $llm->queueText('Northstar Studio presents a measured editorial portfolio.');

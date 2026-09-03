@@ -156,6 +156,7 @@ final class ScaffoldPluginStep implements Step
                 'show_on_front'  => get_option('show_on_front'),
                 'page_on_front'  => get_option('page_on_front'),
                 'changed_front'  => false,
+                'changed_logo'   => false,
             );
 
             // A fresh WordPress ships stock sample content: a published page
@@ -203,6 +204,35 @@ final class ScaffoldPluginStep implements Step
             // media library FIRST — the attachment ids the markup needs exist
             // only after this import, never at build time.
             $image_map = {{FN_PREFIX}}_content_import_images($state['attachment_ids']);
+
+            // Two attachments, not one. custom_logo takes the transparent mark
+            // the header composites over its own bar; site_icon takes the
+            // opaque square generate-images flattened from it. A browser tab
+            // has no bar behind it, so a light mark shared with the logo would
+            // be invisible there (and iOS composites transparency onto black).
+            // With no site-icon row the icon is left untouched rather than
+            // borrowing the mark.
+            foreach ($image_map as $imported) {
+                if (!is_array($imported)) {
+                    continue;
+                }
+                $role = (string) ($imported['role'] ?? '');
+                $id = (int) ($imported['id'] ?? 0);
+                if ($id < 1) {
+                    continue;
+                }
+                if ($role === 'site-logo' && !isset($state['logo_attachment_id'])) {
+                    $state['changed_logo'] = true;
+                    $state['logo_attachment_id'] = $id;
+                    $state['custom_logo'] = get_theme_mod('custom_logo');
+                    set_theme_mod('custom_logo', $id);
+                } elseif ($role === 'site-icon' && !isset($state['icon_attachment_id'])) {
+                    $state['changed_logo'] = true;
+                    $state['icon_attachment_id'] = $id;
+                    $state['site_icon'] = get_option('site_icon');
+                    update_option('site_icon', $id);
+                }
+            }
 
             // The page markup is generated content, not user input from this
             // site — but kses would mangle its block comments when activation
@@ -308,7 +338,10 @@ final class ScaffoldPluginStep implements Step
                 : array();
 
             $map = array();
-            $images_dir = realpath(__DIR__ . '/images');
+            $plugin_root = realpath(__DIR__ . '/images');
+            $theme_root = function_exists('get_stylesheet_directory')
+                ? realpath(get_stylesheet_directory() . '/assets')
+                : false;
             foreach ($images as $image) {
                 if (!is_array($image)) {
                     continue;
@@ -320,15 +353,27 @@ final class ScaffoldPluginStep implements Step
                     || !preg_match('/^[a-z0-9-]+\.(?:jpe?g|png)$/i', $filename)) {
                     continue;
                 }
-                if ($images_dir === false) {
-                    continue;
+                $path = null;
+                $root = null;
+                if ($plugin_root !== false) {
+                    $candidate = $plugin_root . DIRECTORY_SEPARATOR . $filename;
+                    if (is_file($candidate)) {
+                        $path = $candidate;
+                        $root = $plugin_root;
+                    }
                 }
-                $path = $images_dir . DIRECTORY_SEPARATOR . $filename;
-                if (!is_file($path)) {
+                if ($path === null && $theme_root !== false) {
+                    $candidate = $theme_root . DIRECTORY_SEPARATOR . $filename;
+                    if (is_file($candidate)) {
+                        $path = $candidate;
+                        $root = $theme_root;
+                    }
+                }
+                if ($path === null || $root === null) {
                     continue;
                 }
                 $real = realpath($path);
-                if ($real === false || strpos($real, $images_dir . DIRECTORY_SEPARATOR) !== 0) {
+                if ($real === false || strpos($real, $root . DIRECTORY_SEPARATOR) !== 0) {
                     continue;
                 }
 
@@ -362,8 +407,9 @@ final class ScaffoldPluginStep implements Step
 
                 $attachment_ids[] = (int) $attachment_id;
                 $map['theme:./assets/' . $filename] = array(
-                    'id'  => (int) $attachment_id,
-                    'url' => (string) $upload['url'],
+                    'id'   => (int) $attachment_id,
+                    'url'  => (string) $upload['url'],
+                    'role' => isset($image['role']) ? (string) $image['role'] : '',
                 );
             }
             return $map;
@@ -932,6 +978,29 @@ final class ScaffoldPluginStep implements Step
             $ids = isset($state['page_ids']) && is_array($state['page_ids']) ? $state['page_ids'] : array();
             foreach ($ids as $id) {
                 wp_delete_post((int) $id, true);
+            }
+
+            // Each setting is restored against its own attachment: the logo and
+            // the icon are separate imports now, so an owner who replaced one
+            // must not strand the other pointing at an id the loop below
+            // deletes.
+            if (!empty($state['changed_logo'])) {
+                if (isset($state['logo_attachment_id'])
+                    && (int) get_theme_mod('custom_logo') === (int) $state['logo_attachment_id']) {
+                    if (empty($state['custom_logo'])) {
+                        remove_theme_mod('custom_logo');
+                    } else {
+                        set_theme_mod('custom_logo', $state['custom_logo']);
+                    }
+                }
+                if (isset($state['icon_attachment_id'])
+                    && (int) get_option('site_icon') === (int) $state['icon_attachment_id']) {
+                    if (empty($state['site_icon'])) {
+                        delete_option('site_icon');
+                    } else {
+                        update_option('site_icon', $state['site_icon']);
+                    }
+                }
             }
 
             $attachments = isset($state['attachment_ids']) && is_array($state['attachment_ids']) ? $state['attachment_ids'] : array();

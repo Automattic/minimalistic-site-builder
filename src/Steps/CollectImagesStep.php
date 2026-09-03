@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\BusinessSite;
 use Automattic\SiteBuild\GeminiImage;
 use Automattic\SiteBuild\JsonDecoder;
 use Automattic\SiteBuild\MediaReferenceRemoval;
@@ -73,7 +74,7 @@ final class CollectImagesStep implements Step
         return new StepDeclaration(
             id: $this->id(),
             label: $this->label(),
-            reads: ['theme/parts/*'],
+            reads: ['theme/parts/*', 'siteSpec.json', 'meta.json'],
             writes: [
                 'images.json',
                 'theme/parts/*',
@@ -268,8 +269,73 @@ final class CollectImagesStep implements Step
             }
         }
 
+        $this->maybeAppendSiteLogo($project, $byFilename, $warnings);
         $project->writeJson('images.json', array_values($byFilename));
         $project->addWarnings($this->id(), $warnings);
+    }
+
+    /**
+     * @param array<string,array<string,mixed>> $byFilename
+     * @param list<string> $warnings
+     */
+    private function maybeAppendSiteLogo(Project $project, array &$byFilename, array &$warnings): void
+    {
+        if (!$project->exists('siteSpec.json')) {
+            return;
+        }
+        $siteSpec = $project->readJson('siteSpec.json');
+        $prompt = '';
+        if ($project->exists('meta.json')) {
+            // RefinePromptStep has already rewritten meta.json['prompt']; the
+            // original lives at original_prompt. Forward the refined text so
+            // PhotographySite sees the same brief later steps see.
+            $prompt = (string) ($project->readJson('meta.json')['prompt'] ?? '');
+        }
+        if (!BusinessSite::matches($siteSpec, $prompt)) {
+            return;
+        }
+        if (isset($byFilename['site-logo.png'])) {
+            $warnings[] = "file='images.json'; asset='site-logo.png'; delivered no synthetic mark; "
+                . 'disposition=the reserved site-logo filename was already collected from page markup';
+            return;
+        }
+        $byFilename['site-logo.png'] = self::siteLogoSpec($siteSpec);
+    }
+
+    /**
+     * @param array<mixed> $siteSpec
+     * @return array<string,mixed>
+     */
+    private static function siteLogoSpec(array $siteSpec): array
+    {
+        $identities = [
+            trim((string) ($siteSpec['name'] ?? '')),
+            trim((string) ($siteSpec['persona_name'] ?? '')),
+            trim((string) ($siteSpec['email_domain'] ?? '')),
+        ];
+        $area = trim((string) ($siteSpec['area'] ?? ''));
+        $topic = trim((string) ($siteSpec['topic'] ?? ''));
+        $vibe = trim((string) ($siteSpec['visual_vibe'] ?? ''));
+        $about = 'a small business';
+        if ($area !== '' && GenerateImagesStep::safeSubjectMatter($area, $identities)) {
+            $about = $area;
+        } elseif ($topic !== '' && GenerateImagesStep::safeSubjectMatter($topic, $identities)) {
+            $about = $topic;
+        }
+        $mood = ($vibe !== '' && GenerateImagesStep::safeSubjectMatter($vibe, $identities))
+            ? ", {$vibe} mood"
+            : '';
+        return [
+            'filename'    => 'site-logo.png',
+            'src'         => 'theme:./assets/site-logo.png',
+            'subject'     => "simple geometric brand mark for {$about}{$mood}, single ink, no letters, no numerals, no wordmark, no signage",
+            'pageContext' => 'site logo and site icon, small square mark in the header',
+            'style'       => 'flat',
+            'aspectRatio' => 'square',
+            'status'      => 'pending',
+            'sources'     => [],
+            'role'        => 'site-logo',
+        ];
     }
 
     /**

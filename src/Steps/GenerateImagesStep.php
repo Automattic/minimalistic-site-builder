@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\ImageBorderTrim;
 use Automattic\SiteBuild\ImageClient;
 use Automattic\SiteBuild\ImageCrop;
@@ -59,6 +60,9 @@ final class GenerateImagesStep implements Step
     /** Written only once this step has completed all generation and rewrites. */
     public const COMPLETION_ARTIFACT = 'images.generated.json';
 
+    /** The opaque square derived from the keyed mark, for `site_icon` only. */
+    public const SITE_ICON_FILE = 'site-icon.png';
+
     /** Web-artifact wording is a design-comp cue, not subject matter. */
     private const WEB_ARTIFACT_CONTEXT = '/\b(?:web[- ]?sites?|web[- ]?pages?|home[- ]?pages?'
         . '|landing[- ]?(?:pages?|sites?)|(?:one|single)[- ]page\s+sites?'
@@ -110,6 +114,7 @@ final class GenerateImagesStep implements Step
                 'theme/templates/*',
                 // After assemble-pages, multipage section covers live here.
                 'plugin/pages/*',
+                'theme/theme.json',
             ],
             writes: [
                 'images.json',
@@ -118,11 +123,81 @@ final class GenerateImagesStep implements Step
                 'theme/parts/*',
                 'theme/templates/*',
                 'plugin/images/*',
+                'plugin/images.json',
                 'plugin/pages/*',
                 'warnings.json',
             ],
             concurrent: true,
         );
+    }
+
+    /**
+     * Hex color the header site-title actually paints. Walks from the title
+     * block up to the header root for `textColor`, then maps the slug through
+     * theme.json. A white title on a dark header must produce a white mark.
+     */
+    public static function headerTitleInkHex(Project $project): ?string
+    {
+        return self::headerPaletteHex($project, 'textColor', 'contrast');
+    }
+
+    /**
+     * Hex color the header bar paints behind the title — the ground the site
+     * icon is flattened onto. The mark is recolored to the title ink, so the
+     * icon needs that ink's own background to stay legible; a transparent
+     * favicon disappears on a light browser tab. Falls back to `base`, which
+     * is what an unstyled header paints.
+     */
+    public static function headerBackgroundHex(Project $project): ?string
+    {
+        return self::headerPaletteHex($project, 'backgroundColor', 'base');
+    }
+
+    /**
+     * One header color, resolved through theme.json: the slug the site-title
+     * inherits for $attr, else $fallbackSlug.
+     */
+    private static function headerPaletteHex(Project $project, string $attr, string $fallbackSlug): ?string
+    {
+        if (!$project->exists('theme/theme.json') || !$project->exists('theme/parts/header.html')) {
+            return null;
+        }
+        $palette = ContrastFixStep::paletteMap($project->readJson('theme/theme.json'));
+        $slug = self::headerIdentitySlug($project->readText('theme/parts/header.html'), $attr);
+        if ($slug === '' || !isset($palette[$slug])) {
+            $slug = isset($palette[$fallbackSlug]) ? $fallbackSlug : '';
+        }
+        if ($slug === '' || !isset($palette[$slug])) {
+            return null;
+        }
+        $hex = trim((string) $palette[$slug]);
+        return $hex !== '' ? $hex : null;
+    }
+
+    /** Palette slug the site-title inherits for $attr, walking parents then the header root. */
+    private static function headerIdentitySlug(string $markup, string $attr): string
+    {
+        $doc = BlockMarkup::parse($markup);
+        $start = null;
+        foreach ($doc->indices() as $i) {
+            if ($doc->name($i) === 'site-title') {
+                $start = $i;
+                break;
+            }
+        }
+        $i = $start;
+        while ($i !== null) {
+            $slug = trim((string) (($doc->attrs($i) ?? [])[$attr] ?? ''));
+            if ($slug !== '') {
+                return $slug;
+            }
+            $i = $doc->parent($i);
+        }
+        $top = $doc->topLevel();
+        if ($top === null) {
+            return '';
+        }
+        return trim((string) (($doc->attrs($top) ?? [])[$attr] ?? ''));
     }
 
     public function run(Project $project): void
@@ -292,13 +367,61 @@ final class GenerateImagesStep implements Step
         if (!$project->exists('plugin/images.json')) {
             return; // theme-only composition, or assemble-pages never ran
         }
+        $roles = [];
+        if ($project->exists('images.json')) {
+            foreach ((array) $project->readJson('images.json') as $spec) {
+                if (is_array($spec) && isset($spec['filename'])) {
+                    $roles[(string) $spec['filename']] = (string) ($spec['role'] ?? '');
+                }
+            }
+        }
         $manifest = $project->readJson('plugin/images.json');
+        $kept = [];
+        $droppedLogo = false;
         foreach ((array) ($manifest['images'] ?? []) as $image) {
-            $filename = is_array($image) ? (string) ($image['filename'] ?? '') : '';
-            if ($filename === '' || !$project->exists('theme/assets/' . $filename)) {
+            if (!is_array($image)) {
                 continue;
             }
-            $project->writeText('plugin/images/' . $filename, $project->readText('theme/assets/' . $filename));
+            $filename = (string) ($image['filename'] ?? '');
+            if ($filename === '') {
+                continue;
+            }
+            if (($image['role'] ?? '') === 'site-logo' && ($roles[$filename] ?? '') !== 'site-logo') {
+                $droppedLogo = true;
+                continue;
+            }
+            if ($project->exists('theme/assets/' . $filename)) {
+                $project->writeText('plugin/images/' . $filename, $project->readText('theme/assets/' . $filename));
+            }
+            $kept[] = $image;
+        }
+
+        // The icon is derived here, after the mark survived keying, so it has
+        // no images.json spec and assemble-pages never saw it. Add its row now
+        // — only alongside a logo row that survived, since an icon without a
+        // usable mark would be a flat rectangle of header background.
+        $addedIcon = false;
+        $hasLogo = false;
+        $hasIcon = false;
+        foreach ($kept as $image) {
+            $hasLogo = $hasLogo || ($image['role'] ?? '') === 'site-logo';
+            $hasIcon = $hasIcon || ($image['role'] ?? '') === 'site-icon';
+        }
+        if ($hasLogo && !$hasIcon && $project->exists('theme/assets/' . self::SITE_ICON_FILE)) {
+            $project->writeText(
+                'plugin/images/' . self::SITE_ICON_FILE,
+                $project->readText('theme/assets/' . self::SITE_ICON_FILE),
+            );
+            $kept[] = [
+                'filename' => self::SITE_ICON_FILE,
+                'title'    => 'Site icon',
+                'role'     => 'site-icon',
+            ];
+            $addedIcon = true;
+        }
+
+        if ($droppedLogo || $addedIcon) {
+            $project->writeJson('plugin/images.json', ['images' => $kept]);
         }
     }
 
@@ -385,7 +508,7 @@ final class GenerateImagesStep implements Step
      *
      * @param list<string> $identities
      */
-    private static function safeSubjectMatter(string $candidate, array $identities): bool
+    public static function safeSubjectMatter(string $candidate, array $identities): bool
     {
         foreach ($identities as $identity) {
             if ($identity === '') {
@@ -584,6 +707,7 @@ final class GenerateImagesStep implements Step
     ): void {
         $filename = (string) $specs[$i]['filename'];
         $logRequest = $this->requestLog($specs[$i], $genSpec, $imageGrade, $imageCrop, $subject);
+        $iconBytes = null;
         try {
             if (!($result['ok'] ?? false) || !isset($result['bytes'])) {
                 throw new \RuntimeException((string) ($result['error'] ?? 'unknown error'));
@@ -592,6 +716,38 @@ final class GenerateImagesStep implements Step
                 (string) $result['bytes'],
                 $genSpec['mime'],
             );
+            if ($genSpec['mime'] === 'image/png' && ($specs[$i]['role'] ?? '') === 'site-logo') {
+                if (!ImageTransparency::isKeyed($bytes)) {
+                    unset($specs[$i]['role']);
+                    $project->addWarnings($this->id(), [
+                        "file='theme/assets/{$filename}'; asset='site-logo.png'; authored role=site-logo; "
+                        . 'delivered unkeyed opaque PNG kept as a theme asset only; '
+                        . 'disposition=the white-background key wiped out or never ran, so the mark is not a usable logo; '
+                        . 'role dropped, plugin manifest row will be removed, title stays visible',
+                    ]);
+                } else {
+                    $bytes = ImageTransparency::padToSquare($bytes);
+                    $ink = self::headerTitleInkHex($project);
+                    if ($ink !== null) {
+                        $bytes = ImageTransparency::recolorInk($bytes, $ink);
+                    }
+                    // custom_logo and site_icon want opposite things. The
+                    // header composites the mark over its own bar, so the
+                    // logo stays transparent; a browser tab has no such bar,
+                    // and a mark recolored to a light title would vanish on
+                    // it (iOS composites a transparent touch icon onto
+                    // black). Flatten a second copy onto the header's own
+                    // background so the icon reads the same way the header
+                    // does, wherever it is painted.
+                    $ground = self::headerBackgroundHex($project);
+                    if ($ground !== null) {
+                        $flattened = ImageTransparency::flattenOver($bytes, $ground);
+                        if ($flattened !== $bytes) {
+                            $iconBytes = $flattened;
+                        }
+                    }
+                }
+            }
         } catch (\Throwable $e) {
             $specs[$i]['status'] = 'failed';
             $specs[$i]['error']  = $e->getMessage();
@@ -603,6 +759,9 @@ final class GenerateImagesStep implements Step
 
         // Do not classify persistence failures as generated-content defects.
         $project->writeText('theme/assets/' . $filename, $bytes);
+        if ($iconBytes !== null) {
+            $project->writeText('theme/assets/' . self::SITE_ICON_FILE, $iconBytes);
+        }
         $specs[$i]['status'] = 'completed';
         $specs[$i]['url']    = $this->servedUrl($project, $filename);
         unset($specs[$i]['error']);
