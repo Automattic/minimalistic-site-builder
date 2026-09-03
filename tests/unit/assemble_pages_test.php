@@ -370,6 +370,46 @@ test('assemble-pages writes the plugin image manifest for content-referenced ass
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('assemble-pages unions a site-logo role into the plugin image manifest', function () {
+    [$project, $tmp] = assemble_fixture();
+    $project->writeText(
+        'theme/parts/page-home--hero.html',
+        '<!-- wp:cover {"url":"theme:./assets/hero-loaves.jpg"} --><div></div><!-- /wp:cover -->' . "\n"
+    );
+    $project->writeJson('images.json', [
+        ['filename' => 'hero-loaves.jpg', 'src' => 'theme:./assets/hero-loaves.jpg', 'subject' => 'Golden sourdough loaves on a rack'],
+        [
+            'filename' => 'site-logo.png',
+            'src' => 'theme:./assets/site-logo.png',
+            'subject' => 'simple geometric brand mark for bakery, no letters',
+            'role' => 'site-logo',
+        ],
+        ['filename' => 'wordmark.png', 'src' => 'theme:./assets/wordmark.png', 'subject' => 'Bakery wordmark'],
+    ]);
+
+    (new AssemblePagesStep())->run($project);
+
+    assert_eq([
+        ['filename' => 'hero-loaves.jpg', 'title' => 'Golden sourdough loaves on a rack'],
+        ['filename' => 'site-logo.png', 'title' => 'Site logo', 'role' => 'site-logo'],
+    ], $project->readJson('plugin/images.json')['images']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('contentImages does not overwrite a content row with the site-logo title', function () {
+    $markup = '<!-- wp:image --><img src="theme:./assets/site-logo.png" alt="loaf"><!-- /wp:image -->';
+    $specs = [[
+        'filename' => 'site-logo.png',
+        'subject'  => 'A sourdough loaf',
+        'role'     => 'site-logo',
+    ]];
+    assert_eq([[
+        'filename' => 'site-logo.png',
+        'title'    => 'A sourdough loaf',
+    ]], AssemblePagesStep::contentImages(['home' => $markup], $specs));
+});
+
 test('assemble-pages writes an empty image manifest when pages reference no assets', function () {
     [$project, $tmp] = assemble_fixture();
 

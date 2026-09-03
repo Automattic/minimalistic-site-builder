@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\AboveFoldContract;
 use Automattic\SiteBuild\AboveFoldPartFacts;
+use Automattic\SiteBuild\BusinessSite;
 use Automattic\SiteBuild\ContrastFix;
 use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\HeaderBehavior;
@@ -177,6 +178,7 @@ final class HeaderHeroStep implements Step
                 'aboveFold.json',
                 'designDirection.json',
                 'siteSpec.json',
+                'meta.json',
                 'theme/theme.json',
                 'theme/parts/*',
             ],
@@ -185,6 +187,35 @@ final class HeaderHeroStep implements Step
         );
     }
 
+
+    /**
+     * Insert a tagged wp:site-logo immediately before the first wp:site-title.
+     * No-op when a site-logo is already present (authored lockups keep theirs).
+     */
+    public static function ensureSiteLogoMark(string $markup): string
+    {
+        if (preg_match('/<!--\s+wp:site-logo\b/', $markup) === 1) {
+            return $markup;
+        }
+        $comment = BlockMarkup::serializeComment('site-logo', [
+            'width'          => 48,
+            'shouldSyncIcon' => true,
+            'className'      => 'site-logo-mark',
+        ], true);
+        if (preg_match('/<!--\s+wp:site-title\b/', $markup) === 1) {
+            return (string) preg_replace('/(<!--\s+wp:site-title\b)/', $comment . "\n\$1", $markup, 1);
+        }
+        if (preg_match(
+            '/<!--\s+wp:group\b(?:\s+\{(?:(?!-->).)*?\})?\s+-->\s*<(?:div|header)\b[^>]*>/s',
+            $markup,
+            $m,
+            PREG_OFFSET_CAPTURE
+        ) === 1) {
+            $at = $m[0][1] + strlen($m[0][0]);
+            return substr($markup, 0, $at) . $comment . substr($markup, $at);
+        }
+        return $comment . "\n" . $markup;
+    }
 
     public function run(Project $project): void
     {
@@ -251,6 +282,13 @@ final class HeaderHeroStep implements Step
         $writes = [];
         $headerRel = 'parts/header.html';
         $header = $project->readText('theme/' . $headerRel);
+        $prompt = '';
+        if ($project->exists('meta.json')) {
+            // RefinePromptStep has already rewritten meta.json['prompt']; the
+            // original lives at original_prompt. Forward the refined text so
+            // PhotographySite sees the same brief later steps see.
+            $prompt = (string) ($project->readJson('meta.json')['prompt'] ?? '');
+        }
         $authoredPositions = self::removedAuthoredPositions($header);
 
         // Objective overlay evidence (BIGR-762): a planned overlay must be
@@ -607,6 +645,14 @@ final class HeaderHeroStep implements Step
             array_push($warnings, ...$home['warnings']);
         }
 
+        // Inject after every header rewrite (fallback, overlay grant, CTA
+        // dedupe). An earlier insert is wiped when HeaderFallback replaces the
+        // part, which is the HTML-first path's usual landing.
+        if (BusinessSite::matches($siteSpec, $prompt)) {
+            $current = $writes[$headerRel] ?? $header;
+            $writes[$headerRel] = self::ensureSiteLogoMark($current);
+        }
+
         // Compute everything above before the first write: parts, pages and
         // final contract describe the same delivered state at the boundary.
         foreach ($writes as $rel => $markup) {
@@ -633,6 +679,13 @@ final class HeaderHeroStep implements Step
             $project->writeText($path, $markup);
             array_push($warnings, ...$degraded);
             $report[] = "[{$rel}] storefront cart UI degraded after header/hero reconcile";
+        }
+        if (BusinessSite::matches($siteSpec, $prompt) && $project->exists('theme/' . $headerRel)) {
+            $persisted = $project->readText('theme/' . $headerRel);
+            $withMark = self::ensureSiteLogoMark($persisted);
+            if ($withMark !== $persisted) {
+                $project->writeText('theme/' . $headerRel, $withMark);
+            }
         }
         $pagesArtifact = $project->readJson('pages.json');
         $pagesArtifact['pages'] = $pages;

@@ -163,6 +163,125 @@ final class ImageTransparency
     }
 
     /**
+     * Centre $pngBytes on a transparent square of side max(w, h, $minSide).
+     * Padding only — no resampling. Fails soft: any error returns the input.
+     */
+    public static function padToSquare(string $pngBytes, int $minSide = 512): string
+    {
+        if (!self::available()) {
+            return $pngBytes;
+        }
+        try {
+            $im = new \Imagick();
+            $im->readImageBlob($pngBytes);
+            $w = $im->getImageWidth();
+            $h = $im->getImageHeight();
+            $side = max($w, $h, $minSide);
+            if ($w === $side && $h === $side) {
+                return $pngBytes;
+            }
+            $canvas = new \Imagick();
+            $canvas->newImage($side, $side, new \ImagickPixel('transparent'));
+            $canvas->setImageFormat('png');
+            $canvas->compositeImage(
+                $im,
+                \Imagick::COMPOSITE_OVER,
+                intdiv($side - $w, 2),
+                intdiv($side - $h, 2),
+            );
+            return $canvas->getImageBlob();
+        } catch (\Throwable) {
+            return $pngBytes;
+        }
+    }
+
+    /**
+     * True when all four corner pixels are transparent within 0.01. PNG
+     * quantisation does not guarantee exact-zero alpha, so a keyed mark whose
+     * corners land at 1/255 must still count. A successful keyOutBackground
+     * ends in trimToInk(), which leaves a transparent pad, so opaque corners
+     * mean the key was abandoned (or ink runs edge to edge).
+     */
+    public static function isKeyed(string $pngBytes): bool
+    {
+        if (!self::available()) {
+            return false;
+        }
+        try {
+            $im = new \Imagick();
+            $im->readImageBlob($pngBytes);
+            $w = $im->getImageWidth();
+            $h = $im->getImageHeight();
+            if ($w < 1 || $h < 1) {
+                return false;
+            }
+            foreach ([[0, 0], [$w - 1, 0], [0, $h - 1], [$w - 1, $h - 1]] as [$x, $y]) {
+                if ($im->getImagePixelColor($x, $y)->getColorValue(\Imagick::COLOR_ALPHA) > 0.01) {
+                    return false;
+                }
+            }
+            return true;
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
+    /**
+     * Paint every surviving ink pixel to $hex and keep the alpha mask.
+     * The site title's color is the source of truth: a white title on a dark
+     * header must produce a white mark, not the model's default black ink.
+     * Fails soft: missing Imagick, a bad hex, or any Imagick error returns
+     * the input bytes.
+     */
+    public static function recolorInk(string $pngBytes, string $hex): string
+    {
+        if (!self::available() || ContrastMath::hexToRgb($hex) === null) {
+            return $pngBytes;
+        }
+        try {
+            $im = new \Imagick();
+            $im->readImageBlob($pngBytes);
+            // COPYOPACITY is not portable here: some ImageMagick builds copy
+            // the source intensity rather than its alpha channel, making red
+            // ink only ~21% opaque. A full colorize replaces RGB while leaving
+            // the existing alpha mask byte-for-byte in place.
+            $im->colorizeImage(new \ImagickPixel($hex), new \ImagickPixel('white'));
+            $im->setImageFormat('png');
+            return $im->getImageBlob();
+        } catch (\Throwable) {
+            return $pngBytes;
+        }
+    }
+
+    /**
+     * Composite the keyed mark onto an opaque $hex ground and drop the alpha.
+     * The header wants a transparent mark; a favicon wants the opposite. A
+     * white-on-transparent PNG is invisible on a light browser tab, and iOS
+     * composites a transparent touch icon onto black — so the site icon gets
+     * the same mark on the header's own background instead of sharing the
+     * logo's transparency. Fails soft like the rest of the class.
+     */
+    public static function flattenOver(string $pngBytes, string $hex): string
+    {
+        if (!self::available() || ContrastMath::hexToRgb($hex) === null) {
+            return $pngBytes;
+        }
+        try {
+            $im = new \Imagick();
+            $im->readImageBlob($pngBytes);
+            $canvas = new \Imagick();
+            $canvas->newImage($im->getImageWidth(), $im->getImageHeight(), new \ImagickPixel($hex));
+            $canvas->setImageFormat('png');
+            $canvas->compositeImage($im, \Imagick::COMPOSITE_OVER, 0, 0);
+            // Leave no alpha for a browser or an iOS home screen to fill in.
+            $canvas->setImageAlphaChannel(\Imagick::ALPHACHANNEL_OPAQUE);
+            return $canvas->getImageBlob();
+        } catch (\Throwable) {
+            return $pngBytes;
+        }
+    }
+
+    /**
      * Turn the white anti-aliasing baked into surviving pixels into real
      * translucency (see the class docblock). Per pixel: ink coverage
      * t = max(1-R, 1-G, 1-B) scaled so t >= SOLID_INK_COVERAGE is 1, alpha

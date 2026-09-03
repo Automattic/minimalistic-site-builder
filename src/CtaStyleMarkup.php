@@ -3,17 +3,34 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild;
 
-/** Remove per-button construction that would outrank the committed CTA style. */
+/**
+ * Remove per-button construction that would outrank the committed CTA style.
+ *
+ * Width is a container decision, not a style decision. A `block` button keeps
+ * a model-authored full width only inside a narrow container: a card, or a
+ * column chain whose share of the theme's contentSize is at most
+ * CtaStyle::NARROW_CONTAINER_SHARE. Everywhere else, and for every other
+ * style, an authored width is removed and the button keeps its intrinsic
+ * width. The normalizer never adds a width of its own.
+ */
 final class CtaStyleMarkup
 {
     private const VARIATIONS = ['is-style-outline', 'is-style-fill'];
+    private const FULL_WIDTH_CLASS = 'wp-block-button__width-100';
+    private const CUSTOM_WIDTH_CLASS = 'has-custom-width';
 
     /**
+     * @param float|null $contentSize theme.json settings.layout.contentSize in px
+     * @param float|null $wideSize theme.json settings.layout.wideSize in px
      * @return array{markup:string,changes:list<array{blockPath:string,blockName:string,
      *     property:string,authored:mixed,delivered:mixed,disposition:string}>}
      */
-    public static function normalize(string $markup, ?string $style): array
-    {
+    public static function normalize(
+        string $markup,
+        ?string $style,
+        ?float $contentSize = null,
+        ?float $wideSize = null,
+    ): array {
         $style = CtaStyle::explicit($style);
         if ($style === null) {
             return ['markup' => $markup, 'changes' => []];
@@ -90,9 +107,34 @@ final class CtaStyleMarkup
 
             $className = is_string($attrs['className'] ?? null) ? $attrs['className'] : '';
             $tokens = preg_split('/\s+/', trim($className), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            $authoredWidth = $attrs['width'] ?? null;
+            $htmlWidths = self::ownHtmlWidthClassValues($doc, $i);
+            $rootHtmlWidths = self::ownHtmlWidthClassValues($doc, $i, true);
+            $authoredFullWidth = (is_int($authoredWidth) || is_float($authoredWidth) || is_string($authoredWidth))
+                && (float) $authoredWidth === 100.0
+                || in_array(self::FULL_WIDTH_CLASS, $tokens, true)
+                || in_array('100', $htmlWidths, true);
+            $container = self::container($doc, $i, $contentSize, $wideSize);
+            $keepFullWidth = $style === 'block' && $authoredFullWidth && $container['narrow'];
+            $widthDisposition = $style === 'block' && $authoredFullWidth && !$container['narrow']
+                ? 'removed full width outside a narrow container (' . $container['reason']
+                    . '); enforced committed block CTA construction'
+                : null;
+
             foreach ($tokens as $token) {
+                if ($token === self::CUSTOM_WIDTH_CLASS) {
+                    // Only the width support attribute emits this class, and
+                    // the frozen serializer never keeps that attribute.
+                    $tokens = array_values(array_filter(
+                        $tokens,
+                        static fn (string $candidate): bool => $candidate !== $token,
+                    ));
+                    $changed = true;
+                    self::record($changes, $path, 'className', $token, null, $style, $widthDisposition);
+                    continue;
+                }
                 if (!str_starts_with($token, 'wp-block-button__width-')
-                    || ($style === 'block' && $token === 'wp-block-button__width-100')
+                    || ($keepFullWidth && $token === self::FULL_WIDTH_CLASS)
                 ) {
                     continue;
                 }
@@ -101,7 +143,7 @@ final class CtaStyleMarkup
                     static fn (string $candidate): bool => $candidate !== $token,
                 ));
                 $changed = true;
-                self::record($changes, $path, 'className', $token, null, $style);
+                self::record($changes, $path, 'className', $token, null, $style, $widthDisposition);
             }
             foreach (self::VARIATIONS as $variation) {
                 $inAttrs = in_array($variation, $tokens, true);
@@ -118,16 +160,20 @@ final class CtaStyleMarkup
                 $changed = true;
                 self::record($changes, $path, 'className', $variation, null, $style);
             }
-            if ($style === 'block' && !in_array('wp-block-button__width-100', $tokens, true)) {
-                $tokens[] = 'wp-block-button__width-100';
+            if ($keepFullWidth && !in_array(self::FULL_WIDTH_CLASS, $tokens, true)) {
+                // The model authored the full width (attribute or saved
+                // class); the class on className is its canonical form.
+                $tokens[] = self::FULL_WIDTH_CLASS;
                 $changed = true;
                 self::record(
                     $changes,
                     $path,
                     'className',
                     null,
-                    'wp-block-button__width-100',
+                    self::FULL_WIDTH_CLASS,
                     $style,
+                    'kept authored full width in a narrow container (' . $container['reason']
+                        . '); enforced committed block CTA construction',
                 );
             }
             $deliveredClassName = implode(' ', $tokens);
@@ -137,27 +183,26 @@ final class CtaStyleMarkup
                 $attrs['className'] = $deliveredClassName;
             }
 
-            $authoredWidth = $attrs['width'] ?? null;
-            $htmlWidths = self::ownHtmlWidthClassValues($doc, $i);
-            $rootHtmlWidths = self::ownHtmlWidthClassValues($doc, $i, true);
-            $canonicalBlockHtml = $style === 'block'
+            $canonicalFullWidthHtml = $keepFullWidth
                 && $htmlWidths === ['100']
                 && $rootHtmlWidths === ['100'];
             foreach (array_values(array_unique($htmlWidths)) as $width) {
-                $token = 'wp-block-button__width-' . $width;
-                if (!$canonicalBlockHtml) {
-                    $doc->removeClassTokenInOwnHtml($i, $token);
+                if (!$canonicalFullWidthHtml) {
+                    $doc->removeClassTokenInOwnHtml($i, 'wp-block-button__width-' . $width);
                 }
             }
-            if ($style === 'block') {
-                if (!$canonicalBlockHtml) {
+            if (self::ownHtmlHasClassToken($doc, $i, self::CUSTOM_WIDTH_CLASS)) {
+                $doc->removeClassTokenInOwnHtml($i, self::CUSTOM_WIDTH_CLASS);
+            }
+            if ($keepFullWidth) {
+                if (!$canonicalFullWidthHtml) {
                     $doc->replaceClassTokenInOwnHtml(
                         $i,
                         'wp-block-button',
-                        'wp-block-button wp-block-button__width-100',
+                        'wp-block-button ' . self::FULL_WIDTH_CLASS,
                     );
                 }
-                if (array_key_exists('width', $attrs) || !$canonicalBlockHtml) {
+                if (array_key_exists('width', $attrs) || !$canonicalFullWidthHtml) {
                     unset($attrs['width']);
                     $changed = true;
                     self::record(
@@ -165,14 +210,23 @@ final class CtaStyleMarkup
                         $path,
                         'width',
                         $authoredWidth,
-                        'wp-block-button__width-100 class',
+                        self::FULL_WIDTH_CLASS . ' class',
                         $style,
                     );
                 }
             } elseif (array_key_exists('width', $attrs) || $htmlWidths !== []) {
                 unset($attrs['width']);
                 $changed = true;
-                self::record($changes, $path, 'width', $authoredWidth, null, $style);
+                $authored = $authoredWidth ?? (
+                    $htmlWidths === []
+                        ? null
+                        : 'wp-block-button__width-' . implode('/', array_unique($htmlWidths)) . ' class'
+                );
+                self::record($changes, $path, 'width', $authored, null, $style, $widthDisposition);
+            }
+
+            if ($style === 'block' && !$keepFullWidth) {
+                self::relaxStretchedContainer($doc, $i, $paths, $style, $container['reason'], $changes);
             }
 
             if ($changed) {
@@ -334,15 +388,172 @@ final class CtaStyleMarkup
         mixed $authored,
         mixed $delivered,
         string $style,
+        ?string $disposition = null,
+        string $blockName = 'core/button',
     ): void {
         $changes[] = [
             'blockPath' => $path,
-            'blockName' => 'core/button',
+            'blockName' => $blockName,
             'property' => $property,
             'authored' => $authored,
             'delivered' => $delivered,
-            'disposition' => 'enforced committed ' . $style . ' CTA construction',
+            'disposition' => $disposition ?? ('enforced committed ' . $style . ' CTA construction'),
         ];
+    }
+
+    /**
+     * A vertical wp:buttons container with `justifyContent: stretch` widens
+     * every child wrapper to the container. Outside a narrow container that
+     * is the same band the removed width drew, so drop it with the width.
+     *
+     * @param array<int,string> $paths
+     * @param list<array<mixed>> $changes
+     */
+    private static function relaxStretchedContainer(
+        BlockMarkup $doc,
+        int $button,
+        array $paths,
+        string $style,
+        string $reason,
+        array &$changes,
+    ): void {
+        $parent = $doc->parent($button);
+        if ($parent === null || self::coreName($doc->name($parent)) !== 'core/buttons') {
+            return;
+        }
+        $attrs = $doc->attrs($parent) ?? [];
+        $layout = $attrs['layout'] ?? null;
+        if (!is_array($layout) || ($layout['justifyContent'] ?? null) !== 'stretch') {
+            return;
+        }
+        unset($layout['justifyContent']);
+        if ($layout === []) {
+            unset($attrs['layout']);
+        } else {
+            $attrs['layout'] = $layout;
+        }
+        $doc->setAttrs($parent, $attrs);
+        $doc->removeClassTokenInOwnHtml($parent, 'is-content-justification-stretch');
+        self::record(
+            $changes,
+            $paths[$parent] ?? (string) $parent,
+            'layout.justifyContent',
+            'stretch',
+            null,
+            $style,
+            'removed stretched container outside a narrow container (' . $reason
+                . '); enforced committed block CTA construction',
+            'core/buttons',
+        );
+    }
+
+    /**
+     * How much of the theme's contentSize the button's container spans.
+     *
+     * A card is always narrow. Otherwise the share is the product of every
+     * ancestor column's share of its row, scaled by wideSize/contentSize when
+     * the outermost row is aligned wide or full. A button with no column or
+     * card ancestor sits at content width.
+     *
+     * @return array{narrow:bool,reason:string}
+     */
+    private static function container(
+        BlockMarkup $doc,
+        int $button,
+        ?float $contentSize,
+        ?float $wideSize,
+    ): array {
+        $share = 1.0;
+        $wideFactor = 1.0;
+        $sawColumn = false;
+        for ($node = $doc->parent($button); $node !== null; $node = $doc->parent($node)) {
+            $name = self::coreName($doc->name($node));
+            $attrs = $doc->attrs($node) ?? [];
+            if ($name === 'core/group' && self::isCard($attrs)) {
+                return ['narrow' => true, 'reason' => 'inside a card'];
+            }
+            if ($name !== 'core/column') {
+                continue;
+            }
+            $sawColumn = true;
+            $share *= self::columnShare($doc, $node, $contentSize);
+            $row = $doc->parent($node);
+            $rowAlign = $row === null ? null : ($doc->attrs($row)['align'] ?? null);
+            // Only the outermost row's alignment reaches the viewport; the
+            // walk is inner to outer, so the last assignment wins.
+            $wideFactor = in_array($rowAlign, ['wide', 'full'], true)
+                && $contentSize !== null && $wideSize !== null && $contentSize > 0
+                ? $wideSize / $contentSize
+                : 1.0;
+        }
+        if (!$sawColumn) {
+            return ['narrow' => false, 'reason' => 'no column or card ancestor, the button sits at content width'];
+        }
+        $total = $share * $wideFactor;
+        return [
+            'narrow' => $total <= CtaStyle::NARROW_CONTAINER_SHARE + 0.005,
+            'reason' => sprintf('column share %d%% of the content width', (int) round($total * 100)),
+        ];
+    }
+
+    /** The column's share of its row; unsized columns split what sized siblings leave. */
+    private static function columnShare(BlockMarkup $doc, int $column, ?float $contentSize): float
+    {
+        $own = self::columnWidthShare($doc->attrs($column)['width'] ?? null, $contentSize);
+        if ($own !== null) {
+            return $own;
+        }
+        $row = $doc->parent($column);
+        $siblings = $row === null ? [$column] : array_values(array_filter(
+            $doc->children($row),
+            fn (int $child): bool => self::coreName($doc->name($child)) === 'core/column',
+        ));
+        $sized = 0.0;
+        $unsized = 0;
+        foreach ($siblings as $sibling) {
+            $width = self::columnWidthShare($doc->attrs($sibling)['width'] ?? null, $contentSize);
+            if ($width === null) {
+                $unsized++;
+            } else {
+                $sized += $width;
+            }
+        }
+        if ($unsized === 0) {
+            return 1.0 / max(1, count($siblings));
+        }
+        return max(0.0, 1.0 - $sized) / $unsized;
+    }
+
+    private static function columnWidthShare(mixed $width, ?float $contentSize): ?float
+    {
+        if (!is_string($width) && !is_int($width) && !is_float($width)) {
+            return null;
+        }
+        $width = trim((string) $width);
+        if (preg_match('/^([0-9.]+)%$/', $width, $m) === 1) {
+            return ((float) $m[1]) / 100;
+        }
+        if (preg_match('/^([0-9.]+)px$/', $width, $m) === 1 && $contentSize !== null && $contentSize > 0) {
+            return ((float) $m[1]) / $contentSize;
+        }
+        return null;
+    }
+
+    /** @param array<mixed> $attrs */
+    private static function isCard(array $attrs): bool
+    {
+        $className = is_string($attrs['className'] ?? null) ? $attrs['className'] : '';
+        foreach (preg_split('/\s+/', trim($className), -1, PREG_SPLIT_NO_EMPTY) ?: [] as $token) {
+            if (str_starts_with($token, 'card-style--') || $token === 'card-body' || $token === 'card-flush') {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static function coreName(string $name): string
+    {
+        return str_contains($name, '/') ? $name : 'core/' . $name;
     }
 
     /** @return array<int,string> */

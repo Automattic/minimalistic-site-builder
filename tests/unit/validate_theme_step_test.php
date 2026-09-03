@@ -428,7 +428,9 @@ test('validate-theme matches inline position declarations without background-pos
     }
 });
 
-test('validate-theme flags residual style elements in delivered theme markup', function () {
+// A residual <style> element used to be reported and delivered; since
+// BIGR-971 the unsafe-class cut removes it first, so the row records the cut.
+test('validate-theme cuts a residual style element instead of delivering it on a warning', function () {
     [$project, $tmp] = final_validation_project();
     $project->writeText(
         'theme/parts/header.html',
@@ -441,9 +443,15 @@ test('validate-theme flags residual style elements in delivered theme markup', f
     try {
         (new ValidateThemeStep())->run($project);
 
+        $header = $project->readText('theme/parts/header.html');
+        assert_true(!str_contains($header, '<style'), 'the style element is cut');
+        assert_true(!str_contains($header, 'position:fixed'), 'its body is cut with it');
+        assert_contains('<!-- wp:site-title /-->', $header, 'the rest of the part stays');
         $joined = implode("\n", $project->readJson('warnings.json')['validate-theme'] ?? []);
-        assert_contains('theme/parts/header.html: contains 1 <style> element(s)', $joined);
-        assert_contains('disposition: remove the <style> element(s)', $joined);
+        assert_contains('theme/parts/header.html: authored markup reached final validation with unsafe content', $joined);
+        assert_contains('removed script-capable element markup', $joined);
+        assert_contains('disposition cut the unsafe unit', $joined);
+        assert_true(!str_contains($joined, 'contains 1 <style> element(s)'), 'nothing residual is left to report');
         assert_contains('theme delivered anyway', $project->readText('logs/validate-theme.log'));
     } finally {
         exec('rm -rf ' . escapeshellarg($tmp));
@@ -865,4 +873,69 @@ test('validate-theme records design-floor findings as warnings without rewriting
     } finally {
         exec('rm -rf ' . escapeshellarg($tmp));
     }
+});
+
+test('validate-theme cuts unsafe markup from every delivered file and leaves the rest byte-identical', function () {
+    [$project, $tmp] = final_validation_project();
+    $cleanFooter = $project->readText('theme/parts/footer.html');
+    $project->writeText(
+        'theme/parts/header.html',
+        '<!-- wp:group {"className":"header-archetype--standard-row","backgroundColor":"base","textColor":"contrast","layout":{"type":"constrained"}} -->'
+            . '<div class="wp-block-group header-archetype--standard-row has-contrast-color has-base-background-color has-text-color has-background">'
+            . '<script>alert(1)</script><style>.site-header-shell{position:fixed}</style>'
+            . '<!-- wp:site-title /--><!-- wp:paragraph --><p onclick="alert(2)"><a href="javascript:alert(3)">Menu</a></p><!-- /wp:paragraph -->'
+            . '</div><!-- /wp:group -->',
+    );
+    $project->writeText(
+        'plugin/pages/home.html',
+        '<!-- wp:cover {"url":"https://evil.example/bg.jpg","dimRatio":50} -->'
+            . '<div class="wp-block-cover" style="background:url(https://evil.example/px);min-height:50vh">'
+            . '<img class="wp-block-cover__image-background" src="https://evil.example/bg.jpg" alt="Oven">'
+            . '<!-- wp:paragraph --><p>Kept copy.</p><!-- /wp:paragraph --></div><!-- /wp:cover -->',
+    );
+    $echo = "<?php echo esc_url( get_theme_file_uri( 'assets/hero.jpg' ) ); ?>";
+    $patternHead = "<?php\n/**\n * Title: Hero\n * Slug: demo/hero\n * Categories: featured\n */\n?>\n";
+    $patternBody = '<!-- wp:cover {"url":"' . $echo . '"} -->'
+        . '<div class="wp-block-cover" style="background-image:url(' . $echo . ')"><img src="' . $echo . '" alt="x">'
+        . '<script>alert(4)</script><!-- wp:paragraph --><p>Pattern copy.</p><!-- /wp:paragraph --></div><!-- /wp:cover -->' . "\n";
+    $project->writeText('theme/patterns/hero.php', $patternHead . $patternBody);
+
+    (new ValidateThemeStep())->run($project);
+
+    $header = $project->readText('theme/parts/header.html');
+    assert_true(!str_contains($header, '<script') && !str_contains($header, '<style'), 'script and style elements cut');
+    assert_true(!str_contains($header, 'onclick') && !str_contains($header, 'javascript:'), 'handler and executable URL cut');
+    assert_contains('<!-- wp:site-title /-->', $header);
+    assert_contains('>Menu</a>', $header, 'the link text stays');
+    $home = $project->readText('plugin/pages/home.html');
+    assert_true(!str_contains($home, 'evil.example'), 'foreign fetches cut from the page');
+    assert_contains('min-height:50vh', $home, 'the surviving declaration stays');
+    assert_contains('<p>Kept copy.</p>', $home);
+    $pattern = $project->readText('theme/patterns/hero.php');
+    assert_true(str_starts_with($pattern, $patternHead), 'the docblock is untouched');
+    assert_true(!str_contains($pattern, '<script'), 'the script in the pattern body is cut');
+    assert_eq(3, substr_count($pattern, $echo), 'all three asset echoes survive: JSON url, inline style, img src');
+    assert_contains('<p>Pattern copy.</p>', $pattern);
+    assert_eq($cleanFooter, $project->readText('theme/parts/footer.html'), 'a clean file is byte-identical');
+
+    $rows = $project->readJson('warnings.json')['validate-theme'] ?? [];
+    $cuts = array_values(array_filter($rows, static fn (string $row): bool => str_contains($row, 'cut the unsafe unit')));
+    assert_eq(3, count($cuts), 'one row per cut file: ' . implode(' | ', $cuts));
+    assert_contains('theme/parts/header.html: authored markup reached final validation with unsafe content', implode(' ', $cuts));
+    assert_contains('plugin/pages/home.html', implode(' ', $cuts));
+    assert_contains('theme/patterns/hero.php', implode(' ', $cuts));
+
+    // Fixed point: a second run finds nothing left to cut.
+    $after = [
+        'theme/parts/header.html' => $header,
+        'plugin/pages/home.html' => $home,
+        'theme/patterns/hero.php' => $pattern,
+    ];
+    (new ValidateThemeStep())->run($project);
+    foreach ($after as $rel => $bytes) {
+        assert_eq($bytes, $project->readText($rel), "{$rel} stable on the second run");
+    }
+    $rows = $project->readJson('warnings.json')['validate-theme'] ?? [];
+    assert_eq([], array_values(array_filter($rows, static fn (string $row): bool => str_contains($row, 'cut the unsafe unit'))));
+    exec('rm -rf ' . escapeshellarg($tmp));
 });

@@ -109,7 +109,9 @@ root cause (which prompt file / pipeline step / fixer / CSS).
    loose on headings; no meaningful jump between adjacent type sizes; font weights used but never loaded;
    default-looking type where the brand needs character.
 5. **Color & contrast** — body text under 4.5:1 (measure it from the crop, don't eyeball); accent color so
-   frequent it stops meaning "action"; pure #000-on-#fff; purposeless gradients/shadows; link color
+   frequent it stops meaning "action"; pure #000-on-#fff on a site that did not commit to `color_economy:
+   monochrome` (a committed neutral monochrome product register is a look, not a defect); purposeless
+   gradients/shadows; link color
    unreadable on dark sections.
 6. **Content fit** — lorem-ipsum-shaped copy; headline that names the product category instead of the
    value; CTAs labeled "Submit"/"Learn more"; sections that exist only because a template had them.

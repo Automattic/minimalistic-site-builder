@@ -38,6 +38,19 @@ function alpha_at(string $pngBytes, int $x, int $y): float
     return $im->getImagePixelColor($x, $y)->getColorValue(Imagick::COLOR_ALPHA);
 }
 
+/** [r, g, b] of the pixel at ($x, $y), each 0..1. */
+function rgb_at(string $pngBytes, int $x, int $y): array
+{
+    $im = new Imagick();
+    $im->readImageBlob($pngBytes);
+    $px = $im->getImagePixelColor($x, $y);
+    return [
+        $px->getColorValue(Imagick::COLOR_RED),
+        $px->getColorValue(Imagick::COLOR_GREEN),
+        $px->getColorValue(Imagick::COLOR_BLUE),
+    ];
+}
+
 /** [width, height] of PNG bytes. */
 function png_size(string $pngBytes): array
 {
@@ -222,4 +235,97 @@ test('keyOutBackground keeps the original when keying would erase everything', f
     $bytes = $im->getImageBlob();
 
     assert_eq($bytes, ImageTransparency::keyOutBackground($bytes));
+});
+
+test('padToSquare centres a non-square bitmap on a transparent square at max(w, h, 512)', function () {
+    $src = transparency_fixture('transparent', 'red', 40, 20);
+    $out = ImageTransparency::padToSquare($src, 512);
+    assert_eq([512, 512], png_size($out));
+    assert_true(alpha_at($out, 0, 0) < 0.01, 'corner stays transparent');
+    assert_true(alpha_at($out, 511, 511) < 0.01);
+    // Native pixels are not resampled: the 40x20 canvas sits centred.
+    $cx = intdiv(512 - 40, 2) + 20;
+    $cy = intdiv(512 - 20, 2) + 10;
+    assert_true(alpha_at($out, $cx, $cy) > 0.5, 'subject still opaque at centre');
+});
+
+test('padToSquare uses the longer side when it already exceeds minSide', function () {
+    $src = transparency_fixture('transparent', 'red', 80, 600);
+    $out = ImageTransparency::padToSquare($src, 512);
+    assert_eq([600, 600], png_size($out));
+});
+
+test('padToSquare returns its input unchanged on undecodable bytes', function () {
+    assert_eq('NOT A PNG', ImageTransparency::padToSquare('NOT A PNG'));
+});
+
+test('isKeyed is true when every corner is fully transparent', function () {
+    $keyed = ImageTransparency::keyOutBackground(transparency_fixture('white', 'red', 60, 60));
+    assert_true(ImageTransparency::isKeyed($keyed));
+});
+
+test('isKeyed is false for a fully opaque PNG', function () {
+    assert_true(!ImageTransparency::isKeyed(transparency_fixture('white', 'red', 60, 60)));
+});
+
+test('recolorInk paints keyed ink to the header title color and keeps corners transparent', function () {
+    $keyed = ImageTransparency::keyOutBackground(transparency_fixture('white', 'red', 60, 60));
+    $out = ImageTransparency::recolorInk($keyed, '#ffffff');
+    assert_true(ImageTransparency::isKeyed($out));
+    $rgb = rgb_at($out, 30, 30);
+    assert_true($rgb[0] > 0.95 && $rgb[1] > 0.95 && $rgb[2] > 0.95, 'ink follows the white title color');
+    assert_true(alpha_at($out, 0, 0) < 0.01, 'transparent pad is unchanged');
+});
+
+test('flattenOver paints the mark onto an opaque ground for the site icon', function () {
+    $keyed = ImageTransparency::keyOutBackground(transparency_fixture('white', 'red', 60, 60));
+    $mark = ImageTransparency::recolorInk($keyed, '#ffffff');
+    $out = ImageTransparency::flattenOver($mark, '#111111');
+
+    [$w, $h] = png_size($out);
+    assert_true(alpha_at($out, 0, 0) > 0.99, 'the transparent pad becomes opaque ground');
+    $ground = rgb_at($out, 0, 0);
+    assert_true($ground[0] < 0.15 && $ground[1] < 0.15 && $ground[2] < 0.15, 'ground is the header background');
+    $ink = rgb_at($out, intdiv($w, 2), intdiv($h, 2));
+    assert_true($ink[0] > 0.95 && $ink[1] > 0.95 && $ink[2] > 0.95, 'the mark keeps its title ink');
+    assert_true(!ImageTransparency::isKeyed($out), 'a flattened icon is not keyed');
+});
+
+test('flattenOver returns its input on a bad hex', function () {
+    $keyed = ImageTransparency::keyOutBackground(transparency_fixture('white', 'red', 40, 40));
+    assert_eq($keyed, ImageTransparency::flattenOver($keyed, 'not-a-color'));
+});
+
+test('recolorInk returns its input on a bad hex', function () {
+    $keyed = ImageTransparency::keyOutBackground(transparency_fixture('white', 'red', 40, 40));
+    assert_eq($keyed, ImageTransparency::recolorInk($keyed, 'not-a-color'));
+});
+
+test('isKeyed treats near-transparent corners as keyed', function () {
+    $im = new Imagick();
+    $im->newImage(60, 60, new ImagickPixel('transparent'));
+    $im->setImageAlphaChannel(Imagick::ALPHACHANNEL_SET);
+    $draw = new ImagickDraw();
+    $draw->setFillColor(new ImagickPixel('red'));
+    $draw->rectangle(20, 20, 40, 40);
+    $im->drawImage($draw);
+    // 1/255 alpha at the corners. GitHub Actions Imagick has no
+    // setImagePixelColor(); the pixel iterator is the portable write.
+    $iterator = $im->getPixelIterator();
+    foreach ($iterator as $y => $row) {
+        foreach ($row as $x => $pixel) {
+            if (($x === 0 || $x === 59) && ($y === 0 || $y === 59)) {
+                $pixel->setColorValue(Imagick::COLOR_ALPHA, 1 / 255);
+            }
+        }
+        $iterator->syncIterator();
+    }
+    $im->setImageFormat('png32');
+    $bytes = $im->getImageBlob();
+
+    $corner = alpha_at($bytes, 0, 0);
+    if ($corner <= 0.0 || $corner >= 0.01) {
+        skip_test('this Imagick PNG encode does not preserve sub-0.01 corner alpha');
+    }
+    assert_true(ImageTransparency::isKeyed($bytes), 'PNG quantisation dust must not drop a keyed mark');
 });

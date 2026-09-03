@@ -5,12 +5,13 @@ namespace Automattic\SiteBuild\Tests;
 
 use Automattic\SiteBuild\FinishReasonAwareLlm;
 use Automattic\SiteBuild\UsageReporting;
+use Automattic\SiteBuild\VisionLlm;
 
 /**
  * Test double for Llm. Returns queued canned responses (FIFO) and records the
  * prompts/options it received so tests can assert on what a step sent.
  */
-final class FakeLlm implements FinishReasonAwareLlm, UsageReporting
+final class FakeLlm implements FinishReasonAwareLlm, UsageReporting, VisionLlm
 {
     /** @var list<array{text:string,finish_reason:?string}> */
     private array $textQueue = [];
@@ -18,6 +19,13 @@ final class FakeLlm implements FinishReasonAwareLlm, UsageReporting
     private array $jsonQueue = [];
     /** @var array<int,array{prompt:string,opts:array<mixed>}> */
     public array $calls = [];
+    /**
+     * Image requests, kept apart from $calls so assertions on the text
+     * request count stay exact when a step also inspects an image.
+     *
+     * @var array<int,array{prompt:string,mime:string,bytes:int,opts:array<mixed>,answer?:string}>
+     */
+    public array $imageCalls = [];
     public int $completeCalls = 0;
     public int $completeJsonCalls = 0;
     public int $completeBatchCalls = 0;
@@ -76,6 +84,26 @@ final class FakeLlm implements FinishReasonAwareLlm, UsageReporting
         }
         $response = array_shift($this->textQueue);
         $this->lastFinishReason = $response['finish_reason'];
+        $this->calls[array_key_last($this->calls)]['answer'] = $response['text'];
+        $this->recordUsage($prompt, $response['text'], $opts);
+        return $response['text'];
+    }
+
+    /**
+     * Serves the next queued text, like complete(), but records the call in
+     * $imageCalls with the image's MIME type and byte count.
+     */
+    public function completeWithImage(string $prompt, string $imageBytes, string $mime, array $opts = []): string
+    {
+        $this->imageCalls[] = ['prompt' => $prompt, 'mime' => $mime, 'bytes' => strlen($imageBytes), 'opts' => $opts];
+        if ($this->shouldFail($prompt)) {
+            throw new \RuntimeException('FakeLlm: permanent failure');
+        }
+        if ($this->textQueue === []) {
+            throw new \RuntimeException('FakeLlm: no queued text response');
+        }
+        $response = array_shift($this->textQueue);
+        $this->imageCalls[array_key_last($this->imageCalls)]['answer'] = $response['text'];
         $this->recordUsage($prompt, $response['text'], $opts);
         return $response['text'];
     }
@@ -96,6 +124,7 @@ final class FakeLlm implements FinishReasonAwareLlm, UsageReporting
             throw new \RuntimeException('FakeLlm: no queued json response');
         }
         $response = array_shift($this->jsonQueue);
+        $this->calls[array_key_last($this->calls)]['answer'] = self::jsonUsageText($response);
         $this->recordUsage($prompt, self::jsonUsageText($response), $opts);
         return $response;
     }
@@ -125,6 +154,7 @@ final class FakeLlm implements FinishReasonAwareLlm, UsageReporting
                 throw new \RuntimeException('FakeLlm: no queued json response');
             }
             $response = array_shift($this->jsonQueue);
+            $this->calls[array_key_last($this->calls)]['answer'] = self::jsonUsageText($response);
             $this->recordUsage((string) $req['prompt'], self::jsonUsageText($response), $opts);
             $out[$key] = $response;
         }
@@ -157,6 +187,7 @@ final class FakeLlm implements FinishReasonAwareLlm, UsageReporting
                 throw new \RuntimeException('FakeLlm: no queued text response');
             }
             $response = array_shift($this->textQueue)['text'];
+            $this->calls[array_key_last($this->calls)]['answer'] = $response;
             $this->recordUsage((string) $req['prompt'], $response, $opts);
             $out[$key] = $response;
         }

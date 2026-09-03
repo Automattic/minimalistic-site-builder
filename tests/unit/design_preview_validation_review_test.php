@@ -32,13 +32,19 @@ test('design-preview sanitizes a removable script without an LLM repair', functi
 });
 
 $designPreviewEscapedCssAttacks = [
+    // The head-style scrub decodes identifier escapes and removes the
+    // declaration or statement at the write, so these two need no repair
+    // call (BIGR-972). The font-face keyword is not a fetch and still goes
+    // through the contract repair.
     'escaped url function' => [
         'css' => '.hero { background-image: u\\72l("https://cdn.example.test/hero.jpg"); }',
         'needle' => 'u\\72l(',
+        'deterministic' => true,
     ],
     'escaped import keyword' => [
         'css' => '@\\69mport "https://cdn.example.test/preview.css";',
         'needle' => '@\\69mport',
+        'deterministic' => true,
     ],
     'escaped font-face keyword' => [
         'css' => '@font\\2d face { font-family: Remote; src: local("Remote"); }',
@@ -67,12 +73,19 @@ foreach ($designPreviewEscapedCssAttacks as $name => $attack) {
         $allCalls = count($llm->calls);
         design_preview_cleanup($tmp);
 
-        assert_eq(2, $completeCalls, "{$name} triggers exactly one repair call");
-        assert_eq(2, $allCalls, "{$name} has generation plus repair only");
-        assert_eq($safeRepair, $delivered, "{$name} cannot ship as final output");
+        $deterministic = $attack['deterministic'] ?? false;
+        $expectedCalls = $deterministic ? 1 : 2;
+        assert_eq($expectedCalls, $completeCalls, "{$name} uses bounded LLM calls");
+        assert_eq($expectedCalls, $allCalls, "{$name} records bounded LLM calls");
         assert_true(!str_contains($delivered, $attack['needle']), "{$name} is absent from delivery");
-        assert_contains('SAFE-ESCAPED-CSS-REPAIR', $delivered, "{$name} delivers safe repair");
-        assert_contains('disposition repaired', $warnings, "{$name} repair is recorded");
+        if ($deterministic) {
+            assert_contains('AUTHORED-ESCAPED-CSS', $delivered, "{$name} keeps the authored document around the cut");
+            assert_contains('disposition removed', $warnings, "{$name} removal is recorded");
+        } else {
+            assert_eq($safeRepair, $delivered, "{$name} cannot ship as final output");
+            assert_contains('SAFE-ESCAPED-CSS-REPAIR', $delivered, "{$name} delivers safe repair");
+            assert_contains('disposition repaired', $warnings, "{$name} repair is recorded");
+        }
         design_preview_assert_shape($delivered);
     });
 }
@@ -254,6 +267,24 @@ $designPreviewDeterministicDependencyRemovals = [
     // theme: is a pipeline-authored scheme (AssignImageSourcesStep). The
     // sanitizer keeps it, so a preview fixture that injects one is no longer
     // a deterministic strip — it follows the bounded repair path.
+    // The design engine drops an inline style that loads a resource at the
+    // write, so no repair call is spent on it (BIGR-970).
+    'inline style attribute with remote URL' => true,
+    // A media source that names another host, in any spelling the browser
+    // resolves, is removed at the write (BIGR-975).
+    'image https colon without slashes src' => true,
+    'image backslash scheme src' => true,
+    // Every fetch in the head stylesheet is scrubbed at the write, one
+    // declaration at a time, so no repair call is spent on it (BIGR-972).
+    'head CSS image-set remote string' => true,
+    'head CSS image-set relative string' => true,
+    'head CSS image-set data string' => true,
+    'head CSS webkit image-set' => true,
+    'head CSS image function' => true,
+    'head CSS cross-fade function' => true,
+    'head CSS src function' => true,
+    'head CSS element function' => true,
+    'head CSS paint function' => true,
 ];
 
 foreach ($designPreviewDependencyDefects as $name => $mutate) {

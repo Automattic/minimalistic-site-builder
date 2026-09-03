@@ -1375,7 +1375,7 @@ test('normalize commits every bounded depth and warns on an unsupported treatmen
         'description' => 'x',
         'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
     ];
-    foreach (['flat', 'soft', 'hard-offset', 'inset', 'glow'] as $depth) {
+    foreach (['flat', 'ring', 'soft', 'hard-offset', 'inset', 'glow'] as $depth) {
         $warnings = [];
         $direction = DesignDirectionStep::normalize(
             $base + ['depth' => strtoupper($depth)],
@@ -1404,6 +1404,7 @@ test('normalize commits every bounded depth and warns on an unsupported treatmen
 test('format renders depth as an executable build-owned fact', function () {
     foreach ([
         'flat' => 'deliberately shadowless',
+        'ring' => '1px hairline ring and no lift',
         'soft' => 'restrained, diffuse lift',
         'hard-offset' => 'poster-like offset plate',
         'inset' => 'presses cards and contained media',
@@ -2264,6 +2265,59 @@ test('normalize commits a catalog surface and falls unknown textures back to non
     assert_eq('none', $none);
     assert_contains('unsupported texture', implode(' ', $warnings));
     assert_eq('none', DesignDirectionStep::normalizeSurface(null));
+});
+
+test('the hairline device is withheld from concepts with no printed-page argument (BIGR-978)', function () {
+    // 51 of 53 audited directions committed hairline-rule, on neon festivals
+    // and SaaS landings alike. The seed's register and letterform tradition
+    // are the facts a designer would cite for a ruled band.
+    $warnings = [];
+    assert_eq('hairline-rule', DesignDirectionStep::rationHairlineDevice('hairline-rule', 'editorial', 'grotesque', $warnings));
+    assert_eq('hairline-rule', DesignDirectionStep::rationHairlineDevice('hairline-rule', 'pop', 'didone', $warnings));
+    assert_eq('hairline-rule', DesignDirectionStep::rationHairlineDevice('hairline-rule', '', '', $warnings), 'no tradition committed, nothing to judge against');
+    assert_eq('stamp', DesignDirectionStep::rationHairlineDevice('stamp', 'pop', 'geometric', $warnings), 'only the hairline is rationed');
+    assert_eq('none', DesignDirectionStep::rationHairlineDevice('none', 'pop', 'geometric', $warnings));
+    assert_eq([], $warnings);
+
+    assert_eq('none', DesignDirectionStep::rationHairlineDevice('hairline-rule', 'retro-futurist', 'mono', $warnings));
+    assert_eq(1, count($warnings));
+    assert_contains('field device authored "hairline-rule"', $warnings[0]);
+    assert_contains('delivered "none"', $warnings[0]);
+    assert_contains('register "retro-futurist"', $warnings[0]);
+    assert_contains('letterform tradition "mono"', $warnings[0]);
+
+    // normalize() carries the seed's traditions into the ration.
+    $repairs = [];
+    $warnings = [];
+    $withheld = DesignDirectionStep::normalize(
+        ['description' => 'A neon festival.', 'device' => 'hairline-rule'],
+        'cinematic-safe-zone',
+        '',
+        $repairs,
+        $warnings,
+        '',
+        '',
+        '',
+        'pop',
+        'geometric',
+    );
+    assert_eq('none', $withheld['device']);
+    assert_true(!str_contains(DesignDirectionStep::format($withheld), 'device--hairline-rule'));
+
+    $kept = DesignDirectionStep::normalize(
+        ['description' => 'A broadsheet.', 'device' => 'hairline-rule'],
+        'cinematic-safe-zone',
+        '',
+        $repairs,
+        $warnings,
+        '',
+        '',
+        '',
+        'editorial',
+        'transitional',
+    );
+    assert_eq('hairline-rule', $kept['device']);
+    assert_contains('device--hairline-rule', DesignDirectionStep::format($kept));
 });
 
 test('normalize commits a catalog device', function () {

@@ -685,6 +685,8 @@ final class FinalizeThemeStep implements Step
                 // Block themes do not load style.css automatically — without this
                 // enqueue its utility CSS (card layouts, layout utilities) never applies.
                 wp_enqueue_style('{$slug}-style', get_stylesheet_uri(), {$styleDeps}, \$ver);{$overlayEnqueues}{$headerEnqueues}
+                // Front-end only: the editor keeps the title visible so it remains editable.
+                wp_add_inline_style('{$slug}-style', '.site-header-shell:has(.wp-block-site-logo.site-logo-mark img) .wp-block-site-title,header:has(.wp-block-site-logo.site-logo-mark img) .wp-block-site-title{display:none}');
             });
 
             // Mirror the theme stylesheets into the editor so previews match the front end.

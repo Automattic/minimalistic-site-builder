@@ -512,7 +512,9 @@ test('recovery preserves blocks that legitimately mix owned text with children',
         . '</figure><!-- /wp:image -->'
         . '<figcaption class="blocks-gallery-caption wp-element-caption">'
         . 'Gallery <em>caption</em></figcaption></figure><!-- /wp:gallery -->';
-    $embedCover = '<!-- wp:cover {"backgroundType":"embed-video","url":"https://youtu.be/abc"} -->'
+    // A same-site video path: a media url on a foreign host is a fetch the
+    // intake sanitizer removes (BIGR-975), and this test is about structure.
+    $embedCover = '<!-- wp:cover {"backgroundType":"embed-video","url":"/videos/abc"} -->'
         . '<div class="wp-block-cover"><figure class="wp-block-cover__embed-background">'
         . '<div class="wp-block-embed__wrapper">https://youtu.be/abc</div></figure>'
         . '<div class="wp-block-cover__inner-container">'
@@ -827,6 +829,67 @@ test('stripHeroSeparators removes hairline rules from the hero (BIGR-775)', func
     );
     assert_eq([], $again);
     assert_eq([], $againWarnings);
+});
+
+test('stripSectionSeparators removes the rule under a section heading (BIGR-978)', function () {
+    $doc = '<!-- wp:group {"tagName":"section","anchor":"story","layout":{"type":"constrained"}} -->'
+        . '<section class="wp-block-group" id="story">'
+        . '<!-- wp:heading {"level":2} --><h2 class="wp-block-heading">Our story</h2><!-- /wp:heading -->'
+        . '<!-- wp:separator {"className":"is-style-wide"} -->'
+        . '<hr class="wp-block-separator has-alpha-channel-opacity is-style-wide"/>'
+        . '<!-- /wp:separator -->'
+        . '<!-- wp:paragraph --><p>Two paragraphs of history.</p><!-- /wp:paragraph -->'
+        . '<!-- wp:separator --><hr class="wp-block-separator has-alpha-channel-opacity"/><!-- /wp:separator -->'
+        . '<!-- wp:paragraph --><p>And a closing line.</p><!-- /wp:paragraph -->'
+        . '</section><!-- /wp:group -->';
+    $repairs = [];
+    $warnings = [];
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::stripSectionSeparators($doc, 'page-home--story', $repairs, $warnings);
+
+    assert_true(!str_contains($out, 'wp:separator'), 'both separators removed');
+    assert_true(!str_contains($out, 'wp-block-separator'), 'separator HTML removed');
+    assert_contains('Our story', $out);
+    assert_contains('Two paragraphs of history.', $out);
+    assert_contains('And a closing line.', $out);
+    assert_eq([], $repairs, 'visible separator removal is durable loss, not a repair');
+    assert_eq(2, count($warnings));
+    assert_contains("file='theme/parts/page-home--story.html'", $warnings[0]);
+    assert_contains("block='wp:group[0] > wp:separator[0]'", $warnings[0]);
+    assert_contains('delivered=removed', $warnings[0]);
+    assert_contains('prompts/section.md rations lines', $warnings[0]);
+
+    $again = [];
+    $againWarnings = [];
+    assert_eq($out, Automattic\SiteBuild\Units\GeneratedMarkup::stripSectionSeparators($out, 'page-home--story', $again, $againWarnings));
+    assert_eq([], $againWarnings);
+});
+
+test('stripRuleClassTokens drops rule tokens from attributes and HTML but never build-owned markers (BIGR-978)', function () {
+    $doc = '<!-- wp:group {"className":"item-pattern--card device--hairline-rule is-style-rule-row"} -->'
+        . '<div class="wp-block-group item-pattern--card device--hairline-rule is-style-rule-row">'
+        . '<!-- wp:paragraph {"className":"hairline-under"} --><p class="hairline-under">Row</p><!-- /wp:paragraph -->'
+        . '<!-- wp:paragraph {"className":"ruler-note"} --><p class="ruler-note">Kept: ruler is not rule</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->';
+    $repairs = [];
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::stripRuleClassTokens($doc, 'page-home--steps', $repairs);
+    // Block-comment JSON escapes "--" the WordPress way.
+    assert_contains('{"className":"item-pattern\\u002d\\u002dcard device\\u002d\\u002dhairline-rule"}', $out);
+    assert_contains('class="wp-block-group item-pattern--card device--hairline-rule"', $out);
+    assert_true(!str_contains($out, 'is-style-rule-row'));
+    assert_true(!str_contains($out, 'hairline-under'));
+    assert_contains('<p>Row</p>', $out, 'an emptied class attribute is dropped from the HTML');
+    assert_contains('class="ruler-note"', $out);
+    assert_eq(2, count($repairs));
+    assert_eq('rule-class-removed', $repairs[0]['code']);
+    assert_eq('group[0]', $repairs[0]['block']);
+
+    $again = [];
+    assert_eq($out, Automattic\SiteBuild\Units\GeneratedMarkup::stripRuleClassTokens($out, 'page-home--steps', $again));
+    assert_eq([], $again);
+    $clean = '<!-- wp:group {"className":"item-pattern__item card-flush"} --><div class="wp-block-group item-pattern__item card-flush"><p>x</p></div><!-- /wp:group -->';
+    $none = [];
+    assert_eq($clean, Automattic\SiteBuild\Units\GeneratedMarkup::stripRuleClassTokens($clean, 'x', $none), 'a clean document is returned untouched');
+    assert_eq([], $none);
 });
 
 test('stripHeroSeparators removes one outer transaction when generated separators are nested', function () {

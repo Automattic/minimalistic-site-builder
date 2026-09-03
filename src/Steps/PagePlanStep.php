@@ -59,15 +59,40 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     /** Page-owned outer spacing roles — must match page-plan.md. */
     public const VERTICAL_DENSITIES = ['compact', 'standard', 'spacious'];
 
-    /** Semantic type words that make an item-pattern assignment mandatory. */
-    private const LIST_LIKE_TYPES = [
-        'amenities', 'archive', 'articles', 'catalog', 'categories', 'collections',
-        'directory', 'events', 'faq', 'features', 'genres', 'index', 'ingredients',
-        'lineup', 'locations', 'menu', 'offerings', 'posts', 'pricing', 'process',
-        'products', 'program', 'projects', 'rooms', 'schedule', 'services', 'skills',
-        'specifications', 'steps', 'studies', 'team', 'tiers',
-        'timeline', 'workshops',
+    /**
+     * Semantic type words whose items are name/value rows: a menu line, a
+     * price tier, a schedule slot, a spec. These are the only types the
+     * ruled ledger (`rule-row`) may dress. Together with PROSE_LIST_TYPES
+     * they make an item-pattern assignment mandatory.
+     */
+    private const TABULAR_LIST_TYPES = [
+        'amenities', 'archive', 'catalog', 'categories', 'collections',
+        'directory', 'events', 'genres', 'hours', 'index', 'ingredients',
+        'lineup', 'locations', 'menu', 'offerings', 'pricing', 'products',
+        'program', 'rooms', 'schedule', 'skills', 'specifications', 'specs',
+        'tiers', 'timeline',
     ];
+
+    /**
+     * Semantic type words whose items are short paragraphs: a feature, a
+     * process step, a team bio, a service. They repeat, so they take the
+     * committed idiom, but never the ruled ledger — a hairline under every
+     * paragraph is the "lines everywhere" look the audit found in 43 of 53
+     * directions (BIGR-978).
+     */
+    private const PROSE_LIST_TYPES = [
+        'articles', 'benefits', 'faq', 'features', 'posts', 'process',
+        'projects', 'services', 'steps', 'studies', 'team', 'workshops',
+    ];
+
+    /**
+     * The idioms that paint a rule between items. Both are rationed to one
+     * ledger per page: the seven-demo rebuild for BIGR-978 showed a
+     * `spec-table` commitment filling the gap the `rule-row` cap had closed.
+     *
+     * @var list<string>
+     */
+    private const RULED_IDIOMS = ['rule-row', 'spec-table'];
 
     /**
      * Semantic type words for quote-led sections. A testimonial repeats, but
@@ -709,18 +734,6 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             FooterComposition::surface($footerArchetype),
             $warnings,
         );
-        // Apply the surface budget after the footer has settled the closing seam.
-        foreach ($out as $index => $page) {
-            if (!is_array($page) || !is_array($page['sections'] ?? null)) {
-                continue;
-            }
-            $out[$index]['sections'] = self::withSurfaceRestraint(
-                $page['sections'],
-                (string) ($page['slug'] ?? ''),
-                $warnings,
-                !empty($page['front']),
-            );
-        }
 
         $project->addWarnings($this->id(), $warnings);
         $project->writeJson('pages.json', [
@@ -788,6 +801,15 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      * type vocabulary is open-ended, but the common catalog/list identities
      * are objective enough to repair when the planner omitted its assignment.
      *
+     * The ruled ledger is rationed (BIGR-978). Audited plans put `rule-row`
+     * on contact, location, benefits and feature sections alike, so every
+     * page arrived striped with hairlines. Under a `rule-row` or `spec-table`
+     * commitment:
+     * a prose-led type takes `card`; at most ONE section per page keeps the
+     * ledger — the first tabular type, or the first planner-authored section
+     * when the page has no tabular type; every other tabular section takes
+     * `card`, and every other authored non-list section is released to null.
+     *
      * @param array<int,array<string,mixed>> $pages
      * @param list<string> $repairs
      * @return array<int,array<string,mixed>>
@@ -802,7 +824,10 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             if (!is_array($page)) {
                 continue;
             }
-            foreach ((array) ($page['sections'] ?? []) as $sectionIndex => $section) {
+            $slug = (string) ($page['slug'] ?? '');
+            $sections = (array) ($page['sections'] ?? []);
+            $ledgerKeeper = in_array($committed, self::RULED_IDIOMS, true) ? self::ledgerKeeper($sections) : null;
+            foreach ($sections as $sectionIndex => $section) {
                 if (!is_array($section)) {
                     continue;
                 }
@@ -814,7 +839,6 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                     $pages[$pageIndex]['sections'][$sectionIndex]['item_pattern'] = null;
                     $authoredValue = is_string($authored) ? trim($authored) !== '' : $authored !== null;
                     if ($authoredValue) {
-                        $slug = (string) ($page['slug'] ?? '');
                         $repairs[] = self::successfulRepair(
                             self::sectionPath($slug, (int) $sectionIndex) . '.item_pattern',
                             $authored,
@@ -830,22 +854,141 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                     $pages[$pageIndex]['sections'][$sectionIndex]['item_pattern'] = null;
                     continue;
                 }
-                if ($explicit === $committed) {
+                [$target, $disposition] = self::itemPatternTarget(
+                    $committed,
+                    $type,
+                    $explicit,
+                    $ledgerKeeper === (int) $sectionIndex,
+                    $ledgerKeeper,
+                );
+                if ($explicit === $target) {
                     continue;
                 }
-                $pages[$pageIndex]['sections'][$sectionIndex]['item_pattern'] = $committed;
-                $slug = (string) ($page['slug'] ?? '');
+                $pages[$pageIndex]['sections'][$sectionIndex]['item_pattern'] = $target;
+                if ($explicit !== null) {
+                    $pages[$pageIndex]['sections'][$sectionIndex]['content_notes'] = self::withItemPatternCorrection(
+                        $section['content_notes'] ?? '',
+                        $explicit,
+                        $target,
+                    );
+                }
                 $repairs[] = self::successfulRepair(
                     self::sectionPath($slug, (int) $sectionIndex) . '.item_pattern',
                     $authored,
-                    $committed,
-                    $explicit === null
-                        ? "assigned the committed item idiom to list-like section type '{$type}'"
-                        : 'restored the site-wide repeated-item commitment',
+                    $target,
+                    $disposition,
                 );
             }
         }
         return $pages;
+    }
+
+    /**
+     * Tell the section author that the planner's idiom did not survive.
+     *
+     * The planner writes content_notes and item_pattern in one pass, so a
+     * note like "a rule-row list with four steps" outlives the repair that
+     * released the section to `card`. The atlas rebuild for BIGR-978 shipped
+     * `is-style-rule-row` on every item of such a section: the request said
+     * card, the notes said rule-row, and the notes won. The correction is
+     * appended the way seam corrections already are for backgrounds.
+     */
+    public static function withItemPatternCorrection(mixed $notes, string $authored, ?string $delivered): string
+    {
+        $notes = trim((string) $notes);
+        $correction = $delivered === null
+            ? "this section has no assigned item pattern (the planner authored \"{$authored}\"); compose it freely"
+            : "this section's item pattern is now \"{$delivered}\" (the planner authored \"{$authored}\"); "
+                . "follow the assigned {$delivered} recipe";
+        return trim($notes . ' Build correction: ' . $correction
+            . ' and draw no ' . $authored . ' rows, hairlines, separators, or ruled block styles.');
+    }
+
+    /**
+     * The idiom a section delivers under the site-wide commitment, with the
+     * repair disposition that explains it.
+     *
+     * @return array{0:?string,1:string}
+     */
+    private static function itemPatternTarget(
+        string $committed,
+        string $type,
+        ?string $explicit,
+        bool $keepsLedger,
+        ?int $ledgerKeeper,
+    ): array {
+        $restored = $explicit === null
+            ? "assigned the committed item idiom to list-like section type '{$type}'"
+            : 'restored the site-wide repeated-item commitment';
+        if (!in_array($committed, self::RULED_IDIOMS, true)) {
+            return [$committed, $restored];
+        }
+        if (self::isProseLedType($type) && !self::isTabularType($type)) {
+            return [
+                ItemPattern::DEFAULT,
+                "released prose-led section type '{$type}' from the {$committed} ledger: its items are short "
+                . 'paragraphs, not name/value rows, so a hairline under each one is decoration; the card idiom '
+                . 'dresses them',
+            ];
+        }
+        if ($keepsLedger) {
+            return [$committed, $restored];
+        }
+        $keeper = $ledgerKeeper === null ? 'no section' : "sections[{$ledgerKeeper}]";
+        if (self::isTabularType($type)) {
+            return [
+                ItemPattern::DEFAULT,
+                "one ruled ledger per page: {$keeper} keeps the {$committed} idiom, so tabular section type "
+                . "'{$type}' takes the card idiom instead of a second run of hairlines",
+            ];
+        }
+        return [
+            null,
+            "released section type '{$type}' from the {$committed} ledger: one ruled ledger per page ({$keeper} "
+            . 'keeps it) and this type is not a name/value list, so the section author composes it freely',
+        ];
+    }
+
+    /**
+     * The one section on a page that may keep the ruled ledger: the first
+     * tabular type in display order, else the first planner-authored
+     * assignment on a type that is not prose-led, else none.
+     *
+     * @param array<int,mixed> $sections
+     */
+    private static function ledgerKeeper(array $sections): ?int
+    {
+        $firstAuthored = null;
+        foreach ($sections as $index => $section) {
+            if (!is_array($section)) {
+                continue;
+            }
+            $type = strtolower(trim((string) ($section['type'] ?? '')));
+            if (self::isQuoteLedType($type)) {
+                continue;
+            }
+            if (self::isTabularType($type)) {
+                return (int) $index;
+            }
+            if (
+                $firstAuthored === null
+                && !self::isProseLedType($type)
+                && ItemPattern::explicit($section['item_pattern'] ?? null) !== null
+            ) {
+                $firstAuthored = (int) $index;
+            }
+        }
+        return $firstAuthored;
+    }
+
+    private static function isTabularType(string $type): bool
+    {
+        return self::matchesTypeCatalog($type, self::TABULAR_LIST_TYPES);
+    }
+
+    private static function isProseLedType(string $type): bool
+    {
+        return self::matchesTypeCatalog($type, self::PROSE_LIST_TYPES);
     }
 
     private static function isQuoteLedType(string $type): bool
@@ -855,7 +998,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
 
     private static function isListLikeType(string $type): bool
     {
-        return self::matchesTypeCatalog($type, self::LIST_LIKE_TYPES);
+        return self::isTabularType($type) || self::isProseLedType($type);
     }
 
     /** @param list<string> $catalog */
@@ -2995,6 +3138,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         }
 
         $sections = self::withPacingBand($sections, $pageSlug, $warnings);
+        $sections = self::withSurfaceRestraint($sections, $pageSlug, $warnings, $front);
 
         // When the recipe-locked hero and its following section collided,
         // the following section—not the hero—moved. Replace only the now-stale
@@ -3256,15 +3400,21 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             }
         }
 
-        // Background floor — see MIN_BANDED_SECTIONS. Deliberately not a cap on
-        // 'base': base should dominate, and capping it would produce the
-        // alternating stripes the prompt rejects.
-        if (count($sections) >= self::MIN_BANDED_SECTIONS
-            && self::bandedCount($sections) === 0
-        ) {
+        // Background floor and cap — see MIN_BANDED_SECTIONS and
+        // MAX_NON_BASE_SECTIONS. Neither is a cap on 'base': base should
+        // dominate, and capping it would produce the alternating stripes the
+        // prompt rejects.
+        $banded = self::bandedCount($sections);
+        if (count($sections) >= self::MIN_BANDED_SECTIONS && $banded === 0) {
             $errors[] = 'page-plan: all ' . count($sections) . " sections use background 'base' — a page this "
                 . "long needs at least one 'contrast', 'tinted' or 'image' band to pace it; place one for "
                 . 'pacing (under the hero\'s fold, or before the closing next step)';
+        }
+        if (count($sections) >= self::MIN_BANDED_SECTIONS && $banded > self::MAX_NON_BASE_SECTIONS) {
+            $errors[] = "page-plan: {$banded} of " . count($sections) . " sections sit on a non-base background — "
+                . 'a page this long may spend at most ' . self::MAX_NON_BASE_SECTIONS
+                . " 'contrast', 'tinted' or 'image' beats; move the rest back to 'base' and keep the two "
+                . 'transitions that matter most';
         }
 
         $spacious = count(array_filter($sections, fn (array $s) => $s['vertical_density'] === 'spacious'));
@@ -3295,9 +3445,12 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
 
     /**
      * Demote excess bands by kind (tinted, then contrast, then image), top to
-     * bottom within a kind. The closing section is never touched because
-     * withClosingBandOffFooterSurface() has already settled it against the
-     * footer; a locked front hero and image-backed full-bleed covers stay too.
+     * bottom within a kind, so a page keeps at most MAX_NON_BASE_SECTIONS
+     * planner-chosen beats. A locked front hero and image-backed full-bleed
+     * covers stay. This is the deterministic backstop for the validate() cap,
+     * the same pairing as withPacingBand() and the floor; it runs before
+     * withClosingBandOffFooterSurface(), whose one closing correction is
+     * structural and sits outside the budget.
      *
      * @param array<int,array<string,mixed>> $sections
      * @param list<string> $warnings
@@ -3309,8 +3462,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         array &$warnings = [],
         bool $frontHeroLocked = false,
     ): array {
-        $count = count($sections);
-        if ($count < self::MIN_BANDED_SECTIONS) {
+        if (count($sections) < self::MIN_BANDED_SECTIONS) {
             return $sections;
         }
         $excess = self::bandedCount($sections) - self::MAX_NON_BASE_SECTIONS;
@@ -3325,7 +3477,6 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 }
                 if (($section['background'] ?? null) !== $background
                     || ($frontHeroLocked && $index === 0)
-                    || $index === $count - 1
                     || ($background === 'image'
                         && ($section['layout_archetype'] ?? null) === 'full-bleed-cover')
                 ) {
@@ -3360,8 +3511,8 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 $path,
                 "{$remaining} non-base surfaces",
                 "{$remaining} non-base surfaces",
-                'surface budget could not be met without changing a locked hero, closing seam, or structural '
-                    . 'full-bleed image; delivered those sections intact',
+                'surface budget could not be met without changing a locked hero or a structural full-bleed '
+                    . 'image; delivered those sections intact',
             );
         }
 

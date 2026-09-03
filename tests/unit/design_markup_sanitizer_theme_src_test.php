@@ -33,15 +33,31 @@ test('DesignMarkupSanitizer still strips javascript, data, and vbscript URLs', f
     }
 });
 
-test('DesignMarkupSanitizer still keeps relative and https srcs', function () {
+test('DesignMarkupSanitizer still keeps a relative src', function () {
     $warnings = [];
     $out = DesignMarkupSanitizer::sanitize(
-        '<img src="./assets/x.jpg" alt="r"><img src="https://ex.com/x.jpg" alt="h">',
+        '<img src="./assets/x.jpg" alt="r">',
         'design/home.html',
         'section',
         $warnings,
     );
     assert_contains('src="./assets/x.jpg"', $out);
-    assert_contains('src="https://ex.com/x.jpg"', $out);
-    assert_eq([], $warnings);
+    assert_eq([], $warnings, 'a same-origin relative src is not a defect');
+});
+
+test('DesignMarkupSanitizer neutralizes a media src on a foreign host', function () {
+    // This assertion used to require the https src to SURVIVE. BIGR-975
+    // deliberately reversed that: a hot-linked media source is removed at the
+    // write. The element and its alt stay, so only the fetch is dropped.
+    $warnings = [];
+    $out = DesignMarkupSanitizer::sanitize(
+        '<img src="https://ex.com/x.jpg" alt="h">',
+        'design/home.html',
+        'section',
+        $warnings,
+    );
+    assert_true(!str_contains($out, 'ex.com'), "the foreign host must not survive: {$out}");
+    assert_contains('alt="h"', $out, 'only the source is dropped, not the element');
+    assert_eq(1, count($warnings), 'the removal is named, never silent');
+    assert_contains('media source on a foreign host', $warnings[0]);
 });

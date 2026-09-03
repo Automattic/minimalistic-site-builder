@@ -1264,3 +1264,539 @@ test('generate-images records a grade clause cut from a repaired subject', funct
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+/** PNG bytes: a $w x $h canvas of $bg with a centered 1/3-size $fg rectangle. */
+function gi_png_fixture(string $bg, string $fg, int $w = 60, int $h = 60): string
+{
+    $im = new Imagick();
+    $im->newImage($w, $h, new ImagickPixel($bg));
+    $draw = new ImagickDraw();
+    $draw->setFillColor(new ImagickPixel($fg));
+    $draw->rectangle($w / 3, $h / 3, 2 * $w / 3, 2 * $h / 3);
+    $im->drawImage($draw);
+    $im->setImageFormat('png');
+    return $im->getImageBlob();
+}
+
+/** [width, height] of PNG bytes. */
+function gi_png_size(string $pngBytes): array
+{
+    $im = new Imagick();
+    $im->readImageBlob($pngBytes);
+    return [$im->getImageWidth(), $im->getImageHeight()];
+}
+
+test('generate-images declaration writes the plugin image manifest', function () {
+    $declaration = (new GenerateImagesStep(new FakeImageClient()))->declaration();
+    assert_true(in_array('plugin/images.json', $declaration->writes, true));
+});
+
+test('generate-images square-pads a keyed site-logo and ships it to the plugin', function () {
+    if (!\Automattic\SiteBuild\ImageTransparency::available()) {
+        skip_test('imagick not loaded');
+    }
+    [$project, $tmp] = generate_fixture();
+    $mark = \Automattic\SiteBuild\ImageTransparency::keyOutBackground(
+        gi_png_fixture('white', 'red', 40, 20)
+    );
+    $project->writeJson('images.json', array_merge($project->readJson('images.json'), [[
+        'filename' => 'site-logo.png',
+        'src' => 'theme:./assets/site-logo.png',
+        'subject' => 'simple geometric brand mark for bakery, no letters',
+        'pageContext' => 'site logo',
+        'style' => 'flat',
+        'aspectRatio' => 'square',
+        'status' => 'pending',
+        'sources' => [],
+        'role' => 'site-logo',
+    ]]));
+    $project->writeJson('plugin/images.json', ['images' => [
+        ['filename' => 'hero.jpg', 'title' => 'A bakery at dawn'],
+        ['filename' => 'site-logo.png', 'title' => 'Site logo', 'role' => 'site-logo'],
+    ]]);
+    $images = new FakeImageClient();
+    $images->bytesByPromptSubstring['brand mark'] = $mark;
+
+    (new GenerateImagesStep($images))->run($project);
+
+    assert_true($project->exists('plugin/images/site-logo.png'));
+    assert_eq([512, 512], gi_png_size($project->readText('theme/assets/site-logo.png')));
+    $logo = null;
+    foreach ($project->readJson('images.json') as $row) {
+        if (($row['filename'] ?? '') === 'site-logo.png') {
+            $logo = $row;
+        }
+    }
+    assert_eq('site-logo', $logo['role']);
+    assert_eq('completed', $logo['status']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images drops the site-logo role when keying wipes out', function () {
+    if (!\Automattic\SiteBuild\ImageTransparency::available()) {
+        skip_test('imagick not loaded');
+    }
+    [$project, $tmp] = generate_fixture();
+    $white = gi_png_fixture('white', 'white', 32, 32);
+    $project->writeJson('images.json', [[
+        'filename' => 'site-logo.png',
+        'src' => 'theme:./assets/site-logo.png',
+        'subject' => 'simple geometric brand mark for bakery, no letters',
+        'pageContext' => 'site logo',
+        'style' => 'flat',
+        'aspectRatio' => 'square',
+        'status' => 'pending',
+        'sources' => [],
+        'role' => 'site-logo',
+    ]]);
+    $project->writeJson('plugin/images.json', ['images' => [
+        ['filename' => 'site-logo.png', 'title' => 'Site logo', 'role' => 'site-logo'],
+    ]]);
+    $images = new FakeImageClient($white);
+
+    (new GenerateImagesStep($images))->run($project);
+
+    assert_true($project->exists('theme/assets/site-logo.png'), 'completed generation still writes the theme copy');
+    assert_true(!$project->exists('plugin/images/site-logo.png'), 'unkeyed mark is not shipped');
+    $logo = $project->readJson('images.json')[0];
+    assert_true(!isset($logo['role']));
+    assert_eq('completed', $logo['status']);
+    assert_eq(['images' => []], $project->readJson('plugin/images.json'));
+    $warnings = implode("\n", $project->readJson('warnings.json')['generate-images']);
+    assert_contains('site-logo.png', $warnings);
+    assert_contains('unkeyed', $warnings);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('headerTitleInkHex follows the site-title color, inherited from the header', function () {
+    $tmp = sys_get_temp_dir() . '/builder_gi_ink_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('theme/theme.json', [
+        'version' => 3,
+        'settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#171717'],
+            ['slug' => 'contrast', 'color' => '#F4F1EA'],
+        ]]],
+    ]);
+    $project->writeText(
+        'theme/parts/header.html',
+        '<!-- wp:group {"backgroundColor":"base","textColor":"contrast"} -->'
+        . '<div class="wp-block-group"><!-- wp:site-title /--></div><!-- /wp:group -->'
+    );
+    assert_eq('#F4F1EA', GenerateImagesStep::headerTitleInkHex($project));
+
+    $project->writeText(
+        'theme/parts/header.html',
+        '<!-- wp:group {"backgroundColor":"contrast","textColor":"base"} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:site-title {"textColor":"base"} /-->'
+        . '</div><!-- /wp:group -->'
+    );
+    assert_eq('#171717', GenerateImagesStep::headerTitleInkHex($project));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('headerBackgroundHex follows the header background, falling back to base', function () {
+    $tmp = sys_get_temp_dir() . '/builder_gi_bg_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('theme/theme.json', [
+        'version' => 3,
+        'settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#171717'],
+            ['slug' => 'contrast', 'color' => '#F4F1EA'],
+            ['slug' => 'accent', 'color' => '#8A5A2B'],
+        ]]],
+    ]);
+    $project->writeText(
+        'theme/parts/header.html',
+        '<!-- wp:group {"backgroundColor":"accent","textColor":"contrast"} -->'
+        . '<div class="wp-block-group"><!-- wp:site-title /--></div><!-- /wp:group -->'
+    );
+    assert_eq('#8A5A2B', GenerateImagesStep::headerBackgroundHex($project));
+
+    // No backgroundColor anywhere: the icon ground falls back to base, which is
+    // what an unstyled header paints.
+    $project->writeText(
+        'theme/parts/header.html',
+        '<!-- wp:group --><div class="wp-block-group"><!-- wp:site-title /--></div><!-- /wp:group -->'
+    );
+    assert_eq('#171717', GenerateImagesStep::headerBackgroundHex($project));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images recolors a site-logo to the header title ink', function () {
+    if (!\Automattic\SiteBuild\ImageTransparency::available()) {
+        skip_test('imagick not loaded');
+    }
+    [$project, $tmp] = generate_fixture();
+    $mark = \Automattic\SiteBuild\ImageTransparency::keyOutBackground(
+        gi_png_fixture('white', 'red', 40, 20)
+    );
+    $project->writeJson('theme/theme.json', [
+        'version' => 3,
+        'settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#111111'],
+            ['slug' => 'contrast', 'color' => '#FFFFFF'],
+        ]]],
+    ]);
+    $project->writeText(
+        'theme/parts/header.html',
+        '<!-- wp:group {"backgroundColor":"base","textColor":"contrast"} -->'
+        . '<div class="wp-block-group"><!-- wp:site-title /--></div><!-- /wp:group -->'
+    );
+    $project->writeJson('images.json', [[
+        'filename' => 'site-logo.png',
+        'src' => 'theme:./assets/site-logo.png',
+        'subject' => 'simple geometric brand mark for bakery, no letters',
+        'pageContext' => 'site logo',
+        'style' => 'flat',
+        'aspectRatio' => 'square',
+        'status' => 'pending',
+        'sources' => [],
+        'role' => 'site-logo',
+    ]]);
+    $project->writeJson('plugin/images.json', ['images' => [
+        ['filename' => 'site-logo.png', 'title' => 'Site logo', 'role' => 'site-logo'],
+    ]]);
+    $images = new FakeImageClient($mark);
+
+    (new GenerateImagesStep($images))->run($project);
+
+    $out = $project->readText('theme/assets/site-logo.png');
+    $im = new Imagick();
+    $im->readImageBlob($out);
+    $px = $im->getImagePixelColor(256, 256);
+    assert_true($px->getColorValue(Imagick::COLOR_RED) > 0.95, 'white title → white mark');
+    assert_true($px->getColorValue(Imagick::COLOR_GREEN) > 0.95);
+    assert_true($px->getColorValue(Imagick::COLOR_BLUE) > 0.95);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images ships an opaque site icon beside the transparent logo', function () {
+    if (!\Automattic\SiteBuild\ImageTransparency::available()) {
+        skip_test('imagick not loaded');
+    }
+    [$project, $tmp] = generate_fixture();
+    $mark = \Automattic\SiteBuild\ImageTransparency::keyOutBackground(
+        gi_png_fixture('white', 'red', 60, 60)
+    );
+    $project->writeJson('theme/theme.json', [
+        'version' => 3,
+        'settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#111111'],
+            ['slug' => 'contrast', 'color' => '#FFFFFF'],
+        ]]],
+    ]);
+    $project->writeText(
+        'theme/parts/header.html',
+        '<!-- wp:group {"backgroundColor":"base","textColor":"contrast"} -->'
+        . '<div class="wp-block-group"><!-- wp:site-title /--></div><!-- /wp:group -->'
+    );
+    $project->writeJson('images.json', [[
+        'filename' => 'site-logo.png',
+        'src' => 'theme:./assets/site-logo.png',
+        'subject' => 'simple geometric brand mark for bakery, no letters',
+        'pageContext' => 'site logo',
+        'style' => 'flat',
+        'aspectRatio' => 'square',
+        'status' => 'pending',
+        'sources' => [],
+        'role' => 'site-logo',
+    ]]);
+    $project->writeJson('plugin/images.json', ['images' => [
+        ['filename' => 'site-logo.png', 'title' => 'Site logo', 'role' => 'site-logo'],
+    ]]);
+
+    (new GenerateImagesStep(new FakeImageClient($mark)))->run($project);
+
+    // The logo stays transparent: the header composites it over its own bar.
+    $logo = $project->readText('theme/assets/site-logo.png');
+    assert_true(\Automattic\SiteBuild\ImageTransparency::isKeyed($logo), 'the logo keeps its transparency');
+
+    // The icon does not: a transparent favicon vanishes on a light tab.
+    assert_true($project->exists('theme/assets/site-icon.png'), 'a site icon is generated');
+    $icon = $project->readText('theme/assets/site-icon.png');
+    assert_eq(gi_png_size($logo), gi_png_size($icon), 'icon matches the padded square');
+    $im = new Imagick();
+    $im->readImageBlob($icon);
+    $corner = $im->getImagePixelColor(0, 0);
+    assert_true($corner->getColorValue(Imagick::COLOR_ALPHA) > 0.99, 'the icon is opaque');
+    assert_true($corner->getColorValue(Imagick::COLOR_RED) < 0.15, 'ground is the dark header background');
+    $centre = $im->getImagePixelColor(
+        intdiv($im->getImageWidth(), 2),
+        intdiv($im->getImageHeight(), 2),
+    );
+    assert_true($centre->getColorValue(Imagick::COLOR_RED) > 0.95, 'the mark keeps the white title ink');
+
+    assert_true($project->exists('plugin/images/site-icon.png'), 'the icon ships with the plugin');
+    $roles = [];
+    foreach ($project->readJson('plugin/images.json')['images'] as $row) {
+        $roles[$row['filename']] = ['role' => $row['role'] ?? null, 'title' => $row['title'] ?? null];
+    }
+    assert_eq('site-logo', $roles['site-logo.png']['role'] ?? null);
+    assert_eq('site-icon', $roles['site-icon.png']['role'] ?? null);
+    assert_eq('Site icon', $roles['site-icon.png']['title'] ?? null);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images ships no site icon when the mark was dropped', function () {
+    if (!\Automattic\SiteBuild\ImageTransparency::available()) {
+        skip_test('imagick not loaded');
+    }
+    [$project, $tmp] = generate_fixture();
+    $project->writeJson('images.json', [[
+        'filename' => 'site-logo.png',
+        'src' => 'theme:./assets/site-logo.png',
+        'subject' => 'simple geometric brand mark for bakery, no letters',
+        'pageContext' => 'site logo',
+        'style' => 'flat',
+        'aspectRatio' => 'square',
+        'status' => 'pending',
+        'sources' => [],
+        'role' => 'site-logo',
+    ]]);
+    $project->writeJson('plugin/images.json', ['images' => [
+        ['filename' => 'site-logo.png', 'title' => 'Site logo', 'role' => 'site-logo'],
+    ]]);
+    // An opaque render: the key wipes out, the role is dropped, and an icon
+    // built from it would be a flat rectangle of header background.
+    (new GenerateImagesStep(new FakeImageClient(gi_png_fixture('white', 'white', 40, 40))))->run($project);
+
+    assert_true(!$project->exists('theme/assets/site-icon.png'), 'no icon without a usable mark');
+    assert_true(!$project->exists('plugin/images/site-icon.png'));
+    foreach ($project->readJson('plugin/images.json')['images'] as $row) {
+        assert_true(($row['role'] ?? '') !== 'site-icon', 'no icon row reaches the seeder');
+    }
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images drops the site-logo role when Imagick is unavailable', function () {
+    if (\Automattic\SiteBuild\ImageTransparency::available()) {
+        skip_test('imagick is loaded; this pin is the no-extension path');
+    }
+    [$project, $tmp] = generate_fixture();
+    // 1x1 opaque white PNG, so the test does not need Imagick to build a fixture.
+    $white = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABAQAAAAA3bvkkAAAAIGNIUk0AAHomAACAhAAA+gAAAIDoAAB1MAAA6mAAADqYAAAXcJy6UTwAAAACYktHRAAB3YoTpAAAAApJREFUCNdjaAAAAIIAgd1DavQAAAAASUVORK5CYII=');
+    $project->writeJson('images.json', [[
+        'filename' => 'site-logo.png',
+        'src' => 'theme:./assets/site-logo.png',
+        'subject' => 'simple geometric brand mark for bakery, no letters',
+        'pageContext' => 'site logo',
+        'style' => 'flat',
+        'aspectRatio' => 'square',
+        'status' => 'pending',
+        'sources' => [],
+        'role' => 'site-logo',
+    ]]);
+    $project->writeJson('plugin/images.json', ['images' => [
+        ['filename' => 'site-logo.png', 'title' => 'Site logo', 'role' => 'site-logo'],
+    ]]);
+    $images = new FakeImageClient($white);
+
+    (new GenerateImagesStep($images))->run($project);
+
+    $logo = $project->readJson('images.json')[0];
+    assert_true(!isset($logo['role']), 'unkeyed path must drop the role when keying never ran');
+    assert_true(!$project->exists('plugin/images/site-logo.png'), 'opaque mark is not shipped');
+    assert_eq(['images' => []], $project->readJson('plugin/images.json'));
+    $warnings = implode("\n", $project->readJson('warnings.json')['generate-images']);
+    assert_contains('unkeyed', $warnings);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images keeps a missing content image in the plugin manifest', function () {
+    [$project, $tmp] = generate_fixture();
+    $project->writeJson('plugin/images.json', ['images' => [
+        ['filename' => 'hero.jpg', 'title' => 'A bakery at dawn'],
+        ['filename' => 'crumb.jpg', 'title' => 'Crumb detail'],
+    ]]);
+    $images = new FakeImageClient('JPEGDATA');
+
+    (new GenerateImagesStep($images))->run($project);
+
+    $names = array_column($project->readJson('plugin/images.json')['images'], 'filename');
+    assert_true(in_array('crumb.jpg', $names, true), 'missing content row stays in the manifest');
+    assert_true($project->exists('plugin/images/hero.jpg'));
+    assert_true(!$project->exists('plugin/images/crumb.jpg'), 'absent theme asset is not copied');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+// --- BIGR-979: post-generation look at delivered heroes ---------------------
+
+const GI_QA_PASS = '{"upright": true, "rendered_text": false, "matches_subject": true, "note": ""}';
+const GI_QA_ROTATED = '{"upright": false, "rendered_text": false, "matches_subject": true, "note": "sky on the left edge"}';
+
+test('generate-images inspects a delivered hero once and delivers it silently when it passes', function () {
+    [$project, $tmp] = generate_fixture(); // hero.jpg, "full-bleed hero with text overlay"
+    $images = new FakeImageClient('JPEGDATA');
+    $llm = new FakeLlm();
+    $llm->queueText(GI_QA_PASS);
+
+    (new GenerateImagesStep($images, $llm, 'small-model'))->run($project);
+
+    assert_eq(1, count($llm->imageCalls), 'one vision call for the one hero');
+    assert_eq('image/jpeg', $llm->imageCalls[0]['mime']);
+    assert_true($llm->imageCalls[0]['bytes'] > 0, 'the delivered file bytes were sent');
+    assert_eq('small-model', $llm->imageCalls[0]['opts']['model'], 'the small tier looks at the image');
+    assert_contains('A bakery at dawn', $llm->imageCalls[0]['prompt'], 'the authored subject is what it is checked against');
+    assert_eq(0, count($llm->calls), 'no text request was spent');
+    assert_eq(1, count($images->batches), 'no regeneration');
+    assert_eq('completed', $project->readJson('images.json')[0]['status']);
+    assert_true(!$project->exists('warnings.json'), 'a passing image owes no warning');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images regenerates a failing hero once with a corrected subject and passes it', function () {
+    [$project, $tmp] = generate_fixture();
+    $images = new FakeImageClient('JPEGDATA');
+    $llm = new FakeLlm();
+    $llm->queueText(GI_QA_ROTATED);
+    $llm->queueText(GI_QA_PASS);
+
+    (new GenerateImagesStep($images, $llm, 'small-model'))->run($project);
+
+    assert_eq(2, count($llm->imageCalls), 'first look, then a second look at the regenerated image');
+    assert_eq(2, count($images->batches), 'original batch + one regeneration');
+    assert_eq(1, count($images->batches[1]), 'only the failing hero is regenerated');
+    assert_contains('A bakery at dawn', $images->batches[1][0]['prompt'], 'the authored subject leads');
+    assert_contains('The camera is upright and level', $images->batches[1][0]['prompt'], 'the finding becomes a positive correction');
+
+    $spec = $project->readJson('images.json')[0];
+    assert_eq('completed', $spec['status']);
+    assert_eq(true, $spec['qa']['regenerated']);
+    assert_true($project->exists('theme/assets/hero.jpg'));
+    assert_true(!$project->exists('warnings.json'), 'a regeneration that passes owes no warning');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images keeps a hero that fails twice and records the finding', function () {
+    [$project, $tmp] = generate_fixture();
+    $images = new FakeImageClient('JPEGDATA');
+    $llm = new FakeLlm();
+    $llm->queueText(GI_QA_ROTATED);
+    $llm->queueText(GI_QA_ROTATED);
+
+    (new GenerateImagesStep($images, $llm, 'small-model'))->run($project);
+
+    assert_eq(2, count($images->batches), 'one regeneration only');
+    assert_eq(2, count($llm->imageCalls));
+    assert_eq('completed', $project->readJson('images.json')[0]['status'], 'the image ships');
+    assert_true($project->exists('theme/assets/hero.jpg'), 'the image is kept');
+
+    $rows = $project->readJson('warnings.json')['generate-images'];
+    assert_eq(1, count($rows));
+    assert_contains('theme/assets/hero.jpg', $rows[0]);
+    assert_contains('camera not upright', $rows[0]);
+    assert_contains('"A bakery at dawn"', $rows[0]);
+    assert_contains('disposition: delivered, still failing after one regeneration', $rows[0]);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images keeps the first hero when its regeneration fails', function () {
+    [$project, $tmp] = generate_fixture();
+    $images = new FakeImageClient('JPEGDATA');
+    $images->failPromptSubstrings = ['The camera is upright and level']; // only the corrected prompt fails
+    $llm = new FakeLlm();
+    $llm->queueText(GI_QA_ROTATED);
+
+    (new GenerateImagesStep($images, $llm, 'small-model'))->run($project);
+
+    assert_eq(1, count($llm->imageCalls), 'nothing to look at a second time');
+    $spec = $project->readJson('images.json')[0];
+    assert_eq('completed', $spec['status'], 'a failed regeneration never removes a delivered image');
+    assert_eq(['regenerated' => false, 'finding' => 'camera not upright (scene rotated or tilted)'], $spec['qa'], 'the row says the first image ships with its finding');
+    assert_true($project->exists('theme/assets/hero.jpg'));
+    $rows = $project->readJson('warnings.json')['generate-images'];
+    assert_eq(1, count($rows));
+    assert_contains('regeneration failed: fake image failure', $rows[0]);
+    assert_contains('camera not upright', $rows[0]);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images delivers a regenerated hero unverified when the second look is unreadable', function () {
+    [$project, $tmp] = generate_fixture();
+    $images = new FakeImageClient('JPEGDATA');
+    $llm = new FakeLlm();
+    $llm->queueText(GI_QA_ROTATED);
+    $llm->queueText('I cannot tell.');
+
+    (new GenerateImagesStep($images, $llm, 'small-model'))->run($project);
+
+    assert_eq(2, count($images->batches), 'one regeneration');
+    assert_eq(2, count($llm->imageCalls), 'two looks');
+    $spec = $project->readJson('images.json')[0];
+    assert_eq('completed', $spec['status']);
+    assert_eq(true, $spec['qa']['regenerated'], 'the regenerated image ships');
+    assert_true(!$project->exists('warnings.json'), 'no verdict is not a defect');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images delivers a hero unverified when the inspection itself fails', function () {
+    [$project, $tmp] = generate_fixture();
+    $images = new FakeImageClient('JPEGDATA');
+    $llm = new FakeLlm(); // nothing queued: the vision call throws
+
+    (new GenerateImagesStep($images, $llm, 'small-model'))->run($project);
+
+    assert_eq(1, count($llm->imageCalls));
+    assert_eq(1, count($images->batches), 'no regeneration on a missing verdict');
+    assert_eq('completed', $project->readJson('images.json')[0]['status']);
+    assert_true(!$project->exists('warnings.json'), 'an unverified image is not a defect');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images never inspects card images, transparent assets, or with the check off', function () {
+    $tmp = sys_get_temp_dir() . '/builder_gi_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeText('theme/parts/menu.html',
+        '<!-- wp:image --><figure><img src="theme:./assets/loaf.jpg" alt="AI_IMAGE: A sourdough loaf | menu item card in a 3-column grid | photorealistic | square"/></figure><!-- /wp:image -->'
+        . '<!-- wp:image --><figure><img src="theme:./assets/mark.png" alt="AI_IMAGE: A wheat stem | isolated accent | illustration | square"/></figure><!-- /wp:image -->'
+    );
+    (new CollectImagesStep())->run($project);
+    $images = new FakeImageClient('JPEGDATA');
+    $llm = new FakeLlm();
+    $llm->queueText(GI_QA_PASS);
+
+    (new GenerateImagesStep($images, $llm, 'small-model'))->run($project);
+    assert_eq(0, count($llm->imageCalls), 'no card or transparent asset earns a vision call');
+    exec('rm -rf ' . escapeshellarg($tmp));
+
+    [$project, $tmp] = generate_fixture();
+    (new GenerateImagesStep(new FakeImageClient('JPEGDATA'), $llm, 'small-model', inspectImages: false))->run($project);
+    assert_eq(0, count($llm->imageCalls), 'the constructor switch turns the check off');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images skips the hero check on a text-only Llm', function () {
+    [$project, $tmp] = generate_fixture();
+    $textOnly = new class implements \Automattic\SiteBuild\Llm {
+        public int $calls = 0;
+        public function complete(string $prompt, array $opts = []): string { $this->calls++; return ''; }
+        public function completeJson(string $prompt, array $opts = []): array { $this->calls++; return []; }
+        public function completeJsonBatch(array $requests): array { $this->calls++; return []; }
+        public function completeBatch(array $requests): \Automattic\SiteBuild\TextBatchResult { $this->calls++; return new \Automattic\SiteBuild\TextBatchResult([], []); }
+    };
+
+    (new GenerateImagesStep(new FakeImageClient('JPEGDATA'), $textOnly, 'small-model'))->run($project);
+
+    assert_eq(0, $textOnly->calls, 'a transport that cannot carry pixels is never asked to');
+    assert_eq('completed', $project->readJson('images.json')[0]['status']);
+    assert_true(!$project->exists('warnings.json'));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

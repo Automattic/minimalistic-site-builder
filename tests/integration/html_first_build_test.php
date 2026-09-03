@@ -519,13 +519,24 @@ test('G4 HTML-first output gives every transformer marker class matching final t
         // The design's prose <img> reaches images.json as a generable spec at
         // the exact theme path the delivered markup references.
         $images = $project->readJson('images.json');
-        assert_eq(1, count($images), 'the design image was collected');
+        $logo = array_values(array_filter(
+            $images,
+            static fn ($row): bool => ($row['role'] ?? '') === 'site-logo',
+        ));
+        $design = array_values(array_filter(
+            $images,
+            static fn ($row): bool => ($row['role'] ?? '') !== 'site-logo',
+        ));
+        assert_eq(1, count($design), 'the design image was collected');
+        assert_eq(1, count($logo), 'a bakery also collects the synthetic site logo');
+        assert_eq('site-logo.png', $logo[0]['filename']);
         assert_eq(
             'A baker sliding a sourdough loaf into a stone oven, viewed from counter height',
-            $images[0]['subject'],
+            $design[0]['subject'],
         );
-        assert_contains('theme:./assets/', $images[0]['src']);
-        assert_contains($images[0]['src'], $home);
+        assert_contains('theme:./assets/', $design[0]['src']);
+        assert_contains($design[0]['src'], $home);
+        assert_contains('site-logo-mark', $project->readText('theme/parts/header.html'));
 
         assert_true(assert_html_first_page_sections_constrained($project, 'home') > 0);
         assert_contains('hyphens: none;', $style);
