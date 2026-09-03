@@ -554,19 +554,22 @@ final class MarkupSanitizer
     private static function neutralizeBlockJsonSources(string $markup, int &$media, int &$executable): string
     {
         $result = preg_replace_callback(
-            '/<!--\s*wp:(?:core\/)?([a-zA-Z0-9-]+)\s+(\{.*?\})\s*(\/?)-->/s',
+            '/<!--\s*wp:([a-zA-Z0-9-]+(?:\/[a-zA-Z0-9-]+)?)\s+(\{.*?\})\s*(\/?)-->/s',
             static function (array $match) use (&$media, &$executable): string {
                 $attrs = json_decode($match[2], true);
                 if (!is_array($attrs)) {
                     return $match[0];
                 }
-                $mediaBlock = preg_match('/^(?:' . self::BLOCK_MEDIA_NAMES . ')$/', $match[1]) === 1;
+                // WordPress serializes a core block without its namespace;
+                // any other namespace stays on the name.
+                $name = (string) preg_replace('#^core/#', '', $match[1]);
+                $mediaBlock = preg_match('/^(?:' . self::BLOCK_MEDIA_NAMES . ')$/', $name) === 1;
                 $changed = false;
                 $attrs = self::walkBlockJson($attrs, $mediaBlock, null, $media, $executable, $changed);
                 if (!$changed) {
                     return $match[0];
                 }
-                return BlockMarkup::serializeComment($match[1], $attrs, $match[3] === '/');
+                return BlockMarkup::serializeComment($name, $attrs, $match[3] === '/');
             },
             $markup,
         );

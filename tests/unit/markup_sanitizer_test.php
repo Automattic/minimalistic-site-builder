@@ -513,9 +513,13 @@ test('sanitize keeps block JSON valid when adjacent keys go and re-serializes on
         '<!-- wp:image {"id":1,"url":"https://evil.example/x.png","href":"javascript:x()","sizeSlug":"large"} --><figure></figure><!-- /wp:image -->'
         . '<!-- wp:gallery {"images":[{"url":"https://evil.example/g.png","id":2},{"url":"/a.png","id":3}],"columns":2} --><figure></figure><!-- /wp:gallery -->'
         . '<!-- wp:paragraph {"placeholder":"kept  --  as authored","align":"center"} --><p></p><!-- /wp:paragraph -->'
-        . '<!-- wp:navigation-link {"url":"javascript:x()","label":"x"} /-->',
+        . '<!-- wp:navigation-link {"url":"javascript:x()","label":"x"} /-->'
+        . '<!-- wp:core/cover {"url":"https://evil.example/c.png","dimRatio":30} --><div></div><!-- /wp:cover -->'
+        . '<!-- wp:acme/promo {"href":"javascript:x()","title":"t"} /-->',
         $notes,
     );
+    assert_contains('<!-- wp:cover {"dimRatio":30} -->', $out, 'a core/ prefix is judged and serialized the WordPress way');
+    assert_contains('<!-- wp:acme/promo {"title":"t"} /-->', $out, 'another namespace is judged and keeps its name');
     assert_contains('<!-- wp:image {"id":1,"sizeSlug":"large"} -->', $out, 'two adjacent drops leave valid JSON');
     assert_contains('<!-- wp:gallery {"images":[{"id":2},{"url":"/a.png","id":3}],"columns":2} -->', $out, 'a nested list keeps its shape');
     assert_contains('<!-- wp:paragraph {"placeholder":"kept  --  as authored","align":"center"} -->', $out, 'an untouched block keeps its bytes');

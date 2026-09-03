@@ -831,13 +831,16 @@ final class ScaffoldPluginStep implements Step
          */
         function {{FN_PREFIX}}_content_neutralize_block_media($content) {
             $result = preg_replace_callback(
-                '/<!--\s*wp:(?:core\/)?([a-zA-Z0-9-]+)\s+(\{.*?\})\s*(\/?)-->/s',
+                '/<!--\s*wp:([a-zA-Z0-9-]+(?:\/[a-zA-Z0-9-]+)?)\s+(\{.*?\})\s*(\/?)-->/s',
                 function ($match) {
                     $attrs = json_decode($match[2], true);
                     if (!is_array($attrs)) {
                         return $match[0];
                     }
-                    $media_block = preg_match('/^(?:cover|image|video|audio|media-text|gallery)$/', $match[1]) === 1;
+                    // WordPress serializes a core block without its
+                    // namespace; any other namespace stays on the name.
+                    $name = (string) preg_replace('#^core/#', '', $match[1]);
+                    $media_block = preg_match('/^(?:cover|image|video|audio|media-text|gallery)$/', $name) === 1;
                     $changed = false;
                     $attrs = {{FN_PREFIX}}_content_walk_block_json($attrs, $media_block, null, $changed);
                     if (!$changed) {
@@ -854,7 +857,7 @@ final class ScaffoldPluginStep implements Step
                             | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
                         )) . ' ';
                     }
-                    return '<!-- wp:' . $match[1] . ' ' . $json . $match[3] . '-->';
+                    return '<!-- wp:' . $name . ' ' . $json . $match[3] . '-->';
                 },
                 $content
             );
