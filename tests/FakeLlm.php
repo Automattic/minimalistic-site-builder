@@ -76,6 +76,7 @@ final class FakeLlm implements FinishReasonAwareLlm, UsageReporting
         }
         $response = array_shift($this->textQueue);
         $this->lastFinishReason = $response['finish_reason'];
+        $this->calls[array_key_last($this->calls)]['answer'] = $response['text'];
         $this->recordUsage($prompt, $response['text'], $opts);
         return $response['text'];
     }
@@ -96,6 +97,7 @@ final class FakeLlm implements FinishReasonAwareLlm, UsageReporting
             throw new \RuntimeException('FakeLlm: no queued json response');
         }
         $response = array_shift($this->jsonQueue);
+        $this->calls[array_key_last($this->calls)]['answer'] = self::jsonUsageText($response);
         $this->recordUsage($prompt, self::jsonUsageText($response), $opts);
         return $response;
     }
@@ -125,6 +127,7 @@ final class FakeLlm implements FinishReasonAwareLlm, UsageReporting
                 throw new \RuntimeException('FakeLlm: no queued json response');
             }
             $response = array_shift($this->jsonQueue);
+            $this->calls[array_key_last($this->calls)]['answer'] = self::jsonUsageText($response);
             $this->recordUsage((string) $req['prompt'], self::jsonUsageText($response), $opts);
             $out[$key] = $response;
         }
@@ -157,6 +160,7 @@ final class FakeLlm implements FinishReasonAwareLlm, UsageReporting
                 throw new \RuntimeException('FakeLlm: no queued text response');
             }
             $response = array_shift($this->textQueue)['text'];
+            $this->calls[array_key_last($this->calls)]['answer'] = $response;
             $this->recordUsage((string) $req['prompt'], $response, $opts);
             $out[$key] = $response;
         }
