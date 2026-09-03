@@ -8,6 +8,7 @@ use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\DesignFloor;
 use Automattic\SiteBuild\DirectionFidelity;
 use Automattic\SiteBuild\HeaderBehavior;
+use Automattic\SiteBuild\MarkupSanitizer;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\PresetReferences;
 use Automattic\SiteBuild\Project;
@@ -24,6 +25,14 @@ use Automattic\SiteBuild\ThemeValidator;
  * it over a residual defect would leave the user with no site at all. Every
  * problem is recorded in warnings.json (see Project::replaceWarnings) and the
  * theme is delivered anyway.
+ *
+ * One class is not advisory. Script-capable markup, event handlers,
+ * executable URLs, and resource fetches from a model-chosen host are cut
+ * from every delivered template, part, page, and pattern body before the
+ * advisory checks run (rung 3 of the escalation ladder), because a defect
+ * of that class that every earlier choke point missed must not ship on a
+ * warning row. The cut is the intake sanitizer itself, so this step can
+ * never disagree with intake about what is unsafe (BIGR-971).
  */
 final class ValidateThemeStep implements Step
 {
@@ -76,6 +85,11 @@ final class ValidateThemeStep implements Step
             ],
             writes: [
                 'warnings.json',
+                // The unsafe-class cut only; see cutUnsafeMarkup().
+                'theme/parts/*',
+                'theme/templates/*',
+                'theme/patterns/*',
+                'plugin/pages/*',
             ],
             concurrent: false,
         );
@@ -84,6 +98,7 @@ final class ValidateThemeStep implements Step
     public function run(Project $project): void
     {
         $problems = array_merge(
+            self::cutUnsafeMarkup($project),
             ThemeValidator::validate($project),
             ThemeValidator::layoutWarnings($project, $this->htmlFirst),
             ThemeValidator::spacingWarnings($project),
@@ -122,6 +137,64 @@ final class ValidateThemeStep implements Step
 
         $project->writeText('logs/' . self::LOG_FILE, "Final theme validation passed.\n");
         Narrator::write("  final theme validation passed\n");
+    }
+
+    /**
+     * The one mutating pass: run the intake sanitizer over every delivered
+     * markup file and keep only what it keeps. A clean file is byte-identical
+     * and records nothing. A pattern is one docblock and then markup; only
+     * the markup after the docblock is judged, and the asset echo the build
+     * writes into it is one of the two url() forms the sanitizer allows.
+     *
+     * @return list<string> warning rows for the files that were cut
+     */
+    private static function cutUnsafeMarkup(Project $project): array
+    {
+        $rows = [];
+        $targets = [];
+        foreach ($project->themeFiles() as $rel) {
+            $targets[] = 'theme/' . $rel;
+        }
+        foreach (glob($project->pluginPath('pages') . '/*.html') ?: [] as $abs) {
+            $targets[] = 'plugin/pages/' . basename($abs);
+        }
+        foreach ($targets as $rel) {
+            $markup = $project->readText($rel);
+            $notes = [];
+            $clean = MarkupSanitizer::sanitize($markup, $notes);
+            if ($clean === $markup) {
+                continue;
+            }
+            $project->writeText($rel, $clean);
+            $rows[] = self::cutRow($rel, $notes);
+        }
+
+        foreach (glob($project->themePath('patterns') . '/*.php') ?: [] as $abs) {
+            $rel = 'theme/patterns/' . basename($abs);
+            $php = $project->readText($rel);
+            $split = strpos($php, "*/\n?>\n");
+            if ($split === false) {
+                continue;
+            }
+            $headEnd = $split + strlen("*/\n?>\n");
+            $body = substr($php, $headEnd);
+            $notes = [];
+            $clean = MarkupSanitizer::sanitize($body, $notes);
+            if ($clean === $body) {
+                continue;
+            }
+            $project->writeText($rel, substr($php, 0, $headEnd) . $clean);
+            $rows[] = self::cutRow($rel, $notes);
+        }
+        return $rows;
+    }
+
+    /** @param list<string> $notes */
+    private static function cutRow(string $rel, array $notes): string
+    {
+        return "{$rel}: authored markup reached final validation with unsafe content ("
+            . implode('; ', $notes)
+            . '); delivered sanitized; disposition cut the unsafe unit — every earlier choke point missed it';
     }
 
     /**

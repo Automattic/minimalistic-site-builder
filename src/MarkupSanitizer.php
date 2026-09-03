@@ -46,7 +46,9 @@ final class MarkupSanitizer
      * visitor chooses to follow, not a fetch, and stays.
      */
     private const BLOCK_MEDIA_NAMES = 'cover|image|video|audio|media-text|gallery';
-    private const BLOCK_MEDIA_KEYS = 'url|src|poster|mediaUrl';
+    private const BLOCK_MEDIA_KEYS = ['url', 'src', 'poster', 'mediaUrl'];
+    /** Comment-JSON keys any block may render as a destination or a source. */
+    private const BLOCK_SOURCE_KEYS = ['url', 'src', 'poster', 'mediaUrl', 'href', 'textLinkHref'];
 
     /**
      * @param list<string> $notes out-param: one line per class of removal, so
@@ -136,12 +138,17 @@ final class MarkupSanitizer
             $notes[] = self::note("removed {$media} media source attribute(s) on a foreign host", $samples['media'] ?? []);
         }
         // The editor acts on the same sources in block-comment JSON: a cover's
-        // "url" is what it loads when the page opens for editing.
+        // "url" is what it loads when the page opens for editing, and a
+        // dynamic block such as navigation-link renders its "url" from there.
         $blockMedia = 0;
-        $blockSamples = [];
-        $markup = self::neutralizeForeignBlockMedia($markup, $blockMedia, $blockSamples);
+        $blockExecutable = 0;
+        $blockSamples = ['media' => [], 'executable' => []];
+        $markup = self::neutralizeBlockJsonSources($markup, $blockMedia, $blockExecutable, $blockSamples);
         if ($blockMedia > 0) {
-            $notes[] = self::note("removed {$blockMedia} block attribute media source(s) on a foreign host", $blockSamples);
+            $notes[] = self::note("removed {$blockMedia} block attribute media source(s) on a foreign host", $blockSamples['media']);
+        }
+        if ($blockExecutable > 0) {
+            $notes[] = self::note("removed {$blockExecutable} block attribute(s) with an executable URL", $blockSamples['executable']);
         }
         return $markup;
     }
@@ -567,78 +574,99 @@ final class MarkupSanitizer
     }
 
     /**
-     * Remove media sources on a foreign host from the comment JSON of media
-     * blocks. Two passes keep the JSON valid: a key after a comma goes with
-     * its comma, and a key in first position goes with the comma that
-     * follows it.
+     * Neutralize comment-JSON sources. The attribute object of every block
+     * is decoded and walked. On every block, a destination or source key
+     * with an executable scheme goes. On a media block, a source key on a
+     * foreign host goes too; a navigation-link, social-link, or button
+     * "url" is a destination the visitor chooses to follow, and stays. On
+     * every block, a foreign `url` inside a `backgroundImage` object goes,
+     * because WordPress renders style.background.backgroundImage.url from
+     * the JSON at render time. A block that lost a key is re-serialized the
+     * way WordPress does, so the JSON stays valid whatever was removed; a
+     * block that lost nothing keeps its bytes.
      */
-    /** @param list<string> $samples out-param: the authored key/value pairs that went */
-    private static function neutralizeForeignBlockMedia(string $markup, int &$count, array &$samples = []): string
-    {
-        // One authority slash in JSON is `/`, `\/`, or the escaped
-        // backslash `\\` a browser reads as a slash.
-        $slash = '(?:\\\\?\/|\\\\\\\\)';
-        $foreign = '"((?:[a-zA-Z][a-zA-Z0-9+.\-]*:)?' . $slash . $slash . '(?:[^"\\\\]|\\\\.)*)"';
-        $key = '"(?:' . self::BLOCK_MEDIA_KEYS . ')"';
+    /** @param array{media:list<string>,executable:list<string>} $samples out-param: the authored pairs that went */
+    private static function neutralizeBlockJsonSources(
+        string $markup,
+        int &$media,
+        int &$executable,
+        array &$samples = ['media' => [], 'executable' => []],
+    ): string {
         $result = preg_replace_callback(
-            '/<!--\s*wp:(?:core\/)?(?:' . self::BLOCK_MEDIA_NAMES . ')\s+\{.*?\}\s*\/?-->/s',
-            static function (array $match) use (&$count, &$samples, $foreign, $key): string {
-                $comment = $match[0];
-                foreach ([
-                    '/,\s*' . $key . '\s*:\s*' . $foreign . '/',
-                    '/' . $key . '\s*:\s*' . $foreign . '\s*,?/',
-                ] as $pattern) {
-                    $comment = (string) preg_replace_callback(
-                        $pattern,
-                        static function (array $pair) use (&$count, &$samples): string {
-                            $count++;
-                            $samples[] = trim($pair[0], ", \t\n");
-                            return '';
-                        },
-                        $comment,
-                    );
+            '/<!--\s*wp:([a-zA-Z0-9-]+(?:\/[a-zA-Z0-9-]+)?)\s+(\{.*?\})\s*(\/?)-->/s',
+            static function (array $match) use (&$media, &$executable, &$samples): string {
+                $attrs = json_decode($match[2], true);
+                if (!is_array($attrs)) {
+                    return $match[0];
                 }
-                return $comment;
-            },
-            $markup,
-        );
-        $markup = $result ?? $markup;
-
-        // Any block may carry a background image in its style attribute
-        // object. WordPress renders `style.background.backgroundImage.url`
-        // as `background-image: url(...)` at render time, from the JSON,
-        // whatever the saved HTML says.
-        $urlKey = '"url"';
-        $result = preg_replace_callback(
-            '/<!--\s*wp:[a-zA-Z0-9\/-]+\s+\{.*?\}\s*\/?-->/s',
-            static function (array $match) use (&$count, &$samples, $foreign, $urlKey): string {
-                $replaced = preg_replace_callback(
-                    '/"backgroundImage"\s*:\s*\{[^{}]*\}/',
-                    static function (array $object) use (&$count, &$samples, $foreign, $urlKey): string {
-                        $inner = $object[0];
-                        foreach ([
-                            '/,\s*' . $urlKey . '\s*:\s*' . $foreign . '/',
-                            '/' . $urlKey . '\s*:\s*' . $foreign . '\s*,?/',
-                        ] as $pattern) {
-                            $inner = (string) preg_replace_callback(
-                                $pattern,
-                                static function (array $pair) use (&$count, &$samples): string {
-                                    $count++;
-                                    $samples[] = trim($pair[0], ", \t\n");
-                                    return '';
-                                },
-                                $inner,
-                            );
-                        }
-                        return $inner;
-                    },
-                    $match[0],
-                );
-                return $replaced ?? $match[0];
+                // WordPress serializes a core block without its namespace;
+                // any other namespace stays on the name.
+                $name = (string) preg_replace('#^core/#', '', $match[1]);
+                $mediaBlock = preg_match('/^(?:' . self::BLOCK_MEDIA_NAMES . ')$/', $name) === 1;
+                $changed = false;
+                $attrs = self::walkBlockJson($attrs, $mediaBlock, null, $media, $executable, $changed, $samples);
+                if (!$changed) {
+                    return $match[0];
+                }
+                return BlockMarkup::serializeComment($name, $attrs, $match[3] === '/');
             },
             $markup,
         );
         return $result ?? $markup;
+    }
+
+    /**
+     * One recursive pass over a decoded attribute object. An object that
+     * loses its last key goes with it, so `style.background.backgroundImage`
+     * never ships as an empty shell.
+     *
+     * @param array<mixed> $node
+     * @return array<mixed>
+     */
+    private static function walkBlockJson(
+        array $node,
+        bool $mediaBlock,
+        ?string $parentKey,
+        int &$media,
+        int &$executable,
+        bool &$changed,
+        array &$samples = ['media' => [], 'executable' => []],
+    ): array {
+        foreach ($node as $key => $value) {
+            $ownKey = is_string($key) ? $key : $parentKey;
+            if (is_array($value)) {
+                $childChanged = false;
+                $child = self::walkBlockJson($value, $mediaBlock, $ownKey, $media, $executable, $childChanged, $samples);
+                if ($childChanged) {
+                    $changed = true;
+                    if ($child === [] && is_string($key)) {
+                        unset($node[$key]);
+                    } else {
+                        $node[$key] = $child;
+                    }
+                }
+                continue;
+            }
+            if (!is_string($key) || !is_string($value)) {
+                continue;
+            }
+            if (in_array($key, self::BLOCK_SOURCE_KEYS, true) && self::hasExecutableScheme($value)) {
+                unset($node[$key]);
+                $executable++;
+                $samples['executable'][] = json_encode($key) . ':' . json_encode($value, JSON_UNESCAPED_SLASHES);
+                $changed = true;
+                continue;
+            }
+            $fetches = ($mediaBlock && in_array($key, self::BLOCK_MEDIA_KEYS, true))
+                || ($key === 'url' && $parentKey === 'backgroundImage');
+            if ($fetches && self::isForeignSource('src', $value)) {
+                unset($node[$key]);
+                $media++;
+                $samples['media'][] = json_encode($key) . ':' . json_encode($value, JSON_UNESCAPED_SLASHES);
+                $changed = true;
+            }
+        }
+        return $node;
     }
 
     /**
