@@ -18,6 +18,7 @@ use Automattic\SiteBuild\BandColor;
 use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\CssChecks;
+use Automattic\SiteBuild\CssScrub;
 use Automattic\SiteBuild\CtaStyle;
 use Automattic\SiteBuild\PaletteFloor;
 use Automattic\SiteBuild\Llm;
@@ -2312,10 +2313,185 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         $theme = self::mergeScaffoldDefaultsAtPath(self::SCAFFOLD, $theme, '', $shapeWarnings);
         $theme = self::removeUnsupportedTextWrapProperties($theme);
         [$theme, $motionWarnings] = self::removeMotionKitCustomCss($theme);
+        [$theme, $resourceWarnings] = self::removeResourceLoadingCustomCss($theme);
+        [$theme, $fontFaceWarnings] = self::removeForeignFontFaces($theme);
         return [
             $theme,
-            array_merge($colorWarnings, $shadowWarnings, $shapeWarnings, $motionWarnings),
+            array_merge(
+                $colorWarnings,
+                $shadowWarnings,
+                $shapeWarnings,
+                $motionWarnings,
+                $resourceWarnings,
+                $fontFaceWarnings,
+            ),
         ];
+    }
+
+    /**
+     * Remove font faces theme.json would fetch from a host the model chose.
+     *
+     * A `fontFace` entry's `src` becomes a CSS `url()` once WordPress renders
+     * theme.json: `@font-face { src: url(https://…) }` on every page. The
+     * build bundles every face it ships as a theme file under assets/fonts/
+     * (BundleFontsStep), so `file:./assets/fonts/…` is the one legitimate
+     * form. Anything else is a fetch from a model-chosen host, and the
+     * sink-side red-team test found it shipping on the HTML-first graph,
+     * which has no bundling step to overwrite it (BIGR-969).
+     *
+     * A face keeps its bundled sources and loses the rest; a face with no
+     * bundled source goes; a family with no face left loses the key. Every
+     * removal is recorded durably.
+     *
+     * Pure — unit-testable.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>} theme, warnings
+     */
+    public static function removeForeignFontFaces(array $theme): array
+    {
+        $families = $theme['settings']['typography']['fontFamilies'] ?? null;
+        if (!is_array($families)) {
+            return [$theme, []];
+        }
+
+        $warnings = [];
+        foreach ($families as $i => $family) {
+            if (!is_array($family) || !isset($family['fontFace'])) {
+                continue;
+            }
+            $slug = is_string($family['slug'] ?? null) && $family['slug'] !== '' ? $family['slug'] : (string) $i;
+            $location = "theme/theme.json settings.typography.fontFamilies[{$slug}].fontFace";
+            if (!is_array($family['fontFace'])) {
+                $warnings[] = "{$location}: authored " . Warnings::value($family['fontFace'])
+                    . '; delivered removed; disposition fontFace must be a list of faces';
+                unset($families[$i]['fontFace']);
+                continue;
+            }
+
+            $kept = [];
+            foreach ($family['fontFace'] as $face) {
+                if (!is_array($face)) {
+                    $warnings[] = "{$location}: authored " . Warnings::value($face)
+                        . '; delivered removed; disposition a face must be an object';
+                    continue;
+                }
+                $sources = $face['src'] ?? [];
+                $sources = is_string($sources) ? [$sources] : (is_array($sources) ? $sources : []);
+                $bundled = [];
+                foreach ($sources as $source) {
+                    if (is_string($source)
+                        && preg_match('#^file:\./assets/fonts/[A-Za-z0-9][A-Za-z0-9._-]*$#', $source) === 1
+                    ) {
+                        $bundled[] = $source;
+                        continue;
+                    }
+                    $warnings[] = "{$location}: authored src " . Warnings::value($source)
+                        . '; delivered removed; disposition font faces ship only as bundled theme files'
+                        . ' under assets/fonts/, never from another host';
+                }
+                if ($bundled === []) {
+                    continue;
+                }
+                $face['src'] = $bundled;
+                $kept[] = $face;
+            }
+            if ($kept === []) {
+                unset($families[$i]['fontFace']);
+            } else {
+                $families[$i]['fontFace'] = $kept;
+            }
+        }
+        $theme['settings']['typography']['fontFamilies'] = $families;
+        return [$theme, $warnings];
+    }
+
+    /**
+     * Remove every resource-loading form from theme.json custom CSS.
+     *
+     * WordPress trusts theme-origin CSS: a `css` string under `styles` ships
+     * to every visitor exactly as written, with no kses pass and no core
+     * sanitizer. This was the one CSS sink the build never scrubbed.
+     * PageStylesStep and CustomMotionStep both refuse `@import` and `url()`,
+     * but a model-authored `@import url(https://…)` or `background:
+     * url(https://…)` in theme.json shipped verbatim. That is a beacon and a
+     * third-party dependency the site never asked for (BIGR-969).
+     *
+     * Three rungs, smallest unit first. CssScrub removes `@import` statements
+     * and declarations that reference an external authority. CssChecks then
+     * drops any remaining declaration whose value uses a resource-loading
+     * function, relative and data: URLs included, which matches the
+     * page-styles policy. When a loading form still survives both (an
+     * unparseable region, an at-rule prelude), the whole string is removed
+     * rather than delivered unreviewed. Every removal is recorded durably.
+     *
+     * Every `css` string under `styles` is walked, at any depth, so a rule
+     * nested in a block, element, or variation style is scrubbed too.
+     *
+     * Pure — unit-testable.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>} theme, warnings
+     */
+    public static function removeResourceLoadingCustomCss(array $theme): array
+    {
+        if (!is_array($theme['styles'] ?? null)) {
+            return [$theme, []];
+        }
+
+        $warnings = [];
+        $remove = static function (array $node, string $path) use (&$remove, &$warnings): array {
+            foreach ($node as $key => $value) {
+                if ($key === 'css' && is_string($value)) {
+                    $node[$key] = self::scrubResourceLoadingCss($value, "{$path}.css", $warnings);
+                    continue;
+                }
+                if (is_array($value)) {
+                    $node[$key] = $remove($value, $path . '.' . $key);
+                }
+            }
+            return $node;
+        };
+        $theme['styles'] = $remove($theme['styles'], 'styles');
+        return [$theme, $warnings];
+    }
+
+    /**
+     * One custom CSS string, scrubbed of every resource-loading form.
+     *
+     * @param list<string> $warnings
+     */
+    private static function scrubResourceLoadingCss(string $css, string $location, array &$warnings): string
+    {
+        $scrubbed = CssScrub::scrub($css);
+        foreach ($scrubbed['removals'] as $removal) {
+            $warnings[] = "theme/theme.json {$location}: authored "
+                . Warnings::value($removal['authored_value'])
+                . "; delivered {$removal['delivered_value']}; disposition {$removal['disposition']}";
+        }
+
+        [$repaired, $dropped] = CssChecks::dropDeclarations(
+            $scrubbed['css'],
+            static fn (array $declaration): bool =>
+                CssChecks::resourceLoadingProblem($declaration['value']) !== null,
+        );
+        foreach ($dropped as $declaration) {
+            $warnings[] = "theme/theme.json {$location}: authored declaration "
+                . Warnings::value(trim($declaration['raw']))
+                . '; delivered removed; disposition removed a resource-loading CSS value'
+                . ' — theme.json custom CSS may not fetch images, fonts, or stylesheets';
+        }
+
+        // The fallback judges comment-free CSS: a comment that mentions
+        // url() loads nothing, and losing the whole string for it would cut
+        // far above the smallest harmful unit.
+        if (CssChecks::resourceLoadingProblem(CssChecks::withoutComments($repaired)) !== null) {
+            $warnings[] = "theme/theme.json {$location}: authored " . Warnings::value($css)
+                . '; delivered removed; disposition removed the whole custom CSS string'
+                . ' — a resource-loading form survived declaration-level removal';
+            return '';
+        }
+        return $repaired;
     }
 
     /**
