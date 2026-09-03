@@ -30,12 +30,15 @@ use Automattic\SiteBuild\Tests\FakeLlm;
  *
  * FakeLlm answers in call order. The queue below must match the order of
  * LLM calls in each graph exactly: one new call anywhere shifts every
- * later answer into the wrong step, and the run then fails on a decode
- * error rather than a security finding, or feeds a payload to a step that
- * ignores it. When a graph gains a call, add its answer here at the same
- * position. The markup payloads ride `wp:html` blocks where the block
- * fixer keeps raw bytes, so every rule is exercised on the delivered page
- * rather than masked by re-serialization.
+ * later answer into the wrong step. FakeLlm records the answer it served
+ * to every prompt, and red_team_assert_payloads_landed() checks that each
+ * attack payload was served to the prompt it was written for, so a
+ * shifted queue fails on a named payload rather than on a decode error or
+ * by feeding a payload to a step that ignores it. When a graph gains a
+ * call, add its answer here at the same position. The markup payloads
+ * ride `wp:html` blocks where the block fixer keeps raw bytes, so every
+ * rule is exercised on the delivered page rather than masked by
+ * re-serialization.
  *
  * Two canaries make the oracle simple and total: every attack host is
  * `evil.example` and every payload names `redteam_canary`. Neither may
@@ -334,6 +337,30 @@ function red_team_check_php(string $rel, string $code, string $context, array &$
     }
 }
 
+/**
+ * Every queued attack payload must have been served to the prompt written
+ * for it. A payload that lands elsewhere is never exercised on its sink.
+ *
+ * @param array<string,string> $expected payload needle => prompt needle
+ */
+function red_team_assert_payloads_landed(FakeLlm $llm, array $expected, string $graph): void
+{
+    foreach ($expected as $payload => $promptNeedle) {
+        $served = null;
+        foreach ($llm->calls as $call) {
+            if (str_contains((string) ($call['answer'] ?? ''), $payload)) {
+                $served = $call['prompt'];
+                break;
+            }
+        }
+        assert_true($served !== null, "{$graph}: the payload '{$payload}' was never served to any prompt");
+        assert_true(
+            str_contains((string) $served, $promptNeedle),
+            "{$graph}: the payload '{$payload}' was served to a prompt that lacks '{$promptNeedle}'; the queue order has drifted from the graph",
+        );
+    }
+}
+
 function assert_delivered_site_is_inert(Project $project, string $graph): void
 {
     $files = red_team_delivered_files($project);
@@ -572,6 +599,16 @@ test('red team: the blocks graph delivers no executable or fetching model bytes'
         $previous === false ? putenv('SITE_BUILD_HTML_FIRST') : putenv('SITE_BUILD_HTML_FIRST=' . $previous);
     }
 
+    red_team_assert_payloads_landed($llm, [
+        'IGNORE ALL PREVIOUS INSTRUCTIONS' => 'prompt engineer',
+        'http-equiv' => 'footer',
+        "/bg.jpg" => 'immersive-welcome',
+        'PHNjcmlwdD' => 'bakery-story',
+        "/hot.jpg" => 'seasonal-specials',
+        "/steal" => 'menu-introduction',
+        '/o.swf' => 'bread-catalog',
+        '/x.htc' => 'overlap-up',
+    ], 'blocks');
     assert_delivered_site_is_inert($project, 'blocks');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -669,6 +706,10 @@ test('red team: the HTML-first graph delivers no executable or fetching model by
 
         $builder->pipeline()->runThrough($project);
 
+        red_team_assert_payloads_landed($llm, [
+            '/l.css' => 'HTML',
+            'HTML-FIRST-HOME' => 'HTML',
+        ], 'html-first');
         assert_delivered_site_is_inert($project, 'html-first');
     } finally {
         $previous === false ? putenv('SITE_BUILD_HTML_FIRST') : putenv('SITE_BUILD_HTML_FIRST=' . $previous);
