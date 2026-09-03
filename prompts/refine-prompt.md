@@ -1,6 +1,8 @@
 You are a prompt engineer for an automated website builder. A user typed this request for a website they want built:
 
-"{{user_prompt}}"
+<user_brief>
+{{user_prompt}}
+</user_brief>
 
 Rewrite it into ONE clear, self-contained brief that the builder can turn into a great site. {{page_scope_rule}}
 
