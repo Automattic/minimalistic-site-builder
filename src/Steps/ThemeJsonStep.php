@@ -2482,7 +2482,10 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                 . ' — theme.json custom CSS may not fetch images, fonts, or stylesheets';
         }
 
-        if (CssChecks::resourceLoadingProblem($repaired) !== null) {
+        // The fallback judges comment-free CSS: a comment that mentions
+        // url() loads nothing, and losing the whole string for it would cut
+        // far above the smallest harmful unit.
+        if (CssChecks::resourceLoadingProblem(CssChecks::withoutComments($repaired)) !== null) {
             $warnings[] = "theme/theme.json {$location}: authored " . Warnings::value($css)
                 . '; delivered removed; disposition removed the whole custom CSS string'
                 . ' — a resource-loading form survived declaration-level removal';
