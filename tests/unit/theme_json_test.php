@@ -3863,6 +3863,24 @@ test('theme-json never ships a resource-loading custom CSS value', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('theme-json custom CSS keeps a comment that mentions url() and cuts a string that spells it', function () {
+    $theme = ['styles' => [
+        'css' => "/* the hero image comes from markup, not url() */\n.band { color: red }",
+        'blocks' => ['core/group' => ['css' => '.x::before { content: "url("; color: blue }']],
+    ]];
+    [$scrubbed, $warnings] = ThemeJsonStep::removeResourceLoadingCustomCss($theme);
+    assert_contains('url()', $scrubbed['styles']['css'], 'the comment stays');
+    assert_contains('color: red', $scrubbed['styles']['css']);
+    $group = $scrubbed['styles']['blocks']['core/group']['css'];
+    assert_true(!str_contains($group, 'content'), 'the one declaration that spells url( is cut');
+    assert_contains('color: blue', $group, 'its sibling stays');
+    assert_eq(1, count($warnings), implode(' | ', $warnings));
+    assert_contains('styles.blocks.core/group.css', $warnings[0]);
+    [$again, $more] = ThemeJsonStep::removeResourceLoadingCustomCss($scrubbed);
+    assert_eq($scrubbed, $again, 'fixed point');
+    assert_eq([], $more);
+});
+
 test('removeForeignFontFaces keeps only bundled sources and drops faces that fetch', function () {
     $authored = ['settings' => ['typography' => ['fontFamilies' => [
         ['slug' => 'heading', 'fontFamily' => 'Literata, serif', 'name' => 'Heading', 'fontFace' => [

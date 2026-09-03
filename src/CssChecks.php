@@ -108,10 +108,13 @@ final class CssChecks
     }
 
     /**
-     * A `url()` that names one of the build's own image placeholders. The
-     * pipeline writes exactly this form (CollectImagesStep, AssemblePagesStep)
-     * for a cover's `background-image`, and the seeder resolves it to the
-     * site's own upload; nothing else may appear inside the parentheses.
+     * A `url()` that names one of the build's own image placeholders, the
+     * `theme:./assets/<name>.jpg|png` form the image pipeline assigns
+     * (CollectImagesStep, AssignImageSourcesStep). No step writes it into an
+     * inline style itself; the allowance exists so a model-authored cover
+     * that carries the placeholder as a `background-image` keeps it, and the
+     * seeder resolves it to the site's own upload. Nothing else may appear
+     * inside the parentheses.
      */
     public const THEME_ASSET_URL_PATTERN =
         '/url\(\s*(["\']?)theme:\.\/assets\/[a-z0-9-]+\.(?:jpe?g|png)\1\s*\)/i';
@@ -1941,7 +1944,8 @@ final class CssChecks
         return $i;
     }
 
-    private static function withoutComments(string $css): string
+    /** The CSS with every comment removed; a comment never loads anything. */
+    public static function withoutComments(string $css): string
     {
         return (string) preg_replace('~/\*.*?\*/~s', '', $css);
     }

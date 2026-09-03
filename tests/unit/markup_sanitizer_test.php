@@ -478,6 +478,42 @@ test('sanitize judges media sources decoded and with control characters stripped
     }
 });
 
+test('sanitize removes the fetch forms browsers still honor beyond img and video', function () {
+    // Backslashes read as slashes in a special-scheme URL; SVG image/use fetch
+    // through href; the legacy background attribute still maps to
+    // background-image; a body <link> loads a stylesheet or a prefetch; and
+    // any block's style.background.backgroundImage.url renders from the JSON.
+    $notes = [];
+    $out = MarkupSanitizer::sanitize(
+        '<img src="\\\\evil.example/a.png" alt="a"><img src="/\\evil.example/b.png">'
+        . '<svg><image href="https://evil.example/i.png"/><use xlink:href="//evil.example/s.svg#a"/><use href="#local"/></svg>'
+        . '<table background="https://evil.example/t.png"><tr><td background="//evil.example/c.png">x</td></tr></table>'
+        . '<link rel="stylesheet" href="https://evil.example/l.css"><p>after</p>'
+        . '<!-- wp:group {"style":{"background":{"backgroundImage":{"url":"https://evil.example/g.png","id":5}}},"layout":{"type":"constrained"}} --><div class="wp-block-group"></div><!-- /wp:group -->'
+        . '<!-- wp:cover {"url":"\\\\\\\\evil.example\/bg.jpg","id":1} --><div></div><!-- /wp:cover -->',
+        $notes,
+    );
+    assert_true(!str_contains($out, 'evil.example'), "a foreign host survived: {$out}");
+    assert_contains('<img alt="a"><img>', $out);
+    assert_contains('<svg><image/><use/><use href="#local"/></svg>', $out, 'a same-document use stays');
+    assert_contains('<table><tr><td>x</td></tr></table>', $out);
+    assert_true(!str_contains($out, '<link'), 'the link element goes');
+    assert_contains('<p>after</p>', $out);
+    assert_contains('{"style":{"background":{"backgroundImage":{"id":5}}},"layout":{"type":"constrained"}}', $out, 'the group keeps every other key');
+    assert_contains('<!-- wp:cover {"id":1} -->', $out);
+    assert_eq($out, MarkupSanitizer::sanitize($out), 'fixed point');
+    $joined = implode(' | ', $notes);
+    assert_contains('removed 6 media source attribute(s) on a foreign host', $joined);
+    assert_contains('removed 2 block attribute media source(s) on a foreign host', $joined);
+});
+
+test('sanitize keeps a theme asset in a block background image and the JSON valid', function () {
+    $html = '<!-- wp:group {"style":{"background":{"backgroundImage":{"url":"theme:./assets/g.png","source":"file"}}}} --><div></div><!-- /wp:group -->';
+    assert_eq($html, MarkupSanitizer::sanitize($html));
+    $out = MarkupSanitizer::sanitize('<!-- wp:group {"style":{"background":{"backgroundImage":{"url":"https://evil.example/g.png"}}}} --><div></div><!-- /wp:group -->');
+    assert_contains('<!-- wp:group {"style":{"background":{"backgroundImage":{}}}} -->', $out, 'a lone url leaves an empty object');
+});
+
 test('design sanitizer removes a media source on a foreign host with its own disposition', function () {
     $warnings = [];
     $out = \Automattic\SiteBuild\DesignMarkupSanitizer::sanitize(
@@ -485,12 +521,18 @@ test('design sanitizer removes a media source on a foreign host with its own dis
         . '<img src="https://evil.example/hot.jpg" alt="AI_IMAGE: oven | hero | photo | landscape">'
         . '<img src="/a.jpg" alt="kept">'
         . '<video poster="//evil.example/p.jpg"></video>'
+        . '<img src="\\\\evil.example/bs.png" alt="bs">'
+        . '<svg><image href="https://evil.example/i.png"/></svg>'
+        . '<table><tr><td background="//evil.example/c.png">x</td></tr></table>'
         . '</body></html>',
         'design/home.html',
         'test',
         $warnings,
     );
-    assert_true(!str_contains($out, 'evil.example'), 'no foreign host survives');
+    assert_true(!str_contains($out, 'evil.example'), "no foreign host survives: {$out}");
+    assert_contains('<img alt="bs">', $out);
+    assert_true(!str_contains($out, '<image'), 'the design engine drops the svg whole');
+    assert_contains('<td>x</td>', $out);
     assert_contains('<img alt="AI_IMAGE: oven | hero | photo | landscape">', $out, 'the alt stays for the image pipeline');
     assert_contains('<img src="/a.jpg" alt="kept">', $out);
     assert_contains('disposition removed media source on a foreign host', implode(' ', $warnings));

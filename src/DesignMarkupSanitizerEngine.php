@@ -861,8 +861,14 @@ final class DesignMarkupSanitizerEngine
                 $unsafe = !self::isSafeUrlAttribute($name, $attribute['value']);
             }
             if (!$unsafe
-                && in_array($name, ['src', 'srcset', 'poster'], true)
-                && in_array(strtolower($token['name']), ['img', 'source', 'video', 'audio', 'track', 'picture', 'input'], true)
+                && in_array($name, ['src', 'srcset', 'poster', 'href', 'xlink:href', 'background'], true)
+                && in_array(strtolower($token['name']), [
+                    'img', 'source', 'video', 'audio', 'track', 'picture', 'input',
+                    // SVG elements fetch through href / xlink:href.
+                    'image', 'use', 'feimage',
+                    // The legacy `background` attribute still maps to background-image.
+                    'body', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th',
+                ], true)
                 && self::isForeignSource($name, self::decodedAttributeValue(self::unquoted($attribute['value'])))
             ) {
                 // The build generates every image itself, and
@@ -944,6 +950,8 @@ final class DesignMarkupSanitizerEngine
             : [$decoded];
         foreach ($candidates as $candidate) {
             $stripped = (string) preg_replace('/[\x00-\x20\x7f]+/u', '', $candidate);
+            // A browser reads `\` as `/` in a special-scheme URL.
+            $stripped = str_replace('\\', '/', $stripped);
             if (preg_match('#\A(?:[a-z][a-z0-9+.\-]*:)?//#i', $stripped) === 1
                 || preg_match('#\A(?:https?|ftp):#i', $stripped) === 1
             ) {

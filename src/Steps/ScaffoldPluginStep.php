@@ -549,7 +549,14 @@ final class ScaffoldPluginStep implements Step
             $media = array(
                 'IMG' => true, 'SOURCE' => true, 'VIDEO' => true, 'AUDIO' => true,
                 'TRACK' => true, 'PICTURE' => true, 'INPUT' => true,
+                // SVG elements fetch through href / xlink:href.
+                'IMAGE' => true, 'USE' => true, 'FEIMAGE' => true,
+                // The legacy `background` attribute still maps to
+                // background-image on these elements.
+                'BODY' => true, 'TABLE' => true, 'THEAD' => true, 'TBODY' => true,
+                'TFOOT' => true, 'TR' => true, 'TD' => true, 'TH' => true,
             );
+            $media_sources = array('src', 'srcset', 'poster', 'href', 'xlink:href', 'background');
             // Core's canonical URI-attribute list (18 entries, including
             // poster/cite/background/longdesc) plus the SVG spelling it omits.
             $urls = array_merge(wp_kses_uri_attributes(), array('xlink:href'));
@@ -607,7 +614,7 @@ final class ScaffoldPluginStep implements Step
                     // site's own paths and the build's theme:./assets/
                     // placeholders are legitimate here (BIGR-975).
                     if (isset($media[$tag])) {
-                        foreach (array('src', 'srcset', 'poster') as $name) {
+                        foreach ($media_sources as $name) {
                             $value = $processor->get_attribute($name);
                             if (is_string($value) && {{FN_PREFIX}}_content_source_is_foreign($name, $value)) {
                                 $processor->remove_attribute($name);
@@ -630,6 +637,14 @@ final class ScaffoldPluginStep implements Step
                     if ($tag === 'BASE') {
                         $processor->remove_attribute('href');
                         $processor->remove_attribute('target');
+                    }
+                    if ($tag === 'LINK') {
+                        // A stylesheet, icon, or prefetch from a model-chosen
+                        // host. The Tag Processor cannot drop the node, so
+                        // it stays with nothing to load.
+                        $processor->remove_attribute('href');
+                        $processor->remove_attribute('imagesrcset');
+                        $processor->remove_attribute('rel');
                     }
                     if ($tag === 'META') {
                         // http-equiv="refresh" redirects every visitor to a
@@ -791,6 +806,8 @@ final class ScaffoldPluginStep implements Step
             }
             foreach ($candidates as $candidate) {
                 $stripped = (string) preg_replace('/[\x00-\x20\x7F]+/', '', $candidate);
+                // A browser reads `\` as `/` in a special-scheme URL.
+                $stripped = str_replace('\\', '/', $stripped);
                 if (preg_match('#\A(?:[a-z][a-z0-9+.\-]*:)?//#i', $stripped) === 1
                     || preg_match('#\A(?:https?|ftp):#i', $stripped) === 1
                 ) {
@@ -808,7 +825,10 @@ final class ScaffoldPluginStep implements Step
          * position goes with the comma that follows.
          */
         function {{FN_PREFIX}}_content_neutralize_block_media($content) {
-            $foreign = '"((?:[a-zA-Z][a-zA-Z0-9+.\-]*:)?\\\\?\/\\\\?\/(?:[^"\\\\]|\\\\.)*)"';
+            // One authority slash in JSON is `/`, `\/`, or the escaped
+            // backslash `\\` a browser reads as a slash.
+            $slash = '(?:\\\\?\/|\\\\\\\\)';
+            $foreign = '"((?:[a-zA-Z][a-zA-Z0-9+.\-]*:)?' . $slash . $slash . '(?:[^"\\\\]|\\\\.)*)"';
             $key = '"(?:url|src|poster|mediaUrl)"';
             $result = preg_replace_callback(
                 '/<!--\s*wp:(?:core\/)?(?:cover|image|video|audio|media-text|gallery)\s+\{.*?\}\s*\/?-->/s',
@@ -817,6 +837,25 @@ final class ScaffoldPluginStep implements Step
                     $comment = (string) preg_replace('/,\s*' . $key . '\s*:\s*' . $foreign . '/', '', $comment);
                     $comment = (string) preg_replace('/' . $key . '\s*:\s*' . $foreign . '\s*,?/', '', $comment);
                     return $comment;
+                },
+                $content
+            );
+            $content = $result === null ? $content : $result;
+
+            // Any block may carry style.background.backgroundImage.url, and
+            // WordPress renders it as background-image from the JSON.
+            $result = preg_replace_callback(
+                '/<!--\s*wp:[a-zA-Z0-9\/-]+\s+\{.*?\}\s*\/?-->/s',
+                function ($match) use ($foreign) {
+                    $replaced = preg_replace_callback(
+                        '/"backgroundImage"\s*:\s*\{[^{}]*\}/',
+                        function ($object) use ($foreign) {
+                            $inner = (string) preg_replace('/,\s*"url"\s*:\s*' . $foreign . '/', '', $object[0]);
+                            return (string) preg_replace('/"url"\s*:\s*' . $foreign . '\s*,?/', '', $inner);
+                        },
+                        $match[0]
+                    );
+                    return $replaced === null ? $match[0] : $replaced;
                 },
                 $content
             );
