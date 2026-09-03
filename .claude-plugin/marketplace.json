@@ -1,0 +1,13 @@
+{
+  "name": "site-builder",
+  "owner": {
+    "name": "Matthew Batchelder",
+    "email": "borkweb@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "site-builder",
+      "source": "./"
+    }
+  ]
+}

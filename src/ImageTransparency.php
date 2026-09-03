@@ -241,11 +241,13 @@ final class ImageTransparency
         try {
             $im = new \Imagick();
             $im->readImageBlob($pngBytes);
-            $canvas = new \Imagick();
-            $canvas->newImage($im->getImageWidth(), $im->getImageHeight(), new \ImagickPixel($hex));
-            $canvas->setImageFormat('png');
-            $canvas->compositeImage($im, \Imagick::COMPOSITE_COPYOPACITY, 0, 0);
-            return $canvas->getImageBlob();
+            // COPYOPACITY is not portable here: some ImageMagick builds copy
+            // the source intensity rather than its alpha channel, making red
+            // ink only ~21% opaque. A full colorize replaces RGB while leaving
+            // the existing alpha mask byte-for-byte in place.
+            $im->colorizeImage(new \ImagickPixel($hex), new \ImagickPixel('white'));
+            $im->setImageFormat('png');
+            return $im->getImageBlob();
         } catch (\Throwable) {
             return $pngBytes;
         }

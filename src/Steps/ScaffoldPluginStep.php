@@ -269,7 +269,14 @@ final class ScaffoldPluginStep implements Step
                 $content = {{FN_PREFIX}}_content_sanitize($content, "page '{$slug}'");
 
                 $parent_slug = isset($page['parent']) ? (string) $page['parent'] : '';
-                $id = wp_insert_post(array(
+                // wp_insert_post() expects slashed data: it runs wp_unslash()
+                // before the database write. Without wp_slash() the \u002d\u002d
+                // escapes that block comments use for `--` (double dash) in attribute values
+                // (e.g. fontSize "min(var(--wp--preset--font-size--display), 88px)")
+                // lose their backslashes, the stored attribute reads "u002du002d",
+                // and the editor fails block validation against the untouched
+                // inner HTML, which keeps the literal `--`.
+                $id = wp_insert_post(wp_slash(array(
                     'post_type'    => 'page',
                     'post_status'  => 'publish',
                     'post_title'   => isset($page['title']) && $page['title'] !== '' ? (string) $page['title'] : $slug,
@@ -282,7 +289,7 @@ final class ScaffoldPluginStep implements Step
                     // Marks seeder-created content so analytics can tell these
                     // publishes from the site owner's.
                     'meta_input'   => array('_wpcom_ai_generated_post' => '1'),
-                ), true);
+                )), true);
                 if (is_wp_error($id) || !$id) {
                     continue;
                 }
@@ -371,12 +378,15 @@ final class ScaffoldPluginStep implements Step
                 }
 
                 $type = wp_check_filetype($upload['file']);
-                $attachment_id = wp_insert_attachment(array(
+                // wp_insert_attachment() routes through wp_insert_post(), so it
+                // expects slashed data too; a backslash in an images.json title
+                // would otherwise be eaten by the unslash inside core.
+                $attachment_id = wp_insert_attachment(wp_slash(array(
                     'post_mime_type' => !empty($type['type']) ? (string) $type['type'] : 'image/jpeg',
                     'post_title'     => isset($image['title']) && $image['title'] !== '' ? (string) $image['title'] : $filename,
                     'post_status'    => 'inherit',
                     'meta_input'     => array('_wpcom_ai_generated_post' => '1'),
-                ), $upload['file']);
+                )), $upload['file']);
                 if (is_wp_error($attachment_id) || !$attachment_id) {
                     continue;
                 }

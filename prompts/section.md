@@ -105,15 +105,22 @@ Motion classes (optional) — semantic hover, scroll, and ambient presets whose 
 - `reveal-up` — like `reveal` but with a longer rise, for a band that should arrive with presence.
 - `reveal-fade` — pure fade, no movement; for quiet, editorial content.
 - `reveal-scale` — fades in while settling down from a slight zoom; suits imagery and framed cards.
+- `reveal-blur` — fades in while it sharpens from a soft blur, with no travel; for a display heading or imagery that should arrive with quiet weight.
+- `reveal-wipe` — the content is unmasked top-to-bottom in place, with no travel; a cinematic entrance for full-bleed imagery or a strong heading.
+- `reveal-wipe-up` — the content is unmasked bottom-to-top in place, with no travel; an editorial, print-like entrance for framed imagery or a rule-led band.
+- `reveal-aperture` — the mask opens from the vertical center to both edges, with no travel; a letterbox entrance for wide imagery and gallery bands.
+- `reveal-zoom` — fades in while settling down from a slight enlargement (the inverse of `reveal-scale`); suits photography, covers, and full-bleed media.
 - `stagger-children` — ONLY on a container (`wp:columns`, `wp:gallery`, or a card-grid group) whose direct children are cards/columns: the children cascade in one by one. Each child waits for its own viewport entry, so this also works when a row stacks on mobile. Never combine with a `reveal-*` class on the same block.
 - `ken-burns` — AMBIENT: on a `wp:cover` or image figure — its image zooms very slowly.
 - `gradient-shift` — AMBIENT: on a group whose background is a gradient — the gradient drifts slowly.
 - `ambient-drift` — AMBIENT: on ONE small decorative element (never a text band) — a slow vertical float.
 
 Profile choreography — let the chosen profile affect WHICH effects you reach for, not just their timing. Follow the DESIGN DIRECTION's motion note when it is more specific:
-- `calm`: favor sparse `reveal-fade`/`reveal` entrances and quiet image motion; the kit renders them as soft fades and gentle settles. Use stagger only when the sequence matters.
-- `energetic`: favor `stagger-children`, `reveal-up`, and hover responses; the kit renders entrances with diagonal travel and spring overshoot. For a focal ambient effect consider `ambient-drift` or `gradient-shift` instead of defaulting to an image zoom.
-- `dramatic`: favor `reveal-up`/`reveal-scale` and at most one cinematic `ken-burns` or `gradient-shift` focal effect; the kit renders them with directional masks and a focused reveal.
+- `calm`: favor sparse `reveal-fade`/`reveal`/`reveal-blur` entrances and quiet image motion; the kit renders them as soft fades and gentle settles. Use stagger only when the sequence matters.
+- `energetic`: favor `stagger-children`, `reveal-up`, and hover responses; the kit renders entrances as quick vertical arrivals with a crisp, smooth settle — speed carries the energy. For a focal ambient effect consider `ambient-drift` or `gradient-shift` instead of defaulting to an image zoom.
+- `dramatic`: favor `reveal-wipe`/`reveal-up`/`reveal-blur` and at most one cinematic `ken-burns` or `gradient-shift` focal effect; the kit renders them with vertical masks and a soft-focus reveal.
+All kit movement is vertical: an entrance rises, unmasks, sharpens, or settles in place — nothing moves sideways. Vary the entrances down the page: neighboring sections should not repeat the same `reveal-*` class when a different one fits their content.
+Match the entrance to the site's visual world, not just to the profile: a print/editorial direction suits `reveal-wipe`/`reveal-wipe-up` and `reveal-fade`; a photographic or gallery direction suits `reveal-zoom`, `reveal-blur`, and `reveal-aperture`; a quiet product or text-led direction suits `reveal`/`reveal-fade`; a lively brand suits `reveal-up` with `stagger-children`. When the DESIGN DIRECTION's motion note names classes, treat that named set as the site's motion palette and choose from it first.
 The budget is a ceiling, not a quota; zero motion classes is valid when the composition already has enough presence.
 
 Motion budget (hard rules — a deterministic build step strips violations, so overspending just wastes your choices):

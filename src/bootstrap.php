@@ -9,15 +9,19 @@ declare(strict_types=1);
 use Automattic\SiteBuild\AnthropicClient;
 use Automattic\SiteBuild\BlockFixers;
 use Automattic\SiteBuild\Env;
+use Automattic\SiteBuild\HarnessCliLlm;
 use Automattic\SiteBuild\ImageClient;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\ModelConfig;
+use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\OpenAiCompatibleClient;
 use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\SiteBuilder;
 use Automattic\SiteBuild\StepDefaults;
 use Automattic\SiteBuild\Steps\GenerateImagesStep;
+use Automattic\SiteBuild\TransportResolver;
+use Automattic\SiteBuild\TransportUnavailable;
 use Automattic\SiteBuild\WpcomImageClient;
 
 require_once dirname(__DIR__) . '/autoload.php';
@@ -101,15 +105,27 @@ function normalize_provider(?string $provider): ?string
     return $provider;
 }
 
-/** Prefer OpenRouter's canonical key name while accepting the earlier alias. */
-function openrouter_api_key(): string
+/** @return array{variable:string,value:string}|null */
+function openrouter_api_credential(): ?array
 {
     foreach (['OPENROUTER_API_KEY', 'OPEN_ROUTER_API_KEY'] as $key) {
         $value = Env::get($key);
         if ($value !== null && trim($value) !== '') {
-            return trim($value);
+            return ['variable' => $key, 'value' => trim($value)];
         }
     }
+
+    return null;
+}
+
+/** Prefer OpenRouter's canonical key name while accepting the earlier alias. */
+function openrouter_api_key(): string
+{
+    $credential = openrouter_api_credential();
+    if ($credential !== null) {
+        return $credential['value'];
+    }
+
     return Env::getRequired('OPENROUTER_API_KEY');
 }
 
@@ -129,30 +145,35 @@ function openrouter_api_key(): string
  * overridable per step via LLM_MODEL_* — so `--provider=openai` swaps the whole
  * model set without extra flags.
  */
-function make_llm(): Llm
+function make_llm(?string $provider = null): Llm
 {
-    $provider = strtolower((string) Env::get('LLM_PROVIDER', ModelConfig::defaultProvider()));
+    $providerWasExplicit = $provider !== null;
+    $provider = strtolower((string) ($provider ?? Env::get('LLM_PROVIDER', ModelConfig::defaultProvider())));
+    $modelProvider = $provider === 'grok' ? 'xai' : $provider;
+    $model = $providerWasExplicit
+        ? Env::get('LLM_MODEL') ?? ModelConfig::tierModel($modelProvider, 'large')
+        : default_llm_model();
 
     return match ($provider) {
         'anthropic', '' => new AnthropicClient(
             apiKey: Env::getRequired('ANTHROPIC_API_KEY'),
-            model:  default_llm_model(),
+            model:  $model,
         ),
         'xai', 'grok' => new OpenAiCompatibleClient(
             apiKey:   Env::getRequired('XAI_API_KEY'),
-            model:    default_llm_model(),
+            model:    $model,
             baseUrl:  Env::get('OPENAI_BASE_URL', 'https://api.x.ai/v1'),
             provider: 'xai',
         ),
         'openai', 'openai-compatible' => new OpenAiCompatibleClient(
             apiKey:   Env::getRequired('OPENAI_API_KEY'),
-            model:    default_llm_model(),
+            model:    $model,
             baseUrl:  Env::get('OPENAI_BASE_URL', 'https://api.openai.com/v1'),
             provider: 'openai',
         ),
         'openrouter' => new OpenAiCompatibleClient(
             apiKey:   openrouter_api_key(),
-            model:    default_llm_model(),
+            model:    $model,
             baseUrl:  'https://openrouter.ai/api/v1',
             provider: 'openrouter',
             // Kimi K3 currently defaults to maximum-effort reasoning. Those
@@ -194,6 +215,113 @@ function make_llm(): Llm
 }
 
 /**
+ * Resolve, disclose, and construct the production LLM transport.
+ *
+ * Credential values are overlaid through Env::get() so the pure resolver sees
+ * the same process-or-.env configuration that make_llm() will use.
+ */
+function resolve_llm(): Llm
+{
+    $env = getenv();
+    $env = is_array($env) ? $env : [];
+
+    $configuredProvider = Env::get('LLM_PROVIDER');
+    if ($configuredProvider !== null && trim($configuredProvider) !== '') {
+        $env['LLM_PROVIDER'] = $configuredProvider;
+    } else {
+        unset($env['LLM_PROVIDER']);
+    }
+
+    foreach (ModelConfig::providerNames() as $provider) {
+        $variable = TransportResolver::credentialVariableFor($provider);
+        if ($variable === null) {
+            continue;
+        }
+        $value = Env::get($variable);
+        if ($value !== null && trim($value) !== '') {
+            $env[$variable] = $value;
+        } else {
+            unset($env[$variable]);
+        }
+    }
+    $openrouterCredential = openrouter_api_credential();
+    if ($openrouterCredential !== null) {
+        $env[$openrouterCredential['variable']] = $openrouterCredential['value'];
+    }
+
+    $choice = TransportResolver::decide(
+        $env,
+        static fn (string $binary): ?string => TransportResolver::binaryPath($binary),
+        static fn (): array => TransportResolver::ancestry(),
+        ModelConfig::defaultProvider(),
+    );
+
+    $harnessProvider = match ($choice->kind) {
+        \Automattic\SiteBuild\TransportChoice::KIND_CLAUDE_CLI => 'anthropic',
+        \Automattic\SiteBuild\TransportChoice::KIND_CODEX_CLI => 'openai',
+        \Automattic\SiteBuild\TransportChoice::KIND_GROK_CLI => 'xai',
+        default => null,
+    };
+    if ($harnessProvider !== null) {
+        // CLI-host decisions about provider or credential configuration must
+        // use Env::get(), never raw getenv(), so .env and execution agree.
+        $explicitProvider = $configuredProvider;
+        if ($explicitProvider !== null && trim($explicitProvider) !== '') {
+            $explicitCredential = TransportResolver::credentialVariableFor($explicitProvider);
+            $harnessCredential = TransportResolver::credentialVariableFor($harnessProvider);
+            if ($explicitCredential !== $harnessCredential) {
+                throw new TransportUnavailable(
+                    "Transport {$choice->kind} requires provider {$harnessProvider}, "
+                    . "but explicit LLM_PROVIDER={$explicitProvider} disagrees."
+                );
+            }
+        }
+        putenv("LLM_PROVIDER={$harnessProvider}");
+    }
+    $harnessConcurrency = $harnessProvider === null
+        ? HarnessCliLlm::DEFAULT_CONCURRENCY
+        : harness_concurrency_cap();
+    Narrator::write(TransportResolver::describe($choice) . "\n");
+
+    return TransportResolver::build(
+        $choice,
+        static function (string $provider): Llm {
+            $variable = TransportResolver::credentialVariableFor($provider);
+            $openrouterCredential = $provider === 'openrouter' ? openrouter_api_credential() : null;
+            $credential = $openrouterCredential['value'] ?? ($variable === null ? null : Env::get($variable));
+            if ($variable !== null && ($credential === null || trim($credential) === '')) {
+                throw new TransportUnavailable(
+                    "Transport api resolved provider {$provider}, but required credential {$variable} is missing. "
+                    . "Set {$variable}, or choose an available harness with SITE_BUILD_LLM."
+                );
+            }
+
+            return make_llm($provider);
+        },
+        default_llm_model(),
+        $harnessConcurrency,
+    );
+}
+
+/** Positive subprocess cap for subscription-backed harness transports. */
+function harness_concurrency_cap(): int
+{
+    $variable = 'SITE_BUILD_HARNESS_CONCURRENCY';
+    $raw = Env::get($variable);
+    if ($raw === null || trim($raw) === '') {
+        return HarnessCliLlm::DEFAULT_CONCURRENCY;
+    }
+
+    $value = filter_var(trim($raw), FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+    if ($value === false) {
+        throw new TransportUnavailable(
+            "{$variable} must be a positive integer; received " . var_export($raw, true) . '.'
+        );
+    }
+    return $value;
+}
+
+/**
  * Build the production SiteBuilder: this package's prompts, the repo's
  * projects/ directory as the output root, the default block fixer and the
  * configured per-step models.
@@ -222,11 +350,16 @@ function make_image_client(): ImageClient
  * Wire the opt-in image-generation step: the Vertex transport, the Llm that
  * rewrites prompts the safety filter rejects, and that repair's model.
  *
- * A null $llm still generates images, minus the prompt repair.
+ * A null $llm still generates images, minus the prompt repair. Callers that
+ * preflight the transport may pass that same client instance for execution.
  */
-function make_generate_images_step(?Llm $llm): GenerateImagesStep
+function make_generate_images_step(?Llm $llm, ?ImageClient $imageClient = null): GenerateImagesStep
 {
-    return new GenerateImagesStep(make_image_client(), $llm, step_models()['image-prompt-repair'] ?? null);
+    return new GenerateImagesStep(
+        $imageClient ?? make_image_client(),
+        $llm,
+        step_models()['image-prompt-repair'] ?? null,
+    );
 }
 
 /** Project root path helper. */

@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\ImageBorderTrim;
 use Automattic\SiteBuild\ImageClient;
 use Automattic\SiteBuild\ImageCrop;
 use Automattic\SiteBuild\ImageLogger;
@@ -692,6 +693,7 @@ final class GenerateImagesStep implements Step
             // than introducing a second conversion path.
             $bytes = (string) $result['bytes'];
             $this->assertDeliveryMime($bytes, $genSpec['mime']);
+            $borderTrimmed = 0;
             if ($genSpec['mime'] === 'image/png') {
                 // The image model cannot render real alpha: the prompt asked for a flat
                 // solid white background instead, keyed out here so the asset
@@ -729,6 +731,15 @@ final class GenerateImagesStep implements Step
                         }
                     }
                 }
+            } else {
+                // Opaque images sometimes arrive as a printed photograph with
+                // a flat white border painted into the pixels (BIGR-956);
+                // prompt wording alone does not stop it, so the border is
+                // detected and cropped off here. A .png asset is exempt: its
+                // white surround is the keyable background requested above.
+                $trim = ImageBorderTrim::trimPaintedBorder($bytes);
+                $borderTrimmed = $trim['trimmed'];
+                $bytes = $trim['bytes'];
             }
             // ImageTransparency fails soft by returning its input. Verify the
             // post-processed bytes as well before choosing the file extension.
@@ -751,10 +762,15 @@ final class GenerateImagesStep implements Step
         $specs[$i]['url']    = $this->servedUrl($project, $filename);
         unset($specs[$i]['error']);
         $resolved[$specs[$i]['src']] = $specs[$i]['url'];
-        Narrator::write("    generated {$filename}\n");
+        Narrator::write(
+            "    generated {$filename}"
+            . ($borderTrimmed > 0 ? " (trimmed a {$borderTrimmed}px painted border)" : '')
+            . "\n"
+        );
         ImageLogger::log($filename, $logRequest, [
             'path'  => 'theme/assets/' . $filename,
             'bytes' => strlen($bytes),
+            'border_trimmed' => $borderTrimmed,
         ]);
     }
 

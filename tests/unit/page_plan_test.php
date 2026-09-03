@@ -725,6 +725,72 @@ test('PagePlanStep::normalize allows a full-bleed cover opening on the front pag
     ], front: false)));
 });
 
+test('PagePlanStep::normalize forces the image background onto a non-opening full-bleed cover', function () {
+    // BIGR-955: the archetype always delivers one wp:cover band, and only a
+    // planned 'image' background makes the rhythm pass run it edge to edge.
+    // Any other surface framed the delivered cover inside a padded solid band.
+    $warnings = [];
+    $repairs = [];
+    $sections = PagePlanStep::normalize([
+        plan_section(),
+        plan_section(['slug' => 'story', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'base']),
+        plan_section(['slug' => 'artist-lineup', 'role' => 'closing', 'layout_archetype' => 'full-bleed-cover', 'background' => 'tinted']),
+    ], true, null, [], $warnings, 'home', $repairs);
+
+    assert_eq('image', $sections[2]['background'], 'the cover band is planned edge to edge');
+    assert_contains('Build correction', $sections[2]['handoff']);
+    assert_contains('"image"', $sections[2]['handoff']);
+    assert_eq(1, count($warnings), 'exactly one durable value-loss row');
+    assert_contains("pages[slug='home'].sections[2].background", $warnings[0]);
+    assert_contains('"tinted"', $warnings[0]);
+    assert_contains('"image"', $warnings[0]);
+    assert_contains('padded solid band', $warnings[0]);
+
+    // The coerced plan is a fixed point: a second pass changes nothing and
+    // records nothing.
+    $againWarnings = [];
+    $againRepairs = [];
+    assert_eq(
+        $sections,
+        PagePlanStep::normalize($sections, true, null, [], $againWarnings, 'home', $againRepairs),
+    );
+    assert_eq([], $againWarnings);
+    assert_eq([], $againRepairs);
+});
+
+test('PagePlanStep::normalize forces the image background on a deeper interior cover too', function () {
+    $warnings = [];
+    $repairs = [];
+    $sections = PagePlanStep::normalize([
+        plan_section(['slug' => 'intro', 'layout_archetype' => 'centered-stack', 'background' => 'tinted']),
+        plan_section(['slug' => 'gallery-band', 'role' => 'closing', 'background' => 'contrast']),
+    ], false, null, [], $warnings, 'about', $repairs);
+
+    assert_eq('image', $sections[1]['background']);
+    assert_contains("pages[slug='about'].sections[1].background", implode("\n", $warnings));
+});
+
+test('PagePlanStep::normalize leaves the projection-owned front opening cover on its solid fallback', function () {
+    // The cover hero recipes review 'contrast' as their no-image fallback
+    // surface; the forced cover/image pairing must not override the
+    // code-owned projection.
+    $projection = [
+        'layout_archetype' => 'full-bleed-cover',
+        'allowed_backgrounds' => ['image', 'contrast'],
+        'default_background' => 'image',
+        'fallback_family' => 'cover',
+    ];
+    $warnings = [];
+    $repairs = [];
+    $sections = PagePlanStep::normalize([
+        plan_section(['background' => 'contrast']),
+        plan_section(['slug' => 'cta', 'role' => 'closing', 'layout_archetype' => 'centered-stack', 'background' => 'base']),
+    ], true, $projection, [], $warnings, 'home', $repairs);
+
+    assert_eq('contrast', $sections[0]['background'], 'the hero recipe projection owns the opening pairing');
+    assert_eq([], $warnings);
+});
+
 test('PagePlanStep::repairVariety demotes an interior page\'s leading full-bleed cover', function () {
     $sections = PagePlanStep::repairVariety([
         plan_section(),
@@ -991,6 +1057,54 @@ test('page-plan writes pages.json with sections per page', function () {
     );
     assert_eq(0, $llm->remaining(), 'every queued page response was consumed');
 
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('page-plan delivery applies surface restraint after settling the footer seam', function () {
+    $tmp = sys_get_temp_dir() . '/builder_pp_surface_restraint_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A restrained bakery']);
+    seed_test_design_direction($project);
+    $project->writeJson('siteSpec.json', plan_spec(['pages' => [
+        ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome', 'children' => []],
+    ]]));
+    $archetypes = [
+        'full-bleed-cover',
+        'centered-stack',
+        'asymmetric-split',
+        'equal-card-grid',
+        'list-with-thumbnails',
+        'centered-stack',
+    ];
+    $backgrounds = ['image', 'tinted', 'contrast', 'tinted', 'image', 'contrast'];
+    $sections = [];
+    foreach ($archetypes as $index => $archetype) {
+        $sections[] = plan_section([
+            'slug' => "section-{$index}",
+            'title' => "Section {$index}",
+            'type' => $index === 0 ? 'hero' : 'content',
+            'layout_archetype' => $archetype,
+            'background' => $backgrounds[$index],
+            'handoff' => 'Sits between its assigned neighbors.',
+        ]);
+    }
+
+    (new PagePlanStep(new FakeLlm(), new PromptRenderer(repo_path('prompts'))))->consume(
+        $project,
+        ['home' => ['sections' => $sections]],
+    );
+
+    $delivered = $project->readJson('pages.json')['pages'][0]['sections'];
+    $nonBase = array_values(array_filter(
+        array_column($delivered, 'background'),
+        static fn (string $background): bool => $background !== 'base',
+    ));
+    assert_true(count($nonBase) <= 2, 'the final artifact, not only the pure helper, obeys the budget');
+    assert_eq('image', $delivered[0]['background'], 'the locked front hero survives delivery restraint');
+    assert_contains(
+        'demoted an excess color band',
+        implode("\n", $project->readJson('warnings.json')['page-plan'] ?? []),
+    );
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
