@@ -250,6 +250,9 @@ $designPreviewDependencyDefects = [
 $designPreviewDeterministicDependencyRemovals = [
     'image data src' => true,
     'image theme src' => true,
+    // The design engine drops an inline style that loads a resource at the
+    // write, so no repair call is spent on it (BIGR-970).
+    'inline style attribute with remote URL' => true,
 ];
 
 foreach ($designPreviewDependencyDefects as $name => $mutate) {
