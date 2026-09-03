@@ -85,7 +85,7 @@ final class FixBlocksStep implements Step
         // former can truthfully describe the file ultimately delivered after
         // rollback.
         $entryShapeChanges = self::shapeChangesInSnapshot($beforeInitialPass, $shape);
-        $entryCtaChanges = self::ctaChangesInSnapshot($beforeInitialPass, $ctaStyle);
+        $entryCtaChanges = self::ctaChangesInSnapshot($beforeInitialPass, $ctaStyle, $project);
         $shapeChanges = [];
         $ctaChanges = [];
         $designCss = $this->htmlFirst && $project->exists('design/site.css')
@@ -811,12 +811,14 @@ final class FixBlocksStep implements Step
 
         $changes = [];
         $excluded = array_fill_keys($excluded, true);
+        $contentSize = self::themeContentSize($project);
+        $wideSize = self::themeWideSize($project);
         foreach ($project->themeFiles() as $rel) {
             if (isset($excluded[$rel])) {
                 continue;
             }
             $markup = $project->readText('theme/' . $rel);
-            $result = CtaStyleMarkup::normalize($markup, $style);
+            $result = CtaStyleMarkup::normalize($markup, $style, $contentSize, $wideSize);
             if ($result['markup'] !== $markup) {
                 $project->writeText('theme/' . $rel, $result['markup']);
             }
@@ -871,17 +873,19 @@ final class FixBlocksStep implements Step
      * @return list<array{file:string,blockPath:string,blockName:string,property:string,
      *     authored:mixed,delivered:mixed,disposition:string}>
      */
-    private static function ctaChangesInSnapshot(array $snapshot, ?string $style): array
+    private static function ctaChangesInSnapshot(array $snapshot, ?string $style, Project $project): array
     {
         if ($style === null) {
             return [];
         }
         $changes = [];
+        $contentSize = self::themeContentSize($project);
+        $wideSize = self::themeWideSize($project);
         foreach ($snapshot as $rel => $markup) {
             if (!str_starts_with($rel, 'parts/') && !str_starts_with($rel, 'templates/')) {
                 continue;
             }
-            foreach (CtaStyleMarkup::normalize($markup, $style)['changes'] as $change) {
+            foreach (CtaStyleMarkup::normalize($markup, $style, $contentSize, $wideSize)['changes'] as $change) {
                 $changes[] = ['file' => $rel] + $change;
             }
         }
@@ -1836,11 +1840,22 @@ final class FixBlocksStep implements Step
     /** theme.json settings.layout.contentSize in px, when parseable. */
     public static function themeContentSize(Project $project): ?float
     {
+        return self::themeLayoutSize($project, 'contentSize');
+    }
+
+    /** theme.json settings.layout.wideSize in px, when parseable. */
+    public static function themeWideSize(Project $project): ?float
+    {
+        return self::themeLayoutSize($project, 'wideSize');
+    }
+
+    private static function themeLayoutSize(Project $project, string $key): ?float
+    {
         $theme = self::readThemeJson($project);
         if ($theme === null) {
             return null;
         }
-        $size = $theme['settings']['layout']['contentSize'] ?? null;
+        $size = $theme['settings']['layout'][$key] ?? null;
         return is_string($size) && preg_match('/^([0-9.]+)px$/', $size, $m) === 1
             ? (float) $m[1]
             : null;

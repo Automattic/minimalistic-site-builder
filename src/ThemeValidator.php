@@ -1172,9 +1172,11 @@ final class ThemeValidator
             }
         }
 
+        $contentSize = Steps\FixBlocksStep::themeContentSize($project);
+        $wideSize = Steps\FixBlocksStep::themeWideSize($project);
         foreach ($project->markupFiles() as $file) {
             $markup = (string) file_get_contents($file);
-            foreach (CtaStyleMarkup::normalize($markup, $style)['changes'] as $change) {
+            foreach (CtaStyleMarkup::normalize($markup, $style, $contentSize, $wideSize)['changes'] as $change) {
                 $warnings[] = 'committed "' . $style . '" CTA local override drift: file='
                     . basename($file) . '; block=' . $change['blockPath']
                     . '; property=' . $change['property']
