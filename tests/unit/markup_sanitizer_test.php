@@ -428,3 +428,64 @@ test('sanitize keeps a cover background that names a theme asset placeholder', f
     assert_eq($html, MarkupSanitizer::sanitize($html, $notes));
     assert_eq([], $notes);
 });
+
+test('sanitize removes media sources on a foreign host and the matching block-JSON keys', function () {
+    $notes = [];
+    $out = MarkupSanitizer::sanitize(
+        '<!-- wp:cover {"dimRatio":50,"url":"https://evil.example/bg.jpg","id":3} -->'
+        . '<div class="wp-block-cover"><img class="wp-block-cover__image-background" src="https://evil.example/bg.jpg" alt="Oven"><span></span></div>'
+        . '<!-- /wp:cover -->'
+        . '<!-- wp:image {"url":"https:\/\/evil.example\/a.jpg"} --><figure><img src="//evil.example/a.jpg" srcset="/a.jpg 1x, https://evil.example/b.jpg 2x" alt="a"></figure><!-- /wp:image -->'
+        . '<!-- wp:video {"src":"https://evil.example/v.mp4"} /-->'
+        . '<video poster="/p.jpg" src="ftp://evil.example/v.mp4"></video>',
+        $notes,
+    );
+    assert_true(!str_contains($out, 'evil.example'), 'no foreign host survives');
+    assert_contains('<!-- wp:cover {"dimRatio":50,"id":3} -->', $out, 'the key after a comma goes with its comma');
+    assert_contains('<!-- wp:image {} -->', $out, 'a lone key leaves an empty object');
+    assert_contains('<!-- wp:video {} /-->', $out, 'a void block keeps its closer');
+    assert_contains('<img class="wp-block-cover__image-background" alt="Oven">', $out, 'the element and its alt stay');
+    assert_contains('<video poster="/p.jpg"></video>', $out, 'a root-relative poster stays');
+    assert_contains('media source attribute(s) on a foreign host', implode(' | ', $notes));
+    assert_contains('block attribute media source(s) on a foreign host', implode(' | ', $notes));
+});
+
+test('sanitize keeps the build placeholder, root-relative and same-page media sources, and plain links', function () {
+    $html = '<!-- wp:cover {"url":"theme:./assets/hero.jpg","dimRatio":50} -->'
+        . '<div><img src="theme:./assets/hero.jpg" alt="x"><img src="/wp-content/uploads/a.jpg" srcset="/a.jpg 1x, ./b.jpg 2x">'
+        . '<a href="https://example.com/">a link is a destination, not a fetch</a></div><!-- /wp:cover -->';
+    $notes = [];
+    assert_eq($html, MarkupSanitizer::sanitize($html, $notes));
+    assert_eq([], $notes);
+});
+
+test('sanitize judges media sources decoded and with control characters stripped', function () {
+    foreach ([
+        '<img src="&#104;ttps://evil.example/a.jpg">',
+        "<img src=\"ht\ttps://evil.example/a.jpg\">",
+        '<img src=" //evil.example/a.jpg">',
+        '<source srcset="theme:./assets/a.jpg 1x, //evil.example/b.jpg 2x">',
+        '<input type="image" src="https://evil.example/btn.png">',
+    ] as $html) {
+        $out = MarkupSanitizer::sanitize($html);
+        assert_true(!str_contains($out, 'evil.example'), "foreign source survived: {$html}");
+    }
+});
+
+test('design sanitizer removes a media source on a foreign host with its own disposition', function () {
+    $warnings = [];
+    $out = \Automattic\SiteBuild\DesignMarkupSanitizer::sanitize(
+        '<!DOCTYPE html><html><head><title>x</title></head><body>'
+        . '<img src="https://evil.example/hot.jpg" alt="AI_IMAGE: oven | hero | photo | landscape">'
+        . '<img src="/a.jpg" alt="kept">'
+        . '<video poster="//evil.example/p.jpg"></video>'
+        . '</body></html>',
+        'design/home.html',
+        'test',
+        $warnings,
+    );
+    assert_true(!str_contains($out, 'evil.example'), 'no foreign host survives');
+    assert_contains('<img alt="AI_IMAGE: oven | hero | photo | landscape">', $out, 'the alt stays for the image pipeline');
+    assert_contains('<img src="/a.jpg" alt="kept">', $out);
+    assert_contains('disposition removed media source on a foreign host', implode(' ', $warnings));
+});

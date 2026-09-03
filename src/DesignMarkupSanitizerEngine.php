@@ -860,6 +860,19 @@ final class DesignMarkupSanitizerEngine
             if (!$unsafe && in_array($name, self::URL_ATTRIBUTES, true)) {
                 $unsafe = !self::isSafeUrlAttribute($name, $attribute['value']);
             }
+            if (!$unsafe
+                && in_array($name, ['src', 'srcset', 'poster'], true)
+                && in_array(strtolower($token['name']), ['img', 'source', 'video', 'audio', 'track', 'picture', 'input'], true)
+                && self::isForeignSource($name, self::decodedAttributeValue(self::unquoted($attribute['value'])))
+            ) {
+                // The build generates every image itself, and
+                // AssignImageSourcesStep gives a source-less <img> its theme
+                // asset path. A source on another host fetches from a
+                // model-chosen host on every view, the screenshot pass
+                // included (BIGR-975).
+                $unsafe = true;
+                $disposition = 'removed media source on a foreign host';
+            }
             if (!$unsafe && $name === 'style') {
                 // An inline style is a fetch sink: `background:url(https://…)`
                 // calls a model-chosen host on every view of the design, the
@@ -918,6 +931,26 @@ final class DesignMarkupSanitizerEngine
             ];
         }
         return $attributes;
+    }
+
+    /** A scheme with an authority, a protocol-relative `//`, or absolute http/https/ftp. */
+    private static function isForeignSource(string $attribute, string $decoded): bool
+    {
+        $candidates = $attribute === 'srcset'
+            ? array_map(
+                static fn (string $candidate): string => preg_split('/\s+/', trim($candidate), 2)[0] ?? '',
+                explode(',', $decoded),
+            )
+            : [$decoded];
+        foreach ($candidates as $candidate) {
+            $stripped = (string) preg_replace('/[\x00-\x20\x7f]+/u', '', $candidate);
+            if (preg_match('#\A(?:[a-z][a-z0-9+.\-]*:)?//#i', $stripped) === 1
+                || preg_match('#\A(?:https?|ftp):#i', $stripped) === 1
+            ) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** The attribute value without the quotes rawAttributes() keeps on it. */

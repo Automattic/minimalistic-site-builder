@@ -448,7 +448,9 @@ final class ScaffoldPluginStep implements Step
                 $incomplete = false;
                 $sanitized = {{FN_PREFIX}}_content_sanitize_document($content, $incomplete, $context);
                 if ($sanitized !== null) {
-                    return $sanitized;
+                    // The editor loads a cover's "url" from block-comment JSON
+                    // the moment the page opens for editing.
+                    return {{FN_PREFIX}}_content_neutralize_block_media($sanitized);
                 }
                 if (!$incomplete) {
                     break;
@@ -544,6 +546,10 @@ final class ScaffoldPluginStep implements Step
                 'ANIMATE' => true, 'ANIMATETRANSFORM' => true,
                 'ANIMATEMOTION' => true, 'SET' => true,
             );
+            $media = array(
+                'IMG' => true, 'SOURCE' => true, 'VIDEO' => true, 'AUDIO' => true,
+                'TRACK' => true, 'PICTURE' => true, 'INPUT' => true,
+            );
             // Core's canonical URI-attribute list (18 entries, including
             // poster/cite/background/longdesc) plus the SVG spelling it omits.
             $urls = array_merge(wp_kses_uri_attributes(), array('xlink:href'));
@@ -596,6 +602,19 @@ final class ScaffoldPluginStep implements Step
                     // No branch below returns early: every tag still falls
                     // through to the URL sweep, so a stray href on a <meta>
                     // cannot slip past on its way out.
+                    // A media source on another host fetches on every view.
+                    // The build generates every image itself, so only the
+                    // site's own paths and the build's theme:./assets/
+                    // placeholders are legitimate here (BIGR-975).
+                    if (isset($media[$tag])) {
+                        foreach (array('src', 'srcset', 'poster') as $name) {
+                            $value = $processor->get_attribute($name);
+                            if (is_string($value) && {{FN_PREFIX}}_content_source_is_foreign($name, $value)) {
+                                $processor->remove_attribute($name);
+                            }
+                        }
+                    }
+
                     if (isset($inert[$tag])) {
                         foreach ($loaders as $name) {
                             $processor->remove_attribute($name);
@@ -754,6 +773,52 @@ final class ScaffoldPluginStep implements Step
                 return '';
             }
             return $clean;
+        }
+
+        /**
+         * Whether a media source names another host: a scheme with an
+         * authority, a protocol-relative `//`, or absolute http/https/ftp.
+         * Root-relative paths and theme:./assets/ placeholders are not.
+         */
+        function {{FN_PREFIX}}_content_source_is_foreign($attribute, $value) {
+            $candidates = array($value);
+            if ($attribute === 'srcset') {
+                $candidates = array();
+                foreach (explode(',', $value) as $candidate) {
+                    $parts = preg_split('/\s+/', trim($candidate), 2);
+                    $candidates[] = isset($parts[0]) ? $parts[0] : '';
+                }
+            }
+            foreach ($candidates as $candidate) {
+                $stripped = (string) preg_replace('/[\x00-\x20\x7F]+/', '', $candidate);
+                if (preg_match('#\A(?:[a-z][a-z0-9+.\-]*:)?//#i', $stripped) === 1
+                    || preg_match('#\A(?:https?|ftp):#i', $stripped) === 1
+                ) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /**
+         * Remove media sources on a foreign host from block-comment JSON. The
+         * same two passes the build runs: a key after a comma goes with its
+         * comma, a key in first position goes with the comma that follows.
+         */
+        function {{FN_PREFIX}}_content_neutralize_block_media($content) {
+            $foreign = '"((?:[a-zA-Z][a-zA-Z0-9+.\-]*:)?\\\\?\/\\\\?\/(?:[^"\\\\]|\\\\.)*)"';
+            $key = '"(?:url|src|poster|mediaUrl)"';
+            $result = preg_replace_callback(
+                '/<!--\s*wp:[a-zA-Z0-9\/-]+\s+\{.*?\}\s*\/?-->/s',
+                function ($match) use ($foreign, $key) {
+                    $comment = $match[0];
+                    $comment = (string) preg_replace('/,\s*' . $key . '\s*:\s*' . $foreign . '/', '', $comment);
+                    $comment = (string) preg_replace('/' . $key . '\s*:\s*' . $foreign . '\s*,?/', '', $comment);
+                    return $comment;
+                },
+                $content
+            );
+            return $result === null ? $content : $result;
         }
 
         /** Whether the current token sits inside a code-bearing element. */
