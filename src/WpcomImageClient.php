@@ -42,6 +42,7 @@ final class WpcomImageClient implements ImageClient
         private string $model = 'gemini-3.1-flash-image',
         private string $feature = 'builder-theme-image',
         private array $retryDelays = [2, 5, 12],
+        private array $extraHeaders = [],
     ) {}
 
     /** How many image requests this client has made. */
@@ -290,6 +291,30 @@ final class WpcomImageClient implements ImageClient
      * @param array<string,mixed> $body
      * @return \CurlHandle
      */
+    /**
+     * Request headers for every proxy call: auth, the billing feature, the
+     * JSON content type, then the host's extras. Empty values are skipped so
+     * a host can pass a correlation id it may not have yet.
+     *
+     * @return list<string>
+     */
+    private function requestHeaders(): array
+    {
+        $headers = [
+            'authorization: Bearer ' . $this->apiToken,
+            'x-wpcom-ai-feature: ' . $this->feature,
+            'content-type: application/json',
+        ];
+        foreach ($this->extraHeaders as $name => $value) {
+            $value = trim((string) $value);
+            if ('' === $value) {
+                continue;
+            }
+            $headers[] = strtolower((string) $name) . ': ' . $value;
+        }
+        return $headers;
+    }
+
     private function buildHandle(array $body)
     {
         $endpoint = sprintf(self::ENDPOINT_TPL, $this->model);
@@ -299,11 +324,7 @@ final class WpcomImageClient implements ImageClient
         curl_setopt_array($ch, [
             CURLOPT_POST           => true,
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_HTTPHEADER     => [
-                'authorization: Bearer ' . $this->apiToken,
-                'x-wpcom-ai-feature: ' . $this->feature,
-                'content-type: application/json',
-            ],
+            CURLOPT_HTTPHEADER     => $this->requestHeaders(),
             CURLOPT_POSTFIELDS      => $payload,
             CURLOPT_TIMEOUT         => 180, // image generation can take 60s+
             CURLOPT_CONNECTTIMEOUT  => 15,
