@@ -22,9 +22,20 @@ use Automattic\SiteBuild\Tests\FakeLlm;
  * A hostile FakeLlm answers every step of both graphs with the canned
  * fixtures the pipeline integration tests use, each one carrying an attack:
  * `<script>`, `on*` handlers, `javascript:`/`vbscript:`/`data:` URLs, SVG
- * SMIL, `<style>`, `<iframe>`, `<meta http-equiv>`, `<base>`, `@import`,
- * `url()` in inline styles, page styles and theme.json custom CSS, a
- * docblock terminator in the site name, and a hot-linked `<img>`.
+ * SMIL, `<style>`, `<iframe>`, `<meta http-equiv>`, `<base>`, `<link>`,
+ * `@import`, `url()` in inline styles, page styles and theme.json custom
+ * CSS, a docblock terminator in the site name, a hot-linked `<img>` and
+ * `<video>`, a backslash host, an SVG `<image href>`, a `<td background>`,
+ * and a group whose style.background.backgroundImage.url is foreign.
+ *
+ * FakeLlm answers in call order. The queue below must match the order of
+ * LLM calls in each graph exactly: one new call anywhere shifts every
+ * later answer into the wrong step, and the run then fails on a decode
+ * error rather than a security finding, or feeds a payload to a step that
+ * ignores it. When a graph gains a call, add its answer here at the same
+ * position. The markup payloads ride `wp:html` blocks where the block
+ * fixer keeps raw bytes, so every rule is exercised on the delivered page
+ * rather than masked by re-serialization.
  *
  * Two canaries make the oracle simple and total: every attack host is
  * `evil.example` and every payload names `redteam_canary`. Neither may
@@ -168,14 +179,24 @@ function red_team_check_html(string $html, string $context, array &$problems): v
             if (str_contains($value, RED_TEAM_CANARY)) {
                 $problems[] = "{$context}: canary in <{$name} {$attr}>";
             }
+            if (str_contains($value, RED_TEAM_HOST)) {
+                // Whatever the spelling (a backslash host, a scheme-less
+                // authority), the attack host has no place in an attribute.
+                $problems[] = "{$context}: attack host in <{$name} {$attr}>: {$value}";
+            }
             if ($attr === 'style') {
                 red_team_check_css($value, "{$context}: <{$name} style>", $problems);
                 continue;
             }
             $fetches = in_array($attr, $fetchAlways, true)
                 || (in_array($attr, ['href', 'xlink:href'], true) && in_array($name, ['image', 'use', 'feimage', 'link', 'base'], true));
-            if ($fetches && red_team_is_foreign($value)) {
-                $problems[] = "{$context}: <{$name} {$attr}> fetches from a foreign host: {$value}";
+            $candidates = in_array($attr, ['srcset', 'imagesrcset'], true)
+                ? array_map(static fn (string $c): string => preg_split('/\s+/', trim($c), 2)[0] ?? '', explode(',', $value))
+                : [$value];
+            foreach ($candidates as $candidate) {
+                if ($fetches && red_team_is_foreign($candidate)) {
+                    $problems[] = "{$context}: <{$name} {$attr}> fetches from a foreign host: {$candidate}";
+                }
             }
             if (($fetches || in_array($attr, $urlLike, true)) && red_team_is_executable($value)) {
                 $problems[] = "{$context}: <{$name} {$attr}> executable URL survived: {$value}";
@@ -205,6 +226,26 @@ function red_team_check_html(string $html, string $context, array &$problems): v
                 $problems[] = "{$context}: block JSON \"{$key}\" fetches from a foreign host: {$value}";
             }
         }
+        // WordPress renders style.background.backgroundImage.url from the
+        // JSON of any block, at any depth the style object nests it.
+        red_team_check_background_images($attrs, $context, $problems);
+    }
+}
+
+/**
+ * @param array<mixed> $node
+ * @param list<string> $problems
+ */
+function red_team_check_background_images(array $node, string $context, array &$problems): void
+{
+    foreach ($node as $key => $value) {
+        if (!is_array($value)) {
+            continue;
+        }
+        if ($key === 'backgroundImage' && is_string($value['url'] ?? null) && red_team_is_foreign($value['url'])) {
+            $problems[] = "{$context}: block JSON backgroundImage.url fetches from a foreign host: {$value['url']}";
+        }
+        red_team_check_background_images($value, $context, $problems);
     }
 }
 
@@ -484,7 +525,15 @@ test('red team: the blocks graph delivers no executable or fetching model bytes'
         . '<div class="wp-block-group overlap-up hover-lift" style="padding:12rem 2rem;margin:0 auto">'
         . "<!-- wp:heading --><h2 onmouseover=\"{$canary}()\">Specials</h2><!-- /wp:heading -->"
         . '<!-- wp:group {"className":"overlap-up"} --><div class="wp-block-group overlap-up">'
-        . "<!-- wp:paragraph --><p>Featured today</p><!-- /wp:paragraph --><img src=\"https://{$host}/hot.jpg\" alt=\"hot\">"
+        . "<!-- wp:paragraph --><p>Featured today</p><!-- /wp:paragraph -->"
+        // Raw bytes the block fixer keeps as authored, so each rule below is
+        // exercised on the delivered page: a hot-linked image, a backslash
+        // host, a body stylesheet link, an SVG image, a table background.
+        . "<!-- wp:html --><img src=\"https://{$host}/hot.jpg\" alt=\"hot\"><img src=\"\\\\{$host}/bs.png\" alt=\"bs\">"
+        . "<link rel=\"stylesheet\" href=\"https://{$host}/l.css\"><svg><image href=\"https://{$host}/i.png\"/></svg>"
+        . "<table><tr><td background=\"https://{$host}/t.png\">x</td></tr></table><!-- /wp:html -->"
+        . '<!-- wp:group {"style":{"background":{"backgroundImage":{"url":"https://' . $host . '/g.png","id":9}}},"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group"><!-- wp:paragraph --><p>On a painted ground</p><!-- /wp:paragraph --></div><!-- /wp:group -->'
         . '</div><!-- /wp:group -->'
         . '</div><!-- /wp:group -->'
     );
