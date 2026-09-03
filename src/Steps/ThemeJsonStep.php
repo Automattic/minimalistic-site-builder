@@ -61,6 +61,21 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     use LlmOptions;
 
     private const REQUIRED_COLORS = ['base', 'contrast', 'primary', 'secondary', 'accent', 'band'];
+    private const ROOT_BLOCK_GAP_FALLBACK = 'var:preset|spacing|md';
+    private const ROOT_BLOCK_GAP_REFERENCES = [
+        'var:preset|spacing|xs',
+        'var:preset|spacing|sm',
+        'var:preset|spacing|md',
+        'var:preset|spacing|lg',
+        'var:preset|spacing|xl',
+        'var:preset|spacing|xxl',
+        'var(--wp--preset--spacing--xs)',
+        'var(--wp--preset--spacing--sm)',
+        'var(--wp--preset--spacing--md)',
+        'var(--wp--preset--spacing--lg)',
+        'var(--wp--preset--spacing--xl)',
+        'var(--wp--preset--spacing--xxl)',
+    ];
 
     /**
      * The per-slug contrast floors against `base` that prompts/theme-json.md
@@ -547,7 +562,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         if (!is_array($theme['styles']['spacing'] ?? null)) {
             $theme['styles']['spacing'] = [];
         }
-        $theme['styles']['spacing']['blockGap'] ??= 'var:preset|spacing|md';
+        [$theme, $blockGapWarnings] = self::repairRootBlockGap($theme);
         // After the shape repairs above so a malformed styles.spacing records
         // its warning before normalizeRootPadding's silent guard repairs it.
         $theme = self::normalizeRootPadding($theme);
@@ -603,6 +618,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         [$theme, $groupPaddingWarnings] = self::repairGroupBlockPadding($theme);
         $warnings = array_merge(
             $warnings,
+            $blockGapWarnings,
             $layoutWarnings,
             $colorWarnings,
             $fontWarnings,
@@ -759,6 +775,45 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         );
 
         return $theme;
+    }
+
+    /**
+     * Keep the root sibling rhythm on the bounded spacing scale the build
+     * installs. A copied prompt placeholder or invented slug would otherwise
+     * survive as an unresolved CSS variable and remove block spacing across
+     * the delivered theme.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>}
+     */
+    public static function repairRootBlockGap(array $theme): array
+    {
+        if (!isset($theme['styles']) || !is_array($theme['styles'])) {
+            $theme['styles'] = [];
+        }
+        if (!isset($theme['styles']['spacing']) || !is_array($theme['styles']['spacing'])) {
+            $theme['styles']['spacing'] = [];
+        }
+
+        if (!array_key_exists('blockGap', $theme['styles']['spacing'])
+            || $theme['styles']['spacing']['blockGap'] === null
+        ) {
+            $theme['styles']['spacing']['blockGap'] = self::ROOT_BLOCK_GAP_FALLBACK;
+            return [$theme, []];
+        }
+
+        $authored = $theme['styles']['spacing']['blockGap'];
+        if (is_string($authored) && in_array($authored, self::ROOT_BLOCK_GAP_REFERENCES, true)) {
+            return [$theme, []];
+        }
+
+        $theme['styles']['spacing']['blockGap'] = self::ROOT_BLOCK_GAP_FALLBACK;
+        return [$theme, [
+            'theme/theme.json styles.spacing.blockGap: authored ' . Warnings::value($authored)
+                . '; delivered ' . Warnings::value(self::ROOT_BLOCK_GAP_FALLBACK)
+                . '; disposition=unresolved or unsupported spacing preset reference replaced '
+                . 'with the canonical default',
+        ]];
     }
 
     /**
