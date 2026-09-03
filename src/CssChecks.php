@@ -46,6 +46,90 @@ final class CssChecks
     }
 
     /**
+     * resourceLoadingProblem() after the two decodings a browser applies
+     * before its CSS parser sees an inline style: HTML entities (`url&#40;`
+     * in a style attribute is `url(` by the time CSS runs) and CSS identifier
+     * escapes (`\75rl(` is `url(`). A substring test on the raw bytes alone
+     * would let both through (BIGR-970).
+     */
+    public static function decodedResourceLoadingProblem(string $css): ?string
+    {
+        return self::resourceLoadingProblem(
+            self::decodeIdentifier(html_entity_decode($css, ENT_QUOTES | ENT_HTML5, 'UTF-8')),
+        );
+    }
+
+    /**
+     * Drop every declaration whose value loads a resource, judged on the
+     * decoded value. Untouched bytes are preserved exactly.
+     *
+     * @return array{0:string,1:list<array{property:string,value:string,raw:string,start:int,end:int,context:string,ancestors:list<string>,kind:string,structurallySafe:bool}>}
+     */
+    public static function dropResourceLoadingDeclarations(string $css, bool $bareDeclarationList = false): array
+    {
+        return self::dropDeclarations(
+            $css,
+            static fn (array $declaration): bool =>
+                self::decodedResourceLoadingProblem($declaration['value']) !== null,
+            $bareDeclarationList,
+        );
+    }
+
+    /**
+     * One inline `style` attribute value with every resource-loading
+     * declaration removed.
+     *
+     * An inline style is a fetch sink the markup sanitizers never treated as
+     * one: `style="background:url(https://…)"` makes every visitor's browser
+     * call a model-chosen host, which is a beacon and a third-party
+     * dependency the site never asked for. The value handed in must already
+     * be entity-decoded (the attribute's real CSS text); the caller re-encodes
+     * the result for its own quoting.
+     *
+     * Returns null when nothing had to change, '' when a loading form
+     * survived declaration-level removal (the caller drops the attribute),
+     * and otherwise the surviving declarations.
+     */
+    public static function scrubInlineStyle(string $decodedValue): ?string
+    {
+        if (self::inlineStyleLoadingProblem($decodedValue) === null) {
+            return null;
+        }
+        [$scrubbed] = self::dropDeclarations(
+            $decodedValue,
+            static fn (array $declaration): bool =>
+                self::inlineStyleLoadingProblem($declaration['value']) !== null,
+            true,
+        );
+        if (self::inlineStyleLoadingProblem($scrubbed) !== null) {
+            return '';
+        }
+        return $scrubbed;
+    }
+
+    /**
+     * A `url()` that names one of the build's own image placeholders. The
+     * pipeline writes exactly this form (CollectImagesStep, AssemblePagesStep)
+     * for a cover's `background-image`, and the seeder resolves it to the
+     * site's own upload; nothing else may appear inside the parentheses.
+     */
+    public const THEME_ASSET_URL_PATTERN =
+        '/url\(\s*(["\']?)theme:\.\/assets\/[a-z0-9-]+\.(?:jpe?g|png)\1\s*\)/i';
+
+    /**
+     * decodedResourceLoadingProblem() for an inline style attribute: the one
+     * place a `url()` may legitimately appear in generated markup, and only
+     * when it names a theme asset placeholder. Every other loading form is a
+     * fetch from a model-chosen host.
+     */
+    public static function inlineStyleLoadingProblem(string $decodedValue): ?string
+    {
+        $decoded = self::decodeIdentifier(html_entity_decode($decodedValue, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+        $withoutAssets = (string) preg_replace(self::THEME_ASSET_URL_PATTERN, '', $decoded);
+        return self::resourceLoadingProblem($withoutAssets);
+    }
+
+    /**
      * display:none / visibility:hidden / a clip-path that clips everything
      * away, anywhere in the CSS — generated content must stay visible.
      *

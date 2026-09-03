@@ -860,3 +860,46 @@ test('the seeder reports when it degrades or refuses to store markup', function 
     ini_set('error_log', (string) $previous);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('generated seeder scrubs resource-loading inline styles like the intake sanitizer', function () {
+    if (!load_wp_html_api()) {
+        skip_test('no WordPress copy found for the HTML API; set SITEBUILD_WP_PATH');
+    }
+    $slug = 'style-sink-parity';
+    [$project, $tmp] = scaffold_plugin_fixture($slug);
+    require_once $project->pluginPath('site-content.php');
+    $sanitize = content_fn($slug, 'sanitize');
+
+    $corpus = [
+        '<div style="background:url(https://evil.example/px);color:red">hi</div>',
+        '<div style="background:url&#40;https://evil.example/px&#41;">hi</div>',
+        '<div style="background:\\75rl(https://evil.example/px)">hi</div>',
+        '<div style="background-image: url(&quot;https://evil.example/a.png&quot;)">hi</div>',
+        "<div style='background:image-set(\"https://evil.example/a.png\" 1x)'>hi</div>",
+        '<div style=background:url(https://evil.example/px) class=x>hi</div>',
+        '<div style="content:\'a;b\';background:url(https://evil.example/px)">hi</div>',
+    ];
+    foreach ($corpus as $html) {
+        foreach ([
+            'intake' => \Automattic\SiteBuild\MarkupSanitizer::sanitize($html),
+            'seeder' => $sanitize($html),
+        ] as $which => $out) {
+            assert_true(!str_contains($out, 'evil.example'), "{$which}: fetch survived: {$html}");
+            assert_true(preg_match('/url|image-set/i', $out) !== 1, "{$which}: loading form survived: {$html}");
+            assert_contains('>hi</div>', $out, "{$which}: content survived: {$html}");
+        }
+    }
+
+    // The surviving declarations stay, on both sides.
+    $mixed = '<div style="background:url(https://evil.example/px);color:red">hi</div>';
+    assert_contains('color:red', \Automattic\SiteBuild\MarkupSanitizer::sanitize($mixed));
+    assert_contains('color:red', $sanitize($mixed));
+    // A clean inline style is untouched by the seeder.
+    $clean = '<p style="color:red;content:\'a;b\'">t</p>';
+    assert_eq($clean, $sanitize($clean));
+    // The build's own placeholder is the one url() a cover may carry.
+    $cover = '<div class="wp-block-cover" style="background-image:url(theme:./assets/hero.jpg)"></div>';
+    assert_eq($cover, $sanitize($cover));
+    assert_eq($cover, \Automattic\SiteBuild\MarkupSanitizer::sanitize($cover));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

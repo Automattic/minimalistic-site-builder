@@ -10,8 +10,9 @@ namespace Automattic\SiteBuild;
  * markup is later stored as post content with the kses content filter
  * suspended (the seeder plugin — kses would mangle block comments), so
  * nothing between the model and the visitor's browser would otherwise stop a
- * <script> tag, an inline event handler, or a javascript: URL — a valid
- * core/html block can carry all three. Runs at markup intake (SectionsStep),
+ * <script> tag, an inline event handler, a javascript: URL, or an inline
+ * style that fetches from a model-chosen host — a valid core/html block can
+ * carry all four. Runs at markup intake (SectionsStep),
  * one choke point for the header, the footer, and every section; the seeder
  * plugin applies the same rules again at activation (ScaffoldPluginStep) in
  * case a page file was edited between build and seed. Keep the two in sync.
@@ -79,10 +80,11 @@ final class MarkupSanitizer
         // `<svg/onload=...>` and for `/` inside an unquoted ordinary value.
         $handlers = 0;
         $urls = 0;
+        $styles = 0;
         $markup = HtmlBlockContext::rewriteOpeningTags(
             $markup,
-            static function (string $tag) use (&$handlers, &$urls): string {
-                return self::sanitizeOpeningTag($tag, $handlers, $urls);
+            static function (string $tag) use (&$handlers, &$urls, &$styles): string {
+                return self::sanitizeOpeningTag($tag, $handlers, $urls, $styles);
             },
         );
         if ($handlers > 0) {
@@ -91,11 +93,18 @@ final class MarkupSanitizer
         if ($urls > 0) {
             $notes[] = "neutralized {$urls} executable URL value(s)";
         }
+        if ($styles > 0) {
+            $notes[] = "removed resource-loading declarations from {$styles} inline style attribute(s)";
+        }
         return $markup;
     }
 
-    private static function sanitizeOpeningTag(string $tag, int &$handlers = 0, int &$urls = 0): string
-    {
+    private static function sanitizeOpeningTag(
+        string $tag,
+        int &$handlers = 0,
+        int &$urls = 0,
+        int &$styles = 0,
+    ): string {
         $attributes = self::attributes($tag);
         $eventStarts = [];
         foreach ($attributes as $attribute) {
@@ -121,6 +130,50 @@ final class MarkupSanitizer
                     'replacement' => $needsSeparator ? ' ' : '',
                 ];
                 $handlers++;
+                continue;
+            }
+
+            if ($attribute['valueStart'] !== null && $attribute['name'] === 'style') {
+                // An inline style is a fetch sink: `background:url(https://…)`
+                // calls a model-chosen host on every view. Drop only the
+                // loading declarations; the rest of the style stays. The
+                // value is judged decoded, the way the browser's CSS parser
+                // sees it, and re-encoded for the quote it sits in.
+                $raw = substr(
+                    $tag,
+                    $attribute['valueStart'],
+                    $attribute['valueEnd'] - $attribute['valueStart'],
+                );
+                $scrubbed = CssChecks::scrubInlineStyle(
+                    html_entity_decode($raw, ENT_QUOTES | ENT_HTML5, 'UTF-8'),
+                );
+                if ($scrubbed === null) {
+                    continue;
+                }
+                $quoted = $attribute['valueStart'] > 0
+                    && in_array($tag[$attribute['valueStart'] - 1], ['"', "'"], true);
+                if ($quoted && trim($scrubbed) !== '') {
+                    $edits[] = [
+                        'start' => $attribute['valueStart'],
+                        'end' => $attribute['valueEnd'],
+                        'replacement' => htmlspecialchars($scrubbed, ENT_QUOTES | ENT_HTML5, 'UTF-8'),
+                    ];
+                } else {
+                    // Nothing survives, or the value is unquoted and a
+                    // rewrite could split into new attributes: drop the
+                    // whole attribute, with the same seam care as handlers.
+                    $next = $tag[$attribute['end']] ?? '>';
+                    $needsSeparator = !self::isSpaceByte($next)
+                        && $next !== '/'
+                        && $next !== '>'
+                        && !array_key_exists($attribute['end'], $eventStarts);
+                    $edits[] = [
+                        'start' => $attribute['start'],
+                        'end' => $attribute['end'],
+                        'replacement' => $needsSeparator ? ' ' : '',
+                    ];
+                }
+                $styles++;
                 continue;
             }
 
