@@ -18,6 +18,7 @@ use Automattic\SiteBuild\BandColor;
 use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\CssChecks;
+use Automattic\SiteBuild\CssScrub;
 use Automattic\SiteBuild\CtaStyle;
 use Automattic\SiteBuild\PaletteFloor;
 use Automattic\SiteBuild\Llm;
@@ -2312,10 +2313,96 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         $theme = self::mergeScaffoldDefaultsAtPath(self::SCAFFOLD, $theme, '', $shapeWarnings);
         $theme = self::removeUnsupportedTextWrapProperties($theme);
         [$theme, $motionWarnings] = self::removeMotionKitCustomCss($theme);
+        [$theme, $resourceWarnings] = self::removeResourceLoadingCustomCss($theme);
         return [
             $theme,
-            array_merge($colorWarnings, $shadowWarnings, $shapeWarnings, $motionWarnings),
+            array_merge($colorWarnings, $shadowWarnings, $shapeWarnings, $motionWarnings, $resourceWarnings),
         ];
+    }
+
+    /**
+     * Remove every resource-loading form from theme.json custom CSS.
+     *
+     * WordPress trusts theme-origin CSS: a `css` string under `styles` ships
+     * to every visitor exactly as written, with no kses pass and no core
+     * sanitizer. This was the one CSS sink the build never scrubbed.
+     * PageStylesStep and CustomMotionStep both refuse `@import` and `url()`,
+     * but a model-authored `@import url(https://…)` or `background:
+     * url(https://…)` in theme.json shipped verbatim. That is a beacon and a
+     * third-party dependency the site never asked for (BIGR-969).
+     *
+     * Three rungs, smallest unit first. CssScrub removes `@import` statements
+     * and declarations that reference an external authority. CssChecks then
+     * drops any remaining declaration whose value uses a resource-loading
+     * function, relative and data: URLs included, which matches the
+     * page-styles policy. When a loading form still survives both (an
+     * unparseable region, an at-rule prelude), the whole string is removed
+     * rather than delivered unreviewed. Every removal is recorded durably.
+     *
+     * Every `css` string under `styles` is walked, at any depth, so a rule
+     * nested in a block, element, or variation style is scrubbed too.
+     *
+     * Pure — unit-testable.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>} theme, warnings
+     */
+    public static function removeResourceLoadingCustomCss(array $theme): array
+    {
+        if (!is_array($theme['styles'] ?? null)) {
+            return [$theme, []];
+        }
+
+        $warnings = [];
+        $remove = static function (array $node, string $path) use (&$remove, &$warnings): array {
+            foreach ($node as $key => $value) {
+                if ($key === 'css' && is_string($value)) {
+                    $node[$key] = self::scrubResourceLoadingCss($value, "{$path}.css", $warnings);
+                    continue;
+                }
+                if (is_array($value)) {
+                    $node[$key] = $remove($value, $path . '.' . $key);
+                }
+            }
+            return $node;
+        };
+        $theme['styles'] = $remove($theme['styles'], 'styles');
+        return [$theme, $warnings];
+    }
+
+    /**
+     * One custom CSS string, scrubbed of every resource-loading form.
+     *
+     * @param list<string> $warnings
+     */
+    private static function scrubResourceLoadingCss(string $css, string $location, array &$warnings): string
+    {
+        $scrubbed = CssScrub::scrub($css);
+        foreach ($scrubbed['removals'] as $removal) {
+            $warnings[] = "theme/theme.json {$location}: authored "
+                . Warnings::value($removal['authored_value'])
+                . "; delivered {$removal['delivered_value']}; disposition {$removal['disposition']}";
+        }
+
+        [$repaired, $dropped] = CssChecks::dropDeclarations(
+            $scrubbed['css'],
+            static fn (array $declaration): bool =>
+                CssChecks::resourceLoadingProblem($declaration['value']) !== null,
+        );
+        foreach ($dropped as $declaration) {
+            $warnings[] = "theme/theme.json {$location}: authored declaration "
+                . Warnings::value(trim($declaration['raw']))
+                . '; delivered removed; disposition removed a resource-loading CSS value'
+                . ' — theme.json custom CSS may not fetch images, fonts, or stylesheets';
+        }
+
+        if (CssChecks::resourceLoadingProblem($repaired) !== null) {
+            $warnings[] = "theme/theme.json {$location}: authored " . Warnings::value($css)
+                . '; delivered removed; disposition removed the whole custom CSS string'
+                . ' — a resource-loading form survived declaration-level removal';
+            return '';
+        }
+        return $repaired;
     }
 
     /**
