@@ -831,6 +831,39 @@ test('stripHeroSeparators removes hairline rules from the hero (BIGR-775)', func
     assert_eq([], $againWarnings);
 });
 
+test('stripSectionSeparators removes the rule under a section heading (BIGR-978)', function () {
+    $doc = '<!-- wp:group {"tagName":"section","anchor":"story","layout":{"type":"constrained"}} -->'
+        . '<section class="wp-block-group" id="story">'
+        . '<!-- wp:heading {"level":2} --><h2 class="wp-block-heading">Our story</h2><!-- /wp:heading -->'
+        . '<!-- wp:separator {"className":"is-style-wide"} -->'
+        . '<hr class="wp-block-separator has-alpha-channel-opacity is-style-wide"/>'
+        . '<!-- /wp:separator -->'
+        . '<!-- wp:paragraph --><p>Two paragraphs of history.</p><!-- /wp:paragraph -->'
+        . '<!-- wp:separator --><hr class="wp-block-separator has-alpha-channel-opacity"/><!-- /wp:separator -->'
+        . '<!-- wp:paragraph --><p>And a closing line.</p><!-- /wp:paragraph -->'
+        . '</section><!-- /wp:group -->';
+    $repairs = [];
+    $warnings = [];
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::stripSectionSeparators($doc, 'page-home--story', $repairs, $warnings);
+
+    assert_true(!str_contains($out, 'wp:separator'), 'both separators removed');
+    assert_true(!str_contains($out, 'wp-block-separator'), 'separator HTML removed');
+    assert_contains('Our story', $out);
+    assert_contains('Two paragraphs of history.', $out);
+    assert_contains('And a closing line.', $out);
+    assert_eq([], $repairs, 'visible separator removal is durable loss, not a repair');
+    assert_eq(2, count($warnings));
+    assert_contains("file='theme/parts/page-home--story.html'", $warnings[0]);
+    assert_contains("block='wp:group[0] > wp:separator[0]'", $warnings[0]);
+    assert_contains('delivered=removed', $warnings[0]);
+    assert_contains('prompts/section.md rations lines', $warnings[0]);
+
+    $again = [];
+    $againWarnings = [];
+    assert_eq($out, Automattic\SiteBuild\Units\GeneratedMarkup::stripSectionSeparators($out, 'page-home--story', $again, $againWarnings));
+    assert_eq([], $againWarnings);
+});
+
 test('stripHeroSeparators removes one outer transaction when generated separators are nested', function () {
     $following = '<!-- wp:paragraph --><p>KEEP THIS SIBLING</p><!-- /wp:paragraph -->';
     $doc = '<!-- wp:group --><div class="wp-block-group">'

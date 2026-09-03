@@ -2433,6 +2433,56 @@ final class GeneratedMarkup
         array &$repairs = [],
         array &$warnings = [],
     ): string {
+        return self::stripSeparatorBlocks(
+            $markup,
+            $part,
+            'the generated hero separator was removed at its complete block boundary so the reviewed '
+            . 'separator-free copy stack could be delivered',
+            $warnings,
+        );
+    }
+
+    /**
+     * Remove separators from a body section that owns no ruled recipe.
+     *
+     * prompts/section.md rations lines: a `wp:separator` is justified only
+     * inside the rule-row / spec-table item recipes and the list-with-thumbnails
+     * composition, which draw their own rules. Nothing enforced that, and the
+     * audited pages arrived with a hairline under headings and between
+     * paragraphs (BIGR-978). Removal-only, like the hero pass: a separator
+     * carries no copy, but its authored treatment is durable loss and is
+     * warned. Callers skip this pass for sections that carry a ruled recipe.
+     *
+     * @param list<array<string,mixed>> $repairs
+     * @param list<string>              $warnings
+     */
+    public static function stripSectionSeparators(
+        string $markup,
+        string $part,
+        array &$repairs = [],
+        array &$warnings = [],
+    ): string {
+        return self::stripSeparatorBlocks(
+            $markup,
+            $part,
+            'the generated section separator was removed at its complete block boundary; prompts/section.md '
+            . 'rations lines to the rule-row, spec-table and list-with-thumbnails recipes and this section '
+            . 'carries none of them',
+            $warnings,
+        );
+    }
+
+    /**
+     * Shared removal transaction for `wp:separator` blocks.
+     *
+     * @param list<string> $warnings
+     */
+    private static function stripSeparatorBlocks(
+        string $markup,
+        string $part,
+        string $safeDisposition,
+        array &$warnings,
+    ): string {
         $document = BlockMarkup::parse($markup);
         $candidates = [];
         foreach ($document->indices() as $index) {
@@ -2480,8 +2530,7 @@ final class GeneratedMarkup
                     $span['start'],
                     $span['end'] - $span['start'],
                 ))
-                . '; delivered=removed; disposition=the generated hero separator was removed at its complete '
-                . 'block boundary so the reviewed separator-free copy stack could be delivered',
+                . "; delivered=removed; disposition={$safeDisposition}",
             ];
         }
         foreach ($unsafeCandidates as $span) {

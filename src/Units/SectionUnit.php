@@ -173,6 +173,9 @@ final class SectionUnit extends AbstractPageSectionUnit
                 $repairs,
             );
         }
+        if (!self::ownsRuledSeparators($itemPattern, $archetype)) {
+            $markup = GeneratedMarkup::stripSectionSeparators($markup, $this->key($input), $repairs, $warnings);
+        }
         $listThumb = ListThumbContract::enforce($markup, $this->key($input));
         $markup = $listThumb['markup'];
         array_push($repairs, ...$listThumb['repairs']);
@@ -215,6 +218,17 @@ final class SectionUnit extends AbstractPageSectionUnit
             );
         }
         return new MarkupResult($markup, $repairs, $warnings);
+    }
+
+    /**
+     * Whether the assigned recipes draw their own rules, so the section keeps
+     * its `wp:separator` blocks. Every other section is under the line ration
+     * of prompts/section.md (BIGR-978).
+     */
+    private static function ownsRuledSeparators(?string $itemPattern, ?string $archetype): bool
+    {
+        return in_array($itemPattern, ['rule-row', 'spec-table'], true)
+            || $archetype === 'list-with-thumbnails';
     }
 
     /**

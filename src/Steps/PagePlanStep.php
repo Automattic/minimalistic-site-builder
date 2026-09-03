@@ -59,15 +59,34 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     /** Page-owned outer spacing roles — must match page-plan.md. */
     public const VERTICAL_DENSITIES = ['compact', 'standard', 'spacious'];
 
-    /** Semantic type words that make an item-pattern assignment mandatory. */
-    private const LIST_LIKE_TYPES = [
-        'amenities', 'archive', 'articles', 'catalog', 'categories', 'collections',
-        'directory', 'events', 'faq', 'features', 'genres', 'index', 'ingredients',
-        'lineup', 'locations', 'menu', 'offerings', 'posts', 'pricing', 'process',
-        'products', 'program', 'projects', 'rooms', 'schedule', 'services', 'skills',
-        'specifications', 'steps', 'studies', 'team', 'tiers',
-        'timeline', 'workshops',
+    /**
+     * Semantic type words whose items are name/value rows: a menu line, a
+     * price tier, a schedule slot, a spec. These are the only types the
+     * ruled ledger (`rule-row`) may dress. Together with PROSE_LIST_TYPES
+     * they make an item-pattern assignment mandatory.
+     */
+    private const TABULAR_LIST_TYPES = [
+        'amenities', 'archive', 'catalog', 'categories', 'collections',
+        'directory', 'events', 'genres', 'hours', 'index', 'ingredients',
+        'lineup', 'locations', 'menu', 'offerings', 'pricing', 'products',
+        'program', 'rooms', 'schedule', 'skills', 'specifications', 'specs',
+        'tiers', 'timeline',
     ];
+
+    /**
+     * Semantic type words whose items are short paragraphs: a feature, a
+     * process step, a team bio, a service. They repeat, so they take the
+     * committed idiom, but never the ruled ledger — a hairline under every
+     * paragraph is the "lines everywhere" look the audit found in 43 of 53
+     * directions (BIGR-978).
+     */
+    private const PROSE_LIST_TYPES = [
+        'articles', 'benefits', 'faq', 'features', 'posts', 'process',
+        'projects', 'services', 'steps', 'studies', 'team', 'workshops',
+    ];
+
+    /** The one idiom that paints a rule between items. */
+    private const RULED_IDIOM = 'rule-row';
 
     /**
      * Semantic type words for quote-led sections. A testimonial repeats, but
@@ -788,6 +807,14 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      * type vocabulary is open-ended, but the common catalog/list identities
      * are objective enough to repair when the planner omitted its assignment.
      *
+     * The ruled ledger is rationed (BIGR-978). Audited plans put `rule-row`
+     * on contact, location, benefits and feature sections alike, so every
+     * page arrived striped with hairlines. Under a `rule-row` commitment:
+     * a prose-led type takes `card`; at most ONE section per page keeps the
+     * ledger — the first tabular type, or the first planner-authored section
+     * when the page has no tabular type; every other tabular section takes
+     * `card`, and every other authored non-list section is released to null.
+     *
      * @param array<int,array<string,mixed>> $pages
      * @param list<string> $repairs
      * @return array<int,array<string,mixed>>
@@ -802,7 +829,10 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             if (!is_array($page)) {
                 continue;
             }
-            foreach ((array) ($page['sections'] ?? []) as $sectionIndex => $section) {
+            $slug = (string) ($page['slug'] ?? '');
+            $sections = (array) ($page['sections'] ?? []);
+            $ledgerKeeper = $committed === self::RULED_IDIOM ? self::ledgerKeeper($sections) : null;
+            foreach ($sections as $sectionIndex => $section) {
                 if (!is_array($section)) {
                     continue;
                 }
@@ -814,7 +844,6 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                     $pages[$pageIndex]['sections'][$sectionIndex]['item_pattern'] = null;
                     $authoredValue = is_string($authored) ? trim($authored) !== '' : $authored !== null;
                     if ($authoredValue) {
-                        $slug = (string) ($page['slug'] ?? '');
                         $repairs[] = self::successfulRepair(
                             self::sectionPath($slug, (int) $sectionIndex) . '.item_pattern',
                             $authored,
@@ -830,22 +859,113 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                     $pages[$pageIndex]['sections'][$sectionIndex]['item_pattern'] = null;
                     continue;
                 }
-                if ($explicit === $committed) {
+                [$target, $disposition] = self::itemPatternTarget(
+                    $committed,
+                    $type,
+                    $explicit,
+                    $ledgerKeeper === (int) $sectionIndex,
+                    $ledgerKeeper,
+                );
+                if ($explicit === $target) {
                     continue;
                 }
-                $pages[$pageIndex]['sections'][$sectionIndex]['item_pattern'] = $committed;
-                $slug = (string) ($page['slug'] ?? '');
+                $pages[$pageIndex]['sections'][$sectionIndex]['item_pattern'] = $target;
                 $repairs[] = self::successfulRepair(
                     self::sectionPath($slug, (int) $sectionIndex) . '.item_pattern',
                     $authored,
-                    $committed,
-                    $explicit === null
-                        ? "assigned the committed item idiom to list-like section type '{$type}'"
-                        : 'restored the site-wide repeated-item commitment',
+                    $target,
+                    $disposition,
                 );
             }
         }
         return $pages;
+    }
+
+    /**
+     * The idiom a section delivers under the site-wide commitment, with the
+     * repair disposition that explains it.
+     *
+     * @return array{0:?string,1:string}
+     */
+    private static function itemPatternTarget(
+        string $committed,
+        string $type,
+        ?string $explicit,
+        bool $keepsLedger,
+        ?int $ledgerKeeper,
+    ): array {
+        $restored = $explicit === null
+            ? "assigned the committed item idiom to list-like section type '{$type}'"
+            : 'restored the site-wide repeated-item commitment';
+        if ($committed !== self::RULED_IDIOM) {
+            return [$committed, $restored];
+        }
+        if (self::isProseLedType($type) && !self::isTabularType($type)) {
+            return [
+                ItemPattern::DEFAULT,
+                "released prose-led section type '{$type}' from the rule-row ledger: its items are short "
+                . 'paragraphs, not name/value rows, so a hairline under each one is decoration; the card idiom '
+                . 'dresses them',
+            ];
+        }
+        if ($keepsLedger) {
+            return [self::RULED_IDIOM, $restored];
+        }
+        $keeper = $ledgerKeeper === null ? 'no section' : "sections[{$ledgerKeeper}]";
+        if (self::isTabularType($type)) {
+            return [
+                ItemPattern::DEFAULT,
+                "one ruled ledger per page: {$keeper} keeps the rule-row idiom, so tabular section type "
+                . "'{$type}' takes the card idiom instead of a second run of hairlines",
+            ];
+        }
+        return [
+            null,
+            "released section type '{$type}' from the rule-row ledger: one ruled ledger per page ({$keeper} "
+            . 'keeps it) and this type is not a name/value list, so the section author composes it freely',
+        ];
+    }
+
+    /**
+     * The one section on a page that may keep the ruled ledger: the first
+     * tabular type in display order, else the first planner-authored
+     * assignment on a type that is not prose-led, else none.
+     *
+     * @param array<int,mixed> $sections
+     */
+    private static function ledgerKeeper(array $sections): ?int
+    {
+        $firstAuthored = null;
+        foreach ($sections as $index => $section) {
+            if (!is_array($section)) {
+                continue;
+            }
+            $type = strtolower(trim((string) ($section['type'] ?? '')));
+            if (self::isQuoteLedType($type)) {
+                continue;
+            }
+            if (self::isTabularType($type)) {
+                return (int) $index;
+            }
+            if (
+                $firstAuthored === null
+                && !self::isProseLedType($type)
+                && ItemPattern::explicit($section['item_pattern'] ?? null) !== null
+            ) {
+                $firstAuthored = (int) $index;
+            }
+        }
+        return $firstAuthored;
+    }
+
+    private static function isTabularType(string $type): bool
+    {
+        return self::matchesTypeCatalog($type, self::TABULAR_LIST_TYPES);
+    }
+
+    private static function isProseLedType(string $type): bool
+    {
+        return self::matchesTypeCatalog($type, self::PROSE_LIST_TYPES);
     }
 
     private static function isQuoteLedType(string $type): bool
@@ -855,7 +975,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
 
     private static function isListLikeType(string $type): bool
     {
-        return self::matchesTypeCatalog($type, self::LIST_LIKE_TYPES);
+        return self::isTabularType($type) || self::isProseLedType($type);
     }
 
     /** @param list<string> $catalog */
