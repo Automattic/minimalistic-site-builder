@@ -31,8 +31,15 @@ final class MarkupSanitizer
      * legitimate generated markup: it is a fetch from a model-chosen host on
      * every page view (BIGR-975).
      */
-    private const MEDIA_ELEMENTS = ['img', 'source', 'video', 'audio', 'track', 'picture', 'input'];
-    private const MEDIA_SOURCE_ATTRIBUTES = ['src', 'srcset', 'poster'];
+    private const MEDIA_ELEMENTS = [
+        'img', 'source', 'video', 'audio', 'track', 'picture', 'input',
+        // SVG elements fetch through href / xlink:href.
+        'image', 'use', 'feimage',
+        // The HTML rendering rules still map the legacy `background`
+        // attribute on these elements to background-image.
+        'body', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th',
+    ];
+    private const MEDIA_SOURCE_ATTRIBUTES = ['src', 'srcset', 'poster', 'href', 'xlink:href', 'background'];
     /**
      * Only these blocks carry a media source in their comment JSON. A
      * navigation-link, social-link, or button "url" is a destination the
@@ -74,7 +81,9 @@ final class MarkupSanitizer
         $animation = ['animate', 'animatetransform', 'animatemotion', 'set'];
         // `meta` carries no content but http-equiv="refresh" redirects every
         // visitor to a model-chosen URL, which no later pass would catch.
-        $tags = array_merge($containers, $animation, ['embed', 'base', 'meta']);
+        // `link` loads a stylesheet, an icon, or a prefetch from a
+        // model-chosen host, in the body as much as in the head.
+        $tags = array_merge($containers, $animation, ['embed', 'base', 'meta', 'link']);
 
         // Removal splices the bytes on either side of a deleted tag together,
         // and that seam can spell a new tag: `<<base>script>` becomes a live
@@ -531,7 +540,10 @@ final class MarkupSanitizer
      */
     private static function neutralizeForeignBlockMedia(string $markup, int &$count): string
     {
-        $foreign = '"((?:[a-zA-Z][a-zA-Z0-9+.\-]*:)?\\\\?\/\\\\?\/(?:[^"\\\\]|\\\\.)*)"';
+        // One authority slash in JSON is `/`, `\/`, or the escaped
+        // backslash `\\` a browser reads as a slash.
+        $slash = '(?:\\\\?\/|\\\\\\\\)';
+        $foreign = '"((?:[a-zA-Z][a-zA-Z0-9+.\-]*:)?' . $slash . $slash . '(?:[^"\\\\]|\\\\.)*)"';
         $key = '"(?:' . self::BLOCK_MEDIA_KEYS . ')"';
         $result = preg_replace_callback(
             '/<!--\s*wp:(?:core\/)?(?:' . self::BLOCK_MEDIA_NAMES . ')\s+\{.*?\}\s*\/?-->/s',
@@ -551,6 +563,41 @@ final class MarkupSanitizer
                     );
                 }
                 return $comment;
+            },
+            $markup,
+        );
+        $markup = $result ?? $markup;
+
+        // Any block may carry a background image in its style attribute
+        // object. WordPress renders `style.background.backgroundImage.url`
+        // as `background-image: url(...)` at render time, from the JSON,
+        // whatever the saved HTML says.
+        $urlKey = '"url"';
+        $result = preg_replace_callback(
+            '/<!--\s*wp:[a-zA-Z0-9\/-]+\s+\{.*?\}\s*\/?-->/s',
+            static function (array $match) use (&$count, $foreign, $urlKey): string {
+                $replaced = preg_replace_callback(
+                    '/"backgroundImage"\s*:\s*\{[^{}]*\}/',
+                    static function (array $object) use (&$count, $foreign, $urlKey): string {
+                        $inner = $object[0];
+                        foreach ([
+                            '/,\s*' . $urlKey . '\s*:\s*' . $foreign . '/',
+                            '/' . $urlKey . '\s*:\s*' . $foreign . '\s*,?/',
+                        ] as $pattern) {
+                            $inner = (string) preg_replace_callback(
+                                $pattern,
+                                static function () use (&$count): string {
+                                    $count++;
+                                    return '';
+                                },
+                                $inner,
+                            );
+                        }
+                        return $inner;
+                    },
+                    $match[0],
+                );
+                return $replaced ?? $match[0];
             },
             $markup,
         );
@@ -580,6 +627,9 @@ final class MarkupSanitizer
             if ($stripped === null) {
                 return true;
             }
+            // A browser reads `\` as `/` in a special-scheme URL, so
+            // `\\host/x` and `/\host/x` both resolve to another host.
+            $stripped = str_replace('\\', '/', $stripped);
             if (preg_match('#\A(?:[a-z][a-z0-9+.\-]*:)?//#i', $stripped) === 1
                 || preg_match('#\A(?:https?|ftp):#i', $stripped) === 1
             ) {
