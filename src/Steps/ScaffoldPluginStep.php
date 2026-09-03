@@ -549,7 +549,14 @@ final class ScaffoldPluginStep implements Step
             $media = array(
                 'IMG' => true, 'SOURCE' => true, 'VIDEO' => true, 'AUDIO' => true,
                 'TRACK' => true, 'PICTURE' => true, 'INPUT' => true,
+                // SVG elements fetch through href / xlink:href.
+                'IMAGE' => true, 'USE' => true, 'FEIMAGE' => true,
+                // The legacy `background` attribute still maps to
+                // background-image on these elements.
+                'BODY' => true, 'TABLE' => true, 'THEAD' => true, 'TBODY' => true,
+                'TFOOT' => true, 'TR' => true, 'TD' => true, 'TH' => true,
             );
+            $media_sources = array('src', 'srcset', 'poster', 'href', 'xlink:href', 'background');
             // Core's canonical URI-attribute list (18 entries, including
             // poster/cite/background/longdesc) plus the SVG spelling it omits.
             $urls = array_merge(wp_kses_uri_attributes(), array('xlink:href'));
@@ -607,7 +614,7 @@ final class ScaffoldPluginStep implements Step
                     // site's own paths and the build's theme:./assets/
                     // placeholders are legitimate here (BIGR-975).
                     if (isset($media[$tag])) {
-                        foreach (array('src', 'srcset', 'poster') as $name) {
+                        foreach ($media_sources as $name) {
                             $value = $processor->get_attribute($name);
                             if (is_string($value) && {{FN_PREFIX}}_content_source_is_foreign($name, $value)) {
                                 $processor->remove_attribute($name);
@@ -630,6 +637,14 @@ final class ScaffoldPluginStep implements Step
                     if ($tag === 'BASE') {
                         $processor->remove_attribute('href');
                         $processor->remove_attribute('target');
+                    }
+                    if ($tag === 'LINK') {
+                        // A stylesheet, icon, or prefetch from a model-chosen
+                        // host. The Tag Processor cannot drop the node, so
+                        // it stays with nothing to load.
+                        $processor->remove_attribute('href');
+                        $processor->remove_attribute('imagesrcset');
+                        $processor->remove_attribute('rel');
                     }
                     if ($tag === 'META') {
                         // http-equiv="refresh" redirects every visitor to a
@@ -791,6 +806,8 @@ final class ScaffoldPluginStep implements Step
             }
             foreach ($candidates as $candidate) {
                 $stripped = (string) preg_replace('/[\x00-\x20\x7F]+/', '', $candidate);
+                // A browser reads `\` as `/` in a special-scheme URL.
+                $stripped = str_replace('\\', '/', $stripped);
                 if (preg_match('#\A(?:[a-z][a-z0-9+.\-]*:)?//#i', $stripped) === 1
                     || preg_match('#\A(?:https?|ftp):#i', $stripped) === 1
                 ) {
@@ -801,46 +818,91 @@ final class ScaffoldPluginStep implements Step
         }
 
         /**
-         * Neutralize comment-JSON sources, the same way the build does. On
-         * every block, a destination or source key with an executable scheme
+         * Neutralize comment-JSON sources, the same way the build does. The
+         * attribute object of every block is decoded and walked. On every
+         * block, a destination or source key with an executable scheme
          * goes. On a media block, a source key on a foreign host goes too; a
          * navigation-link or social-link "url" is a destination, and stays.
-         * The value is judged JSON-decoded. A key goes with the comma that
-         * binds it so the JSON stays valid.
+         * On every block, a foreign url inside a backgroundImage object
+         * goes, because WordPress renders it as background-image from the
+         * JSON. A block that lost a key is re-serialized the way WordPress
+         * does, so the JSON stays valid; a block that lost nothing keeps its
+         * bytes.
          */
         function {{FN_PREFIX}}_content_neutralize_block_media($content) {
             $result = preg_replace_callback(
-                '/<!--\s*wp:(?:core\/)?([a-zA-Z0-9-]+)\s+\{.*?\}\s*\/?-->/s',
+                '/<!--\s*wp:(?:core\/)?([a-zA-Z0-9-]+)\s+(\{.*?\})\s*(\/?)-->/s',
                 function ($match) {
+                    $attrs = json_decode($match[2], true);
+                    if (!is_array($attrs)) {
+                        return $match[0];
+                    }
                     $media_block = preg_match('/^(?:cover|image|video|audio|media-text|gallery)$/', $match[1]) === 1;
-                    $result = preg_replace_callback(
-                        '/(,\s*)?"(url|src|poster|mediaUrl|href|textLinkHref)"\s*:\s*"((?:[^"\\\\]|\\\\.)*)"(\s*,)?/',
-                        function ($pair) use ($media_block) {
-                            $decoded = json_decode('"' . $pair[3] . '"');
-                            $drop = !is_string($decoded)
-                                || preg_match(
-                                    '/\A(?:javascript|vbscript|data)\s*:/i',
-                                    (string) preg_replace('/[\x00-\x20\x7F]+/', '', $decoded)
-                                ) === 1;
-                            if (!$drop && $media_block
-                                && in_array($pair[2], array('url', 'src', 'poster', 'mediaUrl'), true)
-                                && {{FN_PREFIX}}_content_source_is_foreign('src', $decoded)
-                            ) {
-                                $drop = true;
-                            }
-                            if (!$drop) {
-                                return $pair[0];
-                            }
-                            $leading = isset($pair[1]) && $pair[1] !== '';
-                            return $leading ? (isset($pair[4]) ? $pair[4] : '') : '';
-                        },
-                        $match[0]
-                    );
-                    return $result === null ? $match[0] : $result;
+                    $changed = false;
+                    $attrs = {{FN_PREFIX}}_content_walk_block_json($attrs, $media_block, null, $changed);
+                    if (!$changed) {
+                        return $match[0];
+                    }
+                    if ($attrs === array()) {
+                        $json = '';
+                    } elseif (function_exists('serialize_block_attributes')) {
+                        $json = serialize_block_attributes($attrs) . ' ';
+                    } else {
+                        $json = str_replace('--', '\\u002d\\u002d', (string) json_encode(
+                            $attrs,
+                            JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP
+                            | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+                        )) . ' ';
+                    }
+                    return '<!-- wp:' . $match[1] . ' ' . $json . $match[3] . '-->';
                 },
                 $content
             );
             return $result === null ? $content : $result;
+        }
+
+        /**
+         * One recursive pass over a decoded attribute object. An object that
+         * loses its last key goes with it.
+         */
+        function {{FN_PREFIX}}_content_walk_block_json($node, $media_block, $parent_key, &$changed) {
+            foreach ($node as $key => $value) {
+                $own_key = is_string($key) ? $key : $parent_key;
+                if (is_array($value)) {
+                    $child_changed = false;
+                    $child = {{FN_PREFIX}}_content_walk_block_json($value, $media_block, $own_key, $child_changed);
+                    if ($child_changed) {
+                        $changed = true;
+                        if ($child === array() && is_string($key)) {
+                            unset($node[$key]);
+                        } else {
+                            $node[$key] = $child;
+                        }
+                    }
+                    continue;
+                }
+                if (!is_string($key) || !is_string($value)) {
+                    continue;
+                }
+                $source_key = in_array($key, array('url', 'src', 'poster', 'mediaUrl', 'href', 'textLinkHref'), true);
+                if ($source_key
+                    && preg_match(
+                        '/\A(?:javascript|vbscript|data)\s*:/i',
+                        (string) preg_replace('/[\x00-\x20\x7F]+/', '', $value)
+                    ) === 1
+                ) {
+                    unset($node[$key]);
+                    $changed = true;
+                    continue;
+                }
+                $fetches = ($media_block && in_array($key, array('url', 'src', 'poster', 'mediaUrl'), true))
+                    || ($key === 'url' && $parent_key === 'backgroundImage');
+                if ($fetches && {{FN_PREFIX}}_content_source_is_foreign('src', $value)) {
+                    unset($node[$key]);
+                    $changed = true;
+                }
+            }
+            return $node;
         }
 
         /** Whether the current token sits inside a code-bearing element. */

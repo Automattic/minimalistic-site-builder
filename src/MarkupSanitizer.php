@@ -31,8 +31,15 @@ final class MarkupSanitizer
      * legitimate generated markup: it is a fetch from a model-chosen host on
      * every page view (BIGR-975).
      */
-    private const MEDIA_ELEMENTS = ['img', 'source', 'video', 'audio', 'track', 'picture', 'input'];
-    private const MEDIA_SOURCE_ATTRIBUTES = ['src', 'srcset', 'poster'];
+    private const MEDIA_ELEMENTS = [
+        'img', 'source', 'video', 'audio', 'track', 'picture', 'input',
+        // SVG elements fetch through href / xlink:href.
+        'image', 'use', 'feimage',
+        // The HTML rendering rules still map the legacy `background`
+        // attribute on these elements to background-image.
+        'body', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th',
+    ];
+    private const MEDIA_SOURCE_ATTRIBUTES = ['src', 'srcset', 'poster', 'href', 'xlink:href', 'background'];
     /**
      * Only these blocks carry a media source in their comment JSON. A
      * navigation-link, social-link, or button "url" is a destination the
@@ -41,7 +48,7 @@ final class MarkupSanitizer
     private const BLOCK_MEDIA_NAMES = 'cover|image|video|audio|media-text|gallery';
     private const BLOCK_MEDIA_KEYS = ['url', 'src', 'poster', 'mediaUrl'];
     /** Comment-JSON keys any block may render as a destination or a source. */
-    private const BLOCK_SOURCE_KEYS = 'url|src|poster|mediaUrl|href|textLinkHref';
+    private const BLOCK_SOURCE_KEYS = ['url', 'src', 'poster', 'mediaUrl', 'href', 'textLinkHref'];
 
     /**
      * @param list<string> $notes out-param: one line per class of removal, so
@@ -76,7 +83,9 @@ final class MarkupSanitizer
         $animation = ['animate', 'animatetransform', 'animatemotion', 'set'];
         // `meta` carries no content but http-equiv="refresh" redirects every
         // visitor to a model-chosen URL, which no later pass would catch.
-        $tags = array_merge($containers, $animation, ['embed', 'base', 'meta']);
+        // `link` loads a stylesheet, an icon, or a prefetch from a
+        // model-chosen host, in the body as much as in the head.
+        $tags = array_merge($containers, $animation, ['embed', 'base', 'meta', 'link']);
 
         // Removal splices the bytes on either side of a deleted tag together,
         // and that seam can spell a new tag: `<<base>script>` becomes a live
@@ -531,49 +540,88 @@ final class MarkupSanitizer
     }
 
     /**
-     * Neutralize comment-JSON sources. On every block, a destination or
-     * source key with an executable scheme goes. On a media block, a source
-     * key on a foreign host goes too; a navigation-link, social-link, or
-     * button "url" is a destination the visitor chooses to follow, and stays.
-     * The value is judged JSON-decoded, so a \u-escaped scheme cannot hide.
-     * A key goes with the comma that binds it so the JSON stays valid.
+     * Neutralize comment-JSON sources. The attribute object of every block
+     * is decoded and walked. On every block, a destination or source key
+     * with an executable scheme goes. On a media block, a source key on a
+     * foreign host goes too; a navigation-link, social-link, or button
+     * "url" is a destination the visitor chooses to follow, and stays. On
+     * every block, a foreign `url` inside a `backgroundImage` object goes,
+     * because WordPress renders style.background.backgroundImage.url from
+     * the JSON at render time. A block that lost a key is re-serialized the
+     * way WordPress does, so the JSON stays valid whatever was removed; a
+     * block that lost nothing keeps its bytes.
      */
     private static function neutralizeBlockJsonSources(string $markup, int &$media, int &$executable): string
     {
         $result = preg_replace_callback(
-            '/<!--\s*wp:(?:core\/)?([a-zA-Z0-9-]+)\s+\{.*?\}\s*\/?-->/s',
+            '/<!--\s*wp:(?:core\/)?([a-zA-Z0-9-]+)\s+(\{.*?\})\s*(\/?)-->/s',
             static function (array $match) use (&$media, &$executable): string {
+                $attrs = json_decode($match[2], true);
+                if (!is_array($attrs)) {
+                    return $match[0];
+                }
                 $mediaBlock = preg_match('/^(?:' . self::BLOCK_MEDIA_NAMES . ')$/', $match[1]) === 1;
-                $result = preg_replace_callback(
-                    '/(,\s*)?"(' . self::BLOCK_SOURCE_KEYS . ')"\s*:\s*"((?:[^"\\\\]|\\\\.)*)"(\s*,)?/',
-                    static function (array $pair) use ($mediaBlock, &$media, &$executable): string {
-                        $decoded = json_decode('"' . $pair[3] . '"');
-                        $drop = !is_string($decoded) || self::hasExecutableScheme($decoded);
-                        if ($drop) {
-                            $executable++;
-                        } elseif (
-                            $mediaBlock
-                            && in_array($pair[2], self::BLOCK_MEDIA_KEYS, true)
-                            && self::isForeignSource('src', $decoded)
-                        ) {
-                            $drop = true;
-                            $media++;
-                        }
-                        if (!$drop) {
-                            return $pair[0];
-                        }
-                        // After a comma: the pair goes with that comma and any
-                        // trailing comma stays for the next key. In first
-                        // position: the pair goes with the comma after it.
-                        return ($pair[1] ?? '') !== '' ? ($pair[4] ?? '') : '';
-                    },
-                    $match[0],
-                );
-                return $result ?? $match[0];
+                $changed = false;
+                $attrs = self::walkBlockJson($attrs, $mediaBlock, null, $media, $executable, $changed);
+                if (!$changed) {
+                    return $match[0];
+                }
+                return BlockMarkup::serializeComment($match[1], $attrs, $match[3] === '/');
             },
             $markup,
         );
         return $result ?? $markup;
+    }
+
+    /**
+     * One recursive pass over a decoded attribute object. An object that
+     * loses its last key goes with it, so `style.background.backgroundImage`
+     * never ships as an empty shell.
+     *
+     * @param array<mixed> $node
+     * @return array<mixed>
+     */
+    private static function walkBlockJson(
+        array $node,
+        bool $mediaBlock,
+        ?string $parentKey,
+        int &$media,
+        int &$executable,
+        bool &$changed,
+    ): array {
+        foreach ($node as $key => $value) {
+            $ownKey = is_string($key) ? $key : $parentKey;
+            if (is_array($value)) {
+                $childChanged = false;
+                $child = self::walkBlockJson($value, $mediaBlock, $ownKey, $media, $executable, $childChanged);
+                if ($childChanged) {
+                    $changed = true;
+                    if ($child === [] && is_string($key)) {
+                        unset($node[$key]);
+                    } else {
+                        $node[$key] = $child;
+                    }
+                }
+                continue;
+            }
+            if (!is_string($key) || !is_string($value)) {
+                continue;
+            }
+            if (in_array($key, self::BLOCK_SOURCE_KEYS, true) && self::hasExecutableScheme($value)) {
+                unset($node[$key]);
+                $executable++;
+                $changed = true;
+                continue;
+            }
+            $fetches = ($mediaBlock && in_array($key, self::BLOCK_MEDIA_KEYS, true))
+                || ($key === 'url' && $parentKey === 'backgroundImage');
+            if ($fetches && self::isForeignSource('src', $value)) {
+                unset($node[$key]);
+                $media++;
+                $changed = true;
+            }
+        }
+        return $node;
     }
 
     /**
@@ -599,6 +647,9 @@ final class MarkupSanitizer
             if ($stripped === null) {
                 return true;
             }
+            // A browser reads `\` as `/` in a special-scheme URL, so
+            // `\\host/x` and `/\host/x` both resolve to another host.
+            $stripped = str_replace('\\', '/', $stripped);
             if (preg_match('#\A(?:[a-z][a-z0-9+.\-]*:)?//#i', $stripped) === 1
                 || preg_match('#\A(?:https?|ftp):#i', $stripped) === 1
             ) {
