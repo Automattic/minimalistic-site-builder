@@ -413,7 +413,7 @@ final class StepComposition
             new ResolveNavLinksStep(),
             new CollectImagesStep(htmlFirst: true),
             new NormalizeLayoutStep(htmlFirst: true),
-            new HeaderHeroStep(htmlFirst: true),
+            new HeaderHeroStep(htmlFirst: true, islands: true),
             new ContrastFixStep(htmlFirst: true),
             new MotionSanityStep(htmlFirst: true),
             new FixBlocksStep($blockFixer, htmlFirst: true),

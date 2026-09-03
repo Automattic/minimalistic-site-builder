@@ -151,6 +151,12 @@ final class HeaderHeroStep implements Step
 
     public function __construct(
         private readonly bool $htmlFirst = false,
+        // Only the islands graph hands this step a PHASE_FINAL contract:
+        // IslandAboveFoldStep finalizes from island markup, because
+        // AboveFoldPartFacts inspects a wp:group root the islands never have.
+        // Every other graph reaching here with a final contract is a re-run,
+        // and must still be refused.
+        private readonly bool $islands = false,
     ) {
     }
 
@@ -237,7 +243,8 @@ final class HeaderHeroStep implements Step
             ? GeneratedMarkup::wideMeasureSubjectClasses($project->readText('design/site.css'))
             : [];
         $delivery = $project->readJson('aboveFold.json');
-        $alreadyFinal = ($delivery['phase'] ?? null) === AboveFoldContract::PHASE_FINAL;
+        $alreadyFinal = $this->islands
+            && ($delivery['phase'] ?? null) === AboveFoldContract::PHASE_FINAL;
         if (!$alreadyFinal) {
             AboveFoldContract::assertPhase($delivery, AboveFoldContract::PHASE_DELIVERY);
         }
