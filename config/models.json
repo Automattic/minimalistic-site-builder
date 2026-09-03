@@ -20,8 +20,8 @@
             "small": "moonshotai/kimi-k2.5:nitro"
         },
         "baseten": {
-            "large": "moonshotai/Kimi-K3",
-            "small": "zai-org/GLM-5.2-Fast"
+            "large": "zai-org/GLM-5.3-Flash",
+            "small": "zai-org/GLM-5.3-Flash"
         }
     },
     "step_tiers": {

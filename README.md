@@ -135,7 +135,7 @@ tier there — so switching providers needs no per-step configuration. Defaults:
 | `openai` | `gpt-5.5` | `gpt-5.4-mini` |
 | `xai` | `grok-4.6` | `grok-4.6` |
 | `openrouter` | `moonshotai/kimi-k3` | `moonshotai/kimi-k2.5:nitro` |
-| `baseten` | `moonshotai/Kimi-K3` | `zai-org/GLM-5.2-Fast` |
+| `baseten` | `zai-org/GLM-5.3-Flash` | `zai-org/GLM-5.3-Flash` |
 
 `baseten` reaches Baseten's open-weight models through the WordPress.com AI
 proxy (`https://public-api.wordpress.com/wpcom/v2/ai-api-proxy/v1`, feature slug
@@ -144,6 +144,31 @@ proxy (`https://public-api.wordpress.com/wpcom/v2/ai-api-proxy/v1`, feature slug
 Baseten key. Besides the two tier defaults, `LLM_MODEL` / `LLM_MODEL_<STEP>`
 accept `deepseek-ai/DeepSeek-V4-Pro`, `deepseek-ai/DeepSeek-V4-Flash-0731`,
 `zai-org/GLM-5.2` and `zai-org/GLM-5.3-Flash`. Model ids are case-sensitive.
+
+### Running one step on a different provider
+
+`LLM_MODEL_<STEP>` has always overridden a single step's model. It also accepts
+an optional `transport:` prefix, which moves that one step to another provider:
+
+```bash
+LLM_PROVIDER=anthropic
+LLM_MODEL_THEME_JSON=claude-opus-5                    # model only, as always
+LLM_MODEL_SECTIONS=baseten:zai-org/GLM-5.3-Flash      # this step runs on Baseten
+```
+
+The build then uses one client per transport, dispatching each request on its
+model id. No step knows more than one provider is in play, and a run with no
+prefixed override builds exactly the single client it always did.
+
+Transports are `anthropic`, `xai`, `openai`, `openrouter` and `baseten`. The
+prefix is recognised only when the text before the first colon **is** one of
+them, because model ids contain colons too: `moonshotai/kimi-k2.5:nitro` is an
+ordinary OpenRouter id and is read as a model, not as a transport. Model ids are
+passed through verbatim — Baseten's are case-sensitive.
+
+`design-preview`, `inner-pages-design` and `transform-site` have no tier, so an
+`LLM_MODEL_<STEP>` override is the only thing that ever gives them a model;
+without one they use the client's default.
 
 Most of these models reason by default, and those tokens come out of the same
 completion budget as the answer — asked for 24 tokens, Kimi K3 and both DeepSeek
