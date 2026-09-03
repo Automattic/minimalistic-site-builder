@@ -1944,7 +1944,8 @@ final class CssChecks
         return $i;
     }
 
-    private static function withoutComments(string $css): string
+    /** The CSS with every comment removed; a comment never loads anything. */
+    public static function withoutComments(string $css): string
     {
         return (string) preg_replace('~/\*.*?\*/~s', '', $css);
     }

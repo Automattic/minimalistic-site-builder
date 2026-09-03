@@ -70,7 +70,11 @@ final class DesignMarkupSanitizer
                         . '; delivered removed; disposition removed a resource-loading CSS value'
                         . ' — a design stylesheet may not fetch images, fonts, or stylesheets';
                 }
-                if (CssChecks::resourceLoadingProblem($repaired) !== null) {
+                // The fallback judges comment-free CSS: a comment that
+                // mentions url() loads nothing, and emptying the whole
+                // design stylesheet for it would cut far above the
+                // smallest harmful unit and fail the preview contract.
+                if (CssChecks::resourceLoadingProblem(CssChecks::withoutComments($repaired)) !== null) {
                     $warnings[] = "malformed_design: {$path} context {$context}; authored "
                         . Warnings::value($css)
                         . '; delivered removed; disposition removed the whole design stylesheet'
