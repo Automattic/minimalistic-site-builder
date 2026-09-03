@@ -813,3 +813,33 @@ test('image treatment ownership covers owned surfaces and their image/pseudo lay
     assert_true(!CssChecks::isImageTreatmentAffectingDeclaration('--filter', 'blur(2px)'));
     assert_true(!CssChecks::isImageTreatmentAffectingDeclaration('transform', 'scale(1.1)'));
 });
+
+test('decodedResourceLoadingProblem sees through HTML entities and CSS escapes', function () {
+    assert_true(CssChecks::decodedResourceLoadingProblem('background:url&#40;https://evil.example/px&#41;') !== null, 'numeric entity');
+    assert_true(CssChecks::decodedResourceLoadingProblem('background:url&lpar;x&rpar;') !== null, 'named entity');
+    assert_true(CssChecks::decodedResourceLoadingProblem('background:\\75rl(x)') !== null, 'CSS hex escape');
+    assert_true(CssChecks::decodedResourceLoadingProblem('background:\\u\\r\\l(x)') !== null, 'CSS char escapes');
+    assert_eq(null, CssChecks::decodedResourceLoadingProblem('color:red;content:"&quot;"'));
+});
+
+test('scrubInlineStyle drops only the loading declarations and reports the three outcomes', function () {
+    assert_eq(null, CssChecks::scrubInlineStyle('color:red; margin:0'), 'clean value is untouched');
+    assert_eq('color:red;  margin:0', CssChecks::scrubInlineStyle('color:red; background:url(https://evil.example/px); margin:0'));
+    assert_eq('color:red;', CssChecks::scrubInlineStyle('color:red;background-image:image-set("a.png" 1x)'), 'bytes outside the dropped span are kept');
+    assert_eq('', CssChecks::scrubInlineStyle('background:url(https://evil.example/px)'), 'nothing survives');
+    // A `;` inside a quoted string is not a declaration boundary.
+    assert_eq(
+        'content:"a;b";',
+        CssChecks::scrubInlineStyle('content:"a;b";background:url(x)'),
+    );
+    assert_eq('', CssChecks::scrubInlineStyle('@import url(x)'), 'a surviving loading form empties the value');
+});
+
+test('scrubInlineStyle keeps the build\'s own theme asset placeholder and nothing else inside url()', function () {
+    assert_eq(null, CssChecks::scrubInlineStyle('background-image:url(theme:./assets/hero.jpg)'));
+    assert_eq(null, CssChecks::scrubInlineStyle("background-image:url('theme:./assets/hero-2.png');min-height:60vh"));
+    assert_eq('', CssChecks::scrubInlineStyle('background-image:url(theme:./assets/hero.jpg) url(https://evil.example/px)'));
+    assert_eq('', CssChecks::scrubInlineStyle('background-image:url("theme:./assets/hero.jpg" https://evil.example/px)'));
+    assert_eq('', CssChecks::scrubInlineStyle('background-image:url(theme:./assets/../../evil.jpg)'));
+    assert_eq('', CssChecks::scrubInlineStyle('background-image:url(theme:./assets/hero.svg)'), 'only the image types the build writes');
+});

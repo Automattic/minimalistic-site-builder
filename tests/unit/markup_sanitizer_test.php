@@ -364,3 +364,67 @@ test('normalize reports truncation salvage through the notes out-param', functio
     assert_contains('delivered=', $notes[0]);
     assert_contains('disposition=', $notes[0]);
 });
+
+test('sanitize drops resource-loading declarations from inline styles and keeps the rest', function () {
+    $notes = [];
+    $out = MarkupSanitizer::sanitize(
+        '<!-- wp:group {"style":{"color":{"background":"#fff"}}} -->'
+        . '<div class="wp-block-group" style="background:url(https://evil.example/px);color:red">hi</div>'
+        . '<!-- /wp:group -->',
+        $notes,
+    );
+    assert_true(!str_contains($out, 'evil.example'), 'external fetch removed');
+    assert_contains('style="color:red"', $out);
+    assert_contains('{"style":{"color":{"background":"#fff"}}}', $out, 'block JSON is not an HTML attribute');
+    assert_contains('inline style attribute(s)', implode(' | ', $notes));
+});
+
+test('sanitize judges inline styles decoded, the way the CSS parser sees them', function () {
+    foreach ([
+        '<div style="background:url&#40;https://evil.example/px&#41;">hi</div>',
+        '<div style="background:\\75rl(https://evil.example/px)">hi</div>',
+        '<div style="background-image: url(&quot;https://evil.example/a.png&quot;)">hi</div>',
+        '<div style=background:url(https://evil.example/px) class=x>hi</div>',
+        "<div style='background:image-set(\"https://evil.example/a.png\" 1x)'>hi</div>",
+    ] as $html) {
+        $out = MarkupSanitizer::sanitize($html);
+        assert_true(!str_contains($out, 'evil.example'), "fetch survived: {$html}");
+        assert_true(preg_match('/url|image-set/i', $out) !== 1, "loading form survived: {$html}");
+        assert_contains('>hi</div>', $out, "content survived: {$html}");
+    }
+    // Nothing survives the scrub, so the attribute goes without breaking the
+    // neighbouring attribute.
+    assert_eq('<div class=x>hi</div>', MarkupSanitizer::sanitize('<div style=background:url(x) class=x>hi</div>'));
+});
+
+test('sanitize leaves clean inline styles byte-identical', function () {
+    $html = '<div style="color:red;content:\'a;b\';margin:0"><p style="--x: var(--y)">t</p></div>';
+    $notes = [];
+    assert_eq($html, MarkupSanitizer::sanitize($html, $notes));
+    assert_eq([], $notes);
+});
+
+test('design sanitizer removes an inline style that loads a resource with its own disposition', function () {
+    $warnings = [];
+    $out = \Automattic\SiteBuild\DesignMarkupSanitizer::sanitize(
+        '<!DOCTYPE html><html><head><title>x</title></head><body>'
+        . '<section style="color:red;background:url(https://evil.example/px)" class="hero"><h1>Hi</h1></section>'
+        . '<p style="color:blue">kept</p></body></html>',
+        'design/home.html',
+        'test',
+        $warnings,
+    );
+    assert_true(!str_contains($out, 'evil.example'), 'external fetch removed');
+    assert_contains('<section class="hero"><h1>Hi</h1></section>', $out);
+    assert_contains('<p style="color:blue">kept</p>', $out, 'a clean inline style stays');
+    assert_contains('disposition removed inline style that loads a resource', implode(' ', $warnings));
+});
+
+test('sanitize keeps a cover background that names a theme asset placeholder', function () {
+    $html = '<!-- wp:cover {"hasParallax":true} -->'
+        . '<div class="wp-block-cover" style="background-image:url(theme:./assets/hero.jpg)"></div>'
+        . '<!-- /wp:cover -->';
+    $notes = [];
+    assert_eq($html, MarkupSanitizer::sanitize($html, $notes));
+    assert_eq([], $notes);
+});
