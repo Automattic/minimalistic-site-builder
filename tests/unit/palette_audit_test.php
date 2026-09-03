@@ -132,33 +132,81 @@ test('palette-audit missing theme.json errors on stderr and exits 1', function (
     });
 });
 
+/** @param array<string,string> $palette */
+function write_slug_project(\Automattic\SiteBuild\Project $project, array $palette, string $economy): void
+{
+    write_theme_palette($project, $palette);
+    $project->writeJson('designDirection.json', ['color_economy' => $economy]);
+}
+
+const PALETTE_AUDIT_TWO_HUE_FOUNDATION = [
+    'base' => '#131313',
+    'contrast' => '#E8DFD0',
+    'primary' => '#8E1F26',
+    'secondary' => '#C79A3C',
+    'accent' => '#E2622A',
+];
+
 test('palette-audit slug reports delivered findings and does not repair', function () {
     with_palette_audit_project(function ($project): void {
-        write_theme_palette($project, [
-            'base' => '#131313',
-            'contrast' => '#E8DFD0',
-            'primary' => '#8E1F26',
-            'secondary' => '#C79A3C',
-            'accent' => '#E2622A',
-        ]);
+        write_slug_project($project, PALETTE_AUDIT_TWO_HUE_FOUNDATION, 'multicolor');
         $run = run_palette_audit([$project->slug()]);
         $text = $run['stdout'] . $run['stderr'];
         assert_eq(1, $run['exit'], $text);
+        assert_contains('economy: multicolor', $run['stdout']);
         assert_contains('findings: 2', $run['stdout']);
         assert_contains('hue-separation', $run['stdout']);
         assert_contains('authored=#8E1F26', $run['stdout']);
     });
 });
 
+test('palette-audit slug judges the palette under the economy the build committed', function () {
+    // The same palette under monochrome: the accent is no longer required to
+    // stand apart from primary, but the gold secondary and the orange accent
+    // are spending hue families the direction gave up.
+    with_palette_audit_project(function ($project): void {
+        write_slug_project($project, PALETTE_AUDIT_TWO_HUE_FOUNDATION, 'monochrome');
+        $run = run_palette_audit([$project->slug()]);
+        $text = $run['stdout'] . $run['stderr'];
+        assert_eq(1, $run['exit'], $text);
+        assert_contains('economy: monochrome', $run['stdout']);
+        assert_contains('color-economy', $run['stdout']);
+        assert_true(!str_contains($run['stdout'], 'hue-separation'), $text);
+    });
+
+    // No direction on disk: the build would have used the default, so the
+    // audit does too.
+    with_palette_audit_project(function ($project): void {
+        write_theme_palette($project, PALETTE_AUDIT_TWO_HUE_FOUNDATION);
+        $run = run_palette_audit([$project->slug()]);
+        assert_contains('economy: single-accent', $run['stdout']);
+    });
+});
+
+test('palette-audit --projects repairs under each project\'s committed economy', function () {
+    $dir = sys_get_temp_dir() . '/palette_audit_economy_' . getmypid() . '_' . str_replace('.', '', uniqid('', true));
+    write_slug_project(new \Automattic\SiteBuild\Project($dir . '/mono'), PALETTE_AUDIT_TWO_HUE_FOUNDATION, 'monochrome');
+    try {
+        $run = run_palette_audit(['--projects', $dir]);
+        $text = $run['stdout'] . $run['stderr'];
+        assert_eq(0, $run['exit'], $text);
+        assert_contains('projects palettes: 1', $run['stdout']);
+        assert_contains('residual palettes: 0', $run['stdout'], 'monochrome consolidation repairs cleanly');
+        assert_true(!str_contains($run['stdout'], 'hue-separation'), $text);
+    } finally {
+        remove_tree($dir);
+    }
+});
+
 test('palette-audit slug with a clean delivered palette exits 0', function () {
     with_palette_audit_project(function ($project): void {
-        write_theme_palette($project, [
+        write_slug_project($project, [
             'base' => '#F7F4EE',
             'contrast' => '#1B1B1B',
             'primary' => '#7B2D26',
             'secondary' => '#3E5C4A',
             'accent' => '#1F6F8B',
-        ]);
+        ], 'multicolor');
         $run = run_palette_audit([$project->slug()]);
         assert_eq(0, $run['exit'], $run['stdout'] . $run['stderr']);
         assert_contains('findings: 0', $run['stdout']);
