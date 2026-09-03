@@ -919,6 +919,12 @@ test('generated seeder removes media sources on a foreign host like the intake s
         '<!-- wp:video {"src":"https://evil.example/v.mp4"} /--><video poster="/p.jpg" src="ftp://evil.example/v.mp4"></video>',
         "<img src=\"ht\ttps://evil.example/a.jpg\">",
         '<input type="image" src="https://evil.example/btn.png">',
+        '<img src="\\\\evil.example/a.png" alt="a"><img src="/\\evil.example/b.png">',
+        '<svg><image href="https://evil.example/i.png"/><use xlink:href="//evil.example/s.svg#a"/></svg>',
+        '<table background="https://evil.example/t.png"><tr><td background="//evil.example/c.png">x</td></tr></table>',
+        '<link rel="stylesheet" href="https://evil.example/l.css"><p>after</p>',
+        '<!-- wp:group {"style":{"background":{"backgroundImage":{"url":"https://evil.example/g.png","id":5}}}} --><div class="wp-block-group"></div><!-- /wp:group -->',
+        '<!-- wp:cover {"url":"\\\\\\\\evil.example\/bg.jpg","id":1} --><div></div><!-- /wp:cover -->',
     ];
     foreach ($corpus as $html) {
         foreach ([
@@ -934,6 +940,8 @@ test('generated seeder removes media sources on a foreign host like the intake s
         . '<!-- wp:social-link {"url":"https://x.com/hearth","service":"x"} /-->';
     assert_eq($kept, \Automattic\SiteBuild\MarkupSanitizer::sanitize($kept));
     assert_eq($kept, $sanitize($kept));
+    $group = $sanitize($corpus[9]);
+    assert_contains('{"style":{"background":{"backgroundImage":{"id":5}}}}', $group, 'seeder drops a block background url and keeps the rest');
     $cover = $sanitize($corpus[0]);
     assert_contains('<!-- wp:cover {"dimRatio":50,"id":3} -->', $cover, 'seeder drops the JSON key with its comma');
     assert_contains('alt="Oven"', $cover, 'seeder keeps the element and its alt');
