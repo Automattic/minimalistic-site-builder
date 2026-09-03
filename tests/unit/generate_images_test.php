@@ -1629,3 +1629,174 @@ test('generate-images keeps a missing content image in the plugin manifest', fun
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+// --- BIGR-979: post-generation look at delivered heroes ---------------------
+
+const GI_QA_PASS = '{"upright": true, "rendered_text": false, "matches_subject": true, "note": ""}';
+const GI_QA_ROTATED = '{"upright": false, "rendered_text": false, "matches_subject": true, "note": "sky on the left edge"}';
+
+test('generate-images inspects a delivered hero once and delivers it silently when it passes', function () {
+    [$project, $tmp] = generate_fixture(); // hero.jpg, "full-bleed hero with text overlay"
+    $images = new FakeImageClient('JPEGDATA');
+    $llm = new FakeLlm();
+    $llm->queueText(GI_QA_PASS);
+
+    (new GenerateImagesStep($images, $llm, 'small-model'))->run($project);
+
+    assert_eq(1, count($llm->imageCalls), 'one vision call for the one hero');
+    assert_eq('image/jpeg', $llm->imageCalls[0]['mime']);
+    assert_true($llm->imageCalls[0]['bytes'] > 0, 'the delivered file bytes were sent');
+    assert_eq('small-model', $llm->imageCalls[0]['opts']['model'], 'the small tier looks at the image');
+    assert_contains('A bakery at dawn', $llm->imageCalls[0]['prompt'], 'the authored subject is what it is checked against');
+    assert_eq(0, count($llm->calls), 'no text request was spent');
+    assert_eq(1, count($images->batches), 'no regeneration');
+    assert_eq('completed', $project->readJson('images.json')[0]['status']);
+    assert_true(!$project->exists('warnings.json'), 'a passing image owes no warning');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images regenerates a failing hero once with a corrected subject and passes it', function () {
+    [$project, $tmp] = generate_fixture();
+    $images = new FakeImageClient('JPEGDATA');
+    $llm = new FakeLlm();
+    $llm->queueText(GI_QA_ROTATED);
+    $llm->queueText(GI_QA_PASS);
+
+    (new GenerateImagesStep($images, $llm, 'small-model'))->run($project);
+
+    assert_eq(2, count($llm->imageCalls), 'first look, then a second look at the regenerated image');
+    assert_eq(2, count($images->batches), 'original batch + one regeneration');
+    assert_eq(1, count($images->batches[1]), 'only the failing hero is regenerated');
+    assert_contains('A bakery at dawn', $images->batches[1][0]['prompt'], 'the authored subject leads');
+    assert_contains('The camera is upright and level', $images->batches[1][0]['prompt'], 'the finding becomes a positive correction');
+
+    $spec = $project->readJson('images.json')[0];
+    assert_eq('completed', $spec['status']);
+    assert_eq(true, $spec['qa']['regenerated']);
+    assert_true($project->exists('theme/assets/hero.jpg'));
+    assert_true(!$project->exists('warnings.json'), 'a regeneration that passes owes no warning');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images keeps a hero that fails twice and records the finding', function () {
+    [$project, $tmp] = generate_fixture();
+    $images = new FakeImageClient('JPEGDATA');
+    $llm = new FakeLlm();
+    $llm->queueText(GI_QA_ROTATED);
+    $llm->queueText(GI_QA_ROTATED);
+
+    (new GenerateImagesStep($images, $llm, 'small-model'))->run($project);
+
+    assert_eq(2, count($images->batches), 'one regeneration only');
+    assert_eq(2, count($llm->imageCalls));
+    assert_eq('completed', $project->readJson('images.json')[0]['status'], 'the image ships');
+    assert_true($project->exists('theme/assets/hero.jpg'), 'the image is kept');
+
+    $rows = $project->readJson('warnings.json')['generate-images'];
+    assert_eq(1, count($rows));
+    assert_contains('theme/assets/hero.jpg', $rows[0]);
+    assert_contains('camera not upright', $rows[0]);
+    assert_contains('"A bakery at dawn"', $rows[0]);
+    assert_contains('disposition: delivered, still failing after one regeneration', $rows[0]);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images keeps the first hero when its regeneration fails', function () {
+    [$project, $tmp] = generate_fixture();
+    $images = new FakeImageClient('JPEGDATA');
+    $images->failPromptSubstrings = ['The camera is upright and level']; // only the corrected prompt fails
+    $llm = new FakeLlm();
+    $llm->queueText(GI_QA_ROTATED);
+
+    (new GenerateImagesStep($images, $llm, 'small-model'))->run($project);
+
+    assert_eq(1, count($llm->imageCalls), 'nothing to look at a second time');
+    $spec = $project->readJson('images.json')[0];
+    assert_eq('completed', $spec['status'], 'a failed regeneration never removes a delivered image');
+    assert_eq(['regenerated' => false, 'finding' => 'camera not upright (scene rotated or tilted)'], $spec['qa'], 'the row says the first image ships with its finding');
+    assert_true($project->exists('theme/assets/hero.jpg'));
+    $rows = $project->readJson('warnings.json')['generate-images'];
+    assert_eq(1, count($rows));
+    assert_contains('regeneration failed: fake image failure', $rows[0]);
+    assert_contains('camera not upright', $rows[0]);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images delivers a regenerated hero unverified when the second look is unreadable', function () {
+    [$project, $tmp] = generate_fixture();
+    $images = new FakeImageClient('JPEGDATA');
+    $llm = new FakeLlm();
+    $llm->queueText(GI_QA_ROTATED);
+    $llm->queueText('I cannot tell.');
+
+    (new GenerateImagesStep($images, $llm, 'small-model'))->run($project);
+
+    assert_eq(2, count($images->batches), 'one regeneration');
+    assert_eq(2, count($llm->imageCalls), 'two looks');
+    $spec = $project->readJson('images.json')[0];
+    assert_eq('completed', $spec['status']);
+    assert_eq(true, $spec['qa']['regenerated'], 'the regenerated image ships');
+    assert_true(!$project->exists('warnings.json'), 'no verdict is not a defect');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images delivers a hero unverified when the inspection itself fails', function () {
+    [$project, $tmp] = generate_fixture();
+    $images = new FakeImageClient('JPEGDATA');
+    $llm = new FakeLlm(); // nothing queued: the vision call throws
+
+    (new GenerateImagesStep($images, $llm, 'small-model'))->run($project);
+
+    assert_eq(1, count($llm->imageCalls));
+    assert_eq(1, count($images->batches), 'no regeneration on a missing verdict');
+    assert_eq('completed', $project->readJson('images.json')[0]['status']);
+    assert_true(!$project->exists('warnings.json'), 'an unverified image is not a defect');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images never inspects card images, transparent assets, or with the check off', function () {
+    $tmp = sys_get_temp_dir() . '/builder_gi_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeText('theme/parts/menu.html',
+        '<!-- wp:image --><figure><img src="theme:./assets/loaf.jpg" alt="AI_IMAGE: A sourdough loaf | menu item card in a 3-column grid | photorealistic | square"/></figure><!-- /wp:image -->'
+        . '<!-- wp:image --><figure><img src="theme:./assets/mark.png" alt="AI_IMAGE: A wheat stem | isolated accent | illustration | square"/></figure><!-- /wp:image -->'
+    );
+    (new CollectImagesStep())->run($project);
+    $images = new FakeImageClient('JPEGDATA');
+    $llm = new FakeLlm();
+    $llm->queueText(GI_QA_PASS);
+
+    (new GenerateImagesStep($images, $llm, 'small-model'))->run($project);
+    assert_eq(0, count($llm->imageCalls), 'no card or transparent asset earns a vision call');
+    exec('rm -rf ' . escapeshellarg($tmp));
+
+    [$project, $tmp] = generate_fixture();
+    (new GenerateImagesStep(new FakeImageClient('JPEGDATA'), $llm, 'small-model', inspectImages: false))->run($project);
+    assert_eq(0, count($llm->imageCalls), 'the constructor switch turns the check off');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images skips the hero check on a text-only Llm', function () {
+    [$project, $tmp] = generate_fixture();
+    $textOnly = new class implements \Automattic\SiteBuild\Llm {
+        public int $calls = 0;
+        public function complete(string $prompt, array $opts = []): string { $this->calls++; return ''; }
+        public function completeJson(string $prompt, array $opts = []): array { $this->calls++; return []; }
+        public function completeJsonBatch(array $requests): array { $this->calls++; return []; }
+        public function completeBatch(array $requests): \Automattic\SiteBuild\TextBatchResult { $this->calls++; return new \Automattic\SiteBuild\TextBatchResult([], []); }
+    };
+
+    (new GenerateImagesStep(new FakeImageClient('JPEGDATA'), $textOnly, 'small-model'))->run($project);
+
+    assert_eq(0, $textOnly->calls, 'a transport that cannot carry pixels is never asked to');
+    assert_eq('completed', $project->readJson('images.json')[0]['status']);
+    assert_true(!$project->exists('warnings.json'));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

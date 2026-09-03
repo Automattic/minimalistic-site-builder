@@ -64,3 +64,30 @@ test('WPCOM delivery boundary accepts only bytes matching the requested MIME', f
     assert_contains('requested image/png', $error->getMessage());
     assert_contains('detected image/jpeg', $error->getMessage());
 });
+
+test('WPCOM request headers carry host-supplied extras and skip empty ones', function () {
+    $headers = new ReflectionMethod(WpcomImageClient::class, 'requestHeaders');
+
+    $plain = new WpcomImageClient('test-token');
+    assert_eq(
+        [
+            'authorization: Bearer test-token',
+            'x-wpcom-ai-feature: builder-theme-image',
+            'content-type: application/json',
+        ],
+        $headers->invoke($plain),
+        'no extras: the three headers the proxy has always seen'
+    );
+
+    $tagged = new WpcomImageClient('test-token', extraHeaders: ['X-WPCOM-Session-ID' => 'run-1', 'X-Empty' => '']);
+    assert_eq(
+        [
+            'authorization: Bearer test-token',
+            'x-wpcom-ai-feature: builder-theme-image',
+            'content-type: application/json',
+            'x-wpcom-session-id: run-1',
+        ],
+        $headers->invoke($tagged),
+        'extras append after the fixed three, lowercased like them; an empty value is dropped'
+    );
+});

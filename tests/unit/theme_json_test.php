@@ -3780,3 +3780,160 @@ test('theme-json scaffold removes a --motion-* override, as the prompt promises'
     assert_eq($theme, $again);
     assert_eq([], $none);
 });
+
+test('removeResourceLoadingCustomCss strips @import and url() from every css string and keeps the rest', function () {
+    $authored = ['styles' => [
+        'css' => "@import url(https://evil.example/a.css);\nbody { color: red; background: url(https://evil.example/px.gif); }",
+        'blocks' => ['core/group' => [
+            'css' => ".x { background-image: image-set(\"./assets/a.png\" 1x); margin: 0 }",
+        ]],
+        'elements' => ['link' => ['css' => 'a { text-decoration: underline }']],
+        'variations' => ['poster' => ['css' => 'h2 { mask: url(data:image/svg+xml;base64,AAAA) }']],
+    ]];
+
+    [$theme, $warnings] = ThemeJsonStep::removeResourceLoadingCustomCss($authored);
+    $delivered = json_encode($theme, JSON_UNESCAPED_SLASHES);
+    assert_true(!str_contains($delivered, 'evil.example'), 'no external authority ships');
+    assert_true(!str_contains($delivered, 'url('), 'no url() ships, relative or data: included');
+    assert_true(!str_contains($delivered, 'image-set('), 'no image-set() ships');
+    assert_true(!str_contains($delivered, '@import'), 'no @import ships');
+    assert_contains('color: red', $theme['styles']['css']);
+    assert_contains('margin: 0', $theme['styles']['blocks']['core/group']['css']);
+    assert_eq('a { text-decoration: underline }', $theme['styles']['elements']['link']['css']);
+    assert_true(count($warnings) >= 4, 'every removal is recorded');
+    $joined = implode(' ', $warnings);
+    assert_contains('theme/theme.json styles.css', $joined);
+    assert_contains('theme/theme.json styles.blocks.core/group.css', $joined);
+    assert_contains('theme/theme.json styles.variations.poster.css', $joined);
+    assert_contains('resource-loading', $joined);
+
+    [$fixed, $again] = ThemeJsonStep::removeResourceLoadingCustomCss($theme);
+    assert_eq($theme, $fixed, 'fixed point');
+    assert_eq([], $again);
+});
+
+test('removeResourceLoadingCustomCss removes the whole string when a loading form survives declaration removal', function () {
+    $authored = ['styles' => [
+        'css' => "@namespace svg url(http://www.w3.org/2000/svg);\n.a { color: red }",
+        'blocks' => ['core/group' => ['css' => '.b { color: blue }']],
+    ]];
+    [$theme, $warnings] = ThemeJsonStep::removeResourceLoadingCustomCss($authored);
+    assert_eq('', $theme['styles']['css']);
+    assert_eq('.b { color: blue }', $theme['styles']['blocks']['core/group']['css'], 'siblings are untouched');
+    assert_contains('whole custom CSS string', implode(' ', $warnings));
+});
+
+test('removeResourceLoadingCustomCss leaves clean CSS byte-identical and warns nothing', function () {
+    $authored = ['styles' => [
+        'css' => ".hero { background: linear-gradient(180deg, #000, #fff); color: var(--wp--preset--color--base) }",
+        'blocks' => ['core/group' => ['css' => '.x { margin: 0 }']],
+    ]];
+    [$theme, $warnings] = ThemeJsonStep::removeResourceLoadingCustomCss($authored);
+    assert_eq($authored, $theme);
+    assert_eq([], $warnings);
+});
+
+test('theme-json never ships a resource-loading custom CSS value', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tjresource_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A quiet bakery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project);
+
+    $payload = valid_theme_payload();
+    $payload['styles']['css'] = "@import url(https://evil.example/track.css);\n"
+        . "body { color: red; background-image: url(https://evil.example/px.gif); }";
+    $payload['styles']['blocks']['core/group'] = [
+        'css' => '.band { background: url(./assets/band.jpg) center/cover; padding: 1rem }',
+    ];
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $delivered = $project->readText('theme/theme.json');
+    assert_true(!str_contains($delivered, 'evil.example'), 'no external authority ships');
+    assert_true(!str_contains($delivered, 'url('), 'no url() ships');
+    assert_true(!str_contains($delivered, '@import'), 'no @import ships');
+    $theme = $project->readJson('theme/theme.json');
+    assert_contains('color: red', $theme['styles']['css']);
+    assert_contains('padding: 1rem', $theme['styles']['blocks']['core/group']['css']);
+    $warnings = implode(' ', $project->readJson('warnings.json')['theme-json'] ?? []);
+    assert_contains('theme/theme.json styles.css', $warnings);
+    assert_contains('theme/theme.json styles.blocks.core/group.css', $warnings);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json custom CSS keeps a string whose only url() sits in a comment', function () {
+    $theme = ['styles' => [
+        'css' => "/* the hero image comes from markup, not url() */\n.band { color: red }",
+        'blocks' => ['core/group' => ['css' => '/* no url() here */ .x { color: blue }']],
+    ]];
+    [$scrubbed, $warnings] = ThemeJsonStep::removeResourceLoadingCustomCss($theme);
+    assert_contains('url()', $scrubbed['styles']['css'], 'the comment stays');
+    assert_contains('color: red', $scrubbed['styles']['css']);
+    assert_contains('color: blue', $scrubbed['styles']['blocks']['core/group']['css']);
+    assert_eq([], $warnings, 'nothing was removed, so nothing is recorded');
+    [$again, $more] = ThemeJsonStep::removeResourceLoadingCustomCss($scrubbed);
+    assert_eq($scrubbed, $again, 'fixed point');
+    assert_eq([], $more);
+});
+
+test('removeForeignFontFaces keeps only bundled sources and drops faces that fetch', function () {
+    $authored = ['settings' => ['typography' => ['fontFamilies' => [
+        ['slug' => 'heading', 'fontFamily' => 'Literata, serif', 'name' => 'Heading', 'fontFace' => [
+            ['fontFamily' => 'Literata', 'fontWeight' => '700', 'src' => ['https://evil.example/l.woff2']],
+        ]],
+        ['slug' => 'body', 'fontFamily' => 'Source Sans 3, sans-serif', 'name' => 'Body', 'fontFace' => [
+            ['fontFamily' => 'Source Sans 3', 'fontWeight' => '400', 'src' => [
+                'file:./assets/fonts/source-sans-3-400.woff2',
+                '//evil.example/s.woff2',
+            ]],
+            ['fontFamily' => 'Source Sans 3', 'fontWeight' => '600', 'src' => 'data:font/woff2;base64,AAAA'],
+        ]],
+        ['slug' => 'mono', 'fontFamily' => 'monospace', 'name' => 'Mono'],
+    ]]]];
+
+    [$theme, $warnings] = ThemeJsonStep::removeForeignFontFaces($authored);
+    $families = $theme['settings']['typography']['fontFamilies'];
+    assert_true(!isset($families[0]['fontFace']), 'a family whose every face fetched loses the key');
+    assert_eq(
+        [['fontFamily' => 'Source Sans 3', 'fontWeight' => '400', 'src' => ['file:./assets/fonts/source-sans-3-400.woff2']]],
+        $families[1]['fontFace'],
+        'the bundled source stays, the foreign one and the data: face go',
+    );
+    assert_eq(['slug' => 'mono', 'fontFamily' => 'monospace', 'name' => 'Mono'], $families[2]);
+    assert_true(!str_contains(json_encode($theme), 'evil.example'));
+    assert_eq(3, count($warnings));
+    assert_contains('fontFamilies[heading].fontFace', $warnings[0]);
+    assert_contains('bundled theme files', $warnings[0]);
+
+    [$fixed, $again] = ThemeJsonStep::removeForeignFontFaces($theme);
+    assert_eq($theme, $fixed, 'fixed point');
+    assert_eq([], $again);
+});
+
+test('theme-json never ships a font face from a foreign host', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tjfontface_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A quiet bakery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project);
+
+    $payload = valid_theme_payload();
+    foreach ($payload['settings']['typography']['fontFamilies'] as &$family) {
+        $family['fontFace'] = [
+            ['fontFamily' => $family['name'] ?? 'x', 'fontWeight' => '400', 'src' => ['https://evil.example/f.woff2']],
+        ];
+    }
+    unset($family);
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $delivered = $project->readText('theme/theme.json');
+    assert_true(!str_contains($delivered, 'evil.example'), 'no foreign font source ships');
+    assert_true(!str_contains($delivered, 'fontFace'), 'no face without a bundled source ships');
+    $warnings = implode(' ', $project->readJson('warnings.json')['theme-json'] ?? []);
+    assert_contains('bundled theme files', $warnings);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

@@ -37,10 +37,22 @@ final class PromptRenderer
 
         // Validate the template before substitution. A value may legitimately
         // contain placeholder-shaped text; it is data, not a second template.
+        // A value may not close or open the <user_brief> frame the prompts
+        // wrap the brief in: that tag is the template's, never the data's.
         return (string) preg_replace_callback(
             $pattern,
-            static fn (array $match): string => $vars[$match[1]],
+            static fn (array $match): string => self::withoutBriefFrame($vars[$match[1]]),
             $text,
         );
+    }
+
+    /**
+     * The value with every `<user_brief>` or `</user_brief>` spelling turned
+     * into inert text, so a brief cannot end its own frame early and speak
+     * as the template.
+     */
+    public static function withoutBriefFrame(string $value): string
+    {
+        return (string) preg_replace('/<(\/?)\s*user_brief\b/i', '&lt;$1user_brief', $value);
     }
 }

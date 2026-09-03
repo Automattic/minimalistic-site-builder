@@ -325,20 +325,23 @@ final class DesignPreviewStep implements Step
 
     private static function actionableSanitizerWarning(string $warning, string $context): string
     {
+        // The engine and the head-style scrub write `authored X; delivered
+        // Y; disposition Z` rows with more than one disposition. Carry each
+        // part through instead of matching one fixed suffix, so a row never
+        // collapses into its own authored value.
         $prefix = 'malformed_design: ' . self::PATH . " context {$context}; authored ";
-        $suffix = '; delivered removed; disposition removed';
         $authored = $warning;
-        if (str_starts_with($warning, $prefix) && str_ends_with($warning, $suffix)) {
-            $authored = substr(
-                $warning,
-                strlen($prefix),
-                strlen($warning) - strlen($prefix) - strlen($suffix),
-            );
+        $delivered = 'removed';
+        $disposition = 'removed';
+        if (str_starts_with($warning, $prefix)
+            && preg_match('/^(.*); delivered (.*?); disposition (.*)$/s', substr($warning, strlen($prefix)), $parts) === 1
+        ) {
+            [, $authored, $delivered, $disposition] = $parts;
         }
 
         return 'malformed_design file design/preview.html block_path document '
             . 'authored_value ' . self::warningValue($authored)
-            . ' delivered_value removed disposition removed';
+            . " delivered_value {$delivered} disposition {$disposition}";
     }
 
     private static function repairPrompt(string $prompt, string $authored, string $issue): string

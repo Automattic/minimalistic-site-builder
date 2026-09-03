@@ -10,25 +10,49 @@ final class CtaStyle
     public const DEFAULT = 'solid';
 
     /**
-     * Build-owned wrapper rule for the `block` construction, shipped in the
+     * The widest container in which a `block` button may fill its whole
+     * width, as a share of the theme's contentSize. A button in a wider
+     * container keeps its intrinsic width: a 1040px slab reads as a band,
+     * not as an action (BIGR-980).
+     */
+    public const NARROW_CONTAINER_SHARE = 1 / 3;
+
+    /**
+     * Build-owned rules for the `block` construction, shipped in the
      * theme.json top-level `styles.css` (theme.json has no structured path to
      * the wp-block-button wrapper).
      *
-     * Why it exists: current WordPress sizes a width-classed button in a
-     * VERTICAL wp:buttons container with
+     * Rule 1, the vertical wrapper: current WordPress sizes a width-classed
+     * button in a VERTICAL wp:buttons container with
      * `.wp-block-buttons.is-vertical > .wp-block-button[class*=wp-block-button__width]
      * { width: calc(var(--wp--block-button--width) * 1%) }`. Only the block's
      * `width` support attribute emits that custom property, and the frozen
-     * serializer canonicalizes `block` delivery to the width-100 class alone
-     * (no attribute). The unresolved var() makes the declaration invalid at
+     * serializer canonicalizes delivery to the width-100 class alone (no
+     * attribute). The unresolved var() makes the declaration invalid at
      * computed-value time, it computes to `unset`, and it still wins the
-     * cascade over the horizontal `width: 100%` rule — so the wrapper
+     * cascade over the horizontal `width: 100%` rule, so the wrapper
      * collapses to content width. This equal-specificity rule loads after the
      * block-library stylesheet and wins the source-order tie. Horizontal
      * containers never hit the var() rule and need no help.
+     *
+     * Rule 2, the slab minimum: the wrapper is a flex item of the buttons
+     * container, so its percentage min-width resolves against a definite
+     * width. Core gives the link `width:100%` of the wrapper. A min-width on
+     * the link itself would resolve against the content-sized wrapper and
+     * never widen a short label (measured: a "Go" slab stayed 64px wide).
+     *
+     * Rule 3, the mobile fill: below the core column-stacking breakpoint every
+     * content button sits in a container at most one phone wide, so the slab
+     * fills it there. Header and footer chrome is outside post content and
+     * keeps intrinsic width.
      */
-    public const BLOCK_VERTICAL_WRAPPER_CSS =
-        '.wp-block-buttons.is-vertical > .wp-block-button.wp-block-button__width-100{width:100%;}';
+    public const BLOCK_WRAPPER_CSS =
+        '.wp-block-buttons.is-vertical > .wp-block-button.wp-block-button__width-100{width:100%;}'
+        . '.wp-block-buttons > .wp-block-button{min-width:min(12rem,100%);}'
+        . '@media (max-width:781px){'
+        . '.wp-block-post-content .wp-block-buttons > .wp-block-button{flex-basis:100%;width:100%;}'
+        . '.wp-block-post-content .wp-block-button > .wp-block-button__link{width:100%;}'
+        . '}';
 
     public static function explicit(mixed $value): ?string
     {
@@ -122,7 +146,11 @@ final class CtaStyle
                 'color' => $safeDark,
                 'border' => ['color' => 'var:preset|color|contrast', 'style' => 'solid', 'width' => '2px'],
                 'spacing' => ['padding' => $boxPadding],
-                'css' => 'display:block;width:100%;box-sizing:border-box;text-align:center;',
+                // Intrinsic width. Width is a container decision, never an
+                // element rule: CtaStyleMarkup keeps the width-100 class only
+                // in a narrow container, and BLOCK_WRAPPER_CSS owns the slab
+                // minimum and the mobile fill.
+                'css' => 'box-sizing:border-box;text-align:center;',
                 ':hover' => ['color' => $safeLight, 'border' => ['color' => 'var:preset|color|base']],
                 ':focus' => ['color' => $safeLight, 'border' => ['color' => 'var:preset|color|base']],
                 ':active' => ['color' => $safeLight, 'border' => ['color' => 'var:preset|color|base']],
@@ -137,7 +165,7 @@ final class CtaStyle
             'outline' => 'a transparent 2px current-color outline that fills on interaction',
             'underline' => 'an unboxed text action with a strong underline',
             'ghost-arrow' => 'an unboxed text action followed by an animated arrow glyph',
-            'block' => 'a full-width contrast slab that reverses on interaction',
+            'block' => 'a square contrast slab that reverses on interaction and fills only a narrow container (at most one third of the content width)',
             default => 'the committed deterministic CTA construction',
         };
     }

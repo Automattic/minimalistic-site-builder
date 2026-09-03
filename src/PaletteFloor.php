@@ -69,8 +69,15 @@ final class PaletteFloor
     /** Chroma above this at extreme luminance is the garish-lime failure. */
     public const CHROMA_CEILING = 0.55;
 
-    /** Tonal roles farther apart than this spend a second hue family. */
-    public const ECONOMY_HUE_TOLERANCE = 18.0;
+    /**
+     * Tonal roles farther apart than this spend a second hue family. Same
+     * line as HUE_TOO_CLOSE: two roles read as one hue exactly when they are
+     * too close to read as a distinct accent, so the economy floor and the
+     * separation floor cannot disagree about a pair. It is also half the
+     * narrowest GroundTint band (warm, 20 to 70 degrees), so two hues this
+     * close always fit inside one ground family.
+     */
+    public const ECONOMY_HUE_TOLERANCE = self::HUE_TOO_CLOSE;
 
     public const LUMA_HIGH = 0.6;
     public const LUMA_LOW = 0.06;

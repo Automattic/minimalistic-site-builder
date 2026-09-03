@@ -48,11 +48,17 @@ final class ClaudeCliLlm extends HarnessCliLlm
             );
         }
 
-        $system = $request['system'] ?? '';
-        if (is_string($system) && trim($system) !== '') {
-            $argv[] = '--system-prompt';
-            $argv[] = $system;
+        // The build preamble (language, date, untrusted-brief rules) rides
+        // the same first-class channel the API client uses, ahead of any
+        // caller system text. It is static repository text, so argv is not
+        // a leak for it.
+        $system = AnthropicClient::systemPreamble();
+        $caller = $request['system'] ?? '';
+        if (is_string($caller) && trim($caller) !== '') {
+            $system .= "\n\n" . $caller;
         }
+        $argv[] = '--system-prompt';
+        $argv[] = $system;
         if (isset($request['json_schema']['schema']) && is_array($request['json_schema']['schema'])) {
             try {
                 $schema = json_encode(

@@ -257,16 +257,21 @@ final class ScaffoldPluginStep implements Step
 
                 $file = __DIR__ . '/pages/' . $slug . '.html';
                 $content = is_file($file) ? (string) file_get_contents($file) : '';
-                // Point the markup at the imported media (attachment ids +
-                // upload URLs), then resolve anything left — an image the
-                // build never generated — against the ACTIVE theme's assets.
+                // Sanitize FIRST, on the same placeholder form the build's
+                // intake sanitizer saw, so one rule holds on both sides: an
+                // inline `url()` is allowed only when it names a
+                // `theme:./assets/` image. Then point the markup at the
+                // imported media (attachment ids + upload URLs), and resolve
+                // anything left — an image the build never generated —
+                // against the ACTIVE theme's assets. Both rewrites insert
+                // only URLs this site owns.
+                $content = {{FN_PREFIX}}_content_sanitize($content, "page '{$slug}'");
                 $content = {{FN_PREFIX}}_content_resolve_images($content, $image_map);
                 $content = str_replace(
                     'theme:./assets/',
                     trailingslashit(get_stylesheet_directory_uri()) . 'assets/',
                     $content
                 );
-                $content = {{FN_PREFIX}}_content_sanitize($content, "page '{$slug}'");
 
                 $parent_slug = isset($page['parent']) ? (string) $page['parent'] : '';
                 // wp_insert_post() expects slashed data: it runs wp_unslash()
@@ -489,7 +494,9 @@ final class ScaffoldPluginStep implements Step
                 $incomplete = false;
                 $sanitized = {{FN_PREFIX}}_content_sanitize_document($content, $incomplete, $context);
                 if ($sanitized !== null) {
-                    return $sanitized;
+                    // The editor loads a cover's "url" from block-comment JSON
+                    // the moment the page opens for editing.
+                    return {{FN_PREFIX}}_content_neutralize_block_media($sanitized);
                 }
                 if (!$incomplete) {
                     break;
@@ -585,6 +592,17 @@ final class ScaffoldPluginStep implements Step
                 'ANIMATE' => true, 'ANIMATETRANSFORM' => true,
                 'ANIMATEMOTION' => true, 'SET' => true,
             );
+            $media = array(
+                'IMG' => true, 'SOURCE' => true, 'VIDEO' => true, 'AUDIO' => true,
+                'TRACK' => true, 'PICTURE' => true, 'INPUT' => true,
+                // SVG elements fetch through href / xlink:href.
+                'IMAGE' => true, 'USE' => true, 'FEIMAGE' => true,
+                // The legacy `background` attribute still maps to
+                // background-image on these elements.
+                'BODY' => true, 'TABLE' => true, 'THEAD' => true, 'TBODY' => true,
+                'TFOOT' => true, 'TR' => true, 'TD' => true, 'TH' => true,
+            );
+            $media_sources = array('src', 'srcset', 'poster', 'href', 'xlink:href', 'background');
             // Core's canonical URI-attribute list (18 entries, including
             // poster/cite/background/longdesc) plus the SVG spelling it omits.
             $urls = array_merge(wp_kses_uri_attributes(), array('xlink:href'));
@@ -617,9 +635,39 @@ final class ScaffoldPluginStep implements Step
                         }
                     }
 
+                    // An inline style is a fetch sink: `background:
+                    // url(https://…)` calls a model-chosen host on every
+                    // view. Only the loading declarations go; the rest of
+                    // the style stays. get_attribute() hands back the
+                    // decoded CSS text and set_attribute() re-encodes it.
+                    $style = $processor->get_attribute('style');
+                    if (is_string($style)) {
+                        $clean = {{FN_PREFIX}}_content_scrub_style($style);
+                        if ($clean !== $style) {
+                            if (trim($clean) === '') {
+                                $processor->remove_attribute('style');
+                            } else {
+                                $processor->set_attribute('style', $clean);
+                            }
+                        }
+                    }
+
                     // No branch below returns early: every tag still falls
                     // through to the URL sweep, so a stray href on a <meta>
                     // cannot slip past on its way out.
+                    // A media source on another host fetches on every view.
+                    // The build generates every image itself, so only the
+                    // site's own paths and the build's theme:./assets/
+                    // placeholders are legitimate here (BIGR-975).
+                    if (isset($media[$tag])) {
+                        foreach ($media_sources as $name) {
+                            $value = $processor->get_attribute($name);
+                            if (is_string($value) && {{FN_PREFIX}}_content_source_is_foreign($name, $value)) {
+                                $processor->remove_attribute($name);
+                            }
+                        }
+                    }
+
                     if (isset($inert[$tag])) {
                         foreach ($loaders as $name) {
                             $processor->remove_attribute($name);
@@ -635,6 +683,14 @@ final class ScaffoldPluginStep implements Step
                     if ($tag === 'BASE') {
                         $processor->remove_attribute('href');
                         $processor->remove_attribute('target');
+                    }
+                    if ($tag === 'LINK') {
+                        // A stylesheet, icon, or prefetch from a model-chosen
+                        // host. The Tag Processor cannot drop the node, so
+                        // it stays with nothing to load.
+                        $processor->remove_attribute('href');
+                        $processor->remove_attribute('imagesrcset');
+                        $processor->remove_attribute('rel');
                     }
                     if ($tag === 'META') {
                         // http-equiv="refresh" redirects every visitor to a
@@ -659,6 +715,15 @@ final class ScaffoldPluginStep implements Step
                         // `&#106;avascript:` is compared in its resolved form
                         // and needs no entity handling here.
                         $value = $processor->get_attribute($name);
+                        // The build's own image placeholder rides `src` and
+                        // a cover's `url` until the media rewrite below
+                        // resolves it; its scheme is not a WordPress
+                        // protocol, and only this exact shape passes.
+                        if (is_string($value)
+                            && preg_match('/^theme:\.\/assets\/[a-z0-9-]+\.(?:jpe?g|png)$/i', $value) === 1
+                        ) {
+                            continue;
+                        }
                         if (is_string($value)
                             && wp_kses_bad_protocol($value, $allowed) !== $value
                         ) {
@@ -678,6 +743,215 @@ final class ScaffoldPluginStep implements Step
                 return null;
             }
             return $processor->get_updated_html();
+        }
+
+        /**
+         * Whether a CSS value loads a resource, judged after CSS identifier
+         * escapes are decoded (`\75rl(` is `url(` to the CSS parser). The
+         * same value forms the build's CssChecks::resourceLoadingProblem()
+         * refuses: url(), image-set(), image(), cross-fade(), element(),
+         * paint(), src(), prefixed or not.
+         */
+        function {{FN_PREFIX}}_content_css_loads_resource($value) {
+            $decoded = preg_replace_callback(
+                '/\\\\(?:([0-9a-fA-F]{1,6})[ \t\r\n\f]?|([^\r\n\f]))/',
+                function ($match) {
+                    if (!isset($match[1]) || $match[1] === '') {
+                        return isset($match[2]) ? $match[2] : '';
+                    }
+                    $codepoint = hexdec($match[1]);
+                    // Only ASCII can spell a function name; anything else is
+                    // left as an opaque non-matching placeholder.
+                    return ($codepoint > 0 && $codepoint < 128) ? chr((int) $codepoint) : "\xEF\xBF\xBD";
+                },
+                (string) $value
+            );
+            // The build's own image placeholder is the one url() a cover may
+            // carry; it is resolved to this site's upload after sanitizing.
+            $decoded = preg_replace(
+                '/url\(\s*(["\']?)theme:\.\/assets\/[a-z0-9-]+\.(?:jpe?g|png)\1\s*\)/i',
+                '',
+                (string) $decoded
+            );
+            return preg_match('/(?:image-set|cross-fade|element|paint|url|src|image)\s*\(/i', (string) $decoded) === 1;
+        }
+
+        /**
+         * The inline style with every resource-loading declaration removed.
+         * Same policy as the build's CssChecks::scrubInlineStyle(): split on
+         * `;` outside quotes and parentheses, drop the declarations that
+         * load, and give back '' when a loading form still survives so the
+         * caller drops the attribute rather than store it unreviewed.
+         */
+        function {{FN_PREFIX}}_content_scrub_style($style) {
+            if (!{{FN_PREFIX}}_content_css_loads_resource($style)) {
+                return $style;
+            }
+            $kept = array();
+            $current = '';
+            $depth = 0;
+            $quote = '';
+            $length = strlen($style);
+            for ($i = 0; $i < $length; $i++) {
+                $char = $style[$i];
+                if ($quote !== '') {
+                    $current .= $char;
+                    if ($char === '\\' && $i + 1 < $length) {
+                        $current .= $style[++$i];
+                    } elseif ($char === $quote) {
+                        $quote = '';
+                    }
+                    continue;
+                }
+                if ($char === '"' || $char === "'") {
+                    $quote = $char;
+                    $current .= $char;
+                    continue;
+                }
+                if ($char === '\\' && $i + 1 < $length) {
+                    $current .= $char . $style[++$i];
+                    continue;
+                }
+                if ($char === '(') {
+                    $depth++;
+                } elseif ($char === ')' && $depth > 0) {
+                    $depth--;
+                }
+                if ($char === ';' && $depth === 0) {
+                    if (!{{FN_PREFIX}}_content_css_loads_resource($current)) {
+                        $kept[] = $current;
+                    }
+                    $current = '';
+                    continue;
+                }
+                $current .= $char;
+            }
+            if (trim($current) !== '' && !{{FN_PREFIX}}_content_css_loads_resource($current)) {
+                $kept[] = $current;
+            }
+            $clean = trim(implode(';', $kept));
+            if ($clean !== '' && {{FN_PREFIX}}_content_css_loads_resource($clean)) {
+                return '';
+            }
+            return $clean;
+        }
+
+        /**
+         * Whether a media source names another host: a scheme with an
+         * authority, a protocol-relative `//`, or absolute http/https/ftp.
+         * Root-relative paths and theme:./assets/ placeholders are not.
+         */
+        function {{FN_PREFIX}}_content_source_is_foreign($attribute, $value) {
+            $candidates = array($value);
+            if ($attribute === 'srcset') {
+                $candidates = array();
+                foreach (explode(',', $value) as $candidate) {
+                    $parts = preg_split('/\s+/', trim($candidate), 2);
+                    $candidates[] = isset($parts[0]) ? $parts[0] : '';
+                }
+            }
+            foreach ($candidates as $candidate) {
+                $stripped = (string) preg_replace('/[\x00-\x20\x7F]+/', '', $candidate);
+                // A browser reads `\` as `/` in a special-scheme URL.
+                $stripped = str_replace('\\', '/', $stripped);
+                if (preg_match('#\A(?:[a-z][a-z0-9+.\-]*:)?//#i', $stripped) === 1
+                    || preg_match('#\A(?:https?|ftp):#i', $stripped) === 1
+                ) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /**
+         * Neutralize comment-JSON sources, the same way the build does. The
+         * attribute object of every block is decoded and walked. On every
+         * block, a destination or source key with an executable scheme
+         * goes. On a media block, a source key on a foreign host goes too; a
+         * navigation-link or social-link "url" is a destination, and stays.
+         * On every block, a foreign url inside a backgroundImage object
+         * goes, because WordPress renders it as background-image from the
+         * JSON. A block that lost a key is re-serialized the way WordPress
+         * does, so the JSON stays valid; a block that lost nothing keeps its
+         * bytes.
+         */
+        function {{FN_PREFIX}}_content_neutralize_block_media($content) {
+            $result = preg_replace_callback(
+                '/<!--\s*wp:([a-zA-Z0-9-]+(?:\/[a-zA-Z0-9-]+)?)\s+(\{.*?\})\s*(\/?)-->/s',
+                function ($match) {
+                    $attrs = json_decode($match[2], true);
+                    if (!is_array($attrs)) {
+                        return $match[0];
+                    }
+                    // WordPress serializes a core block without its
+                    // namespace; any other namespace stays on the name.
+                    $name = (string) preg_replace('#^core/#', '', $match[1]);
+                    $media_block = preg_match('/^(?:cover|image|video|audio|media-text|gallery)$/', $name) === 1;
+                    $changed = false;
+                    $attrs = {{FN_PREFIX}}_content_walk_block_json($attrs, $media_block, null, $changed);
+                    if (!$changed) {
+                        return $match[0];
+                    }
+                    if ($attrs === array()) {
+                        $json = '';
+                    } elseif (function_exists('serialize_block_attributes')) {
+                        $json = serialize_block_attributes($attrs) . ' ';
+                    } else {
+                        $json = str_replace('--', '\\u002d\\u002d', (string) json_encode(
+                            $attrs,
+                            JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP
+                            | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+                        )) . ' ';
+                    }
+                    return '<!-- wp:' . $name . ' ' . $json . $match[3] . '-->';
+                },
+                $content
+            );
+            return $result === null ? $content : $result;
+        }
+
+        /**
+         * One recursive pass over a decoded attribute object. An object that
+         * loses its last key goes with it.
+         */
+        function {{FN_PREFIX}}_content_walk_block_json($node, $media_block, $parent_key, &$changed) {
+            foreach ($node as $key => $value) {
+                $own_key = is_string($key) ? $key : $parent_key;
+                if (is_array($value)) {
+                    $child_changed = false;
+                    $child = {{FN_PREFIX}}_content_walk_block_json($value, $media_block, $own_key, $child_changed);
+                    if ($child_changed) {
+                        $changed = true;
+                        if ($child === array() && is_string($key)) {
+                            unset($node[$key]);
+                        } else {
+                            $node[$key] = $child;
+                        }
+                    }
+                    continue;
+                }
+                if (!is_string($key) || !is_string($value)) {
+                    continue;
+                }
+                $source_key = in_array($key, array('url', 'src', 'poster', 'mediaUrl', 'href', 'textLinkHref'), true);
+                if ($source_key
+                    && preg_match(
+                        '/\A(?:javascript|vbscript|data)\s*:/i',
+                        (string) preg_replace('/[\x00-\x20\x7F]+/', '', $value)
+                    ) === 1
+                ) {
+                    unset($node[$key]);
+                    $changed = true;
+                    continue;
+                }
+                $fetches = ($media_block && in_array($key, array('url', 'src', 'poster', 'mediaUrl'), true))
+                    || ($key === 'url' && $parent_key === 'backgroundImage');
+                if ($fetches && {{FN_PREFIX}}_content_source_is_foreign('src', $value)) {
+                    unset($node[$key]);
+                    $changed = true;
+                }
+            }
+            return $node;
         }
 
         /** Whether the current token sits inside a code-bearing element. */

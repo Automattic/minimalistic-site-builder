@@ -1025,3 +1025,90 @@ test('import_images applies the same containment guard to the theme assets root'
     assert_contains('DIRECTORY_SEPARATOR) !== 0', $php);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('generated seeder scrubs resource-loading inline styles like the intake sanitizer', function () {
+    if (!load_wp_html_api()) {
+        skip_test('no WordPress copy found for the HTML API; set SITEBUILD_WP_PATH');
+    }
+    $slug = 'style-sink-parity';
+    [$project, $tmp] = scaffold_plugin_fixture($slug);
+    require_once $project->pluginPath('site-content.php');
+    $sanitize = content_fn($slug, 'sanitize');
+
+    $corpus = [
+        '<div style="background:url(https://evil.example/px);color:red">hi</div>',
+        '<div style="background:url&#40;https://evil.example/px&#41;">hi</div>',
+        '<div style="background:\\75rl(https://evil.example/px)">hi</div>',
+        '<div style="background-image: url(&quot;https://evil.example/a.png&quot;)">hi</div>',
+        "<div style='background:image-set(\"https://evil.example/a.png\" 1x)'>hi</div>",
+        '<div style=background:url(https://evil.example/px) class=x>hi</div>',
+        '<div style="content:\'a;b\';background:url(https://evil.example/px)">hi</div>',
+    ];
+    foreach ($corpus as $html) {
+        foreach ([
+            'intake' => \Automattic\SiteBuild\MarkupSanitizer::sanitize($html),
+            'seeder' => $sanitize($html),
+        ] as $which => $out) {
+            assert_true(!str_contains($out, 'evil.example'), "{$which}: fetch survived: {$html}");
+            assert_true(preg_match('/url|image-set/i', $out) !== 1, "{$which}: loading form survived: {$html}");
+            assert_contains('>hi</div>', $out, "{$which}: content survived: {$html}");
+        }
+    }
+
+    // The surviving declarations stay, on both sides.
+    $mixed = '<div style="background:url(https://evil.example/px);color:red">hi</div>';
+    assert_contains('color:red', \Automattic\SiteBuild\MarkupSanitizer::sanitize($mixed));
+    assert_contains('color:red', $sanitize($mixed));
+    // A clean inline style is untouched by the seeder.
+    $clean = '<p style="color:red;content:\'a;b\'">t</p>';
+    assert_eq($clean, $sanitize($clean));
+    // The build's own placeholder is the one url() a cover may carry.
+    $cover = '<div class="wp-block-cover" style="background-image:url(theme:./assets/hero.jpg)"></div>';
+    assert_eq($cover, $sanitize($cover));
+    assert_eq($cover, \Automattic\SiteBuild\MarkupSanitizer::sanitize($cover));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generated seeder removes media sources on a foreign host like the intake sanitizer', function () {
+    if (!load_wp_html_api()) {
+        skip_test('no WordPress copy found for the HTML API; set SITEBUILD_WP_PATH');
+    }
+    $slug = 'media-sink-parity';
+    [$project, $tmp] = scaffold_plugin_fixture($slug);
+    require_once $project->pluginPath('site-content.php');
+    $sanitize = content_fn($slug, 'sanitize');
+
+    $corpus = [
+        '<!-- wp:cover {"dimRatio":50,"url":"https://evil.example/bg.jpg","id":3} --><div class="wp-block-cover"><img class="wp-block-cover__image-background" src="https://evil.example/bg.jpg" alt="Oven"></div><!-- /wp:cover -->',
+        '<!-- wp:image {"url":"https:\/\/evil.example\/a.jpg"} --><figure><img src="//evil.example/a.jpg" srcset="/a.jpg 1x, https://evil.example/b.jpg 2x" alt="a"></figure><!-- /wp:image -->',
+        '<!-- wp:video {"src":"https://evil.example/v.mp4"} /--><video poster="/p.jpg" src="ftp://evil.example/v.mp4"></video>',
+        "<img src=\"ht\ttps://evil.example/a.jpg\">",
+        '<input type="image" src="https://evil.example/btn.png">',
+        '<img src="\\\\evil.example/a.png" alt="a"><img src="/\\evil.example/b.png">',
+        '<svg><image href="https://evil.example/i.png"/><use xlink:href="//evil.example/s.svg#a"/></svg>',
+        '<table background="https://evil.example/t.png"><tr><td background="//evil.example/c.png">x</td></tr></table>',
+        '<link rel="stylesheet" href="https://evil.example/l.css"><p>after</p>',
+        '<!-- wp:group {"style":{"background":{"backgroundImage":{"url":"https://evil.example/g.png","id":5}}}} --><div class="wp-block-group"></div><!-- /wp:group -->',
+        '<!-- wp:cover {"url":"\\\\\\\\evil.example\/bg.jpg","id":1} --><div></div><!-- /wp:cover -->',
+    ];
+    foreach ($corpus as $html) {
+        foreach ([
+            'intake' => \Automattic\SiteBuild\MarkupSanitizer::sanitize($html),
+            'seeder' => $sanitize($html),
+        ] as $which => $out) {
+            assert_true(!str_contains($out, 'evil.example'), "{$which}: foreign source survived: {$html}");
+        }
+    }
+    // What stays, stays on both sides.
+    $kept = '<!-- wp:cover {"url":"theme:./assets/hero.jpg","dimRatio":50} --><div><img src="theme:./assets/hero.jpg" alt="x"><img src="/wp-content/uploads/a.jpg"><a href="https://example.com/">link</a></div><!-- /wp:cover -->'
+        . '<!-- wp:navigation-link {"label":"Instagram","url":"https://instagram.com/hearth","kind":"custom"} /-->'
+        . '<!-- wp:social-link {"url":"https://x.com/hearth","service":"x"} /-->';
+    assert_eq($kept, \Automattic\SiteBuild\MarkupSanitizer::sanitize($kept));
+    assert_eq($kept, $sanitize($kept));
+    $group = $sanitize($corpus[9]);
+    assert_contains('{"style":{"background":{"backgroundImage":{"id":5}}}}', $group, 'seeder drops a block background url and keeps the rest');
+    $cover = $sanitize($corpus[0]);
+    assert_contains('<!-- wp:cover {"dimRatio":50,"id":3} -->', $cover, 'seeder drops the JSON key with its comma');
+    assert_contains('alt="Oven"', $cover, 'seeder keeps the element and its alt');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

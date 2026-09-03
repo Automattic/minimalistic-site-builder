@@ -4,7 +4,9 @@ declare(strict_types=1);
 use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\PaletteFloor;
 use Automattic\SiteBuild\PaletteReconciliation;
+use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\Steps\DesignDirectionStep;
 use Automattic\SiteBuild\Warnings;
 
 /**
@@ -17,6 +19,11 @@ use Automattic\SiteBuild\Warnings;
  * --fixtures runs check → repair → check on tests/fixtures/palette-floor.
  * --projects runs repair() then check() on every built project's theme.json.
  * <slug> audits the delivered theme.json palette of a built project.
+ *
+ * Built projects are judged under the color economy their direction
+ * committed, read the same way the build reads it, so the audit agrees with
+ * the floor that shipped the palette. Fixtures carry no direction and stay
+ * unconstrained.
  */
 
 require_once __DIR__ . '/../src/bootstrap.php';
@@ -121,10 +128,12 @@ function audit_projects(string $root): int
             continue;
         }
         $palettes++;
-        $slug = basename(dirname(dirname($path)));
+        $project = new Project(dirname(dirname($path)));
+        $slug = $project->slug();
+        $economy = DesignDirectionStep::colorEconomyFor($project);
         $warnings = [];
-        $repaired = PaletteFloor::repair($palette, $warnings);
-        $findings = PaletteFloor::check($repaired);
+        $repaired = PaletteFloor::repair($palette, $warnings, null, $economy);
+        $findings = PaletteFloor::check($repaired, null, $economy);
         if ($findings !== []) {
             $residualPalettes++;
         }
@@ -145,11 +154,12 @@ function audit_projects(string $root): int
             }
             $flag = $unrepaired ? 'unrepaired' : 'MISSING-unrepaired';
             printf(
-                "%s residual class=%s role=%s metric=%s warning=%s\n",
+                "%s residual class=%s role=%s metric=%s economy=%s warning=%s\n",
                 $slug,
                 $finding['class'],
                 $role,
                 format_metric((float) $finding['metric']),
+                $economy,
                 $flag,
             );
         }
@@ -214,9 +224,9 @@ function audit_corpus(string $projectsRoot): int
         if (!is_array($theme)) {
             continue;
         }
-        $slug = basename(dirname(dirname($path)));
+        $project = new Project(dirname(dirname($path)));
         score_corpus_palette(
-            'project:' . $slug,
+            'project:' . $project->slug(),
             PaletteReconciliation::themePalette($theme),
             $delivered,
             $multiWarnRoles,
@@ -224,6 +234,7 @@ function audit_corpus(string $projectsRoot): int
             $residualPalettes,
             $residualWithoutUnrepaired,
             $repairedBlackWhite,
+            DesignDirectionStep::colorEconomyFor($project),
         );
     }
 
@@ -259,12 +270,13 @@ function score_corpus_palette(
     int &$residualPalettes,
     int &$residualWithoutUnrepaired,
     array &$repairedBlackWhite,
+    ?string $economy = null,
 ): void {
     if ($palette === []) {
         return;
     }
     $warnings = [];
-    $out = PaletteFloor::repair($palette, $warnings);
+    $out = PaletteFloor::repair($palette, $warnings, null, $economy);
     $delivered[$name] = $out;
     $byRole = [];
     foreach ($warnings as $row) {
@@ -284,7 +296,7 @@ function score_corpus_palette(
             $multiWarnRoles++;
         }
     }
-    $findings = PaletteFloor::check($out);
+    $findings = PaletteFloor::check($out, null, $economy);
     if ($findings !== []) {
         $residualPalettes++;
     }
@@ -341,9 +353,11 @@ function audit_slug(string $slug): int
     }
 
     $palette = PaletteReconciliation::themePalette($theme);
-    $findings = PaletteFloor::check($palette);
+    $economy = DesignDirectionStep::colorEconomyFor($project);
+    $findings = PaletteFloor::check($palette, null, $economy);
 
     echo $project->slug() . "\n";
+    echo "economy: {$economy}\n";
     echo 'findings: ' . count($findings) . "\n";
     foreach ($findings as $finding) {
         echo format_finding($finding);

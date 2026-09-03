@@ -292,6 +292,14 @@ abstract class HarnessCliLlm implements Llm, UsageReporting
     private function unsupportedOptionNotes(array $request): array
     {
         $notes = [];
+        if (!$this->honorsSystemOption() && !isset(self::$disclosedUnsupportedOptions['preamble'])) {
+            // The build preamble (prompts/system-preamble.md: language, date,
+            // and untrusted-brief rules) has no non-leaking channel on this
+            // transport. Say so once; the sink-side sanitizers, not the
+            // preamble, are the guarantee against model-authored code.
+            Narrator::write("    (Harness CLI has no channel for the build preamble; the untrusted-brief and date rules were not sent.)\n");
+            self::$disclosedUnsupportedOptions['preamble'] = true;
+        }
         $options = ['temperature', 'max_tokens'];
         if (!$this->honorsSystemOption()
             && is_string($request['system'] ?? null)

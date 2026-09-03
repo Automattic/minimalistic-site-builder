@@ -91,14 +91,7 @@ final class ImageCrop
             return $current;
         }
 
-        // Any context that names a background is a viewport-spanning slot:
-        // the documented examples include "background of a call-to-action
-        // band", which no role word alone would classify as full-frame.
-        $fullFrame = $current === '21:9' || preg_match(
-            '/\b(?:full[- ](?:bleed|frame|width)|edge[- ]to[- ]edge|hero\s+cover|background)\b/iu',
-            $pageContext,
-        ) === 1;
-        if ($fullFrame) {
+        if (self::fullFrameSlot($current, $pageContext)) {
             return $crop === 'panoramic' ? '21:9' : '16:9';
         }
 
@@ -112,6 +105,24 @@ final class ImageCrop
             'square'    => '1:1',
             'panoramic' => $feature ? '21:9' : ($tall ? '3:2' : '16:9'),
         };
+    }
+
+    /**
+     * Whether a slot spans the viewport: an authored ultrawide ratio, or a
+     * page context that names a full-bleed, edge-to-edge or background
+     * placement. Any context that names a background counts — the documented
+     * examples include "background of a call-to-action band", which no role
+     * word alone would classify as full-frame. Shared by the ratio choice
+     * above and by ImageQa, which inspects only these images.
+     *
+     * @param string $ratio the authored ratio as GeminiImage::aspectRatio() spells it
+     */
+    public static function fullFrameSlot(string $ratio, string $pageContext): bool
+    {
+        return $ratio === '21:9' || preg_match(
+            '/\b(?:full[- ](?:bleed|frame|width)|edge[- ]to[- ]edge|hero\s+cover|background)\b/iu',
+            $pageContext,
+        ) === 1;
     }
 
     /**

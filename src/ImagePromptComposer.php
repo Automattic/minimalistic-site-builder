@@ -78,6 +78,13 @@ namespace Automattic\SiteBuild;
 final class ImagePromptComposer
 {
     /**
+     * Orientation anchor for every opaque image. Short on purpose: it shares
+     * the GeminiImage::MAX_PROMPT_TOKENS budget with the subject.
+     */
+    public const ORIENTATION_CLAUSE = 'Orientation: the view is upright, with the top of the scene'
+        . ' at the top of the canvas and any visible horizon level.';
+
+    /**
      * @param string             $subject     what the image shows and from what POV
      * @param string             $pageContext where/how the image is used on the page
      * @param string             $style       one of the AI_IMAGE style keywords
@@ -149,6 +156,15 @@ final class ImagePromptComposer
         // meaningless for transparent assets whose keyed canvas is trimmed.
         $cropClause = $transparent ? '' : ImageCrop::promptClause($imageCrop);
 
+        // The structured ratio sets the canvas shape but says nothing about
+        // what is up (BIGR-979). Asked for a lateral copy reservation on a
+        // scene that is organized top to bottom, the model once complied by
+        // turning a portrait composition 90° inside the landscape canvas. This
+        // render instruction anchors the orientation for every scene; a
+        // transparent asset is an isolated object with no horizon to level.
+        // "Canvas", never "frame" (BIGR-956).
+        $orientationClause = $transparent ? '' : self::ORIENTATION_CLAUSE;
+
         // A subject naming a text carrier gets a render instruction stating how
         // such surfaces appear (BIGR-781). Conditional: on a clean subject the
         // clause would plant the very signage concept it constrains. Transparent
@@ -216,6 +232,7 @@ final class ImagePromptComposer
             'style_clause'        => $styleClause,
             'grade_clause'        => $gradeClause,
             'crop_clause'         => $cropClause,
+            'orientation_clause'  => $orientationClause,
             'transparency_clause' => $transparencyClause,
             'lettering_clause'    => $letteringClause,
             'guidance'            => $guidance,

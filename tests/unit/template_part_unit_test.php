@@ -899,10 +899,13 @@ test('FooterUnit preserves a fit-text billboard heading through finish and block
     }
 });
 
+// A `url(` in the value would be scrubbed by the intake sanitizer first
+// (BIGR-970); the malformed CSS here has none, so the root-style repair is
+// what removes it.
 test('FooterUnit removes a malformed root style attribute instead of discarding usable content', function () {
     $unit = new FooterUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
     $raw = '<!-- wp:group -->'
-        . '<div class="wp-block-group" style="color:red;background:url(theme:./asset.jpg">Footer stays.</div>'
+        . '<div class="wp-block-group" style="color:red;background:rgb(1,2">Footer stays.</div>'
         . '<!-- /wp:group -->';
     $result = $unit->finish($raw, template_part_unit_input());
     $out = $result->markup;
