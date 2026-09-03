@@ -60,7 +60,8 @@ final class ArchetypeCatalog
             . 'page has a hero, which it always does, so neither automatic assignment nor a forced HEADER_ARCHETYPE can '
             . 'deliver it (src/AboveFoldContract.php::forcedHeaderCompatible).',
         'header/centered-masthead' => 'Retired from automatic assignment (BIGR-872); reachable only through a forced '
-            . 'HEADER_ARCHETYPE, and refused over an image-led hero.',
+            . 'HEADER_ARCHETYPE, and refused over an image-led hero — which leaves foreground-split as its only '
+            . 'partner, since BIGR-885 retired type-manifesto and every other recipe leads with a cover image.',
         'header/split-nav' => 'Retired from automatic assignment (BIGR-872); reachable only through a forced '
             . 'HEADER_ARCHETYPE, and refused on a one-page site.',
     ];

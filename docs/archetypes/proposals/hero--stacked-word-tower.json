@@ -3,7 +3,7 @@
     "family": "hero",
     "title": "stacked-word-tower — one word per line, each sized to the same width",
     "idea": "The headline breaks one word per line, each word sized so every line reaches the same width — a solid block of type where the size differences come from the words themselves.",
-    "why_new": "type-manifesto sets one headline at one size. Per-line sizing is a different typographic object and the fit-text device already exists to do it.",
+    "why_new": "Every recipe sets one headline at one size. Per-line sizing is a different typographic object and the fit-text device already exists to do it.",
     "built_from": "three headings (or one heading of three fit-text lines) inside a constrained group; imageless, solid surface.",
     "risk": "only works for a three-to-five word headline with words of similar length; needs a word-shape gate, and the copy step must be told to write for it.",
     "mockup": {

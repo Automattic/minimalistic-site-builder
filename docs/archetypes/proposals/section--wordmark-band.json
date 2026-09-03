@@ -3,7 +3,7 @@
     "family": "section",
     "title": "S7 wordmark-band — one phrase at display scale on a full-bleed colour field",
     "idea": "One short phrase set to the full width of a flat colour field, with two small facts under it. The band says one thing at the loudest volume the page has.",
-    "why_new": "type-manifesto gives the hero an imageless display register; below the hero there is no equivalent, so a page's only loud moment is its first band.",
+    "why_new": "No band in the catalog has an imageless display register — BIGR-885 retired the one hero recipe that had one — so a page has no loud typographic moment anywhere.",
     "built_from": "one full-aligned group on a contrast surface and one heading carrying the existing has-fit-text device — which today only footer-composition.md teaches. This is the cheapest way to put that device to work outside the footer.",
     "risk": "fit-text needs a genuinely full-width heading and renders only where the running WordPress version ships it, so it needs a fallback size. Cap at one per site, or every page becomes a shouting match.",
     "mockup": {

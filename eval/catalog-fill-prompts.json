@@ -1,6 +1,6 @@
 {
-  "$comment": "Briefs for the archetype-gallery fill cohort. The demo cohort in theme-prompts.json exercises whatever archetypes its briefs happen to select, which leaves parts of the catalog with no screenshot and parts with only one. Each entry here pins the three site-wide assignments a build cannot otherwise be told \u2014 the header archetype (HEADER_ARCHETYPE), the hero recipe (HERO_RECIPE), and the footer archetype (patched into pages.json between the plan and the sections step) \u2014 so every archetype in the catalog reaches at least two captures. Build them with: php bin/archetypes.php fill (then php bin/archetypes.php capture). Assignment rules the entries respect: centered-masthead is refused over an image-led hero (cover-image media or an image surface); split-nav is refused on a one-page site, so its entries are multi-page; minimal-overlay needs a hero recipe whose header_modes include overlay, so it is paired with cinematic-safe-zone or layered-poster and never with foreground-split; oversized-wordmark is refused whenever a front hero exists, which resolve() always has, so no entry can request it.",
-  "version": 2,
+  "$comment": "Briefs for the archetype-gallery fill cohort. The demo cohort in theme-prompts.json exercises whatever archetypes its briefs happen to select, which leaves parts of the catalog with no screenshot and parts with only one. Each entry here pins the three site-wide assignments a build cannot otherwise be told — the header archetype (HEADER_ARCHETYPE), the hero recipe (HERO_RECIPE), and the footer archetype (patched into pages.json between the plan and the sections step) — so every archetype in the catalog reaches at least two captures. Build them with: php bin/archetypes.php fill (then php bin/archetypes.php capture). Assignment rules the entries respect: centered-masthead is refused over an image-led hero (cover-image media or an image surface); split-nav is refused on a one-page site, so its entries are multi-page; minimal-overlay needs a hero recipe whose header_modes include overlay, so it is paired with cinematic-safe-zone or layered-poster and never with foreground-split; centered-masthead's rule leaves only foreground-split, the one surviving recipe that is not image-led, since BIGR-885 retired type-manifesto; oversized-wordmark is refused whenever a front hero exists, which resolve() always has, so no entry can request it.",
+  "version": 3,
   "prompts": [
     {
       "id": "cat-ledger",
@@ -34,9 +34,9 @@
       "slug": "cat-manifesto",
       "site_type": "consultancy",
       "header": "centered-masthead",
-      "hero": "type-manifesto",
+      "hero": "foreground-split",
       "footer": "split-ledger",
-      "prompt": "Create a website for Plain Terms, a two-person consultancy that rewrites insurance and utility contracts into language ordinary customers can read. No stock photography, no illustrations \u2014 the writing is the product."
+      "prompt": "Create a website for Plain Terms, a two-person consultancy that rewrites insurance and utility contracts into language ordinary customers can read. No stock photography, no illustrations — the writing is the product."
     },
     {
       "id": "cat-atelier",
@@ -67,7 +67,7 @@
       "header": "standard-row",
       "hero": "foreground-split",
       "footer": "editorial-colophon",
-      "prompt": "Create a website for Northlight Physiotherapy, a clinic in Troms\u00f8 treating skiers, climbers and fishing crews. Calm, factual, appointment-led, with a plain explanation of what each treatment involves."
+      "prompt": "Create a website for Northlight Physiotherapy, a clinic in Tromsø treating skiers, climbers and fishing crews. Calm, factual, appointment-led, with a plain explanation of what each treatment involves."
     },
     {
       "id": "cat-luthier",
@@ -75,7 +75,7 @@
       "site_type": "workshop",
       "header": "standard-row",
       "hero": "foreground-split",
-      "prompt": "Create a website for Marta Ili\u0107, a luthier in Zagreb who builds classical guitars to order and restores instruments from the 1930s. One instrument at a time, an eighteen-month waiting list."
+      "prompt": "Create a website for Marta Ilić, a luthier in Zagreb who builds classical guitars to order and restores instruments from the 1930s. One instrument at a time, an eighteen-month waiting list."
     },
     {
       "id": "cat-tidal",
@@ -93,14 +93,14 @@
       "header": "branded-lockup",
       "hero": "foreground-split",
       "footer": "diptych",
-      "prompt": "Create a website for Halvorsen Forge, a blacksmith outside Bergen who makes architectural ironwork \u2014 gates, railings, hinges \u2014 for restoration projects on listed buildings. Everything is drawn by hand before it is drawn out on the anvil."
+      "prompt": "Create a website for Halvorsen Forge, a blacksmith outside Bergen who makes architectural ironwork — gates, railings, hinges — for restoration projects on listed buildings. Everything is drawn by hand before it is drawn out on the anvil."
     },
     {
       "id": "cat-choir",
       "slug": "cat-choir",
       "site_type": "ensemble",
       "header": "centered-masthead",
-      "hero": "type-manifesto",
+      "hero": "foreground-split",
       "footer": "sunken-wordmark",
       "prompt": "Create a website for the Cantus Firmus Collective, a sixteen-voice choir in Tallinn that performs only music written before 1600 and only in buildings older than the music. No recordings, no merchandise, four concerts a year."
     },
@@ -109,7 +109,7 @@
       "slug": "cat-transit",
       "site_type": "civic service",
       "header": "standard-row",
-      "hero": "type-manifesto",
+      "hero": "layered-poster",
       "footer": "status-readout",
       "prompt": "Create a website for the Kaunas Night Line, a municipal night bus service running four routes between midnight and five. Riders need the times, the stops and the fare, and nothing else on the page."
     },

@@ -275,22 +275,6 @@
                 "captured_height": 720
             }
         ],
-        "hero/type-manifesto": [
-            {
-                "file": "hero--type-manifesto.webp",
-                "site": "Plain Terms",
-                "slug": "cat-manifesto",
-                "captured_width": 1366,
-                "captured_height": 722
-            },
-            {
-                "file": "hero--type-manifesto-2.webp",
-                "site": "Neon Flux",
-                "slug": "pulso",
-                "captured_width": 1366,
-                "captured_height": 481
-            }
-        ],
         "section/asymmetric-split": [
             {
                 "file": "section--asymmetric-split.webp",

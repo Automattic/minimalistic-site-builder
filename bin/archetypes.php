@@ -21,6 +21,7 @@ use Automattic\SiteBuild\StudioCli;
  *   php bin/archetypes.php build           # write docs/archetypes/index.html only
  *   php bin/archetypes.php list            # the same coverage as text
  *   php bin/archetypes.php capture [--only=<slug>,…] [--per-archetype=3]
+ *   php bin/archetypes.php prune           # drop shots of retired archetypes
  *   php bin/archetypes.php fill    [--only=<brief>,…] [--parallel=3]
  *   php bin/archetypes.php status  <family/id> <waiting|built|dropped> [--note=…]
  *   php bin/archetypes.php propose "<what you want>" [--family=section] [--count=1]
@@ -98,6 +99,11 @@ switch ($command) {
         build_gallery($page, $docs, live: false);
         break;
 
+    case 'prune':
+        prune_shots($shotsDir);
+        build_gallery($page, $docs, live: false);
+        break;
+
     case 'fill':
         fill_cohort((string) ($flags['--only'] ?? ''), (int) ($flags['--parallel'] ?? 3));
         break;
@@ -138,6 +144,7 @@ function usage(): never
       php bin/archetypes.php build
       php bin/archetypes.php list
       php bin/archetypes.php capture [--only=slug,slug] [--width=1366] [--per-archetype=3]
+      php bin/archetypes.php prune
       php bin/archetypes.php fill [--only=brief,brief] [--parallel=3]
       php bin/archetypes.php status <family/id> <waiting|built|dropped> [--note="…"]
       php bin/archetypes.php propose "<what you want>" [--family=header|hero|section|footer] [--count=1]
@@ -484,10 +491,14 @@ function pick_shots(array $candidates, int $limit): array
  * names.
  *
  * The catalogs are code and they change: a recipe merged into another one
- * (BIGR-912 folded `editorial-split` away) leaves an image of an archetype that
- * no longer exists. The gallery renders only what the catalog knows, so such a
- * shot is invisible rather than wrong — which is exactly why it has to be
- * reported here instead of waiting to be noticed.
+ * (BIGR-912 folded `editorial-split` away) or retired outright (BIGR-885 took
+ * `type-manifesto`) leaves an image of an archetype that no longer exists. The
+ * gallery renders only what the catalog knows, so such a shot is invisible
+ * rather than wrong — which is exactly why it has to be reported here instead
+ * of waiting to be noticed.
+ *
+ * `capture` ends here, and `prune` is the same work on its own: acting on the
+ * stale-shot report should not cost a boot of every project.
  */
 function prune_shots(string $shotsDir): void
 {

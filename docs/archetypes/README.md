@@ -78,6 +78,21 @@ An empty card and a one-example card are both findings, not gaps in the tool. An
 empty card means the generator will not deliver that archetype from any brief
 you have. A one-example card means you cannot yet judge whether it varies.
 
+### After a merge that changes a catalog
+
+The catalogs are code, and the shots and briefs are data that names them. When
+trunk retires or merges a recipe, three things go stale:
+
+```bash
+php bin/archetypes.php list      # reports shots of archetypes nobody owns now
+php bin/archetypes.php prune     # drops them, no builds needed
+```
+
+Then check `eval/catalog-fill-prompts.json` for a brief that pins the gone id —
+`fill` refuses the whole cohort on one unknown archetype — and read the
+proposals whose `why_new` argues against it, because an argument naming a recipe
+nobody can find sends the next reviewer looking for it.
+
 ## Commands
 
 | Command | What it does |
@@ -86,6 +101,7 @@ you have. A one-example card means you cannot yet judge whether it varies.
 | `build` | Writes `index.html` and stops. Opening it from disk works; composing does not. |
 | `list` | Prints the catalog, how many examples each archetype has, and what is stale. |
 | `capture [--only=slug,…] [--width=1366] [--per-archetype=3]` | Boots every built project under `projects/`, screenshots each part it delivered, and files up to `--per-archetype` images per archetype, preferring different sites. Also drops shots of archetypes the catalogs no longer own. |
+| `prune` | Drops shots of archetypes the catalogs no longer own, without booting anything. Run it after a merge that retires a recipe. |
 | `fill [--only=brief,…] [--parallel=3]` | Builds the cohort in `eval/catalog-fill-prompts.json`, which pins a header, a hero and a footer per brief so the archetypes no demo selects get drawn at all. Slow, and it costs model calls. |
 | `status <family/id> <waiting\|built\|dropped> [--note="…"]` | Records where a proposal ended up. |
 | `propose "<what you want>" [--family=…] [--count=1]` | Asks the model to draw one archetype from your description. |
