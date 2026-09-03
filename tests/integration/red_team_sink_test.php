@@ -179,17 +179,18 @@ function red_team_check_html(string $html, string $context, array &$problems): v
             if (str_contains($value, RED_TEAM_CANARY)) {
                 $problems[] = "{$context}: canary in <{$name} {$attr}>";
             }
-            if (str_contains($value, RED_TEAM_HOST)) {
-                // Whatever the spelling (a backslash host, a scheme-less
-                // authority), the attack host has no place in an attribute.
-                $problems[] = "{$context}: attack host in <{$name} {$attr}>: {$value}";
-            }
             if ($attr === 'style') {
                 red_team_check_css($value, "{$context}: <{$name} style>", $problems);
                 continue;
             }
             $fetches = in_array($attr, $fetchAlways, true)
                 || (in_array($attr, ['href', 'xlink:href'], true) && in_array($name, ['image', 'use', 'feimage', 'link', 'base'], true));
+            if ($fetches && str_contains($value, RED_TEAM_HOST)) {
+                // Whatever the spelling (a backslash host, a scheme-less
+                // authority), the attack host has no place in a fetch. A
+                // destination such as <a href> stays allowed by design.
+                $problems[] = "{$context}: attack host in <{$name} {$attr}>: {$value}";
+            }
             $candidates = in_array($attr, ['srcset', 'imagesrcset'], true)
                 ? array_map(static fn (string $c): string => preg_split('/\s+/', trim($c), 2)[0] ?? '', explode(',', $value))
                 : [$value];
