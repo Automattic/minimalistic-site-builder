@@ -85,8 +85,14 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         'projects', 'services', 'steps', 'studies', 'team', 'workshops',
     ];
 
-    /** The one idiom that paints a rule between items. */
-    private const RULED_IDIOM = 'rule-row';
+    /**
+     * The idioms that paint a rule between items. Both are rationed to one
+     * ledger per page: the seven-demo rebuild for BIGR-978 showed a
+     * `spec-table` commitment filling the gap the `rule-row` cap had closed.
+     *
+     * @var list<string>
+     */
+    private const RULED_IDIOMS = ['rule-row', 'spec-table'];
 
     /**
      * Semantic type words for quote-led sections. A testimonial repeats, but
@@ -809,7 +815,8 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      *
      * The ruled ledger is rationed (BIGR-978). Audited plans put `rule-row`
      * on contact, location, benefits and feature sections alike, so every
-     * page arrived striped with hairlines. Under a `rule-row` commitment:
+     * page arrived striped with hairlines. Under a `rule-row` or `spec-table`
+     * commitment:
      * a prose-led type takes `card`; at most ONE section per page keeps the
      * ledger — the first tabular type, or the first planner-authored section
      * when the page has no tabular type; every other tabular section takes
@@ -831,7 +838,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             }
             $slug = (string) ($page['slug'] ?? '');
             $sections = (array) ($page['sections'] ?? []);
-            $ledgerKeeper = $committed === self::RULED_IDIOM ? self::ledgerKeeper($sections) : null;
+            $ledgerKeeper = in_array($committed, self::RULED_IDIOMS, true) ? self::ledgerKeeper($sections) : null;
             foreach ($sections as $sectionIndex => $section) {
                 if (!is_array($section)) {
                     continue;
@@ -870,6 +877,13 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                     continue;
                 }
                 $pages[$pageIndex]['sections'][$sectionIndex]['item_pattern'] = $target;
+                if ($explicit !== null) {
+                    $pages[$pageIndex]['sections'][$sectionIndex]['content_notes'] = self::withItemPatternCorrection(
+                        $section['content_notes'] ?? '',
+                        $explicit,
+                        $target,
+                    );
+                }
                 $repairs[] = self::successfulRepair(
                     self::sectionPath($slug, (int) $sectionIndex) . '.item_pattern',
                     $authored,
@@ -879,6 +893,27 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             }
         }
         return $pages;
+    }
+
+    /**
+     * Tell the section author that the planner's idiom did not survive.
+     *
+     * The planner writes content_notes and item_pattern in one pass, so a
+     * note like "a rule-row list with four steps" outlives the repair that
+     * released the section to `card`. The atlas rebuild for BIGR-978 shipped
+     * `is-style-rule-row` on every item of such a section: the request said
+     * card, the notes said rule-row, and the notes won. The correction is
+     * appended the way seam corrections already are for backgrounds.
+     */
+    public static function withItemPatternCorrection(mixed $notes, string $authored, ?string $delivered): string
+    {
+        $notes = trim((string) $notes);
+        $correction = $delivered === null
+            ? "this section has no assigned item pattern (the planner authored \"{$authored}\"); compose it freely"
+            : "this section's item pattern is now \"{$delivered}\" (the planner authored \"{$authored}\"); "
+                . "follow the assigned {$delivered} recipe";
+        return trim($notes . ' Build correction: ' . $correction
+            . ' and draw no ' . $authored . ' rows, hairlines, separators, or ruled block styles.');
     }
 
     /**
@@ -897,31 +932,31 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         $restored = $explicit === null
             ? "assigned the committed item idiom to list-like section type '{$type}'"
             : 'restored the site-wide repeated-item commitment';
-        if ($committed !== self::RULED_IDIOM) {
+        if (!in_array($committed, self::RULED_IDIOMS, true)) {
             return [$committed, $restored];
         }
         if (self::isProseLedType($type) && !self::isTabularType($type)) {
             return [
                 ItemPattern::DEFAULT,
-                "released prose-led section type '{$type}' from the rule-row ledger: its items are short "
+                "released prose-led section type '{$type}' from the {$committed} ledger: its items are short "
                 . 'paragraphs, not name/value rows, so a hairline under each one is decoration; the card idiom '
                 . 'dresses them',
             ];
         }
         if ($keepsLedger) {
-            return [self::RULED_IDIOM, $restored];
+            return [$committed, $restored];
         }
         $keeper = $ledgerKeeper === null ? 'no section' : "sections[{$ledgerKeeper}]";
         if (self::isTabularType($type)) {
             return [
                 ItemPattern::DEFAULT,
-                "one ruled ledger per page: {$keeper} keeps the rule-row idiom, so tabular section type "
+                "one ruled ledger per page: {$keeper} keeps the {$committed} idiom, so tabular section type "
                 . "'{$type}' takes the card idiom instead of a second run of hairlines",
             ];
         }
         return [
             null,
-            "released section type '{$type}' from the rule-row ledger: one ruled ledger per page ({$keeper} "
+            "released section type '{$type}' from the {$committed} ledger: one ruled ledger per page ({$keeper} "
             . 'keeps it) and this type is not a name/value list, so the section author composes it freely',
         ];
     }

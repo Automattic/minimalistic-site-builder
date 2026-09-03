@@ -864,6 +864,34 @@ test('stripSectionSeparators removes the rule under a section heading (BIGR-978)
     assert_eq([], $againWarnings);
 });
 
+test('stripRuleClassTokens drops rule tokens from attributes and HTML but never build-owned markers (BIGR-978)', function () {
+    $doc = '<!-- wp:group {"className":"item-pattern--card device--hairline-rule is-style-rule-row"} -->'
+        . '<div class="wp-block-group item-pattern--card device--hairline-rule is-style-rule-row">'
+        . '<!-- wp:paragraph {"className":"hairline-under"} --><p class="hairline-under">Row</p><!-- /wp:paragraph -->'
+        . '<!-- wp:paragraph {"className":"ruler-note"} --><p class="ruler-note">Kept: ruler is not rule</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->';
+    $repairs = [];
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::stripRuleClassTokens($doc, 'page-home--steps', $repairs);
+    // Block-comment JSON escapes "--" the WordPress way.
+    assert_contains('{"className":"item-pattern\\u002d\\u002dcard device\\u002d\\u002dhairline-rule"}', $out);
+    assert_contains('class="wp-block-group item-pattern--card device--hairline-rule"', $out);
+    assert_true(!str_contains($out, 'is-style-rule-row'));
+    assert_true(!str_contains($out, 'hairline-under'));
+    assert_contains('<p>Row</p>', $out, 'an emptied class attribute is dropped from the HTML');
+    assert_contains('class="ruler-note"', $out);
+    assert_eq(2, count($repairs));
+    assert_eq('rule-class-removed', $repairs[0]['code']);
+    assert_eq('group[0]', $repairs[0]['block']);
+
+    $again = [];
+    assert_eq($out, Automattic\SiteBuild\Units\GeneratedMarkup::stripRuleClassTokens($out, 'page-home--steps', $again));
+    assert_eq([], $again);
+    $clean = '<!-- wp:group {"className":"item-pattern__item card-flush"} --><div class="wp-block-group item-pattern__item card-flush"><p>x</p></div><!-- /wp:group -->';
+    $none = [];
+    assert_eq($clean, Automattic\SiteBuild\Units\GeneratedMarkup::stripRuleClassTokens($clean, 'x', $none), 'a clean document is returned untouched');
+    assert_eq([], $none);
+});
+
 test('stripHeroSeparators removes one outer transaction when generated separators are nested', function () {
     $following = '<!-- wp:paragraph --><p>KEEP THIS SIBLING</p><!-- /wp:paragraph -->';
     $doc = '<!-- wp:group --><div class="wp-block-group">'

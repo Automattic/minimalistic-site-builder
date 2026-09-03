@@ -155,7 +155,9 @@ test('a page without a tabular list keeps the ledger on the first authored non-p
     assert_eq([], $fixedPointRepairs);
 });
 
-test('the ledger ration applies only to the rule-row commitment', function (): void {
+test('the ledger ration covers spec-table too, and leaves card and tag-cluster alone', function (): void {
+    // The seven-demo rebuild for BIGR-978 showed a spec-table commitment
+    // filling the gap the rule-row cap had closed (lumen: two ruled sections).
     $pages = [[
         'slug' => 'home',
         'sections' => [
@@ -166,11 +168,49 @@ test('the ledger ration applies only to the rule-row commitment', function (): v
     ]];
     $repairs = [];
     $delivered = PagePlanStep::reconcileItemPatternAssignments($pages, 'spec-table', $repairs);
-    assert_eq(['spec-table', 'spec-table', 'spec-table'], array_column($delivered[0]['sections'], 'item_pattern'));
+    assert_eq(['spec-table', 'card', 'card'], array_column($delivered[0]['sections'], 'item_pattern'));
+    $joined = implode("\n", $repairs);
+    assert_contains('sections[0] keeps the spec-table idiom', $joined);
+    assert_contains("released prose-led section type 'team' from the spec-table ledger", $joined);
 
     $repairs = [];
     $cards = PagePlanStep::reconcileItemPatternAssignments($pages, 'card', $repairs);
     assert_eq(['card', 'card', 'card'], array_column($cards[0]['sections'], 'item_pattern'));
+
+    $repairs = [];
+    $tags = PagePlanStep::reconcileItemPatternAssignments($pages, 'tag-cluster', $repairs);
+    assert_eq(['tag-cluster', 'tag-cluster', 'tag-cluster'], array_column($tags[0]['sections'], 'item_pattern'));
+});
+
+test('a repaired item pattern corrects the planner notes the section author reads (BIGR-978)', function (): void {
+    // The planner writes notes and item_pattern together, so "a rule-row list
+    // with four steps" outlives the repair that released the section to card.
+    $pages = [[
+        'slug' => 'home',
+        'sections' => [
+            ['slug' => 'menu', 'type' => 'menu', 'item_pattern' => 'rule-row', 'content_notes' => 'Six dishes as a ledger.'],
+            ['slug' => 'steps', 'type' => 'process', 'item_pattern' => 'rule-row', 'content_notes' => 'A rule-row list with four steps.'],
+            ['slug' => 'contact', 'type' => 'contact', 'item_pattern' => 'rule-row', 'content_notes' => 'Hours and address as rows.'],
+            ['slug' => 'hours', 'type' => 'hours', 'item_pattern' => null, 'content_notes' => 'Opening hours.'],
+        ],
+    ]];
+    $repairs = [];
+    $delivered = PagePlanStep::reconcileItemPatternAssignments($pages, 'rule-row', $repairs);
+    $sections = $delivered[0]['sections'];
+    assert_eq(['rule-row', 'card', null, 'card'], array_column($sections, 'item_pattern'));
+    assert_eq('Six dishes as a ledger.', $sections[0]['content_notes'], 'the keeper is untouched');
+    assert_eq(
+        'A rule-row list with four steps. Build correction: this section\'s item pattern is now "card" '
+        . '(the planner authored "rule-row"); follow the assigned card recipe and draw no rule-row rows, '
+        . 'hairlines, separators, or ruled block styles.',
+        $sections[1]['content_notes'],
+    );
+    assert_contains('has no assigned item pattern (the planner authored "rule-row"); compose it freely', $sections[2]['content_notes']);
+    assert_eq('Opening hours.', $sections[3]['content_notes'], 'an assignment the planner never made needs no correction');
+
+    $again = [];
+    assert_eq($delivered, PagePlanStep::reconcileItemPatternAssignments($delivered, 'rule-row', $again));
+    assert_eq([], $again);
 });
 
 test('quote-led sections never keep a tabular idiom', function (): void {
@@ -323,6 +363,40 @@ test('a section without a ruled recipe loses its separators; a rule-row section 
 
     $table = $unit->finish($raw, item_pattern_unit_input('spec-table'));
     assert_contains('wp:separator', $table->markup, 'the spec table owns its rules too');
+});
+
+test('a section without a ruled recipe loses model-invented rule classes; a ledger keeps them (BIGR-978)', function (): void {
+    // The atlas rebuild shipped `is-style-rule-row` on every item of a section
+    // planned as card, bound to a border in the model's own theme.json css.
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    $unit = new SectionUnit(new FakeLlm(), $renderer);
+    $raw = '<!-- wp:group {"className":"section-composition--centered-stack is-style-rule-list"} -->'
+        . '<div class="wp-block-group section-composition--centered-stack is-style-rule-list">'
+        . '<!-- wp:heading {"level":2} --><h2 class="wp-block-heading">Steps</h2><!-- /wp:heading -->'
+        . '<!-- wp:group {"className":"item-pattern__item is-style-rule-row"} -->'
+        . '<div class="wp-block-group item-pattern__item is-style-rule-row">'
+        . '<!-- wp:paragraph --><p>Clock in</p><!-- /wp:paragraph --></div><!-- /wp:group -->'
+        . '<!-- wp:group {"className":"item-pattern__item rule-rows hover-lift"} -->'
+        . '<div class="wp-block-group item-pattern__item rule-rows hover-lift">'
+        . '<!-- wp:paragraph --><p>Open the job</p><!-- /wp:paragraph --></div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->';
+
+    $card = $unit->finish($raw, item_pattern_unit_input('card'));
+    assert_true(!str_contains($card->markup, 'is-style-rule-row'), 'the item rule style is gone');
+    assert_true(!str_contains($card->markup, 'is-style-rule-list'), 'the root rule style is gone');
+    assert_true(!str_contains($card->markup, 'rule-rows'), 'the bare rule token is gone');
+    assert_contains('item-pattern__item hover-lift', $card->markup, 'other tokens survive in order');
+    assert_contains('item-pattern--card', $card->markup, 'the assigned marker is still applied');
+    assert_contains('Clock in', $card->markup);
+    $ruleRepairs = array_values(array_filter(
+        $card->repairs,
+        static fn (array $repair): bool => ($repair['code'] ?? '') === 'rule-class-removed',
+    ));
+    assert_eq(3, count($ruleRepairs));
+    assert_eq('is-style-rule-row', $ruleRepairs[1]['authored']);
+
+    $ledger = $unit->finish($raw, item_pattern_unit_input('rule-row'));
+    assert_contains('is-style-rule-row', $ledger->markup, 'the ruled recipe keeps its own classes');
 });
 
 /** @return array<string,mixed> */

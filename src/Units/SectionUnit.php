@@ -175,6 +175,7 @@ final class SectionUnit extends AbstractPageSectionUnit
         }
         if (!self::ownsRuledSeparators($itemPattern, $archetype)) {
             $markup = GeneratedMarkup::stripSectionSeparators($markup, $this->key($input), $repairs, $warnings);
+            $markup = GeneratedMarkup::stripRuleClassTokens($markup, $this->key($input), $repairs);
         }
         $listThumb = ListThumbContract::enforce($markup, $this->key($input));
         $markup = $listThumb['markup'];

@@ -2473,6 +2473,80 @@ final class GeneratedMarkup
     }
 
     /**
+     * Remove model-invented "rule" class tokens from a section that owns no
+     * ruled recipe.
+     *
+     * The page plan can release a section from the ruled ledger, but the
+     * section author still reads the site-wide "Item pattern: rule-row" fact
+     * and its own theme.json custom CSS, which defines classes such as
+     * `is-style-rule-row` with a border. The atlas rebuild for BIGR-978
+     * shipped exactly that on a section planned as `card`. Tokens naming a
+     * rule or hairline are removed from every block's className; build-owned
+     * marker families (`item-pattern--*`, `device--*`) are never touched.
+     * The token is also dropped from the saved HTML so the pass is complete
+     * before fix-blocks re-serializes.
+     *
+     * @param list<array<string,mixed>> $repairs
+     */
+    public static function stripRuleClassTokens(string $markup, string $part, array &$repairs = []): string
+    {
+        $document = BlockMarkup::parse($markup);
+        $removed = [];
+        foreach ($document->indices() as $index) {
+            $attrs = $document->attrs($index);
+            if (!is_array($attrs) || !is_string($attrs['className'] ?? null)) {
+                continue;
+            }
+            $tokens = self::classTokens($attrs['className']);
+            $kept = array_values(array_filter($tokens, static fn (string $token): bool => !self::isRuleClassToken($token)));
+            if ($kept === $tokens) {
+                continue;
+            }
+            $dropped = array_values(array_diff($tokens, $kept));
+            array_push($removed, ...$dropped);
+            if ($kept === []) {
+                unset($attrs['className']);
+            } else {
+                $attrs['className'] = implode(' ', $kept);
+            }
+            $document->setAttrs($index, $attrs);
+            $repairs[] = [
+                'code' => 'rule-class-removed',
+                'part' => $part,
+                'block' => $document->name($index) . "[{$index}]",
+                'authored' => implode(' ', $dropped),
+                'delivered' => 'removed',
+                'disposition' => 'repaired',
+            ];
+        }
+        if ($removed === []) {
+            return $markup;
+        }
+        $markup = $document->render();
+        $removed = array_values(array_unique($removed));
+        return (string) preg_replace_callback(
+            '/\s*\bclass="([^"]*)"/',
+            static function (array $match) use ($removed): string {
+                $kept = array_values(array_filter(
+                    self::classTokens($match[1]),
+                    static fn (string $token): bool => !in_array($token, $removed, true),
+                ));
+                return $kept === [] ? '' : ' class="' . implode(' ', $kept) . '"';
+            },
+            $markup,
+        );
+    }
+
+    /** Whether one class token names a rule or hairline the section may not draw. */
+    public static function isRuleClassToken(string $token): bool
+    {
+        if (str_starts_with($token, 'item-pattern--') || str_starts_with($token, 'device--')) {
+            return false;
+        }
+        return preg_match('/(^|-)(rules?|ruled|hairlines?)(-|$)/i', $token) === 1;
+    }
+
+    /**
      * Shared removal transaction for `wp:separator` blocks.
      *
      * @param list<string> $warnings
