@@ -2314,10 +2314,96 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         $theme = self::removeUnsupportedTextWrapProperties($theme);
         [$theme, $motionWarnings] = self::removeMotionKitCustomCss($theme);
         [$theme, $resourceWarnings] = self::removeResourceLoadingCustomCss($theme);
+        [$theme, $fontFaceWarnings] = self::removeForeignFontFaces($theme);
         return [
             $theme,
-            array_merge($colorWarnings, $shadowWarnings, $shapeWarnings, $motionWarnings, $resourceWarnings),
+            array_merge(
+                $colorWarnings,
+                $shadowWarnings,
+                $shapeWarnings,
+                $motionWarnings,
+                $resourceWarnings,
+                $fontFaceWarnings,
+            ),
         ];
+    }
+
+    /**
+     * Remove font faces theme.json would fetch from a host the model chose.
+     *
+     * A `fontFace` entry's `src` becomes a CSS `url()` once WordPress renders
+     * theme.json: `@font-face { src: url(https://…) }` on every page. The
+     * build bundles every face it ships as a theme file under assets/fonts/
+     * (BundleFontsStep), so `file:./assets/fonts/…` is the one legitimate
+     * form. Anything else is a fetch from a model-chosen host, and the
+     * sink-side red-team test found it shipping on the HTML-first graph,
+     * which has no bundling step to overwrite it (BIGR-969).
+     *
+     * A face keeps its bundled sources and loses the rest; a face with no
+     * bundled source goes; a family with no face left loses the key. Every
+     * removal is recorded durably.
+     *
+     * Pure — unit-testable.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>} theme, warnings
+     */
+    public static function removeForeignFontFaces(array $theme): array
+    {
+        $families = $theme['settings']['typography']['fontFamilies'] ?? null;
+        if (!is_array($families)) {
+            return [$theme, []];
+        }
+
+        $warnings = [];
+        foreach ($families as $i => $family) {
+            if (!is_array($family) || !isset($family['fontFace'])) {
+                continue;
+            }
+            $slug = is_string($family['slug'] ?? null) && $family['slug'] !== '' ? $family['slug'] : (string) $i;
+            $location = "theme/theme.json settings.typography.fontFamilies[{$slug}].fontFace";
+            if (!is_array($family['fontFace'])) {
+                $warnings[] = "{$location}: authored " . Warnings::value($family['fontFace'])
+                    . '; delivered removed; disposition fontFace must be a list of faces';
+                unset($families[$i]['fontFace']);
+                continue;
+            }
+
+            $kept = [];
+            foreach ($family['fontFace'] as $face) {
+                if (!is_array($face)) {
+                    $warnings[] = "{$location}: authored " . Warnings::value($face)
+                        . '; delivered removed; disposition a face must be an object';
+                    continue;
+                }
+                $sources = $face['src'] ?? [];
+                $sources = is_string($sources) ? [$sources] : (is_array($sources) ? $sources : []);
+                $bundled = [];
+                foreach ($sources as $source) {
+                    if (is_string($source)
+                        && preg_match('#^file:\./assets/fonts/[A-Za-z0-9][A-Za-z0-9._-]*$#', $source) === 1
+                    ) {
+                        $bundled[] = $source;
+                        continue;
+                    }
+                    $warnings[] = "{$location}: authored src " . Warnings::value($source)
+                        . '; delivered removed; disposition font faces ship only as bundled theme files'
+                        . ' under assets/fonts/, never from another host';
+                }
+                if ($bundled === []) {
+                    continue;
+                }
+                $face['src'] = $bundled;
+                $kept[] = $face;
+            }
+            if ($kept === []) {
+                unset($families[$i]['fontFace']);
+            } else {
+                $families[$i]['fontFace'] = $kept;
+            }
+        }
+        $theme['settings']['typography']['fontFamilies'] = $families;
+        return [$theme, $warnings];
     }
 
     /**

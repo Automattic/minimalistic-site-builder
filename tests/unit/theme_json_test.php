@@ -3862,3 +3862,63 @@ test('theme-json never ships a resource-loading custom CSS value', function () {
     assert_contains('theme/theme.json styles.blocks.core/group.css', $warnings);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('removeForeignFontFaces keeps only bundled sources and drops faces that fetch', function () {
+    $authored = ['settings' => ['typography' => ['fontFamilies' => [
+        ['slug' => 'heading', 'fontFamily' => 'Literata, serif', 'name' => 'Heading', 'fontFace' => [
+            ['fontFamily' => 'Literata', 'fontWeight' => '700', 'src' => ['https://evil.example/l.woff2']],
+        ]],
+        ['slug' => 'body', 'fontFamily' => 'Source Sans 3, sans-serif', 'name' => 'Body', 'fontFace' => [
+            ['fontFamily' => 'Source Sans 3', 'fontWeight' => '400', 'src' => [
+                'file:./assets/fonts/source-sans-3-400.woff2',
+                '//evil.example/s.woff2',
+            ]],
+            ['fontFamily' => 'Source Sans 3', 'fontWeight' => '600', 'src' => 'data:font/woff2;base64,AAAA'],
+        ]],
+        ['slug' => 'mono', 'fontFamily' => 'monospace', 'name' => 'Mono'],
+    ]]]];
+
+    [$theme, $warnings] = ThemeJsonStep::removeForeignFontFaces($authored);
+    $families = $theme['settings']['typography']['fontFamilies'];
+    assert_true(!isset($families[0]['fontFace']), 'a family whose every face fetched loses the key');
+    assert_eq(
+        [['fontFamily' => 'Source Sans 3', 'fontWeight' => '400', 'src' => ['file:./assets/fonts/source-sans-3-400.woff2']]],
+        $families[1]['fontFace'],
+        'the bundled source stays, the foreign one and the data: face go',
+    );
+    assert_eq(['slug' => 'mono', 'fontFamily' => 'monospace', 'name' => 'Mono'], $families[2]);
+    assert_true(!str_contains(json_encode($theme), 'evil.example'));
+    assert_eq(3, count($warnings));
+    assert_contains('fontFamilies[heading].fontFace', $warnings[0]);
+    assert_contains('bundled theme files', $warnings[0]);
+
+    [$fixed, $again] = ThemeJsonStep::removeForeignFontFaces($theme);
+    assert_eq($theme, $fixed, 'fixed point');
+    assert_eq([], $again);
+});
+
+test('theme-json never ships a font face from a foreign host', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tjfontface_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A quiet bakery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project);
+
+    $payload = valid_theme_payload();
+    foreach ($payload['settings']['typography']['fontFamilies'] as &$family) {
+        $family['fontFace'] = [
+            ['fontFamily' => $family['name'] ?? 'x', 'fontWeight' => '400', 'src' => ['https://evil.example/f.woff2']],
+        ];
+    }
+    unset($family);
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $delivered = $project->readText('theme/theme.json');
+    assert_true(!str_contains($delivered, 'evil.example'), 'no foreign font source ships');
+    assert_true(!str_contains($delivered, 'fontFace'), 'no face without a bundled source ships');
+    $warnings = implode(' ', $project->readJson('warnings.json')['theme-json'] ?? []);
+    assert_contains('bundled theme files', $warnings);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
