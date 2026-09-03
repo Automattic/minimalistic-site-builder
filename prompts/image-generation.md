@@ -6,7 +6,7 @@ Use ONLY the native `src` and `alt` attributes on `img` elements. Do NOT use any
 
 - **src**: The image path using the `theme:./assets/` prefix followed by the filename. The filename must only contain lowercase letters (a-z), numbers (0-9), and hyphens (-) — no spaces or special characters — and must be descriptive of the image. ALWAYS use the `.jpg` extension — every generated image is an opaque content image; never use `.png` (see "No decorative or transparent images" below). Give every image a UNIQUE filename. Example: `theme:./assets/hero-mountain-dawn.jpg`
 
-- **alt**: A structured string containing all image generation parameters, e.g. `AI_IMAGE: A misty mountain range at dawn seen from a low valley vantage, the peaks off-center to the right with a calm low-detail sky on the left | wide destination feature with the left side kept as open, low-detail negative space | photorealistic | landscape`
+- **alt**: A structured string containing all image generation parameters, in the exact `AI_IMAGE: subject | page-context | style | aspect-ratio` form described below
 
 ### Alt Attribute Format
 
@@ -70,7 +70,7 @@ Decoration, when a section needs any at all, comes from theme primitives — the
 - A short phrase naming where and how the image is used (e.g. `wide feature band in a portfolio grid`, `portfolio item card in a 3-column gallery`, `menu item thumbnail`). The generator uses this to fit the image to its slot — it is not drawn into the image.
 - Write this machine-guidance field in English even when the site's visitor-facing copy uses another language. It is normalized through a fixed pictorial vocabulary before image generation; it is not visible site copy.
 - Treat the structured `aspectRatio` field as authoritative for canvas orientation. Page-context prose may describe placement but must not contradict that field.
-- Describe copy-overlay placement as reserved empty space in photographic terms, never as text: write `full-frame editorial photograph with the left third kept as open, low-detail negative space` — NOT `hero with the headline and subtitle overlaid on the left`. Naming a headline, subtitle, caption or menu in the page-context is the audited trigger for the model painting ghost text and fake UI into that exact region of the image — and so is design-comp vocabulary like `hero cover background`: a typography-capable image model reads a design brief as an invitation to typeset the missing title block, so prefer photographic slot language (`editorial photograph`, `full-frame backdrop`) over web-layout language (`hero`, `banner`, `cover background`).
+- Describe copy-overlay placement as reserved empty space in photographic terms, never as text: name the slot as a photograph and describe the region the recipe reserves for copy as empty, low-detail space (which region, and how much of the frame, follows from the recipe's text anchor — do not default to one side) — NOT as the place where a headline or subtitle will sit. Naming a headline, subtitle, caption or menu in the page-context is the audited trigger for the model painting ghost text and fake UI into that exact region of the image — and so is design-comp vocabulary like `hero cover background`: a typography-capable image model reads a design brief as an invitation to typeset the missing title block, so prefer photographic slot language (`editorial photograph`, `full-frame backdrop`) over web-layout language (`hero`, `banner`, `cover background`).
 
 **Cover backgrounds:**
 For `wp:cover` backgrounds, set the same `theme:./assets/<name>.jpg` path on BOTH the block's `url` attribute and the inner `<img>` src, and put the `AI_IMAGE` spec in that img's alt. The `url` and `src` are asset PATHS only — never write the `AI_IMAGE:` spec into a `url` or `src`; it belongs solely in the `alt`. A cover whose `url` is an `AI_IMAGE:` string ships the raw prompt text as the image and renders no picture.
@@ -80,28 +80,7 @@ For `wp:cover` backgrounds, set the same `theme:./assets/<name>.jpg` path on BOT
 
 ```html
 <!-- wp:image {"sizeSlug":"large"} -->
-<figure><img src="theme:./assets/loaf-sourdough.jpg" alt="AI_IMAGE: A rustic sourdough loaf with a crackled golden crust on a floured wooden board, warm side light, shot slightly from above | menu item card in the bakery's signature loaves section | photorealistic | square"/></figure>
+<figure><img src="theme:./assets/<unique-descriptive-name>.jpg" alt="AI_IMAGE: <subject: 1-3 sentences about the image itself, no grade or light words> | <page-context: the slot, in English> | photorealistic | card-landscape"/></figure>
 <!-- /wp:image -->
 ```
 
-### Example: Complete Hero Section
-
-```html
-<!-- wp:group {"align":"full","style":{"spacing":{"margin":{"top":"0"}}},"layout":{"type":"constrained"}} -->
-<div>
-    <!-- wp:cover {"url":"theme:./assets/hero-mountain-dawn.jpg","dimRatio":50,"align":"full","minHeight":80,"minHeightUnit":"vh"} -->
-    <div>
-        <img alt="AI_IMAGE: A misty mountain range at dawn seen from a low valley vantage, the peaks off-center to the right with a calm low-detail sky on the left | full-bleed hero section with the headline overlaid on top | photorealistic | landscape" src="theme:./assets/hero-mountain-dawn.jpg"/>
-        <div>
-            <!-- wp:heading {"level":1,"style":{"typography":{"textAlign":"center"}},"textColor":"base","fontFamily":"heading","fontSize":"display"} -->
-            <h1>Into the High Country</h1>
-            <!-- /wp:heading -->
-            <!-- wp:paragraph {"style":{"typography":{"textAlign":"center"}},"textColor":"base","fontSize":"lead"} -->
-            <p>Guided treks through the alpine wilderness.</p>
-            <!-- /wp:paragraph -->
-        </div>
-    </div>
-    <!-- /wp:cover -->
-</div>
-<!-- /wp:group -->
-```

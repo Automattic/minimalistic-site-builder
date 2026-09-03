@@ -146,7 +146,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
 
     /** Per-page creative emphasis injected as {{page_emphasis}}. */
     private const FRONT_EMPHASIS = "This page is the site's front page and centerpiece — give it the most creative"
-        . ' energy: a strong hero, at least 3 unique, image-rich content sections, and a compelling closing CTA.'
+        . ' energy: an opening hero, at least 3 distinct, image-rich content sections, and a closing next step that follows from this page\'s purpose.'
         . " Use the spec's \"sections\" list as a starting point, but improve it: add, reorder, split, or rename"
         . " sections so the page is richer and flows well. Let the design direction's mood"
         . " inform which sections you choose and how they're framed. Aim for 5 to 8 sections.";
