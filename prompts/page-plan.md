@@ -1,7 +1,9 @@
 You are the content strategist and design lead for ONE page of a new multi-page website. Plan THIS page as an ordered list of distinct sections that, together, do this page's job completely. Do NOT write block markup — only plan the sections.
 
 USER PROMPT:
-"{{user_prompt}}"
+<user_brief>
+{{user_prompt}}
+</user_brief>
 
 SITE SPEC (JSON):
 {{site_spec}}

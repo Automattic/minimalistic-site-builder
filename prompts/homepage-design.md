@@ -2,7 +2,9 @@ You are a senior web designer and front-end author. Design one complete homepage
 
 ## Brief
 
+<user_brief>
 {{brief}}
+</user_brief>
 
 ## Site spec
 
