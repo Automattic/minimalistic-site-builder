@@ -33,6 +33,12 @@ final class MarkupSanitizer
      */
     private const MEDIA_ELEMENTS = ['img', 'source', 'video', 'audio', 'track', 'picture', 'input'];
     private const MEDIA_SOURCE_ATTRIBUTES = ['src', 'srcset', 'poster'];
+    /**
+     * Only these blocks carry a media source in their comment JSON. A
+     * navigation-link, social-link, or button "url" is a destination the
+     * visitor chooses to follow, not a fetch, and stays.
+     */
+    private const BLOCK_MEDIA_NAMES = 'cover|image|video|audio|media-text|gallery';
     private const BLOCK_MEDIA_KEYS = 'url|src|poster|mediaUrl';
 
     /**
@@ -518,16 +524,17 @@ final class MarkupSanitizer
     }
 
     /**
-     * Remove media sources on a foreign host from block-comment JSON. Two
-     * passes keep the JSON valid: a key after a comma goes with its comma, and
-     * a key in first position goes with the comma that follows it.
+     * Remove media sources on a foreign host from the comment JSON of media
+     * blocks. Two passes keep the JSON valid: a key after a comma goes with
+     * its comma, and a key in first position goes with the comma that
+     * follows it.
      */
     private static function neutralizeForeignBlockMedia(string $markup, int &$count): string
     {
         $foreign = '"((?:[a-zA-Z][a-zA-Z0-9+.\-]*:)?\\\\?\/\\\\?\/(?:[^"\\\\]|\\\\.)*)"';
         $key = '"(?:' . self::BLOCK_MEDIA_KEYS . ')"';
         $result = preg_replace_callback(
-            '/<!--\s*wp:[a-zA-Z0-9\/-]+\s+\{.*?\}\s*\/?-->/s',
+            '/<!--\s*wp:(?:core\/)?(?:' . self::BLOCK_MEDIA_NAMES . ')\s+\{.*?\}\s*\/?-->/s',
             static function (array $match) use (&$count, $foreign, $key): string {
                 $comment = $match[0];
                 foreach ([

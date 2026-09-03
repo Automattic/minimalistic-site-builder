@@ -929,7 +929,9 @@ test('generated seeder removes media sources on a foreign host like the intake s
         }
     }
     // What stays, stays on both sides.
-    $kept = '<!-- wp:cover {"url":"theme:./assets/hero.jpg","dimRatio":50} --><div><img src="theme:./assets/hero.jpg" alt="x"><img src="/wp-content/uploads/a.jpg"><a href="https://example.com/">link</a></div><!-- /wp:cover -->';
+    $kept = '<!-- wp:cover {"url":"theme:./assets/hero.jpg","dimRatio":50} --><div><img src="theme:./assets/hero.jpg" alt="x"><img src="/wp-content/uploads/a.jpg"><a href="https://example.com/">link</a></div><!-- /wp:cover -->'
+        . '<!-- wp:navigation-link {"label":"Instagram","url":"https://instagram.com/hearth","kind":"custom"} /-->'
+        . '<!-- wp:social-link {"url":"https://x.com/hearth","service":"x"} /-->';
     assert_eq($kept, \Automattic\SiteBuild\MarkupSanitizer::sanitize($kept));
     assert_eq($kept, $sanitize($kept));
     $cover = $sanitize($corpus[0]);

@@ -437,6 +437,7 @@ test('sanitize removes media sources on a foreign host and the matching block-JS
         . '<!-- /wp:cover -->'
         . '<!-- wp:image {"url":"https:\/\/evil.example\/a.jpg"} --><figure><img src="//evil.example/a.jpg" srcset="/a.jpg 1x, https://evil.example/b.jpg 2x" alt="a"></figure><!-- /wp:image -->'
         . '<!-- wp:video {"src":"https://evil.example/v.mp4"} /-->'
+        . '<!-- wp:media-text {"mediaUrl":"https://evil.example/m.jpg","mediaType":"image"} --><div class="wp-block-media-text"></div><!-- /wp:media-text -->'
         . '<video poster="/p.jpg" src="ftp://evil.example/v.mp4"></video>',
         $notes,
     );
@@ -444,6 +445,7 @@ test('sanitize removes media sources on a foreign host and the matching block-JS
     assert_contains('<!-- wp:cover {"dimRatio":50,"id":3} -->', $out, 'the key after a comma goes with its comma');
     assert_contains('<!-- wp:image {} -->', $out, 'a lone key leaves an empty object');
     assert_contains('<!-- wp:video {} /-->', $out, 'a void block keeps its closer');
+    assert_contains('<!-- wp:media-text {"mediaType":"image"} -->', $out, 'a key in first position goes with the comma after it');
     assert_contains('<img class="wp-block-cover__image-background" alt="Oven">', $out, 'the element and its alt stay');
     assert_contains('<video poster="/p.jpg"></video>', $out, 'a root-relative poster stays');
     assert_contains('media source attribute(s) on a foreign host', implode(' | ', $notes));
@@ -453,7 +455,11 @@ test('sanitize removes media sources on a foreign host and the matching block-JS
 test('sanitize keeps the build placeholder, root-relative and same-page media sources, and plain links', function () {
     $html = '<!-- wp:cover {"url":"theme:./assets/hero.jpg","dimRatio":50} -->'
         . '<div><img src="theme:./assets/hero.jpg" alt="x"><img src="/wp-content/uploads/a.jpg" srcset="/a.jpg 1x, ./b.jpg 2x">'
-        . '<a href="https://example.com/">a link is a destination, not a fetch</a></div><!-- /wp:cover -->';
+        . '<a href="https://example.com/">a link is a destination, not a fetch</a></div><!-- /wp:cover -->'
+        // Destinations in block JSON stay too: only media blocks fetch from "url".
+        . '<!-- wp:navigation-link {"label":"Instagram","url":"https://instagram.com/hearth","kind":"custom"} /-->'
+        . '<!-- wp:social-link {"url":"https://x.com/hearth","service":"x"} /-->'
+        . '<!-- wp:media-text {"mediaUrl":"theme:./assets/a.jpg","mediaType":"image"} --><div class="wp-block-media-text"></div><!-- /wp:media-text -->';
     $notes = [];
     assert_eq($html, MarkupSanitizer::sanitize($html, $notes));
     assert_eq([], $notes);

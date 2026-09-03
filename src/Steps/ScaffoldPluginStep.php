@@ -801,15 +801,17 @@ final class ScaffoldPluginStep implements Step
         }
 
         /**
-         * Remove media sources on a foreign host from block-comment JSON. The
-         * same two passes the build runs: a key after a comma goes with its
-         * comma, a key in first position goes with the comma that follows.
+         * Remove media sources on a foreign host from the comment JSON of
+         * media blocks only: a navigation-link or social-link "url" is a
+         * destination, not a fetch, and stays. The same two passes the build
+         * runs: a key after a comma goes with its comma, a key in first
+         * position goes with the comma that follows.
          */
         function {{FN_PREFIX}}_content_neutralize_block_media($content) {
             $foreign = '"((?:[a-zA-Z][a-zA-Z0-9+.\-]*:)?\\\\?\/\\\\?\/(?:[^"\\\\]|\\\\.)*)"';
             $key = '"(?:url|src|poster|mediaUrl)"';
             $result = preg_replace_callback(
-                '/<!--\s*wp:[a-zA-Z0-9\/-]+\s+\{.*?\}\s*\/?-->/s',
+                '/<!--\s*wp:(?:core\/)?(?:cover|image|video|audio|media-text|gallery)\s+\{.*?\}\s*\/?-->/s',
                 function ($match) use ($foreign, $key) {
                     $comment = $match[0];
                     $comment = (string) preg_replace('/,\s*' . $key . '\s*:\s*' . $foreign . '/', '', $comment);
