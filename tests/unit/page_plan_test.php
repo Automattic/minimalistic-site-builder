@@ -467,30 +467,35 @@ test('PagePlanStep removes template-owned footer identities without touching sib
         'title' => 'Copyright & Licensing',
         'type' => 'policy',
         'layout_archetype' => 'offset-grid',
+        'background' => 'base',
     ]);
     $legalTeam = plan_section([
         'slug' => 'legal-team',
         'title' => 'Contact the legal team',
         'type' => 'team',
         'layout_archetype' => 'equal-card-grid',
+        'background' => 'base',
     ]);
     $siteGuide = plan_section([
         'slug' => 'site-details',
         'title' => 'Archaeological site information',
         'type' => 'visitor-guide',
         'layout_archetype' => 'list-with-thumbnails',
+        'background' => 'base',
     ]);
     $siteInformation = plan_section([
         'slug' => 'site-information',
         'title' => 'Site Information',
         'type' => 'visitor-guide',
         'layout_archetype' => 'equal-card-grid',
+        'background' => 'base',
     ]);
     $siteInfo = plan_section([
         'slug' => 'site-info',
         'title' => 'Site Info',
         'type' => 'utility',
-        'layout_archetype' => 'full-bleed-cover',
+        'layout_archetype' => 'asymmetric-split',
+        'background' => 'base',
     ]);
     // The prompt commits slug/type to English identifiers; a localized TITLE
     // alone is on-page copy, never a footer identity.
@@ -499,7 +504,10 @@ test('PagePlanStep removes template-owned footer identities without touching sib
         'title' => 'Visítanos',
         'type' => 'utility',
         'layout_archetype' => 'centered-stack',
+        'background' => 'base',
     ]);
+    // Siblings sit on base so the page stays inside the band cap: this test is
+    // about footer identities, and normalize() would reject nine bands first.
     $raw = [
         $hero,
         plan_section(['slug' => 'utility', 'title' => 'Footer Info', 'type' => 'contact']),
@@ -1060,7 +1068,7 @@ test('page-plan writes pages.json with sections per page', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('page-plan delivery applies surface restraint after settling the footer seam', function () {
+test('page-plan sends an over-budget page through repair, then demotes mechanically', function () {
     $tmp = sys_get_temp_dir() . '/builder_pp_surface_restraint_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A restrained bakery']);
@@ -1089,18 +1097,32 @@ test('page-plan delivery applies surface restraint after settling the footer sea
         ]);
     }
 
-    (new PagePlanStep(new FakeLlm(), new PromptRenderer(repo_path('prompts'))))->consume(
-        $project,
-        ['home' => ['sections' => $sections]],
+    $llm = new FakeLlm();
+    // Six bands on six sections is rejected, and the repair keeps them all.
+    $llm->queueJson(['sections' => $sections]);
+    $llm->queueJson(['sections' => $sections]);
+    (new PagePlanStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    assert_eq(2, count($llm->calls), 'one plan, one repair, then the mechanical backstop');
+    assert_contains(
+        'sit on a non-base background',
+        $llm->calls[1]['prompt'],
+        'the model is told which rule it broke before the build demotes anything',
     );
 
     $delivered = $project->readJson('pages.json')['pages'][0]['sections'];
-    $nonBase = array_values(array_filter(
-        array_column($delivered, 'background'),
-        static fn (string $background): bool => $background !== 'base',
-    ));
+    $backgrounds = array_column($delivered, 'background');
+    $closing = array_pop($backgrounds);
+    $nonBase = array_filter($backgrounds, static fn (string $background): bool => $background !== 'base');
     assert_true(count($nonBase) <= 2, 'the final artifact, not only the pure helper, obeys the budget');
     assert_eq('image', $delivered[0]['background'], 'the locked front hero survives delivery restraint');
+    if ($closing !== 'base') {
+        assert_contains(
+            'Build correction',
+            (string) $delivered[count($delivered) - 1]['handoff'],
+            'a closing band beyond the budget is only ever the footer-seam correction',
+        );
+    }
     assert_contains(
         'demoted an excess color band',
         implode("\n", $project->readJson('warnings.json')['page-plan'] ?? []),
