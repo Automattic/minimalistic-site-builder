@@ -346,7 +346,7 @@ test('design sanitizer scrubs every fetch out of the head stylesheet at the writ
     assert_eq([], $again);
 });
 
-test('design sanitizer keeps a head stylesheet whose only url() sits in a comment', function () {
+test('design sanitizer keeps a head stylesheet whose only url() sits in a comment or a string', function () {
     $warnings = [];
     $out = \Automattic\SiteBuild\DesignMarkupSanitizer::sanitize(
         '<!DOCTYPE html><html><head><title>x</title>'
@@ -361,10 +361,9 @@ test('design sanitizer keeps a head stylesheet whose only url() sits in a commen
     assert_contains('never a url() background', $out, 'the comment stays');
     assert_contains('--content-size: 800px;', $out, 'the sheet is not emptied');
     assert_contains('color: red', $out);
-    assert_true(!str_contains($out, 'content:'), 'the one declaration that spells url( is cut');
-    assert_contains('color: blue', $out, 'its sibling stays');
-    assert_eq(1, count($warnings), implode(' | ', $warnings));
-    assert_contains('resource-loading CSS value', $warnings[0]);
+    assert_contains('content: "url("', $out, 'a string literal never loads anything');
+    assert_contains('color: blue', $out);
+    assert_eq([], $warnings, 'nothing was removed, so nothing is recorded');
     $again = [];
     assert_eq($out, \Automattic\SiteBuild\DesignMarkupSanitizer::sanitize($out, 'design/home.html', 'test', $again), 'fixed point');
     assert_eq([], $again);
