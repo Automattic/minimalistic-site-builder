@@ -495,3 +495,21 @@ test('design sanitizer removes a media source on a foreign host with its own dis
     assert_contains('<img src="/a.jpg" alt="kept">', $out);
     assert_contains('disposition removed media source on a foreign host', implode(' ', $warnings));
 });
+
+test('sanitize removes block-JSON destinations and sources with an executable scheme on any block', function () {
+    $notes = [];
+    $out = MarkupSanitizer::sanitize(
+        '<!-- wp:button {"url":"javascript:alert(1)","className":"x"} --><div class="wp-block-button"><a class="wp-block-button__link" href="javascript:alert(1)">Go</a></div><!-- /wp:button -->'
+        . '<!-- wp:navigation-link {"label":"Go","url":"\\u006aavascript:alert(2)","kind":"custom"} /-->'
+        . '<!-- wp:image {"href":"data:text/html,x","linkDestination":"custom"} --><figure><img src="/a.jpg"></figure><!-- /wp:image -->'
+        . '<!-- wp:navigation-link {"label":"Fine","url":"https://example.com/","kind":"custom"} /-->',
+        $notes,
+    );
+    assert_true(!str_contains(strtolower($out), 'javascript'), 'no executable scheme survives in JSON or HTML');
+    assert_contains('<!-- wp:button {"className":"x"} -->', $out);
+    assert_contains('<!-- wp:navigation-link {"label":"Go","kind":"custom"} /-->', $out);
+    assert_contains('<!-- wp:image {"linkDestination":"custom"} -->', $out);
+    assert_contains('href="#"', $out, 'the rendered href is neutralized as before');
+    assert_contains('{"label":"Fine","url":"https://example.com/","kind":"custom"}', $out, 'a plain destination stays');
+    assert_contains('block attribute(s) with an executable URL', implode(' | ', $notes));
+});

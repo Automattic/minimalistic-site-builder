@@ -39,7 +39,9 @@ final class MarkupSanitizer
      * visitor chooses to follow, not a fetch, and stays.
      */
     private const BLOCK_MEDIA_NAMES = 'cover|image|video|audio|media-text|gallery';
-    private const BLOCK_MEDIA_KEYS = 'url|src|poster|mediaUrl';
+    private const BLOCK_MEDIA_KEYS = ['url', 'src', 'poster', 'mediaUrl'];
+    /** Comment-JSON keys any block may render as a destination or a source. */
+    private const BLOCK_SOURCE_KEYS = 'url|src|poster|mediaUrl|href|textLinkHref';
 
     /**
      * @param list<string> $notes out-param: one line per class of removal, so
@@ -117,11 +119,16 @@ final class MarkupSanitizer
             $notes[] = "removed {$media} media source attribute(s) on a foreign host";
         }
         // The editor acts on the same sources in block-comment JSON: a cover's
-        // "url" is what it loads when the page opens for editing.
+        // "url" is what it loads when the page opens for editing, and a
+        // dynamic block such as navigation-link renders its "url" from there.
         $blockMedia = 0;
-        $markup = self::neutralizeForeignBlockMedia($markup, $blockMedia);
+        $blockExecutable = 0;
+        $markup = self::neutralizeBlockJsonSources($markup, $blockMedia, $blockExecutable);
         if ($blockMedia > 0) {
             $notes[] = "removed {$blockMedia} block attribute media source(s) on a foreign host";
+        }
+        if ($blockExecutable > 0) {
+            $notes[] = "removed {$blockExecutable} block attribute(s) with an executable URL";
         }
         return $markup;
     }
@@ -524,33 +531,45 @@ final class MarkupSanitizer
     }
 
     /**
-     * Remove media sources on a foreign host from the comment JSON of media
-     * blocks. Two passes keep the JSON valid: a key after a comma goes with
-     * its comma, and a key in first position goes with the comma that
-     * follows it.
+     * Neutralize comment-JSON sources. On every block, a destination or
+     * source key with an executable scheme goes. On a media block, a source
+     * key on a foreign host goes too; a navigation-link, social-link, or
+     * button "url" is a destination the visitor chooses to follow, and stays.
+     * The value is judged JSON-decoded, so a \u-escaped scheme cannot hide.
+     * A key goes with the comma that binds it so the JSON stays valid.
      */
-    private static function neutralizeForeignBlockMedia(string $markup, int &$count): string
+    private static function neutralizeBlockJsonSources(string $markup, int &$media, int &$executable): string
     {
-        $foreign = '"((?:[a-zA-Z][a-zA-Z0-9+.\-]*:)?\\\\?\/\\\\?\/(?:[^"\\\\]|\\\\.)*)"';
-        $key = '"(?:' . self::BLOCK_MEDIA_KEYS . ')"';
         $result = preg_replace_callback(
-            '/<!--\s*wp:(?:core\/)?(?:' . self::BLOCK_MEDIA_NAMES . ')\s+\{.*?\}\s*\/?-->/s',
-            static function (array $match) use (&$count, $foreign, $key): string {
-                $comment = $match[0];
-                foreach ([
-                    '/,\s*' . $key . '\s*:\s*' . $foreign . '/',
-                    '/' . $key . '\s*:\s*' . $foreign . '\s*,?/',
-                ] as $pattern) {
-                    $comment = (string) preg_replace_callback(
-                        $pattern,
-                        static function () use (&$count): string {
-                            $count++;
-                            return '';
-                        },
-                        $comment,
-                    );
-                }
-                return $comment;
+            '/<!--\s*wp:(?:core\/)?([a-zA-Z0-9-]+)\s+\{.*?\}\s*\/?-->/s',
+            static function (array $match) use (&$media, &$executable): string {
+                $mediaBlock = preg_match('/^(?:' . self::BLOCK_MEDIA_NAMES . ')$/', $match[1]) === 1;
+                $result = preg_replace_callback(
+                    '/(,\s*)?"(' . self::BLOCK_SOURCE_KEYS . ')"\s*:\s*"((?:[^"\\\\]|\\\\.)*)"(\s*,)?/',
+                    static function (array $pair) use ($mediaBlock, &$media, &$executable): string {
+                        $decoded = json_decode('"' . $pair[3] . '"');
+                        $drop = !is_string($decoded) || self::hasExecutableScheme($decoded);
+                        if ($drop) {
+                            $executable++;
+                        } elseif (
+                            $mediaBlock
+                            && in_array($pair[2], self::BLOCK_MEDIA_KEYS, true)
+                            && self::isForeignSource('src', $decoded)
+                        ) {
+                            $drop = true;
+                            $media++;
+                        }
+                        if (!$drop) {
+                            return $pair[0];
+                        }
+                        // After a comma: the pair goes with that comma and any
+                        // trailing comma stays for the next key. In first
+                        // position: the pair goes with the comma after it.
+                        return ($pair[1] ?? '') !== '' ? ($pair[4] ?? '') : '';
+                    },
+                    $match[0],
+                );
+                return $result ?? $match[0];
             },
             $markup,
         );

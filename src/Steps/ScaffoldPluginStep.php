@@ -801,22 +801,42 @@ final class ScaffoldPluginStep implements Step
         }
 
         /**
-         * Remove media sources on a foreign host from the comment JSON of
-         * media blocks only: a navigation-link or social-link "url" is a
-         * destination, not a fetch, and stays. The same two passes the build
-         * runs: a key after a comma goes with its comma, a key in first
-         * position goes with the comma that follows.
+         * Neutralize comment-JSON sources, the same way the build does. On
+         * every block, a destination or source key with an executable scheme
+         * goes. On a media block, a source key on a foreign host goes too; a
+         * navigation-link or social-link "url" is a destination, and stays.
+         * The value is judged JSON-decoded. A key goes with the comma that
+         * binds it so the JSON stays valid.
          */
         function {{FN_PREFIX}}_content_neutralize_block_media($content) {
-            $foreign = '"((?:[a-zA-Z][a-zA-Z0-9+.\-]*:)?\\\\?\/\\\\?\/(?:[^"\\\\]|\\\\.)*)"';
-            $key = '"(?:url|src|poster|mediaUrl)"';
             $result = preg_replace_callback(
-                '/<!--\s*wp:(?:core\/)?(?:cover|image|video|audio|media-text|gallery)\s+\{.*?\}\s*\/?-->/s',
-                function ($match) use ($foreign, $key) {
-                    $comment = $match[0];
-                    $comment = (string) preg_replace('/,\s*' . $key . '\s*:\s*' . $foreign . '/', '', $comment);
-                    $comment = (string) preg_replace('/' . $key . '\s*:\s*' . $foreign . '\s*,?/', '', $comment);
-                    return $comment;
+                '/<!--\s*wp:(?:core\/)?([a-zA-Z0-9-]+)\s+\{.*?\}\s*\/?-->/s',
+                function ($match) {
+                    $media_block = preg_match('/^(?:cover|image|video|audio|media-text|gallery)$/', $match[1]) === 1;
+                    $result = preg_replace_callback(
+                        '/(,\s*)?"(url|src|poster|mediaUrl|href|textLinkHref)"\s*:\s*"((?:[^"\\\\]|\\\\.)*)"(\s*,)?/',
+                        function ($pair) use ($media_block) {
+                            $decoded = json_decode('"' . $pair[3] . '"');
+                            $drop = !is_string($decoded)
+                                || preg_match(
+                                    '/\A(?:javascript|vbscript|data)\s*:/i',
+                                    (string) preg_replace('/[\x00-\x20\x7F]+/', '', $decoded)
+                                ) === 1;
+                            if (!$drop && $media_block
+                                && in_array($pair[2], array('url', 'src', 'poster', 'mediaUrl'), true)
+                                && {{FN_PREFIX}}_content_source_is_foreign('src', $decoded)
+                            ) {
+                                $drop = true;
+                            }
+                            if (!$drop) {
+                                return $pair[0];
+                            }
+                            $leading = isset($pair[1]) && $pair[1] !== '';
+                            return $leading ? (isset($pair[4]) ? $pair[4] : '') : '';
+                        },
+                        $match[0]
+                    );
+                    return $result === null ? $match[0] : $result;
                 },
                 $content
             );
