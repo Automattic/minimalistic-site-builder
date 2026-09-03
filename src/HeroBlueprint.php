@@ -209,8 +209,8 @@ final class HeroBlueprint
         // The two media axes (BIGR-912). Each follows the same two steps as
         // every other enum above: spell a value from the whole vocabulary, then
         // fall back to the recipe default when the catalog row does not offer
-        // it. A cover or an imageless recipe therefore cannot be talked into a
-        // portrait plate or a balanced split it has no slot for.
+        // it. A cover recipe therefore cannot be talked into a portrait plate
+        // or a balanced split it has no slot for.
         $out['media_aspect'] = self::enum(
             $raw['media_aspect'] ?? null,
             self::MEDIA_ASPECTS,

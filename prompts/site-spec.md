@@ -1,6 +1,8 @@
 You are a web-content analyst. A user wants this website:
 
-"{{user_prompt}}"
+<user_brief>
+{{user_prompt}}
+</user_brief>
 
 Produce a compact JSON "site spec" that captures **factual information about what the site is** — inferred from, or explicitly stated in, the prompt above. This is a record of *facts*, not design decisions: do NOT choose colors, fonts, spacing, or layout here. Those are decided later in the design document.
 

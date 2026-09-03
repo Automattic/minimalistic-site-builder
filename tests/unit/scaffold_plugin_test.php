@@ -82,6 +82,7 @@ function wp_stub_reset(): void
     $GLOBALS['wp_attachments'] = [];
     $GLOBALS['wp_next_id'] = 100;
     $GLOBALS['wp_kses_calls'] = [];
+    $GLOBALS['wp_post_meta'] = [];
     $GLOBALS['wp_actions'] = [];
     $GLOBALS['wp_registered_block_paths'] = [];
     if (method_exists(WP_Block_Type_Registry::get_instance(), 'reset')) {
@@ -141,10 +142,26 @@ if (!function_exists('get_option')) {
         unset($GLOBALS['wp_options'][$key]);
         return true;
     }
+    function wp_slash($value)
+    {
+        if (is_array($value)) {
+            return array_map('wp_slash', $value);
+        }
+        return is_string($value) ? addslashes($value) : $value;
+    }
+    function wp_unslash($value)
+    {
+        if (is_array($value)) {
+            return array_map('wp_unslash', $value);
+        }
+        return is_string($value) ? stripslashes($value) : $value;
+    }
+    // Like core, expects slashed data and unslashes before it stores — this
+    // is what eats the backslashes when a caller forgets wp_slash().
     function wp_insert_post(array $post, bool $wp_error = false): int
     {
         $id = $GLOBALS['wp_next_id']++;
-        $GLOBALS['wp_posts'][$id] = $post;
+        $GLOBALS['wp_posts'][$id] = wp_unslash($post);
         return $id;
     }
     function wp_delete_post(int $id, bool $force = false): bool
@@ -154,6 +171,7 @@ if (!function_exists('get_option')) {
     }
     function wp_update_post(array $post): int
     {
+        $post = wp_unslash($post);
         $id = (int) ($post['ID'] ?? 0);
         if (isset($GLOBALS['wp_posts'][$id])) {
             $GLOBALS['wp_posts'][$id] = array_merge($GLOBALS['wp_posts'][$id], $post);
@@ -202,6 +220,16 @@ if (!function_exists('get_option')) {
         $GLOBALS['wp_filters'][$hook][$callback] = $priority;
         return true;
     }
+    function update_post_meta(int $post_id, string $key, $value): bool
+    {
+        $GLOBALS['wp_post_meta'][$post_id][$key] = $value;
+        return true;
+    }
+    function delete_post_meta(int $post_id, string $key): bool
+    {
+        unset($GLOBALS['wp_post_meta'][$post_id][$key]);
+        return true;
+    }
     function flush_rewrite_rules(): void
     {
     }
@@ -238,10 +266,12 @@ if (!function_exists('get_option')) {
         $ext = strtolower((string) pathinfo($file, PATHINFO_EXTENSION));
         return ['ext' => $ext, 'type' => $ext === 'png' ? 'image/png' : 'image/jpeg'];
     }
+    // Routes through wp_insert_post() in core, so it shares the slash
+    // contract: expects slashed data, unslashes before it stores.
     function wp_insert_attachment(array $args, string $file): int
     {
         $id = $GLOBALS['wp_next_id']++;
-        $GLOBALS['wp_attachments'][$id] = $args + ['file' => $file];
+        $GLOBALS['wp_attachments'][$id] = wp_unslash($args) + ['file' => $file];
         return $id;
     }
     function wp_generate_attachment_metadata(int $id, string $file): array
@@ -360,6 +390,17 @@ test('scaffold-plugin writes the static seeder with identity placeholders', func
     // Path-traversal guard on images.json filenames (basename + charset + realpath).
     assert_contains('basename($filename)', $php);
     assert_contains('realpath($path)', $php);
+
+    // Every post the seeder creates carries the marker analytics uses to tell
+    // seeded publishes from the site owner's; the deactivation republish of
+    // stock content carries it only for the duration of the update.
+    assert_eq(
+        2,
+        substr_count($php, "'_wpcom_ai_generated_post' => '1'"),
+        'seeded pages and imported attachments are inserted with the marker',
+    );
+    assert_contains("update_post_meta(\$restore['ID'], '_wpcom_ai_generated_post', '1');", $php);
+    assert_contains("delete_post_meta(\$restore['ID'], '_wpcom_ai_generated_post');", $php);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -552,7 +593,12 @@ test('the seeder plugin creates, fronts, and removes the site pages', function (
         ['slug' => 'menu', 'title' => 'Menu', 'front' => false, 'menu_order' => 10, 'parent' => null],
         ['slug' => 'breads', 'title' => 'Breads', 'front' => false, 'menu_order' => 20, 'parent' => 'menu'],
     ]]);
-    $project->writeText('plugin/pages/home.html', '<!-- wp:heading --><h2>Welcome</h2><!-- /wp:heading -->' . "\n"
+    // The H1 attribute carries the \u002d\u002d escapes the serializer
+    // writes for `--` inside block-comment JSON; the seeder must store them
+    // byte-for-byte or the editor fails block validation (BIGR-960).
+    $project->writeText('plugin/pages/home.html', '<!-- wp:heading {"level":1,"style":{"typography":{"fontSize":"min(var(\u002d\u002dwp\u002d\u002dpreset\u002d\u002dfont-size\u002d\u002ddisplay), 88px)"}}} -->'
+        . '<h1 class="wp-block-heading" style="font-size:min(var(--wp--preset--font-size--display), 88px)">Pull Up A Stool</h1><!-- /wp:heading -->' . "\n"
+        . '<!-- wp:heading --><h2>Welcome</h2><!-- /wp:heading -->' . "\n"
         . '<!-- wp:image {"sizeSlug":"full"} --><figure class="wp-block-image size-full">'
         . '<img src="theme:./assets/hero.jpg" alt="AI_IMAGE: a bakery | hero | photo | landscape"/></figure><!-- /wp:image -->' . "\n"
         . '<!-- wp:cover {"url":"theme:./assets/hero.jpg"} -->'
@@ -574,7 +620,9 @@ test('the seeder plugin creates, fronts, and removes the site pages', function (
     // but absent (a build without --with-images), so it must fall back to the
     // theme's assets URL.
     $project->writeJson('plugin/images.json', ['images' => [
-        ['filename' => 'hero.jpg', 'title' => 'A bakery at dawn'],
+        // The backslash probes the slash contract: without wp_slash() around
+        // wp_insert_attachment(), the unslash inside core eats it (BIGR-960).
+        ['filename' => 'hero.jpg', 'title' => 'A bakery at dawn \\ dusk'],
         ['filename' => 'never-generated.jpg', 'title' => 'Skipped'],
     ]]);
     $project->writeText('plugin/images/hero.jpg', 'JPEGDATA');
@@ -633,11 +681,17 @@ test('the seeder plugin creates, fronts, and removes the site pages', function (
     assert_eq(1, count($GLOBALS['wp_attachments']), 'one bundled image imported');
     $attId = array_keys($GLOBALS['wp_attachments'])[0];
     $att = $GLOBALS['wp_attachments'][$attId];
-    assert_eq('A bakery at dawn', $att['post_title']);
+    assert_eq('A bakery at dawn \\ dusk', $att['post_title'], 'title backslash survives the insert');
     assert_eq('inherit', $att['post_status']);
     assert_eq(['file' => 'hero.jpg'], $att['meta'], 'attachment metadata generated');
 
     $home = $byName['home']['post_content'];
+    // The block-comment escapes for `--` keep their backslashes. Without
+    // wp_slash() around the insert, wp_insert_post() strips them, the stored
+    // attribute reads "u002du002d", and the editor fails block validation
+    // (BIGR-960).
+    assert_contains('min(var(\u002d\u002dwp', $home);
+    assert_true(!str_contains($home, 'var(u002d'), 'escape backslashes survive the insert');
     // The wp:image block carries the attachment id (unknown until import) and
     // the paired wp-image class, and loads from the media library.
     assert_contains('"id":' . $attId, $home);
@@ -677,12 +731,27 @@ test('the seeder plugin creates, fronts, and removes the site pages', function (
     assert_eq([$attId], $state['attachment_ids'], 'imported attachments recorded');
 
     // Only the post-content kses filter was suspended, and only around the
-    // seeding — it is back in place afterwards.
+    // seeding — it is back in place afterwards. (The log also carries the
+    // plugin's own sync-whitelist registration from load time, so compare
+    // just the content_save_pre entries.)
     assert_eq(
         ['remove:content_save_pre:wp_filter_post_kses', 'add:content_save_pre:wp_filter_post_kses'],
-        $GLOBALS['wp_kses_calls']
+        array_values(array_filter(
+            $GLOBALS['wp_kses_calls'],
+            static fn ($call) => str_contains((string) $call, 'content_save_pre'),
+        )),
     );
     assert_eq(10, has_filter('content_save_pre', 'wp_filter_post_kses'));
+
+    // The marker's sync whitelisting is registered at plugin load.
+    assert_eq(
+        10,
+        has_filter(
+            'jetpack_sync_post_meta_whitelist',
+            \Automattic\SiteBuild\Steps\ApplyIdentityStep::identifierPrefix($slug) . '_content_sync_marker'
+        ),
+        'the seeder whitelists its marker for Jetpack sync',
+    );
 
     // ── A second activation is a no-op (no duplicate pages or attachments). ──
     (content_fn($slug, 'activate'))();
@@ -692,6 +761,13 @@ test('the seeder plugin creates, fronts, and removes the site pages', function (
     // ── Deactivation deletes exactly what was created and restores the rest. ──
     (content_fn($slug, 'deactivate'))();
     assert_eq([2, 3, 4], array_keys($GLOBALS['wp_posts']), 'only the stock content survives');
+    // The republish marker was set for the duration of the update only.
+    foreach ($GLOBALS['wp_post_meta'] ?? [] as $postId => $meta) {
+        assert_true(
+            !isset($meta['_wpcom_ai_generated_post']),
+            "post {$postId} does not keep the seeder marker after deactivation",
+        );
+    }
     assert_eq('publish', $GLOBALS['wp_posts'][2]['post_status'], 'sample page republished');
     assert_eq('publish', $GLOBALS['wp_posts'][3]['post_status'], 'About page republished');
     assert_eq('about', $GLOBALS['wp_posts'][3]['post_name'], 'and it gets its slug back');
@@ -782,5 +858,92 @@ test('the seeder reports when it degrades or refuses to store markup', function 
     }
 
     ini_set('error_log', (string) $previous);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generated seeder scrubs resource-loading inline styles like the intake sanitizer', function () {
+    if (!load_wp_html_api()) {
+        skip_test('no WordPress copy found for the HTML API; set SITEBUILD_WP_PATH');
+    }
+    $slug = 'style-sink-parity';
+    [$project, $tmp] = scaffold_plugin_fixture($slug);
+    require_once $project->pluginPath('site-content.php');
+    $sanitize = content_fn($slug, 'sanitize');
+
+    $corpus = [
+        '<div style="background:url(https://evil.example/px);color:red">hi</div>',
+        '<div style="background:url&#40;https://evil.example/px&#41;">hi</div>',
+        '<div style="background:\\75rl(https://evil.example/px)">hi</div>',
+        '<div style="background-image: url(&quot;https://evil.example/a.png&quot;)">hi</div>',
+        "<div style='background:image-set(\"https://evil.example/a.png\" 1x)'>hi</div>",
+        '<div style=background:url(https://evil.example/px) class=x>hi</div>',
+        '<div style="content:\'a;b\';background:url(https://evil.example/px)">hi</div>',
+    ];
+    foreach ($corpus as $html) {
+        foreach ([
+            'intake' => \Automattic\SiteBuild\MarkupSanitizer::sanitize($html),
+            'seeder' => $sanitize($html),
+        ] as $which => $out) {
+            assert_true(!str_contains($out, 'evil.example'), "{$which}: fetch survived: {$html}");
+            assert_true(preg_match('/url|image-set/i', $out) !== 1, "{$which}: loading form survived: {$html}");
+            assert_contains('>hi</div>', $out, "{$which}: content survived: {$html}");
+        }
+    }
+
+    // The surviving declarations stay, on both sides.
+    $mixed = '<div style="background:url(https://evil.example/px);color:red">hi</div>';
+    assert_contains('color:red', \Automattic\SiteBuild\MarkupSanitizer::sanitize($mixed));
+    assert_contains('color:red', $sanitize($mixed));
+    // A clean inline style is untouched by the seeder.
+    $clean = '<p style="color:red;content:\'a;b\'">t</p>';
+    assert_eq($clean, $sanitize($clean));
+    // The build's own placeholder is the one url() a cover may carry.
+    $cover = '<div class="wp-block-cover" style="background-image:url(theme:./assets/hero.jpg)"></div>';
+    assert_eq($cover, $sanitize($cover));
+    assert_eq($cover, \Automattic\SiteBuild\MarkupSanitizer::sanitize($cover));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generated seeder removes media sources on a foreign host like the intake sanitizer', function () {
+    if (!load_wp_html_api()) {
+        skip_test('no WordPress copy found for the HTML API; set SITEBUILD_WP_PATH');
+    }
+    $slug = 'media-sink-parity';
+    [$project, $tmp] = scaffold_plugin_fixture($slug);
+    require_once $project->pluginPath('site-content.php');
+    $sanitize = content_fn($slug, 'sanitize');
+
+    $corpus = [
+        '<!-- wp:cover {"dimRatio":50,"url":"https://evil.example/bg.jpg","id":3} --><div class="wp-block-cover"><img class="wp-block-cover__image-background" src="https://evil.example/bg.jpg" alt="Oven"></div><!-- /wp:cover -->',
+        '<!-- wp:image {"url":"https:\/\/evil.example\/a.jpg"} --><figure><img src="//evil.example/a.jpg" srcset="/a.jpg 1x, https://evil.example/b.jpg 2x" alt="a"></figure><!-- /wp:image -->',
+        '<!-- wp:video {"src":"https://evil.example/v.mp4"} /--><video poster="/p.jpg" src="ftp://evil.example/v.mp4"></video>',
+        "<img src=\"ht\ttps://evil.example/a.jpg\">",
+        '<input type="image" src="https://evil.example/btn.png">',
+        '<img src="\\\\evil.example/a.png" alt="a"><img src="/\\evil.example/b.png">',
+        '<svg><image href="https://evil.example/i.png"/><use xlink:href="//evil.example/s.svg#a"/></svg>',
+        '<table background="https://evil.example/t.png"><tr><td background="//evil.example/c.png">x</td></tr></table>',
+        '<link rel="stylesheet" href="https://evil.example/l.css"><p>after</p>',
+        '<!-- wp:group {"style":{"background":{"backgroundImage":{"url":"https://evil.example/g.png","id":5}}}} --><div class="wp-block-group"></div><!-- /wp:group -->',
+        '<!-- wp:cover {"url":"\\\\\\\\evil.example\/bg.jpg","id":1} --><div></div><!-- /wp:cover -->',
+    ];
+    foreach ($corpus as $html) {
+        foreach ([
+            'intake' => \Automattic\SiteBuild\MarkupSanitizer::sanitize($html),
+            'seeder' => $sanitize($html),
+        ] as $which => $out) {
+            assert_true(!str_contains($out, 'evil.example'), "{$which}: foreign source survived: {$html}");
+        }
+    }
+    // What stays, stays on both sides.
+    $kept = '<!-- wp:cover {"url":"theme:./assets/hero.jpg","dimRatio":50} --><div><img src="theme:./assets/hero.jpg" alt="x"><img src="/wp-content/uploads/a.jpg"><a href="https://example.com/">link</a></div><!-- /wp:cover -->'
+        . '<!-- wp:navigation-link {"label":"Instagram","url":"https://instagram.com/hearth","kind":"custom"} /-->'
+        . '<!-- wp:social-link {"url":"https://x.com/hearth","service":"x"} /-->';
+    assert_eq($kept, \Automattic\SiteBuild\MarkupSanitizer::sanitize($kept));
+    assert_eq($kept, $sanitize($kept));
+    $group = $sanitize($corpus[9]);
+    assert_contains('{"style":{"background":{"backgroundImage":{"id":5}}}}', $group, 'seeder drops a block background url and keeps the rest');
+    $cover = $sanitize($corpus[0]);
+    assert_contains('<!-- wp:cover {"dimRatio":50,"id":3} -->', $cover, 'seeder drops the JSON key with its comma');
+    assert_contains('alt="Oven"', $cover, 'seeder keeps the element and its alt');
     exec('rm -rf ' . escapeshellarg($tmp));
 });

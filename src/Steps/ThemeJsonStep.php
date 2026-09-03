@@ -18,6 +18,7 @@ use Automattic\SiteBuild\BandColor;
 use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\Surface;
 use Automattic\SiteBuild\CssChecks;
+use Automattic\SiteBuild\CssScrub;
 use Automattic\SiteBuild\CtaStyle;
 use Automattic\SiteBuild\PaletteFloor;
 use Automattic\SiteBuild\Llm;
@@ -145,16 +146,44 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         'accent'  => 'system-ui, sans-serif',
     ];
     /**
-     * Stable component spacing shared by every page density.
+     * Density-owned component spacing (BIGR-954). xs is the tight
+     * intra-component text rhythm (an eyebrow/heading/line stack inside one
+     * card or list row — BIGR-777); sm/md are component-level insets and gaps,
+     * and md also feeds ROOT_GUTTER, so the page's inline gutter follows the
+     * committed density with no extra wiring. The swing is deliberately
+     * smaller than the section ramp's (~±25%): component spacing must stay
+     * readable at both extremes. `measured` keeps the historical fixed values.
      *
-     * xs is the tight intra-component text rhythm (an eyebrow/heading/line
-     * stack inside one card or list row — BIGR-777). sm/md are component-level
-     * @var list<array{slug: string, name: string, size: string}>
+     * @var array<string,list<array{slug: string, name: string, size: string}>>
      */
-    private const COMPONENT_SPACING_PROFILE = [
-        ['slug' => 'xs', 'name' => 'Extra Small', 'size' => 'clamp(0.25rem, 0.5vw, 0.5rem)'],
-        ['slug' => 'sm', 'name' => 'Small', 'size' => 'clamp(0.75rem, 1vw, 1rem)'],
-        ['slug' => 'md', 'name' => 'Medium', 'size' => 'clamp(1.5rem, 2vw, 2rem)'],
+    private const COMPONENT_SPACING_PROFILES = [
+        'expansive' => [
+            ['slug' => 'xs', 'name' => 'Extra Small', 'size' => 'clamp(0.5rem, 0.75vw, 0.75rem)'],
+            ['slug' => 'sm', 'name' => 'Small', 'size' => 'clamp(1.25rem, 1.6vw, 1.5rem)'],
+            ['slug' => 'md', 'name' => 'Medium', 'size' => 'clamp(2.5rem, 3vw, 3rem)'],
+        ],
+        'airy' => [
+            ['slug' => 'xs', 'name' => 'Extra Small', 'size' => 'clamp(0.375rem, 0.6vw, 0.625rem)'],
+            ['slug' => 'sm', 'name' => 'Small', 'size' => 'clamp(1rem, 1.25vw, 1.25rem)'],
+            ['slug' => 'md', 'name' => 'Medium', 'size' => 'clamp(2rem, 2.5vw, 2.5rem)'],
+        ],
+        'measured' => [
+            ['slug' => 'xs', 'name' => 'Extra Small', 'size' => 'clamp(0.25rem, 0.5vw, 0.5rem)'],
+            ['slug' => 'sm', 'name' => 'Small', 'size' => 'clamp(0.75rem, 1vw, 1rem)'],
+            ['slug' => 'md', 'name' => 'Medium', 'size' => 'clamp(1.5rem, 2vw, 2rem)'],
+        ],
+        'dense' => [
+            ['slug' => 'xs', 'name' => 'Extra Small', 'size' => 'clamp(0.25rem, 0.4vw, 0.375rem)'],
+            ['slug' => 'sm', 'name' => 'Small', 'size' => 'clamp(0.625rem, 0.8vw, 0.875rem)'],
+            ['slug' => 'md', 'name' => 'Medium', 'size' => 'clamp(1.25rem, 1.5vw, 1.5rem)'],
+        ],
+        // The packed xs floor stays at the dense/measured 0.25rem: below 4px
+        // an eyebrow/heading stack reads as a collision, not a rhythm.
+        'packed' => [
+            ['slug' => 'xs', 'name' => 'Extra Small', 'size' => 'clamp(0.25rem, 0.35vw, 0.3125rem)'],
+            ['slug' => 'sm', 'name' => 'Small', 'size' => 'clamp(0.5rem, 0.65vw, 0.75rem)'],
+            ['slug' => 'md', 'name' => 'Medium', 'size' => 'clamp(1rem, 1.25vw, 1.25rem)'],
+        ],
     ];
 
     /**
@@ -164,6 +193,11 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      * @var array<string,list<array{slug: string, name: string, size: string}>>
      */
     private const SECTION_SPACING_PROFILES = [
+        'expansive' => [
+            ['slug' => 'lg', 'name' => 'Compact', 'size' => 'clamp(5rem, 7.5vw, 8rem)'],
+            ['slug' => 'xl', 'name' => 'Standard', 'size' => 'clamp(6.5rem, 10vw, 12rem)'],
+            ['slug' => 'xxl', 'name' => 'Spacious', 'size' => 'clamp(8rem, 13vw, 16rem)'],
+        ],
         'airy' => [
             ['slug' => 'lg', 'name' => 'Compact', 'size' => 'clamp(4rem, 6vw, 6rem)'],
             ['slug' => 'xl', 'name' => 'Standard', 'size' => 'clamp(5rem, 8vw, 9rem)'],
@@ -178,6 +212,11 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             ['slug' => 'lg', 'name' => 'Compact', 'size' => 'clamp(2.25rem, 3vw, 3rem)'],
             ['slug' => 'xl', 'name' => 'Standard', 'size' => 'clamp(3rem, 4.5vw, 4.5rem)'],
             ['slug' => 'xxl', 'name' => 'Spacious', 'size' => 'clamp(3.75rem, 5.5vw, 5.5rem)'],
+        ],
+        'packed' => [
+            ['slug' => 'lg', 'name' => 'Compact', 'size' => 'clamp(1.75rem, 2.25vw, 2.25rem)'],
+            ['slug' => 'xl', 'name' => 'Standard', 'size' => 'clamp(2.25rem, 3.5vw, 3.5rem)'],
+            ['slug' => 'xxl', 'name' => 'Spacious', 'size' => 'clamp(3rem, 4.25vw, 4.25rem)'],
         ],
     ];
     /**
@@ -304,8 +343,10 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     ];
     /**
      * The provisioned root inline gutter, from the canonical spacing scale.
-     * md is a component-level inset (~1.5–2rem), matching the ~1rem-per-side
-     * page gutter the designs author on their outermost container.
+     * md is a component-level inset (~1.5–2rem at measured density), matching
+     * the ~1rem-per-side page gutter the designs author on their outermost
+     * container. Because md is density-scaled (COMPONENT_SPACING_PROFILES),
+     * airy sites breathe wider and dense sites pull tighter at the page edge.
      */
     private const ROOT_GUTTER = 'var:preset|spacing|md';
 
@@ -578,6 +619,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         [$theme, $floorWarnings] = self::applyPaletteFloor(
             $theme,
             Surface::contrastFloor(DesignDirectionStep::surfaceFor($project)),
+            DesignDirectionStep::colorEconomyFor($project),
         );
         $warnings = array_merge($warnings, $floorWarnings);
 
@@ -712,7 +754,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         $theme['settings']['spacing']['defaultSpacingSizes'] = false;
         $density = BoundedChoice::explicit($density, DesignDirectionStep::DENSITIES) ?? 'measured';
         $theme['settings']['spacing']['spacingSizes'] = array_merge(
-            self::COMPONENT_SPACING_PROFILE,
+            self::COMPONENT_SPACING_PROFILES[$density],
             self::SECTION_SPACING_PROFILES[$density],
         );
 
@@ -1546,7 +1588,11 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      * @param array<mixed> $theme
      * @return array{0:array<mixed>,1:list<string>} theme, warnings
      */
-    public static function applyPaletteFloor(array $theme, ?float $contrastOnBase = null): array
+    public static function applyPaletteFloor(
+        array $theme,
+        ?float $contrastOnBase = null,
+        ?string $colorEconomy = null,
+    ): array
     {
         $palette = $theme['settings']['color']['palette'] ?? null;
         if (!is_array($palette)) {
@@ -1568,7 +1614,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $map[$slug] = trim($color);
         }
         $warnings = [];
-        $fixed = PaletteFloor::repair($map, $warnings, $contrastOnBase);
+        $fixed = PaletteFloor::repair($map, $warnings, $contrastOnBase, $colorEconomy);
         foreach ($theme['settings']['color']['palette'] as $i => $entry) {
             if (!is_array($entry)) {
                 continue;
@@ -2267,10 +2313,185 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         $theme = self::mergeScaffoldDefaultsAtPath(self::SCAFFOLD, $theme, '', $shapeWarnings);
         $theme = self::removeUnsupportedTextWrapProperties($theme);
         [$theme, $motionWarnings] = self::removeMotionKitCustomCss($theme);
+        [$theme, $resourceWarnings] = self::removeResourceLoadingCustomCss($theme);
+        [$theme, $fontFaceWarnings] = self::removeForeignFontFaces($theme);
         return [
             $theme,
-            array_merge($colorWarnings, $shadowWarnings, $shapeWarnings, $motionWarnings),
+            array_merge(
+                $colorWarnings,
+                $shadowWarnings,
+                $shapeWarnings,
+                $motionWarnings,
+                $resourceWarnings,
+                $fontFaceWarnings,
+            ),
         ];
+    }
+
+    /**
+     * Remove font faces theme.json would fetch from a host the model chose.
+     *
+     * A `fontFace` entry's `src` becomes a CSS `url()` once WordPress renders
+     * theme.json: `@font-face { src: url(https://…) }` on every page. The
+     * build bundles every face it ships as a theme file under assets/fonts/
+     * (BundleFontsStep), so `file:./assets/fonts/…` is the one legitimate
+     * form. Anything else is a fetch from a model-chosen host, and the
+     * sink-side red-team test found it shipping on the HTML-first graph,
+     * which has no bundling step to overwrite it (BIGR-969).
+     *
+     * A face keeps its bundled sources and loses the rest; a face with no
+     * bundled source goes; a family with no face left loses the key. Every
+     * removal is recorded durably.
+     *
+     * Pure — unit-testable.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>} theme, warnings
+     */
+    public static function removeForeignFontFaces(array $theme): array
+    {
+        $families = $theme['settings']['typography']['fontFamilies'] ?? null;
+        if (!is_array($families)) {
+            return [$theme, []];
+        }
+
+        $warnings = [];
+        foreach ($families as $i => $family) {
+            if (!is_array($family) || !isset($family['fontFace'])) {
+                continue;
+            }
+            $slug = is_string($family['slug'] ?? null) && $family['slug'] !== '' ? $family['slug'] : (string) $i;
+            $location = "theme/theme.json settings.typography.fontFamilies[{$slug}].fontFace";
+            if (!is_array($family['fontFace'])) {
+                $warnings[] = "{$location}: authored " . Warnings::value($family['fontFace'])
+                    . '; delivered removed; disposition fontFace must be a list of faces';
+                unset($families[$i]['fontFace']);
+                continue;
+            }
+
+            $kept = [];
+            foreach ($family['fontFace'] as $face) {
+                if (!is_array($face)) {
+                    $warnings[] = "{$location}: authored " . Warnings::value($face)
+                        . '; delivered removed; disposition a face must be an object';
+                    continue;
+                }
+                $sources = $face['src'] ?? [];
+                $sources = is_string($sources) ? [$sources] : (is_array($sources) ? $sources : []);
+                $bundled = [];
+                foreach ($sources as $source) {
+                    if (is_string($source)
+                        && preg_match('#^file:\./assets/fonts/[A-Za-z0-9][A-Za-z0-9._-]*$#', $source) === 1
+                    ) {
+                        $bundled[] = $source;
+                        continue;
+                    }
+                    $warnings[] = "{$location}: authored src " . Warnings::value($source)
+                        . '; delivered removed; disposition font faces ship only as bundled theme files'
+                        . ' under assets/fonts/, never from another host';
+                }
+                if ($bundled === []) {
+                    continue;
+                }
+                $face['src'] = $bundled;
+                $kept[] = $face;
+            }
+            if ($kept === []) {
+                unset($families[$i]['fontFace']);
+            } else {
+                $families[$i]['fontFace'] = $kept;
+            }
+        }
+        $theme['settings']['typography']['fontFamilies'] = $families;
+        return [$theme, $warnings];
+    }
+
+    /**
+     * Remove every resource-loading form from theme.json custom CSS.
+     *
+     * WordPress trusts theme-origin CSS: a `css` string under `styles` ships
+     * to every visitor exactly as written, with no kses pass and no core
+     * sanitizer. This was the one CSS sink the build never scrubbed.
+     * PageStylesStep and CustomMotionStep both refuse `@import` and `url()`,
+     * but a model-authored `@import url(https://…)` or `background:
+     * url(https://…)` in theme.json shipped verbatim. That is a beacon and a
+     * third-party dependency the site never asked for (BIGR-969).
+     *
+     * Three rungs, smallest unit first. CssScrub removes `@import` statements
+     * and declarations that reference an external authority. CssChecks then
+     * drops any remaining declaration whose value uses a resource-loading
+     * function, relative and data: URLs included, which matches the
+     * page-styles policy. When a loading form still survives both (an
+     * unparseable region, an at-rule prelude), the whole string is removed
+     * rather than delivered unreviewed. Every removal is recorded durably.
+     *
+     * Every `css` string under `styles` is walked, at any depth, so a rule
+     * nested in a block, element, or variation style is scrubbed too.
+     *
+     * Pure — unit-testable.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>} theme, warnings
+     */
+    public static function removeResourceLoadingCustomCss(array $theme): array
+    {
+        if (!is_array($theme['styles'] ?? null)) {
+            return [$theme, []];
+        }
+
+        $warnings = [];
+        $remove = static function (array $node, string $path) use (&$remove, &$warnings): array {
+            foreach ($node as $key => $value) {
+                if ($key === 'css' && is_string($value)) {
+                    $node[$key] = self::scrubResourceLoadingCss($value, "{$path}.css", $warnings);
+                    continue;
+                }
+                if (is_array($value)) {
+                    $node[$key] = $remove($value, $path . '.' . $key);
+                }
+            }
+            return $node;
+        };
+        $theme['styles'] = $remove($theme['styles'], 'styles');
+        return [$theme, $warnings];
+    }
+
+    /**
+     * One custom CSS string, scrubbed of every resource-loading form.
+     *
+     * @param list<string> $warnings
+     */
+    private static function scrubResourceLoadingCss(string $css, string $location, array &$warnings): string
+    {
+        $scrubbed = CssScrub::scrub($css);
+        foreach ($scrubbed['removals'] as $removal) {
+            $warnings[] = "theme/theme.json {$location}: authored "
+                . Warnings::value($removal['authored_value'])
+                . "; delivered {$removal['delivered_value']}; disposition {$removal['disposition']}";
+        }
+
+        [$repaired, $dropped] = CssChecks::dropDeclarations(
+            $scrubbed['css'],
+            static fn (array $declaration): bool =>
+                CssChecks::resourceLoadingProblem($declaration['value']) !== null,
+        );
+        foreach ($dropped as $declaration) {
+            $warnings[] = "theme/theme.json {$location}: authored declaration "
+                . Warnings::value(trim($declaration['raw']))
+                . '; delivered removed; disposition removed a resource-loading CSS value'
+                . ' — theme.json custom CSS may not fetch images, fonts, or stylesheets';
+        }
+
+        // The fallback judges comment-free CSS: a comment that mentions
+        // url() loads nothing, and losing the whole string for it would cut
+        // far above the smallest harmful unit.
+        if (CssChecks::resourceLoadingProblem(CssChecks::withoutComments($repaired)) !== null) {
+            $warnings[] = "theme/theme.json {$location}: authored " . Warnings::value($css)
+                . '; delivered removed; disposition removed the whole custom CSS string'
+                . ' — a resource-loading form survived declaration-level removal';
+            return '';
+        }
+        return $repaired;
     }
 
     /**

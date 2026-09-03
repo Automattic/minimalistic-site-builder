@@ -512,7 +512,9 @@ test('recovery preserves blocks that legitimately mix owned text with children',
         . '</figure><!-- /wp:image -->'
         . '<figcaption class="blocks-gallery-caption wp-element-caption">'
         . 'Gallery <em>caption</em></figcaption></figure><!-- /wp:gallery -->';
-    $embedCover = '<!-- wp:cover {"backgroundType":"embed-video","url":"https://youtu.be/abc"} -->'
+    // A same-site video path: a media url on a foreign host is a fetch the
+    // intake sanitizer removes (BIGR-975), and this test is about structure.
+    $embedCover = '<!-- wp:cover {"backgroundType":"embed-video","url":"/videos/abc"} -->'
         . '<div class="wp-block-cover"><figure class="wp-block-cover__embed-background">'
         . '<div class="wp-block-embed__wrapper">https://youtu.be/abc</div></figure>'
         . '<div class="wp-block-cover__inner-container">'

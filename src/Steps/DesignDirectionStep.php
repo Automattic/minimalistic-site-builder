@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\AboveFoldContract;
 use Automattic\SiteBuild\BandColor;
 use Automattic\SiteBuild\CardStyle;
+use Automattic\SiteBuild\ColorEconomy;
 use Automattic\SiteBuild\ConceptSeeds;
 use Automattic\SiteBuild\CtaStyle;
 use Automattic\SiteBuild\Depth;
@@ -145,7 +146,7 @@ final class DesignDirectionStep implements Step
      * with — 85% of audited sections came back `standard`. One site-level
      * commitment gives that per-section choice something to express.
      */
-    public const DENSITIES = ['airy', 'measured', 'dense'];
+    public const DENSITIES = ['expansive', 'airy', 'measured', 'dense', 'packed'];
 
     /**
      * Site-level horizontal intent for text below page-opening heroes. The
@@ -216,6 +217,7 @@ final class DesignDirectionStep implements Step
             'tint'          => $seedTint,
             'register'      => $seedRegister,
             'type_register' => $seedTypeRegister,
+            'color_economy' => $seedColorEconomy,
         ] = $this->chooseSeed($prompt, $spec, $warnings);
         $recipe = self::selectHeroRecipe(
             $meta,
@@ -267,6 +269,9 @@ final class DesignDirectionStep implements Step
             'type_register' => $seedTypeRegister === ''
                 ? 'not committed by the seed — read the letterform tradition off the seed sentence'
                 : $seedTypeRegister,
+            'color_economy' => $seedColorEconomy === ''
+                ? 'not committed by the seed — choose the most restrained economy that serves the concept'
+                : $seedColorEconomy,
             // A rotating per-site shortlist of real families in the committed
             // tradition. Naming the tradition alone lands every build on its
             // one famous face (BIGR-920); empty for a degraded seed.
@@ -298,6 +303,7 @@ final class DesignDirectionStep implements Step
             $warnings,
             $seedTint,
             $seedGround,
+            $seedColorEconomy,
         );
         if ($direction === null) {
             // A build without a committed direction still works — every
@@ -405,6 +411,7 @@ final class DesignDirectionStep implements Step
             'palette'          => [],
             'ground_key'       => '',
             'ground_tint'      => '',
+            'color_economy'    => ColorEconomy::DEFAULT,
             'type'             => [
                 'heading' => self::emptyTypeSlot(),
                 'body'    => self::emptyTypeSlot(),
@@ -451,7 +458,7 @@ final class DesignDirectionStep implements Step
      * sampling.
      *
      * @param list<string> $warnings
-     * @return array{text:string,ground:string,tint:string,register:string,type_register:string}
+     * @return array{text:string,ground:string,tint:string,register:string,type_register:string,color_economy:string}
      */
     private function chooseSeed(string $brief, string $spec, array &$warnings = []): array
     {
@@ -506,6 +513,7 @@ final class DesignDirectionStep implements Step
                 'tint' => '',
                 'register' => '',
                 'type_register' => '',
+                'color_economy' => '',
             ];
         }
         $pool = ConceptSeeds::distinct($seeds, $warnings);
@@ -548,8 +556,8 @@ final class DesignDirectionStep implements Step
      * prose. Passing them through is what makes the vocabularies levers rather
      * than bookkeeping.
      *
-     * @param array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string} $seed
-     * @return array{text:string,ground:string,tint:string,register:string,type_register:string}
+     * @param array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string,color_economy:?string} $seed
+     * @return array{text:string,ground:string,tint:string,register:string,type_register:string,color_economy:string}
      */
     private static function chosen(array $seed): array
     {
@@ -559,6 +567,7 @@ final class DesignDirectionStep implements Step
             'tint'          => $seed['tint'] ?? '',
             'register'      => $seed['register'] ?? '',
             'type_register' => $seed['type_register'] ?? '',
+            'color_economy' => $seed['color_economy'] ?? '',
         ];
     }
 
@@ -737,6 +746,7 @@ final class DesignDirectionStep implements Step
         array &$warnings = [],
         string $conceptTint = '',
         string $conceptGround = '',
+        string $conceptColorEconomy = '',
     ): ?array {
         if (!is_array($raw)) {
             return null;
@@ -783,6 +793,8 @@ final class DesignDirectionStep implements Step
         // as it rotates the ground into the seed's family.
         $groundTint = BoundedChoice::explicit($conceptTint, GroundTint::ALL)
             ?? BoundedChoice::explicit($raw['ground_tint'] ?? null, GroundTint::ALL);
+        $colorEconomy = ColorEconomy::explicit($conceptColorEconomy)
+            ?? ColorEconomy::normalize($raw['color_economy'] ?? null, $warnings);
         if ($groundTint !== null && isset($palette['base'])) {
             $authored = $palette['base'];
             if (GroundTint::classify($authored) !== $groundTint) {
@@ -947,6 +959,7 @@ final class DesignDirectionStep implements Step
             'palette'          => $palette,
             'ground_key'       => $groundKey ?? '',
             'ground_tint'      => $groundTint ?? '',
+            'color_economy'    => $colorEconomy,
             'type'             => [
                 'heading' => self::normalizeTypeSlot($type['heading'] ?? null, 'heading', $warnings),
                 'body'    => self::normalizeTypeSlot($type['body'] ?? null, 'body', $warnings),
@@ -1375,6 +1388,12 @@ final class DesignDirectionStep implements Step
                 . ' — the page background belongs to this family; do not re-hue it.';
         }
 
+        $colorEconomy = ColorEconomy::explicit($direction['color_economy'] ?? null);
+        if ($colorEconomy !== null) {
+            $facts[] = '- **Color economy**: ' . $colorEconomy . ' ('
+                . ColorEconomy::meaning($colorEconomy) . ').';
+        }
+
         $type = is_array($direction['type'] ?? null) ? $direction['type'] : [];
         $pair = [];
         foreach (['heading', 'body', 'accent'] as $slot) {
@@ -1460,7 +1479,6 @@ final class DesignDirectionStep implements Step
             $meaning = match ($itemPattern) {
                 'card'        => 'list-like sections repeat discrete bounded cards',
                 'rule-row'    => 'list-like sections use compact name/detail rows joined by a purposeful hairline',
-                'index'       => 'list-like sections use a strong numbered or lettered scan column',
                 'spec-table'  => 'list-like sections align compact label/value pairs for comparison',
                 'tag-cluster' => 'list-like sections wrap short categorical labels as compact inline chips',
             };
@@ -1502,11 +1520,13 @@ final class DesignDirectionStep implements Step
             // density, so these clauses must not read as "spacious everywhere"
             // — the page plan caps them and would demote the excess anyway.
             $facts[] = '- **Density**: ' . $density . ' — ' . match ($density) {
-                'airy'     => 'generous vertical breathing room; spend the page\'s spacious pauses and prefer standard over compact elsewhere',
-                'measured' => 'an even, unhurried rhythm; standard throughout, with a spacious pause only where the composition needs one',
-                'dense'    => 'tightly packed; prefer compact wherever the content supports it and let content carry the page',
-                default    => 'the committed page density',
-            } . '. The build derives the lg/xl/xxl section-padding ramp from this commitment.';
+                'expansive' => 'monumental vertical breathing room; spend every allowed spacious pause, keep the rest standard, and let emptiness carry the page',
+                'airy'      => 'generous vertical breathing room; spend the page\'s spacious pauses and prefer standard over compact elsewhere',
+                'measured'  => 'an even, unhurried rhythm; standard throughout, with a spacious pause only where the composition needs one',
+                'dense'     => 'tightly packed; prefer compact wherever the content supports it and let content carry the page',
+                'packed'    => 'maximally compressed; compact everywhere the content permits, no spacious pauses, and the content itself paces the page',
+                default     => 'the committed page density',
+            } . '. The build derives the section-padding ramp, component spacing, and page gutter from this commitment.';
         }
 
         $textPlacement = BoundedChoice::explicit(
@@ -1565,7 +1585,6 @@ final class DesignDirectionStep implements Step
         if ($device !== null && $device !== 'none' && $deviceClass !== null) {
             $deviceMeaning = match ($device) {
                 'hairline-rule'  => 'a 1px rule in the current text color on ONE non-hero band',
-                'section-numeral'=> 'a folio numeral on ONE non-hero band',
                 'stamp'          => 'a rotated stamp mark on ONE non-hero band',
                 default          => 'the committed one-band CSS device',
             };
@@ -1581,8 +1600,8 @@ final class DesignDirectionStep implements Step
                 'minimal' => 'hover micro-interactions only; `hover-lift`/`hover-reveal` are the ONLY motion classes allowed',
                 default   => [
                     'calm'      => 'soft fades and gentle settling',
-                    'energetic' => 'quick diagonal arrivals with spring overshoot',
-                    'dramatic'  => 'long directional masks and a cinematic hero focus pull',
+                    'energetic' => 'quick vertical arrivals with a crisp settle',
+                    'dramatic'  => 'long vertical masks and a cinematic hero focus pull',
                 ][$motion] . ' — place motion classes sparingly, per their budget rules',
             };
             $note = self::formatMotionNote($direction['motion_note'] ?? null);
@@ -1872,6 +1891,17 @@ final class DesignDirectionStep implements Step
             $project->readJson(self::FILE)['density'] ?? null,
             self::DENSITIES,
         ) ?? 'measured';
+    }
+
+    /** The palette's hue budget; missing commitments use the restrained default. */
+    public static function colorEconomyFor(Project $project): string
+    {
+        if (!$project->exists(self::FILE)) {
+            return ColorEconomy::DEFAULT;
+        }
+        return ColorEconomy::explicit(
+            $project->readJson(self::FILE)['color_economy'] ?? null,
+        ) ?? ColorEconomy::DEFAULT;
     }
 
     /** The explicit modular type-scale commitment, or null when absent/garbled. */

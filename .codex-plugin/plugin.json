@@ -1,0 +1,47 @@
+{
+  "name": "site-builder",
+  "version": "0.1.0",
+  "description": "Portable pipeline that generates a complete WordPress block theme and companion content plugin",
+  "author": {
+    "name": "Matthew Batchelder",
+    "email": "borkweb@gmail.com",
+    "url": "https://github.com/borkweb"
+  },
+  "homepage": "https://github.com/Automattic/minimalistic-site-builder",
+  "repository": "https://github.com/Automattic/minimalistic-site-builder",
+  "license": "GPL-2.0-or-later",
+  "keywords": [
+    "wordpress",
+    "block-theme",
+    "site-builder",
+    "plugin",
+    "ai",
+    "claude-code",
+    "codex",
+    "grok"
+  ],
+  "skills": [
+    "./skills/site-build"
+  ],
+  "interface": {
+    "displayName": "Site Builder",
+    "shortDescription": "Generate WordPress block themes through coding-agent subscriptions.",
+    "longDescription": "Build or resume complete WordPress block themes and companion content plugins from Claude Code, Codex, or Grok while explicitly confirming the selected subscription-backed transport before spending.",
+    "developerName": "Matthew Batchelder",
+    "category": "Coding",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/Automattic/minimalistic-site-builder",
+    "privacyPolicyURL": "https://github.com/Automattic/minimalistic-site-builder",
+    "termsOfServiceURL": "https://github.com/Automattic/minimalistic-site-builder/blob/trunk/LICENSE.md",
+    "defaultPrompt": [
+      "Confirm the subscription-backed transport before building a site",
+      "Create a WordPress block theme and companion content plugin from my prompt",
+      "Resume an existing generated site from a selected build step"
+    ],
+    "brandColor": "#3858E9",
+    "screenshots": []
+  }
+}

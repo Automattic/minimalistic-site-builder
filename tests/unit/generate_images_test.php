@@ -102,6 +102,26 @@ test('generate-images writes assets, rewrites src/url, and marks completed', fun
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('I-G9 a preconstructed image client still powers post-build generation', function () {
+    [$project, $tmp] = generate_fixture();
+    $images = new FakeImageClient('JPEGDATA');
+
+    try {
+        $step = make_generate_images_step(null, $images);
+        $property = new ReflectionProperty(GenerateImagesStep::class, 'images');
+        $property->setAccessible(true);
+        assert_true($property->getValue($step) === $images, 'the preflight client instance is reused');
+
+        $step->run($project);
+
+        assert_eq(1, count($images->calls));
+        assert_true($project->exists('theme/assets/hero.jpg'));
+        assert_eq('completed', $project->readJson('images.json')[0]['status'] ?? null);
+    } finally {
+        remove_tree($tmp);
+    }
+});
+
 test('generate-images aligns source ratio and prompt composition with image_crop', function () {
     [$project, $tmp] = generate_fixture();
     $project->writeJson('designDirection.json', ['image_crop' => 'portrait']);
@@ -211,7 +231,7 @@ test('generate-images weaves the site context into each prompt as one sentence',
     // The identity-bearing description is rejected whole; the recast page
     // context and clean topic fallback read as adjacent guidance sentences.
     assert_contains(
-        'Composition: full-frame editorial photograph with a reserved area kept as open, low-detail negative space.'
+        'Composition: editorial photograph with a reserved area kept as open, low-detail negative space.'
         . ' The subject matter is artisan sourdough.',
         $sent
     );
@@ -334,7 +354,7 @@ test('generate-images leads with the subject + style and adds the page context',
     assert_contains('A bakery at dawn. Style: photorealistic', $sent);   // subject leads, style appended
     // The page context is included as guidance, recast photographically.
     assert_contains(
-        'full-frame editorial photograph with a reserved area kept as open, low-detail negative space',
+        'editorial photograph with a reserved area kept as open, low-detail negative space',
         $sent
     );
 

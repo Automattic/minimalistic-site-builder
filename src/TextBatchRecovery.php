@@ -24,7 +24,7 @@ namespace Automattic\SiteBuild;
  * one failed retry cannot prevent a successful sibling retry from being
  * logged and accounted by the transport. Degrading one section beats
  * rejecting the entire theme. The transport callback owns the real calls,
- * usage accounting and logging; this orchestrator is pure apart from STDERR
+ * usage accounting and logging; this orchestrator is pure apart from Narrator
  * notes. A retained abnormal member carries a keyed degradation note in the
  * TextBatchResult. A one-token cache-warm request may set tolerate_empty; its
  * expected output-limit response is accepted immediately because only input

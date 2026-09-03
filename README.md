@@ -25,16 +25,24 @@ cp .env.example .env
 # Or Baseten (Kimi/GLM/DeepSeek via the wpcom AI proxy): LLM_PROVIDER=baseten, BASETEN_API_KEY
 # Images (optional): GOOGLE_VERTEX_API_TOKEN
 
+composer install
 npm ci   # optional; installs Playground, screenshot helpers, and block-fixer oracle tooling
 ```
 
-Theme generation and block fixing require PHP 8.1+ only. No Composer is needed:
-the source set autoloads through the dependency-free PSR-4 loader
-`autoload.php`, loaded by `src/bootstrap.php`.
+Standalone theme generation and block fixing require PHP 8.1+ and the Composer
+dependencies installed in `vendor/`. Embedding hosts may provide those
+dependencies through their own autoloader instead.
 
 The block fixer is implemented entirely in PHP and needs neither Node nor
 `node_modules`. WordPress Playground previews and screenshot tooling still use
 Node. Use `php bin/build.php "…" --no-serve` for a PHP-only build.
+
+## Install as a plugin
+
+Use [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json) as the
+marketplace entry point and install the `site-builder` plugin. The plugin ships
+the [`site-build` Skill](skills/site-build/SKILL.md) for driving this repository
+from a supported coding-agent harness.
 
 > **Breaking change for downstream consumers:** the Node block fixer is gone —
 > `NodeBlockFixer` and `Package::blockFixerScript()` no longer exist. Any host

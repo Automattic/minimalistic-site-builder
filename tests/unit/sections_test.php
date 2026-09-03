@@ -1264,6 +1264,39 @@ test('sections persists an exhausted abnormal batch note even when balanced mark
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('sections zero-attempt batch notes do not claim regeneration occurred', function () {
+    [$project, $tmp] = sections_fixture();
+    $llm = new FakeLlm();
+    $llm->queueText('OK'); // cache warm-up probe
+    $llm->queueText('<!-- wp:group --><!-- wp:site-title /--><!-- /wp:group -->');
+    $llm->queueText('<!-- wp:group --><!-- wp:paragraph --><p>(c)</p><!-- /wp:paragraph --><!-- /wp:group -->');
+    $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
+    $llm->queueText('<!-- wp:heading --><h2>About</h2><!-- /wp:heading -->');
+    $llm->batchNotes = [
+        'page-home--hero' => [
+            "Harness CLI cannot honor option 'temperature'; transport default was used.",
+            "part 'page-home--hero': model response remained abnormally terminated after 0 regeneration(s) "
+                . '(generation was truncated (stop reason: max_tokens)); best partial response retained',
+        ],
+    ];
+
+    (new SectionsStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $joined = implode(' ', $project->readJson('warnings.json')['sections'] ?? []);
+    assert_contains("cannot honor option 'temperature'", $joined);
+    assert_contains('after 0 regeneration(s)', $joined);
+    assert_contains('regeneration was not inferred', $joined);
+    assert_true(
+        !str_contains($joined, 'only after bounded regeneration'),
+        'the disposition must not invent a regeneration attempt',
+    );
+    assert_true(
+        !str_contains($joined, 'best normalized partial response'),
+        'an unsupported option note must not be relabeled as a partial response',
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('the footer never takes the surface a page closes on', function () {
     [$project, $tmp] = sections_fixture();
 

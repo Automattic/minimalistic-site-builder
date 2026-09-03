@@ -66,22 +66,30 @@ test('section prompt keeps unbreakable contact tokens out of display type', func
     assert_true(!str_contains($prompt, 'inquiries@alcortaph'), 'malformed cohort identity copy is excluded');
 });
 
-test('centered-stack prompts keep wrapping copy aligned to the writing-direction start', function () {
+test('centered-stack prompts commit the whole band to the theme-owned centering', function () {
+    // BIGR-952: the old contract kept wrapping copy start-aligned inside the
+    // centered band, and the delivered mix (centered heading, start-aligned
+    // copy) read as a defect. The theme now centers the band through the root
+    // marker class, so every prompt layer must stop asking for a start
+    // alignment there — an authored has-text-align-* class would beat the
+    // inherited center.
     $section = (string) file_get_contents(repo_path('prompts/section.md'));
     $composition = (string) file_get_contents(
         repo_path('prompts/section-compositions/centered-stack.md')
     );
     $pagePlan = (string) file_get_contents(repo_path('prompts/page-plan.md'));
 
+    // The global discipline for every OTHER composition is unchanged.
     assert_contains('center display type only', $section, 'short display lines may remain centered');
     assert_contains('writing direction\'s start edge', $section, 'reading copy follows language direction');
     assert_contains('`"align":"left"` for LTR', $section, 'LTR Gutenberg mapping is explicit');
     assert_contains('`"align":"right"` for RTL', $section, 'RTL Gutenberg mapping is explicit');
-    foreach ([$composition, $pagePlan] as $centeredStackContract) {
-        assert_contains('start-aligned', $centeredStackContract);
-        assert_contains('left for LTR', $centeredStackContract);
-        assert_contains('right for RTL', $centeredStackContract);
-    }
+
+    // The centered-stack carve-out exists in all three layers.
+    assert_contains('exception is a `centered-stack` band', $section, 'the global rule names its one exception');
+    assert_contains('centers the whole band through the root marker class', $composition);
+    assert_contains('Do not set a start alignment', $composition);
+    assert_contains('theme centers every element in the band', $pagePlan);
 });
 
 test('section composition moves the assigned copy column without widening its measure', function () {

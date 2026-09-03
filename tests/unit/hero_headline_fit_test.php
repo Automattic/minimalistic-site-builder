@@ -138,6 +138,33 @@ test('a copy group flexSize is the measure the composition asked for', function 
     assert_contains('), 80px)', HeroHeadlineFit::apply($markup, hhf_theme())['markup']);
 });
 
+test('a constrained ancestor without its own contentSize caps the measure at the theme content size', function () {
+    // atlas' delivered shape (BIGR-951): the copy group is constrained with
+    // no contentSize of its own, inside a cover that states a poster-wide
+    // contentSize. Core renders the heading at the global content size, so
+    // the wide cover must not become the measure.
+    [$open, $close] = hhf_section('1560px');
+    $markup = hhf_hero('Two Nights of Electronic Immersion', '"layout":{"type":"constrained"}', $open, $close);
+    $theme = hhf_theme(['settings' => ['layout' => ['contentSize' => '640px']]]);
+    assert_contains('), 83px)', HeroHeadlineFit::apply($markup, $theme)['markup']);
+});
+
+test('a px-width column wider than the theme content size does not widen a constrained copy group', function () {
+    // The BIGR-951 review case: the copy group is constrained with no
+    // contentSize of its own, inside a column that states an 800px width.
+    // Core still caps the group's children at the 640px global content
+    // size, so the wide column must not become the measure.
+    $markup = hhf_hero(
+        'Two Nights of Electronic Immersion',
+        '"layout":{"type":"constrained"}',
+        '<!-- wp:columns --><div class="wp-block-columns">'
+            . '<!-- wp:column {"width":"800px"} --><div class="wp-block-column">',
+        '</div><!-- /wp:column --></div><!-- /wp:columns -->',
+    );
+    $theme = hhf_theme(['settings' => ['layout' => ['contentSize' => '640px']]]);
+    assert_contains('), 83px)', HeroHeadlineFit::apply($markup, $theme)['markup']);
+});
+
 test('the fit uses the theme content size when no ancestor names one', function () {
     $markup = hhf_hero('Two Nights of Electronic Immersion', '"layout":{"type":"constrained"}');
     $wide = HeroHeadlineFit::apply($markup, hhf_theme(['settings' => ['layout' => ['contentSize' => '1200px']]]));
@@ -510,4 +537,63 @@ test('a scalar style attr degrades instead of taking the build down', function (
             'and the pin still lands'
         );
     }
+});
+
+// ── Line target on an authored display H1 (BIGR-951) ────────────────────────
+// Since BIGR-900 the hero model authors `display` itself, so the promotion
+// declines and its line-target bound stopped running. tbilisi and atlas
+// (layered-poster, dramatic scale) shipped 9-word headlines at the full 128px
+// display maximum, one to two lines past their blueprints.
+
+test('a display h1 is bounded by the desktop line target', function () {
+    // tbilisi's delivered headline: nine short words, so the word fit never
+    // fires, and before this bound the H1 kept the full display maximum on
+    // one line more than the [1, 3] blueprint allows.
+    $r = HeroHeadlineFit::apply(
+        hhf_scale_hero('Pull Up a Chair, the Supra Is Already Warm', 'display'),
+        hhf_scale_theme(),
+        [1, 3],
+    );
+    $out = (new Serializer())->transform($r['markup'])->html;
+    assert_contains('font-size:min(var(--wp--preset--font-size--display), 83px)', $out, 'the line target pins the size');
+    assert_true(!str_contains($out, 'has-display-font-size'), 'the !important preset class is gone');
+    assert_contains('headline line-fit', implode("\n", $r['notes']));
+
+    $second = HeroHeadlineFit::apply($r['markup'], hhf_scale_theme(), [1, 3]);
+    assert_eq($r['markup'], $second['markup'], 'fixed point');
+    assert_eq([], $second['notes'], 'and silent on the second pass');
+});
+
+test('the line-target bound leaves a fitting or unachievable display h1 alone', function () {
+    // A headline that already holds its target keeps the plain preset.
+    $fits = hhf_scale_hero('Two Nights of Electronic Dreams', 'display');
+    assert_eq($fits, HeroHeadlineFit::apply($fits, hhf_scale_theme(), [1, 3])['markup'], 'byte-identical');
+
+    // No target at all: only the word fit bounds the heading, and every word
+    // here fits.
+    assert_eq($fits, HeroHeadlineFit::apply($fits, hhf_scale_theme(), null)['markup'], 'byte-identical');
+
+    // A target no size above the pin threshold can hold pins nothing: that
+    // target is already lost, and a sub-threshold masthead is worse than an
+    // extra wrapped line.
+    $impossible = hhf_scale_hero(
+        'A Very Long Masthead Sentence That Cannot Possibly Fit On One Single Line',
+        'display',
+    );
+    assert_eq(
+        $impossible,
+        HeroHeadlineFit::apply($impossible, hhf_scale_theme(), [1, 1])['markup'],
+        'byte-identical',
+    );
+});
+
+test('the line target bounds only the masthead, never a lower display heading', function () {
+    // The blueprint's line target describes the one masthead H1. A stray
+    // display H2 below it still gets the word fit, but not the line bound.
+    $markup = '<!-- wp:group {"className":"hero-composition__copy","layout":{"type":"constrained","contentSize":"720px"}} -->'
+        . '<div class="wp-block-group hero-composition__copy">'
+        . '<!-- wp:heading {"level":2,"fontSize":"display"} -->'
+        . '<h2 class="wp-block-heading has-display-font-size">Pull Up a Chair, the Supra Is Already Warm</h2>'
+        . '<!-- /wp:heading --></div><!-- /wp:group -->';
+    assert_eq($markup, HeroHeadlineFit::apply($markup, hhf_scale_theme(), [1, 3])['markup'], 'byte-identical');
 });

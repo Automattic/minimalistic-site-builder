@@ -1,0 +1,12 @@
+{
+  "name": "site-builder",
+  "description": "Portable pipeline that generates a complete WordPress block theme and companion content plugin",
+  "version": "0.1.0",
+  "author": {
+    "name": "Matthew Batchelder",
+    "email": "borkweb@gmail.com"
+  },
+  "skills": [
+    "./skills/site-build"
+  ]
+}

@@ -5,6 +5,7 @@ use Automattic\SiteBuild\ConcurrentGroup;
 use Automattic\SiteBuild\ConcurrentStep;
 use Automattic\SiteBuild\JsonBatchRecovery;
 use Automattic\SiteBuild\Llm;
+use Automattic\SiteBuild\PaletteFloor;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
@@ -907,15 +908,50 @@ test('normalizeSpacingSettings installs the canonical bounded responsive profile
     ], $theme['settings']['spacing']['spacingSizes']);
 });
 
-test('normalizeSpacingSettings keeps component rhythm stable and scales every section role by density', function () {
+test('normalizeSpacingSettings scales every component and section role by density', function () {
     $profiles = [];
-    foreach (['airy', 'measured', 'dense'] as $density) {
+    foreach (['expansive', 'airy', 'measured', 'dense', 'packed'] as $density) {
         $profiles[$density] = ThemeJsonStep::normalizeSpacingSettings([], $density)
             ['settings']['spacing']['spacingSizes'];
     }
 
-    assert_eq(array_slice($profiles['measured'], 0, 3), array_slice($profiles['airy'], 0, 3));
-    assert_eq(array_slice($profiles['measured'], 0, 3), array_slice($profiles['dense'], 0, 3));
+    // Component spacing (xs/sm/md) follows the density with a smaller swing
+    // than the section ramp: md also feeds the root inline gutter (BIGR-954).
+    assert_eq([
+        'clamp(0.5rem, 0.75vw, 0.75rem)',
+        'clamp(1.25rem, 1.6vw, 1.5rem)',
+        'clamp(2.5rem, 3vw, 3rem)',
+    ], array_column(array_slice($profiles['expansive'], 0, 3), 'size'));
+    assert_eq([
+        'clamp(0.375rem, 0.6vw, 0.625rem)',
+        'clamp(1rem, 1.25vw, 1.25rem)',
+        'clamp(2rem, 2.5vw, 2.5rem)',
+    ], array_column(array_slice($profiles['airy'], 0, 3), 'size'));
+    assert_eq([
+        'clamp(0.25rem, 0.5vw, 0.5rem)',
+        'clamp(0.75rem, 1vw, 1rem)',
+        'clamp(1.5rem, 2vw, 2rem)',
+    ], array_column(array_slice($profiles['measured'], 0, 3), 'size'));
+    assert_eq([
+        'clamp(0.25rem, 0.4vw, 0.375rem)',
+        'clamp(0.625rem, 0.8vw, 0.875rem)',
+        'clamp(1.25rem, 1.5vw, 1.5rem)',
+    ], array_column(array_slice($profiles['dense'], 0, 3), 'size'));
+    assert_eq([
+        'clamp(0.25rem, 0.35vw, 0.3125rem)',
+        'clamp(0.5rem, 0.65vw, 0.75rem)',
+        'clamp(1rem, 1.25vw, 1.25rem)',
+    ], array_column(array_slice($profiles['packed'], 0, 3), 'size'));
+
+    foreach ($profiles as $density => $profile) {
+        assert_eq(['xs', 'sm', 'md', 'lg', 'xl', 'xxl'], array_column($profile, 'slug'), $density);
+    }
+
+    assert_eq([
+        'clamp(5rem, 7.5vw, 8rem)',
+        'clamp(6.5rem, 10vw, 12rem)',
+        'clamp(8rem, 13vw, 16rem)',
+    ], array_column(array_slice($profiles['expansive'], 3), 'size'));
     assert_eq([
         'clamp(4rem, 6vw, 6rem)',
         'clamp(5rem, 8vw, 9rem)',
@@ -931,6 +967,23 @@ test('normalizeSpacingSettings keeps component rhythm stable and scales every se
         'clamp(3rem, 4.5vw, 4.5rem)',
         'clamp(3.75rem, 5.5vw, 5.5rem)',
     ], array_column(array_slice($profiles['dense'], 3), 'size'));
+    assert_eq([
+        'clamp(1.75rem, 2.25vw, 2.25rem)',
+        'clamp(2.25rem, 3.5vw, 3.5rem)',
+        'clamp(3rem, 4.25vw, 4.25rem)',
+    ], array_column(array_slice($profiles['packed'], 3), 'size'));
+
+    // The scale is ordered: at every slug, both clamp bounds shrink (or hold)
+    // from expansive down to packed, so a denser commitment can never deliver
+    // more space than a lighter one at any viewport.
+    foreach ([['expansive', 'airy'], ['airy', 'measured'], ['measured', 'dense'], ['dense', 'packed']] as [$wide, $tight]) {
+        foreach ($profiles[$wide] as $i => $row) {
+            preg_match_all('/([\d.]+)rem/', $row['size'], $w);
+            preg_match_all('/([\d.]+)rem/', $profiles[$tight][$i]['size'], $t);
+            assert_true((float) $t[1][0] <= (float) $w[1][0], "$tight {$row['slug']} min <= $wide");
+            assert_true((float) $t[1][1] <= (float) $w[1][1], "$tight {$row['slug']} max <= $wide");
+        }
+    }
 
     assert_eq($profiles['measured'], ThemeJsonStep::normalizeSpacingSettings([], 'unknown')
         ['settings']['spacing']['spacingSizes']);
@@ -968,7 +1021,7 @@ test('theme-json prompt delegates density-scaled spacing to the build', function
 
     assert_contains('**Density**: airy', $prompt);
     assert_contains('do not emit `spacingSizes`', $prompt);
-    assert_contains('lg/xl/xxl section-padding ramp', $prompt);
+    assert_contains('section-padding ramp, component spacing, and page gutter', $prompt);
     assert_true(!str_contains($prompt, 'clamp(4rem, 6vw, 6rem)'), 'the shared literal ramp is gone');
 
     exec('rm -rf ' . escapeshellarg($tmp));
@@ -3650,6 +3703,29 @@ test('applyPaletteFloor leaves a clean C1 palette unchanged', function () {
     assert_eq($before, $out, 'hexes unchanged');
 });
 
+test('applyPaletteFloor forwards the complete color-economy commitment', function () {
+    $theme = [
+        'settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#F5EDE5', 'name' => 'Base'],
+            ['slug' => 'contrast', 'color' => '#2A2018', 'name' => 'Contrast'],
+            ['slug' => 'primary', 'color' => '#6B2C1F', 'name' => 'Primary'],
+            ['slug' => 'secondary', 'color' => '#1F5C6B', 'name' => 'Secondary'],
+            ['slug' => 'accent', 'color' => '#1667C5', 'name' => 'Accent'],
+        ]]],
+    ];
+
+    [$singleAccent, $singleAccentWarnings] = ThemeJsonStep::applyPaletteFloor($theme, null, 'single-accent');
+    $singleBySlug = array_column($singleAccent['settings']['color']['palette'], 'color', 'slug');
+
+    assert_true(
+        (PaletteFloor::hueDistance($singleBySlug['primary'], $singleBySlug['secondary']) ?? 360.0)
+            <= PaletteFloor::ECONOMY_HUE_TOLERANCE,
+        'single-accent consolidates its foundation',
+    );
+    assert_eq('#1667C5', $singleBySlug['accent'], 'single-accent leaves its independent hue alone');
+    assert_contains('single-accent color economy', implode("\n", $singleAccentWarnings));
+});
+
 test('applyPaletteFloor records unrepaired when a contrast floor cannot be met', function () {
     // 4.5:1 is reachable from any base (black or white always measures at
     // least ~4.58:1), so the unreachable branch now exists only under the
@@ -3703,4 +3779,161 @@ test('theme-json scaffold removes a --motion-* override, as the prompt promises'
     [$again, $none] = ThemeJsonStep::repairScaffold($theme);
     assert_eq($theme, $again);
     assert_eq([], $none);
+});
+
+test('removeResourceLoadingCustomCss strips @import and url() from every css string and keeps the rest', function () {
+    $authored = ['styles' => [
+        'css' => "@import url(https://evil.example/a.css);\nbody { color: red; background: url(https://evil.example/px.gif); }",
+        'blocks' => ['core/group' => [
+            'css' => ".x { background-image: image-set(\"./assets/a.png\" 1x); margin: 0 }",
+        ]],
+        'elements' => ['link' => ['css' => 'a { text-decoration: underline }']],
+        'variations' => ['poster' => ['css' => 'h2 { mask: url(data:image/svg+xml;base64,AAAA) }']],
+    ]];
+
+    [$theme, $warnings] = ThemeJsonStep::removeResourceLoadingCustomCss($authored);
+    $delivered = json_encode($theme, JSON_UNESCAPED_SLASHES);
+    assert_true(!str_contains($delivered, 'evil.example'), 'no external authority ships');
+    assert_true(!str_contains($delivered, 'url('), 'no url() ships, relative or data: included');
+    assert_true(!str_contains($delivered, 'image-set('), 'no image-set() ships');
+    assert_true(!str_contains($delivered, '@import'), 'no @import ships');
+    assert_contains('color: red', $theme['styles']['css']);
+    assert_contains('margin: 0', $theme['styles']['blocks']['core/group']['css']);
+    assert_eq('a { text-decoration: underline }', $theme['styles']['elements']['link']['css']);
+    assert_true(count($warnings) >= 4, 'every removal is recorded');
+    $joined = implode(' ', $warnings);
+    assert_contains('theme/theme.json styles.css', $joined);
+    assert_contains('theme/theme.json styles.blocks.core/group.css', $joined);
+    assert_contains('theme/theme.json styles.variations.poster.css', $joined);
+    assert_contains('resource-loading', $joined);
+
+    [$fixed, $again] = ThemeJsonStep::removeResourceLoadingCustomCss($theme);
+    assert_eq($theme, $fixed, 'fixed point');
+    assert_eq([], $again);
+});
+
+test('removeResourceLoadingCustomCss removes the whole string when a loading form survives declaration removal', function () {
+    $authored = ['styles' => [
+        'css' => "@namespace svg url(http://www.w3.org/2000/svg);\n.a { color: red }",
+        'blocks' => ['core/group' => ['css' => '.b { color: blue }']],
+    ]];
+    [$theme, $warnings] = ThemeJsonStep::removeResourceLoadingCustomCss($authored);
+    assert_eq('', $theme['styles']['css']);
+    assert_eq('.b { color: blue }', $theme['styles']['blocks']['core/group']['css'], 'siblings are untouched');
+    assert_contains('whole custom CSS string', implode(' ', $warnings));
+});
+
+test('removeResourceLoadingCustomCss leaves clean CSS byte-identical and warns nothing', function () {
+    $authored = ['styles' => [
+        'css' => ".hero { background: linear-gradient(180deg, #000, #fff); color: var(--wp--preset--color--base) }",
+        'blocks' => ['core/group' => ['css' => '.x { margin: 0 }']],
+    ]];
+    [$theme, $warnings] = ThemeJsonStep::removeResourceLoadingCustomCss($authored);
+    assert_eq($authored, $theme);
+    assert_eq([], $warnings);
+});
+
+test('theme-json never ships a resource-loading custom CSS value', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tjresource_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A quiet bakery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project);
+
+    $payload = valid_theme_payload();
+    $payload['styles']['css'] = "@import url(https://evil.example/track.css);\n"
+        . "body { color: red; background-image: url(https://evil.example/px.gif); }";
+    $payload['styles']['blocks']['core/group'] = [
+        'css' => '.band { background: url(./assets/band.jpg) center/cover; padding: 1rem }',
+    ];
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $delivered = $project->readText('theme/theme.json');
+    assert_true(!str_contains($delivered, 'evil.example'), 'no external authority ships');
+    assert_true(!str_contains($delivered, 'url('), 'no url() ships');
+    assert_true(!str_contains($delivered, '@import'), 'no @import ships');
+    $theme = $project->readJson('theme/theme.json');
+    assert_contains('color: red', $theme['styles']['css']);
+    assert_contains('padding: 1rem', $theme['styles']['blocks']['core/group']['css']);
+    $warnings = implode(' ', $project->readJson('warnings.json')['theme-json'] ?? []);
+    assert_contains('theme/theme.json styles.css', $warnings);
+    assert_contains('theme/theme.json styles.blocks.core/group.css', $warnings);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json custom CSS keeps a string whose only url() sits in a comment', function () {
+    $theme = ['styles' => [
+        'css' => "/* the hero image comes from markup, not url() */\n.band { color: red }",
+        'blocks' => ['core/group' => ['css' => '/* no url() here */ .x { color: blue }']],
+    ]];
+    [$scrubbed, $warnings] = ThemeJsonStep::removeResourceLoadingCustomCss($theme);
+    assert_contains('url()', $scrubbed['styles']['css'], 'the comment stays');
+    assert_contains('color: red', $scrubbed['styles']['css']);
+    assert_contains('color: blue', $scrubbed['styles']['blocks']['core/group']['css']);
+    assert_eq([], $warnings, 'nothing was removed, so nothing is recorded');
+    [$again, $more] = ThemeJsonStep::removeResourceLoadingCustomCss($scrubbed);
+    assert_eq($scrubbed, $again, 'fixed point');
+    assert_eq([], $more);
+});
+
+test('removeForeignFontFaces keeps only bundled sources and drops faces that fetch', function () {
+    $authored = ['settings' => ['typography' => ['fontFamilies' => [
+        ['slug' => 'heading', 'fontFamily' => 'Literata, serif', 'name' => 'Heading', 'fontFace' => [
+            ['fontFamily' => 'Literata', 'fontWeight' => '700', 'src' => ['https://evil.example/l.woff2']],
+        ]],
+        ['slug' => 'body', 'fontFamily' => 'Source Sans 3, sans-serif', 'name' => 'Body', 'fontFace' => [
+            ['fontFamily' => 'Source Sans 3', 'fontWeight' => '400', 'src' => [
+                'file:./assets/fonts/source-sans-3-400.woff2',
+                '//evil.example/s.woff2',
+            ]],
+            ['fontFamily' => 'Source Sans 3', 'fontWeight' => '600', 'src' => 'data:font/woff2;base64,AAAA'],
+        ]],
+        ['slug' => 'mono', 'fontFamily' => 'monospace', 'name' => 'Mono'],
+    ]]]];
+
+    [$theme, $warnings] = ThemeJsonStep::removeForeignFontFaces($authored);
+    $families = $theme['settings']['typography']['fontFamilies'];
+    assert_true(!isset($families[0]['fontFace']), 'a family whose every face fetched loses the key');
+    assert_eq(
+        [['fontFamily' => 'Source Sans 3', 'fontWeight' => '400', 'src' => ['file:./assets/fonts/source-sans-3-400.woff2']]],
+        $families[1]['fontFace'],
+        'the bundled source stays, the foreign one and the data: face go',
+    );
+    assert_eq(['slug' => 'mono', 'fontFamily' => 'monospace', 'name' => 'Mono'], $families[2]);
+    assert_true(!str_contains(json_encode($theme), 'evil.example'));
+    assert_eq(3, count($warnings));
+    assert_contains('fontFamilies[heading].fontFace', $warnings[0]);
+    assert_contains('bundled theme files', $warnings[0]);
+
+    [$fixed, $again] = ThemeJsonStep::removeForeignFontFaces($theme);
+    assert_eq($theme, $fixed, 'fixed point');
+    assert_eq([], $again);
+});
+
+test('theme-json never ships a font face from a foreign host', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tjfontface_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A quiet bakery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project);
+
+    $payload = valid_theme_payload();
+    foreach ($payload['settings']['typography']['fontFamilies'] as &$family) {
+        $family['fontFace'] = [
+            ['fontFamily' => $family['name'] ?? 'x', 'fontWeight' => '400', 'src' => ['https://evil.example/f.woff2']],
+        ];
+    }
+    unset($family);
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $delivered = $project->readText('theme/theme.json');
+    assert_true(!str_contains($delivered, 'evil.example'), 'no foreign font source ships');
+    assert_true(!str_contains($delivered, 'fontFace'), 'no face without a bundled source ships');
+    $warnings = implode(' ', $project->readJson('warnings.json')['theme-json'] ?? []);
+    assert_contains('bundled theme files', $warnings);
+    exec('rm -rf ' . escapeshellarg($tmp));
 });

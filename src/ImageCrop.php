@@ -114,14 +114,22 @@ final class ImageCrop
         };
     }
 
-    /** Composition guidance consumed by ImagePromptComposer. */
+    /**
+     * Composition guidance consumed by ImagePromptComposer.
+     *
+     * The wording deliberately avoids "frame" and "contained" (BIGR-956): the
+     * image model sometimes reads that vocabulary — stacked with "photograph",
+     * "series" and a film grade — as a printed photo and paints a literal
+     * white border into the pixels. The clause instead states positively that
+     * the scene fills the canvas to its edges.
+     */
     public static function promptClause(mixed $raw): string
     {
         return match (self::explicit($raw)) {
-            'landscape' => 'Site-wide crop direction: compose contained imagery for a consistent horizontal frame, keeping the focal subject inside the central landscape safe area.',
-            'portrait' => 'Site-wide crop direction: compose contained imagery for a consistent vertical frame, keeping the focal subject inside the central portrait safe area.',
-            'square' => 'Site-wide crop direction: compose contained imagery for a consistent square frame with balanced central weight.',
-            'panoramic' => 'Site-wide crop direction: compose contained imagery as shallow, lateral scenes with the focal subject protected inside a wide panoramic band.',
+            'landscape' => 'Site-wide crop direction: compose each scene to fill its wide horizontal canvas out to every edge, keeping the focal subject inside the central landscape safe area.',
+            'portrait' => 'Site-wide crop direction: compose each scene to fill its tall vertical canvas out to every edge, keeping the focal subject inside the central portrait safe area.',
+            'square' => 'Site-wide crop direction: compose each scene to fill its square canvas out to every edge, with balanced central weight.',
+            'panoramic' => 'Site-wide crop direction: compose shallow, lateral scenes that fill the wide panoramic canvas out to every edge, with the focal subject protected inside the central band.',
             default => '',
         };
     }

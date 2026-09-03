@@ -36,7 +36,7 @@ final class RunnerResolver
 
         if ($name === 'studio') {
             if ($cli->available()) {
-                return new StudioAppRunner($cli, StudioAppRunner::defaultRoot(), repo_path());
+                return new StudioAppRunner($cli, StudioAppRunner::defaultRoot(), dirname(__DIR__));
             }
             throw new \RuntimeException('Studio is not available');
         }
@@ -48,7 +48,7 @@ final class RunnerResolver
         }
 
         if ($cli->available()) {
-            return new StudioAppRunner($cli, StudioAppRunner::defaultRoot(), repo_path());
+            return new StudioAppRunner($cli, StudioAppRunner::defaultRoot(), dirname(__DIR__));
         }
         $warn('Studio is not available; falling back to Playground.');
         return new PlaygroundRunner();

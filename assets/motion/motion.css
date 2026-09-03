@@ -8,6 +8,14 @@
  * fast. Generated CSS never overrides these values, so the committed profile
  * remains the authority for the site's motion character.
  *
+ * Movement contract (BIGR: team feedback "too strong / dizzy"):
+ * - Every translation is VERTICAL. The kit never moves content sideways —
+ *   no translateX, no diagonal arrivals, no horizontal pans, no rotation.
+ * - Every easing decelerates smoothly into rest with NO overshoot: no
+ *   control point leaves [0, 1], so nothing springs past its rest position.
+ * - Profiles differ through duration, travel distance, easing, masks, and
+ *   focus (blur), not through direction of travel.
+ *
  * Accessibility / progressive-enhancement contract:
  * - EVERYTHING lives inside @media screen and (prefers-reduced-motion:
  *   no-preference): reduced-motion users get a fully static, fully visible
@@ -31,29 +39,36 @@
     --motion-hero-delay: 60ms;
     --motion-hover-duration: 360ms;
     --motion-ambient-duration: 16s;
-    --motion-enter-ease: cubic-bezier(0.37, 0, 0.63, 1);
-    --motion-hero-ease: cubic-bezier(0.37, 0, 0.63, 1);
+    --motion-enter-ease: cubic-bezier(0.4, 0.2, 0.2, 1);
+    --motion-hero-ease: cubic-bezier(0.4, 0.2, 0.2, 1);
     --motion-hover-ease: cubic-bezier(0.25, 0.1, 0.25, 1);
     --motion-ambient-ease: cubic-bezier(0.37, 0, 0.63, 1);
     --motion-reveal-keyframe: motion-calm-reveal;
     --motion-rise-keyframe: motion-calm-rise;
     --motion-fade-keyframe: motion-calm-fade;
     --motion-scale-keyframe: motion-calm-scale;
+    --motion-blur-keyframe: motion-kit-blur;
+    --motion-wipe-keyframe: motion-kit-wipe;
+    --motion-wipe-up-keyframe: motion-kit-wipe-up;
+    --motion-aperture-keyframe: motion-kit-aperture;
+    --motion-zoom-keyframe: motion-kit-zoom;
     --motion-hero-keyframe: motion-calm-hero;
     --motion-stagger-keyframe: motion-calm-rise;
     --motion-drift-keyframe: motion-calm-drift;
     --motion-ken-burns-keyframe: motion-calm-ken-burns;
     --motion-gradient-keyframe: motion-calm-gradient;
-    --motion-distance: 20px;
+    --motion-distance: 12px;
     --motion-stagger: 160ms;
-    --motion-scale-from: 0.97;
-    --motion-hero-scale-from: 0.98;
-    --motion-ken-burns-scale: 1.06;
-    --motion-ambient-distance: 12px;
-    --motion-hover-lift: -4px;
-    --motion-hover-scale: 1.035;
-    --motion-hover-brightness: 0.9;
-    --motion-hover-shadow-opacity: 0.22;
+    --motion-scale-from: 0.98;
+    --motion-blur-amount: 5px;
+    --motion-zoom-from: 1.02;
+    --motion-hero-scale-from: 0.985;
+    --motion-ken-burns-scale: 1.05;
+    --motion-ambient-distance: 8px;
+    --motion-hover-lift: -3px;
+    --motion-hover-scale: 1.03;
+    --motion-hover-brightness: 0.92;
+    --motion-hover-shadow-opacity: 0.18;
 }
 
 @media screen and (prefers-reduced-motion: no-preference) {
@@ -68,11 +83,21 @@
     html.motion-js:not(.motion-ready) .reveal-up,
     html.motion-js:not(.motion-ready) .reveal-fade,
     html.motion-js:not(.motion-ready) .reveal-scale,
+    html.motion-js:not(.motion-ready) .reveal-blur,
+    html.motion-js:not(.motion-ready) .reveal-wipe,
+    html.motion-js:not(.motion-ready) .reveal-wipe-up,
+    html.motion-js:not(.motion-ready) .reveal-aperture,
+    html.motion-js:not(.motion-ready) .reveal-zoom,
     html.motion-js:not(.motion-ready) .stagger-children > *,
     html.motion-js.motion-ready .reveal.motion-target:not(.is-visible),
     html.motion-js.motion-ready .reveal-up.motion-target:not(.is-visible),
     html.motion-js.motion-ready .reveal-fade.motion-target:not(.is-visible),
     html.motion-js.motion-ready .reveal-scale.motion-target:not(.is-visible),
+    html.motion-js.motion-ready .reveal-blur.motion-target:not(.is-visible),
+    html.motion-js.motion-ready .reveal-wipe.motion-target:not(.is-visible),
+    html.motion-js.motion-ready .reveal-wipe-up.motion-target:not(.is-visible),
+    html.motion-js.motion-ready .reveal-aperture.motion-target:not(.is-visible),
+    html.motion-js.motion-ready .reveal-zoom.motion-target:not(.is-visible),
     html.motion-js.motion-ready .stagger-children > *.motion-target:not(.is-visible) {
         opacity: 0;
     }
@@ -105,6 +130,41 @@
         animation-timing-function: var(--motion-enter-ease);
         animation-fill-mode: backwards;
     }
+    html.motion-js .reveal-blur.motion-target.is-visible {
+        opacity: 1;
+        animation-name: var(--motion-blur-keyframe);
+        animation-duration: var(--motion-enter-duration);
+        animation-timing-function: var(--motion-enter-ease);
+        animation-fill-mode: backwards;
+    }
+    html.motion-js .reveal-wipe.motion-target.is-visible {
+        opacity: 1;
+        animation-name: var(--motion-wipe-keyframe);
+        animation-duration: var(--motion-enter-duration);
+        animation-timing-function: var(--motion-enter-ease);
+        animation-fill-mode: backwards;
+    }
+    html.motion-js .reveal-wipe-up.motion-target.is-visible {
+        opacity: 1;
+        animation-name: var(--motion-wipe-up-keyframe);
+        animation-duration: var(--motion-enter-duration);
+        animation-timing-function: var(--motion-enter-ease);
+        animation-fill-mode: backwards;
+    }
+    html.motion-js .reveal-aperture.motion-target.is-visible {
+        opacity: 1;
+        animation-name: var(--motion-aperture-keyframe);
+        animation-duration: var(--motion-enter-duration);
+        animation-timing-function: var(--motion-enter-ease);
+        animation-fill-mode: backwards;
+    }
+    html.motion-js .reveal-zoom.motion-target.is-visible {
+        opacity: 1;
+        animation-name: var(--motion-zoom-keyframe);
+        animation-duration: var(--motion-enter-duration);
+        animation-timing-function: var(--motion-enter-ease);
+        animation-fill-mode: backwards;
+    }
 
     /* Staggered card/column reveals: the CONTAINER carries the authored class,
        while motion.js observes each direct child. Cards that share a row enter
@@ -119,6 +179,55 @@
         animation-timing-function: var(--motion-enter-ease);
         animation-fill-mode: backwards;
         animation-delay: calc(var(--motion-stagger) * var(--motion-stagger-order, 0));
+    }
+
+    /* ── Shared entrances (profile character comes from the variables) ──── */
+
+    /* Soft-focus fade: no travel at all; the content sharpens into place. */
+    @keyframes motion-kit-blur {
+        from {
+            opacity: 0;
+            filter: blur(var(--motion-blur-amount));
+        }
+        40% { opacity: 1; }
+        to { opacity: 1; filter: blur(0); }
+    }
+    /* Vertical curtain: the content is unmasked top-to-bottom in place. */
+    @keyframes motion-kit-wipe {
+        from {
+            opacity: 0;
+            clip-path: inset(0 0 100% 0);
+        }
+        40% { opacity: 1; }
+        to { opacity: 1; clip-path: inset(0); }
+    }
+    /* Inverse curtain: the content is unmasked bottom-to-top in place. */
+    @keyframes motion-kit-wipe-up {
+        from {
+            opacity: 0;
+            clip-path: inset(100% 0 0 0);
+        }
+        40% { opacity: 1; }
+        to { opacity: 1; clip-path: inset(0); }
+    }
+    /* Letterbox: the mask opens from the vertical center to both edges. */
+    @keyframes motion-kit-aperture {
+        from {
+            opacity: 0;
+            clip-path: inset(50% 0 50% 0);
+        }
+        40% { opacity: 1; }
+        to { opacity: 1; clip-path: inset(0); }
+    }
+    /* Zoom settle: arrives slightly enlarged and eases down to rest —
+       the inverse of reveal-scale, suited to photography and covers. */
+    @keyframes motion-kit-zoom {
+        from {
+            opacity: 0;
+            transform: scale(var(--motion-zoom-from));
+        }
+        40% { opacity: 1; }
+        to { opacity: 1; transform: none; }
     }
 
     /* Calm: soft fades and measured settling. */
@@ -152,25 +261,15 @@
         to { opacity: 1; transform: none; }
     }
 
-    /* Energetic: diagonal arrivals with a brief spring past the rest point. */
+    /* Energetic: quick vertical arrivals that grow slightly as they settle.
+       Speed and a fast-decelerating ease carry the liveliness; there is no
+       diagonal travel and no spring past the rest position. */
     @keyframes motion-energetic-reveal {
         from {
             opacity: 0;
-            transform: translate3d(
-                calc(var(--motion-distance) * -0.6),
-                calc(var(--motion-distance) * 0.35),
-                0
-            ) scale(var(--motion-scale-from));
+            transform: translateY(calc(var(--motion-distance) * 0.6)) scale(var(--motion-scale-from));
         }
         40% { opacity: 1; }
-        68% {
-            opacity: 1;
-            transform: translate3d(
-                calc(var(--motion-distance) * 0.08),
-                calc(var(--motion-distance) * -0.08),
-                0
-            ) scale(1.015);
-        }
         to { opacity: 1; transform: none; }
     }
     @keyframes motion-energetic-rise {
@@ -179,10 +278,6 @@
             transform: translateY(var(--motion-distance)) scale(var(--motion-scale-from));
         }
         40% { opacity: 1; }
-        68% {
-            opacity: 1;
-            transform: translateY(calc(var(--motion-distance) * -0.12)) scale(1.012);
-        }
         to { opacity: 1; transform: none; }
     }
     @keyframes motion-energetic-fade {
@@ -193,19 +288,18 @@
     @keyframes motion-energetic-scale {
         from { opacity: 0; transform: scale(var(--motion-scale-from)); }
         40% { opacity: 1; }
-        68% { opacity: 1; transform: scale(1.025); }
         to { opacity: 1; transform: none; }
     }
 
-    /* Dramatic: directional masks and focus pulls, not a slower calm rise. */
+    /* Dramatic: vertical masks and a soft-focus pull — cinematic through
+       masking and focus, never through sideways movement. */
     @keyframes motion-dramatic-reveal {
         from {
             opacity: 0;
-            clip-path: inset(0 100% 0 0);
-            transform: translateX(calc(var(--motion-distance) * -0.75));
+            clip-path: inset(0 0 100% 0);
         }
-        40% { opacity: 1; clip-path: inset(0); }
-        to { opacity: 1; clip-path: inset(0); transform: none; }
+        40% { opacity: 1; }
+        to { opacity: 1; clip-path: inset(0); }
     }
     @keyframes motion-dramatic-rise {
         from {
@@ -213,7 +307,7 @@
             clip-path: inset(100% 0 0 0);
             transform: translateY(var(--motion-distance));
         }
-        40% { opacity: 1; clip-path: inset(0); }
+        40% { opacity: 1; }
         to { opacity: 1; clip-path: inset(0); transform: none; }
     }
     @keyframes motion-dramatic-fade {
@@ -255,21 +349,17 @@
             transform: translateY(var(--motion-distance)) scale(var(--motion-hero-scale-from));
         }
         40% { opacity: 1; }
-        68% {
-            opacity: 1;
-            transform: translateY(calc(var(--motion-distance) * -0.1)) scale(1.015);
-        }
         to { opacity: 1; transform: none; }
     }
+    /* Focus pull: the hero sharpens and settles down from a slight zoom. */
     @keyframes motion-dramatic-hero {
         from {
             opacity: 0;
-            clip-path: inset(0 100% 0 0);
-            filter: blur(10px);
-            transform: translateX(calc(var(--motion-distance) * -1)) scale(var(--motion-hero-scale-from));
+            filter: blur(var(--motion-blur-amount));
+            transform: scale(var(--motion-hero-scale-from));
         }
-        40% { opacity: 1; clip-path: inset(0); filter: blur(0); }
-        to { opacity: 1; clip-path: inset(0); filter: blur(0); transform: none; }
+        40% { opacity: 1; filter: blur(0); }
+        to { opacity: 1; filter: blur(0); transform: none; }
     }
 
     /* Initial/restored content and a keyboard-focused entrance are marked
@@ -279,6 +369,11 @@
     .reveal-up.motion-skip,
     .reveal-fade.motion-skip,
     .reveal-scale.motion-skip,
+    .reveal-blur.motion-skip,
+    .reveal-wipe.motion-skip,
+    .reveal-wipe-up.motion-skip,
+    .reveal-aperture.motion-skip,
+    .reveal-zoom.motion-skip,
     .stagger-children > *.motion-skip,
     .hero-entrance.motion-skip {
         opacity: 1 !important;
@@ -291,6 +386,11 @@
     html.motion-js .reveal-up:focus-within,
     html.motion-js .reveal-fade:focus-within,
     html.motion-js .reveal-scale:focus-within,
+    html.motion-js .reveal-blur:focus-within,
+    html.motion-js .reveal-wipe:focus-within,
+    html.motion-js .reveal-wipe-up:focus-within,
+    html.motion-js .reveal-aperture:focus-within,
+    html.motion-js .reveal-zoom:focus-within,
     html.motion-js .stagger-children > *:focus-within,
     .hero-entrance:focus-within {
         opacity: 1 !important;
@@ -310,32 +410,24 @@
         animation-direction: alternate;
     }
     @keyframes motion-calm-drift {
-        from { transform: translate3d(0, 0, 0); }
-        to { transform: translate3d(0, calc(var(--motion-ambient-distance) * -1), 0); }
+        from { transform: translateY(0); }
+        to { transform: translateY(calc(var(--motion-ambient-distance) * -1)); }
     }
     @keyframes motion-energetic-drift {
-        from { transform: translate3d(0, 0, 0) rotate(0); }
-        45% {
-            transform: translate3d(0, calc(var(--motion-ambient-distance) * -1), 0) rotate(-1.25deg);
+        from { transform: translateY(0); }
+        55% {
+            transform: translateY(calc(var(--motion-ambient-distance) * -1));
         }
         to {
-            transform: translate3d(
-                calc(var(--motion-ambient-distance) * 0.6),
-                calc(var(--motion-ambient-distance) * -0.2),
-                0
-            ) rotate(1deg);
+            transform: translateY(calc(var(--motion-ambient-distance) * -0.6));
         }
     }
     @keyframes motion-dramatic-drift {
         from {
-            transform: translate3d(calc(var(--motion-ambient-distance) * -0.5), 0, 0);
+            transform: translateY(calc(var(--motion-ambient-distance) * 0.5));
         }
         to {
-            transform: translate3d(
-                calc(var(--motion-ambient-distance) * 0.5),
-                calc(var(--motion-ambient-distance) * -0.25),
-                0
-            );
+            transform: translateY(calc(var(--motion-ambient-distance) * -0.5));
         }
     }
 
@@ -352,17 +444,18 @@
         to { transform: scale(var(--motion-ken-burns-scale)); }
     }
     @keyframes motion-energetic-ken-burns {
-        from { transform: translate3d(-1%, 0, 0) scale(1.02); }
-        to { transform: translate3d(1%, 0, 0) scale(var(--motion-ken-burns-scale)); }
+        from { transform: scale(1.02); }
+        to { transform: scale(var(--motion-ken-burns-scale)); }
     }
     @keyframes motion-dramatic-ken-burns {
-        from { transform: translate3d(-1.5%, 0, 0) scale(var(--motion-ken-burns-scale)); }
-        to { transform: translate3d(0, 0, 0) scale(1); }
+        from { transform: scale(var(--motion-ken-burns-scale)); }
+        to { transform: scale(1); }
     }
 
     /* Slow-breathing gradient background. The doubled class selector outranks
        core's `.has-*-gradient-background { background: … }` shorthand (which
-       would otherwise reset background-size) regardless of stylesheet order. */
+       would otherwise reset background-size) regardless of stylesheet order.
+       The drift is vertical, like every other movement in the kit. */
     .gradient-shift.gradient-shift {
         background-size: 180% 180%;
         animation-name: var(--motion-gradient-keyframe);
@@ -372,16 +465,16 @@
         animation-direction: alternate;
     }
     @keyframes motion-calm-gradient {
-        from { background-position: 0% 50%; }
-        to { background-position: 100% 50%; }
+        from { background-position: 50% 0%; }
+        to { background-position: 50% 100%; }
     }
     @keyframes motion-energetic-gradient {
-        from { background-position: 0% 0%; }
-        to { background-position: 100% 100%; }
+        from { background-position: 50% 100%; }
+        to { background-position: 50% 0%; }
     }
     @keyframes motion-dramatic-gradient {
-        from { background-position: 100% 50%; }
-        to { background-position: 0% 50%; }
+        from { background-position: 50% 20%; }
+        to { background-position: 50% 80%; }
     }
 
     /* ── Hover micro-interactions ──────────────────────────────────

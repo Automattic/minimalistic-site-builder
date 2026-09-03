@@ -730,8 +730,8 @@ final class SectionsStep implements Step
             }
             return "file='theme/{$file}'; block='generated response'; authored="
                 . (string) json_encode($note, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
-                . '; delivered=\"best normalized partial response\"; disposition=abnormally terminated '
-                . 'generation was retained only after bounded regeneration and per-unit normalization';
+                . '; delivered=\"normalized generated response\"; disposition=the batch note was preserved '
+                . 'with the delivered response; regeneration was not inferred';
         }, $notes);
     }
 
