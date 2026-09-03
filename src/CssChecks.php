@@ -35,14 +35,151 @@ final class CssChecks
      * The problem string when the CSS uses a resource-loading value form, or
      * null when clean. url() is not the only one: image-set("…"), image("…"),
      * cross-fade() and friends fetch too (including with vendor prefixes,
-     * which is why the match is a bare substring).
+     * which is why the match is a bare substring). The substring is judged
+     * on the CSS as the parser reads it: a comment and the inside of a
+     * string literal never load anything (BIGR-970).
      */
     public static function resourceLoadingProblem(string $css): ?string
     {
-        if (preg_match('/(?:image-set|cross-fade|element|paint|url|src|image)\s*\(/i', $css) === 1) {
+        if (preg_match('/(?:image-set|cross-fade|element|paint|url|src|image)\s*\(/i', self::judgeable($css)) === 1) {
             return 'resource-loading CSS functions (url(), image-set(), image(), cross-fade(), …) are not allowed';
         }
         return null;
+    }
+
+    /**
+     * The CSS with comments removed and string contents blanked, in one
+     * left-to-right pass, so a quote inside a comment or a comment marker
+     * inside a string cannot hide a function name. The quotes themselves
+     * stay, so `url("x")` still spells `url(`, and `content: "url("` no
+     * longer does. An unterminated string keeps its raw text, which errs on
+     * the side of detection.
+     */
+    public static function judgeable(string $css): string
+    {
+        $out = '';
+        $length = strlen($css);
+        for ($i = 0; $i < $length; $i++) {
+            $char = $css[$i];
+            if ($char === '/' && ($css[$i + 1] ?? '') === '*') {
+                $end = strpos($css, '*/', $i + 2);
+                if ($end === false) {
+                    break;
+                }
+                $i = $end + 1;
+                continue;
+            }
+            if ($char === '"' || $char === "'") {
+                $j = $i + 1;
+                for (; $j < $length; $j++) {
+                    $inner = $css[$j];
+                    if ($inner === '\\') {
+                        $j++;
+                        continue;
+                    }
+                    if ($inner === $char || $inner === "\n" || $inner === "\r" || $inner === "\f") {
+                        break;
+                    }
+                }
+                if ($j < $length && $css[$j] === $char) {
+                    $out .= $char . $char;
+                    $i = $j;
+                    continue;
+                }
+                $out .= substr($css, $i, $j - $i);
+                $i = $j - 1;
+                continue;
+            }
+            $out .= $char;
+        }
+        return $out;
+    }
+
+    /**
+     * resourceLoadingProblem() after the two decodings a browser applies
+     * before its CSS parser sees an inline style: HTML entities (`url&#40;`
+     * in a style attribute is `url(` by the time CSS runs) and CSS identifier
+     * escapes (`\75rl(` is `url(`). A substring test on the raw bytes alone
+     * would let both through (BIGR-970).
+     */
+    public static function decodedResourceLoadingProblem(string $css): ?string
+    {
+        return self::resourceLoadingProblem(
+            self::decodeIdentifier(html_entity_decode($css, ENT_QUOTES | ENT_HTML5, 'UTF-8')),
+        );
+    }
+
+    /**
+     * Drop every declaration whose value loads a resource, judged on the
+     * decoded value. Untouched bytes are preserved exactly.
+     *
+     * @return array{0:string,1:list<array{property:string,value:string,raw:string,start:int,end:int,context:string,ancestors:list<string>,kind:string,structurallySafe:bool}>}
+     */
+    public static function dropResourceLoadingDeclarations(string $css, bool $bareDeclarationList = false): array
+    {
+        return self::dropDeclarations(
+            $css,
+            static fn (array $declaration): bool =>
+                self::decodedResourceLoadingProblem($declaration['value']) !== null,
+            $bareDeclarationList,
+        );
+    }
+
+    /**
+     * One inline `style` attribute value with every resource-loading
+     * declaration removed.
+     *
+     * An inline style is a fetch sink the markup sanitizers never treated as
+     * one: `style="background:url(https://…)"` makes every visitor's browser
+     * call a model-chosen host, which is a beacon and a third-party
+     * dependency the site never asked for. The value handed in must already
+     * be entity-decoded (the attribute's real CSS text); the caller re-encodes
+     * the result for its own quoting.
+     *
+     * Returns null when nothing had to change, '' when a loading form
+     * survived declaration-level removal (the caller drops the attribute),
+     * and otherwise the surviving declarations.
+     */
+    public static function scrubInlineStyle(string $decodedValue): ?string
+    {
+        if (self::inlineStyleLoadingProblem($decodedValue) === null) {
+            return null;
+        }
+        [$scrubbed] = self::dropDeclarations(
+            $decodedValue,
+            static fn (array $declaration): bool =>
+                self::inlineStyleLoadingProblem($declaration['value']) !== null,
+            true,
+        );
+        if (self::inlineStyleLoadingProblem($scrubbed) !== null) {
+            return '';
+        }
+        return $scrubbed;
+    }
+
+    /**
+     * A `url()` that names one of the build's own image placeholders, the
+     * `theme:./assets/<name>.jpg|png` form the image pipeline assigns
+     * (CollectImagesStep, AssignImageSourcesStep). No step writes it into an
+     * inline style itself; the allowance exists so a model-authored cover
+     * that carries the placeholder as a `background-image` keeps it, and the
+     * seeder resolves it to the site's own upload. Nothing else may appear
+     * inside the parentheses.
+     */
+    public const THEME_ASSET_URL_PATTERN =
+        '/url\(\s*(["\']?)theme:\.\/assets\/[a-z0-9-]+\.(?:jpe?g|png)\1\s*\)/i';
+
+    /**
+     * decodedResourceLoadingProblem() for an inline style attribute: the one
+     * place a `url()` may legitimately appear in generated markup, and only
+     * when it names a theme asset placeholder. Every other loading form is a
+     * fetch from a model-chosen host.
+     */
+    public static function inlineStyleLoadingProblem(string $decodedValue): ?string
+    {
+        $decoded = self::decodeIdentifier(html_entity_decode($decodedValue, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+        $withoutAssets = (string) preg_replace(self::THEME_ASSET_URL_PATTERN, '', $decoded);
+        return self::resourceLoadingProblem($withoutAssets);
     }
 
     /**
@@ -1857,7 +1994,8 @@ final class CssChecks
         return $i;
     }
 
-    private static function withoutComments(string $css): string
+    /** The CSS with every comment removed; a comment never loads anything. */
+    public static function withoutComments(string $css): string
     {
         return (string) preg_replace('~/\*.*?\*/~s', '', $css);
     }

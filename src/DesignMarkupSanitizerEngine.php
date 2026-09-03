@@ -491,8 +491,9 @@ final class DesignMarkupSanitizerEngine
         }
         foreach ($removals as $removal) {
             $authored = self::warningValue($removal['authored']);
+            $disposition = $removal['disposition'] ?? 'removed';
             $warnings[] = "malformed_design: {$path} context {$context}; authored {$authored}; "
-                . 'delivered removed; disposition removed';
+                . "delivered removed; disposition {$disposition}";
         }
         return $html;
     }
@@ -855,17 +856,33 @@ final class DesignMarkupSanitizerEngine
             $name = $attribute['name'];
             $unsafe = str_starts_with($name, 'on')
                 || in_array($name, ['srcdoc', 'ping'], true);
+            $disposition = 'removed';
             if (!$unsafe && in_array($name, self::URL_ATTRIBUTES, true)) {
                 $unsafe = !self::isSafeUrlAttribute($name, $attribute['value']);
+            }
+            if (!$unsafe && $name === 'style') {
+                // An inline style is a fetch sink: `background:url(https://…)`
+                // calls a model-chosen host on every view of the design, the
+                // screenshot pass included. This sanitizer only deletes
+                // spans, so the whole attribute goes (BIGR-970).
+                $unsafe = CssChecks::scrubInlineStyle(
+                    html_entity_decode(
+                        self::decodedAttributeValue(self::unquoted($attribute['value'])),
+                        ENT_QUOTES | ENT_HTML5,
+                        'UTF-8',
+                    ),
+                ) !== null;
+                $disposition = 'removed inline style that loads a resource';
             }
             if (!$unsafe) {
                 continue;
             }
 
             $removals[] = [
-                'start'    => $token['start'] + $attribute['offset'],
-                'length'   => strlen($attribute['raw']),
-                'authored' => $attribute['raw'],
+                'start'       => $token['start'] + $attribute['offset'],
+                'length'      => strlen($attribute['raw']),
+                'authored'    => $attribute['raw'],
+                'disposition' => $disposition,
             ];
         }
         return $removals;
@@ -901,6 +918,16 @@ final class DesignMarkupSanitizerEngine
             ];
         }
         return $attributes;
+    }
+
+    /** The attribute value without the quotes rawAttributes() keeps on it. */
+    private static function unquoted(string $value): string
+    {
+        $length = strlen($value);
+        if ($length >= 2 && ($value[0] === '"' || $value[0] === "'") && $value[$length - 1] === $value[0]) {
+            return substr($value, 1, -1);
+        }
+        return $value;
     }
 
     /**

@@ -227,16 +227,21 @@ final class ScaffoldPluginStep implements Step
 
                 $file = __DIR__ . '/pages/' . $slug . '.html';
                 $content = is_file($file) ? (string) file_get_contents($file) : '';
-                // Point the markup at the imported media (attachment ids +
-                // upload URLs), then resolve anything left — an image the
-                // build never generated — against the ACTIVE theme's assets.
+                // Sanitize FIRST, on the same placeholder form the build's
+                // intake sanitizer saw, so one rule holds on both sides: an
+                // inline `url()` is allowed only when it names a
+                // `theme:./assets/` image. Then point the markup at the
+                // imported media (attachment ids + upload URLs), and resolve
+                // anything left — an image the build never generated —
+                // against the ACTIVE theme's assets. Both rewrites insert
+                // only URLs this site owns.
+                $content = {{FN_PREFIX}}_content_sanitize($content, "page '{$slug}'");
                 $content = {{FN_PREFIX}}_content_resolve_images($content, $image_map);
                 $content = str_replace(
                     'theme:./assets/',
                     trailingslashit(get_stylesheet_directory_uri()) . 'assets/',
                     $content
                 );
-                $content = {{FN_PREFIX}}_content_sanitize($content, "page '{$slug}'");
 
                 $parent_slug = isset($page['parent']) ? (string) $page['parent'] : '';
                 // wp_insert_post() expects slashed data: it runs wp_unslash()
@@ -571,6 +576,23 @@ final class ScaffoldPluginStep implements Step
                         }
                     }
 
+                    // An inline style is a fetch sink: `background:
+                    // url(https://…)` calls a model-chosen host on every
+                    // view. Only the loading declarations go; the rest of
+                    // the style stays. get_attribute() hands back the
+                    // decoded CSS text and set_attribute() re-encodes it.
+                    $style = $processor->get_attribute('style');
+                    if (is_string($style)) {
+                        $clean = {{FN_PREFIX}}_content_scrub_style($style);
+                        if ($clean !== $style) {
+                            if (trim($clean) === '') {
+                                $processor->remove_attribute('style');
+                            } else {
+                                $processor->set_attribute('style', $clean);
+                            }
+                        }
+                    }
+
                     // No branch below returns early: every tag still falls
                     // through to the URL sweep, so a stray href on a <meta>
                     // cannot slip past on its way out.
@@ -613,6 +635,15 @@ final class ScaffoldPluginStep implements Step
                         // `&#106;avascript:` is compared in its resolved form
                         // and needs no entity handling here.
                         $value = $processor->get_attribute($name);
+                        // The build's own image placeholder rides `src` and
+                        // a cover's `url` until the media rewrite below
+                        // resolves it; its scheme is not a WordPress
+                        // protocol, and only this exact shape passes.
+                        if (is_string($value)
+                            && preg_match('/^theme:\.\/assets\/[a-z0-9-]+\.(?:jpe?g|png)$/i', $value) === 1
+                        ) {
+                            continue;
+                        }
                         if (is_string($value)
                             && wp_kses_bad_protocol($value, $allowed) !== $value
                         ) {
@@ -632,6 +663,97 @@ final class ScaffoldPluginStep implements Step
                 return null;
             }
             return $processor->get_updated_html();
+        }
+
+        /**
+         * Whether a CSS value loads a resource, judged after CSS identifier
+         * escapes are decoded (`\75rl(` is `url(` to the CSS parser). The
+         * same value forms the build's CssChecks::resourceLoadingProblem()
+         * refuses: url(), image-set(), image(), cross-fade(), element(),
+         * paint(), src(), prefixed or not.
+         */
+        function {{FN_PREFIX}}_content_css_loads_resource($value) {
+            $decoded = preg_replace_callback(
+                '/\\\\(?:([0-9a-fA-F]{1,6})[ \t\r\n\f]?|([^\r\n\f]))/',
+                function ($match) {
+                    if (!isset($match[1]) || $match[1] === '') {
+                        return isset($match[2]) ? $match[2] : '';
+                    }
+                    $codepoint = hexdec($match[1]);
+                    // Only ASCII can spell a function name; anything else is
+                    // left as an opaque non-matching placeholder.
+                    return ($codepoint > 0 && $codepoint < 128) ? chr((int) $codepoint) : "\xEF\xBF\xBD";
+                },
+                (string) $value
+            );
+            // The build's own image placeholder is the one url() a cover may
+            // carry; it is resolved to this site's upload after sanitizing.
+            $decoded = preg_replace(
+                '/url\(\s*(["\']?)theme:\.\/assets\/[a-z0-9-]+\.(?:jpe?g|png)\1\s*\)/i',
+                '',
+                (string) $decoded
+            );
+            return preg_match('/(?:image-set|cross-fade|element|paint|url|src|image)\s*\(/i', (string) $decoded) === 1;
+        }
+
+        /**
+         * The inline style with every resource-loading declaration removed.
+         * Same policy as the build's CssChecks::scrubInlineStyle(): split on
+         * `;` outside quotes and parentheses, drop the declarations that
+         * load, and give back '' when a loading form still survives so the
+         * caller drops the attribute rather than store it unreviewed.
+         */
+        function {{FN_PREFIX}}_content_scrub_style($style) {
+            if (!{{FN_PREFIX}}_content_css_loads_resource($style)) {
+                return $style;
+            }
+            $kept = array();
+            $current = '';
+            $depth = 0;
+            $quote = '';
+            $length = strlen($style);
+            for ($i = 0; $i < $length; $i++) {
+                $char = $style[$i];
+                if ($quote !== '') {
+                    $current .= $char;
+                    if ($char === '\\' && $i + 1 < $length) {
+                        $current .= $style[++$i];
+                    } elseif ($char === $quote) {
+                        $quote = '';
+                    }
+                    continue;
+                }
+                if ($char === '"' || $char === "'") {
+                    $quote = $char;
+                    $current .= $char;
+                    continue;
+                }
+                if ($char === '\\' && $i + 1 < $length) {
+                    $current .= $char . $style[++$i];
+                    continue;
+                }
+                if ($char === '(') {
+                    $depth++;
+                } elseif ($char === ')' && $depth > 0) {
+                    $depth--;
+                }
+                if ($char === ';' && $depth === 0) {
+                    if (!{{FN_PREFIX}}_content_css_loads_resource($current)) {
+                        $kept[] = $current;
+                    }
+                    $current = '';
+                    continue;
+                }
+                $current .= $char;
+            }
+            if (trim($current) !== '' && !{{FN_PREFIX}}_content_css_loads_resource($current)) {
+                $kept[] = $current;
+            }
+            $clean = trim(implode(';', $kept));
+            if ($clean !== '' && {{FN_PREFIX}}_content_css_loads_resource($clean)) {
+                return '';
+            }
+            return $clean;
         }
 
         /** Whether the current token sits inside a code-bearing element. */
