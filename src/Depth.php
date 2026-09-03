@@ -6,7 +6,7 @@ namespace Automattic\SiteBuild;
 /** Shared bounded vocabulary and deterministic execution for visual depth. */
 final class Depth
 {
-    public const ALL = ['flat', 'soft', 'hard-offset', 'inset', 'glow'];
+    public const ALL = ['flat', 'ring', 'soft', 'hard-offset', 'inset', 'glow'];
 
     public const DEFAULT = 'flat';
 
@@ -15,6 +15,13 @@ final class Depth
         'flat' => [
             'name' => 'Flat',
             'shadow' => 'none',
+        ],
+        // A 1px hairline ring, not a lift. Product and technical sites build
+        // every card and framed screenshot from this one line, so the build
+        // owns it here instead of asking the model for decorative borders.
+        'ring' => [
+            'name' => 'Hairline ring',
+            'shadow' => '0 0 0 1px color-mix(in srgb, var(--wp--preset--color--contrast) 12%, transparent)',
         ],
         'soft' => [
             'name' => 'Soft depth',

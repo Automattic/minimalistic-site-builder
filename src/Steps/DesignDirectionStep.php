@@ -1612,6 +1612,7 @@ final class DesignDirectionStep implements Step
         if ($depth !== null) {
             $facts[] = '- **Depth**: ' . $depth . ' — ' . match ($depth) {
                 'flat'        => 'cards, contained images, contained covers, and media-text surfaces stay deliberately shadowless',
+                'ring'        => 'the build gives cards and contained media one 1px hairline ring and no lift',
                 'soft'        => 'the build gives cards and contained media one restrained, diffuse lift',
                 'hard-offset' => 'the build gives cards and contained media one crisp poster-like offset plate',
                 'inset'       => 'the build presses cards and contained media into their surfaces with an inset edge and shade',

@@ -6,6 +6,7 @@ use Automattic\SiteBuild\Depth;
 test('Depth exposes one canonical preset for every bounded commitment', function () {
     $expected = [
         'flat' => 'none',
+        'ring' => '0 0 0 1px',
         'soft' => '0 0.75rem 2rem',
         'hard-offset' => '0.55rem 0.55rem 0',
         'inset' => 'inset 0 0 0 1px',
@@ -38,6 +39,16 @@ test('Depth rejects uncommitted values without inventing a kit or preset', funct
     assert_eq(null, Depth::preset('floating'));
     assert_eq(null, Depth::kitCss('floating'));
     assert_eq('hard-offset', Depth::explicit(' Hard-Offset '));
+});
+
+test('Depth ring is one hairline with no lift and no inset edge', function () {
+    $preset = Depth::preset('ring');
+    assert_eq('0 0 0 1px color-mix(in srgb, var(--wp--preset--color--contrast) 12%, transparent)', $preset['shadow']);
+    assert_eq('Hairline ring', $preset['name']);
+    $css = Depth::kitCss('ring');
+    assert_contains("Committed 'ring' depth", $css);
+    assert_true(!str_contains($css, 'outline-offset'), 'the ring is a box-shadow, not the inset outline');
+    assert_eq(['flat', 'ring', 'soft', 'hard-offset', 'inset', 'glow'], Depth::ALL);
 });
 
 test('Depth inset remains visible on replaced image content', function () {
