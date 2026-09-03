@@ -35,14 +35,64 @@ final class CssChecks
      * The problem string when the CSS uses a resource-loading value form, or
      * null when clean. url() is not the only one: image-set("…"), image("…"),
      * cross-fade() and friends fetch too (including with vendor prefixes,
-     * which is why the match is a bare substring).
+     * which is why the match is a bare substring). The substring is judged
+     * on the CSS as the parser reads it: a comment and the inside of a
+     * string literal never load anything (BIGR-970).
      */
     public static function resourceLoadingProblem(string $css): ?string
     {
-        if (preg_match('/(?:image-set|cross-fade|element|paint|url|src|image)\s*\(/i', $css) === 1) {
+        if (preg_match('/(?:image-set|cross-fade|element|paint|url|src|image)\s*\(/i', self::judgeable($css)) === 1) {
             return 'resource-loading CSS functions (url(), image-set(), image(), cross-fade(), …) are not allowed';
         }
         return null;
+    }
+
+    /**
+     * The CSS with comments removed and string contents blanked, in one
+     * left-to-right pass, so a quote inside a comment or a comment marker
+     * inside a string cannot hide a function name. The quotes themselves
+     * stay, so `url("x")` still spells `url(`, and `content: "url("` no
+     * longer does. An unterminated string keeps its raw text, which errs on
+     * the side of detection.
+     */
+    public static function judgeable(string $css): string
+    {
+        $out = '';
+        $length = strlen($css);
+        for ($i = 0; $i < $length; $i++) {
+            $char = $css[$i];
+            if ($char === '/' && ($css[$i + 1] ?? '') === '*') {
+                $end = strpos($css, '*/', $i + 2);
+                if ($end === false) {
+                    break;
+                }
+                $i = $end + 1;
+                continue;
+            }
+            if ($char === '"' || $char === "'") {
+                $j = $i + 1;
+                for (; $j < $length; $j++) {
+                    $inner = $css[$j];
+                    if ($inner === '\\') {
+                        $j++;
+                        continue;
+                    }
+                    if ($inner === $char || $inner === "\n" || $inner === "\r" || $inner === "\f") {
+                        break;
+                    }
+                }
+                if ($j < $length && $css[$j] === $char) {
+                    $out .= $char . $char;
+                    $i = $j;
+                    continue;
+                }
+                $out .= substr($css, $i, $j - $i);
+                $i = $j - 1;
+                continue;
+            }
+            $out .= $char;
+        }
+        return $out;
     }
 
     /**

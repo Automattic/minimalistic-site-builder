@@ -579,3 +579,34 @@ test('sanitize removes block-JSON destinations and sources with an executable sc
     assert_contains('{"label":"Fine","url":"https://example.com/","kind":"custom"}', $out, 'a plain destination stays');
     assert_contains('block attribute(s) with an executable URL', implode(' | ', $notes));
 });
+
+test('sanitize notes name the authored value behind every removal class', function () {
+    $notes = [];
+    MarkupSanitizer::sanitize(
+        '<link href="https://evil.example/l.css"><script>x()</script>'
+        . '<div onclick="alert(1)" style="color:red;background:url(https://evil.example/x.png)">'
+        . '<a href="javascript:go()">x</a><img src="//evil.example/i.png"></div>'
+        . '<!-- wp:cover {"url":"https://evil.example/bg.jpg","id":1} --><div></div><!-- /wp:cover -->',
+        $notes,
+    );
+    $joined = implode("\n", $notes);
+    assert_true(preg_match('/element markup \(\d+ byte\(s\)\): link, script/', $joined) === 1, $joined);
+    assert_contains('inline event handler attribute(s): onclick="alert(1)"', $joined);
+    assert_contains('executable URL value(s): javascript:go()', $joined);
+    assert_contains('inline style attribute(s): style=color:red;background:url(https://evil.example/x.png)', $joined);
+    assert_contains('media source attribute(s) on a foreign host: src="//evil.example/i.png"', $joined);
+    assert_contains('block attribute media source(s) on a foreign host: "url":"https://evil.example/bg.jpg"', $joined);
+
+    // Long values are clipped and the list is bounded, so a row stays one line.
+    $many = '';
+    for ($i = 0; $i < 7; $i++) {
+        $many .= '<img src="https://evil.example/' . str_repeat('a', 200) . "{$i}.png\">";
+    }
+    $notes = [];
+    MarkupSanitizer::sanitize($many, $notes);
+    assert_eq(1, count($notes));
+    assert_contains('removed 7 media source attribute(s)', $notes[0]);
+    assert_eq(5, substr_count($notes[0], '...png"') + substr_count($notes[0], 'a...'), 'five clipped samples');
+    assert_true(str_ends_with($notes[0], ', ...'), 'the rest is elided');
+    assert_true(strlen($notes[0]) < 800, 'bounded row');
+});

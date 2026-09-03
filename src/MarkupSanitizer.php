@@ -93,6 +93,7 @@ final class MarkupSanitizer
         // until stable. This terminates because a pass that changes anything
         // strictly shortens the markup.
         $removedBytes = 0;
+        preg_match_all('/<(' . implode('|', $tags) . ')\b/i', $markup, $removedNames);
         do {
             $before = $markup;
             $markup = HtmlBlockContext::removeElements($markup, $containers);
@@ -100,7 +101,10 @@ final class MarkupSanitizer
             $removedBytes += strlen($before) - strlen($markup);
         } while ($markup !== $before);
         if ($removedBytes > 0) {
-            $notes[] = "removed script-capable element markup ({$removedBytes} byte(s))";
+            $notes[] = self::note(
+                "removed script-capable element markup ({$removedBytes} byte(s))",
+                array_values(array_unique(array_map('strtolower', $removedNames[1]))),
+            );
         }
         // Attribute tokens follow browser-like quote, whitespace, and slash
         // states. This matters for malformed-but-active forms such as
@@ -109,37 +113,62 @@ final class MarkupSanitizer
         $urls = 0;
         $styles = 0;
         $media = 0;
+        // Every note names what went, so the warning row a caller writes
+        // carries the authored value and not only a count.
+        $samples = [];
         $markup = HtmlBlockContext::rewriteOpeningTags(
             $markup,
-            static function (string $tag) use (&$handlers, &$urls, &$styles, &$media): string {
-                return self::sanitizeOpeningTag($tag, $handlers, $urls, $styles, $media);
+            static function (string $tag) use (&$handlers, &$urls, &$styles, &$media, &$samples): string {
+                return self::sanitizeOpeningTag($tag, $handlers, $urls, $styles, $media, $samples);
             },
         );
         if ($handlers > 0) {
-            $notes[] = "removed {$handlers} inline event handler attribute(s)";
+            $notes[] = self::note("removed {$handlers} inline event handler attribute(s)", $samples['handlers'] ?? []);
         }
         if ($urls > 0) {
-            $notes[] = "neutralized {$urls} executable URL value(s)";
+            $notes[] = self::note("neutralized {$urls} executable URL value(s)", $samples['urls'] ?? []);
         }
         if ($styles > 0) {
-            $notes[] = "removed resource-loading declarations from {$styles} inline style attribute(s)";
+            $notes[] = self::note(
+                "removed resource-loading declarations from {$styles} inline style attribute(s)",
+                $samples['styles'] ?? [],
+            );
         }
         if ($media > 0) {
-            $notes[] = "removed {$media} media source attribute(s) on a foreign host";
+            $notes[] = self::note("removed {$media} media source attribute(s) on a foreign host", $samples['media'] ?? []);
         }
         // The editor acts on the same sources in block-comment JSON: a cover's
         // "url" is what it loads when the page opens for editing, and a
         // dynamic block such as navigation-link renders its "url" from there.
         $blockMedia = 0;
         $blockExecutable = 0;
-        $markup = self::neutralizeBlockJsonSources($markup, $blockMedia, $blockExecutable);
+        $blockSamples = ['media' => [], 'executable' => []];
+        $markup = self::neutralizeBlockJsonSources($markup, $blockMedia, $blockExecutable, $blockSamples);
         if ($blockMedia > 0) {
-            $notes[] = "removed {$blockMedia} block attribute media source(s) on a foreign host";
+            $notes[] = self::note("removed {$blockMedia} block attribute media source(s) on a foreign host", $blockSamples['media']);
         }
         if ($blockExecutable > 0) {
-            $notes[] = "removed {$blockExecutable} block attribute(s) with an executable URL";
+            $notes[] = self::note("removed {$blockExecutable} block attribute(s) with an executable URL", $blockSamples['executable']);
         }
         return $markup;
+    }
+
+    /**
+     * One note: the class summary, then the authored values it stands for,
+     * each clipped, at most five, so a warning row stays one readable line.
+     *
+     * @param list<string> $samples
+     */
+    private static function note(string $summary, array $samples): string
+    {
+        if ($samples === []) {
+            return $summary;
+        }
+        $shown = array_map(
+            static fn (string $sample): string => strlen($sample) > 120 ? substr($sample, 0, 117) . '...' : $sample,
+            array_slice($samples, 0, 5),
+        );
+        return $summary . ': ' . implode(', ', $shown) . (count($samples) > 5 ? ', ...' : '');
     }
 
     private static function sanitizeOpeningTag(
@@ -148,6 +177,7 @@ final class MarkupSanitizer
         int &$urls = 0,
         int &$styles = 0,
         int &$media = 0,
+        array &$samples = [],
     ): string {
         $attributes = self::attributes($tag);
         preg_match('/\A<([a-zA-Z][^\x09\x0A\x0C\x0D\x20\/>]*)/', $tag, $nameMatch);
@@ -176,6 +206,7 @@ final class MarkupSanitizer
                     'replacement' => $needsSeparator ? ' ' : '',
                 ];
                 $handlers++;
+                $samples['handlers'][] = trim(substr($tag, $attribute['start'], $attribute['end'] - $attribute['start']));
                 continue;
             }
 
@@ -202,6 +233,7 @@ final class MarkupSanitizer
                     'replacement' => $needsSeparator ? ' ' : '',
                 ];
                 $media++;
+                $samples['media'][] = trim(substr($tag, $attribute['start'], $attribute['end'] - $attribute['start']));
                 continue;
             }
 
@@ -246,6 +278,7 @@ final class MarkupSanitizer
                     ];
                 }
                 $styles++;
+                $samples['styles'][] = 'style=' . $raw;
                 continue;
             }
 
@@ -265,6 +298,7 @@ final class MarkupSanitizer
                     'replacement' => '#',
                 ];
                 $urls++;
+                $samples['urls'][] = substr($tag, $attribute['valueStart'], $attribute['valueEnd'] - $attribute['valueStart']);
             }
         }
 
@@ -551,11 +585,16 @@ final class MarkupSanitizer
      * way WordPress does, so the JSON stays valid whatever was removed; a
      * block that lost nothing keeps its bytes.
      */
-    private static function neutralizeBlockJsonSources(string $markup, int &$media, int &$executable): string
-    {
+    /** @param array{media:list<string>,executable:list<string>} $samples out-param: the authored pairs that went */
+    private static function neutralizeBlockJsonSources(
+        string $markup,
+        int &$media,
+        int &$executable,
+        array &$samples = ['media' => [], 'executable' => []],
+    ): string {
         $result = preg_replace_callback(
             '/<!--\s*wp:([a-zA-Z0-9-]+(?:\/[a-zA-Z0-9-]+)?)\s+(\{.*?\})\s*(\/?)-->/s',
-            static function (array $match) use (&$media, &$executable): string {
+            static function (array $match) use (&$media, &$executable, &$samples): string {
                 $attrs = json_decode($match[2], true);
                 if (!is_array($attrs)) {
                     return $match[0];
@@ -565,7 +604,7 @@ final class MarkupSanitizer
                 $name = (string) preg_replace('#^core/#', '', $match[1]);
                 $mediaBlock = preg_match('/^(?:' . self::BLOCK_MEDIA_NAMES . ')$/', $name) === 1;
                 $changed = false;
-                $attrs = self::walkBlockJson($attrs, $mediaBlock, null, $media, $executable, $changed);
+                $attrs = self::walkBlockJson($attrs, $mediaBlock, null, $media, $executable, $changed, $samples);
                 if (!$changed) {
                     return $match[0];
                 }
@@ -591,12 +630,13 @@ final class MarkupSanitizer
         int &$media,
         int &$executable,
         bool &$changed,
+        array &$samples = ['media' => [], 'executable' => []],
     ): array {
         foreach ($node as $key => $value) {
             $ownKey = is_string($key) ? $key : $parentKey;
             if (is_array($value)) {
                 $childChanged = false;
-                $child = self::walkBlockJson($value, $mediaBlock, $ownKey, $media, $executable, $childChanged);
+                $child = self::walkBlockJson($value, $mediaBlock, $ownKey, $media, $executable, $childChanged, $samples);
                 if ($childChanged) {
                     $changed = true;
                     if ($child === [] && is_string($key)) {
@@ -613,6 +653,7 @@ final class MarkupSanitizer
             if (in_array($key, self::BLOCK_SOURCE_KEYS, true) && self::hasExecutableScheme($value)) {
                 unset($node[$key]);
                 $executable++;
+                $samples['executable'][] = json_encode($key) . ':' . json_encode($value, JSON_UNESCAPED_SLASHES);
                 $changed = true;
                 continue;
             }
@@ -621,6 +662,7 @@ final class MarkupSanitizer
             if ($fetches && self::isForeignSource('src', $value)) {
                 unset($node[$key]);
                 $media++;
+                $samples['media'][] = json_encode($key) . ':' . json_encode($value, JSON_UNESCAPED_SLASHES);
                 $changed = true;
             }
         }
