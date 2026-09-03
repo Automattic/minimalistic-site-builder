@@ -316,3 +316,58 @@ test('homepage-design rejects a sanitized patch whose raw root is unclosed', fun
     assert_contains('splice_failure', homepage_review_warnings($project));
     homepage_cleanup($tmp);
 });
+
+test('design sanitizer scrubs every fetch out of the head stylesheet at the write', function () {
+    $warnings = [];
+    $out = \Automattic\SiteBuild\DesignMarkupSanitizer::sanitize(
+        '<!DOCTYPE html><html><head><title>x</title>'
+        . '<style>@import url(https://evil.example/i.css);'
+        . ':root { --content-size: 800px; } .hero { color: red; background: url(https://evil.example/px.png); }'
+        . '.card { background-image: image-set("./a.png" 1x); margin: 0 }</style>'
+        . '</head><body><p>Body</p></body></html>',
+        'design/home.html',
+        'test',
+        $warnings,
+    );
+    assert_true(!str_contains($out, 'evil.example'), 'no external authority survives');
+    assert_true(!str_contains($out, 'url(') && !str_contains($out, 'image-set('), 'no loading form survives');
+    assert_true(!str_contains($out, '@import'), 'no @import survives');
+    assert_contains('--content-size: 800px;', $out);
+    assert_contains('color: red;', $out);
+    assert_contains('margin: 0', $out);
+    assert_contains('<p>Body</p>', $out);
+    $joined = implode(' ', $warnings);
+    assert_contains('malformed_design: design/home.html context test', $joined);
+    assert_contains('resource-loading CSS value', $joined);
+    assert_true(count($warnings) >= 3, 'every removal is recorded');
+
+    $again = [];
+    assert_eq($out, \Automattic\SiteBuild\DesignMarkupSanitizer::sanitize($out, 'design/home.html', 'test', $again), 'fixed point');
+    assert_eq([], $again);
+});
+
+test('homepage-design writes a design stylesheet that fetches nothing', function () {
+    [$project, $llm, $tmp] = homepage_fixture([
+        'design_candidates' => 2,
+        'critique_rounds' => 0,
+    ]);
+    homepage_queue_tournament($llm, [
+        homepage_document('FETCH', "\n@import url(https://evil.example/i.css);\n.safe { color: red; background: url(https://evil.example/px) }\n"),
+        homepage_document('SAFE', "\n.safe { color: blue; }\n"),
+    ]);
+
+    homepage_run($project, $llm);
+
+    foreach (['design/home.html', 'design/site.css', 'design/candidate-1.html'] as $rel) {
+        $bytes = $project->readText($rel);
+        assert_true(!str_contains($bytes, 'evil.example'), "{$rel}: no external authority");
+        assert_true(!str_contains($bytes, 'url('), "{$rel}: no url()");
+        assert_true(!str_contains($bytes, '@import'), "{$rel}: no @import");
+    }
+    assert_contains('color: red', $project->readText('design/site.css'), 'the surviving declaration stays');
+    $warnings = homepage_review_warnings($project);
+    assert_contains('evil.example', $warnings, 'the authored fetch is recorded');
+    assert_contains('delivered removed', $warnings);
+    assert_contains('design/candidate-1.html', $warnings);
+    homepage_cleanup($tmp);
+});
