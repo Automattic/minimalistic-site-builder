@@ -9,6 +9,7 @@ use Automattic\SiteBuild\ImageCrop;
 use Automattic\SiteBuild\ImageLogger;
 use Automattic\SiteBuild\GeminiImage;
 use Automattic\SiteBuild\ImagePromptComposer;
+use Automattic\SiteBuild\ImageQa;
 use Automattic\SiteBuild\ImageTransparency;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\MediaReferenceRemoval;
@@ -19,6 +20,7 @@ use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\ThemeValidator;
+use Automattic\SiteBuild\VisionLlm;
 use Automattic\SiteBuild\Warnings;
 
 /**
@@ -43,6 +45,14 @@ use Automattic\SiteBuild\Warnings;
  * tripped the filter, the prompt is recomposed, and the image is regenerated.
  * Without an Llm, or when the repaired prompt is filtered too, the image is
  * marked "failed" like any other failure.
+ *
+ * Delivered heroes and other viewport-spanning images get one look from a
+ * vision model when the Llm is a VisionLlm (BIGR-979): is the view upright,
+ * is there rendered text, does the picture show the subject. A failing image
+ * is regenerated once with a corrected subject and looked at again; one that
+ * still fails, or that could not be regenerated, ships as generated with a
+ * warnings.json row. The check never fails a build: an unreadable or failed
+ * inspection delivers the image unchanged. See ImageQa for the pure parts.
  */
 final class GenerateImagesStep implements Step
 {
@@ -63,12 +73,15 @@ final class GenerateImagesStep implements Step
      *        null falls back to the Llm client's default model
      * @param ?PromptRenderer $renderer renders the repair prompt; null falls
      *        back to the package's prompts/ dir
+     * @param bool    $inspectImages whether delivered heroes get the vision
+     *        check; needs a VisionLlm in $llm to take effect
      */
     public function __construct(
         private ImageClient $images,
         private ?Llm $llm = null,
         private ?string $repairModel = null,
         private ?PromptRenderer $renderer = null,
+        private bool $inspectImages = true,
     ) {
         $this->renderer ??= new PromptRenderer(Package::promptsDir());
     }
@@ -237,6 +250,18 @@ final class GenerateImagesStep implements Step
                     $imageCrop,
                     $resolved,
                 );
+            }
+
+            if ($this->inspectImages && $this->llm instanceof VisionLlm) {
+                $this->inspectDelivered(
+                    $project,
+                    $specs,
+                    array_keys($pending),
+                    $siteContext,
+                    $imageGrade,
+                    $imageCrop,
+                );
+                $project->writeJsonAtomic('images.json', $specs);
             }
         }
 
@@ -563,31 +588,10 @@ final class GenerateImagesStep implements Step
             if (!($result['ok'] ?? false) || !isset($result['bytes'])) {
                 throw new \RuntimeException((string) ($result['error'] ?? 'unknown error'));
             }
-            // Defense in depth: ImageClient implementations are replaceable.
-            // WpcomImageClient already requested and, only if needed, locally
-            // converted JPEG. This final boundary asserts its contract rather
-            // than introducing a second conversion path.
-            $bytes = (string) $result['bytes'];
-            $this->assertDeliveryMime($bytes, $genSpec['mime']);
-            $borderTrimmed = 0;
-            if ($genSpec['mime'] === 'image/png') {
-                // The image model cannot render real alpha: the prompt asked for a flat
-                // solid white background instead, keyed out here so the asset
-                // gets the transparency its .png promises.
-                $bytes = ImageTransparency::keyOutBackground($bytes);
-            } else {
-                // Opaque images sometimes arrive as a printed photograph with
-                // a flat white border painted into the pixels (BIGR-956);
-                // prompt wording alone does not stop it, so the border is
-                // detected and cropped off here. A .png asset is exempt: its
-                // white surround is the keyable background requested above.
-                $trim = ImageBorderTrim::trimPaintedBorder($bytes);
-                $borderTrimmed = $trim['trimmed'];
-                $bytes = $trim['bytes'];
-            }
-            // ImageTransparency fails soft by returning its input. Verify the
-            // post-processed bytes as well before choosing the file extension.
-            $this->assertDeliveryMime($bytes, $genSpec['mime']);
+            ['bytes' => $bytes, 'borderTrimmed' => $borderTrimmed] = $this->deliverableBytes(
+                (string) $result['bytes'],
+                $genSpec['mime'],
+            );
         } catch (\Throwable $e) {
             $specs[$i]['status'] = 'failed';
             $specs[$i]['error']  = $e->getMessage();
@@ -613,6 +617,200 @@ final class GenerateImagesStep implements Step
             'bytes' => strlen($bytes),
             'border_trimmed' => $borderTrimmed,
         ]);
+    }
+
+    /**
+     * Post-process one delivery into the bytes that ship, or throw when they
+     * cannot ship. Shared by the first delivery and a QA regeneration.
+     *
+     * @return array{bytes:string,borderTrimmed:int}
+     */
+    private function deliverableBytes(string $bytes, string $mime): array
+    {
+        // Defense in depth: ImageClient implementations are replaceable.
+        // WpcomImageClient already requested and, only if needed, locally
+        // converted JPEG. This final boundary asserts its contract rather
+        // than introducing a second conversion path.
+        $this->assertDeliveryMime($bytes, $mime);
+        $borderTrimmed = 0;
+        if ($mime === 'image/png') {
+            // The image model cannot render real alpha: the prompt asked for a flat
+            // solid white background instead, keyed out here so the asset
+            // gets the transparency its .png promises.
+            $bytes = ImageTransparency::keyOutBackground($bytes);
+        } else {
+            // Opaque images sometimes arrive as a printed photograph with
+            // a flat white border painted into the pixels (BIGR-956);
+            // prompt wording alone does not stop it, so the border is
+            // detected and cropped off here. A .png asset is exempt: its
+            // white surround is the keyable background requested above.
+            $trim = ImageBorderTrim::trimPaintedBorder($bytes);
+            $borderTrimmed = $trim['trimmed'];
+            $bytes = $trim['bytes'];
+        }
+        // ImageTransparency fails soft by returning its input. Verify the
+        // post-processed bytes as well before choosing the file extension.
+        $this->assertDeliveryMime($bytes, $mime);
+        return ['bytes' => $bytes, 'borderTrimmed' => $borderTrimmed];
+    }
+
+    /**
+     * Look at every hero / full-frame image this run delivered (BIGR-979).
+     * The ladder per image: a failing verdict earns one regeneration with a
+     * corrected subject and a second look; an image that still fails, or
+     * whose regeneration failed, is kept and recorded in warnings.json. No
+     * verdict (transport error, unreadable answer) delivers the image as is
+     * with a narration line only: nothing about the delivered output changed.
+     *
+     * @param array<int,array<string,mixed>> $specs   images.json rows, mutated in place
+     * @param list<int>                      $indices rows this run generated
+     */
+    private function inspectDelivered(
+        Project $project,
+        array &$specs,
+        array $indices,
+        string $siteContext,
+        string $imageGrade,
+        string $imageCrop,
+    ): void {
+        foreach ($indices as $i) {
+            $spec = $specs[$i];
+            if (($spec['status'] ?? '') !== 'completed' || !ImageQa::applies($spec)) {
+                continue;
+            }
+            $filename = (string) $spec['filename'];
+            $rel = 'theme/assets/' . $filename;
+            if (!$project->exists($rel)) {
+                continue;
+            }
+
+            $verdict = $this->inspect($project, $spec, $rel);
+            if ($verdict === null || $verdict['ok']) {
+                if ($verdict !== null) {
+                    Narrator::write("    QA {$filename}: upright, no text, on subject\n");
+                }
+                continue;
+            }
+            $finding = implode('; ', $verdict['findings']);
+            Narrator::write("    QA {$filename}: {$finding}; regenerating once\n");
+
+            $authored = (string) ($spec['subject'] ?? '');
+            $subject = ImageQa::correctedSubject($authored, $verdict);
+            $genSpec = self::generationSpec($spec, $siteContext, $imageGrade, $imageCrop, $subject);
+            $error = $this->regenerate($project, $spec, $rel, $genSpec, $imageGrade, $imageCrop, $subject, $finding);
+            if ($error !== null) {
+                Narrator::write("    QA {$filename}: regeneration failed ({$error}); keeping the first image\n");
+                $specs[$i]['qa'] = ['regenerated' => false, 'finding' => $finding];
+                $project->addWarnings($this->id(), [ImageQa::warningRow(
+                    $filename,
+                    $authored,
+                    $verdict['findings'],
+                    "regeneration failed: {$error}",
+                )]);
+                continue;
+            }
+
+            $second = $this->inspect($project, $spec, $rel);
+            if ($second === null || $second['ok']) {
+                Narrator::write("    QA {$filename}: regenerated image " . ($second === null ? 'unverified' : 'passes') . "\n");
+                $specs[$i]['qa'] = ['regenerated' => true, 'finding' => $finding];
+                continue;
+            }
+            $secondFinding = implode('; ', $second['findings']);
+            Narrator::write("    QA {$filename}: still failing ({$secondFinding}); delivered with a warning\n");
+            $specs[$i]['qa'] = ['regenerated' => true, 'finding' => $secondFinding];
+            $project->addWarnings($this->id(), [ImageQa::warningRow(
+                $filename,
+                $authored,
+                $second['findings'],
+                'still failing after one regeneration',
+            )]);
+        }
+    }
+
+    /**
+     * One vision call over the delivered file. Null when there is no usable
+     * verdict; that is never treated as a defect.
+     *
+     * @param array<string,mixed> $spec
+     * @return array{ok:bool,findings:list<string>,note:string}|null
+     */
+    private function inspect(Project $project, array $spec, string $rel): ?array
+    {
+        if (!$this->llm instanceof VisionLlm) {
+            return null;
+        }
+        $filename = (string) ($spec['filename'] ?? '');
+        try {
+            $prompt = $this->renderer->render('image-qa.md', [
+                'subject' => (string) ($spec['subject'] ?? ''),
+            ]);
+            $answer = $this->llm->completeWithImage(
+                $prompt,
+                $project->readText($rel),
+                GeminiImage::mimeForFilename($filename),
+                ['max_tokens' => 300, 'log_label' => 'image-qa']
+                    + ($this->repairModel !== null ? ['model' => $this->repairModel] : []),
+            );
+        } catch (\Throwable $e) {
+            Narrator::write("    QA {$filename}: inspection unavailable ({$e->getMessage()}); delivered unverified\n");
+            return null;
+        }
+        $verdict = ImageQa::verdict($answer);
+        if ($verdict === null) {
+            Narrator::write("    QA {$filename}: unreadable verdict; delivered unverified\n");
+        }
+        return $verdict;
+    }
+
+    /**
+     * Regenerate one image in place. On success the asset file is replaced
+     * and null is returned; on any failure the first image stays on disk and
+     * the error is returned. images.json is not touched here: the row is
+     * already completed, and a failed regeneration must not turn a delivered
+     * image into a removed one.
+     *
+     * @param array<string,mixed> $spec
+     * @param array{prompt:string,aspect_ratio:string,sample_image_size:string,mime:string} $genSpec
+     */
+    private function regenerate(
+        Project $project,
+        array $spec,
+        string $rel,
+        array $genSpec,
+        string $imageGrade,
+        string $imageCrop,
+        string $subject,
+        string $finding,
+    ): ?string {
+        $filename = (string) ($spec['filename'] ?? '');
+        $logRequest = $this->requestLog($spec, $genSpec, $imageGrade, $imageCrop, $subject)
+            + ['image_qa' => $finding];
+        $error = null;
+        $this->drainBatch([$genSpec], function (int $pos, array $result) use (
+            $project, $rel, $filename, $genSpec, $logRequest, &$error
+        ): void {
+            try {
+                if (!($result['ok'] ?? false) || !isset($result['bytes'])) {
+                    throw new \RuntimeException((string) ($result['error'] ?? 'unknown error'));
+                }
+                ['bytes' => $bytes, 'borderTrimmed' => $borderTrimmed] = $this->deliverableBytes(
+                    (string) $result['bytes'],
+                    $genSpec['mime'],
+                );
+            } catch (\Throwable $e) {
+                $error = $e->getMessage();
+                ImageLogger::log($filename, $logRequest, [], $error);
+                return;
+            }
+            $project->writeText($rel, $bytes);
+            ImageLogger::log($filename, $logRequest, [
+                'path'  => $rel,
+                'bytes' => strlen($bytes),
+                'border_trimmed' => $borderTrimmed,
+            ]);
+        });
+        return $error;
     }
 
     /**

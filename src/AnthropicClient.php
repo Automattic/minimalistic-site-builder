@@ -10,7 +10,7 @@ namespace Automattic\SiteBuild;
  * no streaming, no tool use, no agentic loop. This is the production transport
  * for the builder; see PROGRESS.md for why the wpcom proxy is not used.
  */
-final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting
+final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting, VisionLlm
 {
     private const ENDPOINT = 'https://api.anthropic.com/v1/messages';
     private const API_VERSION = '2023-06-01';
@@ -129,13 +129,39 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting
      */
     public function complete(string $prompt, array $opts = []): string
     {
-        $this->lastFinishReason = null;
-
         // Stream the response: bytes arrive incrementally, so a stalled
         // connection is detected quickly (and retried) instead of blocking the
         // full timeout, and long generations never hit an idle-connection
         // timeout.
         $body = self::bodyFor(['prompt' => $prompt] + $opts, $this->model, $this->defaultMaxTokens);
+        return $this->send($body, $opts);
+    }
+
+    /**
+     * One prompt plus one image, as a single user turn whose content starts
+     * with the image block. Everything else — retries, usage, the finish
+     * reason, the transcript — is the plain complete() path.
+     *
+     * @param array{system?:string,model?:string,max_tokens?:int,temperature?:float,json_schema?:array{name:string,schema:array<string,mixed>},log_label?:string} $opts
+     */
+    public function completeWithImage(string $prompt, string $imageBytes, string $mime, array $opts = []): string
+    {
+        $body = self::bodyForImage(['prompt' => $prompt] + $opts, $imageBytes, $mime, $this->model, $this->defaultMaxTokens);
+        return $this->send($body, $opts, self::redactImages($body));
+    }
+
+    /**
+     * Drive one prepared request body to completion and account for it.
+     *
+     * @param array<string,mixed> $body
+     * @param array{tolerate_empty?:bool,log_label?:string} $opts
+     * @param ?array<string,mixed> $loggedBody what the transcript shows in
+     *        place of $body when the body carries bytes no log should hold
+     */
+    private function send(array $body, array $opts, ?array $loggedBody = null): string
+    {
+        $this->lastFinishReason = null;
+        $loggedBody ??= $body;
 
         $label = (string) ($opts['log_label'] ?? 'request');
         $tolerateEmpty = ($opts['tolerate_empty'] ?? false) === true;
@@ -143,7 +169,7 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting
             $res = $this->requestWithRetry($body, $tolerateEmpty);
         } catch (\Throwable $e) {
             // Log the failed call too, so an aborted build is still inspectable.
-            LlmLogger::log($label, $body, ['text' => '', 'input' => 0, 'output' => 0], 0.0, $e->getMessage());
+            LlmLogger::log($label, $loggedBody, ['text' => '', 'input' => 0, 'output' => 0], 0.0, $e->getMessage());
             throw $e;
         }
 
@@ -153,7 +179,7 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting
         $this->cacheReadInputTokens += $res['cache_read_input_tokens'];
         $this->cacheCreationInputTokens += $res['cache_creation_input_tokens'];
 
-        LlmLogger::log($label, $body, $res, $res['time']);
+        LlmLogger::log($label, $loggedBody, $res, $res['time']);
 
         // Unreachable in practice: retrySingleRequest already converts an
         // empty non-tolerated response into a transient failure. Kept as a
@@ -334,6 +360,64 @@ final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting
             $system .= "\n\n" . $req['system'];
         }
         $body['system'] = $system;
+        return $body;
+    }
+
+    /**
+     * The request body for one prompt and one image. The image is the first
+     * content block of the single user turn, base64-encoded as the API
+     * requires; the prompt follows as text. cached_prefixes are refused: a
+     * prefix breakpoint placed before an image block would never be reused,
+     * and the Llm contract forbids silently dropping the option.
+     *
+     * @param array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float,json_schema?:array{name:string,schema:array<string,mixed>},cached_prefixes?:mixed} $req
+     * @return array<string,mixed>
+     */
+    public static function bodyForImage(array $req, string $imageBytes, string $mime, string $defaultModel, int $defaultMaxTokens): array
+    {
+        if (array_key_exists('cached_prefixes', $req)) {
+            throw new LlmRequestRejected('cached_prefixes are not supported on an image request');
+        }
+        if ($imageBytes === '') {
+            throw new LlmRequestRejected('an image request needs image bytes');
+        }
+        $body = self::bodyFor($req, $defaultModel, $defaultMaxTokens);
+        $body['messages'][0]['content'] = [
+            [
+                'type'   => 'image',
+                'source' => [
+                    'type'       => 'base64',
+                    'media_type' => $mime,
+                    'data'       => base64_encode($imageBytes),
+                ],
+            ],
+            ['type' => 'text', 'text' => (string) $req['prompt']],
+        ];
+        return $body;
+    }
+
+    /**
+     * The same body with every base64 image payload replaced by a short
+     * placeholder, for the transcript. Pure.
+     *
+     * @param array<string,mixed> $body
+     * @return array<string,mixed>
+     */
+    public static function redactImages(array $body): array
+    {
+        foreach ($body['messages'] ?? [] as $m => $message) {
+            if (!is_array($message['content'] ?? null)) {
+                continue;
+            }
+            foreach ($message['content'] as $c => $block) {
+                if (($block['type'] ?? '') !== 'image' || !isset($block['source']['data'])) {
+                    continue;
+                }
+                $bytes = (int) floor(strlen((string) $block['source']['data']) * 3 / 4);
+                $body['messages'][$m]['content'][$c]['source']['data'] =
+                    '<' . (string) ($block['source']['media_type'] ?? 'image') . ", {$bytes} bytes>";
+            }
+        }
         return $body;
     }
 

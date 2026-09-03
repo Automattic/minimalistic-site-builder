@@ -254,6 +254,7 @@ Useful variants:
 
 ```bash
 php bin/build-demos.php --with-images --only=tbilisi     # just one demo
+SITE_BUILD_IMAGE_QA=0 php bin/build-demos.php --with-images  # skip the vision check on delivered heroes
 php bin/build-demos.php --with-images --provider=openai  # build the set on GPT-5.x
 php bin/build-demos.php --with-images --parallel=2       # cap concurrent builds
 php bin/build-demos.php --with-images --no-screenshot    # skip the screenshots

@@ -371,14 +371,14 @@ test('compose protects transparent text carriers without adding scene instructio
     assert_contains('plain solid pure white background', $out);
 });
 
-test('compose with no page or site context is just the subject + style', function () {
+test('compose with no page or site context is the subject + style and the orientation anchor', function () {
     $out = ImagePromptComposer::compose('A sourdough loaf', '', 'photorealistic', '');
-    assert_eq('A sourdough loaf. Style: photorealistic', $out);
+    assert_eq("A sourdough loaf. Style: photorealistic\n\n" . ImagePromptComposer::ORIENTATION_CLAUSE, $out);
 });
 
 test('compose omits the style clause when no style is given', function () {
     $out = ImagePromptComposer::compose('A sourdough loaf', '', '', '');
-    assert_eq('A sourdough loaf', $out);
+    assert_eq("A sourdough loaf\n\n" . ImagePromptComposer::ORIENTATION_CLAUSE, $out);
 });
 
 test('compose keeps the subject in full when the site context is huge', function () {
@@ -815,4 +815,52 @@ test('stripCompetingGradeTokens does not re-punctuate around a clause it only re
         assert_eq([], $result['removed']);
         assert_true($result['kept'] !== [], 'the conflict is still reported');
     }
+});
+
+test('compose anchors the orientation of every opaque image (BIGR-979)', function () {
+    // The structured ratio sets the canvas shape only. A cover asked for a
+    // lateral copy reservation on a top-to-bottom scene once came back as a
+    // portrait composition turned 90° inside the landscape canvas.
+    $cover = ImagePromptComposer::compose(
+        'A dense crowd filling a wide avenue at dusk seen from a raised vantage',
+        'full-frame editorial photograph with the left third kept as open, low-detail negative space',
+        'photorealistic',
+        'A portfolio of twenty years of photojournalism.',
+        'Monochrome documentary in stark blacks and silvers.',
+        imageCrop: 'landscape',
+    );
+    assert_contains(ImagePromptComposer::ORIENTATION_CLAUSE, $cover);
+    assert_contains('upright', ImagePromptComposer::ORIENTATION_CLAUSE);
+    assert_contains('horizon level', ImagePromptComposer::ORIENTATION_CLAUSE);
+    foreach (['frame', 'border', 'contained', 'portrait', 'wide'] as $bad) {
+        assert_true(!str_contains(strtolower(ImagePromptComposer::ORIENTATION_CLAUSE), $bad), "anchor never says “{$bad}”");
+    }
+    // A render instruction sits before the guidance so end-trimming under
+    // token pressure sheds the context first.
+    assert_true(strpos($cover, 'Orientation:') < strpos($cover, 'Purely pictorial'), 'anchor precedes the guidance');
+
+    $card = ImagePromptComposer::compose('A sourdough loaf on a board', 'menu item card', 'photorealistic');
+    assert_contains(ImagePromptComposer::ORIENTATION_CLAUSE, $card, 'every opaque image is anchored, not only covers');
+
+    $transparent = ImagePromptComposer::compose(
+        'A flour-dusted wheat stem',
+        'isolated accent',
+        'illustration',
+        transparent: true,
+    );
+    assert_true(!str_contains($transparent, 'Orientation:'), 'an isolated asset has no horizon to level');
+});
+
+test('compose keeps the orientation anchor under token pressure', function () {
+    $out = ImagePromptComposer::compose(
+        'A sourdough loaf on a board',
+        'menu item card',
+        'photorealistic',
+        str_repeat('A neighborhood bakery selling sourdough and pastries. ', 200),
+        'Warm natural light with soft film grain.',
+        imageCrop: 'landscape',
+    );
+    assert_true(GeminiImage::estimateTokens($out) <= GeminiImage::MAX_PROMPT_TOKENS, 'prompt fits the budget');
+    assert_contains(ImagePromptComposer::ORIENTATION_CLAUSE, $out);
+    assert_contains('Site-wide crop direction:', $out);
 });

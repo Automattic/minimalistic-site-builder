@@ -75,3 +75,14 @@ test('ImageCrop prompt guidance speaks of the canvas, never of a frame', functio
         }
     }
 });
+
+test('ImageCrop names the viewport-spanning slots it and ImageQa agree on', function () {
+    assert_true(ImageCrop::fullFrameSlot('16:9', 'full-bleed hero section'));
+    assert_true(ImageCrop::fullFrameSlot('16:9', 'background of a call-to-action band'));
+    assert_true(ImageCrop::fullFrameSlot('16:9', 'edge-to-edge photographic band'));
+    assert_true(ImageCrop::fullFrameSlot('21:9', 'feature'), 'an authored ultrawide is full-frame by ratio');
+    assert_true(!ImageCrop::fullFrameSlot('16:9', 'menu item card in a 3-column grid'));
+    // generationRatio still routes through the same predicate.
+    assert_eq('16:9', ImageCrop::generationRatio('landscape', 'ultrawide', 'full-bleed hero'));
+    assert_eq('3:2', ImageCrop::generationRatio('landscape', 'landscape', 'menu item card'));
+});

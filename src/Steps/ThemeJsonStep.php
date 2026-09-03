@@ -3050,23 +3050,23 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         }
 
         // The `block` wrapper needs one rule theme.json cannot express as
-        // structured style (see CtaStyle::BLOCK_VERTICAL_WRAPPER_CSS). Ship it
+        // structured style (see CtaStyle::BLOCK_WRAPPER_CSS). Ship it
         // through top-level styles.css, strip a stale copy first so a changed
         // commitment converges, and touch nothing when neither applies.
         $authoredRootCss = $styles['css'] ?? null;
         $hasStaleRule = is_string($authoredRootCss)
-            && str_contains($authoredRootCss, CtaStyle::BLOCK_VERTICAL_WRAPPER_CSS);
+            && str_contains($authoredRootCss, CtaStyle::BLOCK_WRAPPER_CSS);
         if ($style === 'block' || $hasStaleRule) {
             $stripped = trim(str_replace(
-                CtaStyle::BLOCK_VERTICAL_WRAPPER_CSS,
+                CtaStyle::BLOCK_WRAPPER_CSS,
                 '',
                 is_string($authoredRootCss) ? $authoredRootCss : '',
             ));
             $deliveredRoot = $stripped;
             if ($style === 'block') {
                 $deliveredRoot = $stripped === ''
-                    ? CtaStyle::BLOCK_VERTICAL_WRAPPER_CSS
-                    : $stripped . "\n" . CtaStyle::BLOCK_VERTICAL_WRAPPER_CSS;
+                    ? CtaStyle::BLOCK_WRAPPER_CSS
+                    : $stripped . "\n" . CtaStyle::BLOCK_WRAPPER_CSS;
             }
             $deliveredValue = $deliveredRoot === '' ? null : $deliveredRoot;
             if ($deliveredValue !== $authoredRootCss) {
@@ -3074,7 +3074,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                     . Warnings::value($authoredRootCss)
                     . ' delivered ' . Warnings::value($deliveredValue)
                     . '; disposition ' . ($style === 'block'
-                        ? 'appended build-owned vertical-container width rule for committed block CTA construction'
+                        ? 'appended build-owned wrapper rules for committed block CTA construction'
                         : 'removed stale block CTA wrapper rule for committed ' . $style . ' CTA construction');
             }
             if ($deliveredValue === null) {

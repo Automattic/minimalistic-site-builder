@@ -359,7 +359,19 @@ function make_generate_images_step(?Llm $llm, ?ImageClient $imageClient = null):
         $imageClient ?? make_image_client(),
         $llm,
         step_models()['image-prompt-repair'] ?? null,
+        inspectImages: image_qa_enabled(),
     );
+}
+
+/**
+ * Whether generate-images looks at each delivered hero with a vision model
+ * (BIGR-979). On by default; SITE_BUILD_IMAGE_QA=0 turns it off for a run
+ * that must not spend the extra small-tier calls.
+ */
+function image_qa_enabled(): bool
+{
+    $value = strtolower(trim((string) Env::get('SITE_BUILD_IMAGE_QA', '1')));
+    return !in_array($value, ['0', 'off', 'false', 'no'], true);
 }
 
 /** Project root path helper. */
