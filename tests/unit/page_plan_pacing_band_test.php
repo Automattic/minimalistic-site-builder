@@ -56,6 +56,38 @@ test('a long page with every section on the page background is rejected', functi
     assert_true($rejected, 'an all-base 6-section page is a rejection');
 });
 
+test('a long page with more than two bands is rejected', function () {
+    // The other edge of the same audit: more content earned more colors, and
+    // long pages came back as a succession of bands.
+    $warnings = [];
+    $repairs = [];
+    $rejected = false;
+    try {
+        PagePlanStep::normalize(pacing_plan(6, 'contrast'), true, null, [], $warnings, 'home', $repairs, true);
+    } catch (\RuntimeException $e) {
+        $rejected = true;
+        assert_contains('6 of 6 sections sit on a non-base background', $e->getMessage());
+        assert_contains('at most 2', $e->getMessage());
+    }
+    assert_true($rejected, 'a 6-section page with six bands is a rejection');
+});
+
+test('repairVariety demotes a long page down to two bands', function () {
+    $plan = pacing_plan(6);
+    foreach ([1 => 'tinted', 2 => 'contrast', 4 => 'contrast'] as $i => $background) {
+        $plan[$i]['background'] = $background;
+    }
+    $warnings = [];
+    $repairs = [];
+    $out = PagePlanStep::repairVariety($plan, true, null, $warnings, 'home', $repairs, true);
+    assert_eq(
+        ['base', 'base', 'contrast', 'base', 'contrast', 'base'],
+        array_column($out, 'background'),
+        'the subtle tint goes first and the two contrast beats stay',
+    );
+    assert_contains('demoted an excess color band', implode("\n", $warnings));
+});
+
 test('the background floor leaves short pages alone', function () {
     // Every contact page is 2 to 4 sections (BIGR-858). One uniform ground is a
     // fine answer for a page that short, and forcing a dark band onto a contact
@@ -182,7 +214,7 @@ test('surface restraint demotes excess bands to an absolute two-beat budget', fu
     assert_contains('now uses the page base', $out[1]['handoff'], 'neighbor seam facts are corrected');
 });
 
-test('surface restraint preserves locked seams and structural covers', function () {
+test('surface restraint preserves a locked hero and structural covers', function () {
     $plan = pacing_plan(6);
     foreach (['image', 'tinted', 'image', 'contrast', 'tinted', 'contrast'] as $i => $background) {
         $plan[$i]['background'] = $background;
@@ -192,14 +224,25 @@ test('surface restraint preserves locked seams and structural covers', function 
     $warnings = [];
     $out = PagePlanStep::withSurfaceRestraint($plan, 'home', $warnings, true);
 
-    assert_eq('image', $out[0]['background'], 'the recipe-locked front hero is preserved');
-    assert_eq('image', $out[2]['background'], 'a full-bleed cover keeps its required image surface');
-    assert_eq('contrast', $out[5]['background'], 'the settled closing/footer seam is preserved');
     assert_eq(
-        3,
-        count(array_filter(array_column($out, 'background'), fn (string $b) => $b !== 'base')),
-        'protected structure may exceed the visual budget rather than being damaged',
+        ['image', 'base', 'image', 'base', 'base', 'base'],
+        array_column($out, 'background'),
+        'the locked hero and the cover are the two beats that survive; the closing band is not special here',
     );
+    assert_true(!str_contains(implode("\n", $warnings), 'could not be met'), 'the budget was met');
+
+    // Three structural covers cannot be demoted, so the page ships over budget
+    // and says so.
+    $plan = pacing_plan(6);
+    foreach (['image', 'image', 'image', 'tinted', 'base', 'base'] as $i => $background) {
+        $plan[$i]['background'] = $background;
+        if ($background === 'image') {
+            $plan[$i]['layout_archetype'] = 'full-bleed-cover';
+        }
+    }
+    $warnings = [];
+    $out = PagePlanStep::withSurfaceRestraint($plan, 'home', $warnings, true);
+    assert_eq(['image', 'image', 'image', 'base', 'base', 'base'], array_column($out, 'background'));
     $joined = implode("\n", $warnings);
     assert_contains('surface budget could not be met', $joined);
     assert_contains('delivered those sections intact', $joined);
