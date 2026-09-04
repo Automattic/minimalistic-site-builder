@@ -305,3 +305,11 @@ test('distinct model ids on distinct transports remain the supported shape', fun
         putenv('LLM_MODEL_PAGE_PLAN');
     }
 });
+
+test('the seed judge runs on the large tier by default', function () {
+    putenv('LLM_PROVIDER');
+    putenv('LLM_MODEL');
+    putenv('LLM_MODEL_SMALL');
+    assert_eq('large', ModelConfig::stepTiers()['design-direction-judge'] ?? null, 'a taste call earns the quality tier');
+    assert_eq('claude-opus-5', StepDefaults::models()['design-direction-judge']);
+});

@@ -122,6 +122,7 @@ test('build-report lines the starting line up with the row that completes it', f
 test('build-report resolves the model label of a concurrent step group', function () {
     $models = [
         'design-direction-seeds' => 'small-model',
+        'design-direction-judge' => 'judge-model',
         'design-direction' => 'large-model',
         'theme-json' => 'small-model',
         'page-plan' => 'small-model',
@@ -134,9 +135,9 @@ test('build-report resolves the model label of a concurrent step group', functio
     assert_eq('small-model', BuildReport::modelLabel('theme-json+page-plan', $models));
     assert_eq('small-model, large-model', BuildReport::modelLabel('theme-json+sections', $models));
     assert_eq(
-        'small-model, large-model',
+        'small-model, judge-model, large-model',
         BuildReport::modelLabel('design-direction', $models),
-        'one row can name each configured model contributing calls to the step',
+        'one row names each configured model contributing calls to the step: seeds, judge, expansion',
     );
     assert_eq('small-model', BuildReport::modelLabel('generate-images', [
         'image-prompt-repair' => 'small-model',

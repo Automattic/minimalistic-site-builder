@@ -182,6 +182,7 @@ final class StepComposition
                 $models['design-direction'],
                 $temps['design-direction'],
                 $models['design-direction-seeds'],
+                $models['design-direction-judge'],
             ),
             new DesignPreviewStep(
                 $llm,
@@ -309,7 +310,14 @@ final class StepComposition
             // Tradeoff: this is an extra serial LLM round-trip on the critical path
             // (the concurrent group now depends on its output) — a deliberate cost
             // we pay for design variety; tune via LLM_MODEL_DESIGN_DIRECTION.
-            new DesignDirectionStep($llm, $renderer, $models['design-direction'], $temps['design-direction'], $models['design-direction-seeds']),
+            new DesignDirectionStep(
+                $llm,
+                $renderer,
+                $models['design-direction'],
+                $temps['design-direction'],
+                $models['design-direction-seeds'],
+                $models['design-direction-judge'],
+            ),
             // theme.json and the page plan both derive from the prompt + siteSpec +
             // the design direction, so run them concurrently. Design decisions are
             // made inline, steered by designDirection.json.
