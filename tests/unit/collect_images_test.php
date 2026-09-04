@@ -66,6 +66,80 @@ test('collect-images collects .png placeholders (transparent-background assets)'
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('collect-images folds a model-written absolute theme asset path back into the placeholder it meant', function () {
+    // The hero author wrote the post-generation form — an invented theme slug
+    // and a filename nothing would generate under — on both the cover url and
+    // its inner img (PepeneBun build, 2026-09-04). The canonical parser saw
+    // no theme: src, so the spec was never collected, the fold shipped a
+    // broken image, and validate-theme said nothing.
+    [$project, $tmp] = collect_fixture();
+    $project->writeText('theme/parts/page-home--hero.html',
+        '<!-- wp:cover {"url":"/wp-content/themes/pepenobun/assets/watermelon-intake-line-overhead.jpg","dimRatio":60} -->'
+        . '<div class="wp-block-cover"><img class="wp-block-cover__image-background" '
+        . 'src="/wp-content/themes/pepenobun/assets/watermelon-intake-line-overhead.jpg" '
+        . 'alt="AI_IMAGE: Stacked wooden crates heaped with dark-rind watermelons | full-frame backdrop | photorealistic | ultrawide" data-object-fit="cover"/>'
+        . '<div class="wp-block-cover__inner-container"></div></div><!-- /wp:cover -->'
+    );
+
+    (new CollectImagesStep())->run($project);
+
+    $images = $project->readJson('images.json');
+    assert_eq(1, count($images), 'the folded placeholder is collected exactly once');
+    assert_eq('watermelon-intake-line-overhead.jpg', $images[0]['filename']);
+    assert_eq('theme:./assets/watermelon-intake-line-overhead.jpg', $images[0]['src']);
+    assert_eq('ultrawide', $images[0]['aspectRatio']);
+    assert_contains('dark-rind watermelons', $images[0]['subject']);
+
+    $markup = $project->readText('theme/parts/page-home--hero.html');
+    assert_contains('"url":"theme:./assets/watermelon-intake-line-overhead.jpg"', $markup, 'the cover url is the placeholder path');
+    assert_contains('src="theme:./assets/watermelon-intake-line-overhead.jpg"', $markup, 'the inner img src is the placeholder path');
+    assert_true(!str_contains($markup, '/wp-content/themes/pepenobun/'), 'the invented slug is gone');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images slugifies the filename of a folded absolute path so the canonical parser accepts it', function () {
+    [$project, $tmp] = collect_fixture();
+    $project->writeText('theme/parts/page-home--story.html',
+        '<!-- wp:image --><figure class="wp-block-image">'
+        . '<img src="/wp-content/themes/Demo_Site/assets/Field_Rows At-Dawn.JPG" '
+        . 'alt="AI_IMAGE: Rows of melons at dawn | story image | photorealistic | landscape"/>'
+        . '</figure><!-- /wp:image -->'
+    );
+
+    (new CollectImagesStep())->run($project);
+
+    $images = $project->readJson('images.json');
+    assert_eq(1, count($images));
+    assert_eq('field-rows-at-dawn.jpg', $images[0]['filename']);
+    assert_contains('src="theme:./assets/field-rows-at-dawn.jpg"', $project->readText('theme/parts/page-home--story.html'));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images leaves an absolute theme asset path alone when that file exists on disk', function () {
+    // A resume after generate-images already rewrote the real paths; folding
+    // those back would ask for the same photo twice.
+    [$project, $tmp] = collect_fixture();
+    $project->writeText('theme/assets/existing.jpg', 'jpeg-bytes');
+    $markup = '<!-- wp:image --><figure class="wp-block-image">'
+        . '<img src="/wp-content/themes/demo/assets/existing.jpg" alt="AI_IMAGE: A kept photo | card | photorealistic | landscape"/>'
+        . '</figure><!-- /wp:image -->';
+    $project->writeText('theme/parts/page-home--gallery.html', $markup);
+
+    (new CollectImagesStep())->run($project);
+
+    assert_eq($markup, $project->readText('theme/parts/page-home--gallery.html'), 'a real on-disk asset is not folded');
+    $images = $project->exists('images.json') ? $project->readJson('images.json') : [];
+    assert_eq(
+        [],
+        array_values(array_filter($images, static fn (array $image): bool => ($image['filename'] ?? '') === 'existing.jpg')),
+        'and not collected for a second generation',
+    );
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('collect-images recovers an AI_IMAGE spec left in a cover url', function () {
     [$project, $tmp] = collect_fixture();
     $project->writeText('theme/parts/hero.html',
