@@ -19,6 +19,7 @@ through a device. Do not rescue it with a rule, a box, or a decorative motif.
   and leave the rest at the reading measure — a half-wide stack reads as an
   accident.
 - Objective failure: a heading or a paragraph forced back to start alignment
-  inside the centered band (repeated item rows are the one exception and the
-  theme handles them), a multi-column grid built inside the stack, or a
+  inside the centered band (repeated item rows, lists, and a form the host
+  substitutes in are the exceptions, and the theme handles them), a
+  multi-column grid built inside the stack, or a
   hairline rule under the heading.

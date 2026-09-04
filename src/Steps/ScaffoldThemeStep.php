@@ -252,38 +252,40 @@ final class ScaffoldThemeStep implements Step
         .section-composition--centered-stack {
             text-align: center;
         }
+        /* Exempt scope. Three kinds of content keep their own start alignment
+           inside the centered band, and every rule below names the same scope:
+           - a repeated item row (a centered stack may carry a spec-table item
+             pattern);
+           - a form the host substituted in for a placeholder: its labels sit
+             above input text the browser aligns to the start, so centering
+             them is the same mixed alignment;
+           - the host's form container (`.jetpack-contact-form-container`,
+             from Jetpack's `Contact_Form::get_block_container_classes`),
+             which renders the server-side error block before the form and
+             the no-reload success message as a sibling of it, so those two
+             states follow the form's alignment. */
+        .section-composition--centered-stack :is(.item-pattern__item, form, .jetpack-contact-form-container) {
+            text-align: start;
+        }
         /* A wp:buttons row is a flex container, so the inherited text-align
            cannot move it; an unjustified row stays at the start edge. Only a
            row with no authored justification is centered here. The
-           `:not(.item-pattern__item *)` guard (BIGR-952 review follow-up)
-           keeps a nested buttons row out of this rule: the item row below is
-           exempt and start-aligned, and a centered buttons row inside it
-           would recreate the mixed-alignment defect this block exists to
-           remove. */
-        .section-composition--centered-stack .wp-block-buttons:not(.is-content-justification-left):not(.is-content-justification-right):not(.is-content-justification-space-between):not(.item-pattern__item *) {
+           `:not(<exempt scope> *)` guard (BIGR-952 review follow-up) keeps a
+           nested buttons row out of this rule: a centered buttons row inside
+           a start-aligned exemption would recreate the mixed-alignment
+           defect this block exists to remove. */
+        .section-composition--centered-stack .wp-block-buttons:not(.is-content-justification-left):not(.is-content-justification-right):not(.is-content-justification-space-between):not(:is(.item-pattern__item, form, .jetpack-contact-form-container) *) {
             justify-content: center;
         }
-        /* Two exemptions keep the centering from creating new defects. A
-           repeated item row (a centered stack may carry a spec-table item
-           pattern) keeps its own start alignment. A list centers as a block
-           while its items stay start-aligned, because centered lines under
-           start-anchored markers read as a ragged accident. The
-           `:not(.item-pattern__item *)` guard (BIGR-952 review follow-up)
-           keeps a list inside an exempted item row at the row's start edge:
-           without it, the list would still take `margin-inline: auto` and
-           center inside the start-aligned row. */
-        .section-composition--centered-stack .item-pattern__item {
-            text-align: start;
-        }
-        .section-composition--centered-stack :is(ul, ol):not(.item-pattern__item *) {
+        /* A list centers as a block while its items stay start-aligned,
+           because centered lines under start-anchored markers read as a
+           ragged accident. The same guard keeps a list inside an exemption
+           at the exemption's start edge: without it, the list would still
+           take `margin-inline: auto` and center inside the start-aligned
+           row, form, or error block. */
+        .section-composition--centered-stack :is(ul, ol):not(:is(.item-pattern__item, form, .jetpack-contact-form-container) *) {
             width: fit-content;
             margin-inline: auto;
-            text-align: start;
-        }
-        /* A third exemption: a form the host substituted in for a
-           placeholder. Its labels sit above input text the browser aligns to
-           the start, so centering them is the same mixed alignment. */
-        .section-composition--centered-stack form {
             text-align: start;
         }
 

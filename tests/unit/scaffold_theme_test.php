@@ -501,62 +501,48 @@ test('scaffold-theme owns the guaranteed centered-stack alignment rule', functio
     $css = $project->readText('theme/style.css');
 
     $hook = '.section-composition--centered-stack';
+    // One matcher for every rule in the block: the hook, the rule's own
+    // selector tail, any :not() guards, then the declaration body.
+    $rule = static function (string $tail) use ($css, $hook): array {
+        $matched = preg_match(
+            '~' . preg_quote($hook, '~') . $tail . '(?<guards>[^{]*)\{(?<body>[^}]*)\}~',
+            $css,
+            $m
+        );
+        assert_eq(1, $matched, "the rule {$hook}{$tail} exists");
+        return $m;
+    };
+    // Every exemption is named once, in one scope, and the two rules that
+    // could re-center content inside an exemption exclude that same scope.
+    $exempt = ':is(.item-pattern__item, form, .jetpack-contact-form-container)';
 
-    $matched = preg_match(
-        '~' . preg_quote($hook, '~') . '\s*\{(?<body>[^}]*)\}~',
-        $css,
-        $root
-    );
-    assert_eq(1, $matched, 'the root rule exists');
+    $root = $rule('\s*');
     assert_contains('text-align: center', $root['body']);
 
     // A flex buttons row ignores inherited text-align, so it needs its own
     // justification — but only when the author set none.
-    $matched = preg_match(
-        '~' . preg_quote($hook, '~')
-            . '\s+\.wp-block-buttons(?<guards>[^{]*)\{(?<body>[^}]*)\}~',
-        $css,
-        $buttons
-    );
-    assert_eq(1, $matched, 'the buttons rule exists');
+    $buttons = $rule('\s+\.wp-block-buttons');
     assert_contains('justify-content: center', $buttons['body']);
     assert_contains(':not(.is-content-justification-left)', $buttons['guards'], 'an authored justification survives');
-    // BIGR-952 review follow-up: a buttons row inside an exempted item row
-    // must not center, or the start-aligned row gets a mixed alignment again.
-    assert_contains(':not(.item-pattern__item *)', $buttons['guards'], 'a buttons row inside an item row stays exempt');
+    // BIGR-952 review follow-up: a buttons row inside an exemption must not
+    // center, or the start-aligned row gets a mixed alignment again.
+    assert_contains(':not(' . $exempt . ' *)', $buttons['guards'], 'a buttons row inside an exemption stays exempt');
 
-    // Repeated item rows and lists stay start-aligned inside the centered
-    // band; a centered rag on markers or on item rows is a new defect.
-    $matched = preg_match(
-        '~' . preg_quote($hook, '~') . '\s+\.item-pattern__item\s*\{(?<body>[^}]*)\}~',
-        $css,
-        $items
-    );
-    assert_eq(1, $matched, 'the item-row exemption exists');
+    // Repeated item rows, a host-substituted form, and the host's form
+    // container stay start-aligned inside the centered band: centered labels
+    // over start-aligned input text, or a centered rag on markers or on item
+    // rows, is a new defect. The container carries Jetpack's server-side
+    // error block and its success message as siblings of the form.
+    $items = $rule('\s+' . preg_quote($exempt, '~'));
     assert_contains('text-align: start', $items['body']);
 
-    $matched = preg_match(
-        '~' . preg_quote($hook, '~') . '\s+:is\(ul, ol\)(?<guards>[^{]*)\{(?<body>[^}]*)\}~',
-        $css,
-        $lists
-    );
-    assert_eq(1, $matched, 'the list exemption exists');
+    $lists = $rule('\s+:is\(ul, ol\)');
     assert_contains('text-align: start', $lists['body']);
     assert_contains('margin-inline: auto', $lists['body'], 'the list block itself still centers');
-    // BIGR-952 review follow-up: a list inside an exempted item row must not
-    // take the fit-content centering, or it centers inside the start-aligned
-    // row.
-    assert_contains(':not(.item-pattern__item *)', $lists['guards'], 'a list inside an item row stays exempt');
-
-    // A host-substituted form keeps one start-aligned column: centered labels
-    // over start-aligned input text is the same mixed alignment.
-    $matched = preg_match(
-        '~' . preg_quote($hook, '~') . '\s+form\s*\{(?<body>[^}]*)\}~',
-        $css,
-        $form
-    );
-    assert_eq(1, $matched, 'the form exemption exists');
-    assert_contains('text-align: start', $form['body']);
+    // BIGR-952 review follow-up: a list inside an exemption must not take the
+    // fit-content centering, or it centers inside the start-aligned row or
+    // form.
+    assert_contains(':not(' . $exempt . ' *)', $lists['guards'], 'a list inside an exemption stays exempt');
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
