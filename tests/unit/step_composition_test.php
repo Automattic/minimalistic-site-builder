@@ -43,10 +43,32 @@ function composition_deps(): array
  * @param ?string $graph  null drops SITE_BUILD_GRAPH; a name pins it
  * @param ?string $legacy null drops SITE_BUILD_HTML_FIRST; a value pins it
  */
+/**
+ * Run $fn with narration captured, returning what it narrated. Narrator writes
+ * to STDERR, which output buffering does not see; setStream() is the seam it
+ * exposes for exactly this.
+ */
+function narrated(callable $fn, mixed &$result): string
+{
+    $sink = fopen('php://memory', 'w+');
+    Narrator::setStream($sink);
+    try {
+        $result = $fn();
+    } finally {
+        Narrator::reset();
+    }
+    rewind($sink);
+    $said = (string) stream_get_contents($sink);
+    fclose($sink);
+    return $said;
+}
+
 function with_isolated_graph_env(?string $graph, ?string $legacy, callable $fn): void
 {
     $previousGraph = getenv('SITE_BUILD_GRAPH');
     $previousLegacy = getenv('SITE_BUILD_HTML_FIRST');
+    $notice = new ReflectionProperty(StepComposition::class, 'retiredNoticeShownFor');
+    $notice->setValue(null, null);
     $prop = new ReflectionProperty(Env::class, 'vars');
     $savedMap = $prop->getValue();
     $map = $savedMap;
@@ -480,22 +502,27 @@ test('SITE_BUILD_GRAPH=html-islands is recognized and builds the islands graph',
     }
 });
 
-test('leftover SITE_BUILD_HTML_FIRST without SITE_BUILD_GRAPH is refused by name', function () {
+// CONTRACT AMENDMENT (was: "refused by name"). Refusing a leftover
+// SITE_BUILD_HTML_FIRST turned a host that had it exported into a hard failure
+// on upgrade, where trunk had honored it. The retired key is now read as an
+// alias with a deprecation line, so no working deployment breaks silently OR
+// loudly. SITE_BUILD_GRAPH still wins when both are set (test below).
+test('a leftover SITE_BUILD_HTML_FIRST=1 still selects html-first, with a deprecation line', function () {
     with_isolated_graph_env(null, '1', static function (): void {
-        $e = assert_throws(static fn () => StepComposition::selectedGraph());
-        assert_true($e instanceof InvalidArgumentException, get_class($e));
-        assert_true(str_contains($e->getMessage(), 'SITE_BUILD_HTML_FIRST'), $e->getMessage());
-        assert_true(str_contains($e->getMessage(), 'SITE_BUILD_GRAPH'), $e->getMessage());
-        assert_true(str_contains($e->getMessage(), 'html-first'), $e->getMessage());
+        $said = narrated(static fn (): string => StepComposition::selectedGraph(), $graph);
+        assert_eq('html-first', $graph, 'the retired key keeps selecting the graph it always did');
+        assert_true(str_contains($said, 'SITE_BUILD_HTML_FIRST'), "must name the retired key: {$said}");
+        assert_true(str_contains($said, 'SITE_BUILD_GRAPH'), "must name its replacement: {$said}");
     });
 });
 
-test('leftover SITE_BUILD_HTML_FIRST=0 is still set, so it is refused too', function () {
+test('a leftover SITE_BUILD_HTML_FIRST=0 selects blocks, exactly as it used to', function () {
     with_isolated_graph_env(null, '0', static function (): void {
-        $e = assert_throws(static fn () => StepComposition::selectedGraph());
-        assert_true($e instanceof InvalidArgumentException, get_class($e));
-        assert_true(str_contains($e->getMessage(), 'SITE_BUILD_HTML_FIRST'), $e->getMessage());
-        assert_true(str_contains($e->getMessage(), 'SITE_BUILD_GRAPH'), $e->getMessage());
+        // Only '1' ever meant html-first; every other value meant blocks. A
+        // stale "off" value is not a request, so it passes without a notice.
+        $said = narrated(static fn (): string => StepComposition::selectedGraph(), $graph);
+        assert_eq('blocks', $graph);
+        assert_eq('', $said, "an off value is not a selection, so it says nothing: {$said}");
     });
 });
 

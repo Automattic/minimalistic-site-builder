@@ -298,7 +298,12 @@ test('leftover SITE_BUILD_HTML_FIRST is ignored when SITE_BUILD_GRAPH is pinned'
     assert_true(!in_array('transform-site', $ids, true), $seen);
 });
 
-test('leftover SITE_BUILD_HTML_FIRST without SITE_BUILD_GRAPH is refused', function () {
+test('the CLI honors a leftover SITE_BUILD_HTML_FIRST and says it is retired', function () {
+    // Was "is refused". Refusing broke any host that had the retired key
+    // exported. --list-steps is the deterministic observation: it prints the
+    // chosen graph and exits 0, so the assertion cannot pass on an unrelated
+    // build failure the way an exit-code check did.
+    //
     // bootstrap.php loads the repo .env by path, not cwd. A child whose cwd
     // has no .env still inherits that map unless we drop SITE_BUILD_GRAPH
     // from it after bootstrap, which is what "unset" means (site_builder_test.php:17-19).
@@ -319,7 +324,7 @@ putenv("SITE_BUILD_GRAPH");
 putenv("SITE_BUILD_HTML_FIRST=1");
 chdir(' . var_export($tmp, true) . ');
 $_SERVER["SCRIPT_FILENAME"] = ' . var_export($build, true) . ';
-$argv = [' . var_export($build, true) . ', "demo", "--provider=anthropic", "--no-serve"];
+$argv = [' . var_export($build, true) . ', "--list-steps"];
 $_SERVER["argv"] = $argv;
 $_SERVER["argc"] = count($argv);
 require ' . var_export($build, true) . ';
@@ -333,8 +338,10 @@ require ' . var_export($build, true) . ';
         exec($command . ' 2>&1', $output, $exit);
         $text = implode("\n", $output);
 
-        assert_eq(1, $exit, $text);
+        assert_eq(0, $exit, $text);
+        assert_contains('"graph":"html-first"', $text);
         assert_true(str_contains($text, 'SITE_BUILD_HTML_FIRST'), $text);
+        assert_true(str_contains($text, 'retired'), $text);
         assert_true(str_contains($text, 'SITE_BUILD_GRAPH'), $text);
     } finally {
         exec('rm -rf ' . escapeshellarg($tmp));

@@ -56,6 +56,16 @@ final class StepComposition
     /** The env key that selects the graph. Written by the CLI's --html-first / --blocks-first / --html-islands. */
     public const GRAPH_ENV = Graph::ENV;
 
+    /** Retired selector, still read when GRAPH_ENV is unset so exported hosts keep working. */
+    public const RETIRED_HTML_FIRST_ENV = 'SITE_BUILD_HTML_FIRST';
+
+    /**
+     * Value the retirement notice was last narrated for. selectedGraph() has
+     * four in-process callers, so without this a single build repeats the
+     * line four times and it reads like a defect rather than a heads-up.
+     */
+    private static ?string $retiredNoticeShownFor = null;
+
     /** Graph names recorded in meta.json, so a --from resume can run the graph that built the project. */
     public const GRAPH_HTML_FIRST = Graph::HTML_FIRST;
     public const GRAPH_BLOCKS = Graph::BLOCKS;
@@ -117,34 +127,40 @@ final class StepComposition
      * --html-first / --blocks-first / --html-islands flags set that key, which
      * is what makes an explicit flag beat a shell export or an .env line.
      * Unset means blocks. An unknown value is an error, not blocks.
-     * A leftover SITE_BUILD_HTML_FIRST with SITE_BUILD_GRAPH unset is an
-     * error naming both keys, not a silent fallback to blocks.
+     * The retired SITE_BUILD_HTML_FIRST is still read when SITE_BUILD_GRAPH is
+     * unset, so a host that exports it keeps selecting the graph it always
+     * did rather than failing on upgrade; it says so once and names the
+     * replacement. As before, only '1' ever meant html-first, and an explicit
+     * SITE_BUILD_GRAPH wins over any leftover value.
      *
-     * @throws \InvalidArgumentException when SITE_BUILD_GRAPH is not a known name,
-     *         or SITE_BUILD_HTML_FIRST is set while SITE_BUILD_GRAPH is not
+     * @throws \InvalidArgumentException when SITE_BUILD_GRAPH is not a known name
      */
     public static function selectedGraph(): string
     {
         $raw = Env::get(self::GRAPH_ENV);
-        if ($raw === null || $raw === '') {
-            $legacy = Env::get('SITE_BUILD_HTML_FIRST');
-            if ($legacy !== null && $legacy !== '') {
-                throw new \InvalidArgumentException(
-                    'SITE_BUILD_HTML_FIRST is set but SITE_BUILD_GRAPH is not. '
-                    . 'Set SITE_BUILD_GRAPH=' . implode('|', Graph::KNOWN)
-                    . '; SITE_BUILD_HTML_FIRST is no longer read.'
+        if ($raw !== null && $raw !== '') {
+            if (!in_array($raw, Graph::KNOWN, true)) {
+                throw new \InvalidArgumentException(sprintf(
+                    "Unknown graph '%s'. Known: %s.",
+                    $raw,
+                    implode(', ', Graph::KNOWN),
+                ));
+            }
+            return $raw;
+        }
+        // Only '1' ever selected html-first, so any other leftover value is a
+        // stale "off" switch, not a request, and passes without a word.
+        if (Env::get(self::RETIRED_HTML_FIRST_ENV) === '1') {
+            if (self::$retiredNoticeShownFor !== '1') {
+                self::$retiredNoticeShownFor = '1';
+                Narrator::write(
+                    'SITE_BUILD_HTML_FIRST is retired and will stop being read: '
+                    . 'set SITE_BUILD_GRAPH=' . self::GRAPH_HTML_FIRST . " instead.\n"
                 );
             }
-            return self::GRAPH_BLOCKS;
+            return self::GRAPH_HTML_FIRST;
         }
-        if (!in_array($raw, Graph::KNOWN, true)) {
-            throw new \InvalidArgumentException(sprintf(
-                "Unknown graph '%s'. Known: %s.",
-                $raw,
-                implode(', ', Graph::KNOWN),
-            ));
-        }
-        return $raw;
+        return self::GRAPH_BLOCKS;
     }
 
     /**
