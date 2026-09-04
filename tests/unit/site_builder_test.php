@@ -22,7 +22,7 @@ test('SiteBuilder pipeline exposes the default blocks step order and stop ids', 
 
         assert_eq([
             'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
-            'theme-json+page-plan', 'reconcile-palette', 'sections', 'section-rhythm', 'copy-dedupe',
+            'theme-json+page-plan', 'reconcile-palette', 'sections', 'section-rhythm', 'copy-dedupe', 'cta-budget',
             // normalize-layout MUST precede contrast-fix and motion-sanity: the
             // attribute repair can activate previously-inert color/motion
             // attributes, which those policy passes must be able to see.
@@ -50,7 +50,7 @@ test('SITE_BUILD_HTML_FIRST=1 gives the HTML-first order with the blocks fallbac
 
         assert_eq([
             'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
-            'design-preview', 'theme-json', 'inner-pages-design', 'splice-home-design', 'assign-image-sources', 'transform-site', 'resolve-nav-links', 'section-rhythm', 'section-layout',
+            'design-preview', 'theme-json', 'inner-pages-design', 'splice-home-design', 'assign-image-sources', 'transform-site', 'resolve-nav-links', 'section-rhythm', 'section-layout', 'cta-budget',
             'collect-images', 'normalize-layout', 'header-hero', 'contrast-fix', 'motion-sanity', 'fix-blocks', 'assemble-pages', 'fix-pages', 'page-styles', 'custom-motion',
             'fonts-php', 'extract-patterns', 'finalize-theme', 'theme-screenshot', 'validate-theme',
         ], $pipeline->stepIds());
