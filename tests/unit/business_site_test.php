@@ -67,6 +67,21 @@ test('BusinessSite rejects a studio whose only photographer signal is the prompt
     ));
 });
 
+test('BusinessSite still matches a bakery whose prompt asks for photographic imagery', function () {
+    assert_true(BusinessSite::matches(
+        [
+            'name'         => 'Fantinel',
+            'title'        => 'Fantinel',
+            'site_type'    => '',
+            'topic'        => 'Bakery',
+            'area'         => 'business',
+            'persona_name' => '',
+        ],
+        'Fantinel is a professional New York City bakery website with a green color scheme '
+        . 'and photographic imagery. All images are to be photographic in style.',
+    ));
+});
+
 test('BusinessSite does not match topic prose that only says services', function () {
     assert_true(!BusinessSite::matches([
         'site_type' => 'portfolio',

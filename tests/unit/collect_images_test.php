@@ -802,6 +802,30 @@ test('collect-images appends a site-logo spec for a business site', function () 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('collect-images appends a site-logo when a bakery prompt only uses photographic as image style', function () {
+    [$project, $tmp] = collect_fixture();
+    $project->writeJson('siteSpec.json', [
+        'name'         => 'Fantinel',
+        'title'        => 'Fantinel',
+        'site_type'    => '',
+        'area'         => 'business',
+        'topic'        => 'Bakery',
+        'persona_name' => '',
+    ]);
+    $project->writeJson('meta.json', [
+        'prompt' => 'Fantinel is a professional New York City bakery website with a green color scheme '
+            . 'and photographic imagery. All images are to be photographic in style.',
+    ]);
+    $project->writeText('theme/parts/page-home--hero.html', '<!-- wp:paragraph --><p>Hi</p><!-- /wp:paragraph -->');
+
+    (new CollectImagesStep())->run($project);
+
+    $filenames = array_column($project->readJson('images.json'), 'filename');
+    assert_true(in_array('site-logo.png', $filenames, true));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('collect-images does not append a site-logo for a personal site', function () {
     [$project, $tmp] = collect_fixture();
     $project->writeJson('siteSpec.json', [

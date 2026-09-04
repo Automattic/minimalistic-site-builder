@@ -40,6 +40,20 @@ test('PhotographySite rejects a bakery even when the description mentions photog
     ]));
 });
 
+test('PhotographySite rejects photographic as an image-style word in the prompt', function () {
+    assert_true(!PhotographySite::matches(
+        [
+            'name'      => 'Fantinel',
+            'title'     => 'Fantinel',
+            'site_type' => '',
+            'topic'     => 'Bakery',
+            'area'      => 'business',
+        ],
+        'Fantinel is a professional New York City bakery website with a green color scheme '
+        . 'and photographic imagery. All images are to be photographic in style.',
+    ));
+});
+
 test('PhotographySite rejects architecture and food portfolios that are visual work but not photography sites', function () {
     assert_true(!PhotographySite::matches([
         'name'                    => 'Atelier',

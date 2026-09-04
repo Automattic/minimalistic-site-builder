@@ -12,7 +12,8 @@ namespace Automattic\SiteBuild;
  * used. Photography and gallery are both matched only as site-kind words
  * (area, topic, site_type, title, name, prompt). A bakery whose description
  * mentions "warm photography of the pastry case" or "a gallery of loaves"
- * stays false.
+ * stays false. The image-style adjective `photographic` (photographic
+ * imagery, photographic in style) is not a site-kind word.
  */
 final class PhotographySite
 {
@@ -31,7 +32,7 @@ final class PhotographySite
         ]));
 
         if (preg_match(
-            '/\bphotograph(?:s|er|ers|y|ic)?\b|\bphotojournalis[mt]\b|\bphotoshoots?\b/u',
+            '/\bphotograph(?:s|er|ers|y)?\b|\bphotojournalis[mt]\b|\bphotoshoots?\b/u',
             $kind
         ) === 1) {
             return true;
