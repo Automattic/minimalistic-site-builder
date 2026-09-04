@@ -239,6 +239,7 @@ final class StepComposition
             new ResolveNavLinksStep(),
             new SectionRhythmStep(),
             new SectionLayoutStep(),
+            new CtaBudgetStep(),
             new CollectImagesStep(htmlFirst: true),
             new NormalizeLayoutStep(htmlFirst: true),
             new HeaderHeroStep(htmlFirst: true),

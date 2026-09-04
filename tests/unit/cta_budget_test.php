@@ -36,6 +36,22 @@ test('CtaBudget demotes every button beyond the budget to a text action that kee
     assert_contains('<!-- wp:group', $out, 'the surrounding structure is untouched');
 });
 
+test('CtaBudget keeps the planned label when it is not the first button', function () {
+    $markup = '<!-- wp:buttons -->' . "\n" . '<div class="wp-block-buttons">' . "\n"
+        . cta_button('Full seed data', '/products/#seeds') . "\n"
+        . cta_button('Send an inquiry', '/contact/') . "\n"
+        . '</div>' . "\n" . '<!-- /wp:buttons -->';
+
+    $result = CtaBudget::apply($markup, 1, 'Send an inquiry');
+
+    assert_eq(1, $result['kept']);
+    assert_eq(1, $result['demoted']);
+    $out = $result['markup'];
+    assert_eq(1, substr_count($out, '<!-- wp:button -->'));
+    assert_contains('href="/contact/"', $out, 'the planned action stays a button');
+    assert_contains('<p class="text-action"><a href="/products/#seeds">Full seed data</a></p>', $out);
+});
+
 test('CtaBudget keeps the first buttons within the budget and demotes the rest, in document order', function () {
     $markup = '<!-- wp:buttons -->' . "\n" . '<div class="wp-block-buttons">' . "\n"
         . cta_button('Send an inquiry', '/contact/') . "\n"
@@ -161,6 +177,32 @@ test('cta-budget keeps a planned action button on a non-hero section', function 
 
     $lines = $project->readText('theme/parts/page-home--lines.html');
     assert_eq(1, substr_count($lines, '<!-- wp:button -->'), 'a planned action keeps its button');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('cta-budget keeps the planned label when a card button precedes it', function () {
+    [$project, $tmp] = cta_budget_project();
+    $pages = $project->readJson('pages.json');
+    $pages['pages'][0]['sections'][1]['primary_action'] = [
+        'label' => 'See full specifications', 'intent' => 'x', 'destination' => '/products/',
+    ];
+    $project->writeJson('pages.json', $pages);
+    $project->writeText(
+        'theme/parts/page-home--lines.html',
+        '<!-- wp:group {"anchor":"lines","layout":{"type":"constrained"}} -->' . "\n<div id=\"lines\">\n"
+        . '<!-- wp:buttons -->' . "\n" . '<div class="wp-block-buttons">' . "\n"
+        . cta_button('Full seed data', '/products/#seeds') . "\n"
+        . cta_button('See full specifications', '/products/') . "\n"
+        . '</div>' . "\n" . '<!-- /wp:buttons -->' . "\n"
+        . "</div>\n<!-- /wp:group -->",
+    );
+
+    (new CtaBudgetStep())->run($project);
+
+    $lines = $project->readText('theme/parts/page-home--lines.html');
+    assert_eq(1, substr_count($lines, '<!-- wp:button -->'));
+    assert_contains('href="/products/"', $lines);
+    assert_contains('<p class="text-action"><a href="/products/#seeds">Full seed data</a></p>', $lines);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

@@ -33,7 +33,7 @@ final class CtaBudget
     /**
      * @return array{markup:string,kept:int,demoted:int,notes:list<string>}
      */
-    public static function apply(string $markup, int $keep): array
+    public static function apply(string $markup, int $keep, ?string $preferLabel = null): array
     {
         $doc = BlockMarkup::parse($markup);
         if (
@@ -59,8 +59,30 @@ final class CtaBudget
             $buttons[] = ['index' => $i, 'row' => $row];
         }
 
-        $kept = min(max($keep, 0), count($buttons));
-        $demote = array_slice($buttons, $kept);
+        $keep = max($keep, 0);
+        $keepSet = [];
+        $want = is_string($preferLabel) ? self::buttonLabel($preferLabel) : '';
+        if ($want !== '' && $keep > 0) {
+            foreach ($buttons as $k => $button) {
+                if (self::buttonLabel($doc->innerHtml($button['index'])) === $want) {
+                    $keepSet[$k] = true;
+                    break;
+                }
+            }
+        }
+        foreach ($buttons as $k => $_) {
+            if (count($keepSet) >= $keep) {
+                break;
+            }
+            $keepSet[$k] = true;
+        }
+        $demote = [];
+        foreach ($buttons as $k => $button) {
+            if (!isset($keepSet[$k])) {
+                $demote[] = $button;
+            }
+        }
+        $kept = count($buttons) - count($demote);
         if ($demote === []) {
             return ['markup' => $markup, 'kept' => count($buttons), 'demoted' => 0, 'notes' => []];
         }
@@ -110,6 +132,16 @@ final class CtaBudget
         $out = (string) preg_replace("/\n{3,}/", "\n\n", $out);
 
         return ['markup' => $out, 'kept' => $kept, 'demoted' => count($demote), 'notes' => $notes];
+    }
+
+    /** Case-folded, tag-stripped label used to match a planned action. */
+    private static function buttonLabel(string $inner): string
+    {
+        if (preg_match('#<a\b[^>]*>(.*?)</a>#is', $inner, $m) === 1) {
+            $inner = $m[1];
+        }
+        $plain = html_entity_decode(strip_tags($inner), ENT_QUOTES | ENT_HTML5);
+        return mb_strtolower(trim((string) preg_replace('/\s+/u', ' ', $plain)));
     }
 
     /**

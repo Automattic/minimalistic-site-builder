@@ -552,7 +552,7 @@ test('O-G7 --list-steps honors both graph flags and matches each graph stepIds',
 
     assert_eq('html-first', $html['graph']);
     assert_eq('blocks', $blocks['graph']);
-    assert_eq(30, count($htmlIds));
+    assert_eq(31, count($htmlIds));
     assert_eq(27, count($blocksIds));
     assert_eq(stage5_expected_step_ids(true), $htmlIds);
     assert_eq(stage5_expected_step_ids(false), $blocksIds);

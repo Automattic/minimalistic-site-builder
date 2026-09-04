@@ -14,9 +14,10 @@ use Automattic\SiteBuild\StepDeclaration;
  * Step (deterministic): keep a page's buttons to the actions its plan placed,
  * and turn every other button into a text link.
  *
- * Runs on the blocks graph while the generated sections are still separate
- * ordered part files — after copy-dedupe, before image collection and the
- * fix-blocks re-serialization that syncs any edit downstream. Per section the
+ * Runs while the generated sections are still separate ordered part files —
+ * after copy-dedupe on the blocks graph, after section-layout on HTML-first,
+ * before image collection and the fix-blocks re-serialization that syncs any
+ * edit downstream. Per section the
  * budget is: the hero is left to HeaderHeroStep (its one planned button is
  * already the above-fold contract); a section the plan gave a `primary_action`
  * keeps one button; the page's closing section keeps one button as the
@@ -84,13 +85,15 @@ final class CtaBudgetStep implements Step
                         . 'no button budget applied';
                     continue;
                 }
-                $planned = is_array($section['primary_action'] ?? null);
+                $action = is_array($section['primary_action'] ?? null) ? $section['primary_action'] : null;
+                $planned = $action !== null;
+                $prefer = $planned ? trim((string) ($action['label'] ?? '')) : '';
                 $closing = $role === SectionRole::CLOSING || $index === $count - 1;
                 $keep = $planned || $closing ? 1 : 0;
 
                 $markup = $project->readText('theme/' . $rel);
                 try {
-                    $result = CtaBudget::apply($markup, $keep);
+                    $result = CtaBudget::apply($markup, $keep, $prefer !== '' ? $prefer : null);
                 } catch (\RuntimeException $e) {
                     $warnings[] = "file='theme/{$rel}'; block='part'; authored buttons delivered unchanged; "
                         . 'disposition=button budget skipped (' . $e->getMessage() . ')';
