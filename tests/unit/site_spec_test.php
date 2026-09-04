@@ -34,6 +34,59 @@ test('site-spec normalizes a host-supplied spec without an LLM call', function (
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('host-supplied spec with no pages of its own does not steal the description as Home purpose', function () {
+    // wpcom pins titles on meta.json `pages` and a spec without a tree.
+    // The empty-tree floor (homepage purpose = description) must not graft
+    // onto that list — page-plan writes empty purposes from the brief.
+    [$project, $llm, $tmp] = make_sitespec_fixture(
+        multiPage: true,
+        pages: ['Home', 'Menu', 'Visit'],
+        siteSpec: [
+            'name' => 'Fantinel',
+            'description' => 'Fantinel is a New York City bakery offering breads, pastries, cakes, coffee, and custom orders.',
+            'language' => 'en',
+        ],
+    );
+
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $pages = $project->readJson('siteSpec.json')['pages'];
+    assert_eq(['home', 'menu', 'visit'], array_column($pages, 'slug'));
+    assert_eq(
+        ['', '', ''],
+        array_column($pages, 'purpose'),
+        'empty purposes, not the site description on Home',
+    );
+    assert_eq(0, $llm->completeJsonCalls);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('host-supplied spec pages still graft purposes onto a title-only requested list', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture(
+        multiPage: true,
+        pages: ['Home', 'Menu', 'Visit'],
+        siteSpec: [
+            'name' => 'Fantinel',
+            'description' => 'Fantinel is a New York City bakery.',
+            'language' => 'en',
+            'pages' => [
+                ['title' => 'Home', 'purpose' => 'Introduce the bakery'],
+                ['title' => 'Menu', 'purpose' => 'Show the breads'],
+            ],
+        ],
+    );
+
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $pages = $project->readJson('siteSpec.json')['pages'];
+    assert_eq('Introduce the bakery', $pages[0]['purpose']);
+    assert_eq('Show the breads', $pages[1]['purpose']);
+    assert_eq('', $pages[2]['purpose']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('site-spec treats an explicitly supplied empty array as input and degrades without an LLM call', function () {
     [$project, $llm, $tmp] = make_sitespec_fixture(siteSpec: []);
 
