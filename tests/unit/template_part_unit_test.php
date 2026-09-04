@@ -518,6 +518,8 @@ test('FooterUnit generates a constrained footer from self-contained input', func
     }
     assert_contains('This site is ONE page: NEVER use `wp:page-list`', $prompt);
     assert_contains('AI_IMAGE: subject | page-context | style | aspect-ratio', $prompt);
+    assert_true(!str_contains($prompt, 'theme:./assets/<'), 'image instructions contain no copyable placeholder path');
+    assert_true(!str_contains($prompt, 'AI_IMAGE: <subject'), 'image instructions contain no executable placeholder spec');
     assert_eq('footer', $llm->calls[0]['opts']['log_label'] ?? null);
     assert_true(!str_contains($markup, '"tagName":"footer"'), 'template part owns the footer landmark');
     assert_true(!str_contains($markup, '<footer'), 'literal root footer is rewritten');

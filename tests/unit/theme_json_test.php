@@ -835,6 +835,51 @@ test('theme-json keeps a model-provided blockGap', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('theme-json repairs a copied blockGap placeholder and reaches a fixed point', function () {
+    $authored = 'var:preset|spacing|<slug>';
+    $theme = ['styles' => ['spacing' => ['blockGap' => $authored]]];
+
+    [$once, $warnings] = ThemeJsonStep::repairRootBlockGap($theme);
+
+    assert_eq('var:preset|spacing|md', $once['styles']['spacing']['blockGap']);
+    assert_eq(1, count($warnings));
+    $warning = $warnings[0];
+    assert_contains('theme/theme.json styles.spacing.blockGap', $warning);
+    assert_contains('authored "var:preset|spacing|<slug>"', $warning);
+    assert_contains('delivered "var:preset|spacing|md"', $warning);
+    assert_contains('disposition=', $warning);
+
+    [$twice, $secondWarnings] = ThemeJsonStep::repairRootBlockGap($once);
+    assert_eq($once, $twice);
+    assert_eq([], $secondWarnings);
+});
+
+test('theme-json run records a copied blockGap placeholder repair durably', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project);
+
+    $payload = valid_theme_payload();
+    $payload['styles']['spacing']['blockGap'] = 'var:preset|spacing|<slug>';
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    assert_eq(
+        'var:preset|spacing|md',
+        $project->readJson('theme/theme.json')['styles']['spacing']['blockGap'],
+    );
+    $warnings = implode("\n", $project->readJson('warnings.json')['theme-json'] ?? []);
+    assert_contains('styles.spacing.blockGap', $warnings);
+    assert_contains('authored "var:preset|spacing|<slug>"', $warnings);
+    assert_contains('delivered "var:preset|spacing|md"', $warnings);
+    assert_contains('disposition=', $warnings);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('disableCoreDefaultPresets forces the flags even when the model re-enables them', function () {
     // Missing settings sections are created.
     $theme = ThemeJsonStep::disableCoreDefaultPresets([]);
