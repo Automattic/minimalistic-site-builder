@@ -61,6 +61,10 @@ final class FixBlocksStep implements Step
             reads: [
                 'designDirection.json',
                 ...($this->htmlFirst ? ['design/site.css'] : []),
+                // Read only when it exists: the plan names the sections that
+                // keep a staggered row. Absent, the delivered root marker
+                // carries the same assignment.
+                'pages.json',
                 'theme/theme.json',
                 'theme/parts/*',
             ],
@@ -638,13 +642,19 @@ final class FixBlocksStep implements Step
         $excluded = array_fill_keys($excluded, true);
         $contentSize = self::themeContentSize($project);
         $spacingSlugs = self::themeSpacingSlugs($project);
-        // A staggered row survives only where the build assigned it: a
-        // section whose root carries the offset-grid marker. HTML-first
-        // sections carry no assignment, so there the design direction's
-        // committed rhythm is the only signal and it decides for the page.
-        $keepStaggerWithoutMarker = $htmlFirst && SectionComposition::directionContext(
-            DesignDirectionStep::dataFor($project),
-        )[SectionComposition::CONTEXT_BROKEN_GRID_RHYTHM];
+        // A staggered row survives only where the build assigned it. The
+        // plan (pages.json) is the source of truth, and the root marker
+        // SectionUnit stamps is its delivered echo; either one keeps the row,
+        // because SectionUnit stamps no marker on a section whose root is not
+        // one wp:group. HTML-first sections carry no assignment and no marker,
+        // so there the committed rhythm decides, but only for parts with no
+        // section marker at all: a blocks-fallback section on that graph
+        // obeys the same rule as the blocks path.
+        $plannedStaggerParts = self::plannedOffsetGridParts($project);
+        $rhythmKeepsStagger = $htmlFirst && SectionComposition::eligible(
+            'offset-grid',
+            SectionComposition::directionContext(DesignDirectionStep::dataFor($project)),
+        );
         foreach ($project->themeFiles() as $rel) {
             if (isset($excluded[$rel])) {
                 continue;
@@ -661,8 +671,7 @@ final class FixBlocksStep implements Step
             );
             $normalized = $result['markup'];
             if ($role === LayoutFixer::ROLE_SECTION
-                && !$keepStaggerWithoutMarker
-                && !self::assignedStagger($normalized)
+                && !self::keepsStagger($rel, $normalized, $plannedStaggerParts, $rhythmKeepsStagger)
             ) {
                 $flat = StaggeredChildren::flatten($normalized);
                 $normalized = $flat['markup'];
@@ -688,12 +697,58 @@ final class FixBlocksStep implements Step
     }
 
     /**
-     * Whether a section was assigned the staggered archetype: its delivered
-     * root carries the offset-grid marker class SectionUnit stamps.
+     * Whether one section part keeps its staggered sibling tops.
+     *
+     * @param array<string,true> $plannedStaggerParts theme-relative paths of
+     *        the sections the plan assigned offset-grid
+     * @param bool $rhythmKeepsStagger the HTML-first page-level grant, which
+     *        applies only to a part that carries no section marker
      */
-    private static function assignedStagger(string $markup): bool
+    private static function keepsStagger(
+        string $rel,
+        string $markup,
+        array $plannedStaggerParts,
+        bool $rhythmKeepsStagger,
+    ): bool {
+        if (isset($plannedStaggerParts[$rel])) {
+            return true;
+        }
+        $marker = SectionComposition::rootMarker($markup);
+        if ($marker === SectionComposition::marker('offset-grid')) {
+            return true;
+        }
+        return $rhythmKeepsStagger && $marker === null;
+    }
+
+    /**
+     * The section parts the plan assigned the offset-grid archetype, keyed by
+     * theme-relative path (`parts/page-<page>--<section>.html`). Empty when
+     * no plan exists yet, as in a partial run.
+     *
+     * @return array<string,true>
+     */
+    private static function plannedOffsetGridParts(Project $project): array
     {
-        return str_contains($markup, SectionComposition::marker('offset-grid'));
+        if (!$project->exists('pages.json')) {
+            return [];
+        }
+        $parts = [];
+        foreach ((array) ($project->readJson('pages.json')['pages'] ?? []) as $page) {
+            if (!is_array($page)) {
+                continue;
+            }
+            $pageSlug = trim((string) ($page['slug'] ?? ''));
+            foreach ((array) ($page['sections'] ?? []) as $section) {
+                if (!is_array($section) || ($section['layout_archetype'] ?? '') !== 'offset-grid') {
+                    continue;
+                }
+                $slug = trim((string) ($section['slug'] ?? ''));
+                if ($pageSlug !== '' && $slug !== '') {
+                    $parts["parts/page-{$pageSlug}--{$slug}.html"] = true;
+                }
+            }
+        }
+        return $parts;
     }
 
     /**

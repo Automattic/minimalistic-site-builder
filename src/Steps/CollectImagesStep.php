@@ -283,8 +283,8 @@ final class CollectImagesStep implements Step
             return;
         }
         $siteSpec = $project->readJson('siteSpec.json');
-        // A personal site keeps its name set in type; every other site gets a
-        // generated mark. The site-spec step decides which is which.
+        // A personal site shows its name as text and gets no mark. Every
+        // other site gets a generated mark. The site-spec step decides.
         if (SiteSpecStep::isPersonal($siteSpec)) {
             return;
         }

@@ -380,10 +380,38 @@ TEXT;
      */
     public static function directionContext(array $designDirection): array
     {
-        $rhythm = strtolower(trim((string) ($designDirection['rhythm'] ?? '')));
+        $rhythm = BoundedChoice::explicit(
+            $designDirection['rhythm'] ?? null,
+            Steps\DesignDirectionStep::RHYTHMS,
+        );
         return [
-            self::CONTEXT_BROKEN_GRID_RHYTHM => in_array($rhythm, self::BROKEN_GRID_RHYTHMS, true),
+            self::CONTEXT_BROKEN_GRID_RHYTHM => $rhythm !== null
+                && in_array($rhythm, self::BROKEN_GRID_RHYTHMS, true),
         ];
+    }
+
+    /**
+     * The archetype marker on a delivered section's root, or null when the
+     * root carries none or the markup does not parse. This is the delivered
+     * echo of the plan's assignment that SectionUnit stamps.
+     */
+    public static function rootMarker(string $markup): ?string
+    {
+        try {
+            $document = BlockMarkup::parse($markup);
+            $root = $document->topLevel();
+            if ($root === null) {
+                return null;
+            }
+            foreach (self::classTokens($document, $root) as $token) {
+                if (str_starts_with($token, self::MARKER_PREFIX)) {
+                    return $token;
+                }
+            }
+        } catch (\Throwable) {
+            return null;
+        }
+        return null;
     }
 
     /**

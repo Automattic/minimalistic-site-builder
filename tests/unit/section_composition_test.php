@@ -286,10 +286,16 @@ test('direction context turns the committed rhythm into the one fact the gate re
         SectionComposition::directionContext(['rhythm' => ' Offset ']),
         'case and whitespace do not matter',
     );
-    // The gate no longer reads the brief: a photography spec under a level
-    // rhythm stays level, and a bakery under an offset rhythm may stagger.
-    assert_true(in_array('offset', \Automattic\SiteBuild\Steps\DesignDirectionStep::RHYTHMS, true));
-    assert_true(in_array('gallery', \Automattic\SiteBuild\Steps\DesignDirectionStep::RHYTHMS, true));
+    assert_eq(
+        [SectionComposition::CONTEXT_BROKEN_GRID_RHYTHM => false],
+        SectionComposition::directionContext(['rhythm' => ['offset']]),
+        'a non-string rhythm grants nothing and raises no warning',
+    );
+    assert_eq(
+        [],
+        array_diff(SectionComposition::BROKEN_GRID_RHYTHMS, \Automattic\SiteBuild\Steps\DesignDirectionStep::RHYTHMS),
+        'every broken-grid rhythm is one the direction can commit',
+    );
 });
 
 test('the section catalog stays quiet on markup that executes its assignment', function () {

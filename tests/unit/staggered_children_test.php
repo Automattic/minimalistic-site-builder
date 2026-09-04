@@ -264,6 +264,54 @@ test('normalize-layout keeps staggered columns in a section assigned offset-grid
     });
 });
 
+test('normalize-layout keeps an assigned offset-grid row when the root carries no marker', function () {
+    with_project('stagger_planned_', function ($project): void {
+        // SectionUnit stamps no marker on a section whose root is not one
+        // wp:group. The plan still names the assignment, and that is enough.
+        $project->writeJson('siteSpec.json', ['name' => 'Hearth', 'area' => 'bakery']);
+        $project->writeJson('designDirection.json', ['rhythm' => 'offset']);
+        $project->writeJson('pages.json', ['pages' => [[
+            'slug' => 'home', 'front' => true,
+            'sections' => [
+                ['slug' => 'hero', 'layout_archetype' => 'full-bleed-cover'],
+                ['slug' => 'cards', 'layout_archetype' => 'offset-grid'],
+                ['slug' => 'visit', 'layout_archetype' => 'equal-card-grid'],
+            ],
+        ]]]);
+        $project->writeJson('theme/theme.json', ['version' => 3, 'settings' => ['layout' => ['contentSize' => '860px']]]);
+        $row = stagger_row(
+            stagger_column(stagger_card('One'))
+            . stagger_column(stagger_card('Two', '3rem'))
+        );
+        $project->writeText('theme/parts/page-home--cards.html', $row);
+        $project->writeText('theme/parts/page-home--visit.html', $row);
+
+        (new \Automattic\SiteBuild\Steps\NormalizeLayoutStep())->run($project);
+
+        assert_contains('"top":"3rem"', $project->readText('theme/parts/page-home--cards.html'), 'the planned offset-grid row stays staggered');
+        assert_true(!str_contains($project->readText('theme/parts/page-home--visit.html'), '"top":"3rem"'), 'the planned level row is leveled');
+    });
+});
+
+test('normalize-layout on the HTML-first path levels a marked fallback section under a broken-grid rhythm', function () {
+    with_project('stagger_htmlfirst_marked_', function ($project): void {
+        // A blocks-fallback section on the HTML-first graph carries a level
+        // marker; the page-level rhythm grant does not reach it.
+        $project->writeJson('siteSpec.json', ['name' => 'Hearth', 'area' => 'bakery']);
+        $project->writeJson('designDirection.json', ['rhythm' => 'gallery']);
+        $project->writeJson('theme/theme.json', ['version' => 3, 'settings' => ['layout' => ['contentSize' => '860px']]]);
+        $markup = stagger_section(stagger_row(
+            stagger_column(stagger_card('One'))
+            . stagger_column(stagger_card('Two', '3rem'))
+        ), SectionComposition::marker('equal-card-grid'));
+        $project->writeText('theme/parts/page-contact--cards.html', $markup);
+
+        (new \Automattic\SiteBuild\Steps\NormalizeLayoutStep(htmlFirst: true))->run($project);
+
+        assert_true(!str_contains($project->readText('theme/parts/page-contact--cards.html'), '"top":"3rem"'), 'a marked level section is leveled on HTML-first too');
+    });
+});
+
 test('normalize-layout on the HTML-first path keeps stagger only under a broken-grid rhythm', function () {
     foreach ([
         ['rhythm' => 'offset', 'keeps' => true],
@@ -302,6 +350,7 @@ test('home-body and inner-page design prompts keep rows level unless the design 
         $prompt = (string) file_get_contents(repo_path('prompts/' . $file));
         assert_contains('Do not stagger a row of siblings', $prompt, $file);
         assert_contains('unless the design preview already breaks its rows that way', $prompt, $file);
+        assert_contains('offset or gallery rhythm', $prompt, $file);
         assert_true(!str_contains($prompt, 'photography or gallery site'), $file . ' no longer gates on a kind of site');
     }
 });

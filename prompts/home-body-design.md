@@ -52,7 +52,7 @@ Every image needs meaningful `alt` text written as a usable image generation pro
 
 ## Responsive contract
 
-- Do not stagger a row of siblings (different top margins, translateY offsets, or nth-child even/odd vertical offsets) unless the design preview already breaks its rows that way. Keep card and image rows level otherwise.
+- Keep card and image rows level. Do not stagger a row of siblings (different top margins, translateY offsets, or nth-child even/odd vertical offsets) unless the design preview already breaks its rows that way. The build levels every stagger unless the design direction committed to an offset or gallery rhythm, and the preview was drawn from that direction.
 - Follow the mobile-first behavior established by the site CSS.
 - Reuse its grid, flex, bounded content widths, responsive spacing, focus states, readable contrast, and reduced-motion behavior.
 - Keep images, navigation, tables, long words, and multi-column layouts usable on narrow screens.

@@ -43,11 +43,11 @@ plugin activation
 ## Who gets a mark
 
 **Changed in BIGR-986 (2026-09-04).** The first version gated the mark on a
-`BusinessSite` keyword matcher: a list of about twenty business nouns (shop,
-salon, agency, hotel, ...) matched against the spec, minus photography and
-gallery sites and minus personal sites. That list was an allowlist: a product
-landing page, a nonprofit, a school, or a photographer studio got no mark.
-The matcher is gone, together with `PhotographySite`.
+`BusinessSite` keyword matcher. That matcher was a list of about twenty
+business nouns (shop, salon, agency, hotel, ...). It excluded photography and
+gallery sites and personal sites. The list was an allowlist: a product landing
+page, a nonprofit, a school, or a photographer studio got no mark. The matcher
+is gone, together with `PhotographySite`.
 
 The gate is now the one identity decision the site-spec step already makes:
 
@@ -56,17 +56,18 @@ SiteSpecStep::isPersonal(array $siteSpec): bool   // persona_name is non-empty
 ```
 
 - **Personal site** (`persona_name` set: portfolio, CV, personal blog) keeps
-  the plain site title. No mark, no header injection.
+  the plain site title. It gets no mark and no header injection.
 - **Every other site** gets the generated mark and the header injection.
+- **No `siteSpec.json`** (a partial run) gets no mark and no injection.
 
-The prompt is no longer read: `meta.json` left the `reads` of `collect-images`
-and `header-hero`.
+No step reads the prompt for this decision now. `meta.json` left the `reads`
+of `collect-images` and `header-hero`.
 
 ## Image spec
 
 Reserved filename: `site-logo.png`. Content filenames are subject-derived; this name is reserved for the synthetic mark.
 
-`collect-images` appends the spec unless `SiteSpecStep::isPersonal()`. It reads `siteSpec.json` (add to `StepDeclaration::reads`). If `site-logo.png` is already in `images.json` from markup, do not overwrite that row and do not tag it `site-logo` — skip the synthetic mark and warn. A content image must not become the site logo.
+`collect-images` appends the spec unless `SiteSpecStep::isPersonal()`. It reads `siteSpec.json`, declared in `StepDeclaration::reads`. If `site-logo.png` is already in `images.json` from markup, do not overwrite that row and do not tag it `site-logo` — skip the synthetic mark and warn. A content image must not become the site logo.
 
 ```
 file='images.json'; asset='site-logo.png'; delivered no synthetic mark; disposition=the reserved site-logo filename was already collected from page markup
@@ -149,11 +150,11 @@ The title is fixed, not the subject. `title` becomes the attachment's `post_titl
 
 ## Header
 
-`HeaderHeroStep`, business sites only:
+`HeaderHeroStep`, every non-personal site (see "Who gets a mark"):
 
 - If the header has no `wp:site-logo`, insert `<!-- wp:site-logo {"width":48,"shouldSyncIcon":true,"className":"site-logo-mark"} /-->` immediately before the first `wp:site-title` (sibling, same parent). If there is no site-title, insert at the start of the root group wrapper (after the opening `<div>`), not before the group comment — a prepend there fails the HTML-first safe-wrapper check. This branch only runs when there is no identity cluster to find.
 - Do not remove `wp:site-title`.
-- Non-business headers: do not add an empty logo slot.
+- Personal-site headers, and a build with no `siteSpec.json`: do not add an empty logo slot.
 
 `className` is a supported `core/site-logo` attribute and core renders it on the block wrapper. The serializer's `attributeOrder` for the block is `width, isLink, linkTarget, shouldSyncIcon, align, lock, anchor, className, …`, so the three attributes serialize in the order written above.
 
@@ -161,7 +162,7 @@ The class is what scopes the title-hiding rule below to marks **this step inject
 
 HTML-first: do not author a decorative logo `<img>` in the design document. The WordPress logo slot is this injected `core/site-logo` block, after transform. `design-preview.md` keeps the ban on logo images in the design HTML.
 
-`header.md` stays allowed to mention `wp:site-logo` for archetypes that already use it. The fixer is the source of truth for business sites.
+`header.md` stays allowed to mention `wp:site-logo` for archetypes that already use it. The fixer is the source of truth for the injected mark.
 
 Header width estimates already add logo width when `site-logo` is present (`HeaderHeroStep::estimatedRowWidth()`). Leave that as-is (counting title plus logo is conservative). The injected 48px mark does change header geometry on a design authored around a text wordmark, so the plan carries a visual check on a real business build, not unit tests alone.
 
@@ -216,7 +217,7 @@ Generated-content ladder: never abort the build for a missing or bad mark.
 
 | Situation | Delivery |
 |---|---|
-| Not a business site | no spec, no block, no theme mods |
+| Personal site (`persona_name` set), or no `siteSpec.json` | no spec, no block, no theme mods |
 | `--with-images` skipped | spec sits pending; manifest row has no file; seeder finds nothing; no mods; title visible |
 | `site-logo.png` generate failed | existing generate-images warning; no file; no mods; title visible |
 | Keying wiped out (mark came back opaque) | warn; `role` dropped; manifest row removed; nothing shipped or imported; no mods; title visible |
@@ -242,7 +243,7 @@ Suites: `tests/run.php` (unit) and `tests/run-integration.php` (integration). Bo
 - `assemble-pages` puts the role-tagged row in `plugin/images.json` even when page HTML does not reference it; content-only images stay without `role`; the manifest title is `Site logo`; a content row whose filename is also tagged `site-logo` keeps its subject title and is not retagged.
 - `generate-images` ships `site-logo.png` to `plugin/images/` when the manifest lists it and the mark is keyed (same as `hero.jpg` today); drops the role and warns when Imagick is missing or the key never ran; leaves missing ordinary content rows in the manifest.
 - Scaffolded plugin PHP contains the theme-assets fallback with its own containment guard, the `custom_logo` / `site_icon` writes, and a deactivate restore that is skipped per setting when the live value no longer matches `logo_attachment_id` (changing only `site_icon` still restores `custom_logo`).
-- `header-hero` inserts `wp:site-logo` with `className: site-logo-mark` before `wp:site-title` for business sites and leaves a personal-site header unchanged.
+- `header-hero` inserts `wp:site-logo` with `className: site-logo-mark` before `wp:site-title` for a business spec and for a photography spec, and leaves a personal-site header unchanged.
 - `finalize-theme` emits the `:has(.wp-block-site-logo.site-logo-mark img)` rule, and an authored lockup without the class keeps its title.
 - Re-pin the `src/Steps/AssemblePagesStep.php` sha256 at `tests/integration/dp_slice3_section_mode_test.php:154`. `contentImages()` changes in this work, and that assertion fails until the hash is updated.
 

@@ -2857,13 +2857,38 @@ test('ensureSiteLogoMark does not retag an authored branded-lockup logo', functi
     assert_true(!str_contains($out, 'site-logo-mark'));
 });
 
-test('header-hero injects the mark on a business site and not on a personal site', function () {
+test('header-hero injects the mark on every non-personal site and not on a personal site', function () {
     with_project('builder_hh_logo_', function ($project) {
         $project->writeJson('siteSpec.json', [
             'name' => 'Hearth & Crumb', 'site_type' => 'business storefront',
             'area' => 'bakery', 'persona_name' => '',
         ]);
         $project->writeJson('meta.json', ['prompt' => 'A neighborhood bakery']);
+        $project->writeJson('theme/theme.json', hh_theme_json());
+        $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'none']);
+        $pages = [[
+            'slug' => 'home', 'title' => 'Home', 'front' => true,
+            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+        ]];
+        $project->writeJson('pages.json', ['pages' => $pages]);
+        hh_above_fold($project, $pages, 'foreground-split');
+        $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
+        $project->writeText('theme/parts/page-home--hero.html', hh_cover('80') . "\n");
+
+        putenv(\Automattic\SiteBuild\AboveFoldContract::HEADER_ARCHETYPE_ENV);
+        (new HeaderHeroStep())->run($project);
+
+        $header = $project->readText('theme/parts/header.html');
+        assert_contains('site-logo-mark', $header);
+        assert_contains('wp:site-title', $header);
+    });
+
+    with_project('builder_hh_photologo_', function ($project) {
+        $project->writeJson('siteSpec.json', [
+            'name' => 'Stillrange', 'site_type' => 'photography portfolio',
+            'area' => 'landscape photography', 'persona_name' => '',
+        ]);
+        $project->writeJson('meta.json', ['prompt' => 'A landscape photography portfolio']);
         $project->writeJson('theme/theme.json', hh_theme_json());
         $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'none']);
         $pages = [[

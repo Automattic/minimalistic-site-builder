@@ -242,6 +242,10 @@ final class HeaderHeroStep implements Step
         $protection = (string) ($delivery['header']['protection_token'] ?? 'base');
         $siteSpec = $project->exists('siteSpec.json') ? $project->readJson('siteSpec.json') : [];
         $siteName = (string) ($siteSpec['name'] ?? '');
+        // A personal site shows its name as text and gets no mark. Every
+        // other site carries the generated mark. No spec means no mark, the
+        // same default collect-images applies to the asset.
+        $wantsLogoMark = $siteSpec !== [] && !SiteSpecStep::isPersonal($siteSpec);
         $pageTitles = array_map(static fn (array $p): string => (string) ($p['title'] ?? ''), $pages);
 
         // Behavior inputs (BIGR-762): the theme palette, motion-derived
@@ -629,9 +633,7 @@ final class HeaderHeroStep implements Step
         // Inject after every header rewrite (fallback, overlay grant, CTA
         // dedupe). An earlier insert is wiped when HeaderFallback replaces the
         // part, which is the HTML-first path's usual landing.
-        // A personal site keeps its name set in type (SiteSpecStep::isPersonal);
-        // every other site carries the generated mark.
-        if (!SiteSpecStep::isPersonal($siteSpec)) {
+        if ($wantsLogoMark) {
             $current = $writes[$headerRel] ?? $header;
             $writes[$headerRel] = self::ensureSiteLogoMark($current);
         }
@@ -663,7 +665,7 @@ final class HeaderHeroStep implements Step
             array_push($warnings, ...$degraded);
             $report[] = "[{$rel}] storefront cart UI degraded after header/hero reconcile";
         }
-        if (!SiteSpecStep::isPersonal($siteSpec) && $project->exists('theme/' . $headerRel)) {
+        if ($wantsLogoMark && $project->exists('theme/' . $headerRel)) {
             $persisted = $project->readText('theme/' . $headerRel);
             $withMark = self::ensureSiteLogoMark($persisted);
             if ($withMark !== $persisted) {

@@ -1,5 +1,7 @@
 # Business logo and site icon Implementation Plan
 
+> **Historical.** BIGR-986 (2026-09-04) removed the `BusinessSite` and `PhotographySite` matchers this plan describes. The mark now ships for every site without a `persona_name`. See `docs/business-logo-and-site-icon.md`, section "Who gets a mark".
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** For business-like sites, generate one square transparent mark, import it into the media library, and set it as `custom_logo` and `site_icon`, hiding the header site title only while that injected mark renders.
