@@ -820,6 +820,145 @@ test('site-spec grounds contact facts in the original prompt, not the refined re
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('site-spec restores a stated brand name the refine step misspelled, in the spec and in the brief', function () {
+    // PepeneBun build (2026-09-04): refine-prompt rewrote the stated
+    // "PepeneBun" as "PepenoBun", site-spec read the rewrite, listed the name
+    // as invented, and every page of the site carried the wrong brand.
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    $meta = $project->readJson('meta.json');
+    $meta['original_prompt'] = 'PepeneBun is a watermelon supply business in Dabuleni. PepeneBun sells seeds to growers.';
+    $meta['prompt'] = 'PepenoBun is a professional watermelon supply business in Dabuleni, Romania. PepenoBun sells seeds to growers.';
+    $project->writeJson('meta.json', $meta);
+    $llm->queueJson([
+        'name'        => 'PepenoBun',
+        'title'       => 'PepenoBun – Professional Watermelon Supply',
+        'description' => 'PepenoBun supplies seeds to growers.',
+        'language'    => 'en',
+        'invented'    => [],
+        'pages'       => [['title' => 'Home', 'slug' => 'home', 'purpose' => 'Introduce PepenoBun', 'children' => []]],
+    ]);
+
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $spec = $project->readJson('siteSpec.json');
+    assert_eq('PepeneBun', $spec['name']);
+    assert_eq('pepenebun', $spec['slug'], 'the slug follows the restored name');
+    assert_eq('PepeneBun – Professional Watermelon Supply', $spec['title']);
+    assert_eq('PepeneBun supplies seeds to growers.', $spec['description']);
+    assert_eq('Introduce PepeneBun', $spec['pages'][0]['purpose'], 'every string in the spec is restored');
+    assert_eq([], $spec['invented'], 'a stated name is not an invented one');
+
+    $prompt = (string) $project->readJson('meta.json')['prompt'];
+    assert_true(!str_contains($prompt, 'PepenoBun'), 'the refined brief no longer carries the misspelling');
+    assert_contains('PepeneBun sells seeds to growers', $prompt);
+    assert_contains('professional watermelon supply', $prompt, 'the rest of the rewrite is kept');
+
+    $warnings = $project->exists('warnings.json') ? ($project->readJson('warnings.json')['site-spec'] ?? []) : [];
+    assert_true(!str_contains(implode(' ', $warnings), 'PepenoBun'), 'a successful repair is not a warning row');
+    $report = $project->readText('logs/site-spec.txt');
+    assert_contains('PepenoBun', $report);
+    assert_contains('PepeneBun', $report);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec leaves a host-supplied near-miss name alone', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture(siteSpec: [
+        'name'     => 'PepenoBun',
+        'language' => 'en',
+        'pages'    => [['title' => 'Home', 'slug' => 'home', 'purpose' => 'Introduce PepenoBun']],
+    ]);
+    $meta = $project->readJson('meta.json');
+    $meta['original_prompt'] = 'PepeneBun is a watermelon supply business in Dabuleni.';
+    $project->writeJson('meta.json', $meta);
+
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $spec = $project->readJson('siteSpec.json');
+    assert_eq('PepenoBun', $spec['name'], 'a host-supplied spec is trusted as-is');
+    assert_eq(0, $llm->completeJsonCalls);
+    assert_true(!$project->exists('logs/site-spec.txt'), 'nothing was restored');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec leaves a genuinely invented name alone', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    $meta = $project->readJson('meta.json');
+    $meta['original_prompt'] = 'A watermelon supply business in Dabuleni, Romania, for industrial buyers.';
+    $meta['prompt'] = 'A professional watermelon supply business in Dabuleni, Romania, for industrial buyers.';
+    $project->writeJson('meta.json', $meta);
+    $llm->queueJson(['name' => 'Dabuleni Melons', 'language' => 'en', 'invented' => ['name']]);
+
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $spec = $project->readJson('siteSpec.json');
+    assert_eq('Dabuleni Melons', $spec['name']);
+    assert_eq(['name'], $spec['invented']);
+    assert_true(!$project->exists('logs/site-spec.txt'), 'nothing was repaired, so nothing is reported');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec does not mistake a sentence-opening common word for a stated brand', function () {
+    // "Create" is one edit from "Crate", but a plain word opening a sentence
+    // is not a brand the user stated; only a proper noun can be restored.
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    $meta = $project->readJson('meta.json');
+    $meta['original_prompt'] = 'Create a website for my bakery in Portland.';
+    $meta['prompt'] = 'A neighborhood bakery in Portland with a small storefront.';
+    $project->writeJson('meta.json', $meta);
+    $llm->queueJson(['name' => 'Crate', 'language' => 'en', 'invented' => ['name']]);
+
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $spec = $project->readJson('siteSpec.json');
+    assert_eq('Crate', $spec['name']);
+    assert_eq(['name'], $spec['invented']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('statedNameNear finds one stated proper noun within two edits, and nothing otherwise', function () {
+    $stated = 'PepeneBun is a supply business. It ships from Dabuleni to buyers across Romania.';
+    assert_eq('PepeneBun', SiteSpecStep::statedNameNear($stated, 'PepenoBun'), 'one edit, camel-cased brand at a sentence start');
+    assert_eq('PepeneBun', SiteSpecStep::statedNameNear($stated, 'pepenebun'), 'case differences alone are a restoration');
+    assert_eq(null, SiteSpecStep::statedNameNear($stated, 'Dabulenni'), 'a place name is not a brand');
+    assert_eq(null, SiteSpecStep::statedNameNear($stated, 'PepeneBun'), 'an exact match needs no restoration');
+    assert_eq(null, SiteSpecNearProbe::far($stated), 'three edits is a different name');
+    assert_eq(null, SiteSpecStep::statedNameNear($stated, 'Melon'), 'no stated word nearby');
+    assert_eq(null, SiteSpecStep::statedNameNear('It is a bakery.', 'Its'), 'a sentence-opening pronoun is not a brand');
+    assert_eq(
+        'Tbilisi Tavern',
+        SiteSpecStep::statedNameNear('My restaurant "Tbilisi Tavern" serves Georgian food.', 'Tbilissi Tavern'),
+        'a two-word stated name is matched as a phrase',
+    );
+    assert_eq(
+        null,
+        SiteSpecStep::statedNameNear('Both PepeneBun and PepanoBun ship from Dabuleni.', 'PepaneBun'),
+        'two different stated brand-shaped candidates are ambiguous, so nothing is restored',
+    );
+    assert_eq(
+        'PepeneBun',
+        SiteSpecStep::statedNameNear('Both PepeneBun and PepeneBun ship from Dabuleni.', 'PepenoBun'),
+        'the same stated brand twice is one candidate',
+    );
+    assert_eq(
+        null,
+        SiteSpecStep::statedNameNear('Both Lumen and Lumen ship from Copenhagen.', 'Lumin'),
+        'a single un-shaped word is not a brand even when it repeats',
+    );
+});
+
+/** Keeps the far-edit case readable in the test above. */
+final class SiteSpecNearProbe
+{
+    public static function far(string $stated): ?string
+    {
+        return SiteSpecStep::statedNameNear($stated, 'Pepperbin');
+    }
+}
+
 test('site-spec keeps a contact fact the user stated even when refinement reworded around it', function () {
     [$project, $llm, $tmp] = make_sitespec_fixture();
     $meta = $project->readJson('meta.json');

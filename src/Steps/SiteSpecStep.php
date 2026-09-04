@@ -184,6 +184,35 @@ final class SiteSpecStep implements Step
             $statedPrompt,
             array_key_exists('site_spec', $meta),
         );
+        // The refine step rewrites the brief on a small model, and a small
+        // model sometimes respells a brand it was told to preserve. The spec
+        // then reads the rewrite. site-spec.md tells the model to treat a
+        // name sitting in that rewrite as stated, so `invented` often does
+        // not contain `name` — the misspelling still has to be restored.
+        // The user's own words outrank both: a generated name within two
+        // edits of a brand-shaped proper noun the user actually typed is
+        // that noun. Rung 1 — restored in the spec and in the brief every
+        // later step reads, reported, never a warning. A host-supplied spec
+        // is trusted as-is: no refine step touched its name.
+        if (!array_key_exists('site_spec', $meta)) {
+            $restored = self::statedNameNear($statedPrompt, (string) $spec['name']);
+            if ($restored !== null) {
+                $from = (string) $spec['name'];
+                if ($spec['slug'] === ProjectStore::slugify($from)) {
+                    $spec['slug'] = ProjectStore::slugify($restored);
+                }
+                $spec = self::replaceIdentityToken($spec, $from, $restored);
+                $spec['invented'] = array_values(array_diff($spec['invented'], ['name']));
+                $meta['prompt'] = self::replaceIdentityToken($meta['prompt'], $from, $restored);
+                $project->writeJson('meta.json', $meta);
+                $report = 'Identity: the refined brief and the generated spec spelled the name "' . $from
+                    . '"; the user wrote "' . $restored . '", so the stated spelling was restored across the spec '
+                    . 'and the brief, and the invented claim on "name" withdrawn (disposition repaired)';
+                $project->writeText('logs/site-spec.txt', $report . "\n");
+                Narrator::write("  [site-spec] restored the stated name \"{$restored}\" over \"{$from}\"\n");
+            }
+        }
+
         $spec['writing_direction'] = $callerWritingDirection
             ?? WritingDirection::fromLanguage((string) ($spec['language'] ?? ''));
         if ($warnings !== []) {
@@ -212,6 +241,135 @@ final class SiteSpecStep implements Step
         ));
         $name = trim(mb_substr($name, 0, 48));
         return $name !== '' ? mb_convert_case($name, MB_CASE_TITLE, 'UTF-8') : 'New Site';
+    }
+
+    /**
+     * The proper noun the user actually typed that a generated name is a
+     * misspelling of, or null when there is no such word.
+     *
+     * A candidate is a run of capitalized words in the stated prompt, as many
+     * words as the name has, whose first word is a proper noun: capitalized
+     * and either carrying an inner capital or digit (a brand like PepeneBun
+     * reads as a name even when it opens a sentence) or standing somewhere
+     * other than a sentence start (a plain sentence-opening word — "Create",
+     * "It" — is never a brand). A single-word candidate must itself be
+     * brand-shaped: a place name like Dabuleni is not a brand. A two-or-more
+     * word phrase may restore without an inner capital (Tbilisi Tavern).
+     * The name must be at least four characters and within two edits of the
+     * candidate, sharing its first letter; an exact match needs no restoration
+     * and returns null; a match that differs only in case is a restoration to
+     * the stated casing. Two DIFFERENT candidates in range are ambiguous, and
+     * nothing is restored. Pure — unit-testable.
+     */
+    public static function statedNameNear(string $stated, string $name): ?string
+    {
+        $name = trim((string) preg_replace('/\s+/u', ' ', $name));
+        if ($name === '' || mb_strlen($name) < 4) {
+            return null;
+        }
+        $wanted = count(explode(' ', $name));
+        if ($wanted > 4) {
+            return null;
+        }
+
+        preg_match_all('/[\p{L}\p{N}][\p{L}\p{N}\'\x{2019}-]*/u', $stated, $matches, PREG_OFFSET_CAPTURE);
+        $tokens = [];
+        foreach ($matches[0] as [$word, $offset]) {
+            $before = rtrim(substr($stated, 0, $offset));
+            $tokens[] = [
+                'word'    => $word,
+                'initial' => $before === '' || preg_match('/[.!?:]$/u', $before) === 1,
+            ];
+        }
+
+        $lowerName = mb_strtolower($name);
+        $candidates = [];
+        for ($i = 0; $i + $wanted <= count($tokens); $i++) {
+            $run = array_slice($tokens, $i, $wanted);
+            if (!self::looksLikeProperNoun($run[0]['word'], $run[0]['initial'])) {
+                continue;
+            }
+            foreach ($run as $token) {
+                if (preg_match('/^\p{Lu}/u', $token['word']) !== 1) {
+                    continue 2;
+                }
+            }
+            $phrase = implode(' ', array_column($run, 'word'));
+            if ($wanted === 1 && !self::isBrandShaped($run[0]['word'])) {
+                continue;
+            }
+            if ($phrase === $name) {
+                return null;
+            }
+            $lowerPhrase = mb_strtolower($phrase);
+            if (mb_substr($lowerPhrase, 0, 1) !== mb_substr($lowerName, 0, 1)) {
+                continue;
+            }
+            $distance = self::editDistance($lowerPhrase, $lowerName);
+            if ($distance <= 2) {
+                $candidates[$phrase] = true;
+            }
+        }
+
+        return count($candidates) === 1 ? (string) array_key_first($candidates) : null;
+    }
+
+    /** Capitalized, and either brand-shaped inside or not opening a sentence. */
+    private static function looksLikeProperNoun(string $word, bool $sentenceInitial): bool
+    {
+        if (preg_match('/^\p{Lu}/u', $word) !== 1 || mb_strlen($word) < 2) {
+            return false;
+        }
+        return self::isBrandShaped($word) || !$sentenceInitial;
+    }
+
+    /** Inner capital or digit — PepeneBun, iPhone, 3M-shaped tokens. */
+    private static function isBrandShaped(string $word): bool
+    {
+        return preg_match('/^.[^\s]*[\p{Lu}\p{N}]/u', $word) === 1;
+    }
+
+    /** Levenshtein distance over characters, not bytes, so accented names measure right. */
+    private static function editDistance(string $a, string $b): int
+    {
+        $x = preg_split('//u', $a, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $y = preg_split('//u', $b, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $previous = range(0, count($y));
+        foreach ($x as $i => $cx) {
+            $current = [$i + 1];
+            foreach ($y as $j => $cy) {
+                $current[] = min(
+                    $previous[$j + 1] + 1,
+                    $current[$j] + 1,
+                    $previous[$j] + ($cx === $cy ? 0 : 1),
+                );
+            }
+            $previous = $current;
+        }
+        return $previous[count($y)];
+    }
+
+    /**
+     * Replace one identity token, as a whole word, in every string of a value.
+     * Arrays are walked recursively so page titles and purposes follow the
+     * name; non-strings pass through.
+     */
+    private static function replaceIdentityToken(mixed $value, string $from, string $to): mixed
+    {
+        if (is_array($value)) {
+            foreach ($value as $key => $item) {
+                $value[$key] = self::replaceIdentityToken($item, $from, $to);
+            }
+            return $value;
+        }
+        if (!is_string($value) || $from === '') {
+            return $value;
+        }
+        return (string) preg_replace(
+            '/(?<![\p{L}\p{N}])' . preg_quote($from, '/') . '(?![\p{L}\p{N}])/u',
+            $to,
+            $value,
+        );
     }
 
     /**
