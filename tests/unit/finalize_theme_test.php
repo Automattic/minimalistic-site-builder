@@ -55,6 +55,10 @@ test('finalize-theme inlines header title-hiding keyed on site-logo-mark', funct
     $tmp = sys_get_temp_dir() . '/builder_fin_logo_' . uniqid();
     $project = (new ProjectStore($tmp))->create('Forno Vero');
     $project->writeText('theme/style.css', "/*\nTheme Name: Forno Vero\n*/\n");
+    $project->writeText(
+        'theme/parts/header.html',
+        '<!-- wp:site-logo {"className":"site-logo-mark"} /--><!-- wp:site-title /-->',
+    );
     finalize_static_header($project);
 
     quietly(fn () => (new FinalizeThemeStep())->run($project));
@@ -64,9 +68,21 @@ test('finalize-theme inlines header title-hiding keyed on site-logo-mark', funct
     assert_contains('.wp-block-site-logo.site-logo-mark img', $php);
     assert_contains('.site-header-shell:has(', $php);
     assert_contains('header:has(', $php);
-    $ruleAt = strpos($php, 'site-logo-mark img');
-    $editorAt = strpos($php, 'after_setup_theme');
-    assert_true($ruleAt !== false && $editorAt !== false && $ruleAt < $editorAt, 'editor keeps the title visible');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('finalize-theme ships no title-hiding rule when the header has no mark', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fin_nologo_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    $project->writeText('theme/style.css', "/*\nTheme Name: Forno Vero\n*/\n");
+    $project->writeText('theme/parts/header.html', '<!-- wp:site-title /-->');
+    finalize_static_header($project);
+
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+
+    $php = $project->readText('theme/functions.php');
+    assert_true(!str_contains($php, 'site-logo-mark'), 'no rule for a header that carries no mark');
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
