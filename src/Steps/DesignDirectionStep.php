@@ -1947,6 +1947,19 @@ final class DesignDirectionStep implements Step
         return Depth::explicit($project->readJson(self::FILE)['depth'] ?? null);
     }
 
+    /**
+     * The persisted band rhythm, `alternating` (the write-side default) when
+     * absent or not a committed value. Downstream prompts that do not carry
+     * the whole direction still need this one field: it is the input of the
+     * offset-grid gate, so a prompt that states the stagger rule must name
+     * the same rhythm the build enforces.
+     */
+    public static function rhythmFor(Project $project): string
+    {
+        return BoundedChoice::explicit(self::dataFor($project)['rhythm'] ?? null, self::RHYTHMS)
+            ?? 'alternating';
+    }
+
     /** The persisted page density, measured when absent or not a committed value. */
     public static function densityFor(Project $project): string
     {

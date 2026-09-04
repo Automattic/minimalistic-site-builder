@@ -345,12 +345,12 @@ test('normalize-layout on the HTML-first path keeps stagger only under a broken-
     }
 });
 
-test('home-body and inner-page design prompts keep rows level unless the design preview staggers them', function () {
+test('home-body and inner-page design prompts state the rhythm rule the build enforces', function () {
     foreach (['home-body-design.md', 'inner-page-design.md'] as $file) {
         $prompt = (string) file_get_contents(repo_path('prompts/' . $file));
         assert_contains('Do not stagger a row of siblings', $prompt, $file);
-        assert_contains('unless the design preview already breaks its rows that way', $prompt, $file);
-        assert_contains('offset or gallery rhythm', $prompt, $file);
+        assert_contains('`offset` or `gallery`', $prompt, $file);
+        assert_contains('{{band_rhythm}}', $prompt, $file . ' names the committed rhythm');
         assert_true(!str_contains($prompt, 'photography or gallery site'), $file . ' no longer gates on a kind of site');
     }
 });
@@ -364,4 +364,14 @@ test('StaggeredChildren skips structurally unsafe markup', function () {
 
     assert_eq($markup, $result['markup']);
     assert_eq([], $result['notes']);
+});
+
+test('DesignDirectionStep::rhythmFor returns the committed rhythm or the write-side default', function () {
+    with_project('rhythm_for_', function ($project): void {
+        assert_eq('alternating', \Automattic\SiteBuild\Steps\DesignDirectionStep::rhythmFor($project), 'no direction yet');
+        $project->writeJson('designDirection.json', ['rhythm' => ' Gallery ']);
+        assert_eq('gallery', \Automattic\SiteBuild\Steps\DesignDirectionStep::rhythmFor($project));
+        $project->writeJson('designDirection.json', ['rhythm' => 'zigzag']);
+        assert_eq('alternating', \Automattic\SiteBuild\Steps\DesignDirectionStep::rhythmFor($project), 'an uncommitted value falls back');
+    });
 });
