@@ -178,7 +178,7 @@ final class AssemblePagesStep implements Step
      *
      * @param array<string,string>          $pageContents page slug => markup
      * @param array<int,array<string,mixed>> $specs       images.json entries
-     * @return array<int,array{filename:string,title:string}>
+     * @return array<int,array{filename:string,title:string,role?:string}>
      */
     public static function contentImages(array $pageContents, array $specs): array
     {
@@ -204,6 +204,20 @@ final class AssemblePagesStep implements Step
                 }
                 $images[$filename] = ['filename' => $filename, 'title' => $title];
             }
+        }
+        foreach ($specs as $spec) {
+            if (!is_array($spec) || ($spec['role'] ?? '') !== 'site-logo') {
+                continue;
+            }
+            $filename = (string) ($spec['filename'] ?? '');
+            if ($filename === '' || isset($images[$filename])) {
+                continue;
+            }
+            $images[$filename] = [
+                'filename' => $filename,
+                'title'    => 'Site logo',
+                'role'     => 'site-logo',
+            ];
         }
         return array_values($images);
     }

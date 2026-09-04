@@ -85,6 +85,8 @@ function wp_stub_reset(): void
     $GLOBALS['wp_post_meta'] = [];
     $GLOBALS['wp_actions'] = [];
     $GLOBALS['wp_registered_block_paths'] = [];
+    $GLOBALS['wp_theme_mods'] = [];
+    $GLOBALS['wp_stylesheet_directory'] = sys_get_temp_dir() . '/wp-stub-theme';
     if (method_exists(WP_Block_Type_Registry::get_instance(), 'reset')) {
         WP_Block_Type_Registry::get_instance()->reset();
     }
@@ -199,6 +201,23 @@ if (!function_exists('get_option')) {
     function get_stylesheet_directory_uri(): string
     {
         return 'https://example.test/wp-content/themes/demo';
+    }
+    function get_stylesheet_directory(): string
+    {
+        return $GLOBALS['wp_stylesheet_directory'];
+    }
+    function get_theme_mod(string $key, $default = false)
+    {
+        return $GLOBALS['wp_theme_mods'][$key] ?? $default;
+    }
+    function set_theme_mod(string $key, $value): bool
+    {
+        $GLOBALS['wp_theme_mods'][$key] = $value;
+        return true;
+    }
+    function remove_theme_mod(string $key): void
+    {
+        unset($GLOBALS['wp_theme_mods'][$key]);
     }
     function trailingslashit(string $s): string
     {
@@ -858,6 +877,152 @@ test('the seeder reports when it degrades or refuses to store markup', function 
     }
 
     ini_set('error_log', (string) $previous);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('seeder imports from theme assets when plugin/images is empty and sets logo mods', function () {
+    $slug = 'logo-import';
+    [$project, $tmp] = scaffold_plugin_fixture($slug);
+    $project->writeJson('plugin/images.json', ['images' => [
+        ['filename' => 'hero.jpg', 'title' => 'Loaves'],
+        ['filename' => 'site-logo.png', 'title' => 'Site logo', 'role' => 'site-logo'],
+        ['filename' => 'site-icon.png', 'title' => 'Site icon', 'role' => 'site-icon'],
+    ]]);
+    $themeDir = sys_get_temp_dir() . '/wp-stub-theme-' . uniqid();
+    @mkdir($themeDir . '/assets', 0777, true);
+    file_put_contents($themeDir . '/assets/hero.jpg', 'JPEG');
+    file_put_contents($themeDir . '/assets/site-logo.png', 'PNG');
+    file_put_contents($themeDir . '/assets/site-icon.png', 'PNGICON');
+
+    wp_stub_reset();
+    $GLOBALS['wp_stylesheet_directory'] = $themeDir;
+    require_once $project->pluginPath('site-content.php');
+    (content_fn($slug, 'activate'))();
+
+    assert_eq(3, count($GLOBALS['wp_attachments']));
+    $logoId = (int) get_theme_mod('custom_logo');
+    $iconId = (int) get_option('site_icon');
+    assert_true($logoId > 0, 'custom_logo set');
+    assert_true($iconId > 0, 'site_icon set');
+    assert_true(
+        $logoId !== $iconId,
+        'the icon is its own opaque attachment, not the transparent header mark',
+    );
+    $state = get_option(ApplyIdentityStep::identifierPrefix($slug) . '_content_state');
+    assert_true($state['changed_logo']);
+    assert_eq($logoId, $state['logo_attachment_id']);
+    assert_eq($iconId, $state['icon_attachment_id']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+    exec('rm -rf ' . escapeshellarg($themeDir));
+});
+
+test('seeder restore skips logo mods the owner replaced', function () {
+    $slug = 'logo-keep';
+    [$project, $tmp] = scaffold_plugin_fixture($slug);
+    $project->writeJson('plugin/images.json', ['images' => [
+        ['filename' => 'site-logo.png', 'title' => 'Site logo', 'role' => 'site-logo'],
+        ['filename' => 'site-icon.png', 'title' => 'Site icon', 'role' => 'site-icon'],
+    ]]);
+    @mkdir($project->pluginPath('images'), 0777, true);
+    file_put_contents($project->pluginPath('images/site-logo.png'), 'PNG');
+    file_put_contents($project->pluginPath('images/site-icon.png'), 'PNGICON');
+
+    wp_stub_reset();
+    require_once $project->pluginPath('site-content.php');
+    (content_fn($slug, 'activate'))();
+    $seeded = (int) get_theme_mod('custom_logo');
+    set_theme_mod('custom_logo', 999);
+    update_option('site_icon', 999);
+
+    (content_fn($slug, 'deactivate'))();
+
+    assert_eq(999, (int) get_theme_mod('custom_logo'));
+    assert_eq(999, (int) get_option('site_icon'));
+    assert_true(!isset($GLOBALS['wp_attachments'][$seeded]));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('seeder restore clears custom_logo when the owner changed only site_icon', function () {
+    $slug = 'logo-split';
+    [$project, $tmp] = scaffold_plugin_fixture($slug);
+    $project->writeJson('plugin/images.json', ['images' => [
+        ['filename' => 'site-logo.png', 'title' => 'Site logo', 'role' => 'site-logo'],
+        ['filename' => 'site-icon.png', 'title' => 'Site icon', 'role' => 'site-icon'],
+    ]]);
+    @mkdir($project->pluginPath('images'), 0777, true);
+    file_put_contents($project->pluginPath('images/site-logo.png'), 'PNG');
+    file_put_contents($project->pluginPath('images/site-icon.png'), 'PNGICON');
+
+    wp_stub_reset();
+    require_once $project->pluginPath('site-content.php');
+    (content_fn($slug, 'activate'))();
+    $seeded = (int) get_theme_mod('custom_logo');
+    update_option('site_icon', 999);
+
+    (content_fn($slug, 'deactivate'))();
+
+    assert_eq(false, get_theme_mod('custom_logo', false), 'still-owned logo is restored');
+    assert_eq(999, (int) get_option('site_icon'), 'owner site_icon is left alone');
+    assert_true(!isset($GLOBALS['wp_attachments'][$seeded]));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('seeder restore puts back previous logo mods when still owned', function () {
+    $slug = 'logo-restore';
+    [$project, $tmp] = scaffold_plugin_fixture($slug);
+    $project->writeJson('plugin/images.json', ['images' => [
+        ['filename' => 'site-logo.png', 'title' => 'Site logo', 'role' => 'site-logo'],
+        ['filename' => 'site-icon.png', 'title' => 'Site icon', 'role' => 'site-icon'],
+    ]]);
+    @mkdir($project->pluginPath('images'), 0777, true);
+    file_put_contents($project->pluginPath('images/site-logo.png'), 'PNG');
+    file_put_contents($project->pluginPath('images/site-icon.png'), 'PNGICON');
+
+    wp_stub_reset();
+    require_once $project->pluginPath('site-content.php');
+    (content_fn($slug, 'activate'))();
+    $seeded = (int) get_theme_mod('custom_logo');
+    assert_true($seeded > 0);
+
+    (content_fn($slug, 'deactivate'))();
+
+    assert_eq(false, get_theme_mod('custom_logo', false));
+    assert_eq(false, get_option('site_icon', false));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('seeder leaves site_icon alone when no opaque icon shipped', function () {
+    $slug = 'logo-only';
+    [$project, $tmp] = scaffold_plugin_fixture($slug);
+    $project->writeJson('plugin/images.json', ['images' => [
+        ['filename' => 'site-logo.png', 'title' => 'Site logo', 'role' => 'site-logo'],
+    ]]);
+    @mkdir($project->pluginPath('images'), 0777, true);
+    file_put_contents($project->pluginPath('images/site-logo.png'), 'PNG');
+
+    wp_stub_reset();
+    require_once $project->pluginPath('site-content.php');
+    (content_fn($slug, 'activate'))();
+
+    assert_true((int) get_theme_mod('custom_logo') > 0, 'the header still gets its mark');
+    assert_eq(
+        false,
+        get_option('site_icon', false),
+        'a transparent mark is never borrowed as the favicon',
+    );
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('import_images applies the same containment guard to the theme assets root', function () {
+    [$project, $tmp] = scaffold_plugin_fixture();
+    $php = $project->readText(ScaffoldPluginStep::MAIN_FILE);
+    assert_contains("get_stylesheet_directory() . '/assets'", $php);
+    assert_contains('DIRECTORY_SEPARATOR) !== 0', $php);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

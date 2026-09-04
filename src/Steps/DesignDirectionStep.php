@@ -304,6 +304,8 @@ final class DesignDirectionStep implements Step
             $seedTint,
             $seedGround,
             $seedColorEconomy,
+            $seedRegister,
+            $seedTypeRegister,
         );
         if ($direction === null) {
             // A build without a committed direction still works — every
@@ -747,6 +749,8 @@ final class DesignDirectionStep implements Step
         string $conceptTint = '',
         string $conceptGround = '',
         string $conceptColorEconomy = '',
+        string $conceptRegister = '',
+        string $conceptTypeRegister = '',
     ): ?array {
         if (!is_array($raw)) {
             return null;
@@ -884,7 +888,12 @@ final class DesignDirectionStep implements Step
             'invalid CTA construction replaced by deterministic solid fallback',
         );
         $surface = self::normalizeSurface($raw['surface'] ?? null, $warnings);
-        $device = self::normalizeDevice($raw['device'] ?? null, $warnings);
+        $device = self::rationHairlineDevice(
+            self::normalizeDevice($raw['device'] ?? null, $warnings),
+            $conceptRegister,
+            $conceptTypeRegister,
+            $warnings,
+        );
         $rhythm = self::normalizeRhythm($raw['rhythm'] ?? null, $warnings);
         $density = self::normalizeDensity($raw['density'] ?? null, $warnings);
         $textPlacement = self::normalizeTextPlacement($raw['text_placement'] ?? null, $warnings);
@@ -1184,6 +1193,62 @@ final class DesignDirectionStep implements Step
     /**
      * @param list<string> $warnings
      */
+    /**
+     * Seed registers whose world is a printed page, where a ruled band is a
+     * native mark rather than a reflex.
+     *
+     * @var list<string>
+     */
+    public const PRINTED_REGISTERS = ['editorial', 'archival', 'heritage'];
+
+    /**
+     * Letterform traditions that carry the same printed-page argument.
+     *
+     * @var list<string>
+     */
+    public const PRINTED_TYPE_REGISTERS = ['didone', 'transitional'];
+
+    /**
+     * Withhold the hairline device from concepts with no printed-page argument.
+     *
+     * The prompt says "leave none unless the concept needs that one mark",
+     * and 51 of 53 audited directions committed `hairline-rule` anyway, on
+     * neon festivals and SaaS landings alike (BIGR-978). The seed's register
+     * and letterform tradition are the committed facts a designer would cite
+     * for a ruled band, so the device stays only when one of them is a
+     * printed tradition. A seed round that committed no tradition leaves
+     * nothing to judge against, and the authored device stands.
+     *
+     * @param list<string> $warnings
+     */
+    public static function rationHairlineDevice(
+        string $device,
+        string $register,
+        string $typeRegister,
+        array &$warnings = [],
+    ): string {
+        if ($device !== 'hairline-rule') {
+            return $device;
+        }
+        $register = strtolower(trim($register));
+        $typeRegister = strtolower(trim($typeRegister));
+        if ($register === '' && $typeRegister === '') {
+            return $device;
+        }
+        if (
+            in_array($register, self::PRINTED_REGISTERS, true)
+            || in_array($typeRegister, self::PRINTED_TYPE_REGISTERS, true)
+        ) {
+            return $device;
+        }
+        $warnings[] = 'designDirection.json: field device authored "hairline-rule"; delivered "none"; '
+            . 'disposition the hairline device is a printed-page mark and this concept commits register "'
+            . ($register === '' ? 'none' : $register) . '" and letterform tradition "'
+            . ($typeRegister === '' ? 'none' : $typeRegister)
+            . '", neither a printed tradition, so the one-band rule is withheld';
+        return Device::DEFAULT;
+    }
+
     public static function normalizeDevice(mixed $authored, array &$warnings = []): string
     {
         return BoundedChoice::normalize(
@@ -1547,6 +1612,7 @@ final class DesignDirectionStep implements Step
         if ($depth !== null) {
             $facts[] = '- **Depth**: ' . $depth . ' — ' . match ($depth) {
                 'flat'        => 'cards, contained images, contained covers, and media-text surfaces stay deliberately shadowless',
+                'ring'        => 'the build gives cards and contained media one 1px hairline ring and no lift',
                 'soft'        => 'the build gives cards and contained media one restrained, diffuse lift',
                 'hard-offset' => 'the build gives cards and contained media one crisp poster-like offset plate',
                 'inset'       => 'the build presses cards and contained media into their surfaces with an inset edge and shade',

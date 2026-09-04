@@ -691,7 +691,7 @@ test('bodyFor gives OpenRouter Kimi K3 its configured budget and omits unsupport
     }
 });
 
-test('Baseten quiets the models it may quiet and floors GLM 5.3 Flash at low', function () {
+test('Baseten quiets the models it may quiet, and GLM 5.3 Flash follows its vendor profile', function () {
     $effort = static function (string $model): ?string {
         $body = OpenAiCompatibleClient::bodyFor(['prompt' => 'p'], $model, 16000, 'baseten');
         return $body['reasoning_effort'] ?? null;
@@ -707,15 +707,19 @@ test('Baseten quiets the models it may quiet and floors GLM 5.3 Flash at low', f
         assert_eq('none', $effort($model), "{$model}: reasoning is switched off");
     }
 
-    // GLM 5.3 Flash rejects `none`; low is the documented floor.
-    assert_eq('low', $effort('zai-org/GLM-5.3-Flash'), 'GLM 5.3 Flash cannot be disabled');
+    // The small tier is the one model carrying a vendor profile, and that
+    // profile -- not the quiet-list above -- owns its effort. It defaults to
+    // `low` rather than the publisher's `max` because it serves the structural
+    // steps, whose pinned budgets `max` cannot answer within.
+    assert_eq('low', $effort('zai-org/GLM-5.3-Flash'), 'GLM 5.3 Flash defaults to low for small-tier use');
 
-    // Slug case is Baseten's, not ours: the table is matched case-insensitively.
-    assert_eq('none', $effort('zai-org/glm-5.2-fast'), 'the table is case-insensitive');
+    // Slug case is Baseten's, not ours: the lookup is case-insensitive.
+    assert_eq('low', $effort('zai-org/glm-5.3-flash'), 'the profile is matched case-insensitively');
 
-    // zai-org/GLM-5.3 is NOT a Baseten model — the proxy answers 404 — so it
-    // must never acquire a profile here by looking like one that is.
-    assert_eq(null, $effort('zai-org/GLM-5.3'), 'GLM 5.3 plain does not exist and gets no profile');
+    // zai-org/GLM-5.3 plain is a live Baseten model that does honour `none`,
+    // but it is not in the table, so it must not inherit the Flash profile by
+    // looking like it.
+    assert_eq(null, $effort('zai-org/GLM-5.3'), 'GLM 5.3 plain is unlisted and gets no profile');
 
     // Absent from the table → no reasoning field at all, because Baseten
     // answers 400 for a value the model does not list.
@@ -1549,4 +1553,80 @@ test('OpenAiCompatibleClient interpretStream classifies a transfer with no respo
     $out = $method->invoke(null, '', 0, '', 0, 0.0, true);
     assert_eq(false, $out['ok'], 'no response is not a success');
     assert_eq(true, $out['transient'] ?? false, 'no response at all must be retryable, not a batch abort');
+});
+
+test('GLM 5.3 Flash carries its publisher-recommended settings, and only on Baseten', function () {
+    $body = OpenAiCompatibleClient::bodyFor(['prompt' => 'p'], 'zai-org/GLM-5.3-Flash', 16000, 'baseten');
+
+    assert_eq('low', $body['reasoning_effort'] ?? null, 'low by default, for its small-tier role');
+    assert_eq(1.0, $body['temperature'] ?? null, 'temperature: 1');
+    assert_eq(0.95, $body['top_p'] ?? null, 'top_p: 0.95');
+    assert_eq(['type' => 'enabled', 'clear_thinking' => false], $body['thinking'] ?? null, 'thinking stays enabled');
+    assert_eq(true, $body['tool_stream'] ?? null, 'tool_stream on');
+    // The client already streams every request; tool_stream was the missing half.
+    assert_eq(true, $body['stream'] ?? null, 'stream was already on');
+
+    // The profile is a default, not an override: a step that tuned its own
+    // temperature keeps it. Otherwise every per-step temperature in the
+    // pipeline would be silently replaced the moment its model gained one.
+    $pinned = OpenAiCompatibleClient::bodyFor(
+        ['prompt' => 'p', 'temperature' => 0.9],
+        'zai-org/GLM-5.3-Flash',
+        16000,
+        'baseten',
+    );
+    assert_eq(0.9, $pinned['temperature'], "the step's own temperature wins");
+    assert_eq(0.95, $pinned['top_p'] ?? null, 'the rest of the profile still applies');
+
+    // The profile is Baseten's. The same id served elsewhere gets none of it.
+    $elsewhere = OpenAiCompatibleClient::bodyFor(['prompt' => 'p'], 'zai-org/GLM-5.3-Flash', 16000, 'openrouter');
+    foreach (['reasoning_effort', 'top_p', 'thinking', 'tool_stream', 'temperature'] as $field) {
+        assert_true(!isset($elsewhere[$field]), "{$field} does not leak to another provider");
+    }
+
+    // A Baseten model without a profile is untouched by any of this.
+    $plain = OpenAiCompatibleClient::bodyFor(['prompt' => 'p'], 'deepseek-ai/DeepSeek-V4-Pro', 16000, 'baseten');
+    assert_eq('none', $plain['reasoning_effort'] ?? null, 'the quiet-list still governs everything else');
+    foreach (['top_p', 'thinking', 'tool_stream'] as $field) {
+        assert_true(!isset($plain[$field]), "{$field} is profile-only, not a Baseten-wide default");
+    }
+});
+
+test('a request may ask GLM 5.3 Flash for the publisher effort, and buys the budget when it does', function () {
+    // The tier a model serves never reaches this client -- it sees a model id.
+    // So the small-tier default is `low`, and a quality-tier caller names the
+    // publisher's `max` itself rather than this class guessing a role.
+    $heavy = OpenAiCompatibleClient::bodyFor(
+        ['prompt' => 'p', 'reasoning_effort' => 'max'],
+        'zai-org/GLM-5.3-Flash',
+        16000,
+        'baseten',
+    );
+    assert_eq('max', $heavy['reasoning_effort'], 'the request outranks the profile default');
+    // Thinking shares the completion budget, so a heavy effort raises the
+    // ceiling. At the `low` default it must NOT, or every structural call
+    // would carry a 64k ceiling it has no use for.
+    assert_eq(65536, $heavy['max_tokens'], 'a heavy effort buys the room it needs');
+
+    $light = OpenAiCompatibleClient::bodyFor(['prompt' => 'p'], 'zai-org/GLM-5.3-Flash', 16000, 'baseten');
+    assert_eq(16000, $light['max_tokens'], 'the low default keeps the ordinary ceiling');
+
+    // A caller that pins its own budget still wins, heavy or not -- which is
+    // exactly how `max` produces an empty answer on a small pinned request.
+    $pinned = OpenAiCompatibleClient::bodyFor(
+        ['prompt' => 'p', 'reasoning_effort' => 'max', 'max_tokens' => 24],
+        'zai-org/GLM-5.3-Flash',
+        16000,
+        'baseten',
+    );
+    assert_eq(24, $pinned['max_tokens'], 'a pinned budget is honoured verbatim');
+
+    // reasoning_effort is Baseten-only: asking elsewhere sends nothing.
+    $elsewhere = OpenAiCompatibleClient::bodyFor(
+        ['prompt' => 'p', 'reasoning_effort' => 'max'],
+        'zai-org/GLM-5.3-Flash',
+        16000,
+        'openrouter',
+    );
+    assert_true(!isset($elsewhere['reasoning_effort']), 'the parameter never reaches another provider');
 });
