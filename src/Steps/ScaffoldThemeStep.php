@@ -211,6 +211,20 @@ final class ScaffoldThemeStep implements Step
             margin-top: auto;
             justify-content: center;
         }
+        .equal-cards p.cta-bottom {
+            text-align: center;
+        }
+        /* A demoted action (cta-budget): the page's planned buttons stay
+           buttons, every other action is this link — the accent fill is what
+           it lost, not the destination. */
+        .text-action {
+            font-weight: 600;
+        }
+        .text-action a {
+            text-decoration: underline;
+            text-decoration-thickness: 2px;
+            text-underline-offset: 0.2em;
+        }
 
         /* Pinned lead region of a split band (BIGR-945). `SectionComposition`
            asks for this class only where the plan already says one region

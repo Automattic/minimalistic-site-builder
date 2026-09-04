@@ -28,7 +28,7 @@ When an agent needs to create or resume a generated site, follow [the site-build
 
 Default blocks graph (`StepComposition::default()` → `StepComposition::blocks()`), where the model authors block markup directly:
 
-`scaffold-theme -> scaffold-plugin -> refine-prompt -> site-spec -> apply-identity -> design-direction -> (theme-json + page-plan, concurrent) -> reconcile-palette -> sections -> section-rhythm -> copy-dedupe -> collect-images -> normalize-layout -> header-hero -> contrast-fix -> motion-sanity -> fix-blocks -> assemble-pages -> page-styles -> custom-motion -> bundle-fonts -> fonts-php -> extract-patterns -> finalize-theme -> theme-screenshot -> validate-theme`
+`scaffold-theme -> scaffold-plugin -> refine-prompt -> site-spec -> apply-identity -> design-direction -> (theme-json + page-plan, concurrent) -> reconcile-palette -> sections -> section-rhythm -> copy-dedupe -> cta-budget -> collect-images -> normalize-layout -> header-hero -> contrast-fix -> motion-sanity -> fix-blocks -> assemble-pages -> page-styles -> custom-motion -> bundle-fonts -> fonts-php -> extract-patterns -> finalize-theme -> theme-screenshot -> validate-theme`
 
 Image generation is slow and networked, so it is in neither graph. The steps that depend on the real pixels are named once, in `StepComposition::postImages()`, and every entry point runs that list after the graph:
 
