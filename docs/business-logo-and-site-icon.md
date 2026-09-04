@@ -52,7 +52,7 @@ is gone, together with `PhotographySite`.
 The gate is now the one identity decision the site-spec step already makes:
 
 ```php
-SiteSpecStep::isPersonal(array $siteSpec): bool   // persona_name is non-empty
+SiteSpecStep::wantsLogoMark(array $siteSpec): bool   // spec present and persona_name empty
 ```
 
 - **Personal site** (`persona_name` set: portfolio, CV, personal blog) keeps
@@ -154,7 +154,7 @@ The title is fixed, not the subject. `title` becomes the attachment's `post_titl
 
 - If the header has no `wp:site-logo`, insert `<!-- wp:site-logo {"width":48,"shouldSyncIcon":true,"className":"site-logo-mark"} /-->` immediately before the first `wp:site-title` (sibling, same parent). If there is no site-title, insert at the start of the root group wrapper (after the opening `<div>`), not before the group comment — a prepend there fails the HTML-first safe-wrapper check. This branch only runs when there is no identity cluster to find.
 - Do not remove `wp:site-title`.
-- Personal-site headers, and a build with no `siteSpec.json`: do not add an empty logo slot.
+- Personal-site headers, and a build without `siteSpec.json`: keep the header free of an empty logo slot.
 
 `className` is a supported `core/site-logo` attribute and core renders it on the block wrapper. The serializer's `attributeOrder` for the block is `width, isLink, linkTarget, shouldSyncIcon, align, lock, anchor, className, …`, so the three attributes serialize in the order written above.
 

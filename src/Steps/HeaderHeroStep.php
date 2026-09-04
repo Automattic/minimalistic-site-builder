@@ -242,10 +242,7 @@ final class HeaderHeroStep implements Step
         $protection = (string) ($delivery['header']['protection_token'] ?? 'base');
         $siteSpec = $project->exists('siteSpec.json') ? $project->readJson('siteSpec.json') : [];
         $siteName = (string) ($siteSpec['name'] ?? '');
-        // A personal site shows its name as text and gets no mark. Every
-        // other site carries the generated mark. No spec means no mark, the
-        // same default collect-images applies to the asset.
-        $wantsLogoMark = $siteSpec !== [] && !SiteSpecStep::isPersonal($siteSpec);
+        $wantsLogoMark = SiteSpecStep::wantsLogoMark($siteSpec);
         $pageTitles = array_map(static fn (array $p): string => (string) ($p['title'] ?? ''), $pages);
 
         // Behavior inputs (BIGR-762): the theme palette, motion-derived

@@ -250,7 +250,21 @@ final class SiteSpecStep implements Step
      */
     public static function isPersonal(array $siteSpec): bool
     {
-        return trim((string) ($siteSpec['persona_name'] ?? '')) !== '';
+        $persona = $siteSpec['persona_name'] ?? '';
+        return is_string($persona) && trim($persona) !== '';
+    }
+
+    /**
+     * Whether the build ships the generated brand mark: the site logo, the
+     * site icon, and the header's site-logo block. The one rule both
+     * collect-images and header-hero apply: a personal site keeps its name
+     * as text, and an empty spec (a partial run) gets no mark.
+     *
+     * @param array<mixed> $siteSpec
+     */
+    public static function wantsLogoMark(array $siteSpec): bool
+    {
+        return $siteSpec !== [] && !self::isPersonal($siteSpec);
     }
 
     /** The normalized logical writing direction persisted in siteSpec.json. */

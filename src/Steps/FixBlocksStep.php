@@ -649,9 +649,9 @@ final class FixBlocksStep implements Step
         $spacingSlugs = self::themeSpacingSlugs($project);
         // A staggered row survives only where the build assigned it. The
         // plan (pages.json) is the source of truth. The root marker that
-        // SectionUnit stamps repeats the assignment in the delivered part,
-        // and SectionUnit stamps no marker on a section whose root is not
-        // one wp:group, so either signal keeps the row. A transformed
+        // SectionUnit stamps repeats the assignment in the delivered part.
+        // SectionUnit stamps a marker only on a section whose root is one
+        // wp:group, so either signal keeps the row. A transformed
         // HTML-first section carries no assignment and no marker; for such
         // a part only, the committed rhythm decides. A hero part and a page
         // the HTML-first graph routed through the blocks path obey the
@@ -726,6 +726,11 @@ final class FixBlocksStep implements Step
     ): bool {
         if (isset($plannedStaggerParts[$rel])) {
             return true;
+        }
+        // On the blocks path the only marker that keeps the row is the
+        // offset-grid one, so a part without that literal needs no parse.
+        if (!$rhythmKeepsStagger && !str_contains($markup, SectionComposition::marker('offset-grid'))) {
+            return false;
         }
         $marker = SectionComposition::rootMarker($markup);
         if ($marker !== null) {

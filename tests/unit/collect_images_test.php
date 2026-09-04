@@ -821,6 +821,15 @@ test('collect-images appends a site-logo for every non-personal site, whatever i
     }
 });
 
+test('SiteSpecStep::wantsLogoMark is one rule for both steps', function () {
+    $s = \Automattic\SiteBuild\Steps\SiteSpecStep::class;
+    assert_true($s::wantsLogoMark(['name' => 'Hearth', 'persona_name' => '']));
+    assert_true(!$s::wantsLogoMark(['name' => 'Ada', 'persona_name' => 'Ada Lovelace']));
+    assert_true(!$s::wantsLogoMark([]), 'an empty spec gets no mark');
+    assert_true($s::wantsLogoMark(['name' => 'Hearth', 'persona_name' => ['x']]), 'a non-string persona_name is not a person');
+    assert_true($s::wantsLogoMark(['name' => 'Hearth']), 'an absent key is the non-personal default');
+});
+
 test('collect-images does not append a site-logo for a personal site', function () {
     [$project, $tmp] = collect_fixture();
     $project->writeJson('siteSpec.json', [
