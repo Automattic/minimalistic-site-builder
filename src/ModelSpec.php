@@ -26,9 +26,13 @@ namespace Automattic\SiteBuild;
 final class ModelSpec
 {
     /**
-     * Transports make_llm() can build, and therefore the prefixes accepted
-     * here. Not the same as the provider list: a provider is a whole model set
-     * in config/models.json, a transport is a wire client.
+     * The prefixes accepted here: one canonical name per wire client. Not the
+     * same as the provider list — a provider is a whole model set in
+     * config/models.json, a transport is a wire client — and narrower than what
+     * make_llm_transport() will build, which also answers to the aliases 'grok'
+     * and 'openai-compatible'. Those are deliberately not prefixes: one name
+     * per client keeps RoutingLlm from holding two entries pointed at the same
+     * endpoint. Write 'xai' and 'openai'.
      */
     public const TRANSPORTS = ['anthropic', 'xai', 'openai', 'openrouter', 'baseten'];
 

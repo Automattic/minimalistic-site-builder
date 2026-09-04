@@ -160,9 +160,47 @@ final class StepDefaults
     public static function modelTransports(): array
     {
         $out = [];
-        foreach (self::stepSpecs() as $spec) {
-            $out[strtolower($spec['model'])] = $spec['transport'];
+        $owner = [];
+        $specs = self::stepSpecs();
+
+        foreach ($specs as $step => $spec) {
+            $key = strtolower($spec['model']);
+            if (isset($out[$key]) && $out[$key] !== $spec['transport']) {
+                throw new \RuntimeException(
+                    'LLM_MODEL_' . self::envSuffix($step) . " sends '{$spec['model']}' to the "
+                    . "'{$spec['transport']}' transport, but LLM_MODEL_" . self::envSuffix($owner[$key])
+                    . " already sends the same model id to '{$out[$key]}'. Routing is keyed by model id, so "
+                    . 'one id cannot take two transports in a run. Ids are compared case-insensitively, so two '
+                    . 'spellings of one id collide here too. Give the steps different models, or send them to '
+                    . 'the same transport.'
+                );
+            }
+            $out[$key] = $spec['transport'];
+            $owner[$key] = $step;
         }
+
+        // A route is keyed by model id, not by step, so a step that was never
+        // pinned still follows the route whenever it happens to resolve to a
+        // routed id -- which every sibling sharing that tier does. Naming one
+        // step and silently moving four others is the failure this table's
+        // shape makes easy, so refuse it here rather than let the run discover
+        // it as a 404 from the wrong provider, or not at all when the id is
+        // valid on both.
+        foreach (self::models() as $step => $model) {
+            if (isset($specs[$step])) {
+                continue;
+            }
+            $key = strtolower($model);
+            if (isset($out[$key])) {
+                throw new \RuntimeException(
+                    'LLM_MODEL_' . self::envSuffix($owner[$key]) . " sends '{$model}' to the '{$out[$key]}' "
+                    . "transport, but step '{$step}' resolves to that same model id and would follow it there "
+                    . 'without being asked. Routing is keyed by model id, not by step. Pin a model id that no '
+                    . "other step uses, or move '{$step}' deliberately with LLM_MODEL_" . self::envSuffix($step) . '.'
+                );
+            }
+        }
+
         return $out;
     }
 

@@ -2,10 +2,12 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\FinishReasonAwareLlm;
+use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\RoutingLlm;
 use Automattic\SiteBuild\TextBatchResult;
 use Automattic\SiteBuild\UsageReporting;
+use Automattic\SiteBuild\VisionLlm;
 
 /**
  * Unit tests for RoutingLlm: which transport serves a request, and that
@@ -331,4 +333,96 @@ test('RoutingLlm rejects a route naming a transport it does not have', function 
         $threwDefault = $e->getMessage();
     }
     assert_true($threwDefault !== null, 'the default transport is validated too');
+});
+
+/** A transport that can carry pixels, to stand in for AnthropicClient. */
+final class SeeingTransport implements VisionLlm
+{
+    public function complete(string $prompt, array $opts = []): string { return 'text'; }
+    public function completeJson(string $prompt, array $opts = []): array { return []; }
+    public function completeJsonBatch(array $requests): array
+    {
+        $out = [];
+        foreach ($requests as $key => $_) {
+            $out[$key] = ['served' => $key];
+        }
+        return $out;
+    }
+    public function completeBatch(array $requests): TextBatchResult { return new TextBatchResult([], []); }
+    public function completeWithImage(string $p, string $bytes, string $mime, array $opts = []): string
+    {
+        return "saw {$mime}";
+    }
+}
+
+/** A text-only transport whose JSON batch always fails the generated-content way. */
+final class BlindFailingTransport implements Llm
+{
+    public function complete(string $prompt, array $opts = []): string { return 'text'; }
+    public function completeJson(string $prompt, array $opts = []): array { return []; }
+    public function completeJsonBatch(array $requests): array
+    {
+        throw new GeneratedJsonException(['page-plan' => 'malformed page-plan'], []);
+    }
+    public function completeBatch(array $requests): TextBatchResult { return new TextBatchResult([], []); }
+}
+
+test('RoutingLlm carries the vision capability through instead of silently dropping it', function () {
+    // GenerateImagesStep gates image QA on `instanceof VisionLlm` and skips
+    // WITHOUT narrating when it is false, so a router that does not declare the
+    // capability turned hero inspection off for any run using a transport
+    // prefix — including a same-provider one.
+    $router = new RoutingLlm(
+        ['anthropic' => new SeeingTransport(), 'baseten' => new BlindFailingTransport()],
+        ['zai-org/glm-5.3-flash' => 'baseten'],
+        'anthropic',
+        'claude-opus-5',
+    );
+
+    assert_true($router instanceof VisionLlm, 'the router must still look vision-capable');
+    assert_eq('saw image/jpeg', $router->completeWithImage('p', 'bytes', 'image/jpeg'));
+
+    // A route to a transport that cannot carry pixels raises rather than
+    // pretending. inspect() catches Throwable and narrates the image as
+    // delivered unverified, so this degrades loudly instead of silently.
+    $threw = null;
+    try {
+        $router->completeWithImage('p', 'bytes', 'image/jpeg', ['model' => 'zai-org/GLM-5.3-Flash']);
+    } catch (RuntimeException $e) {
+        $threw = $e->getMessage();
+    }
+    assert_true($threw !== null, 'a text-only route must not silently answer an image request');
+    assert_true(str_contains($threw, 'baseten'), "the message names the transport: {$threw}");
+});
+
+test('a failing group does not discard the results other transports already returned', function () {
+    // ConcurrentGroup runs ThemeJsonStep + PagePlanStep through one
+    // completeJsonBatch and reads $e->partialResults to keep the survivor. When
+    // a prefix makes that batch mixed, letting the first group's exception
+    // escape threw away a sibling the run had already paid for, and handed the
+    // step an empty result set that it misreported as its own missing output.
+    $router = new RoutingLlm(
+        ['anthropic' => new SeeingTransport(), 'baseten' => new BlindFailingTransport()],
+        ['zai-org/glm-5.3-flash' => 'baseten'],
+        'anthropic',
+        'claude-opus-5',
+    );
+
+    $threw = null;
+    try {
+        $router->completeJsonBatch([
+            'theme-json' => ['prompt' => 't', 'model' => 'claude-opus-5'],
+            'page-plan'  => ['prompt' => 'p', 'model' => 'zai-org/GLM-5.3-Flash'],
+        ]);
+    } catch (GeneratedJsonException $e) {
+        $threw = $e;
+    }
+
+    assert_true($threw !== null, 'the failure still reaches the caller');
+    assert_eq(['page-plan' => 'malformed page-plan'], $threw->failures, 'the diagnostic survives');
+    assert_eq(
+        ['theme-json' => ['served' => 'theme-json']],
+        $threw->partialResults,
+        'the sibling that succeeded is preserved, not discarded with the group that failed',
+    );
 });

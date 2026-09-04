@@ -26,7 +26,7 @@ namespace Automattic\SiteBuild;
  * intact. Only a genuinely mixed batch is serialized across transports, and it
  * still comes back keyed and ordered exactly as it went in.
  */
-final class RoutingLlm implements FinishReasonAwareLlm, UsageReporting
+final class RoutingLlm implements FinishReasonAwareLlm, UsageReporting, VisionLlm
 {
     /** Transport that most recently served a single completion. */
     private ?Llm $lastUsed = null;
@@ -128,16 +128,63 @@ final class RoutingLlm implements FinishReasonAwareLlm, UsageReporting
     }
 
     /**
+     * Route an image inspection like any other request.
+     *
+     * Declaring VisionLlm is what keeps the capability visible through the
+     * router: GenerateImagesStep asks `instanceof VisionLlm` and skips the
+     * check silently when it is false, so a bare RoutingLlm turned image QA
+     * off for the whole run the moment any step carried a transport prefix.
+     *
+     * Only some transports carry pixels, so a route to a text-only one raises
+     * instead of pretending. That is the loud half of the same contract:
+     * inspect() already catches Throwable and narrates the image as delivered
+     * unverified, so the build degrades with a reason on screen rather than
+     * skipping in silence.
+     */
+    public function completeWithImage(string $prompt, string $imageBytes, string $mime, array $opts = []): string
+    {
+        $opts = $this->withDefaultModel($opts);
+        $llm = $this->llmFor($opts);
+        if (!$llm instanceof VisionLlm) {
+            $name = $this->transportFor($opts['model'] ?? null);
+            throw new \RuntimeException(
+                "The {$name} transport serves '" . trim((string) ($opts['model'] ?? '')) . "' and cannot carry an image."
+            );
+        }
+        $this->lastUsed = $llm;
+        return $llm->completeWithImage($prompt, $imageBytes, $mime, $opts);
+    }
+
+    /**
      * @param array<array-key,array<string,mixed>> $requests
      * @return array<array-key,array<mixed>>
      */
     public function completeJsonBatch(array $requests): array
     {
         $merged = [];
+        $failures = [];
         foreach ($this->groupByTransport($requests) as $name => $group) {
-            foreach ($this->transports[$name]->completeJsonBatch($group) as $key => $value) {
-                $merged[$key] = $value;
+            try {
+                foreach ($this->transports[$name]->completeJsonBatch($group) as $key => $value) {
+                    $merged[$key] = $value;
+                }
+            } catch (GeneratedJsonException $e) {
+                // Keep this group's decoded siblings and its diagnostics, then
+                // carry on to the remaining groups. Letting the first failure
+                // escape would discard every result already returned by the
+                // transports before it -- generations the run has paid for, and
+                // which JsonBatchRecovery's partialResults contract promises the
+                // consuming step it will still get.
+                foreach ($e->partialResults as $key => $value) {
+                    $merged[$key] = $value;
+                }
+                foreach ($e->failures as $key => $message) {
+                    $failures[$key] = $message;
+                }
             }
+        }
+        if ($failures !== []) {
+            throw new GeneratedJsonException($failures, $merged);
         }
         return $this->reorderLike($requests, $merged, 'completeJsonBatch');
     }

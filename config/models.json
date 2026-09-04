@@ -20,7 +20,7 @@
             "small": "moonshotai/kimi-k2.5:nitro"
         },
         "baseten": {
-            "large": "zai-org/GLM-5.3-Flash",
+            "large": "deepseek-ai/DeepSeek-V4-Pro",
             "small": "zai-org/GLM-5.3-Flash"
         }
     },

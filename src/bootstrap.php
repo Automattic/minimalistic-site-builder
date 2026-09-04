@@ -142,8 +142,6 @@ function openrouter_api_key(): string
  *   - baseten   — OpenAI-compatible client → Baseten's open-weight models
  *                 (Kimi, GLM, DeepSeek) via the wpcom AI proxy (BASETEN_API_KEY;
  *                 BASETEN_BASE_URL to reach Baseten directly instead)
- *   - hybrid    — Baseten for the run, OpenAI for the steps config/models.json
- *                 pins to it, dispatched per request by RoutingLlm
  *
  * Model IDs come from the provider's tiers in config/models.json (StepDefaults),
  * overridable per step via LLM_MODEL_* — so `--provider=openai` swaps the whole
@@ -170,6 +168,26 @@ function make_llm(?string $provider = null): Llm
 
     if ($routes === []) {
         return make_llm_transport($provider, $model);
+    }
+
+    // Preflight every routed transport's credential before building anything.
+    // Env::getRequired() does not throw -- it narrates and exit(1)s -- so a
+    // missing key inside the loop below would kill the process from within the
+    // factory, uncatchable by bin/build.php's TransportUnavailable handler and
+    // after the disclosure line has already claimed a transport was resolved.
+    // resolve_llm() preflights only the run's own provider, never these.
+    foreach ($routes as $routeModel => $transport) {
+        $variable = TransportResolver::credentialVariableFor($transport);
+        $credential = $transport === 'openrouter'
+            ? (openrouter_api_credential()['value'] ?? null)
+            : ($variable === null ? null : Env::get($variable));
+        if ($variable !== null && ($credential === null || trim($credential) === '')) {
+            throw new TransportUnavailable(
+                "An LLM_MODEL_<STEP> override routes '{$routeModel}' to the {$transport} transport, but its "
+                . "credential {$variable} is missing. Set {$variable}, or drop the '{$transport}:' prefix "
+                . 'so that step runs on the active provider.'
+            );
+        }
     }
 
     // One client per distinct transport. Each is given a default model its own
