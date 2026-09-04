@@ -13,10 +13,12 @@ use Automattic\SiteBuild\HarnessCliLlm;
 use Automattic\SiteBuild\ImageClient;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\ModelConfig;
+use Automattic\SiteBuild\ModelSpec;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\OpenAiCompatibleClient;
 use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\RoutingLlm;
 use Automattic\SiteBuild\SiteBuilder;
 use Automattic\SiteBuild\StepDefaults;
 use Automattic\SiteBuild\Steps\GenerateImagesStep;
@@ -144,17 +146,74 @@ function openrouter_api_key(): string
  * Model IDs come from the provider's tiers in config/models.json (StepDefaults),
  * overridable per step via LLM_MODEL_* — so `--provider=openai` swaps the whole
  * model set without extra flags.
+ *
+ * A run where some LLM_MODEL_<STEP> carries a `transport:` prefix gets a
+ * RoutingLlm over one client per transport instead of a single client. A run
+ * with no such override keeps exactly the client it had before.
  */
 function make_llm(?string $provider = null): Llm
 {
+    // A caller that names the provider (TransportResolver) wins; otherwise
+    // StepDefaults owns the resolution, so the transport built here cannot
+    // disagree with the models the steps are given — that disagreement is how
+    // a Baseten model ends up addressed to an Anthropic client.
     $providerWasExplicit = $provider !== null;
-    $provider = strtolower((string) ($provider ?? Env::get('LLM_PROVIDER', ModelConfig::defaultProvider())));
+    $provider = strtolower((string) ($provider ?? StepDefaults::provider()));
     $modelProvider = $provider === 'grok' ? 'xai' : $provider;
     $model = $providerWasExplicit
         ? Env::get('LLM_MODEL') ?? ModelConfig::tierModel($modelProvider, 'large')
         : default_llm_model();
 
-    return match ($provider) {
+    $routes = ModelConfig::hasProvider($provider) ? StepDefaults::modelTransports() : [];
+
+    if ($routes === []) {
+        return make_llm_transport($provider, $model);
+    }
+
+    // Preflight every routed transport's credential before building anything.
+    // Env::getRequired() does not throw -- it narrates and exit(1)s -- so a
+    // missing key inside the loop below would kill the process from within the
+    // factory, uncatchable by bin/build.php's TransportUnavailable handler and
+    // after the disclosure line has already claimed a transport was resolved.
+    // resolve_llm() preflights only the run's own provider, never these.
+    foreach ($routes as $routeModel => $transport) {
+        $variable = TransportResolver::credentialVariableFor($transport);
+        $credential = $transport === 'openrouter'
+            ? (openrouter_api_credential()['value'] ?? null)
+            : ($variable === null ? null : Env::get($variable));
+        if ($variable !== null && ($credential === null || trim($credential) === '')) {
+            throw new TransportUnavailable(
+                "An LLM_MODEL_<STEP> override routes '{$routeModel}' to the {$transport} transport, but its "
+                . "credential {$variable} is missing. Set {$variable}, or drop the '{$transport}:' prefix "
+                . 'so that step runs on the active provider.'
+            );
+        }
+    }
+
+    // One client per distinct transport. Each is given a default model its own
+    // transport can actually serve — the provider's large TIER for the default
+    // client, not $model, which LLM_MODEL may have pointed at another provider
+    // entirely. RoutingLlm names the model on every request anyway, so these
+    // are a fallback that should never be reached.
+    $clients = [$provider => make_llm_transport($provider, ModelConfig::tierModel($modelProvider, 'large'))];
+    // Not $model: that is the run default resolved above, and reusing the name
+    // here would clobber it before RoutingLlm is given it.
+    foreach ($routes as $routeModel => $transport) {
+        $clients[$transport] ??= make_llm_transport($transport, $routeModel);
+    }
+
+    return new RoutingLlm($clients, $routes, $provider, $model);
+}
+
+/**
+ * Build ONE wire client by transport name, with $model as its default model.
+ *
+ * Split out of make_llm() so a mixed-transport provider can build several.
+ * $model is what a request that names none will use.
+ */
+function make_llm_transport(string $transport, string $model): Llm
+{
+    return match ($transport) {
         'anthropic', '' => new AnthropicClient(
             apiKey: Env::getRequired('ANTHROPIC_API_KEY'),
             model:  $model,
@@ -188,7 +247,7 @@ function make_llm(?string $provider = null): Llm
         ),
         'baseten' => new OpenAiCompatibleClient(
             apiKey:   Env::getRequired('BASETEN_API_KEY'),
-            model:    default_llm_model(),
+            model:    $model,
             // The wpcom AI proxy fronts Baseten and is what the Automattic
             // key opens; Studio's hosted-model family uses this same route.
             // Set BASETEN_BASE_URL=https://inference.baseten.co/v1 to go direct
@@ -208,8 +267,11 @@ function make_llm(?string $provider = null): Llm
             // Harmless when BASETEN_BASE_URL points straight at Baseten.
             extraHeaders: ['X-WPCOM-AI-Feature' => 'site-builder'],
         ),
+        // Transports, not providers: a provider is a whole model set in
+        // config/models.json, a transport is a wire client. They happen to be
+        // one-to-one today, but the prefix accepts transports.
         default => throw new RuntimeException(
-            "Unknown LLM_PROVIDER '{$provider}'. Use anthropic, xai, openai, openrouter, or baseten."
+            "Unknown LLM transport '{$transport}'. Known: " . implode(', ', ModelSpec::TRANSPORTS) . '.'
         ),
     };
 }
