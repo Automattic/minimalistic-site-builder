@@ -2532,10 +2532,7 @@ test('the seed judge runs on its own model, cold, while seeds and expansion keep
 
     assert_eq('claude-haiku-4-5', $llm->calls[0]['opts']['model'] ?? null, 'seeds use the seed model');
     assert_eq('judge-model', $llm->calls[1]['opts']['model'] ?? null, 'the judge uses the judge model');
-    assert_true(
-        !array_key_exists('temperature', $llm->calls[1]['opts']),
-        'the judge does not inherit the hot sampling temperature',
-    );
+    assert_eq(0.0, $llm->calls[1]['opts']['temperature'] ?? null, 'the judge runs cold, not at the API default');
     assert_eq('claude-opus-4-8', $llm->calls[2]['opts']['model'] ?? null, 'expansion uses the step model');
     assert_eq(1.0, $llm->calls[2]['opts']['temperature'] ?? null, 'expansion keeps the step temperature');
 
@@ -2601,6 +2598,14 @@ test('a round with one distinct seed skips the judge', function () {
     assert_eq(2, count($llm->calls), 'nothing to judge: seeds, expansion');
     assert_contains('Seed choice: single seed', $project->readText('logs/design-direction.txt'));
     exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('the expansion prompt does not name a specific audited site as an anti-example', function () {
+    $prompt = (string) file_get_contents(repo_path('prompts/design-direction.md'));
+    assert_true(
+        !str_contains(strtolower($prompt), 'watermelon'),
+        'a one-site war story in the expansion prompt overfits every later brand',
+    );
 });
 
 test('the seed judge prompt judges fit, subject specificity, and the category reflex, not position', function () {

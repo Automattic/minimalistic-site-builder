@@ -177,6 +177,7 @@ final class DesignDirectionStep implements Step
         private ?float $temperature = null,
         private ?string $seedModel = null,
         private ?string $judgeModel = null,
+        private ?float $judgeTemperature = 0.0,
     ) {}
 
     public function id(): string
@@ -625,10 +626,10 @@ final class DesignDirectionStep implements Step
      * warning (rung 4: the pick then falls to uniform random, so the build
      * loses taste, not the site) and never aborts the build.
      *
-     * The judge runs cold: it inherits neither the step's hot sampling
-     * temperature (that is for spreading the seeds, not for choosing between
-     * them) nor the seed model. Its own model comes from the
-     * design-direction-judge tier.
+     * The judge runs cold: it sends temperature 0 (overridable only via
+     * LLM_TEMPERATURE_DESIGN_DIRECTION_JUDGE) and never inherits the step's
+     * hot sampling temperature or the seed model. Its own model comes from
+     * the design-direction-judge tier.
      *
      * @param list<array{text:string,ground:?string,register:?string,accent:?string,tint:?string,type_register:?string,color_economy:?string}> $pool
      * @param list<string> $warnings
@@ -641,7 +642,10 @@ final class DesignDirectionStep implements Step
                 'design-seed-judge.md',
                 ConceptSeeds::judgePromptVars($brief, $spec, $pool),
             );
-            $opts = ['log_label' => 'design-direction-judge'];
+            $opts = [
+                'log_label'   => 'design-direction-judge',
+                'temperature' => $this->judgeTemperature ?? 0.0,
+            ];
             if ($this->judgeModel !== null) {
                 $opts['model'] = $this->judgeModel;
             }

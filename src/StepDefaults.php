@@ -214,14 +214,17 @@ final class StepDefaults
     public static function temperatures(): array
     {
         return [
-            'refine-prompt'    => self::temperature('REFINE_PROMPT', null),
-            'site-spec'        => self::temperature('SITE_SPEC', null),
-            'design-direction' => self::temperature('DESIGN_DIRECTION', 1.0),
-            'theme-json'       => self::temperature('THEME_JSON', null),
-            'page-plan'        => self::temperature('PAGE_PLAN', null),
-            'sections'         => self::temperature('SECTIONS', 0.9),
-            'page-styles'      => self::temperature('PAGE_STYLES', null),
-            'custom-motion'    => self::temperature('CUSTOM_MOTION', null),
+            'refine-prompt'            => self::temperature('REFINE_PROMPT', null),
+            'site-spec'                => self::temperature('SITE_SPEC', null),
+            'design-direction'         => self::temperature('DESIGN_DIRECTION', 1.0),
+            // Cold on purpose: a global LLM_TEMPERATURE must not heat the
+            // judge. Only LLM_TEMPERATURE_DESIGN_DIRECTION_JUDGE overrides.
+            'design-direction-judge'   => self::judgeTemperature(),
+            'theme-json'               => self::temperature('THEME_JSON', null),
+            'page-plan'                => self::temperature('PAGE_PLAN', null),
+            'sections'                 => self::temperature('SECTIONS', 0.9),
+            'page-styles'              => self::temperature('PAGE_STYLES', null),
+            'custom-motion'            => self::temperature('CUSTOM_MOTION', null),
         ];
     }
 
@@ -233,5 +236,16 @@ final class StepDefaults
     {
         $raw = Env::get('LLM_TEMPERATURE_' . $envSuffix) ?? Env::get('LLM_TEMPERATURE');
         return is_numeric($raw) ? (float) $raw : $default;
+    }
+
+    /**
+     * The seed judge is cold unless this one env is set. A global
+     * LLM_TEMPERATURE is the seed-spread / expansion knob and must not
+     * silently turn the ballot into another sample.
+     */
+    public static function judgeTemperature(): float
+    {
+        $raw = Env::get('LLM_TEMPERATURE_DESIGN_DIRECTION_JUDGE');
+        return is_numeric($raw) ? (float) $raw : 0.0;
     }
 }

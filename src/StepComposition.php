@@ -183,6 +183,7 @@ final class StepComposition
                 $temps['design-direction'],
                 $models['design-direction-seeds'],
                 $models['design-direction-judge'],
+                $temps['design-direction-judge'] ?? 0.0,
             ),
             new DesignPreviewStep(
                 $llm,
@@ -317,6 +318,7 @@ final class StepComposition
                 $temps['design-direction'],
                 $models['design-direction-seeds'],
                 $models['design-direction-judge'],
+                $temps['design-direction-judge'] ?? 0.0,
             ),
             // theme.json and the page plan both derive from the prompt + siteSpec +
             // the design direction, so run them concurrently. Design decisions are
