@@ -1539,6 +1539,9 @@ CSS;
         if ($issue === 'document contains HTML comments') {
             return self::stripHtmlComments($html);
         }
+        if (preg_match('/^hero image must omit (src|srcset|sizes)$/', $issue, $omit) === 1) {
+            return self::dropEmptyImageAttribute($html, $omit[1]);
+        }
         if ($issue === 'document contains scripts or dependency elements') {
             $next = preg_replace(
                 '/<(script|iframe|link)\b[^>]*>.*?<\/\1\s*>/is',
@@ -1559,6 +1562,25 @@ CSS;
             return preg_replace('/<\/source\s*>/i', '', $next) ?? $next;
         }
         return null;
+    }
+
+    /**
+     * Drop an EMPTY src/srcset/sizes from the hero <img>.
+     *
+     * assign-image-sources fills the source in from the alt contract, so an
+     * empty attribute already carries nothing — removing it is lossless and
+     * leaves exactly the markup the rule asks for. An attribute with a real
+     * value is left alone: deleting a source the design authored would be
+     * discarding content, so that stays a defect for the repair pass.
+     */
+    private static function dropEmptyImageAttribute(string $html, string $attribute): ?string
+    {
+        $pattern = '/(<img\b[^>]*?)\s+' . preg_quote($attribute, '/') . '\s*=\s*("\s*"|\'\s*\')/i';
+        $next = preg_replace($pattern, '$1', $html, 1, $count);
+        if ($next === null || $count === 0) {
+            return null;
+        }
+        return $next;
     }
 
     private static function trimToCompleteDocument(string $html): ?string

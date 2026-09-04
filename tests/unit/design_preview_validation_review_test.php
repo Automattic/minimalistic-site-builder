@@ -264,6 +264,10 @@ $designPreviewDeterministicDependencyRemovals = [
     'image data src' => true,
     'picture wrapper' => true,
     'source element' => true,
+    // An empty src carries no source, so it is removed at the write and no
+    // repair call is spent on it. A src with a real value still costs one:
+    // see 'image relative src' below, which is deliberately absent here.
+    'image empty src' => true,
     // theme: is a pipeline-authored scheme (AssignImageSourcesStep). The
     // sanitizer keeps it, so a preview fixture that injects one is no longer
     // a deterministic strip — it follows the bounded repair path.
