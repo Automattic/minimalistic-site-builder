@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\BlocksEngine\PhpTransformer\HtmlToBlocks\Style\CssSyntaxScanner;
 use Automattic\BlocksEngine\PhpTransformer\HtmlToBlocks\Style\CssSelectorMatcher;
 use Automattic\BlocksEngine\PhpTransformer\HtmlToBlocks\Style\CssValueSplitter;
+use Automattic\SiteBuild\CodeFences;
 use Automattic\SiteBuild\CssChecks;
 use Automattic\SiteBuild\DesignMarkupSanitizer;
 use Automattic\SiteBuild\Html;
@@ -24,9 +25,11 @@ use DOMXPath;
  * Generates one standalone first-fold design preview. The preview remains an
  * additive artifact until later slices make it the design seed.
  *
- * Generated markup is untrusted. One malformed response gets one direct repair
- * request; a missing or still-invalid response degrades to a deterministic,
- * contract-valid scaffold instead of aborting the build.
+ * Generated markup is untrusted. Recoverable defects (comments, leftover
+ * script/link/iframe, picture/source, trailing junk around a complete
+ * document) are stripped and re-validated. One remaining defect gets one
+ * direct repair request; a missing or still-invalid response degrades to a
+ * deterministic, contract-valid scaffold instead of aborting the build.
  */
 final class DesignPreviewStep implements Step
 {
@@ -43,6 +46,40 @@ final class DesignPreviewStep implements Step
     private const IMAGE_ALT_PATTERN = '/^AI_IMAGE: [^|\r\n]+ \| [^|\r\n]+ \| '
         . '(?:photorealistic|digital-art|illustration|minimalist|flat-design|3d-render|abstract|watercolor) '
         . '\| (?:square|landscape|portrait)$/D';
+
+    /**
+     * Desktop lock that proves header visibility and the required row without
+     * discarding the rest of the authored design. Marker `--msb-preview-header`
+     * makes the append idempotent.
+     */
+    private const HEADER_LOCK_CSS = <<<'CSS'
+@media (min-width: 720px) {
+html body > header {
+--msb-preview-header: keep;
+display: flex !important;
+flex-direction: row !important;
+flex-wrap: nowrap !important;
+align-items: center !important;
+justify-content: space-between !important;
+visibility: visible !important;
+opacity: 1 !important;
+position: static !important;
+transform: none !important;
+animation: none !important;
+animation-name: none !important;
+}
+html body > header a,
+html body > header nav {
+visibility: visible !important;
+opacity: 1 !important;
+position: static !important;
+transform: none !important;
+animation: none !important;
+animation-name: none !important;
+order: 0 !important;
+}
+}
+CSS;
 
     public function __construct(
         private Llm $llm,
@@ -101,13 +138,12 @@ final class DesignPreviewStep implements Step
             } catch (\RuntimeException $error) {
                 $scaffold = self::safeScaffold($siteSpec, $brief, $sitePages);
                 self::writePreview($project, $scaffold);
-                $warnings[] = self::degradedWarning(
-                    'initial LLM request failed: ' . $error->getMessage(),
-                    $scaffold,
-                );
+                $message = 'initial LLM request failed: ' . $error->getMessage();
+                $warnings[] = self::degradedWarning($message, $scaffold, $message);
                 return;
             }
 
+            $issue = 'unknown design defect';
             $initialSanitizerWarnings = [];
             try {
                 $candidate = self::sanitize(
@@ -115,18 +151,21 @@ final class DesignPreviewStep implements Step
                     'initial preview generation',
                     $initialSanitizerWarnings,
                 );
-                $issue = self::designIssue($candidate, $sitePages);
+                $recovered = self::recover($candidate, $sitePages, $initialSanitizerWarnings);
+                $candidate = $recovered['html'];
+                $issue = $recovered['issue'];
             } catch (\RuntimeException $error) {
                 $candidate = $authored;
                 $issue = 'sanitizer failed: ' . $error->getMessage();
             }
 
+            array_push($warnings, ...$initialSanitizerWarnings);
             if ($issue === null) {
                 self::writePreview($project, $candidate);
-                array_push($warnings, ...$initialSanitizerWarnings);
                 return;
             }
 
+            $repairedIssue = null;
             try {
                 $repairedAuthored = $this->llm->complete(
                     self::repairPrompt($prompt, $authored, $issue),
@@ -138,7 +177,9 @@ final class DesignPreviewStep implements Step
                     'malformed preview repair',
                     $repairSanitizerWarnings,
                 );
-                $repairedIssue = self::designIssue($repaired, $sitePages);
+                $recoveredRepair = self::recover($repaired, $sitePages, $repairSanitizerWarnings);
+                $repaired = $recoveredRepair['html'];
+                $repairedIssue = $recoveredRepair['issue'];
                 if ($repairedIssue !== null) {
                     throw new \RuntimeException("repair remained invalid: {$repairedIssue}");
                 }
@@ -155,6 +196,8 @@ final class DesignPreviewStep implements Step
                 $warnings[] = self::degradedWarning(
                     $authored . '; repair failure: ' . $error->getMessage(),
                     $scaffold,
+                    $issue,
+                    $repairedIssue ?? $error->getMessage(),
                 );
             }
         } finally {
@@ -418,8 +461,12 @@ final class DesignPreviewStep implements Step
             'align-items' => 'center',
             'justify-content' => 'space-between',
         ];
-        /** @var array<string,array{value:string,important:bool,specificity:int,order:int}> $winners */
+        /** @var array<string,array{value:string,important:bool,specificity:int,order:int,proven?:bool}> $winners */
         $winners = [];
+        /** @var array<string,array{value:string,important:bool,specificity:int,order:int,proven?:bool}> $proven */
+        $proven = [];
+        /** @var list<array{property:string,important:bool,specificity:int,specUnknown:bool,order:int}> $threats */
+        $threats = [];
 
         foreach (CssChecks::scanDeclarations($css) as $declaration) {
             if ($declaration['kind'] !== 'style' || !$declaration['structurallySafe']) {
@@ -437,6 +484,7 @@ final class DesignPreviewStep implements Step
             if ($scope === 'inert') {
                 continue;
             }
+            $priority = CssChecks::splitDeclarationPriority($declaration['value']);
 
             if ($property !== 'order') {
                 $match = self::matchingSpecificity(
@@ -444,51 +492,50 @@ final class DesignPreviewStep implements Step
                     $declaration['ancestors'],
                     $header,
                 );
-                if ($match['unprovable'] || ($match['specificity'] !== null && $scope === 'unprovable')) {
-                    return 'desktop header layout cannot be proven across the CSS cascade';
-                }
-                if ($match['specificity'] !== null) {
-                    $priority = CssChecks::splitDeclarationPriority($declaration['value']);
-                    $values = self::headerLayoutValues($property, $priority['value']);
-                    foreach ($values as $resolvedProperty => $value) {
-                        $candidate = [
-                            'value' => $value,
-                            'important' => $priority['important'],
-                            'specificity' => $match['specificity'],
-                            'order' => $declaration['start'],
-                        ];
-                        if (self::cascadeCandidateWins($candidate, $winners[$resolvedProperty] ?? null)) {
-                            $winners[$resolvedProperty] = $candidate;
-                        }
-                    }
-                }
+                self::recordHeaderCascade(
+                    $winners,
+                    $proven,
+                    $threats,
+                    $match,
+                    $scope,
+                    $priority,
+                    $declaration['start'],
+                    self::headerLayoutValues($property, $priority['value']),
+                );
             }
 
             if (!in_array($property, ['order', 'all'], true)) {
                 continue;
             }
-            $priority = CssChecks::splitDeclarationPriority($declaration['value']);
             foreach (['identity' => $identity, 'navigation' => $navigation] as $key => $element) {
                 $match = self::matchingSpecificity(
                     $declaration['context'],
                     $declaration['ancestors'],
                     $element,
                 );
-                if ($match['unprovable'] || ($match['specificity'] !== null && $scope === 'unprovable')) {
+                $orderValue = $property === 'all' ? '0' : self::headerOrderValue($priority['value']);
+                self::recordHeaderCascade(
+                    $winners,
+                    $proven,
+                    $threats,
+                    $match,
+                    $scope,
+                    $priority,
+                    $declaration['start'],
+                    ["{$key}-order" => $orderValue],
+                );
+            }
+        }
+
+        foreach ($threats as $threat) {
+            if (str_ends_with($threat['property'], '-order')) {
+                if (!self::headerThreatBeaten($threat, $proven[$threat['property']] ?? null)) {
                     return 'desktop header item order cannot be proven across the CSS cascade';
                 }
-                if ($match['specificity'] === null) {
-                    continue;
-                }
-                $candidate = [
-                    'value' => $property === 'all' ? '0' : self::headerOrderValue($priority['value']),
-                    'important' => $priority['important'],
-                    'specificity' => $match['specificity'],
-                    'order' => $declaration['start'],
-                ];
-                if (self::cascadeCandidateWins($candidate, $winners["{$key}-order"] ?? null)) {
-                    $winners["{$key}-order"] = $candidate;
-                }
+                continue;
+            }
+            if (!self::headerThreatBeaten($threat, $proven[$threat['property']] ?? null)) {
+                return 'desktop header layout cannot be proven across the CSS cascade';
             }
         }
 
@@ -515,8 +562,12 @@ final class DesignPreviewStep implements Step
         string $label,
         float $viewport,
     ): ?string {
-        /** @var array<string,array{value:string,important:bool,specificity:int,order:int}> $winners */
+        /** @var array<string,array{value:string,important:bool,specificity:int,order:int,proven?:bool}> $winners */
         $winners = [];
+        /** @var array<string,array{value:string,important:bool,specificity:int,order:int,proven?:bool}> $proven */
+        $proven = [];
+        /** @var list<array{property:string,important:bool,specificity:int,specUnknown:bool,order:int}> $threats */
+        $threats = [];
         $properties = [
             'display',
             'visibility',
@@ -544,23 +595,22 @@ final class DesignPreviewStep implements Step
                 $declaration['ancestors'],
                 $element,
             );
-            if ($match['unprovable'] || ($match['specificity'] !== null && $scope === 'unprovable')) {
-                return "desktop {$label} visibility and flow cannot be proven across the CSS cascade";
-            }
-            if ($match['specificity'] === null) {
-                continue;
-            }
             $priority = CssChecks::splitDeclarationPriority($declaration['value']);
-            foreach (self::headerCriticalValues($property, $priority['value']) as $resolved => $value) {
-                $candidate = [
-                    'value' => $value,
-                    'important' => $priority['important'],
-                    'specificity' => $match['specificity'],
-                    'order' => $declaration['start'],
-                ];
-                if (self::cascadeCandidateWins($candidate, $winners[$resolved] ?? null)) {
-                    $winners[$resolved] = $candidate;
-                }
+            self::recordHeaderCascade(
+                $winners,
+                $proven,
+                $threats,
+                $match,
+                $scope,
+                $priority,
+                $declaration['start'],
+                self::headerCriticalValues($property, $priority['value']),
+            );
+        }
+
+        foreach ($threats as $threat) {
+            if (!self::headerThreatBeaten($threat, $proven[$threat['property']] ?? null)) {
+                return "desktop {$label} visibility and flow cannot be proven across the CSS cascade";
             }
         }
 
@@ -730,6 +780,81 @@ final class DesignPreviewStep implements Step
         $viewports = array_map('floatval', $viewports);
         sort($viewports, SORT_NUMERIC);
         return $viewports;
+    }
+
+    /**
+     * @param array<string,array{value:string,important:bool,specificity:int,order:int,proven?:bool}> $winners
+     * @param array<string,array{value:string,important:bool,specificity:int,order:int,proven?:bool}> $proven
+     * @param list<array{property:string,important:bool,specificity:int,specUnknown:bool,order:int}> $threats
+     * @param array{specificity:?int,unprovable:bool} $match
+     * @param array{value:string,important:bool} $priority
+     * @param array<string,string> $values
+     */
+    private static function recordHeaderCascade(
+        array &$winners,
+        array &$proven,
+        array &$threats,
+        array $match,
+        string $scope,
+        array $priority,
+        int $order,
+        array $values,
+    ): void {
+        $unprovableMatch = $match['unprovable'];
+        $unprovableScope = $match['specificity'] !== null && $scope === 'unprovable';
+        $unprovable = $unprovableMatch || $unprovableScope;
+        if ($match['specificity'] === null && !$unprovableMatch) {
+            return;
+        }
+        $specificity = $match['specificity'] ?? 0;
+        $specUnknown = $unprovableMatch && $match['specificity'] === null;
+        foreach ($values as $property => $value) {
+            $candidate = [
+                'value' => $value,
+                'important' => $priority['important'],
+                'specificity' => $specificity,
+                'order' => $order,
+                'proven' => !$unprovable,
+            ];
+            if (self::cascadeCandidateWins($candidate, $winners[$property] ?? null)) {
+                $winners[$property] = $candidate;
+            }
+            if (!$unprovable && self::cascadeCandidateWins($candidate, $proven[$property] ?? null)) {
+                $proven[$property] = $candidate;
+            }
+            if ($unprovable) {
+                $threats[] = [
+                    'property' => $property,
+                    'important' => $priority['important'],
+                    'specificity' => $specificity,
+                    'specUnknown' => $specUnknown,
+                    'order' => $order,
+                ];
+            }
+        }
+    }
+
+    /**
+     * @param array{property:string,important:bool,specificity:int,specUnknown:bool,order:int} $threat
+     * @param array{value:string,important:bool,specificity:int,order:int,proven?:bool}|null $lock
+     */
+    private static function headerThreatBeaten(array $threat, ?array $lock): bool
+    {
+        if ($lock === null || empty($lock['proven']) || !$lock['important']) {
+            return false;
+        }
+        if (!$threat['important']) {
+            return true;
+        }
+        if ($threat['specUnknown']) {
+            return false;
+        }
+        return self::cascadeCandidateWins($lock, [
+            'value' => '',
+            'important' => $threat['important'],
+            'specificity' => $threat['specificity'],
+            'order' => $threat['order'],
+        ]);
     }
 
     /**
@@ -1332,12 +1457,181 @@ final class DesignPreviewStep implements Step
         );
     }
 
-    private static function degradedWarning(string $authored, string $scaffold): string
+    /**
+     * @param list<array<string,mixed>> $sitePages
+     * @param list<string> $warnings
+     * @return array{html:string,issue:?string}
+     */
+    private static function recover(string $html, array $sitePages, array &$warnings): array
     {
-        return 'malformed_design file design/preview.html block_path document '
+        $candidate = $html;
+        if (str_contains($candidate, '<!--')) {
+            $stripped = self::stripHtmlComments($candidate);
+            if ($stripped !== $candidate) {
+                $warnings[] = 'malformed_design file design/preview.html block_path document '
+                    . 'authored_value ' . self::warningValue('document contains HTML comments')
+                    . ' delivered_value removed disposition removed';
+                $candidate = $stripped;
+            }
+        }
+        for ($i = 0; $i < 8; $i++) {
+            $issue = self::designIssue($candidate, $sitePages);
+            if ($issue === null) {
+                return ['html' => $candidate, 'issue' => null];
+            }
+            if (self::isUnprovenHeaderIssue($issue)) {
+                $locked = self::appendHeaderLock($candidate);
+                if ($locked !== null) {
+                    $after = self::designIssue($locked, $sitePages);
+                    if ($after !== $issue) {
+                        $warnings[] = 'malformed_design file design/preview.html block_path document '
+                            . 'authored_value ' . self::warningValue($issue)
+                            . ' delivered_value ' . self::warningValue(self::HEADER_LOCK_CSS)
+                            . ' disposition repaired';
+                        $candidate = $locked;
+                        if ($after === null) {
+                            return ['html' => $candidate, 'issue' => null];
+                        }
+                        continue;
+                    }
+                }
+            }
+            $next = self::recoverOnce($candidate, $issue);
+            if ($next === null || $next === $candidate) {
+                return ['html' => $candidate, 'issue' => $issue];
+            }
+            $warnings[] = 'malformed_design file design/preview.html block_path document '
+                . 'authored_value ' . self::warningValue($issue)
+                . ' delivered_value removed disposition removed';
+            $candidate = $next;
+        }
+        return ['html' => $candidate, 'issue' => self::designIssue($candidate, $sitePages)];
+    }
+
+    private static function isUnprovenHeaderIssue(string $issue): bool
+    {
+        return str_ends_with($issue, 'cannot be proven across the CSS cascade');
+    }
+
+    private static function appendHeaderLock(string $html): ?string
+    {
+        if (str_contains($html, '--msb-preview-header')) {
+            return null;
+        }
+        $updated = preg_replace(
+            '/<\/style>/i',
+            "\n" . self::HEADER_LOCK_CSS . '</style>',
+            $html,
+            1,
+            $count,
+        );
+        if (!is_string($updated) || $count !== 1) {
+            return null;
+        }
+        return $updated;
+    }
+
+    private static function recoverOnce(string $html, string $issue): ?string
+    {
+        if ($issue === 'document is not one complete HTML document') {
+            return self::trimToCompleteDocument($html);
+        }
+        if ($issue === 'document contains HTML comments') {
+            return self::stripHtmlComments($html);
+        }
+        if (preg_match('/^hero image must omit (src|srcset|sizes)$/', $issue, $omit) === 1) {
+            return self::dropEmptyImageAttribute($html, $omit[1]);
+        }
+        if ($issue === 'document contains scripts or dependency elements') {
+            $next = preg_replace(
+                '/<(script|iframe|link)\b[^>]*>.*?<\/\1\s*>/is',
+                '',
+                $html,
+            ) ?? $html;
+            return preg_replace('/<(script|iframe|link)\b[^>]*\/?>/i', '', $next) ?? $next;
+        }
+        if ($issue === 'document contains responsive image dependency elements') {
+            $next = preg_replace_callback(
+                '/<picture\b[^>]*>.*?<\/picture\s*>/is',
+                static function (array $match): string {
+                    return preg_match('/<img\b[^>]*>/i', $match[0], $img) === 1 ? $img[0] : '';
+                },
+                $html,
+            ) ?? $html;
+            $next = preg_replace('/<source\b[^>]*\/?>/i', '', $next) ?? $next;
+            return preg_replace('/<\/source\s*>/i', '', $next) ?? $next;
+        }
+        return null;
+    }
+
+    /**
+     * Drop an EMPTY src/srcset/sizes from the hero <img>.
+     *
+     * assign-image-sources fills the source in from the alt contract, so an
+     * empty attribute already carries nothing — removing it is lossless and
+     * leaves exactly the markup the rule asks for. An attribute with a real
+     * value is left alone: deleting a source the design authored would be
+     * discarding content, so that stays a defect for the repair pass.
+     */
+    private static function dropEmptyImageAttribute(string $html, string $attribute): ?string
+    {
+        $pattern = '/(<img\b[^>]*?)\s+' . preg_quote($attribute, '/') . '\s*=\s*("\s*"|\'\s*\')/i';
+        $next = preg_replace($pattern, '$1', $html, 1, $count);
+        if ($next === null || $count === 0) {
+            return null;
+        }
+        return $next;
+    }
+
+    private static function trimToCompleteDocument(string $html): ?string
+    {
+        $html = CodeFences::strip($html);
+        if (preg_match('/<!doctype\s+html\s*>/i', $html, $open, PREG_OFFSET_CAPTURE) !== 1) {
+            return null;
+        }
+        $start = (int) $open[0][1];
+        if (preg_match('/<html(?=[\s>])/i', $html, $htmlTag, PREG_OFFSET_CAPTURE, $start) !== 1) {
+            return null;
+        }
+        $close = strripos($html, '</html>');
+        if ($close === false || $close < (int) $htmlTag[0][1]) {
+            return null;
+        }
+        $gt = strpos($html, '>', $close);
+        if ($gt === false) {
+            return null;
+        }
+        $trimmed = substr($html, $start, $gt + 1 - $start);
+        if (
+            preg_match(
+                '/\A\s*<!doctype\s+html\s*>\s*<html(?=[\s>])[\s\S]*<\/html\s*>\s*\z/i',
+                $trimmed,
+            ) !== 1
+        ) {
+            return null;
+        }
+        return $trimmed;
+    }
+
+    private static function stripHtmlComments(string $html): string
+    {
+        return preg_replace('/<!--.*?-->/s', '', $html) ?? $html;
+    }
+
+    private static function degradedWarning(
+        string $authored,
+        string $scaffold,
+        string $issue,
+        ?string $repairIssue = null,
+    ): string {
+        $warning = 'malformed_design file design/preview.html block_path document '
             . 'authored_value ' . self::warningValue($authored)
             . ' delivered_value safe scaffold (' . strlen($scaffold) . ' bytes) '
-            . 'disposition degraded';
+            . 'disposition degraded; defect ' . self::warningValue($issue);
+        if ($repairIssue !== null && $repairIssue !== '') {
+            $warning .= '; repair_defect ' . self::warningValue($repairIssue);
+        }
+        return $warning;
     }
 
     private static function warningValue(string $value): string

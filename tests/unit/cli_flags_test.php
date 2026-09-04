@@ -101,7 +101,7 @@ test('build CLI preserves design-constraint error precedence over provider valid
  * The step ids the build CLI would have run, read back from --until's
  * validator. That list IS the selected graph, so it distinguishes the two
  * paths instead of merely proving a flag parsed. $env prefixes the child,
- * which is how a flag gets tested against a hostile SITE_BUILD_HTML_FIRST.
+ * which is how a flag gets tested against a hostile SITE_BUILD_GRAPH.
  *
  * @param list<string>          $args
  * @param array<string, string> $env
@@ -207,7 +207,7 @@ test('X-G13 build CLI usage lists the transport and graph-selection flags', func
     assert_contains('[--transport]', $text);
     assert_contains('[--list-steps]', $text);
     assert_contains('[--step=step-id]', $text);
-    assert_contains('[--html-first|--blocks-first]', $text);
+    assert_contains('[--html-first|--blocks-first|--html-islands]', $text);
 });
 
 test('--html-first runs the build on the HTML-first graph', function () {
@@ -228,27 +228,27 @@ test('--blocks-first runs the build on the blocks graph', function () {
     assert_true(!in_array('transform-site', $ids, true), $seen);
 });
 
-test('--blocks-first overrides SITE_BUILD_HTML_FIRST=1', function () {
-    $ids = build_cli_graph_ids(['--blocks-first'], ['SITE_BUILD_HTML_FIRST' => '1']);
+test('--blocks-first overrides SITE_BUILD_GRAPH=html-first', function () {
+    $ids = build_cli_graph_ids(['--blocks-first'], ['SITE_BUILD_GRAPH' => 'html-first']);
     $seen = implode(',', $ids);
 
     assert_true(in_array('sections', $ids, true), $seen);
     assert_true(!in_array('transform-site', $ids, true), $seen);
 });
 
-test('--html-first overrides SITE_BUILD_HTML_FIRST=0', function () {
-    $ids = build_cli_graph_ids(['--html-first'], ['SITE_BUILD_HTML_FIRST' => '0']);
+test('--html-first overrides SITE_BUILD_GRAPH=blocks', function () {
+    $ids = build_cli_graph_ids(['--html-first'], ['SITE_BUILD_GRAPH' => 'blocks']);
     $seen = implode(',', $ids);
 
     assert_true(in_array('transform-site', $ids, true), $seen);
     assert_true(!in_array('sections', $ids, true), $seen);
 });
 
-test('without either flag SITE_BUILD_HTML_FIRST still picks the graph', function () {
-    $on = build_cli_graph_ids([], ['SITE_BUILD_HTML_FIRST' => '1']);
+test('without a graph flag SITE_BUILD_GRAPH still picks the graph', function () {
+    $on = build_cli_graph_ids([], ['SITE_BUILD_GRAPH' => 'html-first']);
     assert_true(in_array('transform-site', $on, true), implode(',', $on));
 
-    $off = build_cli_graph_ids([], ['SITE_BUILD_HTML_FIRST' => '0']);
+    $off = build_cli_graph_ids([], ['SITE_BUILD_GRAPH' => 'blocks']);
     assert_true(in_array('sections', $off, true), implode(',', $off));
 });
 
@@ -265,9 +265,98 @@ test('--html-first and --blocks-first together are refused', function () {
 
     assert_eq(1, $exit);
     assert_eq(
-        '--html-first and --blocks-first are mutually exclusive; pass one.',
+        '--html-first, --blocks-first, and --html-islands are mutually exclusive; pass one.',
         implode("\n", $output)
     );
+});
+
+test('--html-islands with another graph flag is refused', function () {
+    $command = php_child_command(repo_path('bin/build.php'), [
+        'demo',
+        '--html-first',
+        '--html-islands',
+        '--no-serve',
+    ]);
+    $output = [];
+    $exit = 0;
+    exec($command . ' 2>&1', $output, $exit);
+
+    assert_eq(1, $exit);
+    assert_eq(
+        '--html-first, --blocks-first, and --html-islands are mutually exclusive; pass one.',
+        implode("\n", $output)
+    );
+});
+
+test('leftover SITE_BUILD_HTML_FIRST is ignored when SITE_BUILD_GRAPH is pinned', function () {
+    $ids = build_cli_graph_ids([], [
+        'SITE_BUILD_HTML_FIRST' => '1',
+        'SITE_BUILD_GRAPH' => 'blocks',
+    ]);
+    $seen = implode(',', $ids);
+    assert_true(in_array('sections', $ids, true), $seen);
+    assert_true(!in_array('transform-site', $ids, true), $seen);
+});
+
+test('the CLI honors a leftover SITE_BUILD_HTML_FIRST and says it is retired', function () {
+    // Was "is refused". Refusing broke any host that had the retired key
+    // exported. --list-steps is the deterministic observation: it prints the
+    // chosen graph and exits 0, so the assertion cannot pass on an unrelated
+    // build failure the way an exit-code check did.
+    //
+    // bootstrap.php loads the repo .env by path, not cwd. A child whose cwd
+    // has no .env still inherits that map unless we drop SITE_BUILD_GRAPH
+    // from it after bootstrap, which is what "unset" means (site_builder_test.php:17-19).
+    $tmp = sys_get_temp_dir() . '/d2-leftover-cli-' . uniqid();
+    mkdir($tmp, 0700, true);
+    file_put_contents($tmp . '/.env', '');
+    $driver = $tmp . '/run.php';
+    $bootstrap = repo_path('src/bootstrap.php');
+    $build = repo_path('bin/build.php');
+    file_put_contents($driver, '<?php
+declare(strict_types=1);
+require_once ' . var_export($bootstrap, true) . ';
+$prop = new ReflectionProperty(Automattic\\SiteBuild\\Env::class, "vars");
+$map = $prop->getValue();
+unset($map["SITE_BUILD_GRAPH"]);
+$prop->setValue(null, $map);
+putenv("SITE_BUILD_GRAPH");
+putenv("SITE_BUILD_HTML_FIRST=1");
+chdir(' . var_export($tmp, true) . ');
+$_SERVER["SCRIPT_FILENAME"] = ' . var_export($build, true) . ';
+$argv = [' . var_export($build, true) . ', "--list-steps"];
+$_SERVER["argv"] = $argv;
+$_SERVER["argc"] = count($argv);
+require ' . var_export($build, true) . ';
+');
+
+    try {
+        $command = 'ANTHROPIC_API_KEY=' . escapeshellarg('test-key') . ' '
+            . php_child_command($driver);
+        $output = [];
+        $exit = 0;
+        exec($command . ' 2>&1', $output, $exit);
+        $text = implode("\n", $output);
+
+        assert_eq(0, $exit, $text);
+        assert_contains('"graph":"html-first"', $text);
+        assert_true(str_contains($text, 'SITE_BUILD_HTML_FIRST'), $text);
+        assert_true(str_contains($text, 'retired'), $text);
+        assert_true(str_contains($text, 'SITE_BUILD_GRAPH'), $text);
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('--html-islands runs the build on the HTML-islands graph', function () {
+    $ids = build_cli_graph_ids(['--html-islands']);
+    $seen = implode(',', $ids);
+
+    assert_true(in_array('island-pages', $ids, true), $seen);
+    assert_true(in_array('transform-chrome', $ids, true), $seen);
+    assert_true(in_array('island-above-fold', $ids, true), $seen);
+    assert_true(!in_array('transform-site', $ids, true), $seen);
+    assert_true(!in_array('section-rhythm', $ids, true), $seen);
 });
 
 test('a --from resume runs the graph meta.json recorded, not the ambient one', function () {
@@ -287,7 +376,7 @@ test('a --from resume runs the graph meta.json recorded, not the ambient one', f
         // No flag, and the env explicitly names the OTHER graph: the record wins.
         $ids = build_cli_graph_ids(
             ['--slug=' . $slug, '--from=transform-site'],
-            ['SITE_BUILD_HTML_FIRST' => '0']
+            ['SITE_BUILD_GRAPH' => 'blocks']
         );
         $seen = implode(',', $ids);
         assert_true(in_array('transform-site', $ids, true), $seen);
@@ -317,6 +406,64 @@ test('a --from resume runs the graph meta.json recorded, not the ambient one', f
     }
 });
 
+test('a --from resume on a blocks project ignores a hostile html-first env', function () {
+    $slug = 'zz-resume-blocks-' . getmypid() . '-' . uniqid();
+    $dir = repo_path('projects/' . $slug);
+    mkdir($dir, 0777, true);
+    file_put_contents($dir . '/meta.json', (string) json_encode([
+        'prompt'           => 'a cozy neighborhood bakery',
+        'provisional_slug' => $slug,
+        'multi_page'       => false,
+        'graph'            => 'blocks',
+    ]));
+
+    try {
+        $ids = build_cli_graph_ids(
+            ['--slug=' . $slug, '--from=sections'],
+            ['SITE_BUILD_GRAPH' => 'html-first']
+        );
+        $seen = implode(',', $ids);
+        assert_true(in_array('sections', $ids, true), $seen);
+        assert_true(!in_array('transform-site', $ids, true), $seen);
+        assert_true(!in_array('design-preview', $ids, true), $seen);
+    } finally {
+        exec('rm -rf ' . escapeshellarg($dir));
+    }
+});
+
+test('a --from resume of an unknown recorded graph names it and refuses', function () {
+    $slug = 'zz-resume-unknown-' . getmypid() . '-' . uniqid();
+    $dir = repo_path('projects/' . $slug);
+    mkdir($dir, 0777, true);
+    file_put_contents($dir . '/meta.json', (string) json_encode([
+        'prompt'           => 'a cozy neighborhood bakery',
+        'provisional_slug' => $slug,
+        'multi_page'       => false,
+        'graph'            => 'retired-graph',
+    ]));
+
+    try {
+        $command = 'ANTHROPIC_API_KEY=' . escapeshellarg('test-key') . ' '
+            . php_child_command(repo_path('bin/build.php'), [
+                'demo',
+                '--provider=anthropic',
+                '--no-serve',
+                '--slug=' . $slug,
+                '--from=section-rhythm',
+            ]);
+        $output = [];
+        $exit = 0;
+        exec($command . ' 2>&1', $output, $exit);
+        $text = implode("\n", $output);
+
+        assert_eq(1, $exit, $text);
+        assert_true(str_contains($text, 'retired-graph'), $text);
+        assert_true(str_contains($text, 'does not recognize'), $text);
+    } finally {
+        exec('rm -rf ' . escapeshellarg($dir));
+    }
+});
+
 test('a --from resume on a project with no recorded graph still honors the flag', function () {
     // Projects created before builds recorded the graph must keep resuming.
     $slug = 'zz-resume-unrecorded-' . getmypid() . '-' . uniqid();
@@ -331,7 +478,7 @@ test('a --from resume on a project with no recorded graph still honors the flag'
     try {
         $ids = build_cli_graph_ids(
             ['--slug=' . $slug, '--from=transform-site', '--html-first'],
-            ['SITE_BUILD_HTML_FIRST' => '0']
+            ['SITE_BUILD_GRAPH' => 'blocks']
         );
         $seen = implode(',', $ids);
         assert_true(in_array('transform-site', $ids, true), $seen);

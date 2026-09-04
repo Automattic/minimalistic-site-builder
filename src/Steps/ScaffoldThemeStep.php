@@ -685,6 +685,15 @@ final class ScaffoldThemeStep implements Step
             }
         }
 
+        /* Layout-transparent wrapper around a bare island <img> so core/image
+           can own the leaf without inserting a box into the page's layout. */
+        .island-bare-image {
+            display: contents;
+        }
+        .island-bare-table {
+            display: contents;
+        }
+
         CSS;
 
     private const README = <<<TXT

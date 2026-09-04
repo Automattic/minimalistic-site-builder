@@ -2,7 +2,11 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\BlockFixer;
+use Automattic\SiteBuild\Env;
+use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Package;
+use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\TransformArtifacts;
 use Automattic\SiteBuild\Pipeline;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
@@ -29,6 +33,71 @@ function composition_deps(): array
         'renderer' => new PromptRenderer(Package::promptsDir()),
         'blockFixer' => $fixer,
     ];
+}
+
+/**
+ * Isolate SITE_BUILD_GRAPH / SITE_BUILD_HTML_FIRST from process env AND the
+ * .env map Env::get falls back to. Clearing the process key alone is not
+ * unset — site_builder_test.php:17-19 documents that trap.
+ *
+ * @param ?string $graph  null drops SITE_BUILD_GRAPH; a name pins it
+ * @param ?string $legacy null drops SITE_BUILD_HTML_FIRST; a value pins it
+ */
+/**
+ * Run $fn with narration captured, returning what it narrated. Narrator writes
+ * to STDERR, which output buffering does not see; setStream() is the seam it
+ * exposes for exactly this.
+ */
+function narrated(callable $fn, mixed &$result): string
+{
+    $sink = fopen('php://memory', 'w+');
+    Narrator::setStream($sink);
+    try {
+        $result = $fn();
+    } finally {
+        Narrator::reset();
+    }
+    rewind($sink);
+    $said = (string) stream_get_contents($sink);
+    fclose($sink);
+    return $said;
+}
+
+function with_isolated_graph_env(?string $graph, ?string $legacy, callable $fn): void
+{
+    $previousGraph = getenv('SITE_BUILD_GRAPH');
+    $previousLegacy = getenv('SITE_BUILD_HTML_FIRST');
+    $notice = new ReflectionProperty(StepComposition::class, 'retiredNoticeShownFor');
+    $notice->setValue(null, null);
+    $prop = new ReflectionProperty(Env::class, 'vars');
+    $savedMap = $prop->getValue();
+    $map = $savedMap;
+    try {
+        if ($graph === null) {
+            putenv('SITE_BUILD_GRAPH');
+            unset($map['SITE_BUILD_GRAPH']);
+        } else {
+            putenv('SITE_BUILD_GRAPH=' . $graph);
+            $map['SITE_BUILD_GRAPH'] = $graph;
+        }
+        if ($legacy === null) {
+            putenv('SITE_BUILD_HTML_FIRST');
+            unset($map['SITE_BUILD_HTML_FIRST']);
+        } else {
+            putenv('SITE_BUILD_HTML_FIRST=' . $legacy);
+            $map['SITE_BUILD_HTML_FIRST'] = $legacy;
+        }
+        $prop->setValue(null, $map);
+        $fn();
+    } finally {
+        $prop->setValue(null, $savedMap);
+        $previousGraph === false
+            ? putenv('SITE_BUILD_GRAPH')
+            : putenv('SITE_BUILD_GRAPH=' . $previousGraph);
+        $previousLegacy === false
+            ? putenv('SITE_BUILD_HTML_FIRST')
+            : putenv('SITE_BUILD_HTML_FIRST=' . $previousLegacy);
+    }
 }
 
 test('postImages names the phase every image entry point has to run', function () {
@@ -76,23 +145,60 @@ test('postImages validates against the graph it is handed, not the env selector'
     // rules that path deliberately skips, and only the HTML-first path has a
     // design stylesheet to consult.
     assert_true(
-        in_array('design/site.css', $validateReads(StepComposition::postImages($images, htmlFirst: true)), true),
+        in_array('design/site.css', $validateReads(StepComposition::postImages($images, graph: StepComposition::GRAPH_HTML_FIRST)), true),
         'an HTML-first project is re-validated with the HTML-first width rules',
     );
     assert_true(
-        !in_array('design/site.css', $validateReads(StepComposition::postImages($images, htmlFirst: false)), true),
+        !in_array('design/site.css', $validateReads(StepComposition::postImages($images, graph: StepComposition::GRAPH_BLOCKS)), true),
         'a blocks project is not',
     );
 });
 
 test('images CLI reads the graph off the project instead of the env selector', function () {
     $source = (string) file_get_contents(dirname(__DIR__, 2) . '/bin/images.php');
-    assert_contains('StepComposition::resumeHtmlFirst(', $source);
+    assert_contains('StepComposition::resumeGraph(', $source);
     assert_contains('htmlFirst: $htmlFirst', $source);
     assert_true(
-        !str_contains($source, 'htmlFirstSelected'),
+        !str_contains($source, 'selectedGraph'),
         'the entry point that did not build the project never asks the env selector',
     );
+});
+
+test('images CLI falls back to the transform report on an unknown recorded graph and narrates it', function () {
+    require_once dirname(__DIR__, 2) . '/bin/images.php';
+
+    $tmp = sys_get_temp_dir() . '/builder_images_graph_' . uniqid();
+    $store = new ProjectStore($tmp);
+    $project = $store->create('future');
+    $project->writeJson('meta.json', [
+        'prompt' => 'a bakery',
+        'graph'  => 'some-future-graph',
+    ]);
+
+    $sink = fopen('php://temp', 'w+');
+    Narrator::setStream($sink);
+    try {
+        assert_eq(false, images_html_first_from_project($project), 'no report → blocks rules');
+        rewind($sink);
+        $absent = (string) stream_get_contents($sink);
+        assert_true(str_contains($absent, 'some-future-graph'), $absent);
+
+        $project->writeJson(TransformArtifacts::REPORT, [
+            'fallback_codes'    => [],
+            'repair_outcomes'   => [],
+            'dropped_fragments' => [],
+        ]);
+        ftruncate($sink, 0);
+        rewind($sink);
+        assert_eq(true, images_html_first_from_project($project), 'report present → HTML-first rules');
+        rewind($sink);
+        $present = (string) stream_get_contents($sink);
+        assert_true(str_contains($present, 'some-future-graph'), $present);
+    } finally {
+        Narrator::reset();
+        fclose($sink);
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
 });
 
 test('StepComposition htmlFirst matches the HTML-first step order and validates', function () {
@@ -135,10 +241,10 @@ test('StepComposition htmlFirst matches the HTML-first step order and validates'
 });
 
 test('StepComposition default is the full blocks graph byte-for-byte', function () {
-    $previous = getenv('SITE_BUILD_HTML_FIRST');
+    $previous = getenv('SITE_BUILD_GRAPH');
     // Env::get falls back to the .env map bootstrap.php loads, so clearing the
-    // process env alone leaves a developer's SITE_BUILD_HTML_FIRST=1 in force.
-    putenv('SITE_BUILD_HTML_FIRST=0');
+    // process env alone leaves a developer's SITE_BUILD_GRAPH=html-first in force.
+    putenv('SITE_BUILD_GRAPH=blocks');
     try {
         $d = composition_deps();
         $ids = array_map(
@@ -160,8 +266,8 @@ test('StepComposition default is the full blocks graph byte-for-byte', function 
         assert_true(!in_array('transform-site', $ids, true));
     } finally {
         $previous === false
-            ? putenv('SITE_BUILD_HTML_FIRST')
-            : putenv('SITE_BUILD_HTML_FIRST=' . $previous);
+            ? putenv('SITE_BUILD_GRAPH')
+            : putenv('SITE_BUILD_GRAPH=' . $previous);
     }
 });
 
@@ -182,9 +288,9 @@ test('the fidelity walk needs no graph position of its own', function () {
     StepGraph::validate($c->steps(), $c->seeds());
 });
 
-test('SITE_BUILD_HTML_FIRST=1 routes the default composition to the HTML-first graph', function () {
-    $previous = getenv('SITE_BUILD_HTML_FIRST');
-    putenv('SITE_BUILD_HTML_FIRST=1');
+test('SITE_BUILD_GRAPH=html-first routes the default composition to the HTML-first graph', function () {
+    $previous = getenv('SITE_BUILD_GRAPH');
+    putenv('SITE_BUILD_GRAPH=html-first');
     try {
         $d = composition_deps();
         $ids = array_map(
@@ -196,13 +302,13 @@ test('SITE_BUILD_HTML_FIRST=1 routes the default composition to the HTML-first g
             )->steps(),
         );
 
-        assert_true(StepComposition::htmlFirstSelected());
+        assert_eq('html-first', StepComposition::selectedGraph());
         assert_true(in_array('transform-site', $ids, true));
         assert_true(!in_array('sections', $ids, true));
     } finally {
         $previous === false
-            ? putenv('SITE_BUILD_HTML_FIRST')
-            : putenv('SITE_BUILD_HTML_FIRST=' . $previous);
+            ? putenv('SITE_BUILD_GRAPH')
+            : putenv('SITE_BUILD_GRAPH=' . $previous);
     }
 });
 
@@ -305,55 +411,137 @@ test('StepComposition configures new seeds before inserting a step that reads th
     assert_throws(fn () => new Pipeline($c->steps()));
 });
 
-test('graphName maps the two graphs to the names meta.json records', function () {
-    assert_eq('html-first', StepComposition::graphName(true));
-    assert_eq('blocks', StepComposition::graphName(false));
-    assert_eq(StepComposition::GRAPH_HTML_FIRST, StepComposition::graphName(true));
-    assert_eq(StepComposition::GRAPH_BLOCKS, StepComposition::graphName(false));
+test('graphName maps known graphs to the names meta.json records', function () {
+    assert_eq('html-first', StepComposition::graphName('html-first'));
+    assert_eq('blocks', StepComposition::graphName('blocks'));
+    assert_eq('html-islands', StepComposition::graphName('html-islands'));
+    assert_eq(StepComposition::GRAPH_HTML_FIRST, StepComposition::graphName('html-first'));
+    assert_eq(StepComposition::GRAPH_BLOCKS, StepComposition::graphName('blocks'));
+    assert_eq(StepComposition::GRAPH_HTML_ISLANDS, StepComposition::graphName('html-islands'));
 });
 
 test('graphName with no argument reports the currently selected graph', function () {
-    $previous = getenv('SITE_BUILD_HTML_FIRST');
+    $previous = getenv('SITE_BUILD_GRAPH');
     try {
-        putenv('SITE_BUILD_HTML_FIRST=1');
+        putenv('SITE_BUILD_GRAPH=html-first');
         assert_eq('html-first', StepComposition::graphName());
-        putenv('SITE_BUILD_HTML_FIRST=0');
+        putenv('SITE_BUILD_GRAPH=blocks');
         assert_eq('blocks', StepComposition::graphName());
     } finally {
         $previous === false
-            ? putenv('SITE_BUILD_HTML_FIRST')
-            : putenv('SITE_BUILD_HTML_FIRST=' . $previous);
+            ? putenv('SITE_BUILD_GRAPH')
+            : putenv('SITE_BUILD_GRAPH=' . $previous);
     }
 });
 
 test('a resume with no flag runs whatever graph the record names', function () {
-    assert_eq(true, StepComposition::resumeHtmlFirst('html-first', null));
-    assert_eq(false, StepComposition::resumeHtmlFirst('blocks', null));
+    assert_eq('html-first', StepComposition::resumeGraph('html-first', null));
+    assert_eq('blocks', StepComposition::resumeGraph('blocks', null));
+    assert_eq('html-islands', StepComposition::resumeGraph('html-islands', null));
 });
 
 test('a resume flag that agrees with the record is accepted', function () {
-    assert_eq(true, StepComposition::resumeHtmlFirst('html-first', true));
-    assert_eq(false, StepComposition::resumeHtmlFirst('blocks', false));
+    assert_eq('html-first', StepComposition::resumeGraph('html-first', 'html-first'));
+    assert_eq('blocks', StepComposition::resumeGraph('blocks', 'blocks'));
+    assert_eq('html-islands', StepComposition::resumeGraph('html-islands', 'html-islands'));
 });
 
 test('a resume flag contradicting the record is refused, not honored', function () {
-    $e = assert_throws(static fn () => StepComposition::resumeHtmlFirst('html-first', false));
+    $e = assert_throws(static fn () => StepComposition::resumeGraph('html-first', 'blocks'));
     assert_true($e instanceof InvalidArgumentException, get_class($e));
     // The CLI prints this verbatim behind a "--from: " prefix.
     assert_true(str_contains($e->getMessage(), 'built on the html-first graph'), $e->getMessage());
     assert_true(str_contains($e->getMessage(), 'blocks-first was passed'), $e->getMessage());
 
-    $e = assert_throws(static fn () => StepComposition::resumeHtmlFirst('blocks', true));
+    $e = assert_throws(static fn () => StepComposition::resumeGraph('blocks', 'html-first'));
     assert_true(str_contains($e->getMessage(), 'built on the blocks graph'), $e->getMessage());
     assert_true(str_contains($e->getMessage(), 'html-first was passed'), $e->getMessage());
 });
 
 test('an absent or unreadable record leaves the resume selection to the caller', function () {
-    // Projects built before builds recorded the graph, and anything this
-    // version does not recognize: degrade to the flag/env choice rather than
-    // silently treating an unknown name as the blocks graph.
-    assert_eq(null, StepComposition::resumeHtmlFirst(null, null));
-    assert_eq(null, StepComposition::resumeHtmlFirst(null, true));
-    assert_eq(null, StepComposition::resumeHtmlFirst('', true));
-    assert_eq(null, StepComposition::resumeHtmlFirst('some-future-graph', false));
+    // Projects built before builds recorded the graph: degrade to the flag/env
+    // choice rather than silently treating a missing name as the blocks graph.
+    assert_eq(null, StepComposition::resumeGraph(null, null));
+    assert_eq(null, StepComposition::resumeGraph(null, 'html-first'));
+    assert_eq(null, StepComposition::resumeGraph('', 'html-first'));
+});
+
+test('an unknown recorded graph is refused by name, not treated as the caller\'s selection', function () {
+    $e = assert_throws(static fn () => StepComposition::resumeGraph('some-future-graph', 'blocks'));
+    assert_true($e instanceof InvalidArgumentException, get_class($e));
+    assert_true(str_contains($e->getMessage(), 'some-future-graph'), $e->getMessage());
+});
+
+test('an unknown requested graph is refused by the request name, not blamed on the record', function () {
+    $e = assert_throws(static fn () => StepComposition::resumeGraph('blocks', 'htmlfirst'));
+    assert_true($e instanceof InvalidArgumentException, get_class($e));
+    assert_true(str_contains($e->getMessage(), 'htmlfirst'), $e->getMessage());
+    assert_true(!str_contains($e->getMessage(), 'built on the blocks graph'), $e->getMessage());
+});
+
+test('SITE_BUILD_GRAPH=html-islands is recognized and builds the islands graph', function () {
+    $previous = getenv('SITE_BUILD_GRAPH');
+    putenv('SITE_BUILD_GRAPH=html-islands');
+    try {
+        assert_eq('html-islands', StepComposition::selectedGraph());
+        $d = composition_deps();
+        $composition = StepComposition::default(
+            llm: $d['llm'],
+            renderer: $d['renderer'],
+            blockFixer: $d['blockFixer'],
+        );
+        $ids = array_map(static fn ($s) => $s->id(), $composition->steps());
+        assert_true(in_array('island-pages', $ids, true), implode(',', $ids));
+        assert_true(in_array('transform-chrome', $ids, true), implode(',', $ids));
+        assert_true(in_array('island-above-fold', $ids, true), implode(',', $ids));
+        assert_true(!in_array('transform-site', $ids, true), implode(',', $ids));
+    } finally {
+        $previous === false
+            ? putenv('SITE_BUILD_GRAPH')
+            : putenv('SITE_BUILD_GRAPH=' . $previous);
+    }
+});
+
+// CONTRACT AMENDMENT (was: "refused by name"). Refusing a leftover
+// SITE_BUILD_HTML_FIRST turned a host that had it exported into a hard failure
+// on upgrade, where trunk had honored it. The retired key is now read as an
+// alias with a deprecation line, so no working deployment breaks silently OR
+// loudly. SITE_BUILD_GRAPH still wins when both are set (test below).
+test('a leftover SITE_BUILD_HTML_FIRST=1 still selects html-first, with a deprecation line', function () {
+    with_isolated_graph_env(null, '1', static function (): void {
+        $said = narrated(static fn (): string => StepComposition::selectedGraph(), $graph);
+        assert_eq('html-first', $graph, 'the retired key keeps selecting the graph it always did');
+        assert_true(str_contains($said, 'SITE_BUILD_HTML_FIRST'), "must name the retired key: {$said}");
+        assert_true(str_contains($said, 'SITE_BUILD_GRAPH'), "must name its replacement: {$said}");
+    });
+});
+
+test('a leftover SITE_BUILD_HTML_FIRST=0 selects blocks, exactly as it used to', function () {
+    with_isolated_graph_env(null, '0', static function (): void {
+        // Only '1' ever meant html-first; every other value meant blocks. A
+        // stale "off" value is not a request, so it passes without a notice.
+        $said = narrated(static fn (): string => StepComposition::selectedGraph(), $graph);
+        assert_eq('blocks', $graph);
+        assert_eq('', $said, "an off value is not a selection, so it says nothing: {$said}");
+    });
+});
+
+test('SITE_BUILD_GRAPH wins when a leftover SITE_BUILD_HTML_FIRST is also set', function () {
+    with_isolated_graph_env('blocks', '1', static function (): void {
+        assert_eq('blocks', StepComposition::selectedGraph());
+    });
+});
+
+test('an unknown SITE_BUILD_GRAPH value is refused by name', function () {
+    $previous = getenv('SITE_BUILD_GRAPH');
+    putenv('SITE_BUILD_GRAPH=not-a-graph');
+    try {
+        $e = assert_throws(static fn () => StepComposition::selectedGraph());
+        assert_true($e instanceof InvalidArgumentException, get_class($e));
+        assert_true(str_contains($e->getMessage(), 'not-a-graph'), $e->getMessage());
+    } finally {
+        $previous === false
+            ? putenv('SITE_BUILD_GRAPH')
+            : putenv('SITE_BUILD_GRAPH=' . $previous);
+    }
 });

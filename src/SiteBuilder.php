@@ -61,7 +61,7 @@ final class SiteBuilder
 
         // The blocks graph is the default and generates no design document, so
         // it has nothing to fall back from: only HTML-first gets the wrapper.
-        if (!StepComposition::htmlFirstSelected()) {
+        if (StepComposition::selectedGraph() !== StepComposition::GRAPH_HTML_FIRST) {
             return $primary;
         }
 
@@ -132,7 +132,7 @@ final class SiteBuilder
         array $designConstraints = [],
         ?string $writingDirection = null,
         bool $formPlaceholders = false,
-        ?bool $htmlFirst = null,
+        ?string $graph = null,
     ): Project {
         if ($multiPage === false && $pages !== []) {
             throw new \InvalidArgumentException('A fixed page list requires multiPage to be true or omitted');
@@ -153,6 +153,8 @@ final class SiteBuilder
         $writingDirection = $writingDirection === null
             ? null
             : WritingDirection::validate($writingDirection);
+        // Validate before claiming a directory, same as every other input.
+        $resolvedGraph = StepComposition::graphName($graph);
 
         // A supplied spec is self-contained by default: unless the caller
         // explicitly forces one page, retain whatever page tree it carries.
@@ -170,9 +172,9 @@ final class SiteBuilder
             'created_at'       => gmdate('c'),
             'multi_page'       => $resolvedMultiPage,
             // A --from resume reads this to run the graph that built the project.
-            // Hosts driving a fixed composition must pass $htmlFirst; the default
+            // Hosts driving a fixed composition must pass $graph; the default
             // reads the same selector pipeline() does.
-            'graph'            => StepComposition::graphName($htmlFirst),
+            'graph'            => $resolvedGraph,
         ];
         if ($pages !== []) {
             $seed['pages'] = array_values($pages);

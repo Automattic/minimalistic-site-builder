@@ -44,7 +44,7 @@
         "complete_json_batch_calls": 0,
         "calls": [
             {
-                "prompt_sha256": "fce9c199ff37cc5a12bf9fac83b587983c053dbe568ac58a830ff87b2eec0996",
+                "prompt_sha256": "db8c1660e7ee313d13f910feef94f25d13d2c4d6dee50557e9fd08410e3fc6c3",
                 "prefix_sha256": [
                     "dc58c399d735c8f0679896b786bd5952ba926d1b0e52a92585c30d5cb43a8a56",
                     "907f74a91765ac9a98844d3096d4ba8be0e6207bf886181e7e32e71e79dfa727"

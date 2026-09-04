@@ -13,10 +13,10 @@ use Automattic\SiteBuild\Tests\FakeLlm;
 
 test('SiteBuilder pipeline exposes the default blocks step order and stop ids', function () {
     $tmp = sys_get_temp_dir() . '/builder_sb_' . uniqid();
-    $previous = getenv('SITE_BUILD_HTML_FIRST');
+    $previous = getenv('SITE_BUILD_GRAPH');
     // Env::get falls back to the .env map bootstrap.php loads, so clearing the
-    // process env alone leaves a developer's SITE_BUILD_HTML_FIRST=1 in force.
-    putenv('SITE_BUILD_HTML_FIRST=0');
+    // process env alone leaves a developer's SITE_BUILD_GRAPH=html-first in force.
+    putenv('SITE_BUILD_GRAPH=blocks');
     try {
         $builder = make_test_builder(new FakeLlm(), $tmp);
 
@@ -33,17 +33,17 @@ test('SiteBuilder pipeline exposes the default blocks step order and stop ids', 
         assert_true(in_array('theme-json', $builder->pipeline()->stopIds(), true));
     } finally {
         $previous === false
-            ? putenv('SITE_BUILD_HTML_FIRST')
-            : putenv('SITE_BUILD_HTML_FIRST=' . $previous);
+            ? putenv('SITE_BUILD_GRAPH')
+            : putenv('SITE_BUILD_GRAPH=' . $previous);
     }
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('SITE_BUILD_HTML_FIRST=1 gives the HTML-first order with the blocks fallback wrapper', function () {
+test('SITE_BUILD_GRAPH=html-first gives the HTML-first order with the blocks fallback wrapper', function () {
     $tmp = sys_get_temp_dir() . '/builder_sb_html_first_' . uniqid();
-    $previous = getenv('SITE_BUILD_HTML_FIRST');
-    putenv('SITE_BUILD_HTML_FIRST=1');
+    $previous = getenv('SITE_BUILD_GRAPH');
+    putenv('SITE_BUILD_GRAPH=html-first');
     try {
         $builder = make_test_builder(new FakeLlm(), $tmp);
         $pipeline = $builder->pipeline();
@@ -59,8 +59,8 @@ test('SITE_BUILD_HTML_FIRST=1 gives the HTML-first order with the blocks fallbac
         assert_true($pipeline instanceof \Automattic\SiteBuild\FallbackBuildPipeline);
     } finally {
         $previous === false
-            ? putenv('SITE_BUILD_HTML_FIRST')
-            : putenv('SITE_BUILD_HTML_FIRST=' . $previous);
+            ? putenv('SITE_BUILD_GRAPH')
+            : putenv('SITE_BUILD_GRAPH=' . $previous);
     }
 
     exec('rm -rf ' . escapeshellarg($tmp));
@@ -309,6 +309,13 @@ test('SiteBuilder invalid structured inputs fail before creating a project direc
         writingDirection: 'auto',
     ));
     assert_true(!is_dir($tmp . '/invalid-direction'));
+
+    assert_throws(fn () => $builder->createProject(
+        'a test cafe',
+        'invalid-graph',
+        graph: 'not-a-graph',
+    ));
+    assert_true(!is_dir($tmp . '/invalid-graph'));
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -356,41 +363,41 @@ test('createProject records which graph built the project', function () {
     // --from reads this back to resume on the same graph, so a wrong or missing
     // value silently reroutes a resume through artifacts nobody wrote.
     $tmp = sys_get_temp_dir() . '/builder_graph_' . uniqid();
-    $previous = getenv('SITE_BUILD_HTML_FIRST');
+    $previous = getenv('SITE_BUILD_GRAPH');
     try {
         $builder = make_test_builder(new FakeLlm(), $tmp);
 
-        putenv('SITE_BUILD_HTML_FIRST=0');
+        putenv('SITE_BUILD_GRAPH=blocks');
         $blocks = $builder->createProject(prompt: 'a bakery', slug: 'rec-blocks');
         assert_eq('blocks', $blocks->readJson('meta.json')['graph'] ?? null);
 
-        putenv('SITE_BUILD_HTML_FIRST=1');
+        putenv('SITE_BUILD_GRAPH=html-first');
         $html = $builder->createProject(prompt: 'a bakery', slug: 'rec-html');
         assert_eq('html-first', $html->readJson('meta.json')['graph'] ?? null);
     } finally {
         $previous === false
-            ? putenv('SITE_BUILD_HTML_FIRST')
-            : putenv('SITE_BUILD_HTML_FIRST=' . $previous);
+            ? putenv('SITE_BUILD_GRAPH')
+            : putenv('SITE_BUILD_GRAPH=' . $previous);
     }
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('an explicit htmlFirst beats the env, so a fixed-composition host records the truth', function () {
+test('an explicit graph beats the env, so a fixed-composition host records the truth', function () {
     // A host that hands pipeline() its own StepComposition never consults the
     // env key, so deriving the record from it would file the wrong graph.
     $tmp = sys_get_temp_dir() . '/builder_graph_explicit_' . uniqid();
-    $previous = getenv('SITE_BUILD_HTML_FIRST');
+    $previous = getenv('SITE_BUILD_GRAPH');
     try {
-        putenv('SITE_BUILD_HTML_FIRST=0');
+        putenv('SITE_BUILD_GRAPH=blocks');
         $builder = make_test_builder(new FakeLlm(), $tmp);
 
-        $project = $builder->createProject(prompt: 'a bakery', slug: 'rec-explicit', htmlFirst: true);
+        $project = $builder->createProject(prompt: 'a bakery', slug: 'rec-explicit', graph: 'html-first');
         assert_eq('html-first', $project->readJson('meta.json')['graph'] ?? null);
     } finally {
         $previous === false
-            ? putenv('SITE_BUILD_HTML_FIRST')
-            : putenv('SITE_BUILD_HTML_FIRST=' . $previous);
+            ? putenv('SITE_BUILD_GRAPH')
+            : putenv('SITE_BUILD_GRAPH=' . $previous);
     }
 
     exec('rm -rf ' . escapeshellarg($tmp));

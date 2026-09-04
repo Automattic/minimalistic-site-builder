@@ -235,3 +235,69 @@ test('splice-home-design degrades every generated-content boundary and never dro
         exec('rm -rf ' . escapeshellarg($tmp));
     }
 });
+
+test('splice keeps the site <style> byte-identical to site.css and page-scopes the body CSS', function () {
+    // The home body may now ship its own CSS. It must land in a
+    // `<style data-page-css>` block and NEVER be merged into the preview's
+    // <style>: that block is the SITE stylesheet, mirrored byte for byte by
+    // design/site.css, and PageStylesStep treats a page artifact's unattributed
+    // <style> as site CSS. Merging would push the body's class vocabulary
+    // outside PageScope::bodyClass() scoping — free to collide with every other
+    // page — and ship the same rules twice. A real build did exactly that:
+    // site <style> came out at 10,381B against a 4,529B site.css, the
+    // difference being the 5,850B page block duplicated.
+    $siteCss = ':root{--ink:#231f20}';
+    $bodyCss = '.work-grid{display:grid;gap:2rem}.section__title{font-size:2rem}';
+    [$project, $tmp] = splice_home_fixture(
+        '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+        . '<style>' . $siteCss . '</style></head><body>'
+        . '<header class="site-header"><nav>NAV</nav></header>'
+        . '<main><section id="hero"><h1>HERO</h1></section></main>'
+        . '</body></html>',
+        '<style data-page-css>' . $bodyCss . '</style>'
+        . '<main><section id="work" class="work-grid"><h2 class="section__title">Work</h2></section></main>'
+        . '<footer><p>Footer</p></footer>',
+    );
+    $project->writeText('design/site.css', $siteCss);
+
+    quietly(fn () => splice_home_run($project));
+
+    $home = $project->readText('design/home.html');
+    preg_match_all('#<style([^>]*)>(.*?)</style>#si', $home, $blocks, PREG_SET_ORDER);
+
+    $site = [];
+    $page = [];
+    foreach ($blocks as $block) {
+        if (preg_match('/data-page-css/i', $block[1])) {
+            $page[] = $block[2];
+        } else {
+            $site[] = $block[2];
+        }
+    }
+
+    assert_eq(1, count($site), 'exactly one site <style> survives the splice');
+    assert_eq(
+        $project->readText('design/site.css'),
+        $site[0],
+        "design/home.html's unattributed <style> === design/site.css, byte for byte",
+    );
+    assert_eq(1, count($page), 'the body CSS lands in exactly one data-page-css block');
+    assert_contains('.work-grid', $page[0], 'the body CSS is carried, not dropped');
+    assert_eq(
+        1,
+        substr_count($home, $bodyCss),
+        'body CSS must appear once (data-page-css only), not also in the site block',
+    );
+    assert_true(
+        !str_contains($site[0], '.work-grid'),
+        'the body CSS must NOT be duplicated into the site stylesheet',
+    );
+    assert_true(
+        preg_match(
+            '/<style\b[^>]*\bdata-page-css\b[^>]*>.*?<\/style>\s*<main\b/is',
+            $home,
+        ) === 1,
+        'page CSS sits immediately before <main>, like an inner page',
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

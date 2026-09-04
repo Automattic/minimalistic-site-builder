@@ -35,16 +35,16 @@ function make_integration_builder(FakeLlm $llm, string $outputRoot): SiteBuilder
 
 function blocks_integration_pipeline(SiteBuilder $builder): \Automattic\SiteBuild\BuildPipeline
 {
-    $previous = getenv('SITE_BUILD_HTML_FIRST');
+    $previous = getenv('SITE_BUILD_GRAPH');
     // Env::get falls back to the .env map bootstrap.php loads, so clearing the
-    // process env alone leaves a developer's SITE_BUILD_HTML_FIRST=1 in force.
-    putenv('SITE_BUILD_HTML_FIRST=0');
+    // process env alone leaves a developer's SITE_BUILD_GRAPH=html-first in force.
+    putenv('SITE_BUILD_GRAPH=blocks');
     try {
         return $builder->pipeline();
     } finally {
         $previous === false
-            ? putenv('SITE_BUILD_HTML_FIRST')
-            : putenv('SITE_BUILD_HTML_FIRST=' . $previous);
+            ? putenv('SITE_BUILD_GRAPH')
+            : putenv('SITE_BUILD_GRAPH=' . $previous);
     }
 }
 

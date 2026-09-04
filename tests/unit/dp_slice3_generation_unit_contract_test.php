@@ -451,8 +451,8 @@ test('TG7 section failures drop only failed sections and collapse total loss to 
 });
 
 test('TG8 composed graph validates both modes with explicit planner inputs declared', function () {
-    $previousHtmlFirst = getenv('SITE_BUILD_HTML_FIRST');
-    putenv('SITE_BUILD_HTML_FIRST=1');
+    $previousHtmlFirst = getenv('SITE_BUILD_GRAPH');
+    putenv('SITE_BUILD_GRAPH=html-first');
     try {
         foreach (['page', 'section'] as $mode) {
             dp3_contract_with_mode($mode, function (): void {
@@ -475,8 +475,8 @@ test('TG8 composed graph validates both modes with explicit planner inputs decla
         }
     } finally {
         $previousHtmlFirst === false
-            ? putenv('SITE_BUILD_HTML_FIRST')
-            : putenv('SITE_BUILD_HTML_FIRST=' . $previousHtmlFirst);
+            ? putenv('SITE_BUILD_GRAPH')
+            : putenv('SITE_BUILD_GRAPH=' . $previousHtmlFirst);
     }
 });
 

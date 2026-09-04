@@ -151,6 +151,12 @@ final class HeaderHeroStep implements Step
 
     public function __construct(
         private readonly bool $htmlFirst = false,
+        // Only the islands graph hands this step a PHASE_FINAL contract:
+        // IslandAboveFoldStep finalizes from island markup, because
+        // AboveFoldPartFacts inspects a wp:group root the islands never have.
+        // Every other graph reaching here with a final contract is a re-run,
+        // and must still be refused.
+        private readonly bool $islands = false,
     ) {
     }
 
@@ -237,7 +243,11 @@ final class HeaderHeroStep implements Step
             ? GeneratedMarkup::wideMeasureSubjectClasses($project->readText('design/site.css'))
             : [];
         $delivery = $project->readJson('aboveFold.json');
-        AboveFoldContract::assertPhase($delivery, AboveFoldContract::PHASE_DELIVERY);
+        $alreadyFinal = $this->islands
+            && ($delivery['phase'] ?? null) === AboveFoldContract::PHASE_FINAL;
+        if (!$alreadyFinal) {
+            AboveFoldContract::assertPhase($delivery, AboveFoldContract::PHASE_DELIVERY);
+        }
         $mode = (string) ($delivery['header']['mode'] ?? '');
         $archetype = (string) ($delivery['header']['archetype'] ?? '');
         $foreground = (string) ($delivery['header']['foreground_token'] ?? 'contrast');
@@ -292,7 +302,7 @@ final class HeaderHeroStep implements Step
         // earned by the generated opening markup. Problems do not flip the
         // relation here — they are injected into the contract facts below so
         // the finalizer records the downgrade through its one reviewed path.
-        $openingProblems = $mode === AboveFoldContract::MODE_OVERLAY
+        $openingProblems = !$alreadyFinal && $mode === AboveFoldContract::MODE_OVERLAY
             ? self::overlayOpeningProblems($project, $pages, $protection)
             : [];
         $withOverlayEvidence = static function (array $facts) use ($openingProblems): array {
@@ -498,7 +508,9 @@ final class HeaderHeroStep implements Step
         $partBytes = self::partBytes($project, $writes);
         $facts = $withOverlayEvidence(AboveFoldPartFacts::inspect($pages, $partBytes, $delivery));
         $degradationOffset = count((array) ($delivery['degradations'] ?? []));
-        $final = AboveFoldContract::finalizeMarkup($delivery, $pages, $facts);
+        $final = $alreadyFinal
+            ? $delivery
+            : AboveFoldContract::finalizeMarkup($delivery, $pages, $facts);
 
         // Rhythm may have invalidated image protection after delivery. Apply
         // only the resulting objective relation to the already-generated
@@ -616,13 +628,18 @@ final class HeaderHeroStep implements Step
         // repairs. The pure finalizer is independently idempotent, so this is
         // an assertion-by-construction that the bytes, plan, and final
         // contract describe the same delivered state before persistence.
-        $deliveryForRefinalize = $final;
-        $deliveryForRefinalize['phase'] = AboveFoldContract::PHASE_DELIVERY;
-        $partBytes = self::partBytes($project, $writes);
-        $facts = $withOverlayEvidence(AboveFoldPartFacts::inspect($pages, $partBytes, $deliveryForRefinalize));
-        $final = AboveFoldContract::finalizeMarkup($deliveryForRefinalize, $pages, $facts);
-        $mode = (string) $final['header']['mode'];
-        array_push($warnings, ...AboveFoldContract::warningRows($final, $degradationOffset));
+        // Islands already wrote PHASE_FINAL via IslandPartFacts. Re-finalizing
+        // with the group-root inspector would silently degrade every overlay
+        // header (top-level block is wp:html, not wp:group).
+        if (!$alreadyFinal) {
+            $deliveryForRefinalize = $final;
+            $deliveryForRefinalize['phase'] = AboveFoldContract::PHASE_DELIVERY;
+            $partBytes = self::partBytes($project, $writes);
+            $facts = $withOverlayEvidence(AboveFoldPartFacts::inspect($pages, $partBytes, $deliveryForRefinalize));
+            $final = AboveFoldContract::finalizeMarkup($deliveryForRefinalize, $pages, $facts);
+            $mode = (string) $final['header']['mode'];
+            array_push($warnings, ...AboveFoldContract::warningRows($final, $degradationOffset));
+        }
 
         $footerRel = 'parts/footer.html';
         if ($project->exists('theme/' . $footerRel) || isset($writes[$footerRel])) {
@@ -1719,6 +1736,15 @@ final class HeaderHeroStep implements Step
                 $heroLines[] = $tokens;
             }
         }
+        // Island heroes are one wp:html block; the block walk above sees no
+        // paragraph/heading children. Read <p> and <h1>–<h6> from the raw HTML.
+        if ($heroLines === []) {
+            foreach (self::islandHeroLines($heroMarkup) as $tokens) {
+                if (count($tokens) >= 2 && count($tokens) <= 12) {
+                    $heroLines[] = $tokens;
+                }
+            }
+        }
         $actionLabel = $primaryAction === null
             ? []
             : self::textTokens((string) ($primaryAction['label'] ?? ''));
@@ -1839,7 +1865,7 @@ final class HeaderHeroStep implements Step
             if ($end === null) {
                 continue;
             }
-            if ($name === 'paragraph') {
+            if ($name === 'paragraph' || $name === 'heading') {
                 $tokens = self::textTokens($doc->innerHtml($i));
                 foreach ($heroLines as $line) {
                     if (!self::linesEcho($tokens, $line)) {
@@ -2218,7 +2244,7 @@ final class HeaderHeroStep implements Step
             return true;
         }
         $shell = self::dedupeWithoutInertComments($shell);
-        if (preg_match('/\A\s*<p\b[^>]*>(?<body>.*)<\/p>\s*\z/is', $shell, $match) !== 1) {
+        if (preg_match('/\A\s*<(p|h[1-6])\b[^>]*>(?<body>.*)<\/\1>\s*\z/is', $shell, $match) !== 1) {
             return true;
         }
         return self::dedupeHasNonTextPayload((string) ($match['body'] ?? ''));
@@ -2321,6 +2347,19 @@ final class HeaderHeroStep implements Step
             preg_split('/[^\p{L}\p{N}]+/u', $text) ?: [],
             static fn (string $token): bool => $token !== '',
         ));
+    }
+
+    /** @return list<list<string>> */
+    private static function islandHeroLines(string $markup): array
+    {
+        $lines = [];
+        if (preg_match_all('/<(p|h[1-6])\b[^>]*>(.*?)<\/\1>/is', $markup, $matches, PREG_SET_ORDER) === false) {
+            return $lines;
+        }
+        foreach ($matches as $match) {
+            $lines[] = self::textTokens($match[2]);
+        }
+        return $lines;
     }
 
     /**

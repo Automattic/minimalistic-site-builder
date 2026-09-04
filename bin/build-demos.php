@@ -8,7 +8,7 @@ use Automattic\SiteBuild\ProjectStore;
 /**
  * Build every demo website listed in eval/theme-prompts.json in one command.
  *
- *   php bin/build-demos.php [--with-images] [--html-first|--blocks-first] [--provider=<name>] [--no-screenshot] [--only=<slug>] [--parallel=<n>] [--serve] [--port=<n>] [--file=<path>]
+ *   php bin/build-demos.php [--with-images] [--html-first|--blocks-first|--html-islands] [--provider=<name>] [--no-screenshot] [--only=<slug>] [--parallel=<n>] [--serve] [--port=<n>] [--file=<path>]
  *
  * Each entry in the prompts file becomes a project under projects/. If a folder
  * with that entry's slug already exists, a fresh sibling is created by appending
@@ -82,6 +82,7 @@ $args = parse_cli_args($argv, [
     '--with-images'  => 'bool',
     '--html-first'   => 'bool',
     '--blocks-first' => 'bool',
+    '--html-islands' => 'bool',
     '--multi-page'   => 'bool',
     '--pages'        => 'value',
     '--only'         => 'value',
@@ -95,13 +96,14 @@ $args = parse_cli_args($argv, [
 ]);
 if ($args['unknown'] !== null) {
     fwrite(STDERR, "Unknown argument: {$args['unknown']}\n");
-    fwrite(STDERR, "Usage: php bin/build-demos.php [--html-first|--blocks-first] [--multi-page] [--pages=\"Home, Menu, About\"] [--with-images] [--only=<slug>] [--provider=anthropic|openai|xai|openrouter] [--parallel=<n>] [--no-screenshot] [--motion] [--serve] [--port=9400] [--no-serve] [--file=<path>]\n");
+    fwrite(STDERR, "Usage: php bin/build-demos.php [--html-first|--blocks-first|--html-islands] [--multi-page] [--pages=\"Home, Menu, About\"] [--with-images] [--only=<slug>] [--provider=anthropic|openai|xai|openrouter] [--parallel=<n>] [--no-screenshot] [--motion] [--serve] [--port=9400] [--no-serve] [--file=<path>]\n");
     exit(1);
 }
 $flags = $args['flags'];
 $withImages = $flags['--with-images'] ?? false;
 $htmlFirst = $flags['--html-first'] ?? false;
 $blocksFirst = $flags['--blocks-first'] ?? false;
+$htmlIslands = $flags['--html-islands'] ?? false;
 $multiPage = $flags['--multi-page'] ?? false;
 $pagesArg = $flags['--pages'] ?? null;
 $only = $flags['--only'] ?? null;
@@ -114,8 +116,8 @@ $port = (int) ($flags['--port'] ?? 9400);
 $provider = $flags['--provider'] ?? null;
 $file = $flags['--file'] ?? repo_path('eval/theme-prompts.json');
 
-if ($htmlFirst && $blocksFirst) {
-    Narrator::write("--html-first and --blocks-first are mutually exclusive; pass one.\n");
+if ((int) $htmlFirst + (int) $blocksFirst + (int) $htmlIslands > 1) {
+    Narrator::write("--html-first, --blocks-first, and --html-islands are mutually exclusive; pass one.\n");
     exit(1);
 }
 
@@ -212,6 +214,7 @@ foreach ($entries as $i => $entry) {
             ...($withImages ? ['--with-images'] : []),
             ...($htmlFirst ? ['--html-first'] : []),
             ...($blocksFirst ? ['--blocks-first'] : []),
+            ...($htmlIslands ? ['--html-islands'] : []),
             ...($multiPage ? ['--multi-page'] : []),
             ...($pagesArg !== null ? ['--pages=' . $pagesArg] : []),
         ],

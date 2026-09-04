@@ -14,8 +14,8 @@ function blocks_fallback_block(string $heading, string $marker): string
 
 test('one failed inner design uses blocks-path sections while sibling pages stay transformed', function () {
     $tmp = sys_get_temp_dir() . '/builder_mixed_route_' . uniqid();
-    $previous = getenv('SITE_BUILD_HTML_FIRST');
-    putenv('SITE_BUILD_HTML_FIRST=1');
+    $previous = getenv('SITE_BUILD_GRAPH');
+    putenv('SITE_BUILD_GRAPH=html-first');
     try {
         $llm = new FakeLlm();
         $pages = [
@@ -89,8 +89,8 @@ test('one failed inner design uses blocks-path sections while sibling pages stay
         );
     } finally {
         $previous === false
-            ? putenv('SITE_BUILD_HTML_FIRST')
-            : putenv('SITE_BUILD_HTML_FIRST=' . $previous);
+            ? putenv('SITE_BUILD_GRAPH')
+            : putenv('SITE_BUILD_GRAPH=' . $previous);
         if (is_dir($tmp)) {
             exec('rm -rf ' . escapeshellarg($tmp));
         }

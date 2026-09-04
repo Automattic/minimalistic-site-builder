@@ -106,6 +106,7 @@ final class FinalizeThemeStep implements Step
                     static fn (OverlayKit $kit): string => $kit->declaredWrites(),
                     self::overlayKits(),
                 ),
+                'theme/editor/*',
                 'warnings.json',
             ],
             concurrent: false,
@@ -193,6 +194,7 @@ final class FinalizeThemeStep implements Step
                 $imageTreatment,
             ),
         );
+        self::writeEditorPageStyles($project);
         Narrator::write($motion === null
             ? "  motion: none (kit not shipped)\n"
             : "  motion: '{$motion}' profile enqueued\n");
@@ -519,6 +521,34 @@ final class FinalizeThemeStep implements Step
     }
 
     /**
+     * One stylesheet per page whose selectors match the editor canvas.
+     * Stale files from an earlier revision are removed first so a page that
+     * lost its scoped CSS does not keep injecting it.
+     */
+    private static function writeEditorPageStyles(Project $project): void
+    {
+        $dir = $project->path('theme/editor');
+        if (is_dir($dir)) {
+            foreach (glob($dir . '/*.css') ?: [] as $file) {
+                if (is_file($file)) {
+                    @unlink($file);
+                }
+            }
+        }
+        if (!$project->exists('theme/style.css')) {
+            return;
+        }
+        $css = $project->readText('theme/style.css');
+        foreach (PageScope::slugsIn($css) as $slug) {
+            $editor = PageScope::editorCss($css, $slug);
+            if ($editor === '') {
+                continue;
+            }
+            $project->writeText('theme/editor/' . $slug . '.css', $editor);
+        }
+    }
+
+    /**
      * @param list<OverlayKit> $overlays the build-owned stylesheets this theme
      *        ships, in load order. Each one enqueues after style.css and is
      *        mirrored into the editor; an empty list is a theme with none.
@@ -684,6 +714,39 @@ final class FinalizeThemeStep implements Step
                 }
                 return \$classes;
             });
+
+            // Page-scoped rules in style.css target the front-end body class.
+            // The editor canvas never gets that class, so rewrite the edited
+            // page's rules onto .editor-styles-wrapper and inject only those.
+            add_filter('block_editor_settings_all', function (\$settings, \$context = null) {
+                if (!is_array(\$settings)) {
+                    return \$settings;
+                }
+                \$id = 0;
+                if (is_object(\$context) && isset(\$context->post) && is_object(\$context->post) && isset(\$context->post->ID)) {
+                    \$id = (int) \$context->post->ID;
+                }
+                if (\$id < 1) {
+                    return \$settings;
+                }
+                \$slug = get_post_field('post_name', \$id);
+                if (!is_string(\$slug) || preg_match('/^[A-Za-z0-9_-]+\$/', \$slug) !== 1) {
+                    return \$settings;
+                }
+                \$file = get_theme_file_path('editor/' . \$slug . '.css');
+                if (!is_readable(\$file)) {
+                    return \$settings;
+                }
+                \$css = file_get_contents(\$file);
+                if (!is_string(\$css) || trim(\$css) === '') {
+                    return \$settings;
+                }
+                if (!isset(\$settings['styles']) || !is_array(\$settings['styles'])) {
+                    \$settings['styles'] = array();
+                }
+                \$settings['styles'][] = array('css' => \$css);
+                return \$settings;
+            }, 10, 2);
 
             {$imageTreatmentHook}
 

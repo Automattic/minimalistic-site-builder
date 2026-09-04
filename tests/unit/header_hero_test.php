@@ -2906,3 +2906,113 @@ test('header-hero injects the mark on a business site and not on a personal site
         assert_true(!str_contains($project->readText('theme/parts/header.html'), 'wp:site-logo'));
     });
 });
+
+// ---------------------------------------------------------------------------
+// The already-final contract is an ISLANDS affordance. Every other graph must
+// keep refusing one: header-hero writes a final-phase aboveFold.json, so a
+// re-run (`--from=header-hero`) hands the step its own output. Accepting that
+// silently skips the re-finalize block that proves the parts, plan and
+// contract still describe one delivered state, while still rewriting parts.
+// ---------------------------------------------------------------------------
+
+/** Persist a delivery-phase contract plus the parts the step repairs. */
+function hh_final_phase_fixture($project): void
+{
+    $pages = [[
+        'slug' => 'home', 'title' => 'Home', 'front' => true,
+        'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'primary_action' => null]],
+    ]];
+    $project->writeJson('pages.json', ['pages' => $pages]);
+    $project->writeJson('aboveFold.json', AboveFoldContract::resolve(
+        pages: $pages,
+        blueprint: HeroBlueprint::defaultFor('foreground-split'),
+        canvas: 'full-bleed',
+        themeContext: ['version' => 3],
+        siteContext: ['stable_id' => 'demo', 'writing_direction' => 'ltr', 'page_count' => 1],
+        footerContext: ['archetype' => 'typographic-billboard', 'surface' => 'base'],
+    ));
+    $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
+    $project->writeText('theme/parts/page-home--hero.html', hh_cover('80') . "\n");
+    putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
+}
+
+test('header-hero on the blocks graph refuses an already-final contract', function () {
+    with_project('hh-phase', function ($project) {
+        hh_final_phase_fixture($project);
+        quietly(fn () => (new HeaderHeroStep())->run($project));
+        assert_eq('final', $project->readJson('aboveFold.json')['phase'] ?? null, 'run one finalizes');
+
+        $error = assert_throws(
+            fn () => quietly(fn () => (new HeaderHeroStep())->run($project)),
+            'a blocks re-run must not silently accept its own final contract'
+        );
+        assert_contains("phase must be 'delivery'", $error->getMessage());
+    });
+});
+
+test('header-hero on the HTML-first graph refuses an already-final contract', function () {
+    with_project('hh-phase', function ($project) {
+        hh_final_phase_fixture($project);
+        quietly(fn () => (new HeaderHeroStep(htmlFirst: true))->run($project));
+        $error = assert_throws(
+            fn () => quietly(fn () => (new HeaderHeroStep(htmlFirst: true))->run($project)),
+            'html-first has no islands affordance either'
+        );
+        assert_contains("phase must be 'delivery'", $error->getMessage());
+    });
+});
+
+test('header-hero on the islands graph accepts an already-final contract', function () {
+    with_project('hh-phase', function ($project) {
+        hh_final_phase_fixture($project);
+        quietly(fn () => (new HeaderHeroStep(htmlFirst: true, islands: true))->run($project));
+        assert_eq('final', $project->readJson('aboveFold.json')['phase'] ?? null);
+        // IslandAboveFoldStep hands header-hero a PHASE_FINAL contract by design.
+        quietly(fn () => (new HeaderHeroStep(htmlFirst: true, islands: true))->run($project));
+        assert_eq('final', $project->readJson('aboveFold.json')['phase'] ?? null, 'islands keeps accepting it');
+    });
+});
+
+/** The header-hero instance a composition actually wires, not one built by hand. */
+function hh_step_from(string $graph): HeaderHeroStep
+{
+    $d = composition_deps();
+    $c = match ($graph) {
+        'blocks'       => \Automattic\SiteBuild\StepComposition::blocks(
+            llm: $d['llm'], renderer: $d['renderer'], blockFixer: $d['blockFixer']),
+        'html-first'   => \Automattic\SiteBuild\StepComposition::htmlFirst(
+            llm: $d['llm'], renderer: $d['renderer'], blockFixer: $d['blockFixer']),
+        'html-islands' => \Automattic\SiteBuild\StepComposition::htmlIslands(
+            llm: $d['llm'], renderer: $d['renderer'], blockFixer: $d['blockFixer']),
+    };
+    foreach ($c->steps() as $step) {
+        if ($step->id() === 'header-hero' && $step instanceof HeaderHeroStep) {
+            return $step;
+        }
+    }
+    throw new RuntimeException("no header-hero step in {$graph}");
+}
+
+test('only the islands composition wires header-hero to accept a final contract', function () {
+    // Asserted through the COMPOSITION, not a hand-built step: constructing
+    // HeaderHeroStep directly cannot catch islands:true being wired to the
+    // wrong graph.
+    foreach (['blocks' => true, 'html-first' => true, 'html-islands' => false] as $graph => $mustRefuse) {
+        with_project('hh-wiring', function ($project) use ($graph, $mustRefuse) {
+            hh_final_phase_fixture($project);
+            quietly(fn () => hh_step_from($graph)->run($project));
+            assert_eq('final', $project->readJson('aboveFold.json')['phase'] ?? null, "{$graph} run one");
+
+            if ($mustRefuse) {
+                $error = assert_throws(
+                    fn () => quietly(fn () => hh_step_from($graph)->run($project)),
+                    "{$graph} must refuse its own final contract on a re-run"
+                );
+                assert_contains("phase must be 'delivery'", $error->getMessage());
+                return;
+            }
+            quietly(fn () => hh_step_from($graph)->run($project));
+            assert_eq('final', $project->readJson('aboveFold.json')['phase'] ?? null, "{$graph} accepts it");
+        });
+    }
+});

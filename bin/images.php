@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\Narrator;
+use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\StepComposition;
 use Automattic\SiteBuild\Steps\CollectImagesStep;
@@ -24,6 +26,48 @@ use Automattic\SiteBuild\TransformArtifacts;
 
 require_once __DIR__ . '/../src/bootstrap.php';
 
+/**
+ * Which graph's image rules this project should finish under.
+ *
+ * This entry point did not build the project, so the env selector says nothing
+ * about which graph did — meta.json's record does, and the transform report
+ * (written only by the HTML-first pipeline) is the fallback for a project built
+ * before that record existed, or whose recorded name this version does not
+ * recognize. An unknown record is narrated so a newer graph never silently
+ * falls through to blocks and drops images.
+ */
+function images_graph_from_project(Project $project): string
+{
+    $meta = $project->exists('meta.json') ? $project->readJson('meta.json') : [];
+    $recordedGraph = $meta['graph'] ?? null;
+    try {
+        $graph = StepComposition::resumeGraph(
+            is_string($recordedGraph) ? $recordedGraph : null,
+            null,
+        );
+    } catch (InvalidArgumentException $e) {
+        Narrator::write($e->getMessage() . "\n");
+        $graph = null;
+    }
+
+    return $graph ?? ($project->exists(TransformArtifacts::REPORT)
+        ? StepComposition::GRAPH_HTML_FIRST
+        : StepComposition::GRAPH_BLOCKS);
+}
+
+/** @deprecated keep the old name as a graph-aware bool for in-file callers */
+function images_html_first_from_project(Project $project): bool
+{
+    $graph = images_graph_from_project($project);
+    return $graph === StepComposition::GRAPH_HTML_FIRST
+        || $graph === StepComposition::GRAPH_HTML_ISLANDS;
+}
+
+$scriptFilename = $_SERVER['SCRIPT_FILENAME'] ?? null;
+if (!is_string($scriptFilename) || realpath($scriptFilename) !== __FILE__) {
+    return;
+}
+
 $slug = $argv[1] ?? null;
 if ($slug === null || trim($slug) === '') {
     fwrite(STDERR, "Usage: php bin/images.php <slug>\n");
@@ -36,21 +80,13 @@ $project = $store->open($slug);
 
 echo "Generating images for '{$project->slug()}'\n";
 
-// This entry point did not build the project, so the env selector says nothing
-// about which graph did — meta.json's record does, and the transform report
-// (written only by the HTML-first pipeline) is the fallback for a project built
-// before that record existed. Both the collector and postImages' closing
-// re-validation apply rules that differ per graph, so they read one answer.
-$meta = $project->exists('meta.json') ? $project->readJson('meta.json') : [];
-$recordedGraph = $meta['graph'] ?? null;
-$htmlFirst = StepComposition::resumeHtmlFirst(
-    is_string($recordedGraph) ? $recordedGraph : null,
-    null,
-) ?? $project->exists(TransformArtifacts::REPORT);
+$graph = images_graph_from_project($project);
+$htmlFirst = $graph === StepComposition::GRAPH_HTML_FIRST
+    || $graph === StepComposition::GRAPH_HTML_ISLANDS;
 
 // Use the durable record from the pipeline; only collect if it's absent.
 if (!$project->exists('images.json')) {
-    // HTML-first is what tells the collector to read prose alts as image subjects.
+    // HTML-first / html-islands is what tells the collector to read prose alts as image subjects.
     (new CollectImagesStep(htmlFirst: $htmlFirst))->run($project);
 }
 $specs = $project->readJson('images.json');
@@ -71,7 +107,7 @@ try {
 // — has to run here too, or a project that got its images this way keeps the
 // placeholders the pipeline left behind.
 $start = microtime(true);
-foreach (StepComposition::postImages(make_generate_images_step($llm), htmlFirst: $htmlFirst) as $step) {
+foreach (StepComposition::postImages(make_generate_images_step($llm), graph: $graph) as $step) {
     $step->run($project);
 }
 printf("  done in %.1fs\n", microtime(true) - $start);

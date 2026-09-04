@@ -473,8 +473,16 @@ test('design-preview repairs desktop header CSS that cannot prove the required r
 
         design_preview_run($project, $llm);
 
-        assert_eq(2, $llm->completeCalls, "{$name} triggers one repair");
-        assert_eq($valid, $project->readText('design/preview.html'), "{$name} delivers the repaired row");
+        if ($name === 'unprovable support override') {
+            assert_eq(1, $llm->completeCalls, "{$name} is repaired by the desktop header lock");
+            $delivered = $project->readText('design/preview.html');
+            assert_contains('VALID-HEADER-ROW', $delivered, "{$name} keeps authored copy");
+            assert_contains('--msb-preview-header', $delivered, "{$name} appends the lock");
+            design_preview_assert_shape($delivered);
+        } else {
+            assert_eq(2, $llm->completeCalls, "{$name} triggers one repair");
+            assert_eq($valid, $project->readText('design/preview.html'), "{$name} delivers the repaired row");
+        }
         design_preview_cleanup($tmp);
     }
 });
@@ -520,8 +528,16 @@ test('design-preview rejects indirect, reordered and partially responsive header
 
         design_preview_run($project, $llm);
 
-        assert_eq(2, $llm->completeCalls, "{$name} triggers one repair");
-        assert_eq($valid, $project->readText('design/preview.html'), "{$name} delivers the repaired row");
+        if ($name === 'unsupported matching class selector') {
+            assert_eq(1, $llm->completeCalls, "{$name} is repaired by the desktop header lock");
+            $delivered = $project->readText('design/preview.html');
+            assert_contains('STRICT-HEADER-ROW', $delivered, "{$name} keeps authored copy");
+            assert_contains('--msb-preview-header', $delivered, "{$name} appends the lock");
+            design_preview_assert_shape($delivered);
+        } else {
+            assert_eq(2, $llm->completeCalls, "{$name} triggers one repair");
+            assert_eq($valid, $project->readText('design/preview.html'), "{$name} delivers the repaired row");
+        }
         design_preview_cleanup($tmp);
     }
 });
@@ -736,4 +752,208 @@ test('design-preview safe scaffold uses the supplied inner pages exactly', funct
     assert_eq(2, (new DOMXPath($dom))->query('/html/body/header/nav/a')->length);
     assert_true(!str_contains($html, 'Explore'), 'safe scaffold invents no navigation item');
     design_preview_cleanup($tmp);
+});
+
+test('design-preview degraded warning names the original and repair issues', function () {
+    [$project, $llm, $tmp] = design_preview_fixture();
+    $llm->queueText('MALFORMED-INITIAL');
+    $llm->queueText('MALFORMED-REPAIR');
+
+    design_preview_run($project, $llm);
+
+    $warnings = design_preview_warnings($project);
+    assert_contains('disposition degraded', $warnings);
+    assert_contains('safe scaffold', $warnings);
+    assert_contains('defect document is not one complete HTML document', $warnings);
+    assert_contains('repair_defect document is not one complete HTML document', $warnings);
+    design_preview_cleanup($tmp);
+});
+
+test('design-preview recovers an HTML comment instead of scaffolding', function () {
+    [$project, $llm, $tmp] = design_preview_fixture();
+    $css = design_preview_css();
+    $authored = str_replace(
+        '<!doctype html>',
+        '<!doctype html><!-- head note -->',
+        str_replace(
+            '<main>',
+            '<!-- preview note --><main>',
+            design_preview_document('COMMENT-KEEP-CSS'),
+        ),
+    );
+    $llm->queueText($authored);
+
+    design_preview_run($project, $llm);
+
+    $delivered = $project->readText('design/preview.html');
+    $siteCss = $project->readText('design/site.css');
+    $warnings = design_preview_warnings($project);
+    assert_eq(1, $llm->completeCalls, 'comment recovery does not ask the model to repair');
+    assert_true(!str_contains($delivered, '<!--'), 'HTML comment is stripped');
+    assert_contains('COMMENT-KEEP-CSS', $delivered, 'authored copy survives');
+    assert_eq($css, $siteCss, 'authored CSS is kept');
+    assert_true(!str_contains($warnings, 'disposition degraded'), 'safe scaffold is not used');
+    assert_contains('document contains HTML comments', $warnings);
+    design_preview_assert_shape($delivered);
+    design_preview_cleanup($tmp);
+});
+
+test('design-preview still scaffolds an empty document', function () {
+    [$project, $llm, $tmp] = design_preview_fixture();
+    $llm->queueText('   ');
+    $llm->queueText('');
+
+    design_preview_run($project, $llm);
+
+    $warnings = design_preview_warnings($project);
+    assert_contains('disposition degraded', $warnings);
+    assert_contains('safe scaffold', $warnings);
+    assert_contains('defect document is empty', $warnings);
+    design_preview_assert_shape($project->readText('design/preview.html'));
+    design_preview_cleanup($tmp);
+});
+
+test('design-preview still scaffolds an unparseable document', function () {
+    [$project, $llm, $tmp] = design_preview_fixture();
+    $llm->queueText('not html at all');
+    $llm->queueText('still not html');
+
+    design_preview_run($project, $llm);
+
+    $warnings = design_preview_warnings($project);
+    assert_contains('disposition degraded', $warnings);
+    assert_contains('safe scaffold', $warnings);
+    assert_contains('defect document is not one complete HTML document', $warnings);
+    design_preview_assert_shape($project->readText('design/preview.html'));
+    design_preview_cleanup($tmp);
+});
+
+test('design-preview repairs an unprovable header instead of scaffolding', function () {
+    [$project, $llm, $tmp] = design_preview_fixture();
+    $valid = design_preview_document('KEEP-AUTHORED-HEADER');
+    $authored = str_replace(
+        '</style>',
+        '@media (prefers-reduced-motion: reduce) { * { animation: none !important; } }</style>',
+        $valid,
+    );
+    $llm->queueText($authored);
+
+    design_preview_run($project, $llm);
+
+    $delivered = $project->readText('design/preview.html');
+    $css = $project->readText('design/site.css');
+    $warnings = design_preview_warnings($project);
+    assert_eq(1, $llm->completeCalls, 'unprovable header is repaired without an LLM repair');
+    assert_contains('KEEP-AUTHORED-HEADER', $delivered, 'authored copy survives');
+    assert_contains('@media (prefers-reduced-motion: reduce)', $css, 'authored CSS is kept');
+    assert_contains('--msb-preview-header', $css, 'desktop header lock is appended');
+    assert_contains('disposition repaired', $warnings);
+    assert_contains('cannot be proven across the CSS cascade', $warnings);
+    assert_true(!str_contains($warnings, 'disposition degraded'), 'safe scaffold is not used');
+    design_preview_assert_shape($delivered);
+    design_preview_cleanup($tmp);
+});
+
+test('design-preview still degrades a header that is display:none at desktop', function () {
+    [$project, $llm, $tmp] = design_preview_fixture();
+    $hidden = str_replace(
+        design_preview_header_css(),
+        design_preview_header_css() . 'header { display: none; }',
+        design_preview_document('HIDDEN-HEADER'),
+    );
+    $llm->queueText($hidden);
+    $llm->queueText($hidden);
+
+    design_preview_run($project, $llm);
+
+    $delivered = $project->readText('design/preview.html');
+    $css = $project->readText('design/site.css');
+    $warnings = design_preview_warnings($project);
+    assert_eq(2, $llm->completeCalls, 'proven hide still uses one LLM repair then scaffold');
+    assert_contains('disposition degraded', $warnings);
+    assert_contains('safe scaffold', $warnings);
+    assert_true(!str_contains($css, '--msb-preview-header'), 'lock is not used for a proven hide');
+    assert_true(!str_contains($delivered, 'HIDDEN-HEADER'), 'authored hidden header is not kept');
+    design_preview_assert_shape($delivered);
+    design_preview_cleanup($tmp);
+});
+
+test('design-preview does not emit a header lock when the check already passes', function () {
+    [$project, $llm, $tmp] = design_preview_fixture();
+    $valid = design_preview_document('ALREADY-PROVEN');
+    $llm->queueText($valid);
+
+    design_preview_run($project, $llm);
+
+    $css = $project->readText('design/site.css');
+    assert_eq(1, $llm->completeCalls);
+    assert_eq($valid, $project->readText('design/preview.html'));
+    assert_true(!str_contains($css, '--msb-preview-header'), 'passing header gets no lock');
+    design_preview_cleanup($tmp);
+});
+
+test('design-preview trims trailing junk after the document instead of scaffolding', function () {
+    [$project, $llm, $tmp] = design_preview_fixture();
+    $valid = design_preview_document('TRIMMED-TRAILER');
+    $llm->queueText($valid . "\nThanks, here is the preview.\n");
+
+    design_preview_run($project, $llm);
+
+    $delivered = $project->readText('design/preview.html');
+    assert_eq(1, $llm->completeCalls, 'complete-document trim does not repair');
+    assert_contains('TRIMMED-TRAILER', $delivered);
+    assert_eq(design_preview_css(), $project->readText('design/site.css'), 'authored CSS is kept');
+    assert_true(!str_contains($delivered, 'Thanks, here is the preview.'));
+    design_preview_assert_shape($delivered);
+    design_preview_cleanup($tmp);
+});
+
+// ---------------------------------------------------------------------------
+// An EMPTY src/srcset/sizes on the hero image carries no source, which is
+// exactly what "must omit" is protecting (assign-image-sources fills it in
+// from the alt contract). Discarding a whole authored design over an empty
+// attribute is the wrong end of the degrade ladder: clever-falcon shipped a
+// 436-byte scaffold for one `src=""`.
+// ---------------------------------------------------------------------------
+
+test('an empty hero src is repaired rather than costing the whole design', function () {
+    $r = new ReflectionClass(\Automattic\SiteBuild\Steps\DesignPreviewStep::class);
+    $issue = $r->getMethod('designIssue');
+    $issue->setAccessible(true);
+    $recover = $r->getMethod('recover');
+    $recover->setAccessible(true);
+    // The fixture header links to /menu/, and the nav rule wants one link per
+    // inner page, so the page list has to match the fixture it validates.
+    $pages = [
+        ['slug' => 'home', 'title' => 'Home', 'path' => '/', 'front' => true],
+        ['slug' => 'menu', 'title' => 'Menu', 'path' => '/menu/', 'front' => false],
+    ];
+
+    $doc = str_replace('<img alt=', '<img src="" alt=', design_preview_document());
+    assert_eq('hero image must omit src', $issue->invoke(null, $doc, $pages), 'the empty attribute is the defect');
+
+    $warnings = [];
+    $out = $recover->invokeArgs(null, [$doc, $pages, &$warnings]);
+    assert_eq(null, $out['issue'], 'recovery must clear it, not surrender the design');
+    assert_true(!str_contains($out['html'], 'src=""'), 'the empty attribute is gone: ' . $out['html']);
+    assert_contains('AI_IMAGE:', $out['html'], 'the alt contract survives');
+    assert_true($warnings !== [], 'the repair names itself');
+});
+
+test('a hero src with a real value is still refused, not silently dropped', function () {
+    $r = new ReflectionClass(\Automattic\SiteBuild\Steps\DesignPreviewStep::class);
+    $recover = $r->getMethod('recover');
+    $recover->setAccessible(true);
+    // The fixture header links to /menu/, and the nav rule wants one link per
+    // inner page, so the page list has to match the fixture it validates.
+    $pages = [
+        ['slug' => 'home', 'title' => 'Home', 'path' => '/', 'front' => true],
+        ['slug' => 'menu', 'title' => 'Menu', 'path' => '/menu/', 'front' => false],
+    ];
+
+    // Removing a real source would discard authored content, so it stays a defect.
+    $doc = str_replace('<img alt=', '<img src="https://example.com/a.jpg" alt=', design_preview_document());
+    $warnings = [];
+    $out = $recover->invokeArgs(null, [$doc, $pages, &$warnings]);
+    assert_eq('hero image must omit src', $out['issue'], 'a real source is not ours to delete');
 });

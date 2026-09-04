@@ -51,7 +51,25 @@ foreach (SITES as $slug => $prompt) {
         continue;
     }
     echo "\n=== {$slug} ===\n";
-    $project = $builder->createProject($prompt, $slug);
+    try {
+        $project = $builder->createProject($prompt, $slug);
+    } catch (Throwable $e) {
+        echo "  ERROR: {$e->getMessage()}\n";
+        $results[$slug] = [
+            'prompt'   => $prompt,
+            'timings'  => [],
+            'usage'    => [],
+            'total'    => 0.0,
+            'error'    => $e->getMessage(),
+            'problems' => ['build failed before validation'],
+            'warnings' => [],
+            'metrics'  => [
+                'pages'          => 0,
+                'content_blocks' => 0,
+            ],
+        ];
+        continue;
+    }
 
     $timings = [];
     $usage = [];

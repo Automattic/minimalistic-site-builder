@@ -235,11 +235,11 @@ final class ScaffoldPluginStep implements Step
             }
 
             // The page markup is generated content, not user input from this
-            // site — but kses would mangle its block comments when activation
-            // runs without an unfiltered_html user (WP-CLI, a Playground
-            // blueprint step). So ONLY the post-content kses filter is
-            // suspended around the inserts (titles, excerpts, and everything
-            // else stay filtered), and every page passes through
+            // site — but kses would strip inline style attributes and semantic
+            // elements when activation runs without an unfiltered_html user
+            // (WP-CLI, a Playground blueprint step). So ONLY the post-content
+            // kses filter is suspended around the inserts (titles, excerpts,
+            // and everything else stay filtered), and every page passes through
             // {{FN_PREFIX}}_content_sanitize() below — the same script-stripping
             // rules the build applies — before it is stored.
             $kses_filtered = has_filter('content_save_pre', 'wp_filter_post_kses') !== false;

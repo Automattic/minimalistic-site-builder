@@ -20,6 +20,8 @@ use Automattic\SiteBuild\Steps\FixPagesStep;
 use Automattic\SiteBuild\Steps\FontsPhpStep;
 use Automattic\SiteBuild\Steps\HeaderHeroStep;
 use Automattic\SiteBuild\Steps\InnerPagesDesignStep;
+use Automattic\SiteBuild\Steps\IslandAboveFoldStep;
+use Automattic\SiteBuild\Steps\IslandPagesStep;
 use Automattic\SiteBuild\Steps\MotionSanityStep;
 use Automattic\SiteBuild\Steps\NormalizeLayoutStep;
 use Automattic\SiteBuild\Steps\PagePlanStep;
@@ -37,6 +39,7 @@ use Automattic\SiteBuild\Steps\SiteSpecStep;
 use Automattic\SiteBuild\Steps\SpliceHomeDesignStep;
 use Automattic\SiteBuild\Steps\ThemeJsonStep;
 use Automattic\SiteBuild\Steps\ThemeScreenshotStep;
+use Automattic\SiteBuild\Steps\TransformChromeStep;
 use Automattic\SiteBuild\Steps\TransformSiteStep;
 use Automattic\SiteBuild\Steps\ValidateThemeStep;
 
@@ -50,12 +53,23 @@ use Automattic\SiteBuild\Steps\ValidateThemeStep;
  */
 final class StepComposition
 {
-    /** The env key that selects the HTML-first graph. Written by the CLI's --html-first / --blocks-first. */
-    public const HTML_FIRST_ENV = 'SITE_BUILD_HTML_FIRST';
+    /** The env key that selects the graph. Written by the CLI's --html-first / --blocks-first / --html-islands. */
+    public const GRAPH_ENV = Graph::ENV;
+
+    /** Retired selector, still read when GRAPH_ENV is unset so exported hosts keep working. */
+    public const RETIRED_HTML_FIRST_ENV = 'SITE_BUILD_HTML_FIRST';
+
+    /**
+     * Value the retirement notice was last narrated for. selectedGraph() has
+     * four in-process callers, so without this a single build repeats the
+     * line four times and it reads like a defect rather than a heads-up.
+     */
+    private static ?string $retiredNoticeShownFor = null;
 
     /** Graph names recorded in meta.json, so a --from resume can run the graph that built the project. */
-    public const GRAPH_HTML_FIRST = 'html-first';
-    public const GRAPH_BLOCKS = 'blocks';
+    public const GRAPH_HTML_FIRST = Graph::HTML_FIRST;
+    public const GRAPH_BLOCKS = Graph::BLOCKS;
+    public const GRAPH_HTML_ISLANDS = Graph::HTML_ISLANDS;
 
     /** Artifacts produced before the runtime fallback enters the blocks tail. */
     private const BLOCKS_TAIL_SEEDS = [
@@ -83,8 +97,9 @@ final class StepComposition
 
     /**
      * The package default / CLI composition: the blocks graph, where the model
-     * authors block markup directly. The CLI's --html-first flag, or a
-     * SITE_BUILD_HTML_FIRST=1 env, selects the HTML-first graph instead.
+     * authors block markup directly. The CLI's --html-first flag, or
+     * SITE_BUILD_GRAPH=html-first, selects the HTML-first graph instead.
+     * SITE_BUILD_GRAPH=html-islands selects the HTML-islands graph.
      *
      * @param array<string, string> $models       step id => model id overrides
      * @param array<string, ?float> $temperatures step id => temperature overrides
@@ -97,61 +112,131 @@ final class StepComposition
         ?BlockFixer $blockFixer = null,
         ?FontFetcher $fontFetcher = null,
     ): self {
-        return self::htmlFirstSelected()
-            ? self::htmlFirst($llm, $renderer, $models, $temperatures, $blockFixer, $fontFetcher)
-            : self::blocks($llm, $renderer, $models, $temperatures, $blockFixer, $fontFetcher);
+        $graph = self::selectedGraph();
+        return match ($graph) {
+            self::GRAPH_HTML_FIRST => self::htmlFirst($llm, $renderer, $models, $temperatures, $blockFixer, $fontFetcher),
+            self::GRAPH_BLOCKS => self::blocks($llm, $renderer, $models, $temperatures, $blockFixer, $fontFetcher),
+            self::GRAPH_HTML_ISLANDS => self::htmlIslands($llm, $renderer, $models, $temperatures, $blockFixer, $fontFetcher),
+            default => throw new \RuntimeException($graph . ' graph is not yet implemented'),
+        };
     }
 
     /**
-     * Whether the caller opted into the HTML-first graph. Single owner of the
-     * env key so the facade's fallback wiring can't disagree with default().
-     * The CLI's --html-first / --blocks-first flags set that key, which is what
-     * makes an explicit flag beat a shell export or an .env line.
+     * The graph the caller selected. Single owner of the env key so the
+     * facade's fallback wiring can't disagree with default(). The CLI's
+     * --html-first / --blocks-first / --html-islands flags set that key, which
+     * is what makes an explicit flag beat a shell export or an .env line.
+     * Unset means blocks. An unknown value is an error, not blocks.
+     * The retired SITE_BUILD_HTML_FIRST is still read when SITE_BUILD_GRAPH is
+     * unset, so a host that exports it keeps selecting the graph it always
+     * did rather than failing on upgrade; it says so once and names the
+     * replacement. As before, only '1' ever meant html-first, and an explicit
+     * SITE_BUILD_GRAPH wins over any leftover value.
+     *
+     * @throws \InvalidArgumentException when SITE_BUILD_GRAPH is not a known name
      */
-    public static function htmlFirstSelected(): bool
+    public static function selectedGraph(): string
     {
-        return Env::get(self::HTML_FIRST_ENV) === '1';
+        $raw = Env::get(self::GRAPH_ENV);
+        if ($raw !== null && $raw !== '') {
+            if (!in_array($raw, Graph::KNOWN, true)) {
+                throw new \InvalidArgumentException(sprintf(
+                    "Unknown graph '%s'. Known: %s.",
+                    $raw,
+                    implode(', ', Graph::KNOWN),
+                ));
+            }
+            return $raw;
+        }
+        // Only '1' ever selected html-first, so any other leftover value is a
+        // stale "off" switch, not a request, and passes without a word.
+        if (Env::get(self::RETIRED_HTML_FIRST_ENV) === '1') {
+            if (self::$retiredNoticeShownFor !== '1') {
+                self::$retiredNoticeShownFor = '1';
+                Narrator::write(
+                    'SITE_BUILD_HTML_FIRST is retired and will stop being read: '
+                    . 'set SITE_BUILD_GRAPH=' . self::GRAPH_HTML_FIRST . " instead.\n"
+                );
+            }
+            return self::GRAPH_HTML_FIRST;
+        }
+        return self::GRAPH_BLOCKS;
     }
 
-    /** The meta.json name for a graph. Null asks the current selection. */
-    public static function graphName(?bool $htmlFirst = null): string
+    /**
+     * The meta.json name for a graph. Null asks the current selection.
+     *
+     * @throws \InvalidArgumentException when $graph is not a known name
+     */
+    public static function graphName(?string $graph = null): string
     {
-        $htmlFirst ??= self::htmlFirstSelected();
-        return $htmlFirst ? self::GRAPH_HTML_FIRST : self::GRAPH_BLOCKS;
+        $graph ??= self::selectedGraph();
+        if (!in_array($graph, Graph::KNOWN, true)) {
+            throw new \InvalidArgumentException(sprintf(
+                "Unknown graph '%s'. Known: %s.",
+                $graph,
+                implode(', ', Graph::KNOWN),
+            ));
+        }
+        return $graph;
     }
 
     /**
      * The graph a --from resume must run: whatever built the project. A flag
      * contradicting the record is a mistake, not an override, because the
      * other graph's artifacts were never written. Null means there is nothing
-     * to honor — no record, or one this version doesn't recognize — so the
-     * caller's own selection stands.
+     * to honor — no record — so the caller's own selection stands.
      *
-     * @throws \InvalidArgumentException when the request contradicts the record
+     * An unknown or retired recorded name is an error naming that value, not
+     * null: null used to mean the caller's selection stands, which after a
+     * graph is retired would silently resume on a graph that never wrote its
+     * artifacts.
+     *
+     * @throws \InvalidArgumentException when the request contradicts the record,
+     *         the recorded name is unknown, or the requested name is unknown
      */
-    public static function resumeHtmlFirst(?string $recordedGraph, ?bool $requested): ?bool
+    public static function resumeGraph(?string $recorded, ?string $requested): ?string
     {
-        if ($recordedGraph !== self::GRAPH_HTML_FIRST && $recordedGraph !== self::GRAPH_BLOCKS) {
+        if ($requested !== null && !in_array($requested, Graph::KNOWN, true)) {
+            throw new \InvalidArgumentException(sprintf(
+                "Unknown graph '%s'. Known: %s.",
+                $requested,
+                implode(', ', Graph::KNOWN),
+            ));
+        }
+        if ($recorded === null || $recorded === '') {
             return null;
         }
-        $recorded = $recordedGraph === self::GRAPH_HTML_FIRST;
+        if (!in_array($recorded, Graph::KNOWN, true)) {
+            throw new \InvalidArgumentException(sprintf(
+                "project was built on the %s graph, which this version does not recognize. Known: %s.",
+                $recorded,
+                implode(', ', Graph::KNOWN),
+            ));
+        }
         if ($requested !== null && $requested !== $recorded) {
             throw new \InvalidArgumentException(sprintf(
                 "project was built on the %s graph, but --%s was passed. Resuming on a "
                 . "different graph reads artifacts that graph never wrote.\n"
                 . "Drop the flag to resume on %s.",
-                $recordedGraph,
-                $requested ? 'html-first' : 'blocks-first',
-                $recordedGraph,
+                $recorded,
+                self::graphFlag($requested),
+                $recorded,
             ));
         }
         return $recorded;
     }
 
+    /** The CLI flag that names a graph, for resume-refusal messages. */
+    private static function graphFlag(string $graph): string
+    {
+        return $graph === self::GRAPH_BLOCKS ? 'blocks-first' : $graph;
+    }
+
     /**
      * The HTML-first graph: the model authors an HTML+CSS design, and
      * transform-site converts it to block markup deterministically. Opt-in via
-     * --html-first or SITE_BUILD_HTML_FIRST=1. SiteBuilder wraps this graph
+     * --html-first or SITE_BUILD_GRAPH=html-first. SiteBuilder wraps this graph
      * with the currently dormant whole-build fallback; mixed-page degradation
      * is handled inside TransformSiteStep.
      *
@@ -266,6 +351,99 @@ final class StepComposition
             // The theme's preview card. In-pipeline it composes a palette
             // poster; a host that goes on to generate images re-runs this step
             // so the real hero replaces it.
+            new ThemeScreenshotStep(),
+            new ValidateThemeStep(htmlFirst: true),
+        ]);
+    }
+
+    /**
+     * The HTML-islands graph: the model authors an HTML+CSS design, chrome
+     * becomes real block parts, and each design section ships as one core/html
+     * island. Same prefix as htmlFirst(); transform-site splits into
+     * transform-chrome + island-pages + island-above-fold. Section rhythm,
+     * section layout, fix-pages, and extract-patterns are dropped.
+     *
+     * @param array<string, string> $models       step id => model id overrides
+     * @param array<string, ?float> $temperatures step id => temperature overrides
+     */
+    public static function htmlIslands(
+        Llm $llm,
+        PromptRenderer $renderer,
+        array $models = [],
+        array $temperatures = [],
+        ?BlockFixer $blockFixer = null,
+        ?FontFetcher $fontFetcher = null,
+    ): self {
+        $blockFixer ??= BlockFixers::default();
+        $models = array_merge(StepDefaults::models(), $models);
+        $temps = array_merge(StepDefaults::temperatures(), $temperatures);
+
+        return new self([
+            new ScaffoldThemeStep(),
+            new ScaffoldPluginStep(),
+            new RefinePromptStep($llm, $renderer, $models['refine-prompt'], $temps['refine-prompt']),
+            new SiteSpecStep($llm, $renderer, $models['site-spec'], $temps['site-spec']),
+            new ApplyIdentityStep(),
+            new DesignDirectionStep(
+                $llm,
+                $renderer,
+                $models['design-direction'],
+                $temps['design-direction'],
+                $models['design-direction-seeds'],
+            ),
+            new DesignPreviewStep(
+                $llm,
+                $renderer,
+                $models['design-preview'] ?? null,
+                $temps['design-preview'] ?? null,
+            ),
+            new ThemeJsonStep(
+                llm: $llm,
+                renderer: $renderer,
+                model: $models['theme-json'],
+                temperature: $temps['theme-json'],
+                htmlFirst: true,
+            ),
+            new InnerPagesDesignStep(
+                $llm,
+                $renderer,
+                $models['inner-pages-design'] ?? null,
+                $temps['inner-pages-design'] ?? null,
+                new PagePlanStep(
+                    $llm,
+                    $renderer,
+                    $models['page-plan'],
+                    $temps['page-plan'],
+                ),
+            ),
+            new SpliceHomeDesignStep(),
+            new AssignImageSourcesStep(),
+            new TransformChromeStep(
+                llm: $llm,
+                renderer: $renderer,
+                model: $models['transform-site'] ?? null,
+                temperature: $temps['transform-site'] ?? null,
+            ),
+            new IslandPagesStep(),
+            new IslandAboveFoldStep(),
+            new ResolveNavLinksStep(),
+            new CollectImagesStep(htmlFirst: true),
+            new NormalizeLayoutStep(htmlFirst: true),
+            new HeaderHeroStep(htmlFirst: true, islands: true),
+            new ContrastFixStep(htmlFirst: true),
+            new MotionSanityStep(htmlFirst: true),
+            new FixBlocksStep($blockFixer, htmlFirst: true),
+            new AssemblePagesStep(),
+            new PageStylesStep(
+                llm: $llm,
+                renderer: $renderer,
+                model: $models['page-styles'],
+                temperature: $temps['page-styles'],
+                htmlFirst: true,
+            ),
+            new CustomMotionStep($llm, $renderer, $models['custom-motion'], $temps['custom-motion']),
+            new FontsPhpStep(htmlFirst: true),
+            new FinalizeThemeStep(),
             new ThemeScreenshotStep(),
             new ValidateThemeStep(htmlFirst: true),
         ]);
@@ -440,7 +618,7 @@ final class StepComposition
      * The caller builds the image step, because choosing an image client means
      * reading the environment and this package leaves that to its hosts.
      *
-     * @param ?bool $htmlFirst which graph built the project being finished.
+     * @param ?string $graph which graph built the project being finished.
      *        Null asks the env selection, which is only the truth for a host
      *        that just ran that graph in this process: an entry point resuming
      *        a project it did not build reads the record and passes it, or the
@@ -450,9 +628,11 @@ final class StepComposition
     public static function postImages(
         Step $generateImages,
         ?BlockFixer $blockFixer = null,
-        ?bool $htmlFirst = null,
+        ?string $graph = null,
     ): array {
-        return [
+        $graph ??= self::selectedGraph();
+        $designOwnsLayout = $graph === self::GRAPH_HTML_FIRST || $graph === self::GRAPH_HTML_ISLANDS;
+        $steps = [
             $generateImages,
             // The pipeline drew a palette poster because no photo existed.
             // Now one does, so the card becomes the site's own hero. Before
@@ -463,13 +643,16 @@ final class StepComposition
             // Cover text was picked against an image that did not exist yet;
             // re-check it against the real, dimmed pixels.
             new CoverContrastStep($blockFixer ?? BlockFixers::default()),
+        ];
+        if ($graph !== self::GRAPH_HTML_ISLANDS) {
             // Cover contrast can rewrite assembled page markup after the graph.
             // Refresh pattern winners from those final bytes, then re-validate
             // the delivered theme (the in-graph ValidateThemeStep ran before
             // this phase rewrote covers and re-extracted patterns).
-            new ExtractPatternsStep(),
-            new ValidateThemeStep(htmlFirst: $htmlFirst ?? self::htmlFirstSelected()),
-        ];
+            $steps[] = new ExtractPatternsStep();
+        }
+        $steps[] = new ValidateThemeStep(htmlFirst: $designOwnsLayout);
+        return $steps;
     }
 
     /** @return Step[] */
