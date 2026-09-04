@@ -316,7 +316,8 @@ final class SiteSpecStep implements Step
         // wins over whatever tree the model returned — the model's tree can
         // contribute only per-page purposes.
         $pageWarnings = [];
-        $spec['pages'] = self::normalizePages($spec['pages'] ?? null, $spec, $multiPage, $pageWarnings);
+        $rawPages = $spec['pages'] ?? null;
+        $spec['pages'] = self::normalizePages($rawPages, $spec, $multiPage, $pageWarnings);
         if ($requested !== []) {
             // A caller-fixed list is promised to survive unchanged — same
             // order, same slugs, same titles (REQUESTED_SCOPE above, and the
@@ -324,7 +325,14 @@ final class SiteSpecStep implements Step
             // keeps its name and its route; the cart CONTENTS still degrade
             // downstream, where StorefrontDegrade::markup strips the purchase
             // controls the catalog cannot honor.
-            $spec['pages'] = self::forcePages($requested, $spec['pages']);
+            //
+            // normalizePages() synthesizes a one-page tree whose purpose is
+            // the site description when the candidate had no pages. That floor
+            // is for a one-page build, not a purpose to graft onto a caller-
+            // fixed Home. An empty purpose is what tells page-plan to write
+            // one from the brief (BIGR-984).
+            $modelPages = self::hasPageEntries($rawPages) ? $spec['pages'] : [];
+            $spec['pages'] = self::forcePages($requested, $modelPages);
         } else {
             array_push($warnings, ...$pageWarnings);
         }
@@ -656,6 +664,25 @@ final class SiteSpecStep implements Step
         $purposes = [];
         self::collectPurposes($modelPages, $purposes);
         return self::graftPurposes($requested, $purposes);
+    }
+
+    /**
+     * Whether $raw is a non-empty page list the candidate actually produced.
+     * Junk (non-array entries) does not count — normalizePageList drops those
+     * the same way, and treating them as "had pages" would graft the
+     * description-as-Home floor.
+     */
+    private static function hasPageEntries(mixed $raw): bool
+    {
+        if (!is_array($raw) || $raw === []) {
+            return false;
+        }
+        foreach ($raw as $page) {
+            if (is_array($page)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
