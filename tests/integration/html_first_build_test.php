@@ -174,6 +174,7 @@ function html_first_queue_success(
 
     $llm->queueJson($siteSpec);
     $llm->queueJson(['seeds' => ['Flour Archive', 'Bread Ledger', 'Oven Journal', 'Grain Index']]);
+    $llm->queueJson(['winner' => 0, 'why' => 'fixture judge']);
     $llm->queueJson(html_first_direction());
     $llm->queueJson($themePayload ?? html_first_theme_payload());
 }
