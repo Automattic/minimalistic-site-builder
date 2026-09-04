@@ -167,6 +167,51 @@ test('the injected placeholder sits inside the section group, not after it', fun
     );
 });
 
+test('the default contact form is written in the site language', function () {
+    $spanish = Automattic\SiteBuild\FormPlaceholder::defaultContactMarkup('es-AR');
+    $spec = Automattic\SiteBuild\FormPlaceholder::find($spanish)[0]['spec'];
+    $parsed = Automattic\SiteBuild\FormPlaceholder::parse($spec);
+    assert_true(is_array($parsed), 'the localized spec still parses');
+    assert_eq('Nombre', $parsed['fields'][0]['label']);
+    assert_eq('Enviar mensaje', $parsed['submit']);
+
+    // A plain language name is what SiteSpecStep accepts alongside the code.
+    $byName = Automattic\SiteBuild\FormPlaceholder::find(
+        Automattic\SiteBuild\FormPlaceholder::defaultContactMarkup('Japanese')
+    )[0]['spec'];
+    assert_contains('お名前', $byName);
+
+    // An unmapped language keeps English rather than guessing.
+    $unmapped = Automattic\SiteBuild\FormPlaceholder::find(
+        Automattic\SiteBuild\FormPlaceholder::defaultContactMarkup('mi')
+    )[0]['spec'];
+    assert_contains('Name:name:required', $unmapped);
+    assert_contains('Send message', $unmapped);
+});
+
+test('a marker paragraph outside a placeholder block never reaches the visitor', function () {
+    $loose = '<!-- wp:heading --><h2>Contacto</h2><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>JP_FORM</p><!-- /wp:paragraph -->'
+        . '<!-- wp:paragraph --><p>Escribinos cuando quieras.</p><!-- /wp:paragraph -->';
+    $warnings = [];
+    $out = Automattic\SiteBuild\Steps\SectionsStep::stripLooseFormMarkers(
+        ['parts/page-contact--form.html' => $loose],
+        $warnings,
+    );
+    $markup = $out['parts/page-contact--form.html'];
+
+    assert_eq(0, Automattic\SiteBuild\FormPlaceholder::markerCount($markup));
+    assert_contains('Escribinos cuando quieras.', $markup);
+    assert_contains('Contacto', $markup);
+    assert_contains('outside a jetpack-form-placeholder block', implode(' ', $warnings));
+
+    // A real placeholder is not a loose marker.
+    $kept = Automattic\SiteBuild\Steps\SectionsStep::stripLooseFormMarkers(
+        ['parts/page-contact--form.html' => Automattic\SiteBuild\FormPlaceholder::defaultContactMarkup()],
+    );
+    assert_eq(1, count(Automattic\SiteBuild\FormPlaceholder::find($kept['parts/page-contact--form.html'])));
+});
+
 test('a contact page that already has JP_FORM is left alone', function () {
     $form = Automattic\SiteBuild\FormPlaceholder::defaultContactMarkup();
     $files = [

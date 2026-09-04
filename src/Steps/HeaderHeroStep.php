@@ -6,7 +6,6 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\AboveFoldContract;
 use Automattic\SiteBuild\AboveFoldPartFacts;
-use Automattic\SiteBuild\BusinessSite;
 use Automattic\SiteBuild\ContrastFix;
 use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\HeaderBehavior;
@@ -134,6 +133,13 @@ final class HeaderHeroStep implements Step
     public const NAV_OVERLAY_ONLY_CLASS = 'header-nav-overlay-only';
 
     /**
+     * The generated brand mark, as opposed to a logo the design authored.
+     * FinalizeThemeStep matches on it to hide the site title while the mark
+     * renders, so the two must name the same class.
+     */
+    public const LOGO_MARK_CLASS = 'site-logo-mark';
+
+    /**
      * Rough per-element widths for the row estimate, in px. Deliberately
      * coarse: uppercase caption nav labels track wide (~11px/char at 14px +
      * 0.14em letter-spacing), a heading-size wordmark runs ~17px/char, and a
@@ -178,7 +184,6 @@ final class HeaderHeroStep implements Step
                 'aboveFold.json',
                 'designDirection.json',
                 'siteSpec.json',
-                'meta.json',
                 'theme/theme.json',
                 'theme/parts/*',
             ],
@@ -190,7 +195,10 @@ final class HeaderHeroStep implements Step
 
     /**
      * Insert a tagged wp:site-logo immediately before the first wp:site-title.
-     * No-op when a site-logo is already present (authored lockups keep theirs).
+     * With no site-title, it goes just inside the first group wrapper instead,
+     * so the mark still lands inside the styled header bar; with neither, it is
+     * prepended to the part. No-op when a site-logo is already present
+     * (authored lockups keep theirs).
      */
     public static function ensureSiteLogoMark(string $markup): string
     {
@@ -200,7 +208,7 @@ final class HeaderHeroStep implements Step
         $comment = BlockMarkup::serializeComment('site-logo', [
             'width'          => 48,
             'shouldSyncIcon' => true,
-            'className'      => 'site-logo-mark',
+            'className'      => self::LOGO_MARK_CLASS,
         ], true);
         if (preg_match('/<!--\s+wp:site-title\b/', $markup) === 1) {
             return (string) preg_replace('/(<!--\s+wp:site-title\b)/', $comment . "\n\$1", $markup, 1);
@@ -244,6 +252,7 @@ final class HeaderHeroStep implements Step
         $protection = (string) ($delivery['header']['protection_token'] ?? 'base');
         $siteSpec = $project->exists('siteSpec.json') ? $project->readJson('siteSpec.json') : [];
         $siteName = (string) ($siteSpec['name'] ?? '');
+        $wantsLogoMark = SiteSpecStep::wantsLogoMark($siteSpec);
         $pageTitles = array_map(static fn (array $p): string => (string) ($p['title'] ?? ''), $pages);
 
         // Behavior inputs (BIGR-762): the theme palette, motion-derived
@@ -279,13 +288,6 @@ final class HeaderHeroStep implements Step
         $writes = [];
         $headerRel = 'parts/header.html';
         $header = $project->readText('theme/' . $headerRel);
-        $prompt = '';
-        if ($project->exists('meta.json')) {
-            // RefinePromptStep has already rewritten meta.json['prompt']; the
-            // original lives at original_prompt. Forward the refined text so
-            // PhotographySite sees the same brief later steps see.
-            $prompt = (string) ($project->readJson('meta.json')['prompt'] ?? '');
-        }
         $authoredPositions = self::removedAuthoredPositions($header);
 
         // Objective overlay evidence (BIGR-762): a planned overlay must be
@@ -638,7 +640,7 @@ final class HeaderHeroStep implements Step
         // Inject after every header rewrite (fallback, overlay grant, CTA
         // dedupe). An earlier insert is wiped when HeaderFallback replaces the
         // part, which is the HTML-first path's usual landing.
-        if (BusinessSite::matches($siteSpec, $prompt)) {
+        if ($wantsLogoMark) {
             $current = $writes[$headerRel] ?? $header;
             $writes[$headerRel] = self::ensureSiteLogoMark($current);
         }
@@ -669,13 +671,6 @@ final class HeaderHeroStep implements Step
             $project->writeText($path, $markup);
             array_push($warnings, ...$degraded);
             $report[] = "[{$rel}] storefront cart UI degraded after header/hero reconcile";
-        }
-        if (BusinessSite::matches($siteSpec, $prompt) && $project->exists('theme/' . $headerRel)) {
-            $persisted = $project->readText('theme/' . $headerRel);
-            $withMark = self::ensureSiteLogoMark($persisted);
-            if ($withMark !== $persisted) {
-                $project->writeText('theme/' . $headerRel, $withMark);
-            }
         }
         $pagesArtifact = $project->readJson('pages.json');
         $pagesArtifact['pages'] = $pages;

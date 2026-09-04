@@ -220,11 +220,11 @@ test('mixed-width-editorial is retired into asymmetric-split', function () {
     assert_contains('50/25/25', $fragment, 'the three-region widths survive the merge');
 });
 
-test('the section eligibility gate reserves offset-grid for photography and gallery sites', function () {
-    $photography = [SectionComposition::CONTEXT_PHOTOGRAPHY_SITE => true];
-    $other = [SectionComposition::CONTEXT_PHOTOGRAPHY_SITE => false];
+test('the section eligibility gate reserves offset-grid for a broken-grid rhythm', function () {
+    $brokenGrid = [SectionComposition::CONTEXT_BROKEN_GRID_RHYTHM => true];
+    $other = [SectionComposition::CONTEXT_BROKEN_GRID_RHYTHM => false];
 
-    assert_true(SectionComposition::eligible('offset-grid', $photography));
+    assert_true(SectionComposition::eligible('offset-grid', $brokenGrid));
     assert_true(!SectionComposition::eligible('offset-grid', $other));
     assert_true(!SectionComposition::eligible('offset-grid', []), 'an unstated fact is false');
 
@@ -238,41 +238,63 @@ test('the section eligibility gate reserves offset-grid for photography and gall
         );
     }
 
-    assert_eq(SectionComposition::ARCHETYPES, SectionComposition::eligibleArchetypes($photography));
+    assert_eq(SectionComposition::ARCHETYPES, SectionComposition::eligibleArchetypes($brokenGrid));
     assert_eq(
         array_values(array_diff(SectionComposition::ARCHETYPES, ['offset-grid'])),
         SectionComposition::eligibleArchetypes($other),
     );
 
-    assert_contains('photography and gallery sites', SectionComposition::ineligibleReason('offset-grid'));
+    assert_contains('offset or gallery band rhythm', SectionComposition::ineligibleReason('offset-grid'));
     assert_eq('', SectionComposition::ineligibleReason('centered-stack'));
 });
 
 test('the section eligibility context refuses a fact the catalog never reads', function () {
     $error = assert_throws(
-        fn () => SectionComposition::eligible('offset-grid', ['photograhpy_site' => true])
+        fn () => SectionComposition::eligible('offset-grid', ['broken_grid_rhytm' => true])
     );
     assert_contains('unknown section eligibility context field', $error->getMessage());
     assert_throws(fn () => SectionComposition::eligibleArchetypes(['register' => true]));
     assert_throws(
         fn () => SectionComposition::eligible('offset-grid', [
-            SectionComposition::CONTEXT_PHOTOGRAPHY_SITE => 'yes',
+            SectionComposition::CONTEXT_BROKEN_GRID_RHYTHM => 'yes',
         ])
     );
 });
 
-test('site context turns the spec into the one fact the gate reads', function () {
+test('direction context turns the committed rhythm into the one fact the gate reads', function () {
+    foreach (SectionComposition::BROKEN_GRID_RHYTHMS as $rhythm) {
+        assert_eq(
+            [SectionComposition::CONTEXT_BROKEN_GRID_RHYTHM => true],
+            SectionComposition::directionContext(['rhythm' => $rhythm]),
+            $rhythm,
+        );
+    }
+    foreach (array_diff(\Automattic\SiteBuild\Steps\DesignDirectionStep::RHYTHMS, SectionComposition::BROKEN_GRID_RHYTHMS) as $rhythm) {
+        assert_eq(
+            [SectionComposition::CONTEXT_BROKEN_GRID_RHYTHM => false],
+            SectionComposition::directionContext(['rhythm' => $rhythm]),
+            $rhythm,
+        );
+    }
     assert_eq(
-        [SectionComposition::CONTEXT_PHOTOGRAPHY_SITE => true],
-        SectionComposition::siteContext(['area' => 'photography'], ''),
+        [SectionComposition::CONTEXT_BROKEN_GRID_RHYTHM => false],
+        SectionComposition::directionContext([]),
+        'no direction grants nothing',
     );
     assert_eq(
-        [SectionComposition::CONTEXT_PHOTOGRAPHY_SITE => true],
-        SectionComposition::siteContext([], 'a gallery in Lisbon'),
+        [SectionComposition::CONTEXT_BROKEN_GRID_RHYTHM => true],
+        SectionComposition::directionContext(['rhythm' => ' Offset ']),
+        'case and whitespace do not matter',
     );
     assert_eq(
-        [SectionComposition::CONTEXT_PHOTOGRAPHY_SITE => false],
-        SectionComposition::siteContext(['area' => 'bakery'], 'a neighborhood bakery in Lisbon'),
+        [SectionComposition::CONTEXT_BROKEN_GRID_RHYTHM => false],
+        SectionComposition::directionContext(['rhythm' => ['offset']]),
+        'a non-string rhythm grants nothing and raises no warning',
+    );
+    assert_eq(
+        [],
+        array_diff(SectionComposition::BROKEN_GRID_RHYTHMS, \Automattic\SiteBuild\Steps\DesignDirectionStep::RHYTHMS),
+        'every broken-grid rhythm is one the direction can commit',
     );
 });
 

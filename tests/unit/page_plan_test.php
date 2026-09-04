@@ -2085,7 +2085,7 @@ test('PagePlanStep honors the equal-card-grid cap when remapping offset-grid', f
     assert_eq(2, count(array_filter($sections, fn ($s) => $s['layout_archetype'] === 'equal-card-grid')));
 });
 
-test('PagePlanStep remaps offset-grid away from non-photography sites', function () {
+test('PagePlanStep remaps offset-grid away from a level-rhythm build', function () {
     $warnings = [];
     $sections = PagePlanStep::normalize([
         plan_section(['layout_archetype' => 'full-bleed-cover', 'background' => 'image']),
@@ -2102,7 +2102,7 @@ test('PagePlanStep remaps offset-grid away from non-photography sites', function
     $joined = implode("\n", $warnings);
     assert_contains("pages[slug='home'].sections[1].layout_archetype", $joined);
     assert_contains('offset-grid', $joined);
-    assert_contains('photography', $joined);
+    assert_contains('offset or gallery band rhythm', $joined);
 });
 
 test('PagePlanStep does not remap an interior offset-grid into a full-bleed cover', function () {
@@ -2117,7 +2117,7 @@ test('PagePlanStep does not remap an interior offset-grid into a full-bleed cove
     assert_eq('centered-stack', $sections[1]['layout_archetype']);
 });
 
-test('PagePlanStep keeps offset-grid on a photography site', function () {
+test('PagePlanStep keeps offset-grid under a broken-grid rhythm', function () {
     $warnings = [];
     $sections = PagePlanStep::normalize([
         plan_section(['layout_archetype' => 'full-bleed-cover', 'background' => 'image']),
@@ -2129,7 +2129,7 @@ test('PagePlanStep keeps offset-grid on a photography site', function () {
     assert_eq([], $warnings);
 });
 
-test('PagePlanStep does not pad a thin front plan with offset-grid on non-photography sites', function () {
+test('PagePlanStep does not pad a thin front plan with offset-grid under a level rhythm', function () {
     $pages = [[
         'slug' => 'home',
         'path' => '/',
@@ -2143,7 +2143,7 @@ test('PagePlanStep does not pad a thin front plan with offset-grid on non-photog
     assert_true(count($padded[0]['sections']) >= 3);
 });
 
-test('page-plan and section-composition restrict offset-grid to photography sites', function () {
+test('page-plan and section-composition restrict offset-grid to a broken-grid rhythm', function () {
     $pagePlan = (string) file_get_contents(repo_path('prompts/page-plan.md'));
     $composition = (string) file_get_contents(
         repo_path('prompts/section-compositions/offset-grid.md')
@@ -2152,13 +2152,15 @@ test('page-plan and section-composition restrict offset-grid to photography site
 
     foreach ([$pagePlan, $composition] as $prompt) {
         assert_contains('offset-grid', $prompt);
-        assert_contains('photography', $prompt);
-        assert_contains('gallery', $prompt);
+        assert_contains("DESIGN DIRECTION's rhythm", $prompt);
+        assert_contains('`offset` or `gallery`', $prompt);
+        assert_true(!str_contains($prompt, 'photography or gallery site'), 'the gate no longer names a kind of site');
+        assert_true(!str_contains($prompt, 'photography and gallery sites'), 'the gate no longer names a kind of site');
     }
     assert_contains('staggered-grid', $section);
-    assert_contains('photography', $section);
-    assert_contains('gallery', $section);
-    assert_contains('every SECOND column', $section, 'the staggered construction is still documented for photography and gallery');
+    assert_contains('`offset` or `gallery`', $section);
+    assert_contains('every SECOND column', $section, 'the staggered construction is still documented for the assigned archetype');
+    assert_true(!str_contains($section, 'photography or gallery site'));
 });
 
 test('a contact page is recognized from slug, title, or purpose — not a contact sheet', function () {
@@ -2340,7 +2342,7 @@ test('the contact trim never introduces a full-bleed cover band', function () {
     );
     assert_true(
         !in_array('offset-grid', $archetypes, true),
-        'the trim runs without the photography gate, so it must not assign offset-grid either',
+        'the trim runs without the rhythm gate, so it must not assign offset-grid either',
     );
     for ($i = 1, $n = count($archetypes); $i < $n; $i++) {
         assert_true($archetypes[$i] !== $archetypes[$i - 1], 'and adjacency still holds');

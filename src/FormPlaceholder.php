@@ -17,8 +17,11 @@ namespace Automattic\SiteBuild;
  */
 final class FormPlaceholder
 {
+    /** The marker's name, with no spec behind it. */
+    public const MARKER_NAME = 'JP_FORM';
+
     /** Prefix that opens a spec. */
-    public const MARKER = 'JP_FORM:';
+    public const MARKER = self::MARKER_NAME . ':';
 
     /** Class the host locates a placeholder block by. */
     public const CLASS_NAME = 'jetpack-form-placeholder';
@@ -58,27 +61,130 @@ final class FormPlaceholder
         return $found;
     }
 
-    /** How many times the marker appears at all, placeholder or not. */
+    /**
+     * How many times the marker appears at all, placeholder or not.
+     *
+     * The name alone counts, without the colon a spec opens with: a paragraph
+     * reading `JP_FORM` is machine text a visitor can read, and it is the
+     * shape a marker takes when the model drops the spec it was supposed to
+     * carry. Counting only well-formed prefixes would call that page clean.
+     */
     public static function markerCount(string $markup): int
     {
-        return substr_count($markup, self::MARKER);
+        return substr_count($markup, self::MARKER_NAME);
     }
+
+    /**
+     * Drop the marker paragraphs no host will ever substitute.
+     *
+     * A marker only means something inside a placeholder block: that is the
+     * class the host looks the block up by. Anywhere else the paragraph is
+     * ordinary body copy that happens to read `JP_FORM`, and it ships to the
+     * visitor as grey text. Removing it costs a form the section never had,
+     * because nothing downstream could have built one from it.
+     *
+     * @return array{markup:string, removed:int}
+     */
+    public static function stripLooseMarkers(string $markup): array
+    {
+        $placeholders = [];
+        foreach (self::find($markup) as $found) {
+            $placeholders[$found['block']] = true;
+        }
+
+        $pattern = '/<!--\s*wp:paragraph\b[^>]*?-->\s*<p[^>]*>.*?<\/p>\s*<!--\s*\/wp:paragraph\s*-->/is';
+        $removed = 0;
+        $stripped = preg_replace_callback(
+            $pattern,
+            static function (array $match) use ($placeholders, &$removed): string {
+                if (isset($placeholders[$match[0]]) || !str_contains($match[0], self::MARKER_NAME)) {
+                    return $match[0];
+                }
+                ++$removed;
+                return '';
+            },
+            $markup,
+        );
+
+        return [
+            'markup' => $removed > 0 ? trim((string) $stripped) : $markup,
+            'removed' => $removed,
+        ];
+    }
+
+    /**
+     * The fallback form's four visitor-facing strings, per language.
+     *
+     * Every other spec's labels are the model's own, written in the site's
+     * language along with the rest of the page. This one is written here, so
+     * without a mapping a Spanish site ships an English form. The mapping is
+     * deliberately small and reviewed, like WritingDirection's: a language
+     * that is not in it keeps English rather than guessing.
+     *
+     * @var array<string, array{name:string, email:string, message:string, submit:string}>
+     */
+    private const DEFAULT_LABELS = [
+        'ca' => ['name' => 'Nom', 'email' => 'Correu electrònic', 'message' => 'Missatge', 'submit' => 'Envia el missatge'],
+        'de' => ['name' => 'Name', 'email' => 'E-Mail', 'message' => 'Nachricht', 'submit' => 'Nachricht senden'],
+        'es' => ['name' => 'Nombre', 'email' => 'Correo electrónico', 'message' => 'Mensaje', 'submit' => 'Enviar mensaje'],
+        'fr' => ['name' => 'Nom', 'email' => 'E-mail', 'message' => 'Message', 'submit' => 'Envoyer le message'],
+        'it' => ['name' => 'Nome', 'email' => 'Email', 'message' => 'Messaggio', 'submit' => 'Invia messaggio'],
+        'ja' => ['name' => 'お名前', 'email' => 'メールアドレス', 'message' => 'メッセージ', 'submit' => '送信する'],
+        'nl' => ['name' => 'Naam', 'email' => 'E-mail', 'message' => 'Bericht', 'submit' => 'Bericht versturen'],
+        'pl' => ['name' => 'Imię', 'email' => 'E-mail', 'message' => 'Wiadomość', 'submit' => 'Wyślij wiadomość'],
+        'pt' => ['name' => 'Nome', 'email' => 'E-mail', 'message' => 'Mensagem', 'submit' => 'Enviar mensagem'],
+        'ru' => ['name' => 'Имя', 'email' => 'Эл. почта', 'message' => 'Сообщение', 'submit' => 'Отправить сообщение'],
+        'sv' => ['name' => 'Namn', 'email' => 'E-post', 'message' => 'Meddelande', 'submit' => 'Skicka meddelande'],
+        'tr' => ['name' => 'Ad', 'email' => 'E-posta', 'message' => 'Mesaj', 'submit' => 'Mesaj gönder'],
+    ];
+
+    /**
+     * The plain language names SiteSpecStep also accepts, for the languages
+     * above. The spec asks the model for a BCP-47 code, so a name is the
+     * exception rather than the rule.
+     *
+     * @var array<string, string>
+     */
+    private const LANGUAGE_NAMES = [
+        'catalan' => 'ca', 'dutch' => 'nl', 'french' => 'fr', 'german' => 'de',
+        'italian' => 'it', 'japanese' => 'ja', 'polish' => 'pl', 'portuguese' => 'pt',
+        'russian' => 'ru', 'spanish' => 'es', 'swedish' => 'sv', 'turkish' => 'tr',
+    ];
 
     /**
      * A host-substitutable contact form. Used when a contact page's generated
      * sections omitted the placeholder the brief asked for (BIGR-858).
+     *
+     * @param string $language The site's language, as SiteSpecStep records it.
      */
-    public static function defaultContactMarkup(string $submitLabel = 'Send message'): string
+    public static function defaultContactMarkup(string $language = ''): string
     {
-        $submit = trim($submitLabel);
-        if ($submit === '' || str_contains($submit, '|')) {
-            $submit = 'Send message';
-        }
-        $spec = self::MARKER . ' contact | Name:name:required, Email:email:required, Message:textarea:required | '
-            . $submit;
+        $labels = self::defaultLabels($language);
+        $spec = self::MARKER . ' contact'
+            . " | {$labels['name']}:name:required, {$labels['email']}:email:required,"
+            . " {$labels['message']}:textarea:required"
+            . " | {$labels['submit']}";
         return '<!-- wp:paragraph {"className":"' . self::CLASS_NAME . '"} -->' . "\n"
             . '<p class="' . self::CLASS_NAME . '">' . $spec . '</p>' . "\n"
             . '<!-- /wp:paragraph -->';
+    }
+
+    /**
+     * The fallback strings for a language, English when it is not mapped.
+     *
+     * @return array{name:string, email:string, message:string, submit:string}
+     */
+    private static function defaultLabels(string $language): array
+    {
+        $english = ['name' => 'Name', 'email' => 'Email', 'message' => 'Message', 'submit' => 'Send message'];
+        $normalized = strtolower(trim(str_replace('_', '-', $language)));
+        if ($normalized === '') {
+            return $english;
+        }
+
+        $code = self::LANGUAGE_NAMES[$normalized] ?? explode('-', $normalized, 2)[0];
+
+        return self::DEFAULT_LABELS[$code] ?? $english;
     }
 
     /**

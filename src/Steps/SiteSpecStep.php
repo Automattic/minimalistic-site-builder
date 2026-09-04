@@ -239,6 +239,34 @@ final class SiteSpecStep implements Step
             : "the SITE SPEC's own language (never a language implied by the site's location or audience)";
     }
 
+    /**
+     * Whether the spec describes a personal site: a portfolio, a CV, or a
+     * personal blog about one person. The site-spec prompt asks the model
+     * for a `persona_name` on those sites only, and for an empty string on
+     * every other site. The model decides this from the whole brief. This
+     * helper matches no keyword.
+     *
+     * @param array<mixed> $siteSpec
+     */
+    public static function isPersonal(array $siteSpec): bool
+    {
+        $persona = $siteSpec['persona_name'] ?? '';
+        return is_string($persona) && trim($persona) !== '';
+    }
+
+    /**
+     * Whether the build ships the generated brand mark: the site logo, the
+     * site icon, and the header's site-logo block. The one rule both
+     * collect-images and header-hero apply: a personal site keeps its name
+     * as text, and an empty spec (a partial run) gets no mark.
+     *
+     * @param array<mixed> $siteSpec
+     */
+    public static function wantsLogoMark(array $siteSpec): bool
+    {
+        return $siteSpec !== [] && !self::isPersonal($siteSpec);
+    }
+
     /** The normalized logical writing direction persisted in siteSpec.json. */
     public static function writingDirectionOf(Project $project): string
     {

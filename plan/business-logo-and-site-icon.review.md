@@ -1,5 +1,7 @@
 # BIGR-957 — review gate and findings
 
+> **Historical.** BIGR-986 (2026-09-04) removed the `BusinessSite` and `PhotographySite` matchers this plan describes. The mark now ships for every site without a `persona_name`. See `docs/business-logo-and-site-icon.md`, section "Who gets a mark".
+
 Companion to `plan/business-logo-and-site-icon.md`. Written by a reviewing
 session; the implementing agent should read this **before Task 8**. Sections 6-7
 audit the commits that have landed (Tasks 1-6) and carry four confirmed defects,

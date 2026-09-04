@@ -90,10 +90,21 @@ final class SectionComposition
      *
      * @var list<string>
      */
-    public const CONTEXT_KEYS = [self::CONTEXT_PHOTOGRAPHY_SITE];
+    public const CONTEXT_KEYS = [self::CONTEXT_BROKEN_GRID_RHYTHM];
 
-    /** True when the brief is a photography, photojournalism, or gallery site. */
-    public const CONTEXT_PHOTOGRAPHY_SITE = 'photography_site';
+    /**
+     * True when the committed design direction chose a band rhythm that
+     * breaks the grid: `offset` or `gallery` (DesignDirectionStep::RHYTHMS).
+     */
+    public const CONTEXT_BROKEN_GRID_RHYTHM = 'broken_grid_rhythm';
+
+    /**
+     * The band rhythms under which a staggered row is a design decision
+     * rather than an accident.
+     *
+     * @var list<string>
+     */
+    public const BROKEN_GRID_RHYTHMS = ['offset', 'gallery'];
 
     /**
      * @var array<string,array<string,mixed>>
@@ -194,8 +205,8 @@ final class SectionComposition
             'max_images' => 12,
             'copy_capacity' => 'compact',
             'requires_row' => true,
-            'requires_context' => [self::CONTEXT_PHOTOGRAPHY_SITE],
-            'ineligible_reason' => 'staggered rows are reserved for photography and gallery sites',
+            'requires_context' => [self::CONTEXT_BROKEN_GRID_RHYTHM],
+            'ineligible_reason' => 'staggered rows need an offset or gallery band rhythm from the design direction',
             'root_hook' => '.section-composition--offset-grid',
             'prompt' => 'section-compositions/offset-grid.md',
         ],
@@ -360,17 +371,70 @@ TEXT;
 
     /**
      * The eligibility context for one build. This is the single place that
-     * turns site facts into the predicate's inputs, so no caller re-derives
-     * the photography gate for itself.
+     * turns the committed design direction into the predicate's inputs, so no
+     * caller re-derives the rhythm gate for itself.
      *
-     * @param array<mixed> $siteSpec
+     * @param array<mixed> $designDirection the persisted designDirection.json
+     *        data; an empty array (no direction yet) grants nothing
      * @return array<string,bool>
      */
-    public static function siteContext(array $siteSpec, string $prompt = ''): array
+    public static function directionContext(array $designDirection): array
     {
+        $rhythm = Steps\DesignDirectionStep::explicitRhythm($designDirection);
         return [
-            self::CONTEXT_PHOTOGRAPHY_SITE => PhotographySite::matches($siteSpec, $prompt),
+            self::CONTEXT_BROKEN_GRID_RHYTHM => $rhythm !== null
+                && in_array($rhythm, self::BROKEN_GRID_RHYTHMS, true),
         ];
+    }
+
+    /**
+     * Whether one archetype is eligible for this build, read from the
+     * persisted design direction. The page plan and fix-blocks both ask this
+     * one question here, so no step re-derives the gate.
+     */
+    public static function eligibleForProject(string $archetype, Project $project): bool
+    {
+        return self::eligible(
+            $archetype,
+            self::directionContext(Steps\DesignDirectionStep::dataFor($project)),
+        );
+    }
+
+    /**
+     * The archetype marker on a delivered section's root, or null when the
+     * root carries none or the markup does not parse. SectionUnit stamps this
+     * marker to repeat the plan's assignment in the delivered part.
+     */
+    public static function rootMarker(string $markup): ?string
+    {
+        return self::rootClassWithPrefix($markup, self::MARKER_PREFIX);
+    }
+
+    /**
+     * The first class token with the given prefix on the delivered root
+     * block, or null when there is none or the markup does not parse. The
+     * substring check first skips the parse on a part that cannot match.
+     */
+    public static function rootClassWithPrefix(string $markup, string $prefix): ?string
+    {
+        if (!str_contains($markup, $prefix)) {
+            return null;
+        }
+        try {
+            $document = BlockMarkup::parse($markup);
+            $root = $document->topLevel();
+            if ($root === null) {
+                return null;
+            }
+            foreach (self::classTokens($document, $root) as $token) {
+                if (str_starts_with($token, $prefix)) {
+                    return $token;
+                }
+            }
+        } catch (\Throwable) {
+            return null;
+        }
+        return null;
     }
 
     /**

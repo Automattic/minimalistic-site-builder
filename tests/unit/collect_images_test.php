@@ -802,6 +802,34 @@ test('collect-images appends a site-logo spec for a business site', function () 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('collect-images appends a site-logo for every non-personal site, whatever its kind', function () {
+    foreach ([
+        ['name' => 'Stillrange', 'site_type' => 'photography portfolio', 'area' => 'landscape photography', 'persona_name' => ''],
+        ['name' => 'Northlight', 'site_type' => 'art gallery', 'area' => 'contemporary painting', 'persona_name' => ''],
+        ['name' => 'Riverbank Trust', 'site_type' => 'nonprofit', 'area' => 'river conservation', 'persona_name' => ''],
+        ['name' => 'Ledger', 'site_type' => 'product landing page', 'area' => 'bookkeeping software'],
+    ] as $spec) {
+        [$project, $tmp] = collect_fixture();
+        $project->writeJson('siteSpec.json', $spec);
+        $project->writeText('theme/parts/page-home--hero.html', '<!-- wp:paragraph --><p>Hi</p><!-- /wp:paragraph -->');
+
+        (new CollectImagesStep())->run($project);
+
+        $roles = array_column($project->readJson('images.json'), 'role', 'filename');
+        assert_eq('site-logo', $roles['site-logo.png'] ?? null, $spec['name'] . ' gets a mark');
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('SiteSpecStep::wantsLogoMark is one rule for both steps', function () {
+    $s = \Automattic\SiteBuild\Steps\SiteSpecStep::class;
+    assert_true($s::wantsLogoMark(['name' => 'Hearth', 'persona_name' => '']));
+    assert_true(!$s::wantsLogoMark(['name' => 'Ada', 'persona_name' => 'Ada Lovelace']));
+    assert_true(!$s::wantsLogoMark([]), 'an empty spec gets no mark');
+    assert_true($s::wantsLogoMark(['name' => 'Hearth', 'persona_name' => ['x']]), 'a non-string persona_name is not a person');
+    assert_true($s::wantsLogoMark(['name' => 'Hearth']), 'an absent key is the non-personal default');
+});
+
 test('collect-images does not append a site-logo for a personal site', function () {
     [$project, $tmp] = collect_fixture();
     $project->writeJson('siteSpec.json', [
@@ -841,7 +869,7 @@ test('collect-images logo subject drops identity-bearing area, topic, and vibe',
         }
     }
     assert_true(is_array($logo));
-    assert_contains('a small business', $logo['subject']);
+    assert_contains('a business storefront', $logo['subject'], 'the safe site_type is the fallback subject');
     assert_true(!str_contains($logo['subject'], 'Hearth'), 'identity-bearing fields must not steer the mark');
     assert_true(!str_contains($logo['subject'], 'Crumb'));
 

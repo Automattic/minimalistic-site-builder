@@ -66,7 +66,7 @@ Layout archetypes (pick the one that best serves each section's content):
 - full-bleed-cover — a full-width cover image or gradient with overlaid text. ALWAYS pair it with background "image": the section delivers one wp:cover band, and only the "image" treatment lets the builder run that band edge to edge (any other background frames the cover inside a padded solid band, and the builder forces the pairing to "image" anyway).
 - asymmetric-split — one row of unequal regions, never equal. Two regions (e.g. 34/66 or 40/60) for a lead-and-support band about one thing; three (e.g. 50/25/25) for a magazine row mixing one wide feature with narrow notes. Pick two unless the content is genuinely several items.
 - centered-stack — a single constrained, centered column carried by type and whitespace (the theme centers every element in the band, so plan short copy for it: a long centered rag is hard to read)
-- offset-grid — a staggered grid whose items deliberately don't line up in neat rows. Use ONLY when the site is clearly a photography or gallery site (SITE SPEC area/topic is photography, a photographer, photojournalism, or a gallery). For every other site, pick a level row (equal-card-grid, asymmetric-split, or list-with-thumbnails) instead of offsetting sibling tops.
+- offset-grid — a staggered grid whose items deliberately don't line up in neat rows. Use ONLY when the DESIGN DIRECTION's rhythm is `offset` or `gallery`. Under every other rhythm, pick a level row (equal-card-grid, asymmetric-split, or list-with-thumbnails) instead of offsetting sibling tops.
 - equal-card-grid — the classic equal-height card row
 - list-with-thumbnails — stacked rows, each a small image beside text
 

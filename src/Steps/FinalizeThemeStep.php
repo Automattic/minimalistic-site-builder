@@ -131,6 +131,13 @@ final class FinalizeThemeStep implements Step
         $motion = $profile !== 'none' && $project->exists('theme/assets/motion/motion.css')
             ? $profile
             : null;
+        // Only a header carrying the generated mark needs the rule that hides
+        // the title behind it. Every other theme would ship it matching nothing.
+        $logoMark = $project->exists('theme/parts/header.html')
+            && str_contains(
+                $project->readText('theme/parts/header.html'),
+                HeaderHeroStep::LOGO_MARK_CLASS,
+            );
         [$headerBehavior, $headerWarnings] = self::headerBehaviorFor($project);
         if ($headerWarnings !== []) {
             // A degraded artifact may arrive AFTER HeaderHeroStep rewrote the
@@ -191,6 +198,7 @@ final class FinalizeThemeStep implements Step
                 $header,
                 $overlays,
                 $imageTreatment,
+                $logoMark,
             ),
         );
         Narrator::write($motion === null
@@ -530,6 +538,7 @@ final class FinalizeThemeStep implements Step
         bool $header,
         array $overlays = [],
         ?string $imageTreatment = null,
+        bool $logoMark = false,
     ): string {
         $slug = ProjectStore::slugify($slug);
         $scopePrefix = PageScope::CLASS_PREFIX;
@@ -581,6 +590,16 @@ final class FinalizeThemeStep implements Step
                 // overlay to the viewport before first paint.
                 wp_enqueue_style('{$slug}-header', get_theme_file_uri('assets/header/header.css'), array('{$slug}-style'), \$ver);
                 wp_enqueue_script('{$slug}-header', get_theme_file_uri('assets/header/header.js'), array(), \$ver, false);
+            PHP;
+        }
+
+        $logoMarkStyle = '';
+        if ($logoMark) {
+            $markClass = HeaderHeroStep::LOGO_MARK_CLASS;
+            $logoMarkStyle = <<<PHP
+
+                // Front-end only: the editor keeps the title visible so it remains editable.
+                wp_add_inline_style('{$slug}-style', '.site-header-shell:has(.wp-block-site-logo.{$markClass} img) .wp-block-site-title,header:has(.wp-block-site-logo.{$markClass} img) .wp-block-site-title{display:none}');
             PHP;
         }
 
@@ -654,9 +673,7 @@ final class FinalizeThemeStep implements Step
                 \$ver = wp_get_theme()->get('Version');{$motionEnqueues}
                 // Block themes do not load style.css automatically — without this
                 // enqueue its utility CSS (card layouts, layout utilities) never applies.
-                wp_enqueue_style('{$slug}-style', get_stylesheet_uri(), {$styleDeps}, \$ver);{$overlayEnqueues}{$headerEnqueues}
-                // Front-end only: the editor keeps the title visible so it remains editable.
-                wp_add_inline_style('{$slug}-style', '.site-header-shell:has(.wp-block-site-logo.site-logo-mark img) .wp-block-site-title,header:has(.wp-block-site-logo.site-logo-mark img) .wp-block-site-title{display:none}');
+                wp_enqueue_style('{$slug}-style', get_stylesheet_uri(), {$styleDeps}, \$ver);{$overlayEnqueues}{$headerEnqueues}{$logoMarkStyle}
             });
 
             // Mirror the theme stylesheets into the editor so previews match the front end.
