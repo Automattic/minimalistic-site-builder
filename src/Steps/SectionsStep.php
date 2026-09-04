@@ -340,8 +340,14 @@ final class SectionsStep implements Step
             }
         }
         $pages = self::synchronizePrimaryAction($pages, $initialContract, $delivery, $warnings);
+        $files = self::stripLooseFormMarkers($files, $warnings);
         if (self::formPlaceholders($project)) {
-            $files = self::ensureContactFormPlaceholders($pages, $files, $warnings);
+            $files = self::ensureContactFormPlaceholders(
+                $pages,
+                $files,
+                $warnings,
+                SiteSpecStep::languageOf($project),
+            );
         }
         array_push($warnings, ...AboveFoldContract::warningRows($delivery));
         $plan['pages'] = $pages;
@@ -1160,6 +1166,38 @@ final class SectionsStep implements Step
     }
 
     /**
+     * Remove every marker paragraph that is not a placeholder block.
+     *
+     * A model that writes the marker without the class, or without the spec
+     * behind it, leaves a paragraph reading `JP_FORM` in the page. No host
+     * reads it, the substitution step walks past it, and the visitor gets the
+     * marker as body copy. A contact page that loses one this way still gets
+     * the default placeholder injected below.
+     *
+     * @param array<string,string> $files relative theme path => markup
+     * @param list<string> $warnings
+     * @return array<string,string>
+     */
+    public static function stripLooseFormMarkers(array $files, array &$warnings = []): array
+    {
+        foreach ($files as $rel => $markup) {
+            $stripped = FormPlaceholder::stripLooseMarkers($markup);
+            // A part whose whole body was the marker is left alone: an empty
+            // part file is a worse delivery than one grey line, and the
+            // validator still reports the marker it kept.
+            if ($stripped['removed'] === 0 || $stripped['markup'] === '') {
+                continue;
+            }
+            $files[$rel] = $stripped['markup'];
+            $warnings[] = "file='theme/{$rel}'; block='paragraph'; "
+                . "authored={$stripped['removed']} " . FormPlaceholder::MARKER_NAME
+                . ' marker(s) outside a ' . FormPlaceholder::CLASS_NAME . ' block; delivered=removed; '
+                . 'disposition=no host substitutes these, so they would ship as visible text';
+        }
+        return $files;
+    }
+
+    /**
      * A contact page with a form backend must carry one JP_FORM placeholder.
      * When every generated section omitted it, splice the default spec into
      * the best remaining part so the host still has something to substitute
@@ -1168,12 +1206,14 @@ final class SectionsStep implements Step
      * @param array<int,array<string,mixed>> $pages
      * @param array<string,string> $files relative theme path => markup
      * @param list<string> $warnings
+     * @param string $language the site's language, for the default form's labels
      * @return array<string,string>
      */
     public static function ensureContactFormPlaceholders(
         array $pages,
         array $files,
         array &$warnings = [],
+        string $language = '',
     ): array {
         foreach ($pages as $page) {
             if (!is_array($page) || !PagePlanStep::isContactLikePage($page)) {
@@ -1226,7 +1266,7 @@ final class SectionsStep implements Step
             }
             $files[$target['rel']] = self::injectPlaceholderInsideSection(
                 $files[$target['rel']],
-                FormPlaceholder::defaultContactMarkup(),
+                FormPlaceholder::defaultContactMarkup($language),
             );
             $warnings[] = "file='theme/{$target['rel']}'; block='jetpack-form-placeholder'; "
                 . 'authored=missing JP_FORM on contact page; delivered=default contact placeholder; '
