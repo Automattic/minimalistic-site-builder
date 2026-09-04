@@ -17,55 +17,13 @@ use Automattic\SiteBuild\ImageTransparency;
  * own no-imagick behavior.
  */
 
-/** PNG bytes: a $w x $h canvas of $bg with a centered 1/3-size $fg rectangle. */
-function transparency_fixture(string $bg, string $fg, int $w = 60, int $h = 60): string
-{
-    $im = new Imagick();
-    $im->newImage($w, $h, new ImagickPixel($bg));
-    $draw = new ImagickDraw();
-    $draw->setFillColor(new ImagickPixel($fg));
-    $draw->rectangle($w / 3, $h / 3, 2 * $w / 3, 2 * $h / 3);
-    $im->drawImage($draw);
-    $im->setImageFormat('png');
-    return $im->getImageBlob();
-}
-
-/** The alpha (0..1) of the pixel at ($x, $y) in PNG bytes. */
-function alpha_at(string $pngBytes, int $x, int $y): float
-{
-    $im = new Imagick();
-    $im->readImageBlob($pngBytes);
-    return $im->getImagePixelColor($x, $y)->getColorValue(Imagick::COLOR_ALPHA);
-}
-
-/** [r, g, b] of the pixel at ($x, $y), each 0..1. */
-function rgb_at(string $pngBytes, int $x, int $y): array
-{
-    $im = new Imagick();
-    $im->readImageBlob($pngBytes);
-    $px = $im->getImagePixelColor($x, $y);
-    return [
-        $px->getColorValue(Imagick::COLOR_RED),
-        $px->getColorValue(Imagick::COLOR_GREEN),
-        $px->getColorValue(Imagick::COLOR_BLUE),
-    ];
-}
-
-/** [width, height] of PNG bytes. */
-function png_size(string $pngBytes): array
-{
-    $im = new Imagick();
-    $im->readImageBlob($pngBytes);
-    return [$im->getImageWidth(), $im->getImageHeight()];
-}
-
 if (!ImageTransparency::available()) {
     test('image-transparency tests skipped (imagick not loaded)', function () {});
     return;
 }
 
 test('keyOutBackground makes the white background transparent, keeps the subject', function () {
-    $out = ImageTransparency::keyOutBackground(transparency_fixture('white', 'red'));
+    $out = ImageTransparency::keyOutBackground(png_fixture('white', 'red'));
 
     [$w, $h] = png_size($out);
     assert_true(alpha_at($out, 0, 0) < 0.01, 'corner background is transparent');
@@ -76,7 +34,7 @@ test('keyOutBackground makes the white background transparent, keeps the subject
 test('keyOutBackground keys an off-white background via the fuzz', function () {
     // The model renders "pure white" with slight warmth/noise; the fuzz must
     // absorb that.
-    $out = ImageTransparency::keyOutBackground(transparency_fixture('rgb(250,247,242)', 'rgb(120,40,20)'));
+    $out = ImageTransparency::keyOutBackground(png_fixture('rgb(250,247,242)', 'rgb(120,40,20)'));
 
     [$w, $h] = png_size($out);
     assert_true(alpha_at($out, 0, 0) < 0.01, 'off-white background is keyed');
@@ -88,7 +46,7 @@ test('keyOutBackground keys background pockets enclosed by the subject', functio
     // the flood fill alone cannot reach it (the closed-curl case of a
     // flourish); the global key pass must strip it.
     $im = new Imagick();
-    $im->readImageBlob(transparency_fixture('white', 'red'));
+    $im->readImageBlob(png_fixture('white', 'red'));
     $draw = new ImagickDraw();
     $draw->setFillColor(new ImagickPixel('white'));
     $draw->rectangle(29, 29, 31, 31);
@@ -238,7 +196,7 @@ test('keyOutBackground keeps the original when keying would erase everything', f
 });
 
 test('padToSquare centres a non-square bitmap on a transparent square at max(w, h, 512)', function () {
-    $src = transparency_fixture('transparent', 'red', 40, 20);
+    $src = png_fixture('transparent', 'red', 40, 20);
     $out = ImageTransparency::padToSquare($src, 512);
     assert_eq([512, 512], png_size($out));
     assert_true(alpha_at($out, 0, 0) < 0.01, 'corner stays transparent');
@@ -250,7 +208,7 @@ test('padToSquare centres a non-square bitmap on a transparent square at max(w, 
 });
 
 test('padToSquare uses the longer side when it already exceeds minSide', function () {
-    $src = transparency_fixture('transparent', 'red', 80, 600);
+    $src = png_fixture('transparent', 'red', 80, 600);
     $out = ImageTransparency::padToSquare($src, 512);
     assert_eq([600, 600], png_size($out));
 });
@@ -260,16 +218,16 @@ test('padToSquare returns its input unchanged on undecodable bytes', function ()
 });
 
 test('isKeyed is true when every corner is fully transparent', function () {
-    $keyed = ImageTransparency::keyOutBackground(transparency_fixture('white', 'red', 60, 60));
+    $keyed = ImageTransparency::keyOutBackground(png_fixture('white', 'red', 60, 60));
     assert_true(ImageTransparency::isKeyed($keyed));
 });
 
 test('isKeyed is false for a fully opaque PNG', function () {
-    assert_true(!ImageTransparency::isKeyed(transparency_fixture('white', 'red', 60, 60)));
+    assert_true(!ImageTransparency::isKeyed(png_fixture('white', 'red', 60, 60)));
 });
 
 test('recolorInk paints keyed ink to the header title color and keeps corners transparent', function () {
-    $keyed = ImageTransparency::keyOutBackground(transparency_fixture('white', 'red', 60, 60));
+    $keyed = ImageTransparency::keyOutBackground(png_fixture('white', 'red', 60, 60));
     $out = ImageTransparency::recolorInk($keyed, '#ffffff');
     assert_true(ImageTransparency::isKeyed($out));
     $rgb = rgb_at($out, 30, 30);
@@ -278,7 +236,7 @@ test('recolorInk paints keyed ink to the header title color and keeps corners tr
 });
 
 test('flattenOver paints the mark onto an opaque ground for the site icon', function () {
-    $keyed = ImageTransparency::keyOutBackground(transparency_fixture('white', 'red', 60, 60));
+    $keyed = ImageTransparency::keyOutBackground(png_fixture('white', 'red', 60, 60));
     $mark = ImageTransparency::recolorInk($keyed, '#ffffff');
     $out = ImageTransparency::flattenOver($mark, '#111111');
 
@@ -292,12 +250,12 @@ test('flattenOver paints the mark onto an opaque ground for the site icon', func
 });
 
 test('flattenOver returns its input on a bad hex', function () {
-    $keyed = ImageTransparency::keyOutBackground(transparency_fixture('white', 'red', 40, 40));
+    $keyed = ImageTransparency::keyOutBackground(png_fixture('white', 'red', 40, 40));
     assert_eq($keyed, ImageTransparency::flattenOver($keyed, 'not-a-color'));
 });
 
 test('recolorInk returns its input on a bad hex', function () {
-    $keyed = ImageTransparency::keyOutBackground(transparency_fixture('white', 'red', 40, 40));
+    $keyed = ImageTransparency::keyOutBackground(png_fixture('white', 'red', 40, 40));
     assert_eq($keyed, ImageTransparency::recolorInk($keyed, 'not-a-color'));
 });
 

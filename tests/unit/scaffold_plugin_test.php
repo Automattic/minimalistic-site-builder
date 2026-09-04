@@ -1018,11 +1018,37 @@ test('seeder leaves site_icon alone when no opaque icon shipped', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('import_images applies the same containment guard to the theme assets root', function () {
-    [$project, $tmp] = scaffold_plugin_fixture();
-    $php = $project->readText(ScaffoldPluginStep::MAIN_FILE);
-    assert_contains("get_stylesheet_directory() . '/assets'", $php);
-    assert_contains('DIRECTORY_SEPARATOR) !== 0', $php);
+test('content plugin does not import a theme asset that resolves outside the assets root', function () {
+    $slug = 'escapes-assets';
+    [$project, $tmp] = scaffold_plugin_fixture($slug);
+
+    $project->writeJson('plugin/pages.json', ['pages' => [
+        ['slug' => 'home', 'title' => 'Home', 'front' => true, 'menu_order' => 0, 'parent' => null],
+    ]]);
+    $project->writeText('plugin/pages/home.html', '<!-- wp:paragraph --><p>x</p><!-- /wp:paragraph -->');
+    $project->writeJson('plugin/images.json', ['images' => [
+        ['filename' => 'escape.png', 'title' => 'Symlinked out of the theme'],
+    ]]);
+
+    // A well-named file inside assets/ whose real path is elsewhere. basename
+    // and the charset check both pass it; only the realpath containment on the
+    // theme-assets root stops it. plugin/images stays empty so the theme
+    // fallback is the branch under test.
+    $themeDir = sys_get_temp_dir() . '/wp-stub-theme-' . uniqid();
+    @mkdir($themeDir . '/assets', 0777, true);
+    $outside = sys_get_temp_dir() . '/outside-' . uniqid() . '.png';
+    file_put_contents($outside, 'PNG');
+    symlink($outside, $themeDir . '/assets/escape.png');
+
+    wp_stub_reset();
+    $GLOBALS['wp_stylesheet_directory'] = $themeDir;
+    require_once $project->pluginPath('site-content.php');
+    (content_fn($slug, 'activate'))();
+
+    assert_eq(0, count($GLOBALS['wp_attachments']), 'a symlink out of the assets root is not imported');
+
+    exec('rm -rf ' . escapeshellarg($themeDir));
+    @unlink($outside);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
