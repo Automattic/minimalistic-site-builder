@@ -781,7 +781,7 @@ test('site-spec restores a stated brand name the refine step misspelled, in the 
         'title'       => 'PepenoBun – Professional Watermelon Supply',
         'description' => 'PepenoBun supplies seeds to growers.',
         'language'    => 'en',
-        'invented'    => ['name'],
+        'invented'    => [],
         'pages'       => [['title' => 'Home', 'slug' => 'home', 'purpose' => 'Introduce PepenoBun', 'children' => []]],
     ]);
 
@@ -805,6 +805,26 @@ test('site-spec restores a stated brand name the refine step misspelled, in the 
     $report = $project->readText('logs/site-spec.txt');
     assert_contains('PepenoBun', $report);
     assert_contains('PepeneBun', $report);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec leaves a host-supplied near-miss name alone', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture(siteSpec: [
+        'name'     => 'PepenoBun',
+        'language' => 'en',
+        'pages'    => [['title' => 'Home', 'slug' => 'home', 'purpose' => 'Introduce PepenoBun']],
+    ]);
+    $meta = $project->readJson('meta.json');
+    $meta['original_prompt'] = 'PepeneBun is a watermelon supply business in Dabuleni.';
+    $project->writeJson('meta.json', $meta);
+
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $spec = $project->readJson('siteSpec.json');
+    assert_eq('PepenoBun', $spec['name'], 'a host-supplied spec is trusted as-is');
+    assert_eq(0, $llm->completeJsonCalls);
+    assert_true(!$project->exists('logs/site-spec.txt'), 'nothing was restored');
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -850,7 +870,7 @@ test('statedNameNear finds one stated proper noun within two edits, and nothing 
     $stated = 'PepeneBun is a supply business. It ships from Dabuleni to buyers across Romania.';
     assert_eq('PepeneBun', SiteSpecStep::statedNameNear($stated, 'PepenoBun'), 'one edit, camel-cased brand at a sentence start');
     assert_eq('PepeneBun', SiteSpecStep::statedNameNear($stated, 'pepenebun'), 'case differences alone are a restoration');
-    assert_eq('Dabuleni', SiteSpecStep::statedNameNear($stated, 'Dabulenni'), 'a mid-sentence capitalized word counts');
+    assert_eq(null, SiteSpecStep::statedNameNear($stated, 'Dabulenni'), 'a place name is not a brand');
     assert_eq(null, SiteSpecStep::statedNameNear($stated, 'PepeneBun'), 'an exact match needs no restoration');
     assert_eq(null, SiteSpecNearProbe::far($stated), 'three edits is a different name');
     assert_eq(null, SiteSpecStep::statedNameNear($stated, 'Melon'), 'no stated word nearby');
@@ -862,13 +882,18 @@ test('statedNameNear finds one stated proper noun within two edits, and nothing 
     );
     assert_eq(
         null,
-        SiteSpecStep::statedNameNear('Both Lumen and Lumon ship from Copenhagen.', 'Lumin'),
-        'two different stated candidates are ambiguous, so nothing is restored',
+        SiteSpecStep::statedNameNear('Both PepeneBun and PepanoBun ship from Dabuleni.', 'PepaneBun'),
+        'two different stated brand-shaped candidates are ambiguous, so nothing is restored',
     );
     assert_eq(
-        'Lumen',
+        'PepeneBun',
+        SiteSpecStep::statedNameNear('Both PepeneBun and PepeneBun ship from Dabuleni.', 'PepenoBun'),
+        'the same stated brand twice is one candidate',
+    );
+    assert_eq(
+        null,
         SiteSpecStep::statedNameNear('Both Lumen and Lumen ship from Copenhagen.', 'Lumin'),
-        'the same stated token twice is one candidate',
+        'a single un-shaped word is not a brand even when it repeats',
     );
 });
 

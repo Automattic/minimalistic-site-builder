@@ -186,14 +186,15 @@ final class SiteSpecStep implements Step
         );
         // The refine step rewrites the brief on a small model, and a small
         // model sometimes respells a brand it was told to preserve. The spec
-        // then reads the rewrite, and the model dutifully lists the misspelled
-        // name as invented (PepeneBun -> "PepenoBun", 2026-09-04). The user's
-        // own words outrank both: a name claimed as invented that sits within
-        // two edits of a proper noun the user actually typed is that noun.
-        // Rung 1 — restored in the spec and in the brief every later step
-        // reads, reported, never a warning. A host-supplied spec is trusted
-        // as-is: no refine step touched its name.
-        if (!array_key_exists('site_spec', $meta) && in_array('name', $spec['invented'], true)) {
+        // then reads the rewrite. site-spec.md tells the model to treat a
+        // name sitting in that rewrite as stated, so `invented` often does
+        // not contain `name` — the misspelling still has to be restored.
+        // The user's own words outrank both: a generated name within two
+        // edits of a brand-shaped proper noun the user actually typed is
+        // that noun. Rung 1 — restored in the spec and in the brief every
+        // later step reads, reported, never a warning. A host-supplied spec
+        // is trusted as-is: no refine step touched its name.
+        if (!array_key_exists('site_spec', $meta)) {
             $restored = self::statedNameNear($statedPrompt, (string) $spec['name']);
             if ($restored !== null) {
                 $from = (string) $spec['name'];
@@ -251,11 +252,14 @@ final class SiteSpecStep implements Step
      * and either carrying an inner capital or digit (a brand like PepeneBun
      * reads as a name even when it opens a sentence) or standing somewhere
      * other than a sentence start (a plain sentence-opening word — "Create",
-     * "It" — is never a brand). The name must be at least four characters and
-     * within two edits of the candidate, sharing its first letter; an exact
-     * match needs no restoration and returns null; a match that differs only
-     * in case is a restoration to the stated casing. Two DIFFERENT candidates
-     * in range are ambiguous, and nothing is restored. Pure — unit-testable.
+     * "It" — is never a brand). A single-word candidate must itself be
+     * brand-shaped: a place name like Dabuleni is not a brand. A two-or-more
+     * word phrase may restore without an inner capital (Tbilisi Tavern).
+     * The name must be at least four characters and within two edits of the
+     * candidate, sharing its first letter; an exact match needs no restoration
+     * and returns null; a match that differs only in case is a restoration to
+     * the stated casing. Two DIFFERENT candidates in range are ambiguous, and
+     * nothing is restored. Pure — unit-testable.
      */
     public static function statedNameNear(string $stated, string $name): ?string
     {
@@ -291,6 +295,9 @@ final class SiteSpecStep implements Step
                 }
             }
             $phrase = implode(' ', array_column($run, 'word'));
+            if ($wanted === 1 && !self::isBrandShaped($run[0]['word'])) {
+                continue;
+            }
             if ($phrase === $name) {
                 return null;
             }
@@ -313,8 +320,13 @@ final class SiteSpecStep implements Step
         if (preg_match('/^\p{Lu}/u', $word) !== 1 || mb_strlen($word) < 2) {
             return false;
         }
-        $brandShaped = preg_match('/^.[^\s]*[\p{Lu}\p{N}]/u', $word) === 1;
-        return $brandShaped || !$sentenceInitial;
+        return self::isBrandShaped($word) || !$sentenceInitial;
+    }
+
+    /** Inner capital or digit — PepeneBun, iPhone, 3M-shaped tokens. */
+    private static function isBrandShaped(string $word): bool
+    {
+        return preg_match('/^.[^\s]*[\p{Lu}\p{N}]/u', $word) === 1;
     }
 
     /** Levenshtein distance over characters, not bytes, so accented names measure right. */
