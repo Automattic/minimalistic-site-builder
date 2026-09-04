@@ -1265,27 +1265,6 @@ test('generate-images records a grade clause cut from a repaired subject', funct
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-/** PNG bytes: a $w x $h canvas of $bg with a centered 1/3-size $fg rectangle. */
-function gi_png_fixture(string $bg, string $fg, int $w = 60, int $h = 60): string
-{
-    $im = new Imagick();
-    $im->newImage($w, $h, new ImagickPixel($bg));
-    $draw = new ImagickDraw();
-    $draw->setFillColor(new ImagickPixel($fg));
-    $draw->rectangle($w / 3, $h / 3, 2 * $w / 3, 2 * $h / 3);
-    $im->drawImage($draw);
-    $im->setImageFormat('png');
-    return $im->getImageBlob();
-}
-
-/** [width, height] of PNG bytes. */
-function gi_png_size(string $pngBytes): array
-{
-    $im = new Imagick();
-    $im->readImageBlob($pngBytes);
-    return [$im->getImageWidth(), $im->getImageHeight()];
-}
-
 test('generate-images declaration writes the plugin image manifest', function () {
     $declaration = (new GenerateImagesStep(new FakeImageClient()))->declaration();
     assert_true(in_array('plugin/images.json', $declaration->writes, true));
@@ -1297,7 +1276,7 @@ test('generate-images square-pads a keyed site-logo and ships it to the plugin',
     }
     [$project, $tmp] = generate_fixture();
     $mark = \Automattic\SiteBuild\ImageTransparency::keyOutBackground(
-        gi_png_fixture('white', 'red', 40, 20)
+        png_fixture('white', 'red', 40, 20)
     );
     $project->writeJson('images.json', array_merge($project->readJson('images.json'), [[
         'filename' => 'site-logo.png',
@@ -1320,7 +1299,7 @@ test('generate-images square-pads a keyed site-logo and ships it to the plugin',
     (new GenerateImagesStep($images))->run($project);
 
     assert_true($project->exists('plugin/images/site-logo.png'));
-    assert_eq([512, 512], gi_png_size($project->readText('theme/assets/site-logo.png')));
+    assert_eq([512, 512], png_size($project->readText('theme/assets/site-logo.png')));
     $logo = null;
     foreach ($project->readJson('images.json') as $row) {
         if (($row['filename'] ?? '') === 'site-logo.png') {
@@ -1338,7 +1317,7 @@ test('generate-images drops the site-logo role when keying wipes out', function 
         skip_test('imagick not loaded');
     }
     [$project, $tmp] = generate_fixture();
-    $white = gi_png_fixture('white', 'white', 32, 32);
+    $white = png_fixture('white', 'white', 32, 32);
     $project->writeJson('images.json', [[
         'filename' => 'site-logo.png',
         'src' => 'theme:./assets/site-logo.png',
@@ -1434,7 +1413,7 @@ test('generate-images recolors a site-logo to the header title ink', function ()
     }
     [$project, $tmp] = generate_fixture();
     $mark = \Automattic\SiteBuild\ImageTransparency::keyOutBackground(
-        gi_png_fixture('white', 'red', 40, 20)
+        png_fixture('white', 'red', 40, 20)
     );
     $project->writeJson('theme/theme.json', [
         'version' => 3,
@@ -1483,7 +1462,7 @@ test('generate-images ships an opaque site icon beside the transparent logo', fu
     }
     [$project, $tmp] = generate_fixture();
     $mark = \Automattic\SiteBuild\ImageTransparency::keyOutBackground(
-        gi_png_fixture('white', 'red', 60, 60)
+        png_fixture('white', 'red', 60, 60)
     );
     $project->writeJson('theme/theme.json', [
         'version' => 3,
@@ -1521,7 +1500,7 @@ test('generate-images ships an opaque site icon beside the transparent logo', fu
     // The icon does not: a transparent favicon vanishes on a light tab.
     assert_true($project->exists('theme/assets/site-icon.png'), 'a site icon is generated');
     $icon = $project->readText('theme/assets/site-icon.png');
-    assert_eq(gi_png_size($logo), gi_png_size($icon), 'icon matches the padded square');
+    assert_eq(png_size($logo), png_size($icon), 'icon matches the padded square');
     $im = new Imagick();
     $im->readImageBlob($icon);
     $corner = $im->getImagePixelColor(0, 0);
@@ -1566,7 +1545,7 @@ test('generate-images ships no site icon when the mark was dropped', function ()
     ]]);
     // An opaque render: the key wipes out, the role is dropped, and an icon
     // built from it would be a flat rectangle of header background.
-    (new GenerateImagesStep(new FakeImageClient(gi_png_fixture('white', 'white', 40, 40))))->run($project);
+    (new GenerateImagesStep(new FakeImageClient(png_fixture('white', 'white', 40, 40))))->run($project);
 
     assert_true(!$project->exists('theme/assets/site-icon.png'), 'no icon without a usable mark');
     assert_true(!$project->exists('plugin/images/site-icon.png'));

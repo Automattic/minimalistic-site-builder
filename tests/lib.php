@@ -113,6 +113,51 @@ function with_project(string $prefix, callable $fn): mixed
 }
 
 /**
+ * PNG bytes: a $w x $h canvas of $bg with a centered 1/3-size $fg rectangle.
+ * Callers must skip themselves when imagick is missing.
+ */
+function png_fixture(string $bg, string $fg, int $w = 60, int $h = 60): string
+{
+    $im = new Imagick();
+    $im->newImage($w, $h, new ImagickPixel($bg));
+    $draw = new ImagickDraw();
+    $draw->setFillColor(new ImagickPixel($fg));
+    $draw->rectangle($w / 3, $h / 3, 2 * $w / 3, 2 * $h / 3);
+    $im->drawImage($draw);
+    $im->setImageFormat('png');
+    return $im->getImageBlob();
+}
+
+/** [width, height] of PNG bytes. */
+function png_size(string $pngBytes): array
+{
+    $im = new Imagick();
+    $im->readImageBlob($pngBytes);
+    return [$im->getImageWidth(), $im->getImageHeight()];
+}
+
+/** The alpha (0..1) of the pixel at ($x, $y) in PNG bytes. */
+function alpha_at(string $pngBytes, int $x, int $y): float
+{
+    $im = new Imagick();
+    $im->readImageBlob($pngBytes);
+    return $im->getImagePixelColor($x, $y)->getColorValue(Imagick::COLOR_ALPHA);
+}
+
+/** [r, g, b] of the pixel at ($x, $y), each 0..1. */
+function rgb_at(string $pngBytes, int $x, int $y): array
+{
+    $im = new Imagick();
+    $im->readImageBlob($pngBytes);
+    $px = $im->getImagePixelColor($x, $y);
+    return [
+        $px->getColorValue(Imagick::COLOR_RED),
+        $px->getColorValue(Imagick::COLOR_GREEN),
+        $px->getColorValue(Imagick::COLOR_BLUE),
+    ];
+}
+
+/**
  * The complete text one markup request sends: its cached prefix layers in
  * order, then the varying prompt. Assert against this whenever a test cares
  * about what the model was told, not about which layer carried it.

@@ -168,31 +168,23 @@ final class ImageTransparency
      */
     public static function padToSquare(string $pngBytes, int $minSide = 512): string
     {
-        if (!self::available()) {
-            return $pngBytes;
-        }
-        try {
-            $im = new \Imagick();
-            $im->readImageBlob($pngBytes);
+        return self::withImage($pngBytes, static function (\Imagick $im) use ($minSide): ?\Imagick {
             $w = $im->getImageWidth();
             $h = $im->getImageHeight();
             $side = max($w, $h, $minSide);
             if ($w === $side && $h === $side) {
-                return $pngBytes;
+                return null;
             }
             $canvas = new \Imagick();
             $canvas->newImage($side, $side, new \ImagickPixel('transparent'));
-            $canvas->setImageFormat('png');
             $canvas->compositeImage(
                 $im,
                 \Imagick::COMPOSITE_OVER,
                 intdiv($side - $w, 2),
                 intdiv($side - $h, 2),
             );
-            return $canvas->getImageBlob();
-        } catch (\Throwable) {
-            return $pngBytes;
-        }
+            return $canvas;
+        });
     }
 
     /**
@@ -235,22 +227,17 @@ final class ImageTransparency
      */
     public static function recolorInk(string $pngBytes, string $hex): string
     {
-        if (!self::available() || ContrastMath::hexToRgb($hex) === null) {
+        if (ContrastMath::hexToRgb($hex) === null) {
             return $pngBytes;
         }
-        try {
-            $im = new \Imagick();
-            $im->readImageBlob($pngBytes);
+        return self::withImage($pngBytes, static function (\Imagick $im) use ($hex): \Imagick {
             // COPYOPACITY is not portable here: some ImageMagick builds copy
             // the source intensity rather than its alpha channel, making red
             // ink only ~21% opaque. A full colorize replaces RGB while leaving
             // the existing alpha mask byte-for-byte in place.
             $im->colorizeImage(new \ImagickPixel($hex), new \ImagickPixel('white'));
-            $im->setImageFormat('png');
-            return $im->getImageBlob();
-        } catch (\Throwable) {
-            return $pngBytes;
-        }
+            return $im;
+        });
     }
 
     /**
@@ -263,19 +250,41 @@ final class ImageTransparency
      */
     public static function flattenOver(string $pngBytes, string $hex): string
     {
-        if (!self::available() || ContrastMath::hexToRgb($hex) === null) {
+        if (ContrastMath::hexToRgb($hex) === null) {
+            return $pngBytes;
+        }
+        return self::withImage($pngBytes, static function (\Imagick $im) use ($hex): \Imagick {
+            $canvas = new \Imagick();
+            $canvas->newImage($im->getImageWidth(), $im->getImageHeight(), new \ImagickPixel($hex));
+            $canvas->compositeImage($im, \Imagick::COMPOSITE_OVER, 0, 0);
+            // Leave no alpha for a browser or an iOS home screen to fill in.
+            $canvas->setImageAlphaChannel(\Imagick::ALPHACHANNEL_OPAQUE);
+            return $canvas;
+        });
+    }
+
+    /**
+     * Decode $pngBytes, hand the handle to $fn, and re-encode what it returns
+     * as PNG. Owns the fail-soft contract the byte-returning methods share: no
+     * imagick, bytes that do not decode, or any throw returns the input
+     * unchanged, and so does $fn returning null for "nothing to change".
+     *
+     * @param \Closure(\Imagick): ?\Imagick $fn
+     */
+    private static function withImage(string $pngBytes, \Closure $fn): string
+    {
+        if (!self::available()) {
             return $pngBytes;
         }
         try {
             $im = new \Imagick();
             $im->readImageBlob($pngBytes);
-            $canvas = new \Imagick();
-            $canvas->newImage($im->getImageWidth(), $im->getImageHeight(), new \ImagickPixel($hex));
-            $canvas->setImageFormat('png');
-            $canvas->compositeImage($im, \Imagick::COMPOSITE_OVER, 0, 0);
-            // Leave no alpha for a browser or an iOS home screen to fill in.
-            $canvas->setImageAlphaChannel(\Imagick::ALPHACHANNEL_OPAQUE);
-            return $canvas->getImageBlob();
+            $out = $fn($im);
+            if ($out === null) {
+                return $pngBytes;
+            }
+            $out->setImageFormat('png');
+            return $out->getImageBlob();
         } catch (\Throwable) {
             return $pngBytes;
         }
