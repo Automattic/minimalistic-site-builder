@@ -548,5 +548,15 @@ test('scaffold-theme owns the guaranteed centered-stack alignment rule', functio
     // row.
     assert_contains(':not(.item-pattern__item *)', $lists['guards'], 'a list inside an item row stays exempt');
 
+    // A host-substituted form keeps one start-aligned column: centered labels
+    // over start-aligned input text is the same mixed alignment.
+    $matched = preg_match(
+        '~' . preg_quote($hook, '~') . '\s+form\s*\{(?<body>[^}]*)\}~',
+        $css,
+        $form
+    );
+    assert_eq(1, $matched, 'the form exemption exists');
+    assert_contains('text-align: start', $form['body']);
+
     exec('rm -rf ' . escapeshellarg($tmp));
 });

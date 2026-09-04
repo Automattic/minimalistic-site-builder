@@ -280,6 +280,12 @@ final class ScaffoldThemeStep implements Step
             margin-inline: auto;
             text-align: start;
         }
+        /* A third exemption: a form the host substituted in for a
+           placeholder. Its labels sit above input text the browser aligns to
+           the start, so centering them is the same mixed alignment. */
+        .section-composition--centered-stack form {
+            text-align: start;
+        }
 
         /* Flush-media cards (sections opt in via className="card-flush" on the
            card wp:group): the media is the card's first child at full width and
