@@ -312,6 +312,33 @@ test('normalize-layout on the HTML-first path levels a marked fallback section u
     });
 });
 
+test('normalize-layout on the HTML-first path levels a hero part and a blocks-fallback page under a broken-grid rhythm', function () {
+    with_project('stagger_htmlfirst_excl_', function ($project): void {
+        $project->writeJson('siteSpec.json', ['name' => 'Hearth', 'area' => 'bakery']);
+        $project->writeJson('designDirection.json', ['rhythm' => 'offset']);
+        $project->writeJson('theme/theme.json', ['version' => 3, 'settings' => ['layout' => ['contentSize' => '860px']]]);
+        $project->writeJson('design/page-artifact-map.json', ['home' => 'home', 'about' => 'about', 'visit' => 'visit']);
+        $project->writeText('design/about.failed', "design failed\n");
+        $row = stagger_row(
+            stagger_column(stagger_card('One'))
+            . stagger_column(stagger_card('Two', '3rem'))
+        );
+        // A transformed hero part carries the hero marker, no section marker.
+        $project->writeText('theme/parts/page-home--hero.html', stagger_section($row, 'hero-composition--foreground-split'));
+        // A section on a page the graph routed through the blocks path, whose
+        // root SectionUnit could not stamp.
+        $project->writeText('theme/parts/page-about--cards.html', $row);
+        // A transformed section on a page whose design succeeded.
+        $project->writeText('theme/parts/page-visit--cards.html', stagger_section($row));
+
+        (new \Automattic\SiteBuild\Steps\NormalizeLayoutStep(htmlFirst: true))->run($project);
+
+        assert_true(!str_contains($project->readText('theme/parts/page-home--hero.html'), '"top":"3rem"'), 'the hero part is leveled');
+        assert_true(!str_contains($project->readText('theme/parts/page-about--cards.html'), '"top":"3rem"'), 'the blocks-fallback page is leveled');
+        assert_contains('"top":"3rem"', $project->readText('theme/parts/page-visit--cards.html'), 'the transformed section keeps the stagger');
+    });
+});
+
 test('normalize-layout on the HTML-first path keeps stagger only under a broken-grid rhythm', function () {
     foreach ([
         ['rhythm' => 'offset', 'keeps' => true],

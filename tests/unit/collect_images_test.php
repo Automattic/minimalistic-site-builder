@@ -860,7 +860,7 @@ test('collect-images logo subject drops identity-bearing area, topic, and vibe',
         }
     }
     assert_true(is_array($logo));
-    assert_contains('a small business', $logo['subject']);
+    assert_contains('a business storefront', $logo['subject'], 'the safe site_type is the fallback subject');
     assert_true(!str_contains($logo['subject'], 'Hearth'), 'identity-bearing fields must not steer the mark');
     assert_true(!str_contains($logo['subject'], 'Crumb'));
 

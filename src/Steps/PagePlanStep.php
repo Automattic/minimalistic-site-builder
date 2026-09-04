@@ -3315,10 +3315,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      */
     private static function allowOffsetGridFor(Project $project): bool
     {
-        return SectionComposition::eligible(
-            'offset-grid',
-            SectionComposition::directionContext(DesignDirectionStep::dataFor($project)),
-        );
+        return SectionComposition::eligibleForProject('offset-grid', $project);
     }
 
     /**

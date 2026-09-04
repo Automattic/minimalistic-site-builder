@@ -284,8 +284,9 @@ final class CollectImagesStep implements Step
         }
         $siteSpec = $project->readJson('siteSpec.json');
         // A personal site shows its name as text and gets no mark. Every
-        // other site gets a generated mark. The site-spec step decides.
-        if (SiteSpecStep::isPersonal($siteSpec)) {
+        // other site gets a generated mark. The site-spec step decides. An
+        // empty spec gets no mark either, the same default header-hero uses.
+        if ($siteSpec === [] || SiteSpecStep::isPersonal($siteSpec)) {
             return;
         }
         if (isset($byFilename['site-logo.png'])) {
@@ -309,12 +310,18 @@ final class CollectImagesStep implements Step
         ];
         $area = trim((string) ($siteSpec['area'] ?? ''));
         $topic = trim((string) ($siteSpec['topic'] ?? ''));
+        $siteType = trim((string) ($siteSpec['site_type'] ?? ''));
         $vibe = trim((string) ($siteSpec['visual_vibe'] ?? ''));
-        $about = 'a small business';
+        // Every non-personal site gets a mark, so the fallback names no
+        // kind of organization: a nonprofit, a school, or a festival is not
+        // a small business.
+        $about = 'an organization';
         if ($area !== '' && GenerateImagesStep::safeSubjectMatter($area, $identities)) {
             $about = $area;
         } elseif ($topic !== '' && GenerateImagesStep::safeSubjectMatter($topic, $identities)) {
             $about = $topic;
+        } elseif ($siteType !== '' && GenerateImagesStep::safeSubjectMatter($siteType, $identities)) {
+            $about = "a {$siteType}";
         }
         $mood = ($vibe !== '' && GenerateImagesStep::safeSubjectMatter($vibe, $identities))
             ? ", {$vibe} mood"

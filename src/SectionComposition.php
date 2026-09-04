@@ -380,10 +380,7 @@ TEXT;
      */
     public static function directionContext(array $designDirection): array
     {
-        $rhythm = BoundedChoice::explicit(
-            $designDirection['rhythm'] ?? null,
-            Steps\DesignDirectionStep::RHYTHMS,
-        );
+        $rhythm = Steps\DesignDirectionStep::explicitRhythm($designDirection);
         return [
             self::CONTEXT_BROKEN_GRID_RHYTHM => $rhythm !== null
                 && in_array($rhythm, self::BROKEN_GRID_RHYTHMS, true),
@@ -391,12 +388,38 @@ TEXT;
     }
 
     /**
+     * Whether one archetype is eligible for this build, read from the
+     * persisted design direction. The page plan and fix-blocks both ask this
+     * one question here, so no step re-derives the gate.
+     */
+    public static function eligibleForProject(string $archetype, Project $project): bool
+    {
+        return self::eligible(
+            $archetype,
+            self::directionContext(Steps\DesignDirectionStep::dataFor($project)),
+        );
+    }
+
+    /**
      * The archetype marker on a delivered section's root, or null when the
-     * root carries none or the markup does not parse. This is the delivered
-     * echo of the plan's assignment that SectionUnit stamps.
+     * root carries none or the markup does not parse. SectionUnit stamps this
+     * marker to repeat the plan's assignment in the delivered part.
      */
     public static function rootMarker(string $markup): ?string
     {
+        return self::rootClassWithPrefix($markup, self::MARKER_PREFIX);
+    }
+
+    /**
+     * The first class token with the given prefix on the delivered root
+     * block, or null when there is none or the markup does not parse. The
+     * substring check first skips the parse on a part that cannot match.
+     */
+    public static function rootClassWithPrefix(string $markup, string $prefix): ?string
+    {
+        if (!str_contains($markup, $prefix)) {
+            return null;
+        }
         try {
             $document = BlockMarkup::parse($markup);
             $root = $document->topLevel();
@@ -404,7 +427,7 @@ TEXT;
                 return null;
             }
             foreach (self::classTokens($document, $root) as $token) {
-                if (str_starts_with($token, self::MARKER_PREFIX)) {
+                if (str_starts_with($token, $prefix)) {
                     return $token;
                 }
             }

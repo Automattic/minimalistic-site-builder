@@ -18,7 +18,7 @@ Always include exactly these fixed properties:
   "area": string,            // business type / domain / category, e.g. "bakery", "climate advocacy", "bicycle retail"
   "audience": string,        // who the site is for
   "language": string,        // BCP-47 code (e.g. "en", "es-AR") — the language ALL site copy will be written in: the language the prompt above is WRITTEN in, UNLESS the user explicitly asks for the site in another language. NOT the language of the site's subject, location, or audience: an English prompt about a business in a non-English-speaking country → "en", never that country's language
-  "persona_name": string,    // personal sites only (portfolio, CV, personal blog): the full name of the one person the site is about; "" for non-personal sites, including a business, shop, or studio that names its owner or founder
+  "persona_name": string,    // personal sites only (portfolio, CV, personal blog): the full name of the one person the site is about; "" for non-personal sites
   "email_domain": string,    // user-stated domain for contact — lowercase, no "@" or scheme; "" when the user stated none. NEVER invent one
   "invented": [string],      // which of "name" / "persona_name" you invented rather than took from the prompt; [] if both were stated. NEVER invent email_domain or any other contact fact
   "visual_vibe": string,     // a SHORT descriptive phrase of the overall feeling (two to six mood words) — a vibe, NOT concrete colors or fonts

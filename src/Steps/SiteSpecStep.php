@@ -243,8 +243,8 @@ final class SiteSpecStep implements Step
      * Whether the spec describes a personal site: a portfolio, a CV, or a
      * personal blog about one person. The site-spec prompt asks the model
      * for a `persona_name` on those sites only, and for an empty string on
-     * every other site. The model decides this from the whole brief. No
-     * keyword match is involved.
+     * every other site. The model decides this from the whole brief. This
+     * helper matches no keyword.
      *
      * @param array<mixed> $siteSpec
      */

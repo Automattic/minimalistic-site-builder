@@ -91,7 +91,7 @@ Shape (same keys as a collected placeholder, plus `role`):
 
 > simple geometric brand mark for a neighborhood bakery, warm rustic mood, single ink, no letters, no numerals, no wordmark, no signage
 
-`GenerateImagesStep::siteContext()` already omits the site name. Do not pass the name into the logo subject. `topic`, `area`, and `visual_vibe` are free prose and can still carry the identity ("Hearth & Crumb's sourdough programme"); compose the subject through `GenerateImagesStep::safeSubjectMatter()` and fall back to `a small business` (and drop the vibe suffix) when a candidate repeats `name`, `persona_name`, or `email_domain`.
+`GenerateImagesStep::siteContext()` already omits the site name. Do not pass the name into the logo subject. `topic`, `area`, and `visual_vibe` are free prose and can still carry the identity ("Hearth & Crumb's sourdough programme"); compose the subject through `GenerateImagesStep::safeSubjectMatter()` and fall back to a safe `site_type`, then to `an organization` (and drop the vibe suffix) when a candidate repeats `name`, `persona_name`, or `email_domain`.
 
 ## Site-logo post-process
 

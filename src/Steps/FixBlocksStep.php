@@ -20,7 +20,9 @@ use Automattic\SiteBuild\StaggeredChildren;
 use Automattic\SiteBuild\ShapeMarkup;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\Units\AbstractPageSectionUnit;
 use Automattic\SiteBuild\Units\GeneratedMarkup;
+use Automattic\SiteBuild\Units\HeroUnit;
 
 /**
  * Step 8 (deterministic): repair block-validation issues in generated markup.
@@ -65,6 +67,9 @@ final class FixBlocksStep implements Step
                 // keep a staggered row. Absent, the delivered root marker
                 // carries the same assignment.
                 'pages.json',
+                // HTML-first only, read only when it exists: which pages the
+                // graph routed through the blocks path.
+                ...($this->htmlFirst ? ['design/page-artifact-map.json'] : []),
                 'theme/theme.json',
                 'theme/parts/*',
             ],
@@ -643,18 +648,17 @@ final class FixBlocksStep implements Step
         $contentSize = self::themeContentSize($project);
         $spacingSlugs = self::themeSpacingSlugs($project);
         // A staggered row survives only where the build assigned it. The
-        // plan (pages.json) is the source of truth, and the root marker
-        // SectionUnit stamps is its delivered echo; either one keeps the row,
-        // because SectionUnit stamps no marker on a section whose root is not
-        // one wp:group. HTML-first sections carry no assignment and no marker,
-        // so there the committed rhythm decides, but only for parts with no
-        // section marker at all: a blocks-fallback section on that graph
-        // obeys the same rule as the blocks path.
+        // plan (pages.json) is the source of truth. The root marker that
+        // SectionUnit stamps repeats the assignment in the delivered part,
+        // and SectionUnit stamps no marker on a section whose root is not
+        // one wp:group, so either signal keeps the row. A transformed
+        // HTML-first section carries no assignment and no marker; for such
+        // a part only, the committed rhythm decides. A hero part and a page
+        // the HTML-first graph routed through the blocks path obey the
+        // blocks rule.
         $plannedStaggerParts = self::plannedOffsetGridParts($project);
-        $rhythmKeepsStagger = $htmlFirst && SectionComposition::eligible(
-            'offset-grid',
-            SectionComposition::directionContext(DesignDirectionStep::dataFor($project)),
-        );
+        $rhythmKeepsStagger = $htmlFirst && SectionComposition::eligibleForProject('offset-grid', $project);
+        $blocksFallbackPages = $rhythmKeepsStagger ? self::blocksFallbackPages($project) : [];
         foreach ($project->themeFiles() as $rel) {
             if (isset($excluded[$rel])) {
                 continue;
@@ -671,7 +675,13 @@ final class FixBlocksStep implements Step
             );
             $normalized = $result['markup'];
             if ($role === LayoutFixer::ROLE_SECTION
-                && !self::keepsStagger($rel, $normalized, $plannedStaggerParts, $rhythmKeepsStagger)
+                && !self::keepsStagger(
+                    $rel,
+                    $normalized,
+                    $plannedStaggerParts,
+                    $rhythmKeepsStagger,
+                    $blocksFallbackPages,
+                )
             ) {
                 $flat = StaggeredChildren::flatten($normalized);
                 $normalized = $flat['markup'];
@@ -701,29 +711,51 @@ final class FixBlocksStep implements Step
      *
      * @param array<string,true> $plannedStaggerParts theme-relative paths of
      *        the sections the plan assigned offset-grid
-     * @param bool $rhythmKeepsStagger the HTML-first page-level grant, which
-     *        applies only to a part that carries no section marker
+     * @param bool $rhythmKeepsStagger the HTML-first page-level grant; it
+     *        reaches a transformed part only, never a hero part, a part that
+     *        carries a section marker, or a page on a blocks-fallback route
+     * @param array<string,true> $blocksFallbackPages page slugs the HTML-first
+     *        graph routed through the blocks path
      */
     private static function keepsStagger(
         string $rel,
         string $markup,
         array $plannedStaggerParts,
         bool $rhythmKeepsStagger,
+        array $blocksFallbackPages,
     ): bool {
         if (isset($plannedStaggerParts[$rel])) {
             return true;
         }
         $marker = SectionComposition::rootMarker($markup);
-        if ($marker === SectionComposition::marker('offset-grid')) {
-            return true;
+        if ($marker !== null) {
+            return $marker === SectionComposition::marker('offset-grid');
         }
-        return $rhythmKeepsStagger && $marker === null;
+        if (!$rhythmKeepsStagger) {
+            return false;
+        }
+        if (SectionComposition::rootClassWithPrefix($markup, HeroUnit::MARKER_PREFIX) !== null) {
+            return false;
+        }
+        $pageSlug = self::partPageSlug($rel);
+        return $pageSlug !== null && !isset($blocksFallbackPages[$pageSlug]);
+    }
+
+    /** The page slug of a `parts/page-<page>--<section>.html` part, or null. */
+    private static function partPageSlug(string $rel): ?string
+    {
+        $prefix = 'parts/' . AbstractPageSectionUnit::KEY_PREFIX;
+        if (!str_starts_with($rel, $prefix)) {
+            return null;
+        }
+        $rest = substr($rel, strlen($prefix));
+        $at = strpos($rest, '--');
+        return $at === false || $at === 0 ? null : substr($rest, 0, $at);
     }
 
     /**
      * The section parts the plan assigned the offset-grid archetype, keyed by
-     * theme-relative path (`parts/page-<page>--<section>.html`). Empty when
-     * no plan exists yet, as in a partial run.
+     * theme-relative path. Empty when no plan exists yet, as in a partial run.
      *
      * @return array<string,true>
      */
@@ -744,11 +776,33 @@ final class FixBlocksStep implements Step
                 }
                 $slug = trim((string) ($section['slug'] ?? ''));
                 if ($pageSlug !== '' && $slug !== '') {
-                    $parts["parts/page-{$pageSlug}--{$slug}.html"] = true;
+                    $parts['parts/' . SectionsStep::partSlug($pageSlug, $slug) . '.html'] = true;
                 }
             }
         }
         return $parts;
+    }
+
+    /**
+     * The pages the HTML-first graph routed through the blocks path because
+     * their design artifact failed. TransformSiteStep reads the same map and
+     * the same marker file. Empty on the blocks graph and before the map
+     * exists.
+     *
+     * @return array<string,true>
+     */
+    private static function blocksFallbackPages(Project $project): array
+    {
+        if (!$project->exists('design/page-artifact-map.json')) {
+            return [];
+        }
+        $pages = [];
+        foreach ((array) $project->readJson('design/page-artifact-map.json') as $slug => $artifact) {
+            if (is_string($artifact) && $project->exists("design/{$artifact}.failed")) {
+                $pages[(string) $slug] = true;
+            }
+        }
+        return $pages;
     }
 
     /**

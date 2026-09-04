@@ -14,7 +14,7 @@ use Automattic\SiteBuild\HeroComposition;
  */
 final class HeroUnit extends AbstractPageSectionUnit
 {
-    private const MARKER_PREFIX = 'hero-composition--';
+    public const MARKER_PREFIX = 'hero-composition--';
     private const MOBILE_MARKER_PREFIX = 'hero-mobile--';
 
     /**
