@@ -802,6 +802,25 @@ test('collect-images appends a site-logo spec for a business site', function () 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('collect-images appends a site-logo for every non-personal site, whatever its kind', function () {
+    foreach ([
+        ['name' => 'Stillrange', 'site_type' => 'photography portfolio', 'area' => 'landscape photography', 'persona_name' => ''],
+        ['name' => 'Northlight', 'site_type' => 'art gallery', 'area' => 'contemporary painting', 'persona_name' => ''],
+        ['name' => 'Riverbank Trust', 'site_type' => 'nonprofit', 'area' => 'river conservation', 'persona_name' => ''],
+        ['name' => 'Ledger', 'site_type' => 'product landing page', 'area' => 'bookkeeping software'],
+    ] as $spec) {
+        [$project, $tmp] = collect_fixture();
+        $project->writeJson('siteSpec.json', $spec);
+        $project->writeText('theme/parts/page-home--hero.html', '<!-- wp:paragraph --><p>Hi</p><!-- /wp:paragraph -->');
+
+        (new CollectImagesStep())->run($project);
+
+        $roles = array_column($project->readJson('images.json'), 'role', 'filename');
+        assert_eq('site-logo', $roles['site-logo.png'] ?? null, $spec['name'] . ' gets a mark');
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
 test('collect-images does not append a site-logo for a personal site', function () {
     [$project, $tmp] = collect_fixture();
     $project->writeJson('siteSpec.json', [

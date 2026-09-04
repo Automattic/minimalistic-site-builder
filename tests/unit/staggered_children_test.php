@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\LayoutFixer;
+use Automattic\SiteBuild\SectionComposition;
 use Automattic\SiteBuild\StaggeredChildren;
 
 function stagger_card(string $title, string $top = '', bool $htmlStyle = false): string
@@ -213,80 +214,95 @@ test('StaggeredChildren does not flatten a vertical stack of groups', function (
     assert_eq([], $result['notes']);
 });
 
-test('normalize-layout flattens staggered columns on a non-photography site', function () {
-    with_project('stagger_bakery_', function ($project): void {
-        $project->writeJson('meta.json', ['prompt' => 'A neighborhood bakery']);
-        $project->writeJson('siteSpec.json', [
-            'name' => 'Hearth',
-            'area' => 'bakery',
-            'topic' => 'sourdough',
-        ]);
+function stagger_section(string $inner, string $marker = ''): string
+{
+    $class = $marker === '' ? '' : '{"className":"' . $marker . '"} ';
+    $attr = $marker === '' ? '' : ' ' . $marker;
+    return '<!-- wp:group ' . $class . '-->'
+        . '<div class="wp-block-group' . $attr . '">'
+        . $inner
+        . '</div><!-- /wp:group -->';
+}
+
+test('normalize-layout flattens staggered columns in a section the plan did not assign offset-grid', function () {
+    with_project('stagger_unassigned_', function ($project): void {
+        // A photography brief under an offset rhythm: neither the brief nor
+        // the direction saves an unassigned stagger. Only the marker does.
+        $project->writeJson('siteSpec.json', ['name' => 'Stillrange', 'area' => 'photography']);
+        $project->writeJson('designDirection.json', ['rhythm' => 'offset']);
         $project->writeJson('theme/theme.json', ['version' => 3, 'settings' => ['layout' => ['contentSize' => '860px']]]);
-        $markup = stagger_row(
+        $markup = stagger_section(stagger_row(
             stagger_column(stagger_card('One'))
             . stagger_column(stagger_card('Two', '3rem'))
-        );
+        ), SectionComposition::marker('equal-card-grid'));
         $project->writeText('theme/parts/page-home--cards.html', $markup);
 
         (new \Automattic\SiteBuild\Steps\NormalizeLayoutStep())->run($project);
 
         $delivered = $project->readText('theme/parts/page-home--cards.html');
-        assert_true(!str_contains($delivered, '"top":"3rem"'), 'bakery rows are leveled');
+        assert_true(!str_contains($delivered, '"top":"3rem"'), 'unassigned rows are leveled');
         assert_contains('flattened staggered top offsets', $project->readText('logs/normalize-layout.log'));
     });
 });
 
-test('normalize-layout keeps staggered columns on a photography site', function () {
-    with_project('stagger_photo_', function ($project): void {
-        $project->writeJson('meta.json', ['prompt' => 'A landscape photography portfolio']);
-        $project->writeJson('siteSpec.json', [
-            'name' => 'Stillrange',
-            'area' => 'photography',
-            'topic' => 'landscape photography',
-        ]);
+test('normalize-layout keeps staggered columns in a section assigned offset-grid', function () {
+    with_project('stagger_assigned_', function ($project): void {
+        // A bakery: the brief no longer decides. The assignment does.
+        $project->writeJson('siteSpec.json', ['name' => 'Hearth', 'area' => 'bakery']);
+        $project->writeJson('designDirection.json', ['rhythm' => 'offset']);
         $project->writeJson('theme/theme.json', ['version' => 3, 'settings' => ['layout' => ['contentSize' => '860px']]]);
-        $markup = stagger_row(
+        $markup = stagger_section(stagger_row(
             stagger_column(stagger_card('One'))
             . stagger_column(stagger_card('Two', '3rem'))
-        );
+        ), SectionComposition::marker('offset-grid'));
         $project->writeText('theme/parts/page-home--cards.html', $markup);
 
         (new \Automattic\SiteBuild\Steps\NormalizeLayoutStep())->run($project);
 
         $delivered = $project->readText('theme/parts/page-home--cards.html');
-        assert_contains('"top":"3rem"', $delivered, 'photography rows may stay staggered');
+        assert_contains('"top":"3rem"', $delivered, 'assigned offset-grid rows stay staggered');
     });
 });
 
-test('normalize-layout keeps staggered columns on a gallery site', function () {
-    with_project('stagger_gallery_', function ($project): void {
-        $project->writeJson('meta.json', ['prompt' => 'A contemporary art gallery in Brooklyn']);
-        $project->writeJson('siteSpec.json', [
-            'name' => 'Northlight',
-            'area' => 'art gallery',
-            'topic' => 'contemporary painting',
-            'site_type' => 'gallery',
-        ]);
-        $project->writeJson('theme/theme.json', ['version' => 3, 'settings' => ['layout' => ['contentSize' => '860px']]]);
-        $markup = stagger_row(
-            stagger_column(stagger_card('One'))
-            . stagger_column(stagger_card('Two', '3rem'))
-        );
-        $project->writeText('theme/parts/page-home--cards.html', $markup);
+test('normalize-layout on the HTML-first path keeps stagger only under a broken-grid rhythm', function () {
+    foreach ([
+        ['rhythm' => 'offset', 'keeps' => true],
+        ['rhythm' => 'gallery', 'keeps' => true],
+        ['rhythm' => 'alternating', 'keeps' => false],
+        ['rhythm' => null, 'keeps' => false],
+    ] as $case) {
+        with_project('stagger_htmlfirst_', function ($project) use ($case): void {
+            $project->writeJson('siteSpec.json', ['name' => 'Hearth', 'area' => 'bakery']);
+            if ($case['rhythm'] !== null) {
+                $project->writeJson('designDirection.json', ['rhythm' => $case['rhythm']]);
+            }
+            $project->writeJson('theme/theme.json', ['version' => 3, 'settings' => ['layout' => ['contentSize' => '860px']]]);
+            // HTML-first sections carry no archetype marker.
+            $markup = stagger_section(stagger_row(
+                stagger_column(stagger_card('One'))
+                . stagger_column(stagger_card('Two', '3rem'))
+            ));
+            $project->writeText('theme/parts/page-home--cards.html', $markup);
 
-        (new \Automattic\SiteBuild\Steps\NormalizeLayoutStep())->run($project);
+            (new \Automattic\SiteBuild\Steps\NormalizeLayoutStep(htmlFirst: true))->run($project);
 
-        $delivered = $project->readText('theme/parts/page-home--cards.html');
-        assert_contains('"top":"3rem"', $delivered, 'gallery rows may stay staggered');
-    });
+            $delivered = $project->readText('theme/parts/page-home--cards.html');
+            $label = 'rhythm ' . var_export($case['rhythm'], true);
+            if ($case['keeps']) {
+                assert_contains('"top":"3rem"', $delivered, $label . ' keeps the stagger');
+            } else {
+                assert_true(!str_contains($delivered, '"top":"3rem"'), $label . ' levels the row');
+            }
+        });
+    }
 });
 
-test('home-body and inner-page design prompts reserve stagger for photography and gallery sites', function () {
+test('home-body and inner-page design prompts keep rows level unless the design preview staggers them', function () {
     foreach (['home-body-design.md', 'inner-page-design.md'] as $file) {
         $prompt = (string) file_get_contents(repo_path('prompts/' . $file));
-        assert_contains('photography', $prompt, $file);
-        assert_contains('gallery', $prompt, $file);
-        assert_contains('stagger', $prompt, $file);
+        assert_contains('Do not stagger a row of siblings', $prompt, $file);
+        assert_contains('unless the design preview already breaks its rows that way', $prompt, $file);
+        assert_true(!str_contains($prompt, 'photography or gallery site'), $file . ' no longer gates on a kind of site');
     }
 });
 

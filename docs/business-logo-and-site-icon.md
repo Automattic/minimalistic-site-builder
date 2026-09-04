@@ -17,11 +17,11 @@ Piggyback on the existing image pipeline. No new graph step. wpcom's finish span
 
 ```
 site-spec
-    → BusinessSite::matches()?
+    → SiteSpecStep::isPersonal()? (persona_name set)
 collect-images
     → if yes, append images.json spec: site-logo.png
 header-hero
-    → business sites: ensure wp:site-logo immediately before wp:site-title,
+    → non-personal sites: ensure wp:site-logo immediately before wp:site-title,
       tagged className=site-logo-mark
 assemble-pages
     → copy role:site-logo into plugin/images.json
@@ -40,48 +40,33 @@ plugin activation
     → CSS hides header site-title while the injected mark renders an img
 ```
 
-## BusinessSite
+## Who gets a mark
 
-New helper `src/BusinessSite.php`, same call shape as `PhotographySite`.
+**Changed in BIGR-986 (2026-09-04).** The first version gated the mark on a
+`BusinessSite` keyword matcher: a list of about twenty business nouns (shop,
+salon, agency, hotel, ...) matched against the spec, minus photography and
+gallery sites and minus personal sites. That list was an allowlist: a product
+landing page, a nonprofit, a school, or a photographer studio got no mark.
+The matcher is gone, together with `PhotographySite`.
+
+The gate is now the one identity decision the site-spec step already makes:
 
 ```php
-public static function matches(array $siteSpec, string $prompt = ''): bool
+SiteSpecStep::isPersonal(array $siteSpec): bool   // persona_name is non-empty
 ```
 
-`$prompt` is not part of the business decision, but it **is** forwarded to the photography check: `PhotographySite::matches($siteSpec, $prompt)`. Both existing callers pass the prompt (`SectionComposition.php:372`, `FixBlocksStep.php:645`), and a photographer whose spec says `site_type: studio` carries the only "photographer" signal in the prompt. Dropping it there would classify them as a business.
+- **Personal site** (`persona_name` set: portfolio, CV, personal blog) keeps
+  the plain site title. No mark, no header injection.
+- **Every other site** gets the generated mark and the header injection.
 
-**No** when:
-
-- `persona_name` is a non-empty string (personal portfolio, CV, personal blog).
-- `PhotographySite::matches($siteSpec, $prompt)` is true (photography / gallery).
-
-**Yes** when the concatenated lowercase text of `site_type`, `area`, `topic`, `title`, and `name` matches:
-
-```
-/\b(?:business(?:es)?|storefronts?|shops?|stores?|retail(?:ers?)?|restaurants?|cafés?|cafes?|baker(?:y|ies)|bars?|salons?|spas?|clinics?|gyms?|studios?|agenc(?:y|ies)|consultanc(?:y|ies)|firms?|saas|hotels?|boutiques?)\b/u
-```
-
-Every token is a noun for a kind of business. `services?` was considered and dropped: it is a noun for a kind of sentence, and turns up in `topic` prose on sites that are not businesses.
-
-Pinned cases:
-
-| Spec | Result |
-|---|---|
-| `site_type: business storefront`, bakery area | true |
-| restaurant / cafe / café | true |
-| hair salon, consulting firm, hotel | true |
-| `persona_name` set | false |
-| portfolio, blog, landing page | false |
-| photography / gallery (`PhotographySite`) | false |
-| `site_type: studio` + "photographer" in the prompt only | false |
-
-Allowlist is conservative. Widening it is a later change.
+The prompt is no longer read: `meta.json` left the `reads` of `collect-images`
+and `header-hero`.
 
 ## Image spec
 
 Reserved filename: `site-logo.png`. Content filenames are subject-derived; this name is reserved for the synthetic mark.
 
-`collect-images` appends the spec when `BusinessSite::matches()`. It reads `siteSpec.json` (add to `StepDeclaration::reads`). If `site-logo.png` is already in `images.json` from markup, do not overwrite that row and do not tag it `site-logo` — skip the synthetic mark and warn. A content image must not become the site logo.
+`collect-images` appends the spec unless `SiteSpecStep::isPersonal()`. It reads `siteSpec.json` (add to `StepDeclaration::reads`). If `site-logo.png` is already in `images.json` from markup, do not overwrite that row and do not tag it `site-logo` — skip the synthetic mark and warn. A content image must not become the site logo.
 
 ```
 file='images.json'; asset='site-logo.png'; delivered no synthetic mark; disposition=the reserved site-logo filename was already collected from page markup
@@ -195,7 +180,7 @@ header:has(.wp-block-site-logo.site-logo-mark img) .wp-block-site-title {
 
 Both selectors are needed: `shellClassName()` only emits `site-header-shell` for non-static header behaviours (`AssemblePagesStep.php:307-322`).
 
-The rule is emitted for every theme. It is inert without the class, so no gate on `BusinessSite` is required in this step.
+The rule is emitted for every theme. It is inert without the class, so no personal-site gate is required in this step.
 
 The editor deliberately does **not** get this rule. `add_editor_style` still mirrors `style.css`; the inline hide stays on the front-end `wp_enqueue_scripts` callback so a business header in the site editor keeps the title visible and editable. Removing the custom logo there must still reveal the title the visitor will see.
 
@@ -246,8 +231,8 @@ Generated-content ladder: never abort the build for a missing or bad mark.
 
 Suites: `tests/run.php` (unit) and `tests/run-integration.php` (integration). Both must pass.
 
-- `BusinessSite` matrix (table above), including the prompt-only photographer case, an empty spec, an all-caps `CAFÉ` title, and every allowlist token.
-- `collect-images` appends `site-logo.png` + `role` only for a business spec; personal and photography fixtures do not gain the row; a pre-existing `site-logo.png` placeholder is left untagged and warned; identity-bearing `area`/`topic`/`visual_vibe` fall back rather than entering the subject.
+- `collect-images` appends the mark for photography, gallery, nonprofit, and product-page specs with no `persona_name`.
+- `collect-images` appends `site-logo.png` + `role` for a business spec; a personal fixture does not gain the row; a pre-existing `site-logo.png` placeholder is left untagged and warned; identity-bearing `area`/`topic`/`visual_vibe` fall back rather than entering the subject.
 - `ImageTransparency::padToSquare` centres a non-square bitmap on a transparent square at `max(w, h, 512)` without resampling, and returns its input unchanged on failure.
 - `ImageTransparency::isKeyed` is false for a fully opaque PNG, true for one with transparent corners, and true when those corners quantise to a small non-zero alpha (`< 0.01`).
 - `generate-images` square-pads only the `site-logo` role, and on an unkeyed mark drops the role, removes the manifest row, and does not copy the file.

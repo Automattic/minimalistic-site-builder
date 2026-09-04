@@ -239,6 +239,19 @@ final class SiteSpecStep implements Step
             : "the SITE SPEC's own language (never a language implied by the site's location or audience)";
     }
 
+    /**
+     * Whether the spec describes a personal site — a portfolio, CV, or
+     * personal blog about one person. The site-spec prompt asks the model for
+     * a `persona_name` on exactly those sites and an empty string elsewhere,
+     * so this is the model's call about the brief, not a keyword match.
+     *
+     * @param array<mixed> $siteSpec
+     */
+    public static function isPersonal(array $siteSpec): bool
+    {
+        return trim((string) ($siteSpec['persona_name'] ?? '')) !== '';
+    }
+
     /** The normalized logical writing direction persisted in siteSpec.json. */
     public static function writingDirectionOf(Project $project): string
     {

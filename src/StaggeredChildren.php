@@ -8,9 +8,11 @@ namespace Automattic\SiteBuild;
  *
  * The section recipe's `staggered-grid` (and HTML-first copies of it) push
  * every second column down with a top margin so items don't share a baseline.
- * That rhythm rarely reads well outside photography and gallery sites. This pass equalizes
- * sibling top margins in horizontal rows; stacked groups and uniformly
- * offset siblings stay untouched. Idempotent. Generated defects never throw.
+ * That rhythm reads as a defect wherever the build did not assign it, so
+ * fix-blocks runs this pass on every section except one assigned the
+ * offset-grid archetype. It equalizes sibling top margins in horizontal
+ * rows; stacked groups and uniformly offset siblings stay untouched.
+ * Idempotent. Generated defects never throw.
  */
 final class StaggeredChildren
 {

@@ -4,10 +4,10 @@ Build a staggered grid whose rows do not line up. Unequal column widths and a
 different top offset per item give the band its broken rhythm. The stagger is
 the composition, so it must be visible at the desktop side-by-side state.
 
-Use this archetype on photography and gallery sites only. When the SITE SPEC is
-not a photographer, a photography, a photojournalism, or a gallery brief,
-execute this assignment as `equal-card-grid` with level tops instead of
-offsetting the items.
+The page plan assigns this archetype only when the DESIGN DIRECTION's rhythm
+is `offset` or `gallery`. When the assignment reaches you under any other
+rhythm, execute it as `equal-card-grid` with level tops instead of offsetting
+the items.
 
 - Structure: one `wp:columns` without the `equal-cards` class. Every
   `wp:column` carries an explicit `"width"` and the widths sum to 100%. Push

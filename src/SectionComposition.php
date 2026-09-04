@@ -90,10 +90,21 @@ final class SectionComposition
      *
      * @var list<string>
      */
-    public const CONTEXT_KEYS = [self::CONTEXT_PHOTOGRAPHY_SITE];
+    public const CONTEXT_KEYS = [self::CONTEXT_BROKEN_GRID_RHYTHM];
 
-    /** True when the brief is a photography, photojournalism, or gallery site. */
-    public const CONTEXT_PHOTOGRAPHY_SITE = 'photography_site';
+    /**
+     * True when the committed design direction chose a band rhythm that
+     * breaks the grid: `offset` or `gallery` (DesignDirectionStep::RHYTHMS).
+     */
+    public const CONTEXT_BROKEN_GRID_RHYTHM = 'broken_grid_rhythm';
+
+    /**
+     * The band rhythms under which a staggered row is a design decision
+     * rather than an accident.
+     *
+     * @var list<string>
+     */
+    public const BROKEN_GRID_RHYTHMS = ['offset', 'gallery'];
 
     /**
      * @var array<string,array<string,mixed>>
@@ -194,8 +205,8 @@ final class SectionComposition
             'max_images' => 12,
             'copy_capacity' => 'compact',
             'requires_row' => true,
-            'requires_context' => [self::CONTEXT_PHOTOGRAPHY_SITE],
-            'ineligible_reason' => 'staggered rows are reserved for photography and gallery sites',
+            'requires_context' => [self::CONTEXT_BROKEN_GRID_RHYTHM],
+            'ineligible_reason' => 'staggered rows need an offset or gallery band rhythm from the design direction',
             'root_hook' => '.section-composition--offset-grid',
             'prompt' => 'section-compositions/offset-grid.md',
         ],
@@ -360,16 +371,18 @@ TEXT;
 
     /**
      * The eligibility context for one build. This is the single place that
-     * turns site facts into the predicate's inputs, so no caller re-derives
-     * the photography gate for itself.
+     * turns the committed design direction into the predicate's inputs, so no
+     * caller re-derives the rhythm gate for itself.
      *
-     * @param array<mixed> $siteSpec
+     * @param array<mixed> $designDirection the persisted designDirection.json
+     *        data; an empty array (no direction yet) grants nothing
      * @return array<string,bool>
      */
-    public static function siteContext(array $siteSpec, string $prompt = ''): array
+    public static function directionContext(array $designDirection): array
     {
+        $rhythm = strtolower(trim((string) ($designDirection['rhythm'] ?? '')));
         return [
-            self::CONTEXT_PHOTOGRAPHY_SITE => PhotographySite::matches($siteSpec, $prompt),
+            self::CONTEXT_BROKEN_GRID_RHYTHM => in_array($rhythm, self::BROKEN_GRID_RHYTHMS, true),
         ];
     }
 

@@ -13,9 +13,9 @@ use Automattic\SiteBuild\BlockSerializer\Repair;
 use Automattic\SiteBuild\CtaStyleMarkup;
 use Automattic\SiteBuild\ImageCaptions;
 use Automattic\SiteBuild\LayoutFixer;
-use Automattic\SiteBuild\PhotographySite;
 use Automattic\SiteBuild\PhpBlockFixer;
 use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\SectionComposition;
 use Automattic\SiteBuild\StaggeredChildren;
 use Automattic\SiteBuild\ShapeMarkup;
 use Automattic\SiteBuild\Step;
@@ -61,8 +61,6 @@ final class FixBlocksStep implements Step
             reads: [
                 'designDirection.json',
                 ...($this->htmlFirst ? ['design/site.css'] : []),
-                'meta.json',
-                'siteSpec.json',
                 'theme/theme.json',
                 'theme/parts/*',
             ],
@@ -640,12 +638,13 @@ final class FixBlocksStep implements Step
         $excluded = array_fill_keys($excluded, true);
         $contentSize = self::themeContentSize($project);
         $spacingSlugs = self::themeSpacingSlugs($project);
-        $siteSpec = $project->exists('siteSpec.json') ? $project->readJson('siteSpec.json') : [];
-        $meta = $project->exists('meta.json') ? $project->readJson('meta.json') : [];
-        $flattenStaggeredChildren = !PhotographySite::matches(
-            is_array($siteSpec) ? $siteSpec : [],
-            (string) ($meta['prompt'] ?? ''),
-        );
+        // A staggered row survives only where the build assigned it: a
+        // section whose root carries the offset-grid marker. HTML-first
+        // sections carry no assignment, so there the design direction's
+        // committed rhythm is the only signal and it decides for the page.
+        $keepStaggerWithoutMarker = $htmlFirst && SectionComposition::directionContext(
+            DesignDirectionStep::dataFor($project),
+        )[SectionComposition::CONTEXT_BROKEN_GRID_RHYTHM];
         foreach ($project->themeFiles() as $rel) {
             if (isset($excluded[$rel])) {
                 continue;
@@ -661,7 +660,10 @@ final class FixBlocksStep implements Step
                 $wideMeasureRootClasses,
             );
             $normalized = $result['markup'];
-            if ($flattenStaggeredChildren && $role === LayoutFixer::ROLE_SECTION) {
+            if ($role === LayoutFixer::ROLE_SECTION
+                && !$keepStaggerWithoutMarker
+                && !self::assignedStagger($normalized)
+            ) {
                 $flat = StaggeredChildren::flatten($normalized);
                 $normalized = $flat['markup'];
                 foreach ($flat['notes'] as $note) {
@@ -683,6 +685,15 @@ final class FixBlocksStep implements Step
             }
         }
         return $notes;
+    }
+
+    /**
+     * Whether a section was assigned the staggered archetype: its delivered
+     * root carries the offset-grid marker class SectionUnit stamps.
+     */
+    private static function assignedStagger(string $markup): bool
+    {
+        return str_contains($markup, SectionComposition::marker('offset-grid'));
     }
 
     /**

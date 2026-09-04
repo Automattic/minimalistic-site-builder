@@ -3,7 +3,6 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
-use Automattic\SiteBuild\BusinessSite;
 use Automattic\SiteBuild\GeminiImage;
 use Automattic\SiteBuild\JsonDecoder;
 use Automattic\SiteBuild\MediaReferenceRemoval;
@@ -74,7 +73,7 @@ final class CollectImagesStep implements Step
         return new StepDeclaration(
             id: $this->id(),
             label: $this->label(),
-            reads: ['theme/parts/*', 'siteSpec.json', 'meta.json'],
+            reads: ['theme/parts/*', 'siteSpec.json'],
             writes: [
                 'images.json',
                 'theme/parts/*',
@@ -284,14 +283,9 @@ final class CollectImagesStep implements Step
             return;
         }
         $siteSpec = $project->readJson('siteSpec.json');
-        $prompt = '';
-        if ($project->exists('meta.json')) {
-            // RefinePromptStep has already rewritten meta.json['prompt']; the
-            // original lives at original_prompt. Forward the refined text so
-            // PhotographySite sees the same brief later steps see.
-            $prompt = (string) ($project->readJson('meta.json')['prompt'] ?? '');
-        }
-        if (!BusinessSite::matches($siteSpec, $prompt)) {
+        // A personal site keeps its name set in type; every other site gets a
+        // generated mark. The site-spec step decides which is which.
+        if (SiteSpecStep::isPersonal($siteSpec)) {
             return;
         }
         if (isset($byFilename['site-logo.png'])) {

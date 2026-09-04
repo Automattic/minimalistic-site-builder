@@ -462,7 +462,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         $pages = self::flattenPages($siteSpec);
         $blueprint = DesignDirectionStep::heroBlueprintFor($project);
         $frontProjection = HeroComposition::planProjection($blueprint);
-        $allowOffsetGrid = self::allowOffsetGridFor($project, $siteSpec);
+        $allowOffsetGrid = self::allowOffsetGridFor($project);
         $actionContext = self::withPlannedSectionAnchors(
             self::primaryActionContext($siteSpec, $pages),
             $pages,
@@ -1032,7 +1032,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     {
         $siteSpec = $project->readJson('siteSpec.json');
         $actionContext = self::primaryActionContext($siteSpec, $pages);
-        $allowOffsetGrid = self::allowOffsetGridFor($project, $siteSpec);
+        $allowOffsetGrid = self::allowOffsetGridFor($project);
         $warnings = [];
         $repairs = [];
         $out = [];
@@ -1351,7 +1351,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
      * @param array<string,mixed> $actionContext known page/contact targets
      * @param list<string> $warnings appended only for delivered value loss
      * @param list<string> $repairs appended for semantics-preserving fixes
-     * @param bool $allowOffsetGrid staggered rows are photography- and gallery-only
+     * @param bool $allowOffsetGrid staggered rows need an offset or gallery band rhythm
      * @return array<int,array<string,mixed>>
      */
     public static function normalize(
@@ -2215,8 +2215,8 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             ) {
                 continue;
             }
-            // No offset-grid either: this runs without the photography gate
-            // the outer flow threads, so the safe set is the narrower one.
+            // No offset-grid either: this runs without the rhythm gate the
+            // outer flow threads, so the safe set is the narrower one.
             $replacement = self::pickArchetype($archetypes, (int) $i, false, 'full-bleed-cover');
             if ($replacement === 'full-bleed-cover') {
                 continue;
@@ -3310,30 +3310,27 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
 
     /**
      * Whether this build may use the archetypes the catalog gates. The gate
-     * itself lives in `SectionComposition`; this step only supplies the site
-     * facts the predicate reads.
-     *
-     * @param array<mixed> $siteSpec
+     * itself lives in `SectionComposition`; this step only supplies the
+     * committed design direction the predicate reads.
      */
-    private static function allowOffsetGridFor(Project $project, array $siteSpec): bool
+    private static function allowOffsetGridFor(Project $project): bool
     {
-        $meta = $project->exists('meta.json') ? $project->readJson('meta.json') : [];
         return SectionComposition::eligible(
             'offset-grid',
-            SectionComposition::siteContext($siteSpec, (string) ($meta['prompt'] ?? '')),
+            SectionComposition::directionContext(DesignDirectionStep::dataFor($project)),
         );
     }
 
     /**
      * The catalog's eligibility context for this page's plan. The flag this
-     * step plumbs is exactly "this build is a photography or gallery site",
-     * which is the one predicate input the catalog reads today.
+     * step plumbs is exactly "the design direction chose an offset or gallery
+     * rhythm", which is the one predicate input the catalog reads today.
      *
      * @return array<string,bool>
      */
     private static function eligibilityContext(bool $allowOffsetGrid): array
     {
-        return [SectionComposition::CONTEXT_PHOTOGRAPHY_SITE => $allowOffsetGrid];
+        return [SectionComposition::CONTEXT_BROKEN_GRID_RHYTHM => $allowOffsetGrid];
     }
 
     /** Whether one archetype is usable on a page carrying this gate flag. */
