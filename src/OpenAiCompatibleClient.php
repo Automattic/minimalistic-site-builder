@@ -26,14 +26,13 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporti
      *
      * This pipeline wants block markup and JSON, not hidden thinking that
      * spends the same completion budget, so every model Baseten lets us quiet
-     * gets `none`. GLM 5.3 Flash is documented as impossible to switch off, so
-     * it takes its `low` floor — the proxy does currently accept `none` there,
-     * but undocumented leniency is not something to build a default on.
+     * gets `none`. A model with a vendor profile in BASETEN_MODEL_PROFILE is
+     * absent here: that profile owns its effort, and two tables answering the
+     * same question is how they drift apart.
      *
-     * Kimi K3 is quieted here even though it leads the large tier, unlike the
-     * OpenRouter K3 profile. That profile survives on a token floor applied
-     * only when the caller pins no budget of its own; a caller that DOES pin a
-     * small one gets an empty answer. bin/llm-conformance.php is exactly such a
+     * Kimi K3 is quieted here, unlike the OpenRouter K3 profile. That profile
+     * survives on a token floor applied only when the caller pins no budget of
+     * its own; a caller that DOES pin a small one gets an empty answer. bin/llm-conformance.php is exactly such a
      * caller, and every live check failed that way ("no text content in
      * streamed response") until K3 was listed below. Baseten, unlike
      * OpenRouter, gives us a switch — so use it rather than rely on the floor.
@@ -54,12 +53,57 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporti
         'deepseek-ai/deepseek-v4-flash-0731' => 'none',
         'zai-org/glm-5.2'                    => 'none',
         'zai-org/glm-5.2-fast'               => 'none',
-        'zai-org/glm-5.3-flash'              => 'low',
         'moonshotai/kimi-k3'                 => 'none',
         'moonshotai/kimi-k2.6'               => 'none',
         'openai/gpt-oss-120b'                => 'none',
         'thinkingmachines/inkling'           => 'none',
         'thinkingmachines/inkling-small'     => 'none',
+    ];
+
+    /**
+     * Vendor-recommended request settings per Baseten model, keyed by
+     * lowercased id. Defaults only: an explicit value on the request wins, so a
+     * step that has tuned its own temperature keeps it.
+     *
+     * These are the publisher's numbers for the model, not this pipeline's
+     * preference, and they can disagree — GLM 5.3 Flash is asked to reason at
+     * `max`, which measured 2.6x the completion tokens and 3.3x the wall time
+     * of `low` on a page-plan-shaped prompt. That cost is accepted deliberately
+     * so the model runs as its publisher specifies.
+     *
+     * `thinking` and `tool_stream` are sent for the direct Baseten route
+     * (BASETEN_BASE_URL). The wpcom proxy accepts both and acts on neither —
+     * `thinking.type` enabled, disabled and absent all measured identical, zero
+     * reasoning — so on that route `reasoning_effort` is the lever that works.
+     * They are sent rather than dropped because the same model id is served
+     * both ways and the publisher documents them; a host that honors them gets
+     * the documented behaviour, one that ignores them is unaffected.
+     */
+    private const BASETEN_MODEL_PROFILE = [
+        'zai-org/glm-5.3-flash' => [
+            // The publisher recommends `max`. This model serves the SMALL tier
+            // -- the cheap structural steps -- and `max` is not survivable
+            // there: it measured 2.6x the completion tokens and 3.3x the wall
+            // time of `low` on a page-plan-shaped prompt, and it fails the
+            // Llm contract outright at the small budgets those steps pin,
+            // answering with an empty string (bin/llm-conformance.php goes
+            // from 7/7 to a baseline probe that cannot complete at all).
+            // A caller that wants the publisher's number asks for it per
+            // request; see reasoningEffortFor().
+            'reasoning_effort' => 'low',
+            'temperature'      => 1.0,
+            'top_p'            => 0.95,
+            'thinking'         => ['type' => 'enabled', 'clear_thinking' => false],
+            'tool_stream'      => true,
+            // Reasoning shares the completion budget with the answer, so a
+            // request that turns it up has to buy the room -- the same debt
+            // KIMI_K3_MIN_MAX_TOKENS pays for K3. Applied only when the
+            // resolved effort is actually heavy, so the `low` default keeps
+            // the ordinary 16k ceiling, and only when the caller pinned no
+            // budget of its own; one that pins a small budget still defeats
+            // it, which is precisely how `max` returns an empty answer.
+            'min_max_tokens'   => 65536,
+        ],
     ];
 
     /**
@@ -381,7 +425,7 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporti
 
         // Same intent one provider over: quiet the open-weight models Baseten
         // lets us quiet, so thinking tokens do not eat the markup budget.
-        $effort = self::basetenReasoningEffort($provider, $model);
+        $effort = self::resolvedReasoningEffort($req, $provider, $model);
         if ($effort !== null) {
             $body['reasoning_effort'] = $effort;
         }
@@ -389,8 +433,22 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporti
         // OpenAI reasoning models reject a non-default temperature. Keep Kimi
         // K3 on its provider sampling default too: this profile is tuned
         // around K3's default max-effort reasoning behavior.
-        if (isset($req['temperature']) && !self::restrictsTemperature($provider, $model)) {
-            $body['temperature'] = (float) $req['temperature'];
+        $profile = self::basetenProfile($provider, $model);
+        if (!self::restrictsTemperature($provider, $model)) {
+            // The request wins: a step that tuned its own temperature keeps it,
+            // and the profile only fills in for one that named none.
+            $temperature = $req['temperature'] ?? $profile['temperature'] ?? null;
+            if ($temperature !== null) {
+                $body['temperature'] = (float) $temperature;
+            }
+        }
+        // The rest of the vendor profile. `stream` is already always on, so
+        // tool_stream is the only streaming half left to add.
+        // min_max_tokens is a budget directive, handled in effectiveMaxTokens.
+        foreach (['top_p', 'thinking', 'tool_stream'] as $field) {
+            if (array_key_exists($field, $profile)) {
+                $body[$field] = $profile[$field];
+            }
         }
         if (isset($req['json_schema'])) {
             $spec = $req['json_schema'];
@@ -421,8 +479,15 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporti
         string $provider,
     ): int {
         $maxTokens = (int) ($req['max_tokens'] ?? $defaultMaxTokens);
-        if (!isset($req['max_tokens']) && self::isKimiK3($provider, $model)) {
+        if (isset($req['max_tokens'])) {
+            return $maxTokens;
+        }
+        if (self::isKimiK3($provider, $model)) {
             $maxTokens = max($maxTokens, self::KIMI_K3_MIN_MAX_TOKENS);
+        }
+        $floor = self::basetenProfile($provider, $model)['min_max_tokens'] ?? null;
+        if ($floor !== null && self::isHeavyEffort(self::resolvedReasoningEffort($req, $provider, $model))) {
+            $maxTokens = max($maxTokens, (int) $floor);
         }
         return $maxTokens;
     }
@@ -480,7 +545,50 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporti
         if ($provider !== 'baseten') {
             return null;
         }
+        $profile = self::basetenProfile($provider, $model);
+        if (isset($profile['reasoning_effort'])) {
+            return (string) $profile['reasoning_effort'];
+        }
         return self::BASETEN_REASONING_EFFORT[strtolower(self::withoutRoutingVariant($model))] ?? null;
+    }
+
+    /**
+     * The effort actually sent: an explicit `reasoning_effort` on the request
+     * outranks the model's default.
+     *
+     * The tier a model serves is a StepDefaults concept and never reaches this
+     * client, which sees only a model id. So a model whose default suits one
+     * tier is given the other by the caller naming it, rather than by this
+     * class trying to infer a role it cannot see.
+     *
+     * @param array<string,mixed> $req
+     */
+    private static function resolvedReasoningEffort(array $req, string $provider, string $model): ?string
+    {
+        $asked = $req['reasoning_effort'] ?? null;
+        if (is_string($asked) && trim($asked) !== '') {
+            return $provider === 'baseten' ? strtolower(trim($asked)) : null;
+        }
+        return self::basetenReasoningEffort($provider, $model);
+    }
+
+    /** Efforts that spend enough of the budget on thinking to need the floor. */
+    private static function isHeavyEffort(?string $effort): bool
+    {
+        return $effort === 'max' || $effort === 'high';
+    }
+
+    /**
+     * The vendor profile for a Baseten model, or [] when it has none.
+     *
+     * @return array<string,mixed>
+     */
+    private static function basetenProfile(string $provider, string $model): array
+    {
+        if ($provider !== 'baseten') {
+            return [];
+        }
+        return self::BASETEN_MODEL_PROFILE[strtolower(self::withoutRoutingVariant($model))] ?? [];
     }
 
     private static function isKimiK25(string $provider, string $model): bool

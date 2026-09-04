@@ -135,26 +135,64 @@ tier there — so switching providers needs no per-step configuration. Defaults:
 | `openai` | `gpt-5.5` | `gpt-5.4-mini` |
 | `xai` | `grok-4.6` | `grok-4.6` |
 | `openrouter` | `moonshotai/kimi-k3` | `moonshotai/kimi-k2.5:nitro` |
-| `baseten` | `moonshotai/Kimi-K3` | `zai-org/GLM-5.2-Fast` |
+| `baseten` | `deepseek-ai/DeepSeek-V4-Pro` | `zai-org/GLM-5.3-Flash` |
 
 `baseten` reaches Baseten's open-weight models through the WordPress.com AI
 proxy (`https://public-api.wordpress.com/wpcom/v2/ai-api-proxy/v1`, feature slug
 `site-builder`) — the route Studio's "hosted" models use. Set
 `BASETEN_BASE_URL=https://inference.baseten.co/v1` to go direct with a real
 Baseten key. Besides the two tier defaults, `LLM_MODEL` / `LLM_MODEL_<STEP>`
-accept `deepseek-ai/DeepSeek-V4-Pro`, `deepseek-ai/DeepSeek-V4-Flash-0731`,
-`zai-org/GLM-5.2` and `zai-org/GLM-5.3-Flash`. Model ids are case-sensitive.
+accept `moonshotai/Kimi-K3`, `deepseek-ai/DeepSeek-V4-Flash-0731`,
+`zai-org/GLM-5.2`, `zai-org/GLM-5.2-Fast` and `zai-org/GLM-5.3`. Model ids are
+case-sensitive.
+
+### Running one step on a different provider
+
+`LLM_MODEL_<STEP>` has always overridden a single step's model. It also accepts
+an optional `transport:` prefix, which moves that one step to another provider:
+
+```bash
+LLM_PROVIDER=anthropic
+LLM_MODEL_THEME_JSON=claude-opus-5                    # model only, as always
+LLM_MODEL_SECTIONS=baseten:zai-org/GLM-5.3-Flash      # this step runs on Baseten
+```
+
+The build then uses one client per transport, dispatching each request on its
+model id. No step knows more than one provider is in play, and a run with no
+prefixed override builds exactly the single client it always did.
+
+Transports are `anthropic`, `xai`, `openai`, `openrouter` and `baseten`. The
+prefix is recognised only when the text before the first colon **is** one of
+them, because model ids contain colons too: `moonshotai/kimi-k2.5:nitro` is an
+ordinary OpenRouter id and is read as a model, not as a transport. Model ids are
+passed through verbatim — Baseten's are case-sensitive.
+
+`design-preview`, `inner-pages-design` and `transform-site` have no tier, so an
+`LLM_MODEL_<STEP>` override is the only thing that ever gives them a model;
+without one they use the client's default.
 
 Most of these models reason by default, and those tokens come out of the same
 completion budget as the answer — asked for 24 tokens, Kimi K3 and both DeepSeek
 V4 models spend every one on hidden thinking and return an empty answer with
 `finish_reason: length`. The client therefore sends `reasoning_effort: none` for
-every Baseten model, including K3 on the large tier, and `low` for GLM 5.3 Flash,
-which cannot be switched off. This differs from the `openrouter` profile, which
-keeps K3's max effort and leans on a large token floor — a floor any caller
-pinning its own smaller budget defeats. To reason on a step instead, remove that
-model from `BASETEN_REASONING_EFFORT` in `src/OpenAiCompatibleClient.php` and
-give the step a budget that fits the thinking.
+every Baseten model it may quiet, listed in `BASETEN_REASONING_EFFORT` in
+`src/OpenAiCompatibleClient.php`. This differs from the `openrouter` profile,
+which keeps K3's max effort and leans on a large token floor — a floor any
+caller pinning its own smaller budget defeats. To reason on a step instead,
+remove that model from the table and give the step a budget that fits the
+thinking.
+
+GLM 5.3 Flash is the exception: it carries its publisher's recommended settings
+in `BASETEN_MODEL_PROFILE` — `temperature: 1`, `top_p: 0.95`, `thinking` left
+enabled, and `tool_stream` — as defaults a request can override. Its effort
+defaults to `low` rather than the recommended `max`, because it serves the small
+tier, where `max` measured 2.6× the completion tokens and 3.3× the wall time and
+could not answer the structural steps' pinned budgets at all. A caller that
+wants the publisher's number passes `reasoning_effort: max` on the request,
+which also raises that request's token ceiling to give the thinking room. Note
+that the wpcom proxy accepts the `thinking` object and ignores it; it is sent
+for the direct `BASETEN_BASE_URL` route, where `reasoning_effort` is not the
+only lever.
 
 Edit `config/models.json` to change those model ids. To override just one run or
 one step (any model id, wins over the config):
