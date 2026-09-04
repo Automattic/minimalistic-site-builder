@@ -6,7 +6,6 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\AboveFoldContract;
 use Automattic\SiteBuild\AboveFoldPartFacts;
-use Automattic\SiteBuild\BusinessSite;
 use Automattic\SiteBuild\ContrastFix;
 use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\HeaderBehavior;
@@ -178,7 +177,6 @@ final class HeaderHeroStep implements Step
                 'aboveFold.json',
                 'designDirection.json',
                 'siteSpec.json',
-                'meta.json',
                 'theme/theme.json',
                 'theme/parts/*',
             ],
@@ -244,6 +242,7 @@ final class HeaderHeroStep implements Step
         $protection = (string) ($delivery['header']['protection_token'] ?? 'base');
         $siteSpec = $project->exists('siteSpec.json') ? $project->readJson('siteSpec.json') : [];
         $siteName = (string) ($siteSpec['name'] ?? '');
+        $wantsLogoMark = SiteSpecStep::wantsLogoMark($siteSpec);
         $pageTitles = array_map(static fn (array $p): string => (string) ($p['title'] ?? ''), $pages);
 
         // Behavior inputs (BIGR-762): the theme palette, motion-derived
@@ -279,13 +278,6 @@ final class HeaderHeroStep implements Step
         $writes = [];
         $headerRel = 'parts/header.html';
         $header = $project->readText('theme/' . $headerRel);
-        $prompt = '';
-        if ($project->exists('meta.json')) {
-            // RefinePromptStep has already rewritten meta.json['prompt']; the
-            // original lives at original_prompt. Forward the refined text so
-            // PhotographySite sees the same brief later steps see.
-            $prompt = (string) ($project->readJson('meta.json')['prompt'] ?? '');
-        }
         $authoredPositions = self::removedAuthoredPositions($header);
 
         // Objective overlay evidence (BIGR-762): a planned overlay must be
@@ -638,7 +630,7 @@ final class HeaderHeroStep implements Step
         // Inject after every header rewrite (fallback, overlay grant, CTA
         // dedupe). An earlier insert is wiped when HeaderFallback replaces the
         // part, which is the HTML-first path's usual landing.
-        if (BusinessSite::matches($siteSpec, $prompt)) {
+        if ($wantsLogoMark) {
             $current = $writes[$headerRel] ?? $header;
             $writes[$headerRel] = self::ensureSiteLogoMark($current);
         }
@@ -670,7 +662,7 @@ final class HeaderHeroStep implements Step
             array_push($warnings, ...$degraded);
             $report[] = "[{$rel}] storefront cart UI degraded after header/hero reconcile";
         }
-        if (BusinessSite::matches($siteSpec, $prompt) && $project->exists('theme/' . $headerRel)) {
+        if ($wantsLogoMark && $project->exists('theme/' . $headerRel)) {
             $persisted = $project->readText('theme/' . $headerRel);
             $withMark = self::ensureSiteLogoMark($persisted);
             if ($withMark !== $persisted) {

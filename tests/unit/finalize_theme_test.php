@@ -64,7 +64,6 @@ test('finalize-theme inlines header title-hiding keyed on site-logo-mark', funct
     assert_contains('.wp-block-site-logo.site-logo-mark img', $php);
     assert_contains('.site-header-shell:has(', $php);
     assert_contains('header:has(', $php);
-    assert_true(!str_contains($php, 'BusinessSite'), 'rule is inert without the class; no matcher in functions.php');
     $ruleAt = strpos($php, 'site-logo-mark img');
     $editorAt = strpos($php, 'after_setup_theme');
     assert_true($ruleAt !== false && $editorAt !== false && $ruleAt < $editorAt, 'editor keeps the title visible');

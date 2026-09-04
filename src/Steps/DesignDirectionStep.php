@@ -140,6 +140,9 @@ final class DesignDirectionStep implements Step
      */
     public const RHYTHMS = ['stacked', 'alternating', 'offset', 'interrupted', 'banded', 'gallery'];
 
+    /** The write-side rhythm default; see normalizeRhythm() for why not `stacked`. */
+    public const DEFAULT_RHYTHM = 'alternating';
+
     /**
      * How tightly the page packs vertically. Sections already carry a
      * `vertical_density`, chosen per section with nothing to be consistent
@@ -433,7 +436,7 @@ final class DesignDirectionStep implements Step
             'shape'            => 'sharp',
             'surface'          => Surface::DEFAULT,
             'device'           => Device::DEFAULT,
-            'rhythm'           => 'alternating',
+            'rhythm'           => self::DEFAULT_RHYTHM,
             'density'          => 'measured',
             'text_placement'    => 'left-column',
             'motion'           => Motion::DEFAULT_PROFILE,
@@ -1138,7 +1141,7 @@ final class DesignDirectionStep implements Step
         return BoundedChoice::normalize(
             $authored,
             self::RHYTHMS,
-            'alternating',
+            self::DEFAULT_RHYTHM,
             'rhythm',
             $warnings,
             'unsupported generated band rhythm replaced by default',
@@ -1562,7 +1565,7 @@ final class DesignDirectionStep implements Step
         // rather than a bare keyword for the same reason as canvas: a keyword
         // alone gets re-interpreted, and the audited result was one archetype
         // on one background for three-quarters of every page.
-        $rhythm = BoundedChoice::explicit($direction['rhythm'] ?? null, self::RHYTHMS);
+        $rhythm = self::explicitRhythm($direction);
         if ($rhythm !== null) {
             $facts[] = '- **Rhythm**: ' . $rhythm . ' — ' . match ($rhythm) {
                 'stacked'     => 'bands follow one another in one steady column; carry the page on type scale and spacing, not on changes of shape',
@@ -1945,6 +1948,28 @@ final class DesignDirectionStep implements Step
             return null;
         }
         return Depth::explicit($project->readJson(self::FILE)['depth'] ?? null);
+    }
+
+    /**
+     * The committed band rhythm in one direction's data, or null when the
+     * field is absent or not a committed value. This is the one reader of
+     * the persisted field; the gate and the prompts both go through it.
+     *
+     * @param array<mixed> $direction
+     */
+    public static function explicitRhythm(array $direction): ?string
+    {
+        return BoundedChoice::explicit($direction['rhythm'] ?? null, self::RHYTHMS);
+    }
+
+    /**
+     * The persisted band rhythm, or the write-side default when the file is
+     * absent or the value is not committed. A prompt that states the stagger
+     * rule names this value, so the prompt and the build agree.
+     */
+    public static function rhythmFor(Project $project): string
+    {
+        return self::explicitRhythm(self::dataFor($project)) ?? self::DEFAULT_RHYTHM;
     }
 
     /** The persisted page density, measured when absent or not a committed value. */

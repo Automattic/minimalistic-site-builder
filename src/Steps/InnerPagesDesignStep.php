@@ -127,6 +127,7 @@ final class InnerPagesDesignStep implements Step
 
         $requests = [];
         $units = [];
+        $bandRhythm = DesignDirectionStep::rhythmFor($project);
         $homePrompt = $this->renderer->render('home-body-design.md', [
             'site_spec'      => $siteSpecContext,
             'site_pages'     => $sitePagesContext,
@@ -134,6 +135,7 @@ final class InnerPagesDesignStep implements Step
             'language'       => $language,
             'site_css'       => '[cached prefix layer 1 contains the exact design/site.css bytes]',
             'design_preview' => '[cached prefix layer 2 contains the exact design preview bytes]',
+            'band_rhythm'    => $bandRhythm,
         ]);
         $units['home-body'] = [
             'slug'        => 'home-body',
@@ -173,6 +175,7 @@ final class InnerPagesDesignStep implements Step
                 'language'       => $language,
                 'site_css'       => '[cached prefix layer 1 contains the exact design/site.css bytes]',
                 'design_preview' => '[cached prefix layer 2 contains the exact design preview bytes]',
+                'band_rhythm'    => $bandRhythm,
             ]);
             $units[$requestKey] = [
                 'slug'        => $slug,
@@ -417,6 +420,7 @@ final class InnerPagesDesignStep implements Step
 
         $requests = [];
         $language = SiteSpecStep::languageOf($project);
+        $bandRhythm = DesignDirectionStep::rhythmFor($project);
         $homePrompt = $this->renderer->render('home-body-design.md', [
             'site_spec'      => $siteSpecContext,
             'site_pages'     => $sitePagesContext,
@@ -424,6 +428,7 @@ final class InnerPagesDesignStep implements Step
             'language'       => $language,
             'site_css'       => '[cached prefix layer 1 contains the exact design/site.css bytes]',
             'design_preview' => '[cached prefix layer 2 contains the exact design preview bytes]',
+            'band_rhythm'    => $bandRhythm,
         ]);
         $requests['home-body'] = $this->withOptions([
             'prompt'          => $homePrompt,

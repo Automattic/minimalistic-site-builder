@@ -49,9 +49,8 @@ final class NormalizeLayoutStep implements Step
             // Templates are only scanned when they exist; in the default graph
             // they are written by assemble-pages, which runs after this step.
             reads: [
-                ...($this->htmlFirst ? ['design/site.css'] : []),
-                'meta.json',
-                'siteSpec.json',
+                ...($this->htmlFirst ? ['design/site.css', 'design/page-artifact-map.json'] : []),
+                'designDirection.json',
                 'theme/theme.json',
                 'theme/parts/*',
                 // Read only when it exists: a relabelled purchase CTA needs

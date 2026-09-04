@@ -13,14 +13,16 @@ use Automattic\SiteBuild\BlockSerializer\Repair;
 use Automattic\SiteBuild\CtaStyleMarkup;
 use Automattic\SiteBuild\ImageCaptions;
 use Automattic\SiteBuild\LayoutFixer;
-use Automattic\SiteBuild\PhotographySite;
 use Automattic\SiteBuild\PhpBlockFixer;
 use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\SectionComposition;
 use Automattic\SiteBuild\StaggeredChildren;
 use Automattic\SiteBuild\ShapeMarkup;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\Units\AbstractPageSectionUnit;
 use Automattic\SiteBuild\Units\GeneratedMarkup;
+use Automattic\SiteBuild\Units\HeroUnit;
 
 /**
  * Step 8 (deterministic): repair block-validation issues in generated markup.
@@ -61,8 +63,13 @@ final class FixBlocksStep implements Step
             reads: [
                 'designDirection.json',
                 ...($this->htmlFirst ? ['design/site.css'] : []),
-                'meta.json',
-                'siteSpec.json',
+                // Read only when it exists: the plan names the sections that
+                // keep a staggered row. Absent, the delivered root marker
+                // carries the same assignment.
+                'pages.json',
+                // HTML-first only, read only when it exists: which pages the
+                // graph routed through the blocks path.
+                ...($this->htmlFirst ? ['design/page-artifact-map.json'] : []),
                 'theme/theme.json',
                 'theme/parts/*',
             ],
@@ -640,12 +647,18 @@ final class FixBlocksStep implements Step
         $excluded = array_fill_keys($excluded, true);
         $contentSize = self::themeContentSize($project);
         $spacingSlugs = self::themeSpacingSlugs($project);
-        $siteSpec = $project->exists('siteSpec.json') ? $project->readJson('siteSpec.json') : [];
-        $meta = $project->exists('meta.json') ? $project->readJson('meta.json') : [];
-        $flattenStaggeredChildren = !PhotographySite::matches(
-            is_array($siteSpec) ? $siteSpec : [],
-            (string) ($meta['prompt'] ?? ''),
-        );
+        // A staggered row survives only where the build assigned it. The
+        // plan (pages.json) is the source of truth. The root marker that
+        // SectionUnit stamps repeats the assignment in the delivered part.
+        // SectionUnit stamps a marker only on a section whose root is one
+        // wp:group, so either signal keeps the row. A transformed
+        // HTML-first section carries no assignment and no marker; for such
+        // a part only, the committed rhythm decides. A hero part and a page
+        // the HTML-first graph routed through the blocks path obey the
+        // blocks rule.
+        $plannedStaggerParts = self::plannedOffsetGridParts($project);
+        $rhythmKeepsStagger = $htmlFirst && SectionComposition::eligibleForProject('offset-grid', $project);
+        $blocksFallbackPages = $rhythmKeepsStagger ? self::blocksFallbackPages($project) : [];
         foreach ($project->themeFiles() as $rel) {
             if (isset($excluded[$rel])) {
                 continue;
@@ -661,7 +674,15 @@ final class FixBlocksStep implements Step
                 $wideMeasureRootClasses,
             );
             $normalized = $result['markup'];
-            if ($flattenStaggeredChildren && $role === LayoutFixer::ROLE_SECTION) {
+            if ($role === LayoutFixer::ROLE_SECTION
+                && !self::keepsStagger(
+                    $rel,
+                    $normalized,
+                    $plannedStaggerParts,
+                    $rhythmKeepsStagger,
+                    $blocksFallbackPages,
+                )
+            ) {
                 $flat = StaggeredChildren::flatten($normalized);
                 $normalized = $flat['markup'];
                 foreach ($flat['notes'] as $note) {
@@ -683,6 +704,110 @@ final class FixBlocksStep implements Step
             }
         }
         return $notes;
+    }
+
+    /**
+     * Whether one section part keeps its staggered sibling tops.
+     *
+     * @param array<string,true> $plannedStaggerParts theme-relative paths of
+     *        the sections the plan assigned offset-grid
+     * @param bool $rhythmKeepsStagger the HTML-first page-level grant; it
+     *        reaches a transformed part only, never a hero part, a part that
+     *        carries a section marker, or a page on a blocks-fallback route
+     * @param array<string,true> $blocksFallbackPages page slugs the HTML-first
+     *        graph routed through the blocks path
+     */
+    private static function keepsStagger(
+        string $rel,
+        string $markup,
+        array $plannedStaggerParts,
+        bool $rhythmKeepsStagger,
+        array $blocksFallbackPages,
+    ): bool {
+        if (isset($plannedStaggerParts[$rel])) {
+            return true;
+        }
+        // On the blocks path the only marker that keeps the row is the
+        // offset-grid one, so a part without that literal needs no parse.
+        if (!$rhythmKeepsStagger && !str_contains($markup, SectionComposition::marker('offset-grid'))) {
+            return false;
+        }
+        $marker = SectionComposition::rootMarker($markup);
+        if ($marker !== null) {
+            return $marker === SectionComposition::marker('offset-grid');
+        }
+        if (!$rhythmKeepsStagger) {
+            return false;
+        }
+        if (SectionComposition::rootClassWithPrefix($markup, HeroUnit::MARKER_PREFIX) !== null) {
+            return false;
+        }
+        $pageSlug = self::partPageSlug($rel);
+        return $pageSlug !== null && !isset($blocksFallbackPages[$pageSlug]);
+    }
+
+    /** The page slug of a `parts/page-<page>--<section>.html` part, or null. */
+    private static function partPageSlug(string $rel): ?string
+    {
+        $prefix = 'parts/' . AbstractPageSectionUnit::KEY_PREFIX;
+        if (!str_starts_with($rel, $prefix)) {
+            return null;
+        }
+        $rest = substr($rel, strlen($prefix));
+        $at = strpos($rest, '--');
+        return $at === false || $at === 0 ? null : substr($rest, 0, $at);
+    }
+
+    /**
+     * The section parts the plan assigned the offset-grid archetype, keyed by
+     * theme-relative path. Empty when no plan exists yet, as in a partial run.
+     *
+     * @return array<string,true>
+     */
+    private static function plannedOffsetGridParts(Project $project): array
+    {
+        if (!$project->exists('pages.json')) {
+            return [];
+        }
+        $parts = [];
+        foreach ((array) ($project->readJson('pages.json')['pages'] ?? []) as $page) {
+            if (!is_array($page)) {
+                continue;
+            }
+            $pageSlug = trim((string) ($page['slug'] ?? ''));
+            foreach ((array) ($page['sections'] ?? []) as $section) {
+                if (!is_array($section) || ($section['layout_archetype'] ?? '') !== 'offset-grid') {
+                    continue;
+                }
+                $slug = trim((string) ($section['slug'] ?? ''));
+                if ($pageSlug !== '' && $slug !== '') {
+                    $parts['parts/' . SectionsStep::partSlug($pageSlug, $slug) . '.html'] = true;
+                }
+            }
+        }
+        return $parts;
+    }
+
+    /**
+     * The pages the HTML-first graph routed through the blocks path because
+     * their design artifact failed. TransformSiteStep reads the same map and
+     * the same marker file. Empty on the blocks graph and before the map
+     * exists.
+     *
+     * @return array<string,true>
+     */
+    private static function blocksFallbackPages(Project $project): array
+    {
+        if (!$project->exists('design/page-artifact-map.json')) {
+            return [];
+        }
+        $pages = [];
+        foreach ((array) $project->readJson('design/page-artifact-map.json') as $slug => $artifact) {
+            if (is_string($artifact) && $project->exists("design/{$artifact}.failed")) {
+                $pages[(string) $slug] = true;
+            }
+        }
+        return $pages;
     }
 
     /**

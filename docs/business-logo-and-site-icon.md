@@ -17,11 +17,11 @@ Piggyback on the existing image pipeline. No new graph step. wpcom's finish span
 
 ```
 site-spec
-    → BusinessSite::matches()?
+    → SiteSpecStep::isPersonal()? (persona_name set)
 collect-images
     → if yes, append images.json spec: site-logo.png
 header-hero
-    → business sites: ensure wp:site-logo immediately before wp:site-title,
+    → non-personal sites: ensure wp:site-logo immediately before wp:site-title,
       tagged className=site-logo-mark
 assemble-pages
     → copy role:site-logo into plugin/images.json
@@ -40,48 +40,34 @@ plugin activation
     → CSS hides header site-title while the injected mark renders an img
 ```
 
-## BusinessSite
+## Who gets a mark
 
-New helper `src/BusinessSite.php`, same call shape as `PhotographySite`.
+**Changed in BIGR-986 (2026-09-04).** The first version gated the mark on a
+`BusinessSite` keyword matcher. That matcher was a list of about twenty
+business nouns (shop, salon, agency, hotel, ...). It excluded photography and
+gallery sites and personal sites. The list was an allowlist: a product landing
+page, a nonprofit, a school, or a photographer studio got no mark. The matcher
+is gone, together with `PhotographySite`.
+
+The gate is now the one identity decision the site-spec step already makes:
 
 ```php
-public static function matches(array $siteSpec, string $prompt = ''): bool
+SiteSpecStep::wantsLogoMark(array $siteSpec): bool   // spec present and persona_name empty
 ```
 
-`$prompt` is not part of the business decision, but it **is** forwarded to the photography check: `PhotographySite::matches($siteSpec, $prompt)`. Both existing callers pass the prompt (`SectionComposition.php:372`, `FixBlocksStep.php:645`), and a photographer whose spec says `site_type: studio` carries the only "photographer" signal in the prompt. Dropping it there would classify them as a business.
+- **Personal site** (`persona_name` set: portfolio, CV, personal blog) keeps
+  the plain site title. It gets no mark and no header injection.
+- **Every other site** gets the generated mark and the header injection.
+- **No `siteSpec.json`** (a partial run) gets no mark and no injection.
 
-**No** when:
-
-- `persona_name` is a non-empty string (personal portfolio, CV, personal blog).
-- `PhotographySite::matches($siteSpec, $prompt)` is true (photography / gallery).
-
-**Yes** when the concatenated lowercase text of `site_type`, `area`, `topic`, `title`, and `name` matches:
-
-```
-/\b(?:business(?:es)?|storefronts?|shops?|stores?|retail(?:ers?)?|restaurants?|cafés?|cafes?|baker(?:y|ies)|bars?|salons?|spas?|clinics?|gyms?|studios?|agenc(?:y|ies)|consultanc(?:y|ies)|firms?|saas|hotels?|boutiques?)\b/u
-```
-
-Every token is a noun for a kind of business. `services?` was considered and dropped: it is a noun for a kind of sentence, and turns up in `topic` prose on sites that are not businesses.
-
-Pinned cases:
-
-| Spec | Result |
-|---|---|
-| `site_type: business storefront`, bakery area | true |
-| restaurant / cafe / café | true |
-| hair salon, consulting firm, hotel | true |
-| `persona_name` set | false |
-| portfolio, blog, landing page | false |
-| photography / gallery (`PhotographySite`) | false |
-| `site_type: studio` + "photographer" in the prompt only | false |
-
-Allowlist is conservative. Widening it is a later change.
+No step reads the prompt for this decision now. `meta.json` left the `reads`
+of `collect-images` and `header-hero`.
 
 ## Image spec
 
 Reserved filename: `site-logo.png`. Content filenames are subject-derived; this name is reserved for the synthetic mark.
 
-`collect-images` appends the spec when `BusinessSite::matches()`. It reads `siteSpec.json` (add to `StepDeclaration::reads`). If `site-logo.png` is already in `images.json` from markup, do not overwrite that row and do not tag it `site-logo` — skip the synthetic mark and warn. A content image must not become the site logo.
+`collect-images` appends the spec unless `SiteSpecStep::isPersonal()`. It reads `siteSpec.json`, declared in `StepDeclaration::reads`. If `site-logo.png` is already in `images.json` from markup, do not overwrite that row and do not tag it `site-logo` — skip the synthetic mark and warn. A content image must not become the site logo.
 
 ```
 file='images.json'; asset='site-logo.png'; delivered no synthetic mark; disposition=the reserved site-logo filename was already collected from page markup
@@ -105,7 +91,7 @@ Shape (same keys as a collected placeholder, plus `role`):
 
 > simple geometric brand mark for a neighborhood bakery, warm rustic mood, single ink, no letters, no numerals, no wordmark, no signage
 
-`GenerateImagesStep::siteContext()` already omits the site name. Do not pass the name into the logo subject. `topic`, `area`, and `visual_vibe` are free prose and can still carry the identity ("Hearth & Crumb's sourdough programme"); compose the subject through `GenerateImagesStep::safeSubjectMatter()` and fall back to `a small business` (and drop the vibe suffix) when a candidate repeats `name`, `persona_name`, or `email_domain`.
+`GenerateImagesStep::siteContext()` already omits the site name. Do not pass the name into the logo subject. `topic`, `area`, and `visual_vibe` are free prose and can still carry the identity ("Hearth & Crumb's sourdough programme"); compose the subject through `GenerateImagesStep::safeSubjectMatter()` and fall back to a safe `site_type`, then to `an organization` (and drop the vibe suffix) when a candidate repeats `name`, `persona_name`, or `email_domain`.
 
 ## Site-logo post-process
 
@@ -164,11 +150,11 @@ The title is fixed, not the subject. `title` becomes the attachment's `post_titl
 
 ## Header
 
-`HeaderHeroStep`, business sites only:
+`HeaderHeroStep`, every non-personal site (see "Who gets a mark"):
 
 - If the header has no `wp:site-logo`, insert `<!-- wp:site-logo {"width":48,"shouldSyncIcon":true,"className":"site-logo-mark"} /-->` immediately before the first `wp:site-title` (sibling, same parent). If there is no site-title, insert at the start of the root group wrapper (after the opening `<div>`), not before the group comment — a prepend there fails the HTML-first safe-wrapper check. This branch only runs when there is no identity cluster to find.
 - Do not remove `wp:site-title`.
-- Non-business headers: do not add an empty logo slot.
+- Personal-site headers, and a build without `siteSpec.json`: keep the header free of an empty logo slot.
 
 `className` is a supported `core/site-logo` attribute and core renders it on the block wrapper. The serializer's `attributeOrder` for the block is `width, isLink, linkTarget, shouldSyncIcon, align, lock, anchor, className, …`, so the three attributes serialize in the order written above.
 
@@ -176,7 +162,7 @@ The class is what scopes the title-hiding rule below to marks **this step inject
 
 HTML-first: do not author a decorative logo `<img>` in the design document. The WordPress logo slot is this injected `core/site-logo` block, after transform. `design-preview.md` keeps the ban on logo images in the design HTML.
 
-`header.md` stays allowed to mention `wp:site-logo` for archetypes that already use it. The fixer is the source of truth for business sites.
+`header.md` stays allowed to mention `wp:site-logo` for archetypes that already use it. The fixer is the source of truth for the injected mark.
 
 Header width estimates already add logo width when `site-logo` is present (`HeaderHeroStep::estimatedRowWidth()`). Leave that as-is (counting title plus logo is conservative). The injected 48px mark does change header geometry on a design authored around a text wordmark, so the plan carries a visual check on a real business build, not unit tests alone.
 
@@ -195,7 +181,7 @@ header:has(.wp-block-site-logo.site-logo-mark img) .wp-block-site-title {
 
 Both selectors are needed: `shellClassName()` only emits `site-header-shell` for non-static header behaviours (`AssemblePagesStep.php:307-322`).
 
-The rule is emitted for every theme. It is inert without the class, so no gate on `BusinessSite` is required in this step.
+The rule is emitted for every theme. It is inert without the class, so no personal-site gate is required in this step.
 
 The editor deliberately does **not** get this rule. `add_editor_style` still mirrors `style.css`; the inline hide stays on the front-end `wp_enqueue_scripts` callback so a business header in the site editor keeps the title visible and editable. Removing the custom logo there must still reveal the title the visitor will see.
 
@@ -231,7 +217,7 @@ Generated-content ladder: never abort the build for a missing or bad mark.
 
 | Situation | Delivery |
 |---|---|
-| Not a business site | no spec, no block, no theme mods |
+| Personal site (`persona_name` set), or no `siteSpec.json` | no spec, no block, no theme mods |
 | `--with-images` skipped | spec sits pending; manifest row has no file; seeder finds nothing; no mods; title visible |
 | `site-logo.png` generate failed | existing generate-images warning; no file; no mods; title visible |
 | Keying wiped out (mark came back opaque) | warn; `role` dropped; manifest row removed; nothing shipped or imported; no mods; title visible |
@@ -246,8 +232,8 @@ Generated-content ladder: never abort the build for a missing or bad mark.
 
 Suites: `tests/run.php` (unit) and `tests/run-integration.php` (integration). Both must pass.
 
-- `BusinessSite` matrix (table above), including the prompt-only photographer case, an empty spec, an all-caps `CAFÉ` title, and every allowlist token.
-- `collect-images` appends `site-logo.png` + `role` only for a business spec; personal and photography fixtures do not gain the row; a pre-existing `site-logo.png` placeholder is left untagged and warned; identity-bearing `area`/`topic`/`visual_vibe` fall back rather than entering the subject.
+- `collect-images` appends the mark for photography, gallery, nonprofit, and product-page specs with no `persona_name`.
+- `collect-images` appends `site-logo.png` + `role` for a business spec; a personal fixture does not gain the row; a pre-existing `site-logo.png` placeholder is left untagged and warned; identity-bearing `area`/`topic`/`visual_vibe` fall back rather than entering the subject.
 - `ImageTransparency::padToSquare` centres a non-square bitmap on a transparent square at `max(w, h, 512)` without resampling, and returns its input unchanged on failure.
 - `ImageTransparency::isKeyed` is false for a fully opaque PNG, true for one with transparent corners, and true when those corners quantise to a small non-zero alpha (`< 0.01`).
 - `generate-images` square-pads only the `site-logo` role, and on an unkeyed mark drops the role, removes the manifest row, and does not copy the file.
@@ -257,7 +243,7 @@ Suites: `tests/run.php` (unit) and `tests/run-integration.php` (integration). Bo
 - `assemble-pages` puts the role-tagged row in `plugin/images.json` even when page HTML does not reference it; content-only images stay without `role`; the manifest title is `Site logo`; a content row whose filename is also tagged `site-logo` keeps its subject title and is not retagged.
 - `generate-images` ships `site-logo.png` to `plugin/images/` when the manifest lists it and the mark is keyed (same as `hero.jpg` today); drops the role and warns when Imagick is missing or the key never ran; leaves missing ordinary content rows in the manifest.
 - Scaffolded plugin PHP contains the theme-assets fallback with its own containment guard, the `custom_logo` / `site_icon` writes, and a deactivate restore that is skipped per setting when the live value no longer matches `logo_attachment_id` (changing only `site_icon` still restores `custom_logo`).
-- `header-hero` inserts `wp:site-logo` with `className: site-logo-mark` before `wp:site-title` for business sites and leaves a personal-site header unchanged.
+- `header-hero` inserts `wp:site-logo` with `className: site-logo-mark` before `wp:site-title` for a business spec and for a photography spec, and leaves a personal-site header unchanged.
 - `finalize-theme` emits the `:has(.wp-block-site-logo.site-logo-mark img)` rule, and an authored lockup without the class keeps its title.
 - Re-pin the `src/Steps/AssemblePagesStep.php` sha256 at `tests/integration/dp_slice3_section_mode_test.php:154`. `contentImages()` changes in this work, and that assertion fails until the hash is updated.
 

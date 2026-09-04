@@ -48,7 +48,7 @@ Every image needs meaningful `alt` text written as a usable image generation pro
 
 ## Responsive CSS contract
 
-- Do not stagger a row of siblings (different top margins, translateY offsets, or nth-child even/odd vertical offsets) unless SITE SPEC is clearly a photography or gallery site (photographer, photography, photojournalism, or a gallery). Keep card and image rows level for every other site.
+- Keep card and image rows level. Do not stagger a row of siblings (different top margins, translateY offsets, or nth-child even/odd vertical offsets) unless the design direction's band rhythm is `offset` or `gallery`. This site's band rhythm is `{{band_rhythm}}`. Under any other rhythm the build levels a margin-based stagger, and a transform or nth-child stagger is not repaired and ships as a defect.
 - Write mobile-first responsive CSS, then add min-width media queries only where composition needs them.
 - Use fluid type with `clamp()` for display and section-heading scales while keeping body text readable.
 - Headings and paragraphs keep `text-wrap: pretty` as a browser best-effort hint that reduces dangling final words. It cannot guarantee a particular final line at every font, width, or browser. Never set `text-wrap: wrap` or `text-wrap: nowrap` on headings or paragraphs.
