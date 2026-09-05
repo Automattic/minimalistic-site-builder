@@ -48,7 +48,7 @@ final class SectionComposition
     public const STAT_LEDGER_COUNTS = [3, 4];
 
     /** A figure-only text: what a stat-ledger column leads with (mirrors GeneratedMarkup::markFigures). */
-    public const FIGURE_PATTERN = '/^[^\d\s]{0,3}\d[\d,.\x{00a0} ]{0,11}\d?\s?(?:%|\+|x|×|[kKmMbB]|\p{L}{1,4})?$/u';
+    public const FIGURE_PATTERN = '/^[^\d\s]{0,3}\d[\d,.\x{00a0} ]{0,11}\d?\s?(?:%|\+|x|×|[kKmMbB]|\p{L}{1,2})?$/u';
 
     /** The tier counts a pricing-tiers row may carry: two plans or three (frm W3c). */
     public const PRICING_TIER_COUNTS = [2, 3];
