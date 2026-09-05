@@ -10,7 +10,7 @@ namespace Automattic\SiteBuild;
  */
 final class Surface
 {
-    public const ALL = ['none', 'paper', 'concrete', 'film', 'fabric'];
+    public const ALL = ['none', 'paper', 'concrete', 'film', 'fabric', 'noise', 'dot-grid'];
 
     public const DEFAULT = 'none';
 
@@ -80,6 +80,19 @@ final class Surface
                 self::fabricLayers(self::rgba($darkRgb, 0.10), self::rgba($darkRgb, 0.07))
                     . ', ' . self::fabricLayers(self::rgba($lightRgb, 0.10), self::rgba($lightRgb, 0.07)),
             ],
+            // frm W4d: the fine grain of the dark product references
+            // (Dreammotion, Spector). Finer than film, both inks, no lines.
+            'noise' => [
+                $dark ? '0.34' : '0.22',
+                self::noiseLayers(self::rgba($darkRgb, 0.14), self::rgba($darkRgb, 0.08))
+                    . ', ' . self::noiseLayers(self::rgba($lightRgb, 0.14), self::rgba($lightRgb, 0.08)),
+            ],
+            // frm W4d: Zova's dotted grid as a page ground: one dot every
+            // 24px in the page's own ink, faint enough to read as paper.
+            'dot-grid' => [
+                $dark ? '0.30' : '0.22',
+                self::dotGridLayer(self::rgba($dark ? $lightRgb : $darkRgb, 0.55)),
+            ],
             default => [null, null],
         };
         if ($opacity === null || $background === null) {
@@ -92,9 +105,10 @@ final class Surface
         // dark one, so multiply and screen carry it at the same alphas.
         $blend = $dark ? 'screen' : 'multiply';
         $mode = $dark ? 'dark' : 'light';
+        $size = $surface === 'dot-grid' ? '24px 24px' : 'auto';
         return "/* Committed '{$surface}' page surface ({$mode}). "
             . "CSS-only grain — written by the build, never by a model. */\n"
-            . self::overlayCss($opacity, $blend, $background);
+            . self::overlayCss($opacity, $blend, $background, $size);
     }
 
     public static function isDark(?string $hex): bool
@@ -153,6 +167,18 @@ final class Surface
             . "repeating-radial-gradient(circle at 80% 70%, {$coarser} 0 0.5px, transparent 0.8px 5px)";
     }
 
+    private static function noiseLayers(string $fine, string $finer): string
+    {
+        return "repeating-radial-gradient(circle at 23% 31%, {$fine} 0 0.35px, transparent 0.6px 3px), "
+            . "repeating-radial-gradient(circle at 67% 79%, {$finer} 0 0.4px, transparent 0.65px 3.5px), "
+            . "repeating-radial-gradient(circle at 48% 12%, {$finer} 0 0.3px, transparent 0.55px 2.5px)";
+    }
+
+    private static function dotGridLayer(string $dot): string
+    {
+        return "radial-gradient(circle, {$dot} 1px, transparent 1.4px)";
+    }
+
     private static function fabricLayers(string $warp, string $weft): string
     {
         return "repeating-linear-gradient(0deg, {$warp} 0 1px, transparent 1px 4px), "
@@ -169,7 +195,7 @@ final class Surface
      * this is a fog, not grain — and it does not print or show to users who
      * asked for less transparency.
      */
-    private static function overlayCss(string $opacity, string $blend, string $background): string
+    private static function overlayCss(string $opacity, string $blend, string $background, string $size = 'auto'): string
     {
         return <<<CSS
 @supports (mix-blend-mode: soft-light) {
@@ -198,6 +224,7 @@ html body::before {
     mix-blend-mode: {$blend};
     background-color: transparent;
     background-image: {$background};
+    background-size: {$size};
     background-repeat: repeat;
     background-attachment: scroll;
 }
