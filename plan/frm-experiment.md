@@ -128,6 +128,7 @@ Order: W0 first (cohort + baseline). Then interleave W1–W8 by the ranked list.
 - PR-4j (P0 craft, found while building W4d): every physical `surface` sheet (paper, concrete, film, fabric) has been invisible since it shipped: `mix-blend-mode: soft-light` at the kit's alphas changes no pixel on a light or a dark page. Fix: multiply on light pages, screen on dark ones, same alphas. Note for evidence: a fixed `body::before` sheet does not appear beyond the first viewport in bin/screenshot.php full-page captures; measure with a viewport shot.
 - PR-3j: when `side-label` is committed, the ledger (and any single-row archetype) sits inside the split's trailing column, so row-count checks see the label row too (spector-like6 `[2,4]`). Teach the row checks to look inside the trailing column of a proven side-label split.
 - PR-3k: a zigzag-steps row whose image was dropped (failed asset) leaves its media column empty; the boundary or the image collector should leave the `step-plate` group in its place so the ladder keeps its rhythm.
+- PR-3l: the footer unit has no `form_placeholders` path, so newsletter-columns ships a button instead of an email field; teach FooterUnit the jetpack-form fragment for the `newsletter-signup` purpose. Also still open from W3i: verify that `sunken-wordmark` renders like the Cohesion and Spector ghost wordmarks.
 
 - PR-4g: the stated-ground rule (PR-4f) is prompt-only and held on 1 of 2 zova reruns (light on the PR-4f rerun, dark again on the PR-5d rerun). Follow-up: a deterministic ration in `DesignDirectionStep::normalize` when the brief itself names a ground (a bounded phrase list: "white page", "light page", "dark ground", "black ground", "near-black"), applied to `ground_key` and `palette.base` the way the seed ground is applied today. This is a client instruction, not a category matcher.
 
@@ -241,6 +242,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 | 44 | #491 | W3 (PR-3k) | Keep the plate shape in an emptied zigzag media column (frm) | merged | gist b60601726acb5c8c2c7b841bbfeb2cf7: luzia-like8-3k replay, tinted plates opposite each step where the failed images were dropped | (see git) |
 | 45 | #492 | W5c | Stack display lines under the uppercase treatments (frm) | merged | gist d5054962392e23fdb3d2d226b77bcd3e: spector-like7-5c finalize replay, three-line caps H1 at line-height 0.92 with balanced breaks | (see git) |
 | 46 | #493 | W3e (statement-lines) | Add the statement-lines section archetype (frm) | merged | gist 029fc3967b71be56ce07ab32bff2a7a4: spector-like8 planned it unforced, five caps statements with hairlines inside a side-label split; mobile 390 (phone cap added after the crop) | (see git) |
+| 47 | #494 | W3i | Add the newsletter-columns footer composition (frm) | merged | gist be85d75369233a1ae9a2d1afb373756a: zova-like12-3i with the footer pinned, invitation row + three link columns + credit; mobile 390 | (see git) |
 
 ## 9. Iteration log (one line per loop turn)
 
@@ -291,6 +293,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 - 2026-09-05 turn 45: W3g #490 merged. PR-3k on `frm/zigzag-plate`: theme CSS gives a zigzag media column with no element child the plate's height, radius and a 6% ink tint (`:not(:has(*))`, whitespace-safe). Replayed on a luzia-like8 copy. Merged as #491.
 - 2026-09-05 turn 46: PR-3k #491 merged. W5c built on `frm/display-lines`: a treatment overlay kit for caps-tight/caps-tracked (hero H1 and display headings at line-height 0.92 + text-wrap balance), finalize ship/prune, scaffold balance for every hero heading; the theme model's heading lineHeight stays untouched elsewhere. Merged as #492.
 - 2026-09-05 turn 47: W5c #492 merged. W3e statement-lines built on `frm/statement-lines`: one marked group of 3-6 heading lines, hairlines and section-title scale from the theme, page-plan text; spector-like8 planned it unforced with no warnings. The 390 crop showed four-line statements, so the line now scales with the viewport on phones (8vw cap). W3e is complete. Merged as #493.
+- 2026-09-05 turn 48: W3e statement-lines #493 merged; trunk merge rechecked clean. W3i built on `frm/newsletter-footer`: newsletter-columns footer composition (fragment, contrast surface, marker test); evidence by pinning footer_archetype in a zova copy and rerunning sections. Follow-up PR-3l: the footer unit carries no form placeholder, so the invitation has no input; the sunken-wordmark verification stays open. Merged as #494.
 
 ## 10. Parked / rejected
 
