@@ -177,6 +177,8 @@ Cohort header/hero facts at baseline: all 5 sites resolved `minimal-overlay` on 
 | 6 | #453 | W4 (PR-4e) | Make the direction honor a brief that names cards, pills or a product landing (frm) | merged | gist 8166f7f623ecd0e8de0277a7bc9724bd: 5/5 direction reruns moved to card/flush/soft-round/ring (spector kept brutalist); zova-like4 + luzia-like2 renders | 08583ee6 |
 | 7 | #454 | W3a | Add the bento-grid section archetype (frm) | merged | gist d0f8b3b121983a19fef2c3a057038341: luzia-like2 + dreammotion-like4 planned one bento each unforced, two rows + one highlight, mobile 390 | a519d3ac |
 | 8 | #455 | W3b | Add the faq-split section archetype with a native accordion (frm) | merged | gist ff61116857a54a4f6ad558612603856a: zova-like5 + dreammotion-like5 planned faq-split unforced, 7 details each, mobile 390 | ce16c44d |
+| 9 | #456 | W3d | Add the cta-panel closing section archetype (frm) | merged | gist 347de02ca8c14aa42dd9478192cecbaf: dreammotion-like6 + luzia-like3 planned cta-panel unforced; 390px headline clip fixed by an 11vw cap | 5edd129c |
+| 10 | #457 | W8a | Add the word-reveal hero headline entrance to the motion kit (frm) | merged | gist d8886fe5a5d2f02191de839914de0801: in-page opacity samples + frames on dreammotion-like7; reduced motion whole | 47fa5b8a |
 
 ## 9. Iteration log (one line per loop turn)
 
@@ -189,6 +191,7 @@ Cohort header/hero facts at baseline: all 5 sites resolved `minimal-overlay` on 
 - 2026-09-05 turn 7: PR-3a #454 merged (both plans chose bento-grid unforced). Started W3b `faq-split` (core/details accordion; summary text joins the contrast walk; accordion rows styled in the scaffold) on branch `frm/faq-split`.
 - 2026-09-05 turn 8: PR-3b #455 merged (both plans chose faq-split unforced). Started W3d `cta-panel` (contained rounded closing panel, one action; band stays on the page ground) on branch `frm/cta-panel`.
 - 2026-09-05 turn 9: PR-3d #456 opened (both plans chose cta-panel unforced); its 390px shot clipped a display word inside the panel, fixed by a phone-scale headline cap. W8a `word-reveal` built on branch `frm/word-reveal`: the first version registered the H1 as a scroll target and the driver marked it static (first viewport), so it now plays on load like hero-entrance; verified in-page (opacities 0.15/0.01/0/0 at 240ms, settled at 1.2s; reduced motion leaves the heading whole). Neither evidence build authored the class unprompted, so the hero prompt now makes it the default for calm/dramatic display H1s.
+- 2026-09-05 turn 10: PR-3d #456 and PR-8a #457 merged (#457 needed `gh workflow run tests.yml` because the PR reported no checks, and a plan-file merge from frm_experiment). W7a `image_kind` built on branch `frm/image-kind` (commit moved off the W8a branch by cherry-pick). Builds cohesion-like5 (3d-object) and zova-like6 (ui-mockup, 14/15 placeholders on flat-design) committed non-photo kinds unforced, and both heroes authored `word-reveal` under the strengthened hero prompt (adoption 2/2 after 0/2).
 
 ## 10. Parked / rejected
 
