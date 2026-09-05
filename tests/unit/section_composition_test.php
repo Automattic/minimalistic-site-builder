@@ -720,7 +720,7 @@ test('the feature-row-hairlines archetype checks one row of three or four headin
     assert_eq('section-compositions/feature-row-hairlines.md', $meta['prompt']);
     assert_eq(0, $meta['max_images']);
     assert_true(is_file(repo_path('prompts/' . $meta['prompt'])));
-    assert_true(str_contains((string) file_get_contents(repo_path('prompts/page-plan.md')), 'stat-ledger, feature-row-hairlines"'));
+    assert_true(str_contains((string) file_get_contents(repo_path('prompts/page-plan.md')), 'stat-ledger, feature-row-hairlines'));
 
     $column = static fn (string $inner): string => '<!-- wp:column {"width":"25%"} --><div class="wp-block-column">' . $inner . '</div><!-- /wp:column -->';
     $text = static fn (string $title): string => '<!-- wp:heading {"level":3} --><h3 class="wp-block-heading">' . $title . '</h3><!-- /wp:heading -->'
@@ -778,4 +778,33 @@ test('row checks look past a committed side-label split (frm PR-3j)', function (
     $notSplit = str_replace('<p class="side-label has-caption-font-size">Scale</p><!-- /wp:paragraph -->', '<p class="side-label has-caption-font-size">Scale</p><!-- /wp:paragraph --><!-- wp:paragraph --><p>More</p><!-- /wp:paragraph -->', $split);
     $joined = implode("\n", SectionComposition::markupWarnings($notSplit, 'stat-ledger', 'page-home--stats'));
     assert_contains('"column_rows":2', $joined);
+});
+
+test('the zigzag-steps archetype checks three to five two-column rows whose copy side alternates (frm W3g)', function () {
+    assert_true(in_array('zigzag-steps', SectionComposition::ARCHETYPES, true));
+    $meta = SectionComposition::metadata('zigzag-steps');
+    assert_eq('section-compositions/zigzag-steps.md', $meta['prompt']);
+    assert_eq(5, $meta['max_images']);
+    assert_true(is_file(repo_path('prompts/' . $meta['prompt'])));
+    assert_true(str_contains((string) file_get_contents(repo_path('prompts/page-plan.md')), 'feature-row-hairlines, zigzag-steps"'));
+
+    $copy = static fn (string $t): string => '<!-- wp:column {"width":"55%"} --><div class="wp-block-column"><!-- wp:heading {"level":3} --><h3 class="wp-block-heading">' . $t . '</h3><!-- /wp:heading --><!-- wp:paragraph --><p>One line.</p><!-- /wp:paragraph --></div><!-- /wp:column -->';
+    $media = '<!-- wp:column {"width":"45%"} --><div class="wp-block-column"><!-- wp:group {"className":"step-plate","backgroundColor":"band"} --><div class="wp-block-group step-plate has-band-background-color has-background"></div><!-- /wp:group --></div><!-- /wp:column -->';
+    $row = static fn (bool $copyFirst, string $t): string => '<!-- wp:columns {"align":"wide"} --><div class="wp-block-columns alignwide">' . ($copyFirst ? $copy($t) . $media : $media . $copy($t)) . '</div><!-- /wp:columns -->';
+    $band = static fn (string $inner): string => '<!-- wp:group {"className":"section-composition--zigzag-steps","layout":{"type":"constrained"}} --><div class="wp-block-group section-composition--zigzag-steps"><!-- wp:heading --><h2 class="wp-block-heading">How we work</h2><!-- /wp:heading -->' . $inner . '</div><!-- /wp:group -->';
+
+    $good = $band($row(true, 'Discovery') . $row(false, 'Strategy') . $row(true, 'Design'));
+    assert_eq([], SectionComposition::markupWarnings($good, 'zigzag-steps', 'page-home--process'));
+
+    $two = $band($row(true, 'A') . $row(false, 'B'));
+    $joined = implode("\n", SectionComposition::markupWarnings($two, 'zigzag-steps', 'page-home--process'));
+    assert_contains('zigzag step rows', $joined);
+
+    $sameSide = $band($row(true, 'A') . $row(true, 'B') . $row(false, 'C'));
+    $joined = implode("\n", SectionComposition::markupWarnings($sameSide, 'zigzag-steps', 'page-home--process'));
+    assert_contains('zigzag alternation', $joined);
+    assert_contains('"copy_column_per_row":[0,0,1]', $joined);
+
+    $plain = str_replace('section-composition--zigzag-steps', 'section-composition--asymmetric-split', $sameSide);
+    assert_true(!str_contains(implode("\n", SectionComposition::markupWarnings($plain, 'asymmetric-split', 'x')), 'zigzag'));
 });

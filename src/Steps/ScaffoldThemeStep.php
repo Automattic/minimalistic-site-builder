@@ -866,6 +866,27 @@ final class ScaffoldThemeStep implements Step
             }
         }
 
+        /* Zigzag steps (the zigzag-steps archetype, frm W3g): rows center
+           vertically; an empty step plate takes the media's shape; on phones
+           every row stacks copy-first whichever side the copy authored. */
+        .section-composition--zigzag-steps .wp-block-columns {
+            align-items: center;
+        }
+        .section-composition--zigzag-steps .wp-block-group.step-plate {
+            min-block-size: 14rem;
+            border-radius: var(--shape-radius-media, 0);
+        }
+        .section-composition--zigzag-steps .wp-block-column > figure.wp-block-image img {
+            width: 100%;
+            height: auto;
+            border-radius: var(--shape-radius-media, 0);
+        }
+        @media (max-width: 781px) {
+            .section-composition--zigzag-steps .wp-block-column:has(> .wp-block-heading) {
+                order: -1;
+            }
+        }
+
         /* Closing invitation panel (the cta-panel archetype): a contained
            card on the page ground, rounded from the committed shape scale
            and clipped so a background image or gradient follows the corner. */

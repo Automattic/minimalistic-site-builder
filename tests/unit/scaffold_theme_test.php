@@ -638,3 +638,16 @@ test('scaffold-theme shares the hairline column rules with the feature row (frm 
     assert_contains('.section-composition--feature-row-hairlines .wp-block-column > .wp-block-heading:first-child {', $css);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('scaffold-theme centers zigzag rows, sizes the empty plate, and stacks copy-first on phones (frm W3g)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_zigzag_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Luzia');
+    quietly(fn () => (new ScaffoldThemeStep())->run($project));
+    $css = $project->readText('theme/style.css');
+    assert_contains('.section-composition--zigzag-steps .wp-block-columns {', $css);
+    assert_contains('.section-composition--zigzag-steps .wp-block-group.step-plate {', $css);
+    assert_contains('min-block-size: 14rem', $css);
+    assert_contains('.section-composition--zigzag-steps .wp-block-column:has(> .wp-block-heading) {', $css);
+    assert_contains('order: -1', $css);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
