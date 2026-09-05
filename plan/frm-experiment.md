@@ -113,6 +113,9 @@ Order: W0 first (cohort + baseline). Then interleave W1–W8 by the ranked list.
 - PR-5b: medium-weight display option and `tight` tracking defaults for the product/portfolio register; reference family shortlist in FontShortlist for `grotesque`/`geometric`/`display-serif` registers.
 - PR-5c: stacked-line display (`display-lines`) for uppercase 2–3 line headlines.
 
+### W5 follow-up found 2026-09-05 (turn 6)
+- PR-5d: `heading_emphasis` monoculture. In the PR-4e direction reruns all 5 cohort directions committed `two-tone` (Spector and Cohesion included); `italic-word` and `highlight` were never chosen. Trace: the field text ranks two-tone first and calls it "the product-landing and portfolio voice"; the seeds carry no letterform hint the expansion could read an italic word off. Fix in the prompt fragment: tie `italic-word` to seeds whose type_register is display-serif/didone/script or whose brief names an italic or serif word, `highlight` to friendly product/fintech briefs, and say two-tone is not a default.
+
 ### W6 — Opt-in devices (taste rules relaxed as devices, not as free choice)
 - PR-6a: `section-badge` device (pill with dot, caption size, one per section, never above the hero H1). Direction commits `device: section-badge`; page plan assigns it per section; the eyebrow stripper in HeaderHeroStep and section rules keep the hero clean.
 - PR-6b: `side-label` device (split label column).
