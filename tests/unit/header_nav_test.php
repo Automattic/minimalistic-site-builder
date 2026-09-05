@@ -1022,3 +1022,77 @@ test('HeaderNav leaves an unterminated raw nav unchanged and warns instead of ad
     assert_contains("block='nav'", $result['warnings'][0]);
     assert_contains('delivered=unchanged', $result['warnings'][0]);
 });
+
+test('HeaderNav restores the header-pill class on a floating-pill row the model left bare (frm W1a)', function () {
+    $markup = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:group {"layout":{"type":"flex","flexWrap":"nowrap","justifyContent":"center"}} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:site-title /-->'
+        . '<!-- wp:navigation -->'
+        . '<!-- wp:navigation-link {"label":"Menu","url":"/menu/","kind":"custom"} /-->'
+        . '<!-- /wp:navigation -->'
+        . '<!-- wp:buttons --><div class="wp-block-buttons">'
+        . '<!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link" href="/visit/">Visit</a></div><!-- /wp:button -->'
+        . '</div><!-- /wp:buttons -->'
+        . '</div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->';
+
+    $result = HeaderNav::withPillRow($markup);
+    assert_eq(1, count($result['notes']), 'the restoration is a recorded repair');
+    assert_eq([], $result['warnings']);
+    $document = BlockMarkup::parse($result['markup']);
+    $row = $document->children($document->topLevel())[0];
+    assert_eq('header-pill', ($document->attrs($row) ?? [])['className'] ?? null, 'the row comment carries the class');
+    assert_contains('<div class="wp-block-group header-pill">', $result['markup'], 'the saved HTML mirrors it');
+    assert_eq(
+        $result['markup'],
+        HeaderNav::withPillRow($result['markup'])['markup'],
+        'a marked row is a fixed point',
+    );
+
+    // Already marked (with other classes): untouched.
+    $marked = str_replace(
+        '{"layout":{"type":"flex","flexWrap":"nowrap","justifyContent":"center"}}',
+        '{"className":"custom-motion header-pill","layout":{"type":"flex"}}',
+        $markup,
+    );
+    assert_eq($marked, HeaderNav::withPillRow($marked)['markup']);
+
+    // No navigation at all: nothing provable, one durable warning, bytes kept.
+    $bare = '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">'
+        . '<!-- wp:site-title /--></div><!-- /wp:group -->';
+    $unproven = HeaderNav::withPillRow($bare);
+    assert_eq($bare, $unproven['markup']);
+    assert_eq(1, count($unproven['warnings']));
+    assert_contains('delivered=unchanged', $unproven['warnings'][0]);
+});
+
+test('fixHeader marks the floating-pill row after the single-row repair wraps bare root children', function () {
+    $markup = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:site-title /-->'
+        . '<!-- wp:navigation -->'
+        . '<!-- wp:navigation-link {"label":"Menu","url":"/menu/","kind":"custom"} /-->'
+        . '<!-- /wp:navigation -->'
+        . '</div><!-- /wp:group -->';
+    $result = HeaderHeroStep::fixHeader(
+        $markup,
+        AboveFoldContract::MODE_STACKED,
+        'Northlight',
+        ['Home', 'Menu'],
+        false,
+        'floating-pill',
+        'contrast',
+        'base',
+        null,
+        [],
+        header_nav_pages(),
+    );
+    $document = BlockMarkup::parse($result['markup']);
+    $root = $document->topLevel();
+    $row = $document->children($root)[0];
+    assert_eq('flex', ($document->attrs($row) ?? [])['layout']['type'] ?? null, 'the row repair ran first');
+    assert_contains('header-pill', (string) (($document->attrs($row) ?? [])['className'] ?? ''), 'then the pill class landed on the wrapped row');
+    assert_contains('header-archetype--floating-pill', $result['markup'], 'the root carries the archetype marker');
+});

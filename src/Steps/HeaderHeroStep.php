@@ -740,6 +740,15 @@ final class HeaderHeroStep implements Step
         array_push($notes, ...$row['notes']);
         array_push($warnings, ...$row['warnings']);
 
+        // The pill class is the only hook the trusted kit styles; a row the
+        // model forgot to mark would ship as a plain bar (rung 1: fix).
+        if ($archetype === 'floating-pill') {
+            $pill = HeaderNav::withPillRow($markup);
+            $markup = $pill['markup'];
+            array_push($notes, ...$pill['notes']);
+            array_push($warnings, ...$pill['warnings']);
+        }
+
         // Strictly after the Home strip: consolidation COPIES nav items, and a
         // copy taken first would carry a Home item — or a whole page-list the
         // strip is about to replace with inner-page links — into the collapsed

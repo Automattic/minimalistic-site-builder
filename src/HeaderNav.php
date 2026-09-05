@@ -37,7 +37,10 @@ final class HeaderNav
     private const GROUP_CLOSE = '</div><!-- /wp:group -->';
 
     /** Header archetypes whose contract is one identity/navigation row. */
-    private const SINGLE_ROW_ARCHETYPES = ['standard-row', 'branded-lockup', 'minimal-overlay'];
+    private const SINGLE_ROW_ARCHETYPES = ['standard-row', 'branded-lockup', 'minimal-overlay', 'floating-pill'];
+
+    /** The class the trusted header kit styles as the detached pill. */
+    public const PILL_ROW_CLASS = 'header-pill';
 
     /**
      * @param list<array<string,mixed>> $pages
@@ -302,6 +305,65 @@ final class HeaderNav
         return [
             'markup' => $markup,
             'notes' => [...$labelNotes, $note],
+            'warnings' => [],
+        ];
+    }
+
+    /**
+     * Mark the identity/navigation row of a floating-pill header with the
+     * kit's pill class. The generated markup is asked to carry it; when the
+     * model forgets, the row is still provable (the lowest group holding
+     * both the identity and the one navigation), so the class is restored
+     * deterministically instead of shipping a pill with no pill.
+     *
+     * @return array{markup:string,notes:list<string>,warnings:list<string>}
+     */
+    public static function withPillRow(string $markup): array
+    {
+        if (preg_match('/(?:^|[\s"])' . self::PILL_ROW_CLASS . '(?:$|[\s"])/', $markup) === 1) {
+            return ['markup' => $markup, 'notes' => [], 'warnings' => []];
+        }
+        $document = BlockMarkup::parse($markup);
+        $cluster = self::identityCluster($document);
+        $navigations = array_values(array_filter(
+            $document->indices(),
+            static fn (int $index): bool => self::canonicalName($document->name($index)) === 'navigation'
+                && $document->isStructurallySafe($index),
+        ));
+        if ($cluster === null || count($navigations) !== 1) {
+            return [
+                'markup' => $markup,
+                'notes' => [],
+                'warnings' => ["file='theme/parts/header.html'; block='floating-pill row'; authored=no provable"
+                    . ' identity/navigation row; delivered=unchanged; disposition=the pill class was not restored'
+                    . ' because the row could not be proven, so the header renders as a plain bar'],
+            ];
+        }
+        $row = self::lowestCommonGroup($document, $cluster['units'][0], $navigations[0]);
+        if ($row === null || $document->parent($row) === null) {
+            // The root group is the shell's surface owner; the pill needs an
+            // inner row of its own. withSingleRowForArchetype wraps one when
+            // the identity and navigation are bare root children, so this
+            // only remains reachable for shapes that pass proved unwrapped.
+            return [
+                'markup' => $markup,
+                'notes' => [],
+                'warnings' => ["file='theme/parts/header.html'; block='floating-pill row'; authored=identity"
+                    . ' and navigation share only the root group; delivered=unchanged; disposition=the pill'
+                    . ' class was not restored because the root cannot be the pill'],
+            ];
+        }
+        $attrs = $document->attrs($row) ?? [];
+        $tokens = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $tokens[] = self::PILL_ROW_CLASS;
+        $attrs['className'] = implode(' ', array_values(array_unique($tokens)));
+        $document->setAttrs($row, $attrs);
+        if (preg_match('/^\s*<div class="wp-block-group(?=[" ])/', $document->ownHtml($row)) === 1) {
+            $document->replaceInOwnHtml($row, 'class="wp-block-group', 'class="wp-block-group ' . self::PILL_ROW_CLASS);
+        }
+        return [
+            'markup' => $document->render(),
+            'notes' => ['floating-pill: restored the ' . self::PILL_ROW_CLASS . ' class on the identity/navigation row'],
             'warnings' => [],
         ];
     }

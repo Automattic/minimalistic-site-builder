@@ -88,6 +88,13 @@ final class HeaderBehavior
         if (in_array((string) $forcedArchetype, self::TALL_ARCHETYPES, true)) {
             return self::STATIC;
         }
+        // A detached pill that scrolls away is a bar with rounded corners;
+        // persistence is the archetype's whole point, so it asks for sticky
+        // regardless of site depth (the palette safety check can still
+        // downgrade it to static, in which case the pill simply rests).
+        if ((string) $forcedArchetype === 'floating-pill') {
+            return self::STICKY_SOFT;
+        }
         if (count($pages) > 1) {
             return self::STICKY_SOFT;
         }
