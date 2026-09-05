@@ -1,0 +1,17 @@
+{
+    "id": "two-column-prose",
+    "family": "section",
+    "title": "S10 two-column-prose — a genuine editorial reading band",
+    "idea": "A real reading band: a heading, then body copy set in two columns at a comfortable measure. The section is the writing, not a layout holding a summary of the writing.",
+    "why_new": "every story section on every site collapses into centered-stack today, which caps at two or three short paragraphs. There is no band where a site can simply say something at length.",
+    "built_from": "one constrained group and a column count on the copy region; a raised copy budget is the real dependency, not the CSS.",
+    "risk": "two columns of a short text look broken, and two columns that stack on mobile break reading order if the copy is one continuous argument. Needs a word-count floor before assignment, and a single column below the breakpoint.",
+    "mockup": {
+        "scope": "mock-section-two-column-prose",
+        "html": "<div class=\"preview mock-section-two-column-prose\">\n<h4>How a bakery ends up with its own mill</h4>\n    <div class=\"cols\">\n      <p>We started buying flour by the sack from a mill two valleys over, and for six years that was\n      the whole supply chain. Then the mill closed.</p>\n      <p>The stones came up for sale in the spring. Moving them took a crane, a closed road, and most\n      of a Sunday, and they have not been switched off since.</p>\n      <p>Milling on the morning of the bake changes the bread more than any other decision we have\n      made. The flour is warm when it goes into the water, and the loaf keeps a day longer.</p>\n      <p>Everything we sell is now made from grain grown inside forty kilometres, and we know the name\n      of every farm on the list.</p>\n    </div>\n    <div class=\"sig\">Anders Holm · Head baker</div>\n</div>",
+        "css": ".mock-section-two-column-prose { background: #fbf9f3; color: #191712; font-family: var(--f-serif);\n  padding: 6cqw 7cqw; display: flex; flex-direction: column; gap: 3.4cqw; }\n.mock-section-two-column-prose h4 { margin: 0; font-size: 4.2cqw; line-height: 1.06; letter-spacing: -.02em; max-width: 20ch; }\n.mock-section-two-column-prose .cols { column-count: 2; column-gap: 5cqw; font-size: 1.7cqw; line-height: 1.62; }\n.mock-section-two-column-prose .cols p { margin: 0 0 1.5cqw; }\n.mock-section-two-column-prose .sig { font-family: var(--f-sans); font-size: 1.2cqw; letter-spacing: .16em;\n  text-transform: uppercase; opacity: .45; }"
+    },
+    "origin": "hand",
+    "prompt": "",
+    "created": "2026-08-27"
+}

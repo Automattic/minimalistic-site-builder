@@ -1,0 +1,17 @@
+{
+    "id": "marquee-overflow",
+    "family": "hero",
+    "title": "marquee-overflow — one line of type wider than the band, clipped at both edges",
+    "idea": "One line set far larger than the band and clipped at both edges, so the visitor reads a fragment and infers the whole word. The overflow is deliberate and the rest of the band stays calm.",
+    "why_new": "every recipe fits its type inside the measure; the fit-text device shrinks type to fit. This one does the opposite on purpose.",
+    "built_from": "one heading with a reviewed overflow class and root overflow: hidden; imageless.",
+    "risk": "a long site name clips to two illegible syllables. Needs a minimum-legible-fragment rule and a word-count gate before assignment.",
+    "mockup": {
+        "scope": "mock-hero-marquee-overflow",
+        "html": "<div class=\"preview mock-hero-marquee-overflow grain\">\n<div class=\"chrome\"><span>Tideline</span><nav><span>Archive</span><span>Surveys</span><span>About</span></nav></div>\n    <div class=\"big\">SPRING TIDE</div>\n    <div class=\"row\">\n      <p>A working archive of tidal survey photography, updated after every spring tide since 2009.</p>\n      <span class=\"cta\">Enter the archive</span>\n    </div>\n</div>",
+        "css": ".mock-hero-marquee-overflow { background: #f6f4ee; color: #131210;\n  font-family: \"Helvetica Neue\", Inter, ui-sans-serif, sans-serif;\n  display: flex; flex-direction: column; justify-content: center; gap: 3cqw; }\n.mock-hero-marquee-overflow .big { font-size: 19cqw; font-weight: 850; line-height: .8; letter-spacing: -.05em;\n  white-space: nowrap; margin-inline-start: -6cqw; text-transform: uppercase; }\n.mock-hero-marquee-overflow .row { display: flex; justify-content: space-between; align-items: flex-end;\n  padding: 0 5cqw; gap: 4cqw; }\n.mock-hero-marquee-overflow .row p { margin: 0; max-width: 46%; font-size: 1.95cqw; line-height: 1.45; opacity: .8; }\n.mock-hero-marquee-overflow .row .cta { font-size: 1.6cqw; letter-spacing: .12em; text-transform: uppercase;\n  border-bottom: 1px solid currentColor; padding-bottom: .5cqw; }"
+    },
+    "origin": "hand",
+    "prompt": "",
+    "created": "2026-08-27"
+}

@@ -1,0 +1,17 @@
+{
+    "id": "index-table",
+    "family": "section",
+    "title": "S6 index-table — a dense ruled list where the separators do real work",
+    "idea": "A dense ruled list — a menu, a schedule, a price list, a directory. Name, detail and value align in three stable columns, and every row carries the same hairline.",
+    "why_new": "it was, when BIGR-885 was written. It largely is not now: the rule-row item pattern already builds exactly this — name at the start, detail at the end, one hairline per row, for menus, schedules, directories and price lists — inside a centered-stack.",
+    "built_from": "",
+    "risk": "building it as an archetype creates two ways to express one idiom, and the page plan would have to choose between them on every list-like section. My advice is to widen rule-row instead and close S6.",
+    "mockup": {
+        "scope": "mock-section-index-table",
+        "html": "<div class=\"preview mock-section-index-table r-tall\">\n<div class=\"head\"><h4>Winter list</h4><span>Kitchen closes 21:30</span></div>\n    <div>\n      <div class=\"r\"><b>Cured trout, dill, rye</b><span>Cold smoked in the shed behind the kitchen</span><em>14</em></div>\n      <div class=\"r\"><b>Barley and brown butter</b><span>Last year's crop, milled here</span><em>11</em></div>\n      <div class=\"r\"><b>Mutton, turnip, juniper</b><span>Slow cooked from Friday</span><em>26</em></div>\n      <div class=\"r\"><b>Baked cream, burnt honey</b><span>One size only</span><em>9</em></div>\n      <div class=\"r\"><b>Cheese from the valley</b><span>Three, with oatcakes</span><em>12</em></div>\n      <div class=\"r\"><b>Bread and cultured butter</b><span>Baked at four, every morning</span><em>4</em></div>\n      <div class=\"r\"><b>House cordial</b><span>Rhubarb until it runs out</span><em>5</em></div>\n    </div>\n</div>",
+        "css": ".mock-section-index-table { background: #faf8f2; color: #171510; font-family: var(--f-sans);\n  padding: 5cqw 6cqw; display: flex; flex-direction: column; gap: 2.6cqw; }\n.mock-section-index-table .head { display: flex; justify-content: space-between; align-items: baseline; gap: 2cqw; }\n.mock-section-index-table h4 { margin: 0; font-family: var(--f-serif); font-size: 3.4cqw; }\n.mock-section-index-table .head span { font-family: var(--f-mono); font-size: 1.15cqw;\n  letter-spacing: .16em; text-transform: uppercase; opacity: .45; }\n.mock-section-index-table .r { display: grid; grid-template-columns: 1fr 32% 9cqw; gap: 2.4cqw; align-items: baseline;\n  border-top: 1px solid rgba(23,21,16,.16); padding: 1.5cqw 0; }\n.mock-section-index-table .r b { font-weight: 600; font-size: 1.9cqw; }\n.mock-section-index-table .r span { font-size: 1.35cqw; opacity: .58; }\n.mock-section-index-table .r em { font-style: normal; font-family: var(--f-mono); font-size: 1.45cqw; text-align: end; }"
+    },
+    "origin": "hand",
+    "prompt": "",
+    "created": "2026-08-27"
+}

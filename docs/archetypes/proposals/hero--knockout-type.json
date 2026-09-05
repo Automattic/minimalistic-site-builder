@@ -1,0 +1,19 @@
+{
+    "id": "knockout-type",
+    "family": "hero",
+    "title": "knockout-type — the photograph shows only through the letters",
+    "idea": "The headline is cut out of a solid panel and the photograph shows through the letterforms only. There is no picture on the page — the type is the picture, and the band stays a flat colour field everywhere else.",
+    "why_new": "every image today is a rectangle behind, beside or under the type. Nothing puts the image inside the letterforms.",
+    "built_from": "one heading carrying a reviewed knockout class, one image bound to it as the fill; a solid root surface. No cover block.",
+    "risk": "needs a legibility floor — short words, heavy weight, and a busy photograph destroys it. Wants a reviewed fallback to solid colour when the image is low contrast.",
+    "mockup": {
+        "scope": "mock-hero-knockout-type",
+        "html": "<div class=\"preview mock-hero-knockout-type grain\">\n<div class=\"chrome\"><span>Ferrous</span><nav><span>Work</span><span>Process</span><span>Contact</span></nav></div>\n    <div class=\"cut\">Cast<br>Iron</div>\n    <div class=\"foot\"><span>Foundry &amp; fabrication — Sheffield</span><span class=\"cta\">See the work</span></div>\n</div>",
+        "css": ".mock-hero-knockout-type { background: #0e0e0d; color: #f2efe8;\n  font-family: \"Helvetica Neue\", Inter, ui-sans-serif, sans-serif;\n  display: flex; flex-direction: column; justify-content: center; padding: 0 5cqw; }\n.mock-hero-knockout-type .cut { font-weight: 800; font-size: 15.5cqw; line-height: .84; letter-spacing: -.045em;\n  text-transform: uppercase; background-image:\n    radial-gradient(70% 90% at 30% 20%, rgba(255,255,255,.4), transparent 60%),\n    linear-gradient(140deg, #d8642f 0%, #8e2f1c 45%, #2f5f6b 100%);\n  background-size: 130% 130%; background-position: 40% 40%;\n  -webkit-background-clip: text; background-clip: text; color: transparent; }\n.mock-hero-knockout-type .foot { display: flex; justify-content: space-between; align-items: flex-end;\n  margin-top: 4cqw; font-size: 1.7cqw; letter-spacing: .08em; text-transform: uppercase; opacity: .72; }\n.mock-hero-knockout-type .cta { border: 1px solid #f2efe8; padding: 1.1cqw 2.6cqw; opacity: 1; }"
+    },
+    "origin": "hand",
+    "status": "waiting",
+    "status_note": "built in #393 and reverted from trunk in #399; the weak dark-photo case is still undecided",
+    "prompt": "",
+    "created": "2026-08-27"
+}
