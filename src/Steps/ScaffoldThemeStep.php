@@ -756,6 +756,13 @@ final class ScaffoldThemeStep implements Step
             .wp-block-group.cta-panel {
                 padding-inline: 1.25rem !important;
             }
+            /* The preset size class carries !important, so the phone cap
+               must too: 11vw keeps a nine-letter display word inside a
+               390px panel without breaking it mid-word. */
+            .wp-block-group.cta-panel :is(h1, h2, h3) {
+                font-size: min(var(--wp--preset--font-size--section-title), 11vw) !important;
+                overflow-wrap: normal;
+            }
         }
 
         CSS;
