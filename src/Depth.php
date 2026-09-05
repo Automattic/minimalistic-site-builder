@@ -6,7 +6,10 @@ namespace Automattic\SiteBuild;
 /** Shared bounded vocabulary and deterministic execution for visual depth. */
 final class Depth
 {
-    public const ALL = ['flat', 'ring', 'soft', 'hard-offset', 'inset', 'glow'];
+    public const ALL = ['flat', 'ring', 'soft', 'hard-offset', 'inset', 'glow', 'glass'];
+
+    /** Glass is a dark-ground treatment; the direction step degrades it to this on a light page (frm W4b). */
+    public const GLASS_LIGHT_FALLBACK = 'ring';
 
     public const DEFAULT = 'flat';
 
@@ -38,6 +41,14 @@ final class Depth
         'glow' => [
             'name' => 'Glow',
             'shadow' => '0 0 2rem color-mix(in srgb, var(--wp--preset--color--primary) 48%, transparent)',
+        ],
+        // frm W4b: frosted panels on a dark ground (Dreammotion's cards). The
+        // shadow is a 1px light hairline plus a deep soft drop; the
+        // translucent fill and the blur live in kitCss() because a shadow
+        // preset cannot carry them.
+        'glass' => [
+            'name' => 'Glass',
+            'shadow' => '0 0 0 1px color-mix(in srgb, var(--wp--preset--color--contrast) 16%, transparent), 0 1.25rem 3rem rgb(0 0 0 / 0.35)',
         ],
     ];
 
@@ -98,6 +109,34 @@ final class Depth
                 CSS
             : '';
 
+        // frm W4b: a glass card is a translucent tint of its own band colour
+        // with the page blurred behind it. Only band-coloured shells take
+        // the fill: a card painted contrast or an accent is an inverted
+        // highlight whose text was proven against that solid, so it stays
+        // solid. Reduced transparency restores the solid band.
+        $glass = $depth === 'glass'
+            ? <<<CSS
+
+                .wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap).has-band-background-color {
+                    background-color: color-mix(in srgb, var(--wp--preset--color--band) 72%, transparent) !important;
+                }
+                @supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+                    .wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap).has-band-background-color {
+                        -webkit-backdrop-filter: blur(14px) saturate(1.2);
+                        backdrop-filter: blur(14px) saturate(1.2);
+                    }
+                }
+                @media (prefers-reduced-transparency: reduce) {
+                    .wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap).has-band-background-color {
+                        background-color: var(--wp--preset--color--band) !important;
+                        -webkit-backdrop-filter: none;
+                        backdrop-filter: none;
+                    }
+                }
+
+                CSS
+            : '';
+
         return <<<CSS
             /* Committed '{$depth}' depth. The theme-json step publishes the
                same value as --wp--preset--shadow--depth; the literal fallback
@@ -118,7 +157,7 @@ final class Depth
             .wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap) > .wp-block-media-text:not(.alignfull) > .wp-block-media-text__media {
                 box-shadow: none !important;
             }
-            {$insetMedia}
+            {$insetMedia}{$glass}
 
             CSS;
     }
