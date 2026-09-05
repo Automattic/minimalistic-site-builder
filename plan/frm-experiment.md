@@ -340,6 +340,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 | 79 | #527 | W5 (PR-5h) | Teach the headline fit the wide display faces (frm) | merged | gist f9ae0ba97dfcc597c38c69fc8b7a1beb: spector-like14 at 390 before (16.3vw, ENOUGH past the edge) / after (fit re-derived with the Unbounded factor: 12.4vw, mirrored, headline inside the viewport) + fit replay | 3b85b57d |
 | 80 | #528 | W1 (PR-1x) | Keep the phone pill header on one row (frm) | merged | gist cc631bde55ab693724499a372ae00d7c: cohesion-like17 pill at 390 before (title truncated, two-line CTA) / after (rule mirrored into the built kit: full title, one-line caption CTA) | 7ed1ebfc |
 | 81 | #530 | W3 (PR-3z) | Scope the stat-ledger figure rule to level-3 headings (frm) | merged | gist 553ad31694a7fc0119c3348c4f79572d: spector-like15 ledger before (H2 on one unwrapped line, page 3065px wide) / after mirror (H2 wraps, page 1366px, phone scrollWidth 390) | 828bd4c9 |
+| 82 | #531 | W3 (PR-3y) | Keep only as many pictures as the archetype budgets (frm) | merged | gist 574c0394736f2b76c81461afbe1cc620: zova-like18 dashboard before crop (three stacked screens) + replay on the recorded dashboard and comparison responses (3 to 2 pictures, headings intact, media count check passes); no build | ccbbab31 |
 
 ## 9. Iteration log (one line per loop turn)
 
@@ -432,6 +433,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 - 2026-09-05 turn 87: PR-1x #528 merged (the phone pill keeps one row). Next: PR-7h on branch frm/portrait-fills-half: the metadata-corners fragment asks for a person filling the trailing half of the frame at large scale, never a small figure at the edge of an empty room. After it the cohort-6 rows are done and the loop owes cohort-7.
 - 2026-09-05 turn 88: PR-7h #529 merged. Cohort-7 built with images on 4f68b2a8 (cohesion-like18, dreammotion-like17, zova-like18, luzia-like14, spector-like15; 69/69 images, one QA regeneration on luzia). Every cohort-6 fix holds: portrait large at dim 50, marquee kept, numbered services, no cover after the zova hero, pill row on one line at 390, headline inside the phone viewport. Fidelity 4.5 / 4.5 / 4 / 4.5 / 4 (section 7 cohort-7 rows). New rows: PR-3z ledger H2 on one line (P0, next, branch frm/ledger-figure-level), PR-3x five tiles in a 2x2 grid (P1), PR-3y media over the archetype budget (P1).
 - 2026-09-05 turn 89: PR-3z #530 merged (the ledger figure rule names level-3 headings only). Next: PR-3y on branch frm/media-over-budget: a section keeps only as many image blocks as its archetype budgets, in document order (GeneratedMarkup::stripMediaOverBudget; stripBlocksNamed gains a keep-first count). Then PR-3x (extra project-grid tiles).
+- 2026-09-05 turn 90: PR-3y #531 merged (a section keeps only as many image blocks as its archetype budgets). Merge check: a throwaway worktree merged origin/trunk (7fa2c663) into frm_experiment with no conflicts. Next: PR-3x on branch frm/grid-tile-count: the dreammotion-like17 fifth tile was the band's own image cover; a tile is a cover inside a column.
 
 ## 10. Parked / rejected
 
