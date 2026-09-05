@@ -29,6 +29,7 @@ test('sticky-stack is a kit class with its own one-per-page budget on a containe
     assert_contains('position: sticky', $css);
     assert_contains('top: calc(var(--header-safe-top, 5rem) + var(--stack-offset, 0rem))', $css);
     assert_contains('.sticky-stack > :nth-child(6) { --stack-offset: 5rem; }', $css);
+    assert_contains('min-block-size: 60vh', $css, 'a card claims most of a viewport so the pile has room');
     assert_true(strpos($css, '.sticky-stack {') > strpos($css, 'prefers-reduced-motion: no-preference'), 'inert under reduced motion');
     assert_true(!str_contains($css, 'translateX(') || true, 'vertical only');
 });

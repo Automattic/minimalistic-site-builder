@@ -489,6 +489,11 @@
     .sticky-stack > * {
         position: sticky;
         top: calc(var(--header-safe-top, 5rem) + var(--stack-offset, 0rem));
+        /* A card pins only while its container still has room below it; a
+           short stack scrolls away before anything piles. Each card claims
+           most of a viewport so the pile is visible as the reader scrolls. */
+        min-block-size: 60vh;
+        box-sizing: border-box;
     }
     .sticky-stack > :nth-child(1) { --stack-offset: 0rem; }
     .sticky-stack > :nth-child(2) { --stack-offset: 1rem; }
