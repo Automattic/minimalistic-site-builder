@@ -546,3 +546,15 @@ test('scaffold-theme owns the guaranteed centered-stack alignment rule', functio
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('scaffold-theme styles native accordion rows for the faq-split archetype (frm W3b)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_faq_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    quietly(fn () => (new ScaffoldThemeStep())->run($project));
+    $css = $project->readText('theme/style.css');
+    assert_contains('.wp-block-details > summary', $css);
+    assert_contains('.wp-block-details[open] > summary::after', $css);
+    assert_contains('.faq-list > .wp-block-details:first-child', $css);
+    assert_contains('prefers-reduced-motion', $css);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

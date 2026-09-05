@@ -693,6 +693,48 @@ final class ScaffoldThemeStep implements Step
             }
         }
 
+        /* Native accordion rows (the faq-split archetype builds them from
+           core/details). Hairline-separated questions with a chevron that
+           turns when open; the answer keeps the theme's paragraph rhythm. */
+        .wp-block-details {
+            padding-block: 0.9rem;
+            border-block-end: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+        }
+        .faq-list > .wp-block-details:first-child {
+            border-block-start: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+        }
+        .wp-block-details > summary {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 1rem;
+            cursor: pointer;
+            list-style: none;
+            font-weight: 600;
+        }
+        .wp-block-details > summary::-webkit-details-marker {
+            display: none;
+        }
+        .wp-block-details > summary::after {
+            content: "+";
+            flex: none;
+            font-weight: 400;
+            font-size: 1.25em;
+            line-height: 1;
+            transition: transform 200ms ease;
+        }
+        .wp-block-details[open] > summary::after {
+            transform: rotate(45deg);
+        }
+        .wp-block-details > :not(summary) {
+            margin-block-start: 0.75rem;
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .wp-block-details > summary::after {
+                transition: none;
+            }
+        }
+
         CSS;
 
     private const README = <<<TXT

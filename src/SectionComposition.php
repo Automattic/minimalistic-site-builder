@@ -38,7 +38,11 @@ final class SectionComposition
         'equal-card-grid',
         'list-with-thumbnails',
         'bento-grid',
+        'faq-split',
     ];
+
+    /** The fewest accordion items a faq-split must carry to read as one. */
+    public const FAQ_MIN_ITEMS = 3;
 
     /** The one card in a bento that is set apart by an inverted surface. */
     public const BENTO_HIGHLIGHT_CLASS = 'card-highlight';
@@ -255,6 +259,22 @@ final class SectionComposition
             'ineligible_reason' => '',
             'root_hook' => '.section-composition--bento-grid',
             'prompt' => 'section-compositions/bento-grid.md',
+        ],
+        // frm W3b: the reference corpus' FAQ. A split band whose leading
+        // region introduces the questions and whose trailing region is a
+        // native accordion of core/details blocks (three or more). The item
+        // count is checked in markupWarnings().
+        'faq-split' => [
+            'backgrounds' => ['base', 'tinted', 'contrast'],
+            'default_background' => 'base',
+            'min_images' => 0,
+            'max_images' => 1,
+            'copy_capacity' => 'expanded',
+            'requires_row' => true,
+            'requires_context' => [],
+            'ineligible_reason' => '',
+            'root_hook' => '.section-composition--faq-split',
+            'prompt' => 'section-compositions/faq-split.md',
         ],
     ];
 
@@ -593,6 +613,24 @@ TEXT;
                     ['archetype' => $archetype, 'highlighted_cards' => 1, 'class' => self::BENTO_HIGHLIGHT_CLASS],
                     ['highlighted_cards' => $highlights],
                     'safe parseable section was retained; exactly one card carries the inverted highlight',
+                );
+            }
+        }
+
+        if ($archetype === 'faq-split') {
+            $items = 0;
+            foreach ($document->indices() as $index) {
+                if ($document->name($index) === 'details') {
+                    $items++;
+                }
+            }
+            if ($items < self::FAQ_MIN_ITEMS) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'faq accordion items',
+                    ['archetype' => $archetype, 'minimum_details_blocks' => self::FAQ_MIN_ITEMS],
+                    ['details_block_count' => $items],
+                    'safe parseable section was retained; a FAQ split is an accordion of core/details blocks, not a paragraph list',
                 );
             }
         }
