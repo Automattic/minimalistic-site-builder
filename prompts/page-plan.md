@@ -36,7 +36,7 @@ Return a single JSON object with this exact shape:
       "type": "a short, specific semantic label; examples: menu, timeline, case-studies, process, services, gallery, testimonials, pricing, team, faq, contact, story",
       "purpose": "1 sentence: what this section is for and what the visitor should take away",
       "content_notes": "2-4 sentences of concrete guidance: the specific copy points, items, or layout idea for this section, grounded in the site spec (real facts where given)",
-      "layout_archetype": "one of: full-bleed-cover, asymmetric-split, centered-stack, offset-grid, equal-card-grid, list-with-thumbnails, bento-grid, faq-split, cta-panel, pricing-tiers, stat-ledger, feature-row-hairlines, zigzag-steps",
+      "layout_archetype": "one of: full-bleed-cover, asymmetric-split, centered-stack, offset-grid, equal-card-grid, list-with-thumbnails, bento-grid, faq-split, cta-panel, pricing-tiers, stat-ledger, feature-row-hairlines, zigzag-steps, statement-lines",
       "background": "one of: base, tinted, contrast, image",
       "vertical_density": "one of: compact, standard, spacious",
       "item_pattern": null,
@@ -76,6 +76,7 @@ Layout archetypes (pick the one that best serves each section's content):
 - stat-ledger — ONE row of three or four figures, each a number with its unit or sign ("120+", "98%", "$4.2M", "1,200") over one short label, hairlines between them, no cards and no images. For proof by numbers: metrics, results, milestones, counters, "by the numbers" sections. The figures must come from the brief or the SITE SPEC; never invent a statistic. Never for fewer than three figures (fold them into the copy) and never with a paragraph per figure.
 - feature-row-hairlines — ONE row of three or four short text columns (a two-to-four-word heading over one or two lines each) separated by hairlines, no cards and no images. For a compact set of capabilities, principles, services or steps that should read as one quiet row under a hero or a panel. Never for long copy, never for fewer than three items (use asymmetric-split), and never when the set wants tiles (that is bento-grid).
 - zigzag-steps — a ladder of three to five steps, each one two-column row with the copy (a short heading and one or two lines) on one side and one image or an empty plate on the other, the sides swapping row by row. For a process, method, how-it-works or onboarding sequence that deserves room per step; the committed step numeral (when the direction has one) leads every step. Never for fewer than three steps (asymmetric-split) and never for a set that is not a sequence (bento-grid or feature-row-hairlines).
+- statement-lines — a ledger of three to six one-line statements set large, one under another with a hairline between them, no cards and no images. For values, principles, manifesto lines, a client list read as a roll, or a short list of disciplines. Never for items that need a paragraph each (feature-row-hairlines) and never for a sequence (zigzag-steps).
 
 Section structure and types:
 - List sections in their intended page order. The builder derives each section's structural role from that order after generation, so do not return a `role` field.
