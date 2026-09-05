@@ -40,3 +40,25 @@ test('the driver counts a figure up from zero after it enters and the kit never 
     }
     assert_contains("'.count-up',", (string) file_get_contents(repo_path('bin/screenshot/screenshot.js')), 'the screenshot harness settles the figures');
 });
+
+test('the section boundary marks figure-only blocks with count-up when the profile runs entrances (frm W8b)', function () {
+    $heading = static fn (string $text, string $class = ''): string => '<!-- wp:heading {"level":3' . ($class !== '' ? ',"className":"' . $class . '"' : '') . '} -->'
+        . '<h3 class="wp-block-heading' . ($class !== '' ? ' ' . $class : '') . '">' . $text . '</h3><!-- /wp:heading -->';
+    $markup = '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">'
+        . $heading('120+') . $heading('$4.2M') . $heading('1,200') . $heading('98 %')
+        . $heading('120 projects delivered') . $heading('2024') . $heading('7', 'reveal-fade')
+        . '<!-- wp:paragraph --><p>Nothing to count here.</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->';
+    $repairs = [];
+    $out = \Automattic\SiteBuild\Units\GeneratedMarkup::markFigures($markup, 'page-home--metrics', 'dramatic', $repairs);
+    assert_eq(4, substr_count($out, 'class="count-up wp-block-heading"'), 'the four figures count');
+    assert_contains('{"level":3,"className":"count-up"}', $out, 'the block attributes carry the class too');
+    assert_true(!str_contains($out, 'count-up wp-block-heading">120 projects'), 'a sentence is not a figure');
+    assert_contains('<h3 class="wp-block-heading reveal-fade">7</h3>', $out, 'a block with its own entrance keeps it');
+    assert_contains('<h3 class="wp-block-heading">2024</h3>', $out, 'a bare year is a date, not a count');
+    assert_eq(4, count($repairs));
+
+    $minimal = \Automattic\SiteBuild\Units\GeneratedMarkup::markFigures($markup, 'page-home--metrics', 'minimal', $repairs);
+    assert_eq($markup, $minimal, 'the minimal profile runs no entrances');
+    assert_eq($markup, \Automattic\SiteBuild\Units\GeneratedMarkup::markFigures($markup, 'page-home--metrics', 'none', $repairs));
+});
