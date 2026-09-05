@@ -3982,3 +3982,22 @@ test('theme-json never ships a font face from a foreign host', function () {
     assert_contains('bundled theme files', $warnings);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+
+test('theme.json custom CSS loses every rule on the emphasis hook at any depth, with a warning per declaration (frm PR-5g)', function () {
+    $theme = ['styles' => [
+        'css' => '.section-badge{gap:.5em} .emph{position:relative;white-space:nowrap}',
+        'blocks' => ['core/heading' => ['css' => '.emph{display:inline-block}']],
+    ]];
+    [$out, $warnings] = ThemeJsonStep::removeEmphasisHookCustomCss($theme);
+    assert_eq('.section-badge{gap:.5em} .emph{}', $out['styles']['css']);
+    assert_eq('.emph{}', $out['styles']['blocks']['core/heading']['css']);
+    assert_eq(3, count($warnings));
+    assert_contains('styles.css: authored declaration', $warnings[0]);
+    assert_contains('white-space:nowrap', $warnings[1]);
+    assert_contains('styles.blocks.core/heading.css', $warnings[2]);
+    assert_contains('the emphasis kit paints it', $warnings[2]);
+    [$same, $none] = ThemeJsonStep::removeEmphasisHookCustomCss(['styles' => ['css' => 'body{margin:0}']]);
+    assert_eq('body{margin:0}', $same['styles']['css']);
+    assert_eq([], $none);
+});
