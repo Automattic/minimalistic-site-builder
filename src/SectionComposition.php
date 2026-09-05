@@ -131,11 +131,14 @@ final class SectionComposition
     /**
      * Whether a stated brief clause is about THIS section (frm PR-3w shares
      * the PR-3s reader): the clause and the section's slug, title, type or
-     * purpose share a word stem of four letters or more.
+     * purpose share a word stem of four letters or more. A caller that
+     * names a device (the numbered row) skips the purpose: its prose names
+     * neighbours and services too often, and a numeral on the wrong row is
+     * a decorative number.
      *
      * @param array<string,mixed> $section
      */
-    public static function clauseAppliesTo(?string $clause, array $section): bool
+    public static function clauseAppliesTo(?string $clause, array $section, bool $includePurpose = true): bool
     {
         if ($clause === null || trim($clause) === '') {
             return false;
@@ -151,7 +154,7 @@ final class SectionComposition
         }
         $haystack = mb_strtolower(implode(' ', array_map(
             static fn (string $key): string => (string) ($section[$key] ?? ''),
-            ['slug', 'title', 'type', 'purpose'],
+            $includePurpose ? ['slug', 'title', 'type', 'purpose'] : ['slug', 'title', 'type'],
         )), 'UTF-8');
         foreach (preg_split('/[^\\p{L}]+/u', $haystack) ?: [] as $word) {
             if (mb_strlen($word, 'UTF-8') >= 4 && in_array(mb_substr($word, 0, 4, 'UTF-8'), $stems, true)) {

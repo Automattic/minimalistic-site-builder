@@ -103,6 +103,7 @@ final class SectionUnit extends AbstractPageSectionUnit
                 SectionComposition::clauseAppliesTo(
                     is_string($input['stated_numbered'] ?? null) ? $input['stated_numbered'] : null,
                     $section,
+                    false,
                 ),
             ),
             // The catalog, not the model, decides whether this band pins its
@@ -218,6 +219,7 @@ final class SectionUnit extends AbstractPageSectionUnit
             ) || SectionComposition::clauseAppliesTo(
                 is_string($input['stated_numbered'] ?? null) ? $input['stated_numbered'] : null,
                 is_array($input['section'] ?? null) ? $input['section'] : [],
+                false,
             ),
         );
         $markup = $numeral['markup'];

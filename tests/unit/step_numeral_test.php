@@ -122,6 +122,9 @@ test('a numbered stack the brief states counts as a process section for its own 
     $work = ['slug' => 'work', 'type' => 'portfolio', 'title' => 'Selected work'];
     assert_true(\Automattic\SiteBuild\SectionComposition::clauseAppliesTo('services listed as a numbered stack', $services));
     assert_true(!\Automattic\SiteBuild\SectionComposition::clauseAppliesTo('services listed as a numbered stack', $work));
+    $pricing = ['slug' => 'pricing', 'type' => 'pricing', 'title' => 'Plans', 'purpose' => 'Two plans for ongoing design services.'];
+    assert_true(\Automattic\SiteBuild\SectionComposition::clauseAppliesTo('services listed as a numbered stack', $pricing), 'the purpose reaches a highlight');
+    assert_true(!\Automattic\SiteBuild\SectionComposition::clauseAppliesTo('services listed as a numbered stack', $pricing, false), 'a numeral never rides the purpose prose');
 
     assert_contains('counts as a process section', StepNumeral::numberedDirective('chip', true));
     assert_contains('"fontSize":"caption"', StepNumeral::numberedDirective('chip', true));
