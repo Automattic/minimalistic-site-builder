@@ -11,6 +11,7 @@ use Automattic\SiteBuild\ImageLogger;
 use Automattic\SiteBuild\GeminiImage;
 use Automattic\SiteBuild\ImagePromptComposer;
 use Automattic\SiteBuild\ImageQa;
+use Automattic\SiteBuild\ImageKind;
 use Automattic\SiteBuild\ImageTransparency;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\MediaReferenceRemoval;
@@ -914,7 +915,8 @@ final class GenerateImagesStep implements Step
         $filename = (string) ($spec['filename'] ?? '');
         try {
             $prompt = $this->renderer->render('image-qa.md', [
-                'subject' => (string) ($spec['subject'] ?? ''),
+                'subject'   => (string) ($spec['subject'] ?? ''),
+                'text_rule' => ImageKind::qaTextRule((string) ($spec['image_kind'] ?? '')),
             ]);
             $answer = $this->llm->completeWithImage(
                 $prompt,

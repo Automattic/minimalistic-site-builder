@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\ImageKind;
 use Automattic\SiteBuild\ImagePromptComposer;
+use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\Steps\FinalizeThemeStep;
 use Automattic\SiteBuild\Steps\DesignDirectionStep;
 
 test('image kind is a closed vocabulary with one style keyword and one render clause each (frm W7a)', function () {
@@ -60,4 +62,67 @@ test('the direction normalizes, persists, formats and reads image_kind (frm W7a)
         $project->writeJson('designDirection.json', ['description' => 'x', 'image_kind' => 'line-illustration']);
         assert_eq('line-illustration', DesignDirectionStep::imageKindFor($project));
     });
+});
+
+test('the framed-screen kit ships for ui-mockup only, keys on the image role hooks and spares covers, avatars and transparent assets (frm W7b)', function () {
+    assert_eq(null, ImageKind::kitCss('photo'));
+    assert_eq(null, ImageKind::kitCss('3d-object'));
+    assert_eq(null, ImageKind::kitCss(null));
+    $css = (string) ImageKind::kitCss(' UI-Mockup ');
+    assert_contains('.wp-block-image, .card-media, .card-media-tall, .card-media-thumb, .feature-media, .hero-composition__stage', $css);
+    assert_contains(':not(.wp-block-cover *)', $css, 'a cover keeps its own treatment');
+    assert_contains(':not([class*="avatar"])', $css, 'an avatar is not a screen');
+    assert_contains(':has(> img:not([src$=".png"]))', $css, 'a transparent asset is not a screen');
+    assert_contains('border-radius: var(--shape-radius-panel, 1rem)', $css, 'the frame takes the committed panel radius');
+    assert_contains('inset 0 0 0 1px color-mix(in srgb, currentColor 16%, transparent)', $css, 'the ring is drawn in the surface ink');
+    assert_contains('inset-inline-start: 0.875rem', $css, 'the window dots follow the writing direction');
+    assert_contains('.screen-frame--tilt', $css);
+    assert_contains('rotate: x 6deg', $css, 'the tilt is the individual rotate property, never transform');
+    assert_contains('rotate: none', $css, 'phones lie the screen flat');
+    assert_true(!str_contains($css, '!important'), 'the screen kit fights nothing');
+    assert_eq('screen-frame--tilt', ImageKind::TILT_CLASS);
+});
+
+test('a ui-mockup site inspects every picture and reads placeholder bars as shapes, not text (frm W7b)', function () {
+    assert_true(ImageKind::inspectsEveryImage('ui-mockup'));
+    assert_true(!ImageKind::inspectsEveryImage('photo'));
+    assert_true(!ImageKind::inspectsEveryImage(null));
+    assert_eq('', ImageKind::qaTextRule('photo'));
+    assert_contains('blurred placeholder bars', ImageKind::qaTextRule('ui-mockup'));
+    assert_contains('legible letters, words or numerals', ImageKind::qaTextRule('ui-mockup'));
+
+    $card = ['filename' => 'feature-dashboard.jpg', 'aspectRatio' => 'landscape', 'pageContext' => 'card thumbnail in a feature grid'];
+    assert_true(!\Automattic\SiteBuild\ImageQa::applies($card), 'a photo card is not inspected');
+    assert_true(\Automattic\SiteBuild\ImageQa::applies($card + ['image_kind' => 'ui-mockup']), 'a mockup card is inspected');
+    assert_true(!\Automattic\SiteBuild\ImageQa::applies(['filename' => 'object.png', 'image_kind' => 'ui-mockup']), 'a transparent asset never is');
+
+    $prompt = \Automattic\SiteBuild\PromptRenderer::fill(
+        (string) file_get_contents(__DIR__ . '/../../prompts/image-qa.md'),
+        ['subject' => 'a dashboard', 'text_rule' => ImageKind::qaTextRule('ui-mockup')],
+    );
+    assert_contains('abstract marks do not count. This picture is a product-interface mockup', $prompt);
+});
+
+test('the direction fact tells a ui-mockup author about the frame and the one tilt class (frm W7b)', function () {
+    $rendered = DesignDirectionStep::format(['description' => 'x', 'image_kind' => 'ui-mockup']);
+    assert_contains('frames every contained picture as a product window', $rendered);
+    assert_contains('`screen-frame--tilt` to at most ONE screen per page', $rendered);
+    assert_true(!str_contains(DesignDirectionStep::format(['description' => 'x', 'image_kind' => '3d-object']), 'screen-frame--tilt'));
+});
+
+test('finalize-theme ships the screen kit for ui-mockup and prunes it for photo (frm W7b)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fin_screen_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Zova');
+    $project->writeJson('designDirection.json', ['description' => 'x', 'image_kind' => 'ui-mockup']);
+    finalize_static_header($project);
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+    assert_contains('.hero-composition__stage', $project->readText('theme/assets/screen/screen.css'));
+    $php = $project->readText('theme/functions.php');
+    assert_contains("wp_enqueue_style('zova-screen', get_theme_file_uri('assets/screen/screen.css'), array('zova-style'), \$ver);", $php);
+
+    $project->writeJson('designDirection.json', ['description' => 'x', 'image_kind' => 'photo']);
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+    assert_true(!$project->exists('theme/assets/screen/screen.css'), 'stale screen kit pruned');
+    assert_true(!str_contains($project->readText('theme/functions.php'), 'zova-screen'), 'stale screen enqueue pruned');
+    exec('rm -rf ' . escapeshellarg($tmp));
 });

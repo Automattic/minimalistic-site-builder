@@ -1794,7 +1794,13 @@ final class DesignDirectionStep implements Step
         if ($imageKind !== null && $imageKind !== ImageKind::DEFAULT) {
             $facts[] = "- **Image kind**: {$imageKind} — " . ImageKind::meaning($imageKind)
                 . '. Every AI_IMAGE placeholder on this site uses the style keyword `' . ImageKind::styleKeyword($imageKind)
-                . '`; the build appends the kind\'s render instruction to every image request.';
+                . '`; the build appends the kind\'s render instruction to every image request.'
+                . ($imageKind === 'ui-mockup'
+                    ? ' The build frames every contained picture as a product window (radius, hairline ring, window'
+                        . ' bar), so author no frame, border or shadow around an image. Add the class `'
+                        . ImageKind::TILT_CLASS . '` to at most ONE screen per page (the hero stage or the first'
+                        . ' feature image) for a gentle perspective tilt; every other screen sits flat.'
+                    : '');
         }
 
         $sectionLabel = SectionLabel::explicit($direction['section_label'] ?? null);

@@ -30,6 +30,11 @@ final class ImageQa
         if ($filename === '' || GeminiImage::mimeForFilename($filename) === 'image/png') {
             return false;
         }
+        // A product-screen site inspects every picture (frm W7b): painted
+        // words in a mockup read as the site's own copy.
+        if (ImageKind::inspectsEveryImage((string) ($spec['image_kind'] ?? ''))) {
+            return true;
+        }
         if (preg_match('/^hero(?:[-_.]|$)/i', $filename) === 1) {
             return true;
         }
