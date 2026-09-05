@@ -15,7 +15,7 @@ test('marquee is an ambient kit class with its own duration in every profile (fr
     assert_contains('animation-timing-function: linear', $css);
     assert_contains('to { transform: translateX(-50%); }', $css);
     assert_contains('.marquee:focus-within .marquee__track', $css, 'keyboard focus pauses the loop');
-    assert_true(strpos($css, '.marquee {') > strpos($css, 'prefers-reduced-motion: no-preference'), 'the marquee rules are inert under reduced motion');
+    assert_true(strpos($css, '.marquee .marquee__track {') > strpos($css, 'prefers-reduced-motion: no-preference'), 'the loop is inert under reduced motion (the scale rule may sit outside, frm PR-8g)');
     foreach (['calm', 'energetic', 'dramatic', 'minimal'] as $profile) {
         assert_contains('--motion-marquee-duration:', (string) file_get_contents(repo_path("assets/motion/profiles/{$profile}.css")), $profile);
     }
@@ -60,4 +60,25 @@ test('a phrase repeated three or more times in one block collapses to the phrase
         assert_eq($untouched, GeneratedMarkup::collapseRepeatedPhrase($untouched, $part, $repairs));
         assert_eq($before, count($repairs));
     }
+});
+
+test('the kit owns the marquee scale and the boundary drops an authored size or face (frm PR-8g)', function () {
+    $css = (string) file_get_contents(repo_path('assets/motion/motion.css'));
+    $base = substr($css, 0, strpos($css, 'prefers-reduced-motion: no-preference'));
+    assert_contains('.marquee {', $base, 'the scale applies in every motion preference');
+    assert_contains('font-size: var(--wp--preset--font-size--display, 3rem)', $base);
+    assert_contains('white-space: nowrap', $base);
+    assert_true(!str_contains($base, '!important'), 'no fight with the preset classes');
+
+    $authored = '<!-- wp:paragraph {"className":"marquee has-text-align-center","fontSize":"caption","fontFamily":"body","style":{"typography":{"letterSpacing":"0.1em"}}} -->'
+        . '<p class="has-text-align-center marquee has-body-font-family has-caption-font-size" style="letter-spacing:0.1em">Identity, editorial, packaging</p><!-- /wp:paragraph -->';
+    $repairs = [];
+    $out = \Automattic\SiteBuild\Units\GeneratedMarkup::ownMarqueeScale($authored, 'page-home--marquee', $repairs);
+    assert_true(!str_contains($out, '"fontSize"'), 'fontSize attribute dropped');
+    assert_true(!str_contains($out, 'has-caption-font-size'), 'size class dropped');
+    assert_true(!str_contains($out, 'has-body-font-family'), 'face class dropped');
+    assert_contains('marquee', $out);
+    assert_eq(1, count($repairs));
+    $plain = '<!-- wp:paragraph {"className":"marquee"} --><p class="marquee">Plain</p><!-- /wp:paragraph -->';
+    assert_eq($plain, \Automattic\SiteBuild\Units\GeneratedMarkup::ownMarqueeScale($plain, 'x', $repairs), 'nothing authored, nothing changed');
 });

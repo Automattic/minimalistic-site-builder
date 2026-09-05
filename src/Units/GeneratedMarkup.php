@@ -4147,4 +4147,59 @@ final class GeneratedMarkup
         }
         return $changed ? $document->render() : $markup;
     }
+
+    /**
+     * The kit owns the marquee's type (frm PR-8g): an authored fontSize or
+     * fontFamily on a `marquee` paragraph (spector-like4 set caption size)
+     * would fight the kit's display scale through the preset's own
+     * !important, so the boundary drops them and records the repair.
+     *
+     * @param list<array<string,mixed>> $repairs
+     */
+    public static function ownMarqueeScale(string $markup, string $part, array &$repairs = []): string
+    {
+        $document = BlockMarkup::parse($markup);
+        $changed = false;
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) !== 'paragraph' || !$document->isStructurallySafe($index)) {
+                continue;
+            }
+            $attrs = $document->attrs($index) ?? [];
+            $tokens = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            if (!in_array('marquee', $tokens, true)) {
+                continue;
+            }
+            $dropped = [];
+            foreach (['fontSize', 'fontFamily'] as $key) {
+                $value = trim((string) ($attrs[$key] ?? ''));
+                if ($value === '') {
+                    continue;
+                }
+                unset($attrs[$key]);
+                $suffix = $key === 'fontSize' ? 'font-size' : 'font-family';
+                $document->removeClassTokenInOwnHtml($index, "has-{$value}-{$suffix}");
+                $dropped[] = "{$key} '{$value}'";
+            }
+            if (isset($attrs['style']['typography'])) {
+                unset($attrs['style']['typography']);
+                if ($attrs['style'] === []) {
+                    unset($attrs['style']);
+                }
+                $dropped[] = 'style.typography';
+            }
+            if ($dropped === []) {
+                continue;
+            }
+            $document->setAttrs($index, $attrs);
+            $repairs[] = [
+                'part' => $part,
+                'block' => 'paragraph.marquee',
+                'authored' => implode(', ', $dropped),
+                'delivered' => 'removed',
+                'note' => 'the motion kit sets the marquee scale; an authored size or face would fight it',
+            ];
+            $changed = true;
+        }
+        return $changed ? $document->render() : $markup;
+    }
 }

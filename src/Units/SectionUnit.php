@@ -205,6 +205,7 @@ final class SectionUnit extends AbstractPageSectionUnit
         // A marquee painted in copy (the same phrase three times in one
         // block) collapses to the phrase and the kit class (frm W8c).
         $markup = GeneratedMarkup::collapseRepeatedPhrase($markup, $this->key($input), $repairs);
+        $markup = GeneratedMarkup::ownMarqueeScale($markup, $this->key($input), $repairs);
         // A figure-only block counts up when the profile runs entrances (frm W8b).
         $markup = GeneratedMarkup::markFigures(
             $markup,

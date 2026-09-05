@@ -234,6 +234,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 | 38 | #485 | W8d | Add the sticky-stack kit class for a card stack (frm) | merged | gist 2e016a8f9758bf525b0e22444f018879: cohesion-like10-8d replay, cards pinned at 80/96px under the pill, static under reduce; cohesion-like12 unforced did not use it | (see git) |
 | 39 | #486 | W1 (PR-1f) | Keep the pill's and the centered bar's CTA against the hero action (frm) | merged | pure replay on cohesion-like10: standard-row drops the button, floating-pill keeps "Start project"; no build | (see git) |
 | 40 | #487 | W2 (PR-2f) | Bind the marquee-name paragraph to the site name (frm) | merged | pure replay on cohesion-like10's hero: the exact name untouched, a paraphrase bound to "Alexia Studio" with one repair; no build | (see git) |
+| 41 | #488 | W3 (PR-3j) | Let row checks look past a committed side-label split (frm) | merged | pure replay on spector-like6's stats pattern: the [2,4] row warning is gone, only the unit-word figure remains; no build | (see git) |
 
 ## 9. Iteration log (one line per loop turn)
 
@@ -278,6 +279,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 - 2026-09-05 turn 39: W4d #484 merged. W8d built on `frm/sticky-stack`: STACK_CLASSES bucket (one per page, container of 2-6, no entrance budget), pure-CSS sticky pile with growing offsets and 60vh cards (the first version pinned nothing: a short container scrolls away), prompt bullet, tests. Evidence: replay on a cohesion copy with a Playwright scroll probe; the unforced cohesion-like12 did not reach for the class. Ops lesson: keep-alive servers linger unless the whole process group is killed (`kill -- -$KA`); about forty stale Playground servers were found and stopped. Merged as #485.
 - 2026-09-05 turn 40: W8d #485 merged. PR-1f on `frm/pill-keeps-cta`: the keeps-action commit of W1b had never reached PR #465 (only two of three commits were pushed), so the flag was absent on frm_experiment; landed the parameter, a `keepsHeaderAction` helper for floating-pill and bar-center-cta, the run-time call and the tests. Lesson: after `git push`, confirm the PR's commit list with `gh pr view <n> --json commits` before merging. Merged as #486.
 - 2026-09-05 turn 41: PR-1f #486 merged (audit of #462-#486 commit lists: only #465 had lost a commit). PR-2f on `frm/marquee-name-bind`: `HeroComposition::bindMarqueeName` replaces the marquee paragraph's text with the spec's site name at the hero boundary and records the repair. Merged as #487.
+- 2026-09-05 turn 42: PR-2f #487 merged. PR-3j on `frm/side-label-rows`: `isSideLabelSplit` lets the bento, pricing, ledger and feature-row row counts skip the split whose first column holds only the side label. Merged as #488.
 
 ## 10. Parked / rejected
 
