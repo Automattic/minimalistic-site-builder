@@ -250,6 +250,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 | 45 | #492 | W5c | Stack display lines under the uppercase treatments (frm) | merged | gist d5054962392e23fdb3d2d226b77bcd3e: spector-like7-5c finalize replay, three-line caps H1 at line-height 0.92 with balanced breaks | (see git) |
 | 46 | #493 | W3e (statement-lines) | Add the statement-lines section archetype (frm) | merged | gist 029fc3967b71be56ce07ab32bff2a7a4: spector-like8 planned it unforced, five caps statements with hairlines inside a side-label split; mobile 390 (phone cap added after the crop) | (see git) |
 | 47 | #494 | W3i | Add the newsletter-columns footer composition (frm) | merged | gist be85d75369233a1ae9a2d1afb373756a: zova-like12-3i with the footer pinned, invitation row + three link columns + credit; mobile 390 | (see git) |
+| 48 | #495 | W2 (PR-2g) | Let a hero the brief states outrank the stable recipe pick (frm) | merged | direction reruns: zova-like12-2g panel-stage (was marquee-name), spector-like8-2g cinematic-safe-zone (was foreground-split); no full build | (see git) |
 
 ## 9. Iteration log (one line per loop turn)
 
@@ -302,6 +303,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 - 2026-09-05 turn 47: W5c #492 merged. W3e statement-lines built on `frm/statement-lines`: one marked group of 3-6 heading lines, hairlines and section-title scale from the theme, page-plan text; spector-like8 planned it unforced with no warnings. The 390 crop showed four-line statements, so the line now scales with the viewport on phones (8vw cap). W3e is complete. Merged as #493.
 - 2026-09-05 turn 48: W3e statement-lines #493 merged; trunk merge rechecked clean. W3i built on `frm/newsletter-footer`: newsletter-columns footer composition (fragment, contrast surface, marker test); evidence by pinning footer_archetype in a zova copy and rerunning sections. Follow-up PR-3l: the footer unit carries no form placeholder, so the invitation has no input; the sunken-wordmark verification stays open. Merged as #494.
 - 2026-09-05 turn 49: W3i #494 merged; PR-3l parked (host substitution unverifiable). Backlog left: W3f (JS tabs), W3h/W2c/W2d/W7b/W7c (need the image proxy, still failing at 10:40). Fidelity critique on the latest unforced builds (no new cohort: the night's two-cohort budget is spent): fidelity 3 on all five (cohesion 2->3, zova 2->3, others flat, images still absent). Biggest gap now: the brief's own words for the hero and the header are ignored by the hash picks (cohesion names a pill and a marquee, zova a gradient panel hero, spector a spread nav and a portrait hero). Filed PR-2g and PR-1h as stated-choice rations, the same shape as PR-4g for the ground.
+- 2026-09-05 turn 50: PR-2g on `frm/stated-hero`: `HeroComposition::statedInBrief` phrase list + `selectHeroRecipe` reads original_prompt then prompt and commits the stated recipe inside the caller constraints (repair recorded when the pick changes; HERO_RECIPE still first). Direction reruns on zova and spector copies land on the briefed heroes. Merged as #495.
 
 ## 10. Parked / rejected
 
