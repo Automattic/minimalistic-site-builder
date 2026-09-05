@@ -1000,15 +1000,26 @@ final class ScaffoldThemeStep implements Step
            at display scale in the heading face over caption labels, with
            hairlines between the columns; on phones the row stacks and the
            hairline turns horizontal. Authored separators are not needed. */
+        /* Each ledger column is its own inline-size container and may
+           shrink below its content (flex items default to min-width auto,
+           which let "$4.2M" spill into the next column on spector-like10,
+           frm PR-3m); the figure never wraps mid-token. */
+        .section-composition--stat-ledger .wp-block-columns > .wp-block-column {
+            container-type: inline-size;
+            min-width: 0;
+        }
         .section-composition--stat-ledger .wp-block-column > .wp-block-heading:first-child {
             font-family: var(--wp--preset--font-family--heading, inherit);
-            /* Capped by the viewport so a four-column figure never runs out
-               of its column (spector-like6: "4 YEARS" clipped at 1366). */
-            font-size: min(var(--wp--preset--font-size--display), 7vw);
+            /* Capped by the viewport AND by the column: 26cqi keeps a
+               five-glyph figure ("$4.2M", "1,200") inside a four-up column
+               at every width; the viewport cap still bounds three-up rows
+               (spector-like6: "4 YEARS" clipped at 1366). */
+            font-size: min(var(--wp--preset--font-size--display), 7vw, 26cqi);
             font-weight: 600;
             line-height: 1;
             letter-spacing: -0.03em;
             margin-block-end: 0.35em;
+            white-space: nowrap;
         }
         /* The hairline family (frm W3e): stat-ledger and feature-row-hairlines
            share the column rules. */
