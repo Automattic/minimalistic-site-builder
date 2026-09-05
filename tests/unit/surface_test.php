@@ -40,7 +40,7 @@ test('Surface kitCss carries both inks so no band loses the texture', function (
     foreach (['#16181A', '#EFE8DA'] as $base) {
         $css = Surface::kitCss('concrete', $base);
         assert_true(is_string($css));
-        assert_contains('mix-blend-mode: soft-light', $css, "one blend serves both on {$base}");
+        assert_true(str_contains($css, 'mix-blend-mode: multiply') || str_contains($css, 'mix-blend-mode: screen'), "one visible blend serves both inks on {$base}");
         assert_contains('rgba(', $css, "inks present on {$base}");
     }
 });

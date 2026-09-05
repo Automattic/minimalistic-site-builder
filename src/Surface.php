@@ -98,7 +98,12 @@ final class Surface
         if ($opacity === null || $background === null) {
             return null;
         }
-        $blend = 'soft-light';
+        // soft-light never moved a pixel: at these alphas it darkens a
+        // near-white page by a fraction of one level and brightens a
+        // near-black one by less (frm PR-4j, measured on a bare fixture).
+        // The texture is a dark ink on a light page and a light ink on a
+        // dark one, so multiply and screen carry it at the same alphas.
+        $blend = $dark ? 'screen' : 'multiply';
         $mode = $dark ? 'dark' : 'light';
         $size = $surface === 'dot-grid' ? '24px 24px' : 'auto';
         return "/* Committed '{$surface}' page surface ({$mode}). "
