@@ -912,6 +912,13 @@ final class ScaffoldThemeStep implements Step
         .section-composition--statement-lines .wp-block-group.statement-lines > .wp-block-heading:last-child {
             border-block-end: 1px solid color-mix(in srgb, currentColor 14%, transparent);
         }
+        @media (max-width: 600px) {
+            /* Four-line statements at section-title scale crowd a phone
+               (spector-like8 at 390); the line scales with the viewport. */
+            .section-composition--statement-lines .wp-block-group.statement-lines > .wp-block-heading {
+                font-size: min(var(--wp--preset--font-size--section-title), 8vw);
+            }
+        }
 
         /* Closing invitation panel (the cta-panel archetype): a contained
            card on the page ground, rounded from the committed shape scale

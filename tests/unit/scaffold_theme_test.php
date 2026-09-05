@@ -661,5 +661,6 @@ test('scaffold-theme sets statement lines at section-title scale with hairlines 
     assert_contains('.section-composition--statement-lines .wp-block-group.statement-lines > .wp-block-heading {', $css);
     assert_contains('border-block-start: 1px solid color-mix(in srgb, currentColor 14%, transparent)', $css);
     assert_contains('.section-composition--statement-lines .wp-block-group.statement-lines > .wp-block-heading:last-child {', $css);
+    assert_contains('font-size: min(var(--wp--preset--font-size--section-title), 8vw)', $css, 'phones scale the line with the viewport');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
