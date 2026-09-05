@@ -9,6 +9,7 @@ use Automattic\SiteBuild\CardStyle;
 use Automattic\SiteBuild\ColorEconomy;
 use Automattic\SiteBuild\ConceptSeeds;
 use Automattic\SiteBuild\BandGeometry;
+use Automattic\SiteBuild\StepNumeral;
 use Automattic\SiteBuild\HeadingEmphasis;
 use Automattic\SiteBuild\ImageKind;
 use Automattic\SiteBuild\SectionLabel;
@@ -455,6 +456,7 @@ final class DesignDirectionStep implements Step
             'device'           => Device::DEFAULT,
             'heading_emphasis' => HeadingEmphasis::DEFAULT,
             'band_geometry'    => BandGeometry::DEFAULT,
+            'step_numeral'     => StepNumeral::DEFAULT,
             'section_label'    => SectionLabel::DEFAULT,
             'rhythm'           => self::DEFAULT_RHYTHM,
             'density'          => 'measured',
@@ -930,6 +932,7 @@ final class DesignDirectionStep implements Step
         );
         $headingEmphasis = self::normalizeHeadingEmphasis($raw['heading_emphasis'] ?? null, $warnings);
         $bandGeometry = self::normalizeBandGeometry($raw['band_geometry'] ?? null, $warnings);
+        $stepNumeral = self::normalizeStepNumeral($raw['step_numeral'] ?? null, $warnings);
         $sectionLabel = self::normalizeSectionLabel($raw['section_label'] ?? null, $warnings);
         $imageKind = BoundedChoice::normalize(
             $raw['image_kind'] ?? null,
@@ -1044,6 +1047,7 @@ final class DesignDirectionStep implements Step
             // the model marks it with the `emph` hook and a kit paints it.
             'heading_emphasis' => $headingEmphasis,
             'band_geometry'    => $bandGeometry,
+            'step_numeral'     => $stepNumeral,
             // The one committed form in which a small label above a section
             // heading may return; eyebrows stay banned otherwise.
             'section_label'    => $sectionLabel,
@@ -1248,6 +1252,18 @@ final class DesignDirectionStep implements Step
             'section_label',
             $warnings,
             'unsupported section label replaced by none',
+        );
+    }
+
+    public static function normalizeStepNumeral(mixed $authored, array &$warnings = []): string
+    {
+        return BoundedChoice::normalize(
+            $authored,
+            StepNumeral::ALL,
+            StepNumeral::DEFAULT,
+            'step_numeral',
+            $warnings,
+            'unsupported step numeral replaced by none',
         );
     }
 
@@ -1762,6 +1778,11 @@ final class DesignDirectionStep implements Step
                 . ' ("Use cases", "Pricing"), never repeats the heading.';
         }
 
+        $stepNumeral = StepNumeral::explicit($direction['step_numeral'] ?? null);
+        if ($stepNumeral !== null && $stepNumeral !== StepNumeral::DEFAULT) {
+            $facts[] = "- **Step numeral**: {$stepNumeral} — " . StepNumeral::meaning($stepNumeral) . '.';
+        }
+
         $bandGeometry = BandGeometry::explicit($direction['band_geometry'] ?? null);
         if ($bandGeometry !== null && $bandGeometry !== BandGeometry::DEFAULT) {
             $facts[] = "- **Band geometry**: {$bandGeometry} — " . BandGeometry::meaning($bandGeometry) . '.';
@@ -2205,6 +2226,15 @@ final class DesignDirectionStep implements Step
             }
         }
         return null;
+    }
+
+    /** The committed step numeral, or `none`. */
+    public static function stepNumeralFor(Project $project): string
+    {
+        if (!$project->exists(self::FILE)) {
+            return StepNumeral::DEFAULT;
+        }
+        return self::normalizeStepNumeral($project->readJson(self::FILE)['step_numeral'] ?? null);
     }
 
     /** The committed band geometry, or `square`. */

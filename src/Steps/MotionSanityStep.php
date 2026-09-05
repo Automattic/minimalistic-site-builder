@@ -7,6 +7,7 @@ use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\Motion;
 use Automattic\SiteBuild\SectionComposition;
+use Automattic\SiteBuild\StepNumeral;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
@@ -541,6 +542,9 @@ final class MotionSanityStep implements Step
             if (preg_match('/^(?:18|19|20|21)\d{2}$/', $figure) === 1) {
                 return 'count-up never counts a year';
             }
+            if (in_array(StepNumeral::CLASS_NAME, self::classTokensOf($doc, $i), true)) {
+                return 'a step numeral is a label, not a count';
+            }
         }
         $isEntrance = in_array($token, Motion::SCROLL_CLASSES, true)
             && !in_array($token, Motion::UNBUDGETED_ENTRANCES, true);
@@ -593,5 +597,12 @@ final class MotionSanityStep implements Step
         $keptKitClass = $token;
         $kitOnBlock++;
         return null;
+    }
+
+    /** @return list<string> */
+    private static function classTokensOf(BlockMarkup $doc, int $i): array
+    {
+        $attrs = $doc->attrs($i) ?? [];
+        return preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
     }
 }
