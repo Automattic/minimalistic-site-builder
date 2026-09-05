@@ -442,6 +442,7 @@ final class DesignDirectionStep implements Step
             'motion'           => Motion::DEFAULT_PROFILE,
             'motion_note'      => [],
             'concept_seed'     => $seed,
+            'register'         => '',
             'hero_blueprint'   => HeroBlueprint::defaultFor($recipe),
         ];
     }
@@ -1007,6 +1008,13 @@ final class DesignDirectionStep implements Step
             'motion'           => $motion,
             'motion_note'      => $motionNote,
             'concept_seed'     => $conceptSeed,
+            // The seed's design tradition, kept as a bounded token so
+            // build-owned gates (AboveFoldContract's header pool) can read
+            // it. The persisted value survives re-normalization: a second
+            // pass without the seed axis reads it back from the artifact.
+            'register'         => BoundedChoice::explicit($conceptRegister, ConceptSeeds::knownRegisters())
+                ?? BoundedChoice::explicit($raw['register'] ?? null, ConceptSeeds::knownRegisters())
+                ?? '',
             'hero_blueprint'   => $blueprint,
         ];
     }
@@ -1894,6 +1902,21 @@ final class DesignDirectionStep implements Step
      * background around every band, so an overlay header can never float over
      * the hero image; AboveFoldContract resolves that relation once.
      */
+    /**
+     * The committed design tradition ('' for a pre-field artifact or a
+     * degraded seed). Read by the above-fold header pool.
+     */
+    public static function registerFor(Project $project): string
+    {
+        if (!$project->exists(self::FILE)) {
+            return '';
+        }
+        return BoundedChoice::explicit(
+            $project->readJson(self::FILE)['register'] ?? null,
+            ConceptSeeds::knownRegisters(),
+        ) ?? '';
+    }
+
     public static function canvasFor(Project $project): string
     {
         if (!$project->exists(self::FILE)) {

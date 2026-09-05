@@ -1201,3 +1201,53 @@ test('the contract carries the committed media aspect and rejects an incompatibl
     $broken['media_aspect'] = 'none';
     assert_throws(fn () => AboveFoldContract::assertPhase($broken, AboveFoldContract::PHASE_DELIVERY));
 });
+
+test('floating-pill is the stacked pool for a full-bleed product/portfolio tradition (frm W1a)', function () {
+    $blueprint = HeroBlueprint::defaultFor('foreground-split');
+    $projection = HeroComposition::planProjection($blueprint);
+    $pages = [[
+        'slug' => 'home', 'title' => 'Home', 'path' => '/', 'front' => true,
+        'sections' => [[
+            'slug' => 'hero', 'title' => 'Hero',
+            'layout_archetype' => $projection['layout_archetype'],
+            'background' => 'base',
+            'primary_action' => null,
+        ]],
+    ]];
+    $resolve = static fn (string $register, string $canvas): array => AboveFoldContract::resolve(
+        $pages,
+        $blueprint,
+        $canvas,
+        ['base' => '#FFFFFF', 'contrast' => '#111111'],
+        ['stable_id' => 'pill', 'writing_direction' => 'ltr', 'page_count' => 1, 'register' => $register],
+        ['archetype' => 'minimal-columns', 'surface' => 'base'],
+    );
+
+    foreach (AboveFoldContract::FLOATING_PILL_REGISTERS as $register) {
+        $pill = $resolve($register, 'full-bleed');
+        assert_eq('floating-pill', $pill['header']['archetype'], "{$register} on a full-bleed canvas floats");
+        assert_eq(AboveFoldContract::MODE_STACKED, $pill['header']['mode']);
+        assert_eq(false, $pill['header']['displays_tagline'], 'the pill never carries a tagline');
+        assert_eq(1, $pill['header']['text_rows']);
+    }
+
+    // A framed canvas commits to an opaque stacked bar; the pill stays out.
+    $framed = $resolve('modernist', 'framed');
+    assert_true($framed['header']['archetype'] !== 'floating-pill', 'framed canvas keeps the bar catalog');
+
+    // Other traditions keep the bar catalog: the pill is never a lottery
+    // entry, it is either the tradition's chrome or absent.
+    foreach (['heritage', 'editorial', 'craft', ''] as $register) {
+        $bar = $resolve($register, 'full-bleed');
+        assert_true($bar['header']['archetype'] !== 'floating-pill', "'{$register}' does not float");
+    }
+
+    // Overlay mode never floats: the pill is page-ground chrome.
+    $overlay = above_fold_resolve(above_fold_pages(), recipe: 'cinematic-safe-zone');
+    assert_eq('minimal-overlay', $overlay['header']['archetype']);
+
+    // The operator override picks the pill on any stacked-compatible site.
+    $forced = above_fold_resolve(above_fold_pages(), recipe: 'foreground-split', forced: 'floating-pill');
+    assert_eq('floating-pill', $forced['header']['archetype']);
+    assert_eq(AboveFoldContract::MODE_STACKED, $forced['header']['mode']);
+});

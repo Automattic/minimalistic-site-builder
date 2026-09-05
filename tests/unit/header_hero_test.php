@@ -2931,3 +2931,19 @@ test('header-hero injects the mark on every non-personal site and not on a perso
         assert_true(!str_contains($project->readText('theme/parts/header.html'), 'wp:site-logo'));
     });
 });
+
+test('floating-pill asks for persistent chrome regardless of site depth (frm W1a)', function () {
+    $short = [['slug' => 'home', 'sections' => [['slug' => 'hero'], ['slug' => 'about']]]];
+    assert_eq(HeaderBehavior::STATIC, HeaderBehavior::behaviorFor($short, HeaderBehavior::MODE_STACKED));
+    assert_eq(
+        HeaderBehavior::STICKY_SOFT,
+        HeaderBehavior::behaviorFor($short, HeaderBehavior::MODE_STACKED, 'floating-pill'),
+    );
+    $resolved = HeaderBehavior::resolve(
+        $short,
+        HeaderBehavior::MODE_STACKED,
+        ['base' => '#FFFFFF', 'contrast' => '#111111'],
+        'floating-pill',
+    );
+    assert_eq(HeaderBehavior::STICKY_SOFT, $resolved['behavior']);
+});

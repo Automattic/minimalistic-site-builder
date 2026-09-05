@@ -305,6 +305,147 @@ html.header-state-js
     }
 }
 
+/*
+ * Floating pill (frm W1a). The archetype's root is a transparent rail: it
+ * keeps the shell's positioning, states and foreground, but paints nothing.
+ * The inner .header-pill row is what the eye reads as the header. It paints
+ * exactly the surface HeaderBehavior proved for each state (the treatment-
+ * aware start/scrolled variables, or the opaque token on a static root), so
+ * the contrast contract is unchanged; only the shape moved.
+ */
+.site-header-shell .header-archetype--floating-pill,
+html.header-is-scrolled .site-header-shell .header-archetype--floating-pill,
+.site-header-shell--force-solid .header-archetype--floating-pill {
+    background-color: transparent !important;
+    box-shadow: none;
+}
+
+/* A static root has no behavior variables; read the token off its core class. */
+.site-header-shell .header-archetype--floating-pill.has-base-background-color { --header-pill-solid: var(--wp--preset--color--base, #ffffff); }
+.site-header-shell .header-archetype--floating-pill.has-contrast-background-color { --header-pill-solid: var(--wp--preset--color--contrast, #111111); }
+.site-header-shell .header-archetype--floating-pill.has-primary-background-color { --header-pill-solid: var(--wp--preset--color--primary, #333333); }
+.site-header-shell .header-archetype--floating-pill.has-secondary-background-color { --header-pill-solid: var(--wp--preset--color--secondary, #eeeeee); }
+.site-header-shell .header-archetype--floating-pill.has-accent-background-color { --header-pill-solid: var(--wp--preset--color--accent, #555555); }
+
+.site-header-shell .header-archetype--floating-pill .header-pill {
+    --header-pill-surface: var(--header-start-surface, var(--header-pill-solid, var(--wp--preset--color--base, #ffffff)));
+    --header-pill-shadow: 0 6px 24px rgb(0 0 0 / 0.08);
+
+    position: relative;
+    box-sizing: border-box;
+    inline-size: fit-content;
+    max-inline-size: 100%;
+    min-inline-size: 0;
+    margin-inline: auto;
+    padding-block: 0.375rem;
+    padding-inline: 1.25rem 0.5rem;
+    border: 1px solid color-mix(in srgb, var(--header-foreground, currentColor) 12%, transparent);
+    border-radius: 999px;
+    background-color: var(--header-pill-surface);
+    box-shadow: var(--header-pill-shadow);
+    transition-property: background-color, box-shadow;
+    transition-duration: var(--header-state-duration);
+    transition-timing-function: var(--header-state-ease);
+}
+
+html.header-is-scrolled .site-header-shell .header-archetype--floating-pill .header-pill {
+    --header-pill-surface: var(--header-scrolled-surface, var(--header-pill-solid, var(--wp--preset--color--base, #ffffff)));
+    --header-pill-shadow: 0 10px 30px rgb(0 0 0 / 0.12);
+}
+
+.site-header-shell--force-solid .header-archetype--floating-pill .header-pill {
+    --header-pill-surface: var(--header-scrolled-solid, var(--header-pill-solid, var(--wp--preset--color--base, #ffffff)));
+}
+
+/* The wordmark yields before the row wraps; the nav collapses on its own. */
+.site-header-shell .header-archetype--floating-pill .header-pill .wp-block-site-title {
+    min-inline-size: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+/* Inside a pill every boxed control is a pill too. */
+.site-header-shell .header-archetype--floating-pill .header-pill .wp-block-button__link,
+.site-header-shell .header-archetype--floating-pill .header-pill .wp-block-navigation-item__content {
+    border-radius: 999px;
+}
+
+.site-header-shell .header-archetype--floating-pill .header-pill .wp-block-navigation-item__content {
+    padding: 0.35em 0.75em;
+}
+
+/* Below the hamburger breakpoint the pill spans the rail so a long wordmark,
+ * the CTA and the menu button all fit. */
+@media (max-width: 600px) {
+    .site-header-shell .header-archetype--floating-pill .header-pill {
+        inline-size: 100%;
+        padding-inline: 1rem 0.5rem;
+    }
+}
+
+/* Glass blurs behind the pill, not behind the transparent rail. The
+ * pseudo-element pattern is the same as the root's: never an ancestor of
+ * the navigation, so a fixed responsive menu keeps the viewport as its
+ * containing block. */
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px)))
+    and (background-color: color-mix(in srgb, red 80%, transparent)) {
+    html.header-state-js
+        .site-header-shell
+        .header-archetype--floating-pill:is(.header-top-glass, .header-scrolled-glass)::before {
+        content: none;
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+    }
+
+    html.header-state-js
+        .site-header-shell
+        .header-archetype--floating-pill:is(.header-top-glass, .header-scrolled-glass)
+        .header-pill::before {
+        position: absolute;
+        z-index: 0;
+        inset: 0;
+        content: "";
+        border-radius: inherit;
+        pointer-events: none;
+        -webkit-backdrop-filter: blur(14px) saturate(115%);
+        backdrop-filter: blur(14px) saturate(115%);
+    }
+
+    html.header-state-js
+        .site-header-shell
+        .header-archetype--floating-pill:is(.header-top-glass, .header-scrolled-glass)
+        .header-pill > * {
+        position: relative;
+        z-index: 1;
+    }
+
+    html.header-state-js.header-is-scrolled
+        .site-header-shell
+        .header-archetype--floating-pill:not(.header-scrolled-glass)
+        .header-pill::before {
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+    }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+    html.header-state-js
+        .site-header-shell
+        .header-archetype--floating-pill
+        .header-pill::before {
+        content: none;
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .site-header-shell .header-archetype--floating-pill .header-pill {
+        transition-duration: 0s !important;
+    }
+}
+
 /* Progressive glass enhancement for image-led opening compositions. The
  * pseudo-element is not an ancestor of the navigation, so its filter cannot
  * turn a fixed responsive menu into a header-relative containing block. */
@@ -460,5 +601,15 @@ html.header-state-js {
         content: none !important;
         -webkit-backdrop-filter: none !important;
         backdrop-filter: none !important;
+    }
+
+    .site-header-shell .header-archetype--floating-pill .header-pill {
+        border: 0;
+        background: #ffffff !important;
+        box-shadow: none !important;
+    }
+
+    .site-header-shell .header-archetype--floating-pill .header-pill::before {
+        content: none !important;
     }
 }

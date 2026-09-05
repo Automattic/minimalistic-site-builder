@@ -68,10 +68,15 @@ final class HeaderFallback
                 'verticalAlignment' => 'center',
             ],
         ];
+        $rowClasses = 'wp-block-group alignwide';
+        if ($archetype === 'floating-pill') {
+            $row['className'] = HeaderNav::PILL_ROW_CLASS;
+            $rowClasses .= ' ' . HeaderNav::PILL_ROW_CLASS;
+        }
         $markup = '<!-- wp:group ' . self::encode($attrs) . ' -->' . "\n"
             . '<div class="' . implode(' ', $classes) . '">'
             . '<!-- wp:group ' . self::encode($row) . ' -->' . "\n"
-            . '<div class="wp-block-group alignwide">'
+            . '<div class="' . $rowClasses . '">'
             . $identity
             . '</div>' . "\n" . '<!-- /wp:group -->'
             . '</div>' . "\n<!-- /wp:group -->";

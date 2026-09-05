@@ -275,3 +275,36 @@ test('header driver runtime covers restored scroll, measurement, admin bar, and 
     assert_eq(0, $exit, implode("\n", $output));
     assert_contains('header state driver runtime harness passed', implode("\n", $output));
 });
+
+test('header CSS paints the floating pill on the inner row and keeps the rail transparent (frm W1a)', function () {
+    $css = (string) file_get_contents(repo_path('assets/header/header.css'));
+
+    $rail = header_asset_css_block($css, '.site-header-shell .header-archetype--floating-pill,');
+    assert_contains('background-color: transparent !important', $rail, 'the rail paints nothing in any state');
+    assert_contains('html.header-is-scrolled .site-header-shell .header-archetype--floating-pill', $rail);
+    assert_contains('.site-header-shell--force-solid .header-archetype--floating-pill', $rail);
+
+    $pill = header_asset_css_block($css, '.site-header-shell .header-archetype--floating-pill .header-pill {');
+    assert_contains('border-radius: 999px', $pill);
+    assert_contains('inline-size: fit-content', $pill);
+    assert_contains('margin-inline: auto', $pill);
+    assert_contains('var(--header-start-surface', $pill, 'the pill paints the proved start surface');
+    assert_contains('transition-property: background-color, box-shadow', $pill);
+
+    $scrolled = header_asset_css_block(
+        $css,
+        'html.header-is-scrolled .site-header-shell .header-archetype--floating-pill .header-pill',
+    );
+    assert_contains('var(--header-scrolled-surface', $scrolled, 'the scrolled pill paints the proved scrolled surface');
+    assert_true(
+        preg_match('/\b(?:height|padding|margin|position|top|inset|border-width)\s*:/', $scrolled) !== 1,
+        'the scrolled pill state must not mutate geometry',
+    );
+
+    assert_true(
+        substr_count($css, 'position: fixed') === 1,
+        'the pill adds no fixed positioning of its own',
+    );
+    assert_contains('.header-pill::before', $css, 'glass blurs behind the pill via a non-ancestor pseudo-element');
+    assert_contains('@media (max-width: 600px)', $css);
+});

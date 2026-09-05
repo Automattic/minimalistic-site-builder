@@ -206,3 +206,15 @@ test('the fallback hero carries the committed media aspect marker (BIGR-925)', f
     $contract['media_aspect'] = 'none';
     assert_throws(fn () => HeroFallback::render(hero_fallback_input(), $contract, 'transport failed'));
 });
+
+test('the header fallback row is the pill when the contract floats (frm W1a)', function () {
+    $contract = test_above_fold_contract('foreground-split', 'floating-pill');
+    $markup = HeaderFallback::render(['site_spec' => ['name' => 'Northlight']], $contract, 'bad header')->markup;
+    assert_contains('header-archetype--floating-pill', $markup);
+    assert_contains('"className":"header-pill"', $markup);
+    assert_contains('class="wp-block-group alignwide header-pill"', $markup);
+    assert_eq('floating-pill', AboveFoldPartFacts::headerFacts($markup)['archetype']);
+
+    $plain = HeaderFallback::render([], test_above_fold_contract('foreground-split', 'standard-row'), 'bad header')->markup;
+    assert_true(!str_contains($plain, 'header-pill'), 'a bar archetype gets no pill class');
+});

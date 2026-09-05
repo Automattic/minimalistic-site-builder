@@ -28,7 +28,15 @@ final class AboveFoldContract
         'oversized-wordmark',
         'branded-lockup',
         'split-nav',
+        'floating-pill',
     ];
+
+    /**
+     * Design traditions whose sites read as product or portfolio landings,
+     * where the reference corpus (Cohesion, Zova) detaches the navigation
+     * into a centered pill. Other traditions keep the stacked bar catalog.
+     */
+    public const FLOATING_PILL_REGISTERS = ['modernist', 'pop', 'technical'];
 
     /**
      * Reject an operator override only when caller-owned facts already prove
@@ -181,7 +189,11 @@ final class AboveFoldContract
             );
         }
 
-        $pool = self::headerPool($mode);
+        $pool = self::headerPool(
+            $mode,
+            strtolower(trim((string) ($siteContext['register'] ?? ''))),
+            $canvas,
+        );
         if ($forced !== '' && self::forcedHeaderCompatible($forced, $overlaySupported, count($pages), $imageLed)) {
             $archetype = $forced;
             $mode = $forced === 'minimal-overlay' ? self::MODE_OVERLAY : self::MODE_STACKED;
@@ -617,11 +629,22 @@ final class AboveFoldContract
         ];
     }
 
-    /** @return list<string> */
-    private static function headerPool(string $mode): array
+    /**
+     * The archetypes automatic assignment may pick. A stacked header on a
+     * full-bleed canvas in a product/portfolio tradition takes the floating
+     * pill alone: the pill is the register's signature chrome, and a coin
+     * flip against the plain bar would make the evidence build a lottery.
+     * Overlay mode never floats a pill — the pill is page-ground chrome.
+     *
+     * @return list<string>
+     */
+    private static function headerPool(string $mode, string $register = '', string $canvas = ''): array
     {
         if ($mode === self::MODE_OVERLAY) {
             return ['minimal-overlay'];
+        }
+        if ($canvas === 'full-bleed' && in_array($register, self::FLOATING_PILL_REGISTERS, true)) {
+            return ['floating-pill'];
         }
         // centered-masthead and split-nav are retired from auto-assignment
         // (BIGR-872). Forced HEADER_ARCHETYPE can still pick them through
@@ -631,6 +654,7 @@ final class AboveFoldContract
             'oversized-wordmark',
             'centered-masthead',
             'split-nav',
+            'floating-pill',
         ];
         return array_values(array_diff(self::HEADER_ARCHETYPES, $excluded));
     }

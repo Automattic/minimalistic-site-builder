@@ -147,20 +147,25 @@ Same rubric as `.claude/skills/design-quality-loop/SKILL.md` phase 2, plus one a
 
 | cohort | commit | date | site | conviction | impact | fidelity | notes |
 |---|---|---|---|---|---|---|---|
-| baseline | | | cohesion-like | | | | |
-| baseline | | | dreammotion-like | | | | |
-| baseline | | | zova-like | | | | |
-| baseline | | | luzia-like | | | | |
-| baseline | | | spector-like | | | | |
+| baseline | 8bf3a9d1 | 2026-09-04 | cohesion-like | 2 | 2 | 1 | overlay header, condensed uppercase type, flat grey hero band (image proxy down), no pill nav, no marquee name, no 3D objects, no cards; only the red sunken-wordmark footer rhymes with the reference |
+| baseline | 8bf3a9d1 | 2026-09-04 | dreammotion-like | 3 | 2 | 2 | dark ground + serif two-tone italic emphasis match; no glass cards, no bento, no mockups, text-only sections, FAQ is a plain list, cream footer band breaks the dark monochrome |
+| baseline | 8bf3a9d1 | 2026-09-04 | zova-like | 2 | 2 | 2 | 3-tier pricing with highlighted middle, FAQ, newsletter panel and ghost wordmark exist; no panel hero, no mockup, no hairline feature row, no pill nav, thin wordmark |
+| baseline | 8bf3a9d1 | 2026-09-04 | luzia-like | 2 | 2 | 1 | warm tan serif register (reference is white + tight sans); work cards with no images, no bento, one card highlighted in green not violet, no dark rounded band, no zigzag |
+| baseline | 8bf3a9d1 | 2026-09-04 | spector-like | 3 | 3 | 2 | dark mono uppercase, stats counters, hairline-ish rules; "MORE PROJECTS" is a static repeated stack not a marquee, no portrait hero, no metadata corners, no gradient display, nav not spread |
+
+Baseline note (2026-09-04): every image request on all 5 sites failed with `HTTP 500 {"code":418,"message":"...wordpress.com is in read-only mode."}` from the WPCOM AI proxy, and one retry with `bin/images.php` failed the same way. Scores judge layout, type and color only; imagery gaps are not scored against the pipeline until the proxy is back. Reference captures live in the session scratchpad (`refs/<site>-{desktop,mobile}.png`, 1440 and 390 wide, scrolled before capture).
+
+Cohort header/hero facts at baseline: all 5 sites resolved `minimal-overlay` on an image-led hero (`cinematic-safe-zone` x2, `foreground-split` x2, `layered-poster` x1). The design direction did not persist the concept seed's register, so no build-owned gate could read the tradition.
 
 ## 8. PR log (append one row per PR, newest last)
 
 | # | PR | workstream | title | status | evidence | merged sha |
 |---|---|---|---|---|---|---|
+| 1 | #448 | W0 | Add the frm cohort briefs (frm) | merged | baseline cohort, section 7 | 8bf3a9d1 |
 
 ## 9. Iteration log (one line per loop turn)
 
-- (none yet)
+- 2026-09-04 turn 1: setup (branch, worktree, baseline 61 failures = trunk), PR-0a #448 merged, baseline cohort built (images failed: WPCOM proxy read-only, retried once), references captured, section 7 filled. Started PR-1a `floating-pill` on branch `frm/floating-pill-header`.
 
 ## 10. Parked / rejected
 
