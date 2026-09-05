@@ -916,8 +916,9 @@ final class GenerateImagesStep implements Step
         $filename = (string) ($spec['filename'] ?? '');
         try {
             $prompt = $this->renderer->render('image-qa.md', [
-                'subject'   => (string) ($spec['subject'] ?? ''),
-                'text_rule' => ImageKind::qaTextRule((string) ($spec['image_kind'] ?? '')),
+                'subject'      => (string) ($spec['subject'] ?? ''),
+                'upright_rule' => ImageKind::qaUprightRule((string) ($spec['image_kind'] ?? '')),
+                'text_rule'    => ImageKind::qaTextRule((string) ($spec['image_kind'] ?? '')),
             ]);
             $answer = $this->llm->completeWithImage(
                 $prompt,
@@ -930,7 +931,7 @@ final class GenerateImagesStep implements Step
             Narrator::write("    QA {$filename}: inspection unavailable ({$e->getMessage()}); delivered unverified\n");
             return null;
         }
-        $verdict = ImageQa::verdict($answer);
+        $verdict = ImageQa::verdict($answer, ImageKind::keepsTilt((string) ($spec['image_kind'] ?? '')));
         if ($verdict === null) {
             Narrator::write("    QA {$filename}: unreadable verdict; delivered unverified\n");
         }
