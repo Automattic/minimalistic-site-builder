@@ -277,6 +277,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 | 58 | #505 | W3 (PR-3q) | Keep a section image band whole under a project grid (frm) | merged | gist df28683825f210b791ffbf6e31420242: dreammotion-like13 gallery band before/after (CSS mirrored), bottom row whole; cohort-3 mobile sheet | f53c8591 |
 | 59 | #506 | W3 (PR-3p) | Own a project tile's overlay and ink on every ground (frm) | merged | gist 1e4abdc94e72b6c4cf0a08739bdef689: dreammotion-like13 both grids before/after (helper mirrored into the seeded page), luzia-like10 light site unchanged in read | f2cbb3d5 |
 | 60 | #507 | W8 (PR-8i) | Wrap the marquee whole under reduced motion (frm) | merged | gist 126b587259ea911f756fd7f2ee407c1b: spector-like11 marquee before (ellipsis) / after (three balanced lines), 390 five lines; kit mirrored | 763c7500 |
+| 61 | #508 | W2 (PR-2h) | Open a stated light page on its ground when the brief names no hero (frm) | merged | selector replay on luzia-like10's own seed: cinematic-safe-zone -> marquee-name with the yield note; direction rerun on a copy kept an already-grounded pick; no build | 2bb1685e |
 
 ## 9. Iteration log (one line per loop turn)
 
@@ -344,6 +345,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 - 2026-09-05 turn 62: PR-3q #505 merged (tile rules scoped to covers inside columns). Next: PR-3p on branch frm/tile-ink: the build owns a project tile's overlay and ink (black at 50%, white text) on every ground; the fragment stops naming palette slugs for the tile.
 - 2026-09-05 turn 63: PR-3p #506 merged (black overlay at 50% + white text on every project tile; the band keeps its surface). Next: PR-8i on branch frm/marquee-wrap: under reduced motion or without the script the marquee wraps as a balanced centered statement instead of clipping to an ellipsis.
 - 2026-09-05 turn 64: PR-8i #507 merged (the marquee wraps whole under reduced motion and without the script). Next: PR-2h on branch frm/light-ground-hero: a stated light page with no stated hero drops the cover recipes from the pool inside the caller's constraints, so the site opens on its ground.
+- 2026-09-05 turn 65: PR-2h #508 merged (a cover stable pick yields to the foreground pool on a stated light page with no stated hero; an already-grounded pick keeps its seat). Next: PR-2i on branch frm/phone-panel-ground: the cinematic phone panel takes the page ground (base) with contrast ink instead of a contrast slab.
 
 ## 10. Parked / rejected
 
