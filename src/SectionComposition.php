@@ -860,6 +860,28 @@ TEXT;
 
         $imageCount = preg_match_all('~<img\b~i', $markup);
         $imageCount = is_int($imageCount) ? $imageCount : 0;
+        if ($archetype === 'project-grid-2x2') {
+            // The band's own cover picture is the planned image surface, not
+            // media the recipe budgets (frm PR-3x2): dreammotion-like17 and
+            // -like18 wrapped their grids in one cover and the count read
+            // five pictures on a budget of four. Count the pictures of the
+            // column tiles and of any image block instead.
+            $imageCount = 0;
+            foreach ($document->indices() as $index) {
+                $name = $document->name($index);
+                if ($name === 'image') {
+                    $imageCount++;
+                    continue;
+                }
+                if ($name !== 'cover') {
+                    continue;
+                }
+                $parent = $document->parent($index);
+                if ($parent !== null && $document->name($parent) === 'column') {
+                    $imageCount += (int) preg_match_all('~<img\b~i', $document->ownHtml($index));
+                }
+            }
+        }
 
         $rows = 0;
         foreach ($document->indices() as $index) {

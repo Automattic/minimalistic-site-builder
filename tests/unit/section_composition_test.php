@@ -967,6 +967,7 @@ test('a project grid wrapped in the band\'s own cover counts only the column til
         . '</div></div><!-- /wp:cover --></div><!-- /wp:group -->';
     $joined = implode("\n", SectionComposition::markupWarnings($wrapped, 'project-grid-2x2', 'page-home--gallery'));
     assert_true(!str_contains($joined, 'project grid tiles'), 'the band cover is not a tile');
+    assert_true(!str_contains($joined, 'archetype media count'), 'the band cover picture is not budgeted media (frm PR-3x2)');
 
     $five = '<!-- wp:group {"className":"section-composition--project-grid-2x2","layout":{"type":"constrained"}} --><div class="wp-block-group section-composition--project-grid-2x2">'
         . $row($tile('One') . $tile('Two')) . $row($tile('Three') . $tile('Four')) . $row($tile('Five'))
@@ -974,4 +975,25 @@ test('a project grid wrapped in the band\'s own cover counts only the column til
     $joined = implode("\n", SectionComposition::markupWarnings($five, 'project-grid-2x2', 'page-home--gallery'));
     assert_contains('project grid tiles', $joined, 'five column tiles still fail');
     assert_contains('"tiles":5', $joined);
+});
+
+
+test('a project grid counts its tile pictures and image blocks, never the band cover picture (frm PR-3x2)', function () {
+    $tile = static fn (string $title): string => '<!-- wp:column {"width":"50%"} --><div class="wp-block-column"><!-- wp:cover {"url":"/x.jpg","dimRatio":50} --><div class="wp-block-cover"><img class="wp-block-cover__image-background" src="/x.jpg" alt=""/><div class="wp-block-cover__inner-container"><!-- wp:heading {"level":3} --><h3 class="wp-block-heading">' . $title . '</h3><!-- /wp:heading --></div></div><!-- /wp:cover --></div><!-- /wp:column -->';
+    $row = static fn (string $tiles): string => '<!-- wp:columns --><div class="wp-block-columns">' . $tiles . '</div><!-- /wp:columns -->';
+    $open = '<!-- wp:group {"className":"section-composition--project-grid-2x2","layout":{"type":"constrained"}} --><div class="wp-block-group section-composition--project-grid-2x2">';
+    $close = '</div><!-- /wp:group -->';
+
+    // Four tiles in a band cover: four pictures, within the budget of four.
+    $wrapped = $open . '<!-- wp:cover {"url":"/band.jpg","dimRatio":70,"align":"full"} --><div class="wp-block-cover alignfull"><img class="wp-block-cover__image-background" src="/band.jpg" alt=""/><div class="wp-block-cover__inner-container">'
+        . $row($tile('One') . $tile('Two')) . $row($tile('Three') . $tile('Four')) . '</div></div><!-- /wp:cover -->' . $close;
+    $joined = implode("\n", SectionComposition::markupWarnings($wrapped, 'project-grid-2x2', 'page-home--gallery'));
+    assert_true(!str_contains($joined, 'archetype media count'), $joined);
+
+    // One tile only: below the minimum of two, and the band cover does not make up the difference.
+    $one = $open . '<!-- wp:cover {"url":"/band.jpg","dimRatio":70} --><div class="wp-block-cover"><img class="wp-block-cover__image-background" src="/band.jpg" alt=""/><div class="wp-block-cover__inner-container">'
+        . $row($tile('One')) . '</div></div><!-- /wp:cover -->' . $close;
+    $joined = implode("\n", SectionComposition::markupWarnings($one, 'project-grid-2x2', 'page-home--gallery'));
+    assert_contains('archetype media count', $joined);
+    assert_contains('"image_count":1', $joined);
 });
