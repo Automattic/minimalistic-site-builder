@@ -75,6 +75,21 @@
     --motion-count-duration: 1400ms;
 }
 
+/* Marquee scale (frm PR-8g): the kit owns the loop's type. One line in the
+   heading face at display scale, clipped; the boundary strips an authored
+   size so this reads in every motion preference (the loop itself lives in
+   the no-preference block below; without it the line is static). */
+.marquee {
+    overflow: hidden;
+    white-space: nowrap;
+    font-family: var(--wp--preset--font-family--heading, inherit);
+    font-size: var(--wp--preset--font-size--display, 3rem);
+    font-weight: 600;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    text-overflow: ellipsis;
+}
+
 @media screen and (prefers-reduced-motion: no-preference) {
 
     /* ── Scroll reveals (motion.js adds .is-visible on intersection) ─────
@@ -512,10 +527,6 @@
        seam. Without JS, or under reduced motion (this whole block is
        inert there), the paragraph is a plain static line. Hover and
        keyboard focus pause it. */
-    .marquee {
-        overflow: hidden;
-        white-space: nowrap;
-    }
     .marquee .marquee__track {
         display: inline-flex;
         will-change: transform;
