@@ -637,6 +637,39 @@ final class ScaffoldThemeStep implements Step
             line-height: 0.95;
             text-wrap: balance;
         }
+        /* portrait-backdrop (frm W2d): one portrait plate centered on the
+           page ground, capped to the viewport so the copy row stays in the
+           first screen, rounded from the committed media radius; the copy
+           row under it aligns its two columns to their bottom edge so the
+           line and the action sit level with the headline's last line. */
+        .hero-composition--portrait-backdrop .hero-composition__media {
+            display: flex;
+            justify-content: center;
+        }
+        .hero-composition--portrait-backdrop .hero-composition__media figure {
+            margin: 0;
+        }
+        .hero-composition--portrait-backdrop .hero-composition__media img {
+            display: block;
+            width: auto;
+            max-width: min(100%, 36rem);
+            max-height: 58vh;
+            object-fit: cover;
+            border-radius: var(--shape-radius-media, 0);
+        }
+        .hero-composition--portrait-backdrop.hero-media--portrait .hero-composition__media img {
+            aspect-ratio: 3 / 4;
+        }
+        .hero-composition--portrait-backdrop.hero-media--square .hero-composition__media img {
+            aspect-ratio: 1 / 1;
+        }
+        .hero-composition--portrait-backdrop .hero-composition__copy .wp-block-columns {
+            align-items: flex-end;
+        }
+        .hero-composition--portrait-backdrop .hero-composition__copy h1 {
+            margin-block: 0;
+            text-wrap: balance;
+        }
         /* panel-stage (frm W2a): the opener is one rounded, tinted panel on
            the page ground. Rounded from the committed shape scale, clipped,
            with a faint dot grid on the tint; the copy row centers vertically

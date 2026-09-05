@@ -20,7 +20,11 @@ final class HeroComposition
         'panel-stage',
         'marquee-name',
         'metadata-corners',
+        'portrait-backdrop',
     ];
+
+    /** The one portrait plate of portrait-backdrop (frm W2d). */
+    public const PORTRAIT_CLASS = 'hero-composition__portrait';
 
     /** The corner facts of metadata-corners: one flex group of two or three short paragraphs (frm W2c). */
     public const META_CLASS = 'hero-composition__meta';
@@ -258,6 +262,40 @@ final class HeroComposition
                 'height_profile' => 'immersive', 'cta_treatment' => 'quiet',
                 'mobile_transformation' => 'retain-media-overlay',
                 'media_aspect' => 'landscape', 'media_weight' => 'dominant',
+            ],
+        ],
+        // frm W2d: Luzia's opener. One large portrait of the person centered
+        // on the page ground, then one copy row under it: the headline on the
+        // leading side, one line and the action on the trailing side. The
+        // plate is opaque (no cutout: keyed hair edges fray), sized and
+        // rounded by the theme; the header stays stacked above.
+        'portrait-backdrop' => [
+            'canvases' => ['full-bleed', 'framed'],
+            'media_modes' => ['foreground-image'],
+            'min_images' => 1,
+            'max_images' => 1,
+            'backgrounds' => ['base', 'tinted'],
+            'default_background' => 'base',
+            'fallback_background' => 'base',
+            'header_modes' => ['stacked'],
+            'copy_capacity' => 'compact',
+            'mobile_transformations' => ['stack-media-first'],
+            'layout_archetype' => 'asymmetric-split',
+            'fallback_family' => 'foreground-split',
+            'root_hook' => '.hero-composition--portrait-backdrop',
+            'prompt' => 'hero-compositions/portrait-backdrop.md',
+            'headline_registers' => ['display', 'restrained'],
+            'height_profiles' => ['standard', 'immersive'],
+            'media_aspects' => ['portrait', 'square'],
+            'media_weights' => ['dominant'],
+            'defaults' => [
+                'media_mode' => 'foreground-image', 'headline_register' => 'display',
+                'text_anchor' => 'center-start',
+                'headline_line_target' => ['desktop' => [2, 3], 'mobile' => [2, 5]],
+                'focal_region' => 'none', 'text_safe_region' => 'full',
+                'height_profile' => 'standard', 'cta_treatment' => 'prominent',
+                'mobile_transformation' => 'stack-media-first',
+                'media_aspect' => 'portrait', 'media_weight' => 'dominant',
             ],
         ],
         'layered-poster' => [
@@ -738,6 +776,41 @@ final class HeroComposition
                 );
             }
         }
+        // frm W2d: the portrait plate is the recipe's device. Exactly one
+        // marked image inside the media region, and the copy region holds
+        // one two-column row (headline leading, line and action trailing).
+        if ($recipe === 'portrait-backdrop') {
+            $portraits = [];
+            foreach ($document->indices() as $index) {
+                $attrs = $document->attrs($index) ?? [];
+                $classes = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+                if (in_array(self::PORTRAIT_CLASS, $classes, true)) {
+                    $portraits[] = $index;
+                }
+            }
+            $plate = count($portraits) === 1
+                && $document->name($portraits[0]) === 'image'
+                && self::hasAncestorClass($document, $portraits[0], 'hero-composition__media');
+            $rows = [];
+            foreach ($document->indices() as $index) {
+                if ($document->name($index) !== 'columns' || !self::hasAncestorClass($document, $index, 'hero-composition__copy')) {
+                    continue;
+                }
+                $rows[] = count(array_filter(
+                    $document->children($index),
+                    static fn (int $child): bool => $document->name($child) === 'column',
+                ));
+            }
+            if (!$plate || $rows !== [2]) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'recipe portrait plate',
+                    ['required_class' => self::PORTRAIT_CLASS, 'count' => 1, 'block' => 'image', 'inside' => 'hero-composition__media', 'copy_rows' => [2]],
+                    ['matching_images' => count($portraits), 'copy_rows' => $rows],
+                    'safe parseable hero was retained; restore the one marked portrait in the media region and the one two-column copy row',
+                );
+            }
+        }
         // BIGR-775 advisory copy-budget check: every hero holds at most the
         // headline plus ONE supporting paragraph (naturaleza9's three stacked
         // bodies read as clutter even inside the old standard budget).
@@ -958,6 +1031,10 @@ final class HeroComposition
         'marquee-name' => [
             'marquee of my name', 'marquee of the name', 'name behind the hero', 'giant name behind',
             'giant marquee', 'wordmark behind the hero', 'name marquee',
+        ],
+        'portrait-backdrop' => [
+            'portrait backdrop', 'portrait behind', 'portrait centered behind', 'photo centered behind',
+            'portrait photo centered', 'headshot behind', 'photo behind the copy', 'portrait behind the copy',
         ],
         'metadata-corners' => [
             'metadata in the corners', 'metadata corners', 'corner metadata', 'facts in the corners',

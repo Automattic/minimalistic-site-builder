@@ -62,7 +62,8 @@
             },
             "eligible": [
                 "foreground-split",
-                "marquee-name"
+                "marquee-name",
+                "portrait-backdrop"
             ]
         },
         {
@@ -78,7 +79,8 @@
             },
             "eligible": [
                 "foreground-split",
-                "marquee-name"
+                "marquee-name",
+                "portrait-backdrop"
             ]
         },
         {
@@ -94,7 +96,8 @@
             },
             "eligible": [
                 "foreground-split",
-                "marquee-name"
+                "marquee-name",
+                "portrait-backdrop"
             ]
         },
         {
@@ -111,7 +114,8 @@
             },
             "eligible": [
                 "foreground-split",
-                "marquee-name"
+                "marquee-name",
+                "portrait-backdrop"
             ]
         },
         {
@@ -127,7 +131,8 @@
             },
             "eligible": [
                 "foreground-split",
-                "marquee-name"
+                "marquee-name",
+                "portrait-backdrop"
             ]
         },
         {
@@ -143,7 +148,8 @@
             },
             "eligible": [
                 "foreground-split",
-                "marquee-name"
+                "marquee-name",
+                "portrait-backdrop"
             ]
         },
         {
@@ -159,7 +165,8 @@
             },
             "eligible": [
                 "foreground-split",
-                "marquee-name"
+                "marquee-name",
+                "portrait-backdrop"
             ]
         },
         {
