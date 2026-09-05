@@ -404,17 +404,20 @@
     }
 
     /* ── Word reveal (frm W8a): the hero headline arrives one word at a
-       time. motion.js wraps each word in `.word-reveal__word` with its
-       `--word-index` and marks the heading `word-reveal--split`; only a
-       split heading ever hides its words, so a heading the driver could
-       not split stays fully visible. Same vertical-only, no-overshoot
-       contract as every entrance; the stagger is a profile token. ── */
-    html.motion-js .word-reveal--split.motion-target:not(.is-visible) .word-reveal__word {
+       time. Like hero-entrance it plays on load, outside the scroll
+       observer (which marks first-viewport targets static). motion.js wraps
+       each word in `.word-reveal__word` with its `--word-index` and marks
+       the heading `word-reveal--split` before it announces motion-ready; the
+       unsplit heading is hidden only under the driver scope before that
+       moment, so a failed driver (which removes the scope) fails open and
+       a heading the driver could not split is fully visible from
+       motion-ready on. Same vertical-only, no-overshoot contract as every
+       entrance; the stagger is a profile token. ── */
+    html.motion-js:not(.motion-ready) .word-reveal {
         opacity: 0;
     }
-    html.motion-js .word-reveal--split.motion-target.is-visible .word-reveal__word {
+    html.motion-js .word-reveal--split .word-reveal__word {
         display: inline-block;
-        opacity: 1;
         animation-name: var(--motion-word-keyframe);
         animation-duration: var(--motion-hero-duration);
         animation-timing-function: var(--motion-hero-ease);

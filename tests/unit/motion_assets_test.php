@@ -454,8 +454,8 @@ test('the JS driver and the screenshot harness observe every entrance class', fu
     foreach ($sources as $file) {
         $js = (string) file_get_contents(repo_path($file));
         foreach (Motion::SCROLL_CLASSES as $class) {
-            if ($class === 'hero-entrance') {
-                continue; // pure CSS on load; neither file needs to observe it
+            if (in_array($class, Motion::HERO_CLASSES, true)) {
+                continue; // pure CSS on load; neither file needs to observe them
             }
             $needle = $class === 'stagger-children' ? '.stagger-children > *' : ".{$class}";
             assert_true(
@@ -617,8 +617,8 @@ test('the motion kit reveals a headline word by word inside the reduced-motion g
     $guard = strpos($css, '@media screen and (prefers-reduced-motion: no-preference)');
     assert_true($guard !== false);
     foreach ([
-        '.word-reveal--split.motion-target:not(.is-visible) .word-reveal__word',
-        '.word-reveal--split.motion-target.is-visible .word-reveal__word',
+        'html.motion-js:not(.motion-ready) .word-reveal',
+        'html.motion-js .word-reveal--split .word-reveal__word',
         '@keyframes motion-kit-word',
         '.word-reveal.motion-skip .word-reveal__word',
         '.word-reveal:focus-within .word-reveal__word',
@@ -626,7 +626,7 @@ test('the motion kit reveals a headline word by word inside the reduced-motion g
         $at = strpos($css, $needle);
         assert_true($at !== false && $at > $guard, "{$needle} lives inside the guard");
     }
-    $rule = motion_asset_css_block($css, '.word-reveal--split.motion-target.is-visible .word-reveal__word');
+    $rule = motion_asset_css_block($css, 'html.motion-js .word-reveal--split .word-reveal__word');
     assert_contains('var(--word-index, 0) * var(--motion-word-stagger)', $rule, 'the stagger is a profile token times the word index');
     assert_contains('--motion-word-stagger: 70ms', $css, 'the kit declares the default token');
     foreach (['calm', 'energetic', 'dramatic', 'minimal'] as $profile) {
@@ -642,7 +642,8 @@ test('the motion kit reveals a headline word by word inside the reduced-motion g
     assert_contains("'word-reveal__word'", $js);
     assert_contains("'--word-index'", $js);
     assert_contains("classList.add('word-reveal--split')", $js);
-    assert_true(strpos($js, 'splitWords();') < strpos($js, 'querySelectorAll(ENTRANCE_SELECTOR)'), 'words split before targets register');
+    assert_true(strpos($js, 'splitWords();') < strpos($js, "classList.add('motion-ready')"), 'words split before motion-ready');
+    assert_true(!str_contains($js, "'.stagger-children > *, .word-reveal'"), 'a word reveal is never an observed scroll target');
 
     assert_true(in_array('word-reveal', \Automattic\SiteBuild\Motion::SCROLL_CLASSES, true));
     assert_true(!in_array('word-reveal', \Automattic\SiteBuild\Motion::noteClasses(), true), 'hero-only: never in the site-wide note');

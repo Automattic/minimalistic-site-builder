@@ -8,15 +8,17 @@
 (function () {
     var root = document.documentElement;
     var ENTRANCE_SELECTOR = '.reveal, .reveal-up, .reveal-fade, .reveal-scale, .reveal-blur, '
-        + '.reveal-wipe, .reveal-wipe-up, .reveal-aperture, .reveal-zoom, .stagger-children > *, .word-reveal';
+        + '.reveal-wipe, .reveal-wipe-up, .reveal-aperture, .reveal-zoom, .stagger-children > *';
     var WORD_CLASS = 'word-reveal__word';
     var WORD_INLINE = /^(?:A|ABBR|B|EM|I|SPAN|STRONG|SUB|SUP|U|MARK|SMALL)$/;
 
     // Wrap each word of a `.word-reveal` heading in an indexed span so the
-    // kit can stagger them. Inline emphasis (a `.emph` span, <em>, <a>) is
-    // walked into, not flattened; any other child element makes the heading
-    // unsplittable and it stays whole and visible. Runs before targets are
-    // registered so the first paint already hides the words.
+    // kit can stagger them on load (a word reveal is a hero-entrance, not a
+    // scroll reveal: the observer would mark a first-viewport target static).
+    // Inline emphasis (a `.emph` span, <em>, <a>) is walked into, not
+    // flattened; any other child element makes the heading unsplittable and
+    // it stays whole and visible. Runs before motion-ready so the split
+    // words start their staggered entrance from the first painted frame.
     function splitWords() {
         var headings = document.querySelectorAll('.word-reveal:not(.word-reveal--split)');
         Array.prototype.forEach.call(headings, function (heading) {
