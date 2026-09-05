@@ -285,6 +285,7 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
         'foreground-split',
         'foreground-split',
         'layered-poster',
+        'panel-stage',
     ] as $recipe) {
         assert_contains('.hero-composition--' . $recipe, $css);
     }
@@ -570,5 +571,16 @@ test('scaffold-theme rounds and clips the closing cta-panel from the shape scale
     assert_contains('.wp-block-group.cta-panel :is(h1, h2, h3)', $css, 'a clipped panel never clips its headline');
     assert_contains('overflow-wrap: anywhere', $css);
     assert_contains('font-size: min(var(--wp--preset--font-size--section-title), 11vw) !important', $css, 'phone-scale headline cap');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('scaffold-theme rounds the panel-stage hero panel from the shape scale (frm W2a)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_panel_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    quietly(fn () => (new ScaffoldThemeStep())->run($project));
+    $css = $project->readText('theme/style.css');
+    assert_contains('.hero-composition--panel-stage .hero-composition__panel {', $css);
+    assert_contains('radial-gradient(color-mix(in srgb, currentColor 9%, transparent) 1px, transparent 1.5px)', $css);
+    assert_contains('.hero-composition--panel-stage .hero-composition__stage img', $css);
     exec('rm -rf ' . escapeshellarg($tmp));
 });

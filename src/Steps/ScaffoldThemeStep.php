@@ -589,6 +589,33 @@ final class ScaffoldThemeStep implements Step
         .hero-composition--layered-poster {
             overflow: hidden;
         }
+        /* panel-stage (frm W2a): the opener is one rounded, tinted panel on
+           the page ground. Rounded from the committed shape scale, clipped,
+           with a faint dot grid on the tint; the copy row centers vertically
+           and the plate fills its column. */
+        .hero-composition--panel-stage .hero-composition__panel {
+            border-radius: var(--shape-radius-panel, 0);
+            overflow: hidden;
+            background-image: radial-gradient(color-mix(in srgb, currentColor 9%, transparent) 1px, transparent 1.5px);
+            background-size: 22px 22px;
+        }
+        .hero-composition--panel-stage .wp-block-columns {
+            align-items: center;
+        }
+        .hero-composition--panel-stage .hero-composition__media img,
+        .hero-composition--panel-stage .hero-composition__stage img {
+            width: 100%;
+            height: auto;
+            object-fit: cover;
+        }
+        @media (max-width: 600px) {
+            .hero-composition--panel-stage .hero-composition__panel {
+                padding-inline: 1.25rem !important;
+            }
+            .hero-composition--panel-stage .hero-composition__panel :is(h1, h2) {
+                font-size: min(var(--wp--preset--font-size--display), 11vw) !important;
+            }
+        }
         /* Hero headlines wrap whole words (BIGR-864). `hyphens: auto` was
            here to prefer a language break over a mid-word snap, but it
            hyphenates at EVERY line-break opportunity, not only the impossible

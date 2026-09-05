@@ -17,6 +17,7 @@ final class HeroComposition
         'cinematic-safe-zone',
         'foreground-split',
         'layered-poster',
+        'panel-stage',
     ];
 
     /**
@@ -131,6 +132,42 @@ final class HeroComposition
             // merged recipe keeps that whole range rather than the narrowest.
             'height_profiles' => ['compact', 'standard', 'immersive'],
             'media_aspects' => ['portrait', 'landscape', 'square'],
+            'media_weights' => ['balanced', 'dominant'],
+            'defaults' => [
+                'media_mode' => 'foreground-image', 'headline_register' => 'display',
+                'text_anchor' => 'center-start',
+                'headline_line_target' => ['desktop' => [1, 3], 'mobile' => [2, 5]],
+                'focal_region' => 'none', 'text_safe_region' => 'full',
+                'height_profile' => 'standard', 'cta_treatment' => 'prominent',
+                'mobile_transformation' => 'stack-copy-first',
+                'media_aspect' => 'landscape', 'media_weight' => 'balanced',
+            ],
+        ],
+        // frm W2a: the product-landing opener of the reference corpus (Zova).
+        // A rounded, tinted panel on the page ground holds the copy on the
+        // leading side and one foreground illustration or mockup on the
+        // trailing side; a second, wider product image may sit below the
+        // copy row inside the same panel. Two images at most, so a caller
+        // capped at one image never sees it; the header stays stacked above
+        // the panel.
+        'panel-stage' => [
+            'canvases' => ['full-bleed', 'framed'],
+            'media_modes' => ['foreground-image'],
+            'min_images' => 1,
+            'max_images' => 2,
+            'backgrounds' => ['base', 'tinted'],
+            'default_background' => 'base',
+            'fallback_background' => 'base',
+            'header_modes' => ['stacked'],
+            'copy_capacity' => 'compact',
+            'mobile_transformations' => ['stack-copy-first'],
+            'layout_archetype' => 'asymmetric-split',
+            'fallback_family' => 'foreground-split',
+            'root_hook' => '.hero-composition--panel-stage',
+            'prompt' => 'hero-compositions/panel-stage.md',
+            'headline_registers' => ['restrained', 'display'],
+            'height_profiles' => ['standard', 'immersive'],
+            'media_aspects' => ['landscape', 'square'],
             'media_weights' => ['balanced', 'dominant'],
             'defaults' => [
                 'media_mode' => 'foreground-image', 'headline_register' => 'display',

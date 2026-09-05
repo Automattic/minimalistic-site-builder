@@ -120,6 +120,7 @@ test('HeroUnit exposes one isolated assigned recipe behind the shared site layer
         'cinematic-safe-zone' => 'landscape cover stage',
         'foreground-split' => 'deliberately unequal copy and foreground-media regions',
         'layered-poster' => 'cover image beneath controlled block-built type',
+        'panel-stage' => 'one contained stage',
     ];
 
     assert_eq(HeroComposition::RECIPES, array_keys($markers));

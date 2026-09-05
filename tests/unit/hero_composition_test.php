@@ -5,7 +5,7 @@ use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
 
 test('hero catalog entries own complete metadata, defaults, prompts, and unique hooks', function () {
-    assert_eq(3, count(HeroComposition::RECIPES));
+    assert_eq(4, count(HeroComposition::RECIPES));
     $hooks = [];
     foreach (HeroComposition::RECIPES as $recipe) {
         $meta = HeroComposition::metadata($recipe);
@@ -384,4 +384,21 @@ test('hero copy budget and headline punctuation overruns warn without hiding val
     $cleanHeadline = str_replace('One subject — staged', 'One subject staged', $inBudget);
     $warnings = HeroComposition::markupWarnings($cleanHeadline, 'foreground-split', 'page-home--hero');
     assert_eq([], array_values(array_filter($warnings, fn (string $w): bool => str_contains($w, 'hero headline punctuation'))));
+});
+
+test('panel-stage is a two-image foreground recipe that stays out of one-image caller pools (frm W2a)', function () {
+    assert_true(in_array('panel-stage', HeroComposition::RECIPES, true));
+    $meta = HeroComposition::metadata('panel-stage');
+    assert_eq(['foreground-image'], $meta['media_modes']);
+    assert_eq(['stacked'], $meta['header_modes'], 'the header sits above the panel, never over it');
+    assert_eq(['base', 'tinted'], $meta['backgrounds'], 'the panel carries the tint; the root never paints contrast or an image');
+    assert_eq('asymmetric-split', $meta['layout_archetype']);
+    assert_true(is_file(repo_path('prompts/' . $meta['prompt'])));
+    assert_true(in_array('panel-stage', HeroComposition::compatible([]), true));
+    assert_true(!in_array('panel-stage', HeroComposition::compatible(['max_hero_images' => 1]), true), 'a one-image cap excludes it');
+    assert_true(!in_array('panel-stage', HeroComposition::compatible(['allowed_hero_media_modes' => ['cover-image']]), true));
+    $blueprint = \Automattic\SiteBuild\HeroBlueprint::defaultFor('panel-stage');
+    assert_eq('panel-stage', $blueprint['recipe']);
+    assert_eq('foreground-image', $blueprint['media_mode']);
+    assert_eq('asymmetric-split', HeroComposition::planProjection($blueprint)['layout_archetype']);
 });

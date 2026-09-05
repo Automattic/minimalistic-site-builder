@@ -113,6 +113,10 @@ Order: W0 first (cohort + baseline). Then interleave W1–W8 by the ranked list.
 - PR-5b: medium-weight display option and `tight` tracking defaults for the product/portfolio register; reference family shortlist in FontShortlist for `grotesque`/`geometric`/`display-serif` registers.
 - PR-5c: stacked-line display (`display-lines`) for uppercase 2–3 line headlines.
 
+### W4/W1 follow-ups found 2026-09-05 (final cohort)
+- PR-4f: honor an explicit ground named in the brief. zova-like7's brief says "White page" and the direction shipped a dark brown ground (the use-scene rule outweighed the client's words). Prompt fix in `design-direction-seeds.md` and `design-direction.md`: a brief that names light/white or dark/black ground has decided `ground_key`; the seeds must all honor it.
+- PR-1e: the floating pill never shows on an image-led hero (every cohort hero resolved `minimal-overlay`). Either allow `floating-pill` in overlay mode (pill floats over the cover with the glass treatment) or steer product/portfolio briefs to `panel-stage` so the header stays stacked.
+
 ### W5 follow-up found 2026-09-05 (turn 6)
 - PR-5d: `heading_emphasis` monoculture. In the PR-4e direction reruns all 5 cohort directions committed `two-tone` (Spector and Cohesion included); `italic-word` and `highlight` were never chosen. Trace: the field text ranks two-tone first and calls it "the product-landing and portfolio voice"; the seeds carry no letterform hint the expansion could read an italic word off. Fix in the prompt fragment: tie `italic-word` to seeds whose type_register is display-serif/didone/script or whose brief names an italic or serif word, `highlight` to friendly product/fintech briefs, and say two-tone is not a default.
 
@@ -165,6 +169,14 @@ Baseline note (2026-09-04): every image request on all 5 sites failed with `HTTP
 
 Cohort header/hero facts at baseline: all 5 sites resolved `minimal-overlay` on an image-led hero (`cinematic-safe-zone` x2, `foreground-split` x2, `layered-poster` x1). The design direction did not persist the concept seed's register, so no build-owned gate could read the tradition.
 
+| final | 66ab5b1c | 2026-09-05 | cohesion-like6 | 3 | 3 | 2 | badges, two-tone serif headings, ring card shells, closing sunken wordmark; still no marquee name, no 3D objects on the page (images unavailable), overlay header so no pill |
+| final | 66ab5b1c | 2026-09-05 | dreammotion-like8 | 3 | 3 | 3 | dark ground, badges, two-tone, 2+3 bento, gallery grid, FAQ split, closing panel, ring card shells: the reference skeleton in the direction's own green |
+| final | 66ab5b1c | 2026-09-05 | zova-like7 | 3 | 2 | 2 | pricing tiers with highlighted middle, badges, FAQ split, newsletter panel, framed cards; NOT improved: the direction chose a dark brown ground for a brief that says "white page" |
+| final | 66ab5b1c | 2026-09-05 | luzia-like4 | 3 | 3 | 3 | light ground, badges, two-tone, work cards, award/stat bento, FAQ split, dark closing panel, sunken wordmark; serif rather than tight sans |
+| final | 66ab5b1c | 2026-09-05 | spector-like2 | 4 | 4 | 3 | uppercase two-tone display, 2x2 project grid, MORE PROJECTS line, statement lines, awards bento with cream highlight, huge counters, ghost wordmark |
+
+Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dreammotion 2 to 3, luzia 1 to 3, spector 2 to 3); zova stayed at 2 because its direction chose a dark ground against an explicit "white page" brief (PR-4f below). All five heroes resolved `minimal-overlay` on image-led recipes, so the floating pill (W1a) never appears in the cohort; a W1 follow-up should let the pill float over an image-led hero or steer product briefs to the stacked `panel-stage` recipe. Word-reveal adoption 5/5, section-badge 4/5, two-tone 5/5, cta-panel 4/5, faq-split 3/5, bento 3/5. Images still unavailable (proxy down all night), so no imagery axis was scored.
+
 ## 8. PR log (append one row per PR, newest last)
 
 | # | PR | workstream | title | status | evidence | merged sha |
@@ -179,6 +191,7 @@ Cohort header/hero facts at baseline: all 5 sites resolved `minimal-overlay` on 
 | 8 | #455 | W3b | Add the faq-split section archetype with a native accordion (frm) | merged | gist ff61116857a54a4f6ad558612603856a: zova-like5 + dreammotion-like5 planned faq-split unforced, 7 details each, mobile 390 | ce16c44d |
 | 9 | #456 | W3d | Add the cta-panel closing section archetype (frm) | merged | gist 347de02ca8c14aa42dd9478192cecbaf: dreammotion-like6 + luzia-like3 planned cta-panel unforced; 390px headline clip fixed by an 11vw cap | 5edd129c |
 | 10 | #457 | W8a | Add the word-reveal hero headline entrance to the motion kit (frm) | merged | gist d8886fe5a5d2f02191de839914de0801: in-page opacity samples + frames on dreammotion-like7; reduced motion whole | 47fa5b8a |
+| 11 | #458 | W7a | Add the image_kind direction token (frm) | merged | gist acd236e9de388471fb4b145b8b8e84c0: cohesion-like5 3d-object (9/9 on 3d-render, kind clause in every request), zova-like6 ui-mockup (14/15 flat-design) | 66ab5b1c |
 
 ## 9. Iteration log (one line per loop turn)
 
@@ -192,6 +205,7 @@ Cohort header/hero facts at baseline: all 5 sites resolved `minimal-overlay` on 
 - 2026-09-05 turn 8: PR-3b #455 merged (both plans chose faq-split unforced). Started W3d `cta-panel` (contained rounded closing panel, one action; band stays on the page ground) on branch `frm/cta-panel`.
 - 2026-09-05 turn 9: PR-3d #456 opened (both plans chose cta-panel unforced); its 390px shot clipped a display word inside the panel, fixed by a phone-scale headline cap. W8a `word-reveal` built on branch `frm/word-reveal`: the first version registered the H1 as a scroll target and the driver marked it static (first viewport), so it now plays on load like hero-entrance; verified in-page (opacities 0.15/0.01/0/0 at 240ms, settled at 1.2s; reduced motion leaves the heading whole). Neither evidence build authored the class unprompted, so the hero prompt now makes it the default for calm/dramatic display H1s.
 - 2026-09-05 turn 10: PR-3d #456 and PR-8a #457 merged (#457 needed `gh workflow run tests.yml` because the PR reported no checks, and a plan-file merge from frm_experiment). W7a `image_kind` built on branch `frm/image-kind` (commit moved off the W8a branch by cherry-pick). Builds cohesion-like5 (3d-object) and zova-like6 (ui-mockup, 14/15 placeholders on flat-design) committed non-photo kinds unforced, and both heroes authored `word-reveal` under the strengthened hero prompt (adoption 2/2 after 0/2).
+- 2026-09-05 turn 11: PR-7a #458 merged. Final 5-site cohort built on 66ab5b1c (all merged work except W2a) and scored in section 7. W2a `panel-stage` built afterwards on branch `frm/panel-stage` with its own forced evidence builds (HERO_RECIPE=panel-stage), because the ranked interleave never reached W2 before the final cohort.
 
 ## 10. Parked / rejected
 
