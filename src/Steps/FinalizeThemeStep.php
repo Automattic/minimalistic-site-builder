@@ -10,6 +10,7 @@ use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Depth;
 use Automattic\SiteBuild\BandGeometry;
 use Automattic\SiteBuild\StepNumeral;
+use Automattic\SiteBuild\TypeTreatment;
 use Automattic\SiteBuild\HeadingEmphasis;
 use Automattic\SiteBuild\SectionLabel;
 use Automattic\SiteBuild\Device;
@@ -184,6 +185,12 @@ final class FinalizeThemeStep implements Step
             BandGeometry::kitCss($bandGeometry),
             $headerWarnings,
         );
+        $treatmentShipped = self::writeOverlayKit(
+            $project,
+            self::treatmentKit(),
+            TypeTreatment::kitCss(DesignDirectionStep::typeTreatmentFor($project) ?? ''),
+            $headerWarnings,
+        );
         $stepNumeral = DesignDirectionStep::stepNumeralFor($project);
         $numeralShipped = self::writeOverlayKit(
             $project,
@@ -223,6 +230,9 @@ final class FinalizeThemeStep implements Step
         }
         if ($bandShipped) {
             $overlays[] = self::bandKit();
+        }
+        if ($treatmentShipped) {
+            $overlays[] = self::treatmentKit();
         }
         if ($numeralShipped) {
             $overlays[] = self::numeralKit();
@@ -338,6 +348,15 @@ final class FinalizeThemeStep implements Step
     }
 
     /** The committed section-label kit: paints the one badge above a section heading. */
+    public static function treatmentKit(): OverlayKit
+    {
+        return new OverlayKit(
+            'treatment',
+            "// Committed display lines for an uppercase heading treatment.\n"
+                . '// Loads after generated style.css.',
+        );
+    }
+
     public static function numeralKit(): OverlayKit
     {
         return new OverlayKit(

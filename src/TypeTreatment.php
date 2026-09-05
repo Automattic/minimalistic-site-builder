@@ -46,4 +46,32 @@ final class TypeTreatment
             default        => 'the committed deterministic heading treatment',
         };
     }
+
+    /** The treatments whose display headings stack as tight uppercase lines (frm W5c). */
+    public const STACKED_LINE_TREATMENTS = ['caps-tight', 'caps-tracked'];
+
+    /**
+     * Display-lines kit (frm W5c): under an uppercase treatment a display
+     * heading reads as stacked lines, the way Spector sets its three-line
+     * H1: leading near the cap height and balanced line breaks. Scoped to
+     * display-size headings and the hero H1, so the theme model's heading
+     * lineHeight (which repairTypeTreatment preserves) still governs the
+     * other levels. Nothing ships for the other treatments.
+     */
+    public static function kitCss(mixed $treatment): ?string
+    {
+        $treatment = self::explicit($treatment);
+        if ($treatment === null || !in_array($treatment, self::STACKED_LINE_TREATMENTS, true)) {
+            return null;
+        }
+        return <<<CSS
+            /* Committed '{$treatment}' display lines. Written by the build, never by a model. */
+            .hero-composition__copy .wp-block-heading:is(h1, .has-display-font-size),
+            .wp-block-heading.has-display-font-size {
+                line-height: 0.92;
+                text-wrap: balance;
+            }
+
+            CSS;
+    }
 }

@@ -685,6 +685,9 @@ final class ScaffoldThemeStep implements Step
             overflow-wrap: normal;
             word-break: normal;
             hyphens: manual;
+            /* Balanced breaks keep a two- or three-line display heading from
+               ending on a one-word rag (frm W5c); a no-op on one line. */
+            text-wrap: balance;
         }
         .hero-composition__copy .wp-block-heading.headline-hyphenate,
         .hero-composition--layered-poster .wp-block-heading.headline-hyphenate {
