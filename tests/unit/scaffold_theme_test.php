@@ -602,3 +602,15 @@ test('scaffold-theme paints the marquee-name hero name behind a centered stack (
     assert_contains('border-radius: var(--shape-radius-card, 0)', $css);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('scaffold-theme sets the pricing figure in the heading face and lifts the recommended tier (frm W3c)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_pricing_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Zova');
+    quietly(fn () => (new ScaffoldThemeStep())->run($project));
+    $css = $project->readText('theme/style.css');
+    assert_contains('.section-composition--pricing-tiers .price-figure {', $css);
+    assert_contains('font-size: var(--wp--preset--font-size--section-title)', $css);
+    assert_contains('.section-composition--pricing-tiers .equal-cards > .wp-block-column > .card-highlight {', $css);
+    assert_contains('transform: translateY(-0.75rem)', $css);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
