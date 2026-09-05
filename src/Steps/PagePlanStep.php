@@ -730,6 +730,16 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             $project->readText('siteSpec.json'),
             DesignDirectionStep::readFor($project),
         );
+        // A footer the brief states in so many words outranks the hash pick
+        // (frm PR-3r), the way stated ground, hero and header already do.
+        $statedFooter = FooterComposition::statedArchetypeFor(
+            $project->exists('meta.json') ? $project->readJson('meta.json') : [],
+        );
+        if ($statedFooter !== null && $statedFooter !== $footerArchetype) {
+            $warnings[] = "file='pages.json'; path=\"footer_archetype\"; authored=\"{$footerArchetype}\" (stable pick); "
+                . "delivered=\"{$statedFooter}\"; disposition=the brief names its footer, so the stable pick yields to it";
+            $footerArchetype = $statedFooter;
+        }
         $out = self::withClosingBandOffFooterSurface(
             $out,
             FooterComposition::surface($footerArchetype),

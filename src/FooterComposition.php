@@ -156,6 +156,63 @@ final class FooterComposition
         );
     }
 
+    /**
+     * Bounded phrases a brief uses to name its footer (frm PR-3r), read as
+     * whole words, first match wins, the way GroundKey, HeroComposition and
+     * AboveFoldContract read a stated ground, hero and header. The cohesion
+     * brief asks for "a huge clipped wordmark" and got conversion-panel.
+     *
+     * @var array<string, list<string>>
+     */
+    private const STATED_PHRASES = [
+        'sunken-wordmark' => [
+            'huge clipped wordmark', 'giant clipped wordmark', 'clipped wordmark', 'clipped giant wordmark',
+            'giant wordmark footer', 'huge wordmark footer', 'ghost wordmark footer', 'ghost wordmark',
+            'wordmark footer', 'sunken wordmark',
+        ],
+        'newsletter-columns' => ['newsletter footer', 'newsletter signup footer', 'footer with link columns', 'link columns footer', 'four-column footer', '4-col footer', 'four column footer'],
+        'contact-sheet' => ['contact sheet footer', 'footer with contact details', 'contact details footer'],
+        'cover-coda' => ['photo footer', 'footer with a photo', 'image footer', 'footer band with a photo', 'footer band with an image'],
+        'conversion-panel' => ['cta footer', 'footer with a call to action', 'closing cta panel footer'],
+        'color-field' => ['color-field footer', 'colour-field footer', 'solid color footer'],
+        'repeat-rail' => ['marquee footer', 'footer marquee', 'ticker footer'],
+    ];
+
+    /** The footer a brief names in so many words, or null. */
+    public static function statedInBrief(string $brief): ?string
+    {
+        $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
+        foreach (self::STATED_PHRASES as $archetype => $phrases) {
+            foreach ($phrases as $phrase) {
+                if (preg_match('/(?<![\p{L}-])' . preg_quote($phrase, '/') . '(?![\p{L}-])/u', $text) === 1) {
+                    return $archetype;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The stated footer from a build's meta, the user's own words first and
+     * the refined brief second, or null when the brief names none.
+     *
+     * @param array<string,mixed> $meta
+     */
+    public static function statedArchetypeFor(array $meta): ?string
+    {
+        foreach (['original_prompt', 'prompt'] as $key) {
+            $text = $meta[$key] ?? null;
+            if (!is_string($text) || trim($text) === '') {
+                continue;
+            }
+            $stated = self::statedInBrief($text);
+            if ($stated !== null) {
+                return $stated;
+            }
+        }
+        return null;
+    }
+
     public static function archetypeFor(string $siteSpec, string $designDirection): string
     {
         $bucket = 0;
