@@ -735,6 +735,17 @@ final class ScaffoldThemeStep implements Step
             }
         }
 
+        /* Closing invitation panel (the cta-panel archetype): a contained
+           card on the page ground, rounded from the committed shape scale
+           and clipped so a background image or gradient follows the corner. */
+        .wp-block-group.cta-panel {
+            border-radius: var(--shape-radius-panel, 0);
+            overflow: hidden;
+        }
+        .wp-block-group.cta-panel > .wp-block-columns {
+            align-items: center;
+        }
+
         CSS;
 
     private const README = <<<TXT

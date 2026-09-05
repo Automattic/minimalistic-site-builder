@@ -558,3 +558,14 @@ test('scaffold-theme styles native accordion rows for the faq-split archetype (f
     assert_contains('prefers-reduced-motion', $css);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('scaffold-theme rounds and clips the closing cta-panel from the shape scale (frm W3d)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_cta_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    quietly(fn () => (new ScaffoldThemeStep())->run($project));
+    $css = $project->readText('theme/style.css');
+    assert_contains('.wp-block-group.cta-panel {', $css);
+    assert_contains('border-radius: var(--shape-radius-panel, 0)', $css);
+    assert_contains('overflow: hidden', $css);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
