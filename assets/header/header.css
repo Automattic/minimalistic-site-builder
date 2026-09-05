@@ -405,6 +405,57 @@ html.header-is-scrolled .site-header-shell .header-archetype--floating-pill .hea
     }
 }
 
+/*
+ * Centered bar (frm W1b). The root keeps the shell's surface and states; the
+ * marked .header-bar-center row becomes a three-column grid so the
+ * navigation sits on the page's center line regardless of how wide the
+ * wordmark and the CTA are (a flex space-between row centers the nav only
+ * when both ends happen to match). The layout container class core writes
+ * for the authored flex row is overridden by the deeper selector.
+ */
+.site-header-shell .header-archetype--bar-center-cta .header-bar-center {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: center;
+    column-gap: var(--wp--preset--spacing--md, 1.5rem);
+}
+
+.site-header-shell .header-archetype--bar-center-cta .header-bar-center > .wp-block-site-title,
+.site-header-shell .header-archetype--bar-center-cta .header-bar-center > .wp-block-site-logo {
+    justify-self: start;
+    min-inline-size: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.site-header-shell .header-archetype--bar-center-cta .header-bar-center > .wp-block-navigation {
+    justify-self: center;
+}
+
+.site-header-shell .header-archetype--bar-center-cta .header-bar-center > .wp-block-buttons {
+    justify-self: end;
+}
+
+/* The one CTA is a pill on both references; the direction's CTA style
+ * still owns its fill, text and border. */
+.site-header-shell .header-archetype--bar-center-cta .header-bar-center .wp-block-button__link {
+    border-radius: 999px;
+}
+
+/* Below the hamburger breakpoint the centered column is the menu button;
+ * it moves next to the CTA so the wordmark keeps the start edge. */
+@media (max-width: 782px) {
+    .site-header-shell .header-archetype--bar-center-cta .header-bar-center {
+        grid-template-columns: minmax(0, 1fr) auto auto;
+        column-gap: var(--wp--preset--spacing--sm, 0.75rem);
+    }
+
+    .site-header-shell .header-archetype--bar-center-cta .header-bar-center > .wp-block-navigation {
+        justify-self: end;
+    }
+}
+
 /* Glass blurs behind the pill, not behind the transparent rail. The
  * pseudo-element pattern is the same as the root's: never an ancestor of
  * the navigation, so a fixed responsive menu keeps the viewport as its

@@ -29,6 +29,7 @@ final class AboveFoldContract
         'branded-lockup',
         'split-nav',
         'floating-pill',
+        'bar-center-cta',
     ];
 
     /**
@@ -40,6 +41,14 @@ final class AboveFoldContract
 
     /** Archetypes that may float over an image-led opening. */
     public const OVERLAY_ARCHETYPES = ['minimal-overlay', 'floating-pill'];
+
+    /**
+     * Traditions whose stacked header on a full-bleed canvas is the centered
+     * bar (frm W1b): wordmark left, navigation centered, one pill CTA right,
+     * sticky. Dreammotion and Luzia read this way; the cohort briefs for
+     * both resolve `archival`, Spector's resolves `noir`.
+     */
+    public const BAR_CENTER_REGISTERS = ['archival', 'noir', 'editorial'];
 
     /**
      * Reject an operator override only when caller-owned facts already prove
@@ -658,6 +667,11 @@ final class AboveFoldContract
         if ($pillRegister) {
             return ['floating-pill'];
         }
+        // frm W1b: the centered bar is the same kind of commitment for its
+        // traditions; a coin flip against the plain bar would be a lottery.
+        if ($canvas === 'full-bleed' && in_array($register, self::BAR_CENTER_REGISTERS, true)) {
+            return ['bar-center-cta'];
+        }
         // centered-masthead and split-nav are retired from auto-assignment
         // (BIGR-872). Forced HEADER_ARCHETYPE can still pick them through
         // forcedHeaderCompatible().
@@ -667,6 +681,7 @@ final class AboveFoldContract
             'centered-masthead',
             'split-nav',
             'floating-pill',
+            'bar-center-cta',
         ];
         return array_values(array_diff(self::HEADER_ARCHETYPES, $excluded));
     }
