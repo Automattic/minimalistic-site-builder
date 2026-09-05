@@ -2515,3 +2515,12 @@ test('both direction prompts tell the model that a ground named in the brief is 
         'the stated-ground rule precedes the anti-reflex rule it qualifies',
     );
 });
+
+test('the direction prompt ties each heading emphasis to a tradition and refuses a two-tone default (frm PR-5d)', function () {
+    $prompt = (string) file_get_contents(repo_path('prompts/design-direction.md'));
+    $field = substr($prompt, strpos($prompt, '- `heading_emphasis`:'), 1800);
+    assert_contains('`display-serif`, `didone`, `humanist` or `script`', $field);
+    assert_contains('it is NOT the default for everything else', $field);
+    assert_contains('`grotesque`, `geometric` or `condensed`', $field);
+    assert_true(strpos($field, '`italic-word`') < strpos($field, '`two-tone` mutes'), 'two-tone is no longer described first');
+});
