@@ -613,7 +613,7 @@ test('FooterUnit renders exactly one reviewed recipe and image instructions only
         'status-readout' => 'quiet status readout',
         'contact-sheet' => 'A film contact sheet closes the page',
         'mosaic-tiles' => 'A hard-edged mosaic of flat color tiles',
-        'color-field' => 'One massive inset panel of a single strong palette color',
+        'color-field' => 'One massive inset panel in the `contrast` palette color',
         'repeat-rail' => 'The identity as printed tape',
         'newsletter-columns' => 'an INVITATION ROW over',
     ];

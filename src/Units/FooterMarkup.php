@@ -92,6 +92,68 @@ final class FooterMarkup
      * @param list<string> $notes appended to when opaque authored styling must
      *                            be removed to make the surface enforceable
      */
+    /** The palette slugs a color-field panel may not take: the accent stays rare (frm PR-4k). */
+    private const LOUD_PANEL_COLORS = ['primary', 'accent', 'secondary'];
+
+    /**
+     * Bound the color-field panel to the contrast surface (frm PR-4k). The
+     * fragment offered "primary or accent" for its one massive panel, and
+     * dreammotion-like14 closed on a viewport-wide yellow slab: the loudest
+     * fill on the page, against the standing rule that the accent stays
+     * rare. The first panel group under the root that paints primary,
+     * accent or secondary takes contrast with base ink instead; a panel
+     * already on band or contrast is untouched.
+     *
+     * @param list<string> $notes
+     */
+    public static function withBoundedColorFieldPanel(string $markup, array &$notes = []): string
+    {
+        $document = BlockMarkup::parse($markup);
+        $root = $document->topLevel();
+        if ($root === null) {
+            return $markup;
+        }
+        foreach ($document->children($root) as $child) {
+            if ($document->name($child) !== 'group') {
+                continue;
+            }
+            $attrs = $document->attrs($child) ?? [];
+            $color = strtolower(trim((string) ($attrs['backgroundColor'] ?? '')));
+            if (!in_array($color, self::LOUD_PANEL_COLORS, true)) {
+                continue;
+            }
+            $authoredText = (string) ($attrs['textColor'] ?? '');
+            $attrs['backgroundColor'] = 'contrast';
+            $attrs['textColor'] = 'base';
+            $document->setAttrs($child, $attrs);
+            $own = $document->ownHtml($child);
+            $open = preg_replace_callback(
+                '~^(\s*<div\b[^>]*\bclass=")([^"]*)(")~',
+                static function (array $m) use ($color, $authoredText): string {
+                    $tokens = preg_split('/\s+/', trim($m[2]), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+                    $tokens = array_values(array_filter($tokens, static fn (string $t): bool => $t !== "has-{$color}-background-color"
+                        && ($authoredText === '' || $t !== "has-{$authoredText}-color")));
+                    foreach (['has-contrast-background-color', 'has-base-color', 'has-text-color', 'has-background'] as $needed) {
+                        if (!in_array($needed, $tokens, true)) {
+                            $tokens[] = $needed;
+                        }
+                    }
+                    return $m[1] . implode(' ', $tokens) . $m[3];
+                },
+                $own,
+                1,
+            );
+            if (is_string($open) && $open !== $own) {
+                $document->spliceOwnHtml($child, 0, strlen($own), $open);
+            }
+            $notes[] = "footer color-field panel: authored backgroundColor '{$color}'"
+                . ($authoredText !== '' ? " with textColor '{$authoredText}'" : '')
+                . '; delivered contrast with base ink; disposition the accent stays rare, so the one massive panel takes the contrast surface';
+            return $document->render();
+        }
+        return $markup;
+    }
+
     public static function withRootBackgroundColor(string $markup, string $color, array &$notes = []): string
     {
         if (preg_match('/^[a-z0-9-]+$/', $color) !== 1) {
