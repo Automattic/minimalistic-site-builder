@@ -27,7 +27,7 @@ final class GroundKey
      * to move lands where pages live: near-white or near-black, in the
      * authored hue.
      */
-    public const PAGE_LIGHT_LUMINANCE = 0.82;
+    public const PAGE_LIGHT_LUMINANCE = 0.88;
     public const PAGE_DARK_LUMINANCE = 0.03;
 
     /**
