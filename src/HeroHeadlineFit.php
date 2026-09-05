@@ -83,6 +83,66 @@ final class HeroHeadlineFit
     private const UPPERCASE_EM = 0.70;
     private const MIXED_CASE_EM = 0.58;
 
+    /**
+     * Per-character advance for the wide display faces the direction likes
+     * to commit (frm PR-5h), keyed by the lowercase family name: uppercase
+     * em, mixed-case em. The generic constants above are a median for
+     * grotesques; Unbounded runs a quarter wider, so spector-like14's
+     * "ENOUGH" was pinned at 16.3vw and still ran past a 390px viewport.
+     * Only the heading family the theme names is consulted; an unknown
+     * family keeps the generic estimate.
+     *
+     * @var array<string, array{0:float,1:float}>
+     */
+    private const WIDE_FACE_EM = [
+        'unbounded' => [0.92, 0.78],
+        'michroma' => [1.00, 0.90],
+        'orbitron' => [0.90, 0.80],
+        'monoton' => [0.95, 0.95],
+        'rubik mono one' => [0.95, 0.90],
+        'bungee' => [0.85, 0.85],
+        'archivo black' => [0.80, 0.68],
+        'black ops one' => [0.80, 0.70],
+        'syne' => [0.78, 0.66],
+        'chakra petch' => [0.74, 0.62],
+        'space grotesk' => [0.72, 0.60],
+        'bricolage grotesque' => [0.72, 0.60],
+        'krona one' => [0.92, 0.82],
+        'righteous' => [0.76, 0.64],
+    ];
+
+    /**
+     * The per-character advance for the theme's heading face, in em: the
+     * wide-face table when the family is known, the generic constant
+     * otherwise.
+     */
+    private static function characterEm(array $theme, bool $uppercase): float
+    {
+        $family = self::headingFamily($theme);
+        if ($family !== null && isset(self::WIDE_FACE_EM[$family])) {
+            return self::WIDE_FACE_EM[$family][$uppercase ? 0 : 1];
+        }
+        return $uppercase ? self::UPPERCASE_EM : self::MIXED_CASE_EM;
+    }
+
+    /** The lowercase name of the theme's heading family, or null. */
+    private static function headingFamily(array $theme): ?string
+    {
+        foreach ((array) ($theme['settings']['typography']['fontFamilies'] ?? []) as $family) {
+            if (!is_array($family) || ($family['slug'] ?? null) !== 'heading') {
+                continue;
+            }
+            $name = $family['name'] ?? null;
+            if (!is_string($name) || trim($name) === '') {
+                $stack = (string) ($family['fontFamily'] ?? '');
+                $name = trim((string) (explode(',', $stack)[0] ?? ''), " \t\"'");
+            }
+            $name = mb_strtolower(trim((string) $name), 'UTF-8');
+            return $name === '' ? null : $name;
+        }
+        return null;
+    }
+
     /** Non-em letter spacing means "spacing exists"; only widening counts. */
     private const UNKNOWN_SPACING_EM = 0.03;
 
@@ -326,7 +386,7 @@ final class HeroHeadlineFit
         $uppercase = self::effectiveTransform($attrs, $theme, $level) === 'uppercase';
         $spacingEm = self::effectiveLetterSpacingEm($attrs, $theme, $level);
         $chars = mb_strlen($word);
-        $wordEm = $chars * ($uppercase ? self::UPPERCASE_EM : self::MIXED_CASE_EM)
+        $wordEm = $chars * self::characterEm($theme, $uppercase)
             + max(0, $chars - 1) * $spacingEm;
         if ($wordEm <= 0) {
             return null;
