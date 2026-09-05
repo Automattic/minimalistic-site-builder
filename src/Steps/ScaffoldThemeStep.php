@@ -838,7 +838,9 @@ final class ScaffoldThemeStep implements Step
            hairline turns horizontal. Authored separators are not needed. */
         .section-composition--stat-ledger .wp-block-column > .wp-block-heading:first-child {
             font-family: var(--wp--preset--font-family--heading, inherit);
-            font-size: var(--wp--preset--font-size--display);
+            /* Capped by the viewport so a four-column figure never runs out
+               of its column (spector-like6: "4 YEARS" clipped at 1366). */
+            font-size: min(var(--wp--preset--font-size--display), 7vw);
             font-weight: 600;
             line-height: 1;
             letter-spacing: -0.03em;

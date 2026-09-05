@@ -7,9 +7,11 @@ theme draws. No cards, no images, no paragraphs of explanation inside the row.
 - Structure: one `wp:columns` with `"align":"wide"` holding three
   `wp:column` at `"width":"33.33%"` or four at `"width":"25%"`. Each column
   holds, in this order, ONE level-3 `wp:heading` whose entire text is the
-  figure with its unit or sign ("120+", "98%", "$4.2M", "1,200", "12 yrs") and
+  figure with its sign or symbol ("120+", "98%", "$4.2M", "1,200", "3x") and
   ONE `wp:paragraph` with `"fontSize":"caption"` naming what it counts in two
-  to five words. Nothing else in a column.
+  to five words. A unit word belongs in the label, never in the figure: "4"
+  over "years of average client tenure", not "4 years". Nothing else in a
+  column.
 - Figures: use only numbers the SITE SPEC or the section notes state; when a
   figure is not given, do not invent one, and drop the section to three
   figures or fold the missing one into the band's lead line. Write the figure

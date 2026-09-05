@@ -690,7 +690,10 @@ test('the stat-ledger archetype checks one row of three or four figure-led colum
 
     $four = $band($row($column('120+') . $column('98%') . $column('$4.2M') . $column('1,200')));
     assert_eq([], SectionComposition::markupWarnings($four, 'stat-ledger', 'page-home--metrics'));
-    $three = $band($row($column('12 yrs') . $column('40') . $column('3x')));
+    $three = $band($row($column('12 km') . $column('40') . $column('3x')));
+    assert_eq([], SectionComposition::markupWarnings($three, 'stat-ledger', 'page-home--metrics'));
+    $unitWord = $band($row($column('4 years') . $column('40') . $column('3x')));
+    assert_contains('stat ledger figures', implode("\n", SectionComposition::markupWarnings($unitWord, 'stat-ledger', 'page-home--metrics')), 'a unit word belongs in the label');
     assert_eq([], SectionComposition::markupWarnings($three, 'stat-ledger', 'page-home--metrics'));
 
     $two = $band($row($column('120+') . $column('98%')));
