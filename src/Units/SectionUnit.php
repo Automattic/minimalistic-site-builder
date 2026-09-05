@@ -7,6 +7,7 @@ use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\ItemPattern;
 use Automattic\SiteBuild\SectionComposition;
 use Automattic\SiteBuild\SectionLabel;
+use Automattic\SiteBuild\StepNumeral;
 use Automattic\SiteBuild\Steps\PagePlanStep;
 
 /**
@@ -186,6 +187,21 @@ final class SectionUnit extends AbstractPageSectionUnit
         );
         $markup = $label['markup'];
         array_push($warnings, ...$label['warnings']);
+        // Step numerals (frm W6c): committed, process sections only, first
+        // in each step item, renumbered in order; anything else is a
+        // decorative number and goes.
+        $numeral = StepNumeral::normalize(
+            $markup,
+            is_string($input['step_numeral'] ?? null) ? $input['step_numeral'] : null,
+            $this->key($input),
+            StepNumeral::isProcessSection(
+                (string) ($input['section']['type'] ?? ''),
+                (string) ($input['section']['slug'] ?? ''),
+            ),
+        );
+        $markup = $numeral['markup'];
+        array_push($warnings, ...$numeral['warnings']);
+        array_push($repairs, ...$numeral['repairs']);
         // A marquee painted in copy (the same phrase three times in one
         // block) collapses to the phrase and the kit class (frm W8c).
         $markup = GeneratedMarkup::collapseRepeatedPhrase($markup, $this->key($input), $repairs);

@@ -9,6 +9,7 @@ use Automattic\SiteBuild\ImageCrop;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Depth;
 use Automattic\SiteBuild\BandGeometry;
+use Automattic\SiteBuild\StepNumeral;
 use Automattic\SiteBuild\HeadingEmphasis;
 use Automattic\SiteBuild\SectionLabel;
 use Automattic\SiteBuild\Device;
@@ -183,6 +184,13 @@ final class FinalizeThemeStep implements Step
             BandGeometry::kitCss($bandGeometry),
             $headerWarnings,
         );
+        $stepNumeral = DesignDirectionStep::stepNumeralFor($project);
+        $numeralShipped = self::writeOverlayKit(
+            $project,
+            self::numeralKit(),
+            StepNumeral::kitCss($stepNumeral),
+            $headerWarnings,
+        );
         $sectionLabel = DesignDirectionStep::sectionLabelFor($project);
         $labelShipped = self::writeOverlayKit(
             $project,
@@ -215,6 +223,9 @@ final class FinalizeThemeStep implements Step
         }
         if ($bandShipped) {
             $overlays[] = self::bandKit();
+        }
+        if ($numeralShipped) {
+            $overlays[] = self::numeralKit();
         }
         if ($labelShipped) {
             $overlays[] = self::labelKit();
@@ -327,6 +338,15 @@ final class FinalizeThemeStep implements Step
     }
 
     /** The committed section-label kit: paints the one badge above a section heading. */
+    public static function numeralKit(): OverlayKit
+    {
+        return new OverlayKit(
+            'numeral',
+            "// Committed step numeral (chip or ghost) on process steps.\n"
+                . '// Loads after generated style.css.',
+        );
+    }
+
     public static function labelKit(): OverlayKit
     {
         return new OverlayKit(
