@@ -652,3 +652,14 @@ test('scaffold-theme centers zigzag rows, sizes the empty plate, and stacks copy
     assert_contains('order: -1', $css);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('scaffold-theme sets statement lines at section-title scale with hairlines between them (frm W3e)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_statements_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Spector');
+    quietly(fn () => (new ScaffoldThemeStep())->run($project));
+    $css = $project->readText('theme/style.css');
+    assert_contains('.section-composition--statement-lines .wp-block-group.statement-lines > .wp-block-heading {', $css);
+    assert_contains('border-block-start: 1px solid color-mix(in srgb, currentColor 14%, transparent)', $css);
+    assert_contains('.section-composition--statement-lines .wp-block-group.statement-lines > .wp-block-heading:last-child {', $css);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

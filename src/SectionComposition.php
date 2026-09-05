@@ -44,7 +44,14 @@ final class SectionComposition
         'stat-ledger',
         'feature-row-hairlines',
         'zigzag-steps',
+        'statement-lines',
     ];
+
+    /** The line counts a statement-lines ledger may carry (frm W3e). */
+    public const STATEMENT_LINE_COUNTS = [3, 4, 5, 6];
+
+    /** The list group the statement-lines fragment marks (frm W3e). */
+    public const STATEMENT_LIST_CLASS = 'statement-lines';
 
     /** The step counts a zigzag-steps ladder may carry (frm W3g). */
     public const ZIGZAG_STEP_COUNTS = [3, 4, 5];
@@ -384,6 +391,23 @@ final class SectionComposition
             'ineligible_reason' => '',
             'root_hook' => '.section-composition--zigzag-steps',
             'prompt' => 'section-compositions/zigzag-steps.md',
+        ],
+        // frm W3e: the reference corpus' statement ledger (Spector's values).
+        // One marked list group of three to six single-line statements set
+        // as headings, hairlines between them drawn by the theme; no cards,
+        // no images, no row. Line count and list shape are checked in
+        // markupWarnings().
+        'statement-lines' => [
+            'backgrounds' => ['base', 'tinted', 'contrast'],
+            'default_background' => 'base',
+            'min_images' => 0,
+            'max_images' => 0,
+            'copy_capacity' => 'compact',
+            'requires_row' => false,
+            'requires_context' => [],
+            'ineligible_reason' => '',
+            'root_hook' => '.section-composition--statement-lines',
+            'prompt' => 'section-compositions/statement-lines.md',
         ],
     ];
 
@@ -968,6 +992,38 @@ TEXT;
                         'safe parseable section was retained; consecutive steps put the copy on opposite sides',
                     );
                 }
+            }
+        }
+
+        if ($archetype === 'statement-lines') {
+            $lists = [];
+            foreach ($document->indices() as $index) {
+                if ($document->name($index) !== 'group'
+                    || !in_array(self::STATEMENT_LIST_CLASS, self::classTokens($document, $index), true)) {
+                    continue;
+                }
+                $headings = 0;
+                $others = 0;
+                foreach ($document->children($index) as $child) {
+                    if ($document->name($child) === 'heading') {
+                        $headings++;
+                    } else {
+                        $others++;
+                    }
+                }
+                $lists[] = ['headings' => $headings, 'others' => $others];
+            }
+            $sound = count($lists) === 1
+                && in_array($lists[0]['headings'], self::STATEMENT_LINE_COUNTS, true)
+                && $lists[0]['others'] === 0;
+            if (!$sound) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'statement lines list',
+                    ['archetype' => $archetype, 'list_groups' => 1, 'class' => self::STATEMENT_LIST_CLASS, 'headings' => self::STATEMENT_LINE_COUNTS, 'other_children' => 0],
+                    ['list_groups' => count($lists), 'lists' => $lists],
+                    'safe parseable section was retained; a statement ledger is one marked group of three to six heading lines and nothing else',
+                );
             }
         }
 

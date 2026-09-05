@@ -786,7 +786,7 @@ test('the zigzag-steps archetype checks three to five two-column rows whose copy
     assert_eq('section-compositions/zigzag-steps.md', $meta['prompt']);
     assert_eq(5, $meta['max_images']);
     assert_true(is_file(repo_path('prompts/' . $meta['prompt'])));
-    assert_true(str_contains((string) file_get_contents(repo_path('prompts/page-plan.md')), 'feature-row-hairlines, zigzag-steps"'));
+    assert_true(str_contains((string) file_get_contents(repo_path('prompts/page-plan.md')), 'feature-row-hairlines, zigzag-steps'));
 
     $copy = static fn (string $t): string => '<!-- wp:column {"width":"55%"} --><div class="wp-block-column"><!-- wp:heading {"level":3} --><h3 class="wp-block-heading">' . $t . '</h3><!-- /wp:heading --><!-- wp:paragraph --><p>One line.</p><!-- /wp:paragraph --></div><!-- /wp:column -->';
     $media = '<!-- wp:column {"width":"45%"} --><div class="wp-block-column"><!-- wp:group {"className":"step-plate","backgroundColor":"band"} --><div class="wp-block-group step-plate has-band-background-color has-background"></div><!-- /wp:group --></div><!-- /wp:column -->';
@@ -815,4 +815,30 @@ test('the zigzag-steps archetype checks three to five two-column rows whose copy
         . '<!-- wp:columns --><div class="wp-block-columns">' . $empty . $wrapped('B') . '</div><!-- /wp:columns -->'
         . '<!-- wp:columns --><div class="wp-block-columns">' . $wrapped('C') . $empty . '</div><!-- /wp:columns -->');
     assert_eq([], SectionComposition::markupWarnings($deep, 'zigzag-steps', 'page-home--process'), 'a wrapped heading still names the copy side');
+});
+
+test('the statement-lines archetype checks one marked group of three to six heading lines and nothing else (frm W3e)', function () {
+    assert_true(in_array('statement-lines', SectionComposition::ARCHETYPES, true));
+    $meta = SectionComposition::metadata('statement-lines');
+    assert_eq('section-compositions/statement-lines.md', $meta['prompt']);
+    assert_eq(false, $meta['requires_row']);
+    assert_eq(0, $meta['max_images']);
+    assert_true(is_file(repo_path('prompts/' . $meta['prompt'])));
+    assert_true(str_contains((string) file_get_contents(repo_path('prompts/page-plan.md')), 'zigzag-steps, statement-lines'));
+
+    $line = static fn (string $t): string => '<!-- wp:heading {"level":3} --><h3 class="wp-block-heading">' . $t . '</h3><!-- /wp:heading -->';
+    $list = static fn (string $inner): string => '<!-- wp:group {"className":"statement-lines","layout":{"type":"constrained"}} --><div class="wp-block-group statement-lines">' . $inner . '</div><!-- /wp:group -->';
+    $band = static fn (string $inner): string => '<!-- wp:group {"className":"section-composition--statement-lines","layout":{"type":"constrained"}} --><div class="wp-block-group section-composition--statement-lines"><!-- wp:heading --><h2 class="wp-block-heading">What we stand for</h2><!-- /wp:heading -->' . $inner . '</div><!-- /wp:group -->';
+
+    $good = $band($list($line('Contrast is a decision') . $line('Type carries the argument') . $line('Nothing without weight')));
+    assert_eq([], SectionComposition::markupWarnings($good, 'statement-lines', 'page-home--values'));
+    $two = $band($list($line('A') . $line('B')));
+    assert_contains('statement lines list', implode("\n", SectionComposition::markupWarnings($two, 'statement-lines', 'page-home--values')));
+    $mixed = $band($list($line('A') . $line('B') . $line('C') . '<!-- wp:paragraph --><p>Not a line.</p><!-- /wp:paragraph -->'));
+    $joined = implode("\n", SectionComposition::markupWarnings($mixed, 'statement-lines', 'page-home--values'));
+    assert_contains('"others":1', $joined);
+    $none = $band($line('A') . $line('B') . $line('C'));
+    assert_contains('"list_groups":0', implode("\n", SectionComposition::markupWarnings($none, 'statement-lines', 'page-home--values')));
+    $plain = str_replace('section-composition--statement-lines', 'section-composition--centered-stack', $two);
+    assert_true(!str_contains(implode("\n", SectionComposition::markupWarnings($plain, 'centered-stack', 'x')), 'statement'));
 });

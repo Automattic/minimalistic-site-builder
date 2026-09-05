@@ -894,6 +894,25 @@ final class ScaffoldThemeStep implements Step
             }
         }
 
+        /* Statement lines (the statement-lines archetype, frm W3e): each line
+           at section-title scale in the heading face, a hairline between
+           lines, the last one closed by a hairline too. The band's rhythm
+           comes from the padding, not from margins the model would author. */
+        .section-composition--statement-lines .wp-block-group.statement-lines {
+            gap: 0;
+        }
+        .section-composition--statement-lines .wp-block-group.statement-lines > .wp-block-heading {
+            margin: 0;
+            padding-block: var(--wp--preset--spacing--md, 1.5rem);
+            border-block-start: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+            font-size: var(--wp--preset--font-size--section-title);
+            line-height: 1.1;
+            text-wrap: balance;
+        }
+        .section-composition--statement-lines .wp-block-group.statement-lines > .wp-block-heading:last-child {
+            border-block-end: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+        }
+
         /* Closing invitation panel (the cta-panel archetype): a contained
            card on the page ground, rounded from the committed shape scale
            and clipped so a background image or gradient follows the corner. */
