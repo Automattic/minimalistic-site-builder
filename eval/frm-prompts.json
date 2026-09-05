@@ -1,0 +1,41 @@
+{
+  "$comment": "Cohort briefs for the frm_experiment branch (see plan/frm-experiment.md). Each brief names the look it wants so the direction step can reach one of the five Framer reference registers. Build all: php bin/build-demos.php --file=eval/frm-prompts.json --with-images. Build one: add --only=<slug>.",
+  "version": 1,
+  "prompts": [
+    {
+      "id": "cohesion-like",
+      "slug": "cohesion-like",
+      "site_type": "portfolio",
+      "reference": "https://cohesion.framer.ai/",
+      "prompt": "Create a playful personal portfolio for a UX/UI designer in Bucharest. Light, white page, bold black type with one giant marquee of my name behind the hero, floating colorful 3D objects, a floating pill navigation, services listed as a numbered stack, client testimonials, two subscription plans, footer with a huge clipped wordmark."
+    },
+    {
+      "id": "dreammotion-like",
+      "slug": "dreammotion-like",
+      "site_type": "saas",
+      "reference": "https://dreammotion.framer.website/",
+      "prompt": "Create a dark landing page for an AI image and video generation studio. Near-black ground, serif display headings with two-tone emphasis, one cinematic dusk photo series, glass cards on a bento grid, a three-step process with app mockups, testimonials, gallery, FAQ accordion, and a closing CTA panel with an image."
+    },
+    {
+      "id": "zova-like",
+      "slug": "zova-like",
+      "site_type": "saas",
+      "reference": "https://zova-saas.framer.ai/",
+      "prompt": "Create a clean SaaS landing page for a finance analytics product for small teams. White page with a pale blue gradient panel hero, dashboard mockup, four-column feature row separated by hairlines, a sticky split with tabs, three pricing tiers with the middle one highlighted, a photo testimonial, FAQ, and a newsletter footer. Floating pill nav with a black arrow CTA."
+    },
+    {
+      "id": "luzia-like",
+      "slug": "luzia-like",
+      "site_type": "portfolio",
+      "reference": "https://luzia.framer.website/",
+      "prompt": "Create a portfolio for an independent brand and web designer in Lisbon. Light page, tight sans headings with muted-plus-dark two-tone lines, featured work as large image cards with tag pills, an award/quote/stat bento, three service cards with one highlighted in violet, a dark rounded band with zigzag numbered steps, FAQ, and a dark CTA plus footer band with a 3D object."
+    },
+    {
+      "id": "spector-like",
+      "slug": "spector-like",
+      "site_type": "agency",
+      "reference": "https://spector.framer.website/",
+      "prompt": "Create a site for a design agency in New York. Dark hero with a full-bleed high-contrast portrait, metadata in the corners, a three-line uppercase display headline with a red-to-cream gradient, edge-to-edge spread navigation, a 2x2 full-bleed project grid, a MORE PROJECTS marquee, hairline-separated statement lines, an awards bento, huge stat counters, and a ghost wordmark footer."
+    }
+  ]
+}
