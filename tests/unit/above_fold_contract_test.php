@@ -1268,6 +1268,16 @@ test('the floating pill also floats over an image-led opening in a product tradi
     assert_eq('floating-pill', $pill['header']['archetype']);
     assert_eq(AboveFoldContract::MODE_OVERLAY, $pill['header']['mode'], 'the pill keeps the overlay relation over the cover');
     assert_eq(true, $pill['header']['protect_top_edge']);
+    // The delivery phase's coherence check accepts the floating pill as an
+    // overlay archetype (it used to pin overlay to minimal-overlay).
+    $parts = [
+        'page-home--hero' => above_fold_image_part('hero', 50, className: 'hero-composition--cinematic-safe-zone'),
+        'page-menu--menu-opening' => above_fold_solid_part('menu-opening', 'contrast'),
+    ];
+    $delivered = AboveFoldContract::finalizeDelivery($pill, $pages, AboveFoldPartFacts::inspect($pages, $parts, $pill));
+    assert_eq('floating-pill', $delivered['header']['archetype']);
+    assert_eq(AboveFoldContract::MODE_OVERLAY, $delivered['header']['mode']);
+    assert_eq([], $delivered['degradations']);
 
     $bar = $resolve('heritage');
     assert_eq('minimal-overlay', $bar['header']['archetype'], 'other traditions keep the quiet overlay bar');

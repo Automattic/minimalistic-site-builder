@@ -38,6 +38,9 @@ final class AboveFoldContract
      */
     public const FLOATING_PILL_REGISTERS = ['modernist', 'pop', 'technical'];
 
+    /** Archetypes that may float over an image-led opening. */
+    public const OVERLAY_ARCHETYPES = ['minimal-overlay', 'floating-pill'];
+
     /**
      * Reject an operator override only when caller-owned facts already prove
      * it impossible. Generated canvas, recipe, plan, opening, and delivered
@@ -928,15 +931,18 @@ final class AboveFoldContract
         string $disposition,
     ): array {
         $stacked = is_array($contract['stacked_pair'] ?? null) ? $contract['stacked_pair'] : [];
+        // A pill that loses its overlay keeps its shape on the stacked rail
+        // (frm PR-1e); every other lost relation lands on the reviewed bar.
+        $archetype = ($contract['header']['archetype'] ?? null) === 'floating-pill' ? 'floating-pill' : 'standard-row';
         $contract['header'] = [
             'mode' => self::MODE_STACKED,
-            'archetype' => 'standard-row',
+            'archetype' => $archetype,
             'foreground_token' => (string) ($stacked['foreground'] ?? 'contrast'),
             'protection_token' => (string) ($stacked['protection'] ?? 'base'),
             'protection_orientation' => 'top-edge',
             'protect_top_edge' => false,
             'safe_top_px' => 0,
-        ] + self::headerTextFacts('standard-row', '');
+        ] + self::headerTextFacts($archetype, '');
         $contract['viewport']['stacked_cover_max_vh'] = 80;
         $contract['degradations'][] = self::degradation(
             $code,
@@ -1038,9 +1044,12 @@ final class AboveFoldContract
         // the design's own `header` rule, which no consumer of aboveFold.json
         // holds. What remains objective is that both slugs are ones the
         // header kit can actually paint, and that they are distinct.
+        // Two archetypes float (frm PR-1e): the quiet bar and the pill.
+        if ($overlay && !in_array($header['archetype'] ?? null, self::OVERLAY_ARCHETYPES, true)) {
+            throw new \RuntimeException('aboveFold.json has an incoherent header.archetype');
+        }
         $expectedHeader = $overlay
             ? [
-                'archetype' => 'minimal-overlay',
                 'foreground_token' => $overlayForeground,
                 'protection_token' => $overlayProtection,
                 'protect_top_edge' => true,
