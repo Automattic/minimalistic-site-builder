@@ -332,6 +332,9 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     $phone = substr($phone, 0, (int) strpos($phone, '.hero-composition--marquee-name .hero-composition__objects'));
     assert_eq(2, substr_count($phone, 'background: var(--wp--preset--color--base);'), 'the cover field and the inner panel take the page ground');
     assert_true(!str_contains($phone, 'background: var(--wp--preset--color--contrast);'), 'no contrast slab on a phone');
+    // The photo field keeps only a light veil: the copy is off the photo there (frm PR-2j).
+    assert_contains('.wp-block-cover__background[class*="has-background-dim-"] {', $phone);
+    assert_contains('opacity: 0.25;', $phone, 'the authored desktop dim is capped on the phone field');
 
     $readme = $project->readText('theme/readme.txt');
     assert_contains('=== {{THEME_NAME}} ===', $readme);
