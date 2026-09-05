@@ -2524,3 +2524,13 @@ test('the direction prompt ties each heading emphasis to a tradition and refuses
     assert_contains('`grotesque`, `geometric` or `condensed`', $field);
     assert_true(strpos($field, '`italic-word`') < strpos($field, '`two-tone` mutes'), 'two-tone is no longer described first');
 });
+
+test('a ground the brief states in so many words is read as a bounded phrase (frm PR-4g)', function () {
+    assert_eq('light', GroundKey::statedInBrief('Create a clean SaaS landing page. White page with a pale blue gradient panel hero.'));
+    assert_eq('dark', GroundKey::statedInBrief('Create a dark landing page for an AI studio. Near-black ground, serif headings.'));
+    assert_eq('dark', GroundKey::statedInBrief('white text on a dark ground'), 'dark phrases win when both appear');
+    assert_eq(null, GroundKey::statedInBrief('Create a website for a Georgian restaurant in Tbilisi Old Town.'), 'a silent brief decides nothing');
+    assert_eq(null, GroundKey::statedInBrief('a lighthearted, darkly funny comedy club'), 'adjectives are not a ground');
+    assert_eq('light', GroundKey::statedInBrief("Light\n  page, please"));
+    assert_eq(null, GroundKey::statedInBrief('the page ends on a lighthearted note, on blackboard green'), 'a phrase must end at a word boundary');
+});
