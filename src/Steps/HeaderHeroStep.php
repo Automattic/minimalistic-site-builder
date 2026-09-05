@@ -750,6 +750,11 @@ final class HeaderHeroStep implements Step
             $markup = $marked['markup'];
             array_push($notes, ...$marked['notes']);
             array_push($warnings, ...$marked['warnings']);
+            // The kit paints these chromes in both states against ONE proven
+            // foreground; an authored nav colour escapes that proof (PR-1g).
+            $ink = HeaderNav::inheritProvenInk($markup, $foreground);
+            $markup = $ink['markup'];
+            array_push($notes, ...$ink['notes']);
         }
 
         // Strictly after the Home strip: consolidation COPIES nav items, and a

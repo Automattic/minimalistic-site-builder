@@ -1665,4 +1665,67 @@ final class HeaderNav
             . '; delivered=unchanged; disposition=left the row untouched because the identity and navigation byte '
             . 'boundaries could not be proven for deterministic source-order repair';
     }
+
+    /**
+     * Make the navigation, its links and the site title inherit the proven
+     * header foreground on a chrome the kit paints (floating-pill and
+     * bar-center-cta, frm PR-1g). Those surfaces change between the start
+     * and scrolled states, and HeaderBehavior proved ONE foreground against
+     * both; an authored `textColor` on the navigation escapes that proof
+     * (cohesion-like10 set `secondary` on the nav, 1.81:1 on the scrolled
+     * accent pill). Token colours and inline text colours are removed; the
+     * proven token is inherited from the root.
+     *
+     * @return array{markup:string,notes:list<string>}
+     */
+    public static function inheritProvenInk(string $markup, string $foreground): array
+    {
+        if ($foreground === '') {
+            return ['markup' => $markup, 'notes' => []];
+        }
+        $document = BlockMarkup::parse($markup);
+        $notes = [];
+        foreach ($document->indices() as $index) {
+            $name = self::canonicalName($document->name($index));
+            if (!in_array($name, ['navigation', 'navigation-link', 'site-title'], true) || !$document->isStructurallySafe($index)) {
+                continue;
+            }
+            $attrs = $document->attrs($index) ?? [];
+            $changed = [];
+            $token = trim((string) ($attrs['textColor'] ?? ''));
+            if ($token !== '' && $token !== $foreground) {
+                unset($attrs['textColor']);
+                $document->removeClassTokenInOwnHtml($index, "has-{$token}-color");
+                $changed[] = "textColor '{$token}'";
+            }
+            if (is_array($attrs['style']['color'] ?? null) && isset($attrs['style']['color']['text'])) {
+                unset($attrs['style']['color']['text']);
+                if ($attrs['style']['color'] === []) {
+                    unset($attrs['style']['color']);
+                }
+                $changed[] = 'style.color.text';
+            }
+            if (isset($attrs['style']['elements']['link']['color']['text'])) {
+                unset($attrs['style']['elements']['link']['color']['text']);
+                $changed[] = 'style.elements.link.color.text';
+            }
+            if ($changed === []) {
+                continue;
+            }
+            if (isset($attrs['style']) && $attrs['style'] === []) {
+                unset($attrs['style']);
+            }
+            $document->setAttrs($index, $attrs);
+            $document->removeClassTokenInOwnHtml($index, 'has-text-color');
+            $own = $document->ownHtml($index);
+            $stripped = preg_replace('/(\sstyle="[^"]*?)(?:^|;)\s*color\s*:[^;"]*;?/i', '$1', $own) ?? $own;
+            $stripped = preg_replace('/\sstyle=""/', '', $stripped) ?? $stripped;
+            if ($stripped !== $own) {
+                $document->spliceOwnHtml($index, 0, strlen($own), $stripped);
+            }
+            $notes[] = "{$name}: dropped " . implode(', ', $changed)
+                . " so the kit-painted chrome inherits the proven '{$foreground}' foreground in both states";
+        }
+        return ['markup' => $notes === [] ? $markup : $document->render(), 'notes' => $notes];
+    }
 }
