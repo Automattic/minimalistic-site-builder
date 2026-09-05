@@ -162,11 +162,13 @@ Cohort header/hero facts at baseline: all 5 sites resolved `minimal-overlay` on 
 | # | PR | workstream | title | status | evidence | merged sha |
 |---|---|---|---|---|---|---|
 | 1 | #448 | W0 | Add the frm cohort briefs (frm) | merged | baseline cohort, section 7 | 8bf3a9d1 |
+| 2 | #449 | W1a | Add the floating-pill header archetype (frm) | merged | gist c227b01f7ba99e8dd9b91e9afa93aa2c: zova-like2 + cohesion-like2 forced pill, glass/glass sticky, mobile 390 | 5a9f9783 |
 
 ## 9. Iteration log (one line per loop turn)
 
 - 2026-09-04 turn 1: setup (branch, worktree, baseline 61 failures = trunk), PR-0a #448 merged, baseline cohort built (images failed: WPCOM proxy read-only, retried once), references captured, section 7 filled. Started PR-1a `floating-pill` on branch `frm/floating-pill-header`.
+- 2026-09-05 turn 2: PR-1a #449 merged (CI green, no new unit failures). Evidence forced `HEADER_ARCHETYPE=floating-pill` because image-led heroes resolve overlay; `register` is now persisted on the direction. Images still failing (proxy read-only). Next: W4a as a shape-owned radius scale (no separate `radius_scale` token, see section 10).
 
 ## 10. Parked / rejected
 
-- (none yet)
+- `radius_scale` as a separate direction token (PR-4a as written): rejected 2026-09-05. It overlaps `shape`, which already is the site's one corner commitment. Instead the build executes `shape` as a scale (media / card / panel / pill) and publishes it as custom properties for later kits (rounded band, badge, glass).

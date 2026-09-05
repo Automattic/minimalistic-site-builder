@@ -336,6 +336,7 @@ test('finalize-theme ships and enqueues the shape kit for a rounded commitment',
     $css = $project->readText('theme/assets/shape/shape.css');
     assert_contains('border-radius: 0.5rem', $css);
     assert_contains('.wp-block-cover:not(.alignfull)', $css);
+    assert_contains('--shape-radius-card: 0.75rem', $css, 'the radius scale ships with the kit (frm W4a)');
     $php = $project->readText('theme/functions.php');
     assert_contains(
         "wp_enqueue_style('forno-vero-shape', get_theme_file_uri('assets/shape/shape.css'), array('forno-vero-style')",
@@ -353,7 +354,8 @@ test('finalize-theme ships and enqueues the shape kit for a rounded commitment',
 test('finalize-theme omits a stale overlay kit from the loader when it cannot be pruned', function () {
     $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
     $project = (new ProjectStore($tmp))->create('Forno Vero');
-    $project->writeJson('designDirection.json', ['description' => 'x', 'shape' => 'sharp']);
+    // No committed shape at all: the kit resolves to no CSS and is pruned.
+    $project->writeJson('designDirection.json', ['description' => 'x']);
     $project->writeText('theme/assets/shape/shape.css', '.wp-block-cover { border-radius: 1.25rem; }');
     $project->writeText('theme/functions.php', "wp_enqueue_style('forno-vero-shape', 'stale');\n");
     finalize_static_header($project);
@@ -375,7 +377,7 @@ test('finalize-theme omits a stale overlay kit from the loader when it cannot be
     }
 });
 
-test('finalize-theme ships no shape kit for sharp and prunes a stale one', function () {
+test('finalize-theme ships the sharp radius scale and replaces a stale rounded kit (frm W4a)', function () {
     $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
     $project = (new ProjectStore($tmp))->create('Forno Vero');
     $project->writeJson('designDirection.json', ['description' => 'x', 'shape' => 'sharp']);
@@ -385,10 +387,12 @@ test('finalize-theme ships no shape kit for sharp and prunes a stale one', funct
 
     quietly(fn () => (new FinalizeThemeStep())->run($project));
 
-    assert_true(!$project->exists('theme/assets/shape/shape.css'), 'stale kit pruned');
+    $css = $project->readText('theme/assets/shape/shape.css');
+    assert_contains('--shape-radius-card: 0;', $css, 'sharp publishes a zero scale for later kits');
+    assert_true(!str_contains($css, '1.25rem'), 'the stale rounded rule is gone');
+    assert_true(!str_contains($css, '.wp-block-cover'), 'sharp ships no media rules');
     $php = $project->readText('theme/functions.php');
-    assert_true(!str_contains($php, 'forno-vero-shape'), 'no shape enqueue for sharp');
-    assert_contains("add_editor_style('style.css')", $php);
+    assert_contains("wp_enqueue_style('forno-vero-shape'", $php, 'the scale is enqueued for sharp too');
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

@@ -8,6 +8,7 @@ use Automattic\SiteBuild\BandColor;
 use Automattic\SiteBuild\CardStyle;
 use Automattic\SiteBuild\ColorEconomy;
 use Automattic\SiteBuild\ConceptSeeds;
+use Automattic\SiteBuild\ShapeMarkup;
 use Automattic\SiteBuild\CtaStyle;
 use Automattic\SiteBuild\Depth;
 use Automattic\SiteBuild\Device;
@@ -1638,11 +1639,15 @@ final class DesignDirectionStep implements Step
         // the field existed carry none.
         $shape = self::explicitShape($direction['shape'] ?? null);
         if ($shape !== null) {
+            $scale = ShapeMarkup::RADIUS_SCALE[$shape];
             $facts[] = match ($shape) {
                 'sharp' => '- **Shape**: sharp — the build keeps contained media (`core/image`, `core/cover`, the media half of `core/media-text`) and buttons square. Full-bleed media stays square.',
                 'soft'  => '- **Shape**: soft — the build wires a subtle corner radius onto contained media (`core/image`, `core/cover`, the media half of `core/media-text`) and a modest radius onto buttons. Full-bleed media stays square.',
                 'round' => '- **Shape**: round — the build wires a decisive corner radius onto contained media (`core/image`, `core/cover`, the media half of `core/media-text`) and pill-shaped buttons. Full-bleed media stays square.',
-            };
+            } . ' The same commitment is one radius scale the build executes: marked card shells'
+                . ' (`card-style--flush`, `card-style--framed`, `card-style--overlap` groups) ' . $scale['card']
+                . ', panels ' . $scale['panel'] . ', pill controls ' . $scale['pill']
+                . '. Never author a competing radius on those surfaces.';
         }
 
         $surface = Surface::explicit($direction['surface'] ?? null);

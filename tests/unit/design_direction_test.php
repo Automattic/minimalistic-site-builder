@@ -1509,7 +1509,8 @@ test('format renders the shape commitment with its executable meaning', function
     assert_contains('**Shape**: sharp', $sharp);
     assert_contains('contained media (`core/image`, `core/cover`, the media half of `core/media-text`) and buttons square', $sharp);
     assert_contains('Full-bleed media stays square', $sharp);
-    assert_true(!str_contains($sharp, 'cards'), 'shape does not promise generic card geometry');
+    assert_contains('marked card shells', $sharp, 'shape now promises the card-shell scale (frm W4a)');
+    assert_contains('`card-style--flush`, `card-style--framed`, `card-style--overlap` groups) 0, panels 0, pill controls 0', $sharp);
 
     $soft = DesignDirectionStep::format(['description' => 'x', 'shape' => 'soft']);
     assert_contains('**Shape**: soft', $soft);
@@ -1522,6 +1523,8 @@ test('format renders the shape commitment with its executable meaning', function
     assert_contains('decisive corner radius', $round);
     assert_contains('pill-shaped buttons', $round);
     assert_contains('Full-bleed media stays square', $round);
+    assert_contains('groups) 1.5rem, panels 2.5rem, pill controls 9999px', $round);
+    assert_contains('Never author a competing radius', $round);
 
     // Directions persisted before the field existed carry no shape fact,
     // and an unrecognized or wrong-typed value renders none rather than
