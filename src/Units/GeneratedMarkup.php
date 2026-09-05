@@ -2542,7 +2542,11 @@ final class GeneratedMarkup
     /** Whether one class token names a rule or hairline the section may not draw. */
     public static function isRuleClassToken(string $token): bool
     {
-        if (str_starts_with($token, 'item-pattern--') || str_starts_with($token, 'device--')) {
+        // Build-owned marker families are never rule classes; a composition
+        // marker names its archetype (feature-row-hairlines, frm W3e).
+        if (str_starts_with($token, 'item-pattern--')
+            || str_starts_with($token, 'device--')
+            || str_starts_with($token, 'section-composition--')) {
             return false;
         }
         return preg_match('/(^|-)(rules?|ruled|hairlines?)(-|$)/i', $token) === 1;
