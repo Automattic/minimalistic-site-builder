@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\Device;
 use Automattic\SiteBuild\Motion;
+use Automattic\SiteBuild\SectionComposition;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
@@ -528,6 +529,18 @@ final class MotionSanityStep implements Step
         $isCountUp = $token === 'count-up';
         if ($isCountUp && !in_array($doc->name($i), ['heading', 'paragraph'], true)) {
             return 'count-up runs on a heading or paragraph that starts with a figure';
+        }
+        if ($isCountUp) {
+            // A model-authored count on prose or a date counts nonsense from
+            // zero (zova-like11 counted "2024"). The boundary marker skips
+            // both; the same rule applies to what the model marked itself.
+            $figure = trim(html_entity_decode(strip_tags($doc->innerHtml($i)), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+            if (preg_match(SectionComposition::FIGURE_PATTERN, $figure) !== 1) {
+                return 'count-up counts a figure-only block; prose keeps its text still';
+            }
+            if (preg_match('/^(?:18|19|20|21)\d{2}$/', $figure) === 1) {
+                return 'count-up never counts a year';
+            }
         }
         $isEntrance = in_array($token, Motion::SCROLL_CLASSES, true)
             && !in_array($token, Motion::UNBUDGETED_ENTRANCES, true);
