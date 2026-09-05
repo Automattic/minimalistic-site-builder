@@ -1383,3 +1383,44 @@ test('spread-nav is the stacked pool for a full-bleed noir, brutalist or poster 
     $forced = above_fold_resolve(above_fold_pages(), recipe: 'foreground-split', forced: 'spread-nav');
     assert_eq('spread-nav', $forced['header']['archetype']);
 });
+
+test('a header the brief states outranks the register pool when the opening can carry it (frm PR-1h)', function () {
+    assert_eq('floating-pill', AboveFoldContract::statedInBrief('Light page, bold black type, a floating pill navigation, services as a numbered stack.'));
+    assert_eq('spread-nav', AboveFoldContract::statedInBrief('Dark hero, edge-to-edge spread navigation, a 2x2 project grid.'));
+    assert_eq('bar-center-cta', AboveFoldContract::statedInBrief('wordmark left, navigation centered, black pill CTA'));
+    assert_eq(null, AboveFoldContract::statedInBrief('Create a website for a bakery in Lyon.'));
+
+    $blueprint = HeroBlueprint::defaultFor('foreground-split');
+    $projection = HeroComposition::planProjection($blueprint);
+    $pages = [[
+        'slug' => 'home', 'title' => 'Home', 'path' => '/', 'front' => true,
+        'sections' => [[
+            'slug' => 'hero', 'title' => 'Hero',
+            'layout_archetype' => $projection['layout_archetype'],
+            'background' => 'base',
+            'primary_action' => null,
+        ]],
+    ]];
+    $resolve = static fn (string $register, ?string $stated): array => AboveFoldContract::resolve(
+        $pages,
+        $blueprint,
+        'full-bleed',
+        ['base' => '#FFFFFF', 'contrast' => '#111111'],
+        ['stable_id' => 'stated', 'writing_direction' => 'ltr', 'page_count' => 1, 'register' => $register, 'stated_header' => $stated],
+        ['archetype' => 'minimal-columns', 'surface' => 'base'],
+    );
+    assert_eq('spread-nav', $resolve('brutalist', null)['header']['archetype'], 'the pool stands when the brief is silent');
+    assert_eq('floating-pill', $resolve('brutalist', 'floating-pill')['header']['archetype'], 'the stated pill wins over the register pool');
+    assert_eq('spread-nav', $resolve('heritage', 'spread-nav')['header']['archetype']);
+    assert_eq('standard-row', $resolve('heritage', 'nonsense')['header']['archetype'] === 'standard-row' ? 'standard-row' : 'other', 'an unknown stated value is ignored, not thrown');
+    $forced = AboveFoldContract::resolve(
+        $pages,
+        $blueprint,
+        'full-bleed',
+        ['base' => '#FFFFFF', 'contrast' => '#111111'],
+        ['stable_id' => 'stated', 'writing_direction' => 'ltr', 'page_count' => 1, 'register' => 'brutalist', 'stated_header' => 'floating-pill'],
+        ['archetype' => 'minimal-columns', 'surface' => 'base'],
+        'bar-center-cta',
+    );
+    assert_eq('bar-center-cta', $forced['header']['archetype'], 'the operator override still outranks the brief');
+});
