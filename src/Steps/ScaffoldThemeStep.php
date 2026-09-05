@@ -846,12 +846,19 @@ final class ScaffoldThemeStep implements Step
             letter-spacing: -0.03em;
             margin-block-end: 0.35em;
         }
-        .section-composition--stat-ledger .wp-block-columns > .wp-block-column + .wp-block-column {
+        /* The hairline family (frm W3e): stat-ledger and feature-row-hairlines
+           share the column rules. */
+        .section-composition--stat-ledger .wp-block-columns > .wp-block-column + .wp-block-column,
+        .section-composition--feature-row-hairlines .wp-block-columns > .wp-block-column + .wp-block-column {
             border-inline-start: 1px solid color-mix(in srgb, currentColor 14%, transparent);
             padding-inline-start: var(--wp--preset--spacing--md, 1.5rem);
         }
+        .section-composition--feature-row-hairlines .wp-block-column > .wp-block-heading:first-child {
+            margin-block-end: 0.5em;
+        }
         @media (max-width: 781px) {
-            .section-composition--stat-ledger .wp-block-columns > .wp-block-column + .wp-block-column {
+            .section-composition--stat-ledger .wp-block-columns > .wp-block-column + .wp-block-column,
+            .section-composition--feature-row-hairlines .wp-block-columns > .wp-block-column + .wp-block-column {
                 border-inline-start: 0;
                 border-block-start: 1px solid color-mix(in srgb, currentColor 14%, transparent);
                 padding-inline-start: 0;

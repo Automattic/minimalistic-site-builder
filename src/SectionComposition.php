@@ -42,7 +42,11 @@ final class SectionComposition
         'cta-panel',
         'pricing-tiers',
         'stat-ledger',
+        'feature-row-hairlines',
     ];
+
+    /** The column counts a feature-row-hairlines row may carry (frm W3e). */
+    public const FEATURE_ROW_COUNTS = [3, 4];
 
     /** The figure counts a stat-ledger row may carry (frm W3e). */
     public const STAT_LEDGER_COUNTS = [3, 4];
@@ -342,6 +346,23 @@ final class SectionComposition
             'ineligible_reason' => '',
             'root_hook' => '.section-composition--stat-ledger',
             'prompt' => 'section-compositions/stat-ledger.md',
+        ],
+        // frm W3e: the reference corpus' capability row (Zova's four-up).
+        // One row of three or four text columns, a short heading over one or
+        // two lines each, hairlines between the columns drawn by the theme,
+        // no cards and no images. Row shape and text-only columns are
+        // checked in markupWarnings().
+        'feature-row-hairlines' => [
+            'backgrounds' => ['base', 'tinted', 'contrast'],
+            'default_background' => 'base',
+            'min_images' => 0,
+            'max_images' => 0,
+            'copy_capacity' => 'standard',
+            'requires_row' => true,
+            'requires_context' => [],
+            'ineligible_reason' => '',
+            'root_hook' => '.section-composition--feature-row-hairlines',
+            'prompt' => 'section-compositions/feature-row-hairlines.md',
         ],
     ];
 
@@ -814,6 +835,66 @@ TEXT;
                     ['archetype' => $archetype, 'figure_led_columns' => $columnsTotal],
                     ['figure_led_columns' => $figureColumns],
                     'safe parseable section was retained; every column leads with a heading that is only a figure',
+                );
+            }
+        }
+
+        if ($archetype === 'feature-row-hairlines') {
+            $rows = [];
+            $cardColumns = 0;
+            $headedColumns = 0;
+            $columnsTotal = 0;
+            foreach ($document->indices() as $index) {
+                if ($document->name($index) !== 'columns') {
+                    continue;
+                }
+                $columns = array_values(array_filter(
+                    $document->children($index),
+                    static fn (int $child): bool => $document->name($child) === 'column',
+                ));
+                $rows[] = count($columns);
+                foreach ($columns as $column) {
+                    $columnsTotal++;
+                    $first = $document->children($column)[0] ?? null;
+                    if ($first !== null && $document->name($first) === 'heading') {
+                        $headedColumns++;
+                    }
+                    foreach ($document->children($column) as $child) {
+                        foreach (self::classTokens($document, $child) as $token) {
+                            if (str_starts_with($token, 'card-style--') || $token === 'card-body') {
+                                $cardColumns++;
+                                continue 3;
+                            }
+                        }
+                    }
+                }
+            }
+            $count = count($rows) === 1 ? $rows[0] : 0;
+            if (count($rows) !== 1 || !in_array($count, self::FEATURE_ROW_COUNTS, true)) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'feature row shape',
+                    ['archetype' => $archetype, 'column_rows' => 1, 'columns' => self::FEATURE_ROW_COUNTS],
+                    ['column_rows' => count($rows), 'columns_per_row' => $rows],
+                    'safe parseable section was retained; a hairline feature row is one row of three or four text columns',
+                );
+            }
+            if ($columnsTotal > 0 && $headedColumns < $columnsTotal) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'feature row headings',
+                    ['archetype' => $archetype, 'heading_led_columns' => $columnsTotal],
+                    ['heading_led_columns' => $headedColumns],
+                    'safe parseable section was retained; every column opens with its short heading',
+                );
+            }
+            if ($cardColumns > 0) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'feature row cards',
+                    ['archetype' => $archetype, 'card_columns' => 0],
+                    ['card_columns' => $cardColumns],
+                    'safe parseable section was retained; the hairlines are the structure, a card shell inside a column doubles it',
                 );
             }
         }
