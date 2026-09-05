@@ -32,7 +32,11 @@ final class Motion
         'reveal', 'reveal-up', 'reveal-fade', 'reveal-scale',
         'reveal-blur', 'reveal-wipe', 'reveal-wipe-up', 'reveal-aperture', 'reveal-zoom',
         'stagger-children', 'hero-entrance', 'word-reveal',
+        'count-up',
     ];
+
+    /** Entrances that do not spend a section's entrance budget: a stat row counts every figure (frm W8b). */
+    public const UNBUDGETED_ENTRANCES = ['count-up'];
 
     /** Hero-only entrances: the first section, once per page each. */
     public const HERO_CLASSES = ['hero-entrance', 'word-reveal'];
@@ -87,7 +91,7 @@ final class Motion
             return true;
         }
         return preg_match(
-            '/^(?:(?:reveal|stagger|ambient|motion|ken-burns|gradient-shift|hero-entrance|word-reveal|marquee)|hover-(?:lift|reveal))(?:-[\w-]+)?$/',
+            '/^(?:(?:reveal|stagger|ambient|motion|ken-burns|gradient-shift|hero-entrance|word-reveal|marquee|count-up)|hover-(?:lift|reveal))(?:-[\w-]+)?$/',
             $token
         ) === 1;
     }

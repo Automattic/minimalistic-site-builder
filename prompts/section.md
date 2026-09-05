@@ -115,6 +115,7 @@ Motion classes (optional) — semantic hover, scroll, and ambient presets whose 
 - `reveal-aperture` — the mask opens from the vertical center to both edges, with no travel; a letterbox entrance for wide imagery and gallery bands.
 - `reveal-zoom` — fades in while settling down from a slight enlargement (the inverse of `reveal-scale`); suits photography, covers, and full-bleed media.
 - `stagger-children` — ONLY on a container (`wp:columns`, `wp:gallery`, or a card-grid group) whose direct children are cards/columns: the children cascade in one by one. Each child waits for its own viewport entry, so this also works when a row stacks on mobile. Never combine with a `reveal-*` class on the same block.
+- `count-up` — on a heading or paragraph whose text BEGINS with a figure ("120+", "98%", "$4.2M", "1,200"): the figure counts up from zero when it scrolls into view, keeping its prefix, separators, decimals and suffix. For stat and metric rows: put it on each figure's own block; these do not spend the section's two-entrance budget. Never on a sentence, a date, or a block whose number is not the point.
 - `ken-burns` — AMBIENT: on a `wp:cover` or image figure — its image zooms very slowly.
 - `gradient-shift` — AMBIENT: on a group whose background is a gradient — the gradient drifts slowly.
 - `ambient-drift` — AMBIENT: on ONE small decorative element (never a text band) — a slow vertical float.
