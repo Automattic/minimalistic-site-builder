@@ -584,7 +584,7 @@ test('finalize-theme ships and enqueues the surface overlay', function () {
 
     $css = $project->readText('theme/assets/surface/surface.css');
     assert_contains('position: fixed', $css);
-    assert_contains('mix-blend-mode: soft-light', $css);
+    assert_true(preg_match('/mix-blend-mode: (multiply|screen)/', $css) === 1, 'a blend that moves pixels');
     $php = $project->readText('theme/functions.php');
     assert_contains('assets/surface/surface.css', $php);
 
@@ -729,7 +729,7 @@ test('finalize-theme tunes the overlay to a dark page base', function () {
     quietly(fn () => (new FinalizeThemeStep())->run($project));
 
     $css = $project->readText('theme/assets/surface/surface.css');
-    assert_contains('mix-blend-mode: soft-light', $css);
+    assert_true(preg_match('/mix-blend-mode: (multiply|screen)/', $css) === 1, 'a blend that moves pixels');
     assert_contains('opacity: 0.48', $css, 'a dark base carries the heavier grain');
     assert_true(!str_contains($css, 'feTurbulence'));
     assert_contains('z-index: 1', $css);
