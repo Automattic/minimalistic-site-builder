@@ -2572,3 +2572,45 @@ test('the stated ground is read from the user\'s own words before the refined br
     assert_eq(null, DesignDirectionStep::statedGroundFor(['original_prompt' => 'A cafe in Tbilisi.', 'prompt' => 'A cafe in Tbilisi with warm wood.']));
     assert_eq(null, DesignDirectionStep::statedGroundFor([]));
 });
+
+
+test('a stated light page with no stated hero opens on its ground: the cover recipes yield (frm PR-2h)', function () {
+    $light = ['prompt' => 'Create a portfolio for an independent designer in Lisbon. Light page, tight sans headings, featured work as large image cards.'];
+    $seed = 'A quiet studio with one violet accent.';
+    $picks = [];
+    foreach (['atelier-lisbon', 'luzia-studio', 'estudio-marim', 'casa-rio', 'lisbon-desk', 'brand-hand'] as $id) {
+        $warnings = [];
+        $note = null;
+        $recipe = DesignDirectionStep::selectHeroRecipe($light, $id, $seed, $warnings, $note);
+        $picks[] = $recipe;
+        assert_eq(['foreground-image'], HeroComposition::metadata($recipe)['media_modes'], "{$id} opens on the page ground");
+        assert_eq([], $warnings);
+        $unlit = HeroComposition::select($id, $seed, []);
+        if (HeroComposition::metadata($unlit)['media_modes'] === ['cover-image']) {
+            assert_contains('states a light page and names no hero', (string) $note, "{$id}: the yield is recorded");
+        } else {
+            assert_eq($unlit, $recipe, "{$id}: a stable pick already on the ground keeps its seat");
+            assert_eq(null, $note);
+        }
+    }
+    assert_true(count(array_unique($picks)) >= 2, 'the foreground pool still spreads across identities');
+
+    // A stated hero outranks the ground ration; a dark or silent brief keeps the full pool.
+    $note = null;
+    $warnings = [];
+    assert_eq('cinematic-safe-zone', DesignDirectionStep::selectHeroRecipe(['prompt' => 'Light page with a full-bleed cinematic photo hero.'], 'x', $seed, $warnings, $note));
+    foreach (['Create a dark landing page for an AI studio.', 'Create a site for a Georgian restaurant.'] as $brief) {
+        $warnings = [];
+        $note = null;
+        assert_eq(HeroComposition::select('field-notes', $seed, []), DesignDirectionStep::selectHeroRecipe(['prompt' => $brief], 'field-notes', $seed, $warnings, $note), 'no ration: ' . $brief);
+        assert_eq(null, $note);
+    }
+
+    // A caller who pinned cover-image keeps it: the ration never overrides design_constraints.
+    $pinned = $light + ['design_constraints' => ['allowed_hero_media_modes' => ['cover-image']]];
+    $warnings = [];
+    $note = null;
+    $recipe = DesignDirectionStep::selectHeroRecipe($pinned, 'atelier-lisbon', $seed, $warnings, $note);
+    assert_eq(['cover-image'], HeroComposition::metadata($recipe)['media_modes']);
+    assert_eq(null, $note);
+});
