@@ -1375,7 +1375,7 @@ test('normalize commits every bounded depth and warns on an unsupported treatmen
         'description' => 'x',
         'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
     ];
-    foreach (['flat', 'ring', 'soft', 'hard-offset', 'inset', 'glow'] as $depth) {
+    foreach (['flat', 'ring', 'soft', 'hard-offset', 'inset', 'glow', 'glass'] as $depth) {
         $warnings = [];
         $direction = DesignDirectionStep::normalize(
             $base + ['depth' => strtoupper($depth)],
@@ -2533,4 +2533,26 @@ test('a ground the brief states in so many words is read as a bounded phrase (fr
     assert_eq(null, GroundKey::statedInBrief('a lighthearted, darkly funny comedy club'), 'adjectives are not a ground');
     assert_eq('light', GroundKey::statedInBrief("Light\n  page, please"));
     assert_eq(null, GroundKey::statedInBrief('the page ends on a lighthearted note, on blackboard green'), 'a phrase must end at a word boundary');
+});
+
+test('a glass depth on a light ground degrades to the ring it is built on, and stays on a dark one (frm W4b)', function () {
+    $base = [
+        'description' => 'x',
+        'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
+        'depth' => 'glass',
+    ];
+    foreach ([['#0B0B0F', 'glass', 'dark'], ['#FFFFFF', 'ring', 'light']] as [$hex, $expected, $ground]) {
+        $warnings = [];
+        $repairs = [];
+        $direction = DesignDirectionStep::normalize(
+            $base + ['palette' => ['base' => $hex, 'contrast' => $hex === '#FFFFFF' ? '#111111' : '#F5F5F5']],
+            'cinematic-safe-zone',
+            '',
+            $repairs,
+            $warnings,
+        );
+        assert_eq($expected, $direction['depth'], "glass on a {$ground} ground");
+        $glassRepairs = array_values(array_filter($repairs, fn (string $r): bool => str_contains($r, 'field depth authored "glass"')));
+        assert_eq($expected === 'ring' ? 1 : 0, count($glassRepairs), "repair recorded only on the {$ground} ground");
+    }
 });
