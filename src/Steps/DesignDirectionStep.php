@@ -672,6 +672,44 @@ final class DesignDirectionStep implements Step
             return $stated;
         }
 
+        // frm PR-2h: a stated light page with no stated hero opens on its
+        // own ground. A cover recipe paints a full-bleed photo band, dark or
+        // dimmed for its copy (luzia-like10 opened dark on a "Light page"
+        // brief), so the cover-image recipes leave the pool unless the
+        // caller pinned that mode. The user's own words first, the refined
+        // brief second, like the stated hero above.
+        $ground = null;
+        foreach (['original_prompt', 'prompt'] as $key) {
+            $text = $meta[$key] ?? null;
+            if (is_string($text) && trim($text) !== '') {
+                $ground = GroundKey::statedInBrief($text);
+                if ($ground !== null) {
+                    break;
+                }
+            }
+        }
+        if ($ground === 'light') {
+            $modes = array_values(array_diff(
+                (array) ($constraints['allowed_hero_media_modes'] ?? ['foreground-image', 'cover-image']),
+                ['cover-image'],
+            ));
+            $lit = $constraints;
+            $lit['allowed_hero_media_modes'] = $modes;
+            $stablePick = HeroComposition::select($stableIdentifier, $conceptSeed, $constraints);
+            $stableIsCover = in_array('cover-image', (array) HeroComposition::metadata($stablePick)['media_modes'], true);
+            // Only a cover pick yields: a stable pick that already opens on
+            // the ground keeps its seat, so the narrower pool never reshuffles
+            // sites the ration was not meant for.
+            if ($stableIsCover && $modes !== [] && HeroComposition::compatible($lit) !== []) {
+                $constraints = $lit;
+                $pool = HeroComposition::compatible($constraints);
+                $groundPick = HeroComposition::select($stableIdentifier, $conceptSeed, $constraints);
+                $statedNote = 'designDirection.json: hero recipe stable pick ' . self::describe($stablePick)
+                    . ' delivered ' . self::describe($groundPick)
+                    . '; disposition the brief states a light page and names no hero, so the cover recipes yield';
+            }
+        }
+
         if (!array_key_exists('hero_assignment', $meta)) {
             return HeroComposition::select($stableIdentifier, $conceptSeed, $constraints);
         }
