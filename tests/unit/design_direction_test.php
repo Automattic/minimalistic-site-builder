@@ -2523,4 +2523,5 @@ test('a ground the brief states in so many words is read as a bounded phrase (fr
     assert_eq(null, GroundKey::statedInBrief('Create a website for a Georgian restaurant in Tbilisi Old Town.'), 'a silent brief decides nothing');
     assert_eq(null, GroundKey::statedInBrief('a lighthearted, darkly funny comedy club'), 'adjectives are not a ground');
     assert_eq('light', GroundKey::statedInBrief("Light\n  page, please"));
+    assert_eq(null, GroundKey::statedInBrief('the page ends on a lighthearted note, on blackboard green'), 'a phrase must end at a word boundary');
 });

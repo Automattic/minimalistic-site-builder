@@ -47,7 +47,7 @@ final class GroundKey
         $text = mb_strtolower(preg_replace('/\s+/u', ' ', $brief) ?? $brief, 'UTF-8');
         foreach (self::STATED_PHRASES as $key => $phrases) {
             foreach ($phrases as $phrase) {
-                if (str_contains($text, $phrase)) {
+                if (preg_match('/(?<![\\p{L}-])' . preg_quote($phrase, '/') . '(?![\\p{L}-])/u', $text) === 1) {
                     return $key;
                 }
             }
