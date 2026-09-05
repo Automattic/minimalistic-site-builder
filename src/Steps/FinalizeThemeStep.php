@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\HeaderBehavior;
 use Automattic\SiteBuild\ImageTreatment;
 use Automattic\SiteBuild\ImageCrop;
+use Automattic\SiteBuild\ImageKind;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Depth;
 use Automattic\SiteBuild\BandGeometry;
@@ -93,6 +94,8 @@ final class FinalizeThemeStep implements Step
             label: $this->label(),
             reads: [
                 'designDirection.json',
+                // Only when it exists: which delivered pictures are not screens.
+                'images.json',
                 'headerBehavior.json',
                 'theme/theme.json',
                 'theme/style.css',
@@ -168,6 +171,12 @@ final class FinalizeThemeStep implements Step
             $headerWarnings,
         );
         $imageCropShipped = self::writeOverlayKit($project, self::imageCropKit(), ImageCrop::kitCss($imageCrop), $headerWarnings);
+        $screenShipped = self::writeOverlayKit(
+            $project,
+            self::screenKit(),
+            ImageKind::kitCss(DesignDirectionStep::imageKindFor($project), self::offKindImageFiles($project)),
+            $headerWarnings,
+        );
         $depthShipped = self::writeOverlayKit($project, self::depthKit(), Depth::kitCss($depth), $headerWarnings);
         $surfaceShipped = self::writeOverlayKit($project, self::surfaceKit(), $surfaceCss, $headerWarnings);
         $deviceShipped = self::writeOverlayKit($project, self::deviceKit(), Device::kitCss($device), $headerWarnings);
@@ -214,6 +223,9 @@ final class FinalizeThemeStep implements Step
         }
         if ($imageCropShipped) {
             $overlays[] = self::imageCropKit();
+        }
+        if ($screenShipped) {
+            $overlays[] = self::screenKit();
         }
         if ($depthShipped) {
             $overlays[] = self::depthKit();
@@ -344,7 +356,7 @@ final class FinalizeThemeStep implements Step
      */
     public static function overlayKits(): array
     {
-        return [self::shapeKit(), self::imageTreatmentKit(), self::imageCropKit(), self::depthKit(), self::surfaceKit(), self::deviceKit(), self::emphasisKit(), self::labelKit()];
+        return [self::shapeKit(), self::imageTreatmentKit(), self::imageCropKit(), self::screenKit(), self::depthKit(), self::surfaceKit(), self::deviceKit(), self::emphasisKit(), self::labelKit()];
     }
 
     /** The committed section-label kit: paints the one badge above a section heading. */
@@ -437,6 +449,32 @@ final class FinalizeThemeStep implements Step
     }
 
     /** Site-wide card, thumbnail, and feature-media proportion system. */
+    /**
+     * Delivered pictures the screen frame must skip (frm W7b): portraits and
+     * other off-kind rows of images.json. No images.json, nothing to skip.
+     *
+     * @return list<string>
+     */
+    private static function offKindImageFiles(Project $project): array
+    {
+        if (!$project->exists('images.json')) {
+            return [];
+        }
+        $data = $project->readJson('images.json');
+        $rows = is_array($data['images'] ?? null) ? $data['images'] : $data;
+        return ImageKind::offKindFiles(is_array($rows) ? array_values($rows) : []);
+    }
+
+    /** The framed-screen kit for a committed `ui-mockup` imagery kind (frm W7b). */
+    public static function screenKit(): OverlayKit
+    {
+        return new OverlayKit(
+            'screen',
+            "// Committed ui-mockup imagery: every contained picture is framed as a\n"
+                . '// product window. Loads after generated style.css.',
+        );
+    }
+
     public static function imageCropKit(): OverlayKit
     {
         return new OverlayKit(

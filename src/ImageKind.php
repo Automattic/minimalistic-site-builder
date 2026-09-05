@@ -20,6 +20,14 @@ final class ImageKind
 
     public const DEFAULT = 'photo';
 
+    /**
+     * The one class an author may add to a framed screen on a `ui-mockup`
+     * site for a gentle perspective tilt (frm W7b). The kit paints it with
+     * the individual `rotate` property, so a reveal class that owns
+     * `transform` on the same block never fights it; phones lie it flat.
+     */
+    public const TILT_CLASS = 'screen-frame--tilt';
+
     /** The AI_IMAGE `style` keyword each kind asks the section author to use. */
     private const STYLE = [
         'photo'             => 'photorealistic',
@@ -69,5 +77,157 @@ final class ImageKind
                 . ' slow colour drift, edge to edge; no objects, no scene, no text.',
             default             => '',
         };
+    }
+
+    /**
+     * Whether every delivered picture of this kind goes through the vision
+     * check (frm W7b). A product screen is where painted words hurt most:
+     * a fake wordmark or a legible menu in a dashboard mockup reads as the
+     * site's own copy. Photographs keep the hero-and-cover rule.
+     */
+    public static function inspectsEveryImage(?string $raw): bool
+    {
+        return self::explicit($raw) === 'ui-mockup';
+    }
+
+    /**
+     * The kind-specific reading of the QA prompt's text question. A mockup
+     * is drawn with blurred placeholder bars and chart shapes on purpose;
+     * only legible letters, words or numerals are a finding there.
+     */
+    public static function qaTextRule(?string $raw): string
+    {
+        if (self::explicit($raw) !== 'ui-mockup') {
+            return '';
+        }
+        return ' This picture is a product-interface mockup: blurred placeholder bars, blocks and abstract'
+            . ' chart shapes are NOT text. Answer true only for legible letters, words or numerals.';
+    }
+
+    /**
+     * The framed-screen kit (frm W7b), shipped only for `ui-mockup`. Every
+     * contained picture on such a site is a product screen, so the build
+     * frames it as one window: the committed panel radius, a hairline ring
+     * and a window bar drawn in the surface's own ink, a soft drop shadow.
+     * Covers and backgrounds, avatars, logos and transparent assets keep
+     * their own treatment. The selector keys on the image role hooks the
+     * section authors already write, so no markup changes.
+     */
+    /**
+     * Words in an authored subject or slot that name a person, so the picture
+     * is a portrait even on a `ui-mockup` site (the testimonial card beside a
+     * quote). A portrait in a browser window is the one frame that reads
+     * wrong; the build lists these files as off-kind and the kit exempts them.
+     */
+    private const PERSON_PATTERN = '/\b(?:portrait|headshot|head-and-shoulders|person|people|woman|women|man|men|face|faces|founder|founders|team photo|avatar|smiling)\b/iu';
+
+    /**
+     * Whether one images.json row is a product screen the kit should frame.
+     * A transparent asset, the site logo, and any picture whose subject or
+     * slot names a person are not screens.
+     *
+     * @param array<string,mixed> $spec
+     */
+    public static function isScreen(array $spec): bool
+    {
+        $filename = basename((string) ($spec['filename'] ?? ''));
+        if ($filename === '' || str_ends_with(strtolower($filename), '.png')) {
+            return false;
+        }
+        $text = (string) ($spec['subject'] ?? '') . ' ' . (string) ($spec['pageContext'] ?? '');
+        return preg_match(self::PERSON_PATTERN, $text) !== 1;
+    }
+
+    /**
+     * The delivered filenames of the rows that are not screens, for the kit.
+     *
+     * @param list<array<string,mixed>> $specs
+     * @return list<string>
+     */
+    public static function offKindFiles(array $specs): array
+    {
+        $files = [];
+        foreach ($specs as $spec) {
+            if (!is_array($spec)) {
+                continue;
+            }
+            $filename = basename((string) ($spec['filename'] ?? ''));
+            if ($filename !== '' && !str_ends_with(strtolower($filename), '.png') && !self::isScreen($spec)) {
+                $files[] = $filename;
+            }
+        }
+        return array_values(array_unique($files));
+    }
+
+    /**
+     * @param list<string> $offKindFiles delivered filenames the frame must skip
+     */
+    public static function kitCss(?string $raw, array $offKindFiles = []): ?string
+    {
+        if (self::explicit($raw) !== 'ui-mockup') {
+            return null;
+        }
+        $tilt = self::TILT_CLASS;
+        $skip = '';
+        foreach ($offKindFiles as $file) {
+            $file = str_replace(['\\', '"'], ['\\\\', '\\"'], basename((string) $file));
+            if ($file !== '') {
+                $skip .= ':not(:has(> img[src$="/' . $file . '"]))';
+            }
+        }
+        return <<<CSS
+            /* Committed 'ui-mockup' imagery (frm W7b): each contained picture is a
+               product screen framed as one window. Covers, backgrounds, avatars,
+               logos and transparent assets keep their own treatment. */
+            :is(.wp-block-image, .card-media, .card-media-tall, .card-media-thumb, .feature-media, .hero-composition__stage):not(.wp-block-cover *):not(.is-style-rounded):not([class*="avatar"]):not([class*="logo"]):has(> img:not([src$=".png"])){$skip} {
+                position: relative;
+                padding-block-start: 1.75rem;
+                border-radius: var(--shape-radius-panel, 1rem);
+                overflow: hidden;
+                background: color-mix(in srgb, currentColor 7%, transparent);
+                box-shadow:
+                    inset 0 0 0 1px color-mix(in srgb, currentColor 16%, transparent),
+                    0 1.5rem 2.5rem -1.75rem rgb(0 0 0 / 0.45);
+            }
+            :is(.wp-block-image, .card-media, .card-media-tall, .card-media-thumb, .feature-media, .hero-composition__stage):not(.wp-block-cover *):not(.is-style-rounded):not([class*="avatar"]):not([class*="logo"]):has(> img:not([src$=".png"])){$skip}::before {
+                content: "";
+                position: absolute;
+                inset-block-start: 0.6875rem;
+                inset-inline-start: 0.875rem;
+                width: 2.25rem;
+                height: 0.375rem;
+                background: radial-gradient(circle, currentColor 0.1875rem, transparent 0.2rem) 0 50% / 0.75rem 0.375rem repeat-x;
+                opacity: 0.35;
+                pointer-events: none;
+            }
+            :is(.wp-block-image, .card-media, .card-media-tall, .card-media-thumb, .feature-media, .hero-composition__stage):not(.wp-block-cover *):not(.is-style-rounded):not([class*="avatar"]):not([class*="logo"]){$skip} > img:not([src$=".png"]) {
+                display: block;
+                width: 100%;
+                height: auto;
+                border-radius: 0;
+            }
+            /* Optional tilt on one screen: individual `rotate`, so a reveal
+               class that owns `transform` never fights it. Phones lie flat. */
+            :has(> .{$tilt}) {
+                perspective: 1400px;
+            }
+            .{$tilt} {
+                rotate: x 6deg;
+                transform-origin: 50% 100%;
+            }
+            /* One tilt per page: any tilted screen with an earlier tilted screen
+               in document order lies flat. For a later screen, some ancestor-or-
+               self follows a sibling that holds the earlier one. */
+            :is(:has(.{$tilt}), .{$tilt}) ~ * .{$tilt},
+            :is(:has(.{$tilt}), .{$tilt}) ~ .{$tilt} {
+                rotate: none;
+            }
+            @media (max-width: 781px) {
+                .{$tilt} {
+                    rotate: none;
+                }
+            }
+
+            CSS;
     }
 }
