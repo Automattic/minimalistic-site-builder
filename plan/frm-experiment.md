@@ -348,6 +348,8 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 | 80 | #528 | W1 (PR-1x) | Keep the phone pill header on one row (frm) | merged | gist cc631bde55ab693724499a372ae00d7c: cohesion-like17 pill at 390 before (title truncated, two-line CTA) / after (rule mirrored into the built kit: full title, one-line caption CTA) | 7ed1ebfc |
 | 81 | #530 | W3 (PR-3z) | Scope the stat-ledger figure rule to level-3 headings (frm) | merged | gist 553ad31694a7fc0119c3348c4f79572d: spector-like15 ledger before (H2 on one unwrapped line, page 3065px wide) / after mirror (H2 wraps, page 1366px, phone scrollWidth 390) | 828bd4c9 |
 | 82 | #531 | W3 (PR-3y) | Keep only as many pictures as the archetype budgets (frm) | merged | gist 574c0394736f2b76c81461afbe1cc620: zova-like18 dashboard before crop (three stacked screens) + replay on the recorded dashboard and comparison responses (3 to 2 pictures, headings intact, media count check passes); no build | ccbbab31 |
+| 83 | #532 | W3 (PR-3x) | Count only column tiles in a project grid (frm) | merged | gist 88a59c3b66664b34acdd7776fff608df: the recorded dreammotion-like17 gallery response replayed (tile row gone; the media count row stayed and became PR-3x2); no build | 93ffa166 |
+| 84 | #533 | W3 (PR-3x2) | Count only tile pictures in a project grid's media budget (frm) | merged | gist 77dc8936f8e6483dc36c98c14a19d289: the recorded dreammotion-like17 and -like18 galleries replayed (media count row gone on both); no build | 2ddd0996 |
 
 ## 9. Iteration log (one line per loop turn)
 
@@ -442,6 +444,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 - 2026-09-05 turn 89: PR-3z #530 merged (the ledger figure rule names level-3 headings only). Next: PR-3y on branch frm/media-over-budget: a section keeps only as many image blocks as its archetype budgets, in document order (GeneratedMarkup::stripMediaOverBudget; stripBlocksNamed gains a keep-first count). Then PR-3x (extra project-grid tiles).
 - 2026-09-05 turn 90: PR-3y #531 merged (a section keeps only as many image blocks as its archetype budgets). Merge check: a throwaway worktree merged origin/trunk (7fa2c663) into frm_experiment with no conflicts. Next: PR-3x on branch frm/grid-tile-count: the dreammotion-like17 fifth tile was the band's own image cover; a tile is a cover inside a column.
 - 2026-09-05 turn 91: PR-3x #532 merged. Cohort-8 built with images on 93ffa166 (cohesion-like19, dreammotion-like18, zova-like19, luzia-like15, spector-like16; 68/68 images, one QA regeneration). Every cohort-7 fix holds: the ledger heading wraps, no site over the media budget, tile count right. Fidelity 4.5 on all five (section 7 cohort-8 rows), the first cohort with no P0 or P1 defect. New rows: PR-3x2 (P2, next, branch frm/grid-media-count), PR-1y (P2).
+- 2026-09-05 turn 92: PR-3x2 #533 merged. Next: PR-1y on branch frm/no-nav-section: the spector header already carries the spread navigation (header-archetype--spread-nav on like14, like15 and like16), and the plan added a navigation/menu section each time; PagePlanStep::removeHeaderNavigationSections drops it beside the footer removal (whole-word navigation/nav identity; a restaurant menu stays).
 
 ## 10. Parked / rejected
 

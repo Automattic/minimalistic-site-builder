@@ -2421,3 +2421,29 @@ test('rewritten seam prose names each neighbor assignment, not just its title', 
         }
     }
 });
+
+
+test('a planned site-navigation section is removed because the header carries the navigation (frm PR-1y)', function () {
+    $hero = plan_section(['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero']);
+    $menu = plan_section(['slug' => 'menu', 'title' => 'Menu', 'type' => 'seasonal-menu']);
+    $work = plan_section(['slug' => 'work', 'title' => 'Selected work', 'type' => 'portfolio']);
+    $raw = [
+        $hero,
+        plan_section(['slug' => 'navigation', 'title' => 'Navigation Menu', 'type' => 'menu']),
+        $menu,
+        plan_section(['slug' => 'navigation-info', 'title' => 'Navigation & Studio Info', 'type' => 'navigation']),
+        $work,
+        plan_section(['slug' => 'site-nav', 'title' => 'Where to go', 'type' => 'links']),
+    ];
+    $warnings = [];
+    $filtered = PagePlanStep::removeHeaderNavigationSections($raw, $warnings, 'home');
+    assert_eq([$hero, $menu, $work], $filtered, 'a restaurant menu is content; the navigation bands go');
+    assert_eq(3, count($warnings));
+    $joined = implode("\n", $warnings);
+    assert_contains("pages[slug='home'].sections[1]", $joined);
+    assert_contains('"title":"Navigation Menu"', $joined);
+    assert_contains('theme/parts/header.html carries the navigation', $joined);
+    $again = $warnings;
+    assert_eq($filtered, PagePlanStep::removeHeaderNavigationSections($filtered, $warnings, 'home'));
+    assert_eq($again, $warnings, 'a second pass adds no warning');
+});
