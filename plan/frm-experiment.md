@@ -235,6 +235,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 | 39 | #486 | W1 (PR-1f) | Keep the pill's and the centered bar's CTA against the hero action (frm) | merged | pure replay on cohesion-like10: standard-row drops the button, floating-pill keeps "Start project"; no build | (see git) |
 | 40 | #487 | W2 (PR-2f) | Bind the marquee-name paragraph to the site name (frm) | merged | pure replay on cohesion-like10's hero: the exact name untouched, a paraphrase bound to "Alexia Studio" with one repair; no build | (see git) |
 | 41 | #488 | W3 (PR-3j) | Let row checks look past a committed side-label split (frm) | merged | pure replay on spector-like6's stats pattern: the [2,4] row warning is gone, only the unit-word figure remains; no build | (see git) |
+| 42 | #489 | W8 (PR-8g) | Let the motion kit own the marquee scale (frm) | merged | gist 42984751fc3afa61d952304667da1afd: spector-like4-8g replay, caption -> display scale, loop probe built and moving, static clipped under reduce; 390 | (see git) |
 
 ## 9. Iteration log (one line per loop turn)
 
@@ -280,6 +281,7 @@ Final note (2026-09-05 03:20): fidelity improved on 4 of 5 (cohesion 1 to 2, dre
 - 2026-09-05 turn 40: W8d #485 merged. PR-1f on `frm/pill-keeps-cta`: the keeps-action commit of W1b had never reached PR #465 (only two of three commits were pushed), so the flag was absent on frm_experiment; landed the parameter, a `keepsHeaderAction` helper for floating-pill and bar-center-cta, the run-time call and the tests. Lesson: after `git push`, confirm the PR's commit list with `gh pr view <n> --json commits` before merging. Merged as #486.
 - 2026-09-05 turn 41: PR-1f #486 merged (audit of #462-#486 commit lists: only #465 had lost a commit). PR-2f on `frm/marquee-name-bind`: `HeroComposition::bindMarqueeName` replaces the marquee paragraph's text with the spec's site name at the hero boundary and records the repair. Merged as #487.
 - 2026-09-05 turn 42: PR-2f #487 merged. PR-3j on `frm/side-label-rows`: `isSideLabelSplit` lets the bento, pricing, ledger and feature-row row counts skip the split whose first column holds only the side label. Merged as #488.
+- 2026-09-05 turn 43: PR-3j #488 merged. PR-8g on `frm/marquee-scale`: a base `.marquee` rule (heading face, display size, clipped) outside the reduced-motion guard, and `GeneratedMarkup::ownMarqueeScale` drops an authored size, face or typography style at the boundary. Merged as #489.
 
 ## 10. Parked / rejected
 
