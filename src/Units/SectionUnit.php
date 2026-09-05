@@ -96,6 +96,16 @@ final class SectionUnit extends AbstractPageSectionUnit
             'handoff'          => $compositionVars['handoff'],
             'neighbors'        => $this->inputString($input, 'neighbors'),
             'root_marker'      => SectionComposition::marker($archetype),
+            // A numbered row the brief states counts as a process section
+            // for the numeral rule (frm PR-3w).
+            'numeral_directive' => StepNumeral::numberedDirective(
+                is_string($input['step_numeral'] ?? null) ? $input['step_numeral'] : null,
+                SectionComposition::clauseAppliesTo(
+                    is_string($input['stated_numbered'] ?? null) ? $input['stated_numbered'] : null,
+                    $section,
+                    false,
+                ),
+            ),
             // The catalog, not the model, decides whether this band pins its
             // lead region. A recipe that cannot pin renders an empty directive
             // and never reads a word about it.
@@ -206,6 +216,10 @@ final class SectionUnit extends AbstractPageSectionUnit
             StepNumeral::isProcessSection(
                 (string) ($input['section']['type'] ?? ''),
                 (string) ($input['section']['slug'] ?? ''),
+            ) || SectionComposition::clauseAppliesTo(
+                is_string($input['stated_numbered'] ?? null) ? $input['stated_numbered'] : null,
+                is_array($input['section'] ?? null) ? $input['section'] : [],
+                false,
             ),
         );
         $markup = $numeral['markup'];

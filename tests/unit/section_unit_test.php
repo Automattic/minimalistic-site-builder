@@ -431,6 +431,7 @@ test('SectionUnit layered request loses only cache marker separators', function 
         'handoff'          => $input['section']['handoff'],
         'neighbors'        => $input['neighbors'],
         'root_marker'      => SectionComposition::marker($archetype),
+        'numeral_directive' => '',
         'composition_recipe' => $renderer->render(
             SectionComposition::recipeTemplate($archetype),
             []

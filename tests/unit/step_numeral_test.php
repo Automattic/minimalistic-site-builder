@@ -110,3 +110,34 @@ test('a step numeral is never a count-up figure (frm W6c)', function () {
     assert_true(!str_contains($sane['markup'], 'count-up'), 'the sanity step drops a model-authored count on an ordinal');
     assert_contains('step-numeral', $sane['markup']);
 });
+
+
+test('a numbered stack the brief states counts as a process section for its own row only (frm PR-3w)', function () {
+    assert_eq('services listed as a numbered stack', StepNumeral::statedNumbered('Light page, services listed as a numbered stack, client testimonials.'));
+    assert_eq(null, StepNumeral::statedNumbered('Create a website for a Georgian restaurant.'));
+    assert_eq('services listed as a numbered stack', StepNumeral::statedNumberedFor(['original_prompt' => 'services listed as a numbered stack', 'prompt' => 'a portfolio']));
+    assert_eq(null, StepNumeral::statedNumberedFor([]));
+
+    $services = ['slug' => 'services', 'type' => 'services', 'title' => 'Services'];
+    $work = ['slug' => 'work', 'type' => 'portfolio', 'title' => 'Selected work'];
+    assert_true(\Automattic\SiteBuild\SectionComposition::clauseAppliesTo('services listed as a numbered stack', $services));
+    assert_true(!\Automattic\SiteBuild\SectionComposition::clauseAppliesTo('services listed as a numbered stack', $work));
+    $pricing = ['slug' => 'pricing', 'type' => 'pricing', 'title' => 'Plans', 'purpose' => 'Two plans for ongoing design services.'];
+    assert_true(\Automattic\SiteBuild\SectionComposition::clauseAppliesTo('services listed as a numbered stack', $pricing), 'the purpose reaches a highlight');
+    assert_true(!\Automattic\SiteBuild\SectionComposition::clauseAppliesTo('services listed as a numbered stack', $pricing, false), 'a numeral never rides the purpose prose');
+
+    assert_contains('counts as a process section', StepNumeral::numberedDirective('chip', true));
+    assert_contains('"fontSize":"caption"', StepNumeral::numberedDirective('chip', true));
+    assert_true(!str_contains(StepNumeral::numberedDirective('ghost', true), 'caption'));
+    assert_eq('', StepNumeral::numberedDirective('none', true), 'no committed device, no numerals');
+    assert_eq('', StepNumeral::numberedDirective('chip', false));
+    assert_eq('', StepNumeral::numberedDirective(null, true));
+    assert_true(str_contains((string) file_get_contents(repo_path('prompts/section-composition.md')), '{{numeral_directive}}'));
+
+    // The boundary keeps the numerals on a stated row the way it does on a process row.
+    $good = step_numeral_section(step_numeral_item('1', true, 'Research') . step_numeral_item('2', true, 'Systems'));
+    $kept = StepNumeral::normalize($good, 'chip', 'page-home--services', true);
+    assert_eq(2, substr_count($kept['markup'], '<p class="step-numeral'));
+    $dropped = StepNumeral::normalize($good, 'chip', 'page-home--services', false);
+    assert_true(!str_contains($dropped['markup'], 'step-numeral'), 'an unstated non-process row still loses them');
+});
