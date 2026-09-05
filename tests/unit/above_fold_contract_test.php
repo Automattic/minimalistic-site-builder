@@ -1251,3 +1251,49 @@ test('floating-pill is the stacked pool for a full-bleed product/portfolio tradi
     assert_eq('floating-pill', $forced['header']['archetype']);
     assert_eq(AboveFoldContract::MODE_STACKED, $forced['header']['mode']);
 });
+
+test('the floating pill also floats over an image-led opening in a product tradition (frm PR-1e)', function () {
+    $pages = above_fold_pages();
+    $blueprint = HeroBlueprint::defaultFor('cinematic-safe-zone');
+    $resolve = static fn (string $register, ?string $forced = null): array => AboveFoldContract::resolve(
+        $pages,
+        $blueprint,
+        'full-bleed',
+        ['base' => '#FFFFFF', 'contrast' => '#111111'],
+        ['stable_id' => 'pill-overlay', 'writing_direction' => 'ltr', 'page_count' => 2, 'register' => $register],
+        ['archetype' => 'minimal-columns', 'surface' => 'base'],
+        $forced,
+    );
+    $pill = $resolve('modernist');
+    assert_eq('floating-pill', $pill['header']['archetype']);
+    assert_eq(AboveFoldContract::MODE_OVERLAY, $pill['header']['mode'], 'the pill keeps the overlay relation over the cover');
+    assert_eq(true, $pill['header']['protect_top_edge']);
+    // The delivery phase's coherence check accepts the floating pill as an
+    // overlay archetype (it used to pin overlay to minimal-overlay).
+    $parts = [
+        'page-home--hero' => above_fold_image_part('hero', 50, className: 'hero-composition--cinematic-safe-zone'),
+        'page-menu--menu-opening' => above_fold_solid_part('menu-opening', 'contrast'),
+    ];
+    $delivered = AboveFoldContract::finalizeDelivery($pill, $pages, AboveFoldPartFacts::inspect($pages, $parts, $pill));
+    assert_eq('floating-pill', $delivered['header']['archetype']);
+    assert_eq(AboveFoldContract::MODE_OVERLAY, $delivered['header']['mode']);
+    assert_eq([], $delivered['degradations']);
+
+    $bar = $resolve('heritage');
+    assert_eq('minimal-overlay', $bar['header']['archetype'], 'other traditions keep the quiet overlay bar');
+
+    $forced = $resolve('heritage', 'floating-pill');
+    assert_eq('floating-pill', $forced['header']['archetype']);
+    assert_eq(AboveFoldContract::MODE_OVERLAY, $forced['header']['mode'], 'a forced pill on an overlay-capable opening floats in overlay mode');
+
+    $framed = AboveFoldContract::resolve(
+        $pages,
+        $blueprint,
+        'framed',
+        ['base' => '#FFFFFF', 'contrast' => '#111111'],
+        ['stable_id' => 'pill-overlay', 'writing_direction' => 'ltr', 'page_count' => 2, 'register' => 'modernist'],
+        ['archetype' => 'minimal-columns', 'surface' => 'base'],
+        'floating-pill',
+    );
+    assert_eq(AboveFoldContract::MODE_STACKED, $framed['header']['mode'], 'a framed canvas never overlays');
+});
