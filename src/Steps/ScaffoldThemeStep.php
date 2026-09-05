@@ -735,6 +735,36 @@ final class ScaffoldThemeStep implements Step
             }
         }
 
+        /* Closing invitation panel (the cta-panel archetype): a contained
+           card on the page ground, rounded from the committed shape scale
+           and clipped so a background image or gradient follows the corner. */
+        .wp-block-group.cta-panel {
+            border-radius: var(--shape-radius-panel, 0);
+            overflow: hidden;
+        }
+        .wp-block-group.cta-panel > .wp-block-columns {
+            align-items: center;
+        }
+        /* A clipped panel must never clip its own headline: a display-size
+           word wider than the narrow panel breaks rather than vanishing, and
+           below the hamburger breakpoint the authored side padding gives way
+           to a phone-scale inset so the measure stays usable. */
+        .wp-block-group.cta-panel :is(h1, h2, h3) {
+            overflow-wrap: anywhere;
+        }
+        @media (max-width: 600px) {
+            .wp-block-group.cta-panel {
+                padding-inline: 1.25rem !important;
+            }
+            /* The preset size class carries !important, so the phone cap
+               must too: 11vw keeps a nine-letter display word inside a
+               390px panel without breaking it mid-word. */
+            .wp-block-group.cta-panel :is(h1, h2, h3) {
+                font-size: min(var(--wp--preset--font-size--section-title), 11vw) !important;
+                overflow-wrap: normal;
+            }
+        }
+
         CSS;
 
     private const README = <<<TXT

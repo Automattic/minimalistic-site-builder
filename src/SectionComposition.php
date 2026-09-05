@@ -39,7 +39,11 @@ final class SectionComposition
         'list-with-thumbnails',
         'bento-grid',
         'faq-split',
+        'cta-panel',
     ];
+
+    /** The contained panel a closing cta-panel band wraps its invitation in. */
+    public const CTA_PANEL_CLASS = 'cta-panel';
 
     /** The fewest accordion items a faq-split must carry to read as one. */
     public const FAQ_MIN_ITEMS = 3;
@@ -275,6 +279,23 @@ final class SectionComposition
             'ineligible_reason' => '',
             'root_hook' => '.section-composition--faq-split',
             'prompt' => 'section-compositions/faq-split.md',
+        ],
+        // frm W3d: the reference corpus' closing invitation. The band stays on
+        // the page ground; inside it one contained, rounded panel (the
+        // committed panel radius) carries one heading, one line and exactly
+        // one action, with an optional image beside the copy. Both the panel
+        // and the single action are checked in markupWarnings().
+        'cta-panel' => [
+            'backgrounds' => ['base', 'tinted'],
+            'default_background' => 'base',
+            'min_images' => 0,
+            'max_images' => 1,
+            'copy_capacity' => 'compact',
+            'requires_row' => false,
+            'requires_context' => [],
+            'ineligible_reason' => '',
+            'root_hook' => '.section-composition--cta-panel',
+            'prompt' => 'section-compositions/cta-panel.md',
         ],
     ];
 
@@ -613,6 +634,38 @@ TEXT;
                     ['archetype' => $archetype, 'highlighted_cards' => 1, 'class' => self::BENTO_HIGHLIGHT_CLASS],
                     ['highlighted_cards' => $highlights],
                     'safe parseable section was retained; exactly one card carries the inverted highlight',
+                );
+            }
+        }
+
+        if ($archetype === 'cta-panel') {
+            $panels = 0;
+            $buttons = 0;
+            foreach ($document->indices() as $index) {
+                if ($document->name($index) === 'group'
+                    && in_array(self::CTA_PANEL_CLASS, self::classTokens($document, $index), true)) {
+                    $panels++;
+                }
+                if ($document->name($index) === 'button') {
+                    $buttons++;
+                }
+            }
+            if ($panels !== 1) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'cta panel container',
+                    ['archetype' => $archetype, 'panel_groups' => 1, 'class' => self::CTA_PANEL_CLASS],
+                    ['panel_groups' => $panels],
+                    'safe parseable section was retained; the closing invitation lives in exactly one contained panel group',
+                );
+            }
+            if ($buttons !== 1) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'cta panel action',
+                    ['archetype' => $archetype, 'buttons' => 1],
+                    ['buttons' => $buttons],
+                    'safe parseable section was retained; a closing panel carries exactly one action',
                 );
             }
         }
