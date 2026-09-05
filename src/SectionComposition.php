@@ -40,7 +40,11 @@ final class SectionComposition
         'bento-grid',
         'faq-split',
         'cta-panel',
+        'pricing-tiers',
     ];
+
+    /** The tier counts a pricing-tiers row may carry: two plans or three (frm W3c). */
+    public const PRICING_TIER_COUNTS = [2, 3];
 
     /** The contained panel a closing cta-panel band wraps its invitation in. */
     public const CTA_PANEL_CLASS = 'cta-panel';
@@ -296,6 +300,23 @@ final class SectionComposition
             'ineligible_reason' => '',
             'root_hook' => '.section-composition--cta-panel',
             'prompt' => 'section-compositions/cta-panel.md',
+        ],
+        // frm W3c: the reference corpus' pricing. One row of two or three
+        // tier cards, every tier the same construction with a price figure,
+        // a short feature list and its own action, and exactly one tier
+        // inverted as the recommended plan. Tier count, the one highlight,
+        // one action per tier and the lists are checked in markupWarnings().
+        'pricing-tiers' => [
+            'backgrounds' => ['base', 'tinted', 'contrast'],
+            'default_background' => 'base',
+            'min_images' => 0,
+            'max_images' => 0,
+            'copy_capacity' => 'standard',
+            'requires_row' => true,
+            'requires_context' => [],
+            'ineligible_reason' => '',
+            'root_hook' => '.section-composition--pricing-tiers',
+            'prompt' => 'section-compositions/pricing-tiers.md',
         ],
     ];
 
@@ -666,6 +687,62 @@ TEXT;
                     ['archetype' => $archetype, 'buttons' => 1],
                     ['buttons' => $buttons],
                     'safe parseable section was retained; a closing panel carries exactly one action',
+                );
+            }
+        }
+
+        if ($archetype === 'pricing-tiers') {
+            $rows = [];
+            $highlights = 0;
+            $buttons = 0;
+            $lists = 0;
+            foreach ($document->indices() as $index) {
+                $name = $document->name($index);
+                if ($name === 'columns') {
+                    $tiers = 0;
+                    foreach ($document->children($index) as $child) {
+                        if ($document->name($child) === 'column') {
+                            $tiers++;
+                        }
+                    }
+                    $rows[] = $tiers;
+                }
+                if (in_array(self::BENTO_HIGHLIGHT_CLASS, self::classTokens($document, $index), true)) {
+                    $highlights++;
+                }
+                if ($name === 'button') {
+                    $buttons++;
+                }
+                if ($name === 'list') {
+                    $lists++;
+                }
+            }
+            $tierCount = count($rows) === 1 ? $rows[0] : 0;
+            if (count($rows) !== 1 || !in_array($tierCount, self::PRICING_TIER_COUNTS, true)) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'pricing tier row',
+                    ['archetype' => $archetype, 'column_rows' => 1, 'tiers' => self::PRICING_TIER_COUNTS],
+                    ['column_rows' => count($rows), 'tiers_per_row' => $rows],
+                    'safe parseable section was retained; pricing is one row of two or three tier columns',
+                );
+            }
+            if ($highlights !== 1) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'pricing highlight',
+                    ['archetype' => $archetype, 'highlighted_tiers' => 1, 'class' => self::BENTO_HIGHLIGHT_CLASS],
+                    ['highlighted_tiers' => $highlights],
+                    'safe parseable section was retained; exactly one tier carries the inverted highlight',
+                );
+            }
+            if ($tierCount > 0 && ($buttons !== $tierCount || $lists < $tierCount)) {
+                $warnings[] = self::markupWarning(
+                    $part,
+                    'pricing tier anatomy',
+                    ['archetype' => $archetype, 'buttons' => $tierCount, 'minimum_lists' => $tierCount],
+                    ['buttons' => $buttons, 'lists' => $lists],
+                    'safe parseable section was retained; every tier carries one feature list and one action',
                 );
             }
         }

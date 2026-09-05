@@ -816,6 +816,22 @@ final class ScaffoldThemeStep implements Step
             }
         }
 
+        /* Pricing tiers (the pricing-tiers archetype, frm W3c): the price
+           figure is set in the heading face at section-title scale, and the
+           recommended tier rises above its siblings on desktop. */
+        .section-composition--pricing-tiers .price-figure {
+            font-family: var(--wp--preset--font-family--heading, inherit);
+            font-size: var(--wp--preset--font-size--section-title);
+            font-weight: 700;
+            line-height: 1.05;
+            letter-spacing: -0.02em;
+        }
+        @media (min-width: 782px) {
+            .section-composition--pricing-tiers .equal-cards > .wp-block-column > .card-highlight {
+                transform: translateY(-0.75rem);
+            }
+        }
+
         /* Closing invitation panel (the cta-panel archetype): a contained
            card on the page ground, rounded from the committed shape scale
            and clipped so a background image or gradient follows the corner. */

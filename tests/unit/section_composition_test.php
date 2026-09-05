@@ -612,3 +612,59 @@ test('the cta-panel archetype checks one contained panel and exactly one action 
     $other = str_replace('section-composition--cta-panel', 'section-composition--centered-stack', $noPanel);
     assert_true(!str_contains(implode("\n", SectionComposition::markupWarnings($other, 'centered-stack', 'x')), 'cta panel'));
 });
+
+test('the pricing-tiers archetype checks one row of two or three tiers, one highlight, and one list and action per tier (frm W3c)', function () {
+    assert_true(in_array('pricing-tiers', SectionComposition::ARCHETYPES, true));
+    $meta = SectionComposition::metadata('pricing-tiers');
+    assert_eq('section-compositions/pricing-tiers.md', $meta['prompt']);
+    assert_eq(true, $meta['requires_row']);
+    assert_eq(0, $meta['max_images'], 'pricing carries no image');
+    assert_true(is_file(repo_path('prompts/' . $meta['prompt'])), 'the recipe fragment ships');
+    assert_true(str_contains((string) file_get_contents(repo_path('prompts/page-plan.md')), 'cta-panel, pricing-tiers"'), 'the page plan enum lists it');
+
+    $tier = static fn (string $extra = '', bool $list = true, bool $button = true): string => '<!-- wp:column {"width":"33.33%","verticalAlignment":"stretch"} --><div class="wp-block-column">'
+        . '<!-- wp:group {"className":"card-style--flush card-flush' . $extra . '"} --><div class="wp-block-group card-style--flush card-flush' . $extra . '">'
+        . '<!-- wp:heading {"level":3} --><h3 class="wp-block-heading">Starter</h3><!-- /wp:heading -->'
+        . '<!-- wp:paragraph {"className":"price-figure"} --><p class="price-figure">$29 / month</p><!-- /wp:paragraph -->'
+        . ($list ? '<!-- wp:list --><ul class="wp-block-list"><!-- wp:list-item --><li>Three seats</li><!-- /wp:list-item --></ul><!-- /wp:list -->' : '')
+        . ($button ? '<!-- wp:buttons {"className":"cta-bottom"} --><div class="wp-block-buttons cta-bottom"><!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link" href="/signup/">Choose</a></div><!-- /wp:button --></div><!-- /wp:buttons -->' : '')
+        . '</div><!-- /wp:group --></div><!-- /wp:column -->';
+    $row = static fn (string $tiers): string => '<!-- wp:columns {"className":"equal-cards","align":"wide"} --><div class="wp-block-columns alignwide equal-cards">'
+        . $tiers . '</div><!-- /wp:columns -->';
+    $band = static fn (string $inner): string => '<!-- wp:group {"className":"section-composition--pricing-tiers","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group section-composition--pricing-tiers">'
+        . '<!-- wp:heading --><h2 class="wp-block-heading">Plans</h2><!-- /wp:heading -->'
+        . $inner . '</div><!-- /wp:group -->';
+
+    $three = $band($row($tier() . $tier(' card-highlight') . $tier()));
+    assert_eq([], SectionComposition::markupWarnings($three, 'pricing-tiers', 'page-home--plans'));
+    $two = $band($row($tier() . $tier(' card-highlight')));
+    assert_eq([], SectionComposition::markupWarnings($two, 'pricing-tiers', 'page-home--plans'), 'two plans are a legitimate set');
+
+    $four = $band($row($tier() . $tier(' card-highlight') . $tier() . $tier()));
+    $joined = implode("\n", SectionComposition::markupWarnings($four, 'pricing-tiers', 'page-home--plans'));
+    assert_contains('pricing tier row', $joined);
+    assert_contains('"tiers_per_row":[4]', $joined);
+
+    $twoRows = $band($row($tier() . $tier(' card-highlight')) . $row($tier() . $tier()));
+    $joined = implode("\n", SectionComposition::markupWarnings($twoRows, 'pricing-tiers', 'page-home--plans'));
+    assert_contains('"column_rows":2', $joined);
+
+    $noHighlight = $band($row($tier() . $tier() . $tier()));
+    $joined = implode("\n", SectionComposition::markupWarnings($noHighlight, 'pricing-tiers', 'page-home--plans'));
+    assert_contains('pricing highlight', $joined);
+    assert_contains('"highlighted_tiers":0', $joined);
+
+    $noButton = $band($row($tier() . $tier(' card-highlight') . $tier('', true, false)));
+    $joined = implode("\n", SectionComposition::markupWarnings($noButton, 'pricing-tiers', 'page-home--plans'));
+    assert_contains('pricing tier anatomy', $joined);
+    assert_contains('"buttons":2', $joined);
+
+    $noList = $band($row($tier() . $tier(' card-highlight') . $tier('', false, true)));
+    $joined = implode("\n", SectionComposition::markupWarnings($noList, 'pricing-tiers', 'page-home--plans'));
+    assert_contains('"lists":2', $joined);
+
+    // Other archetypes never see the pricing checks.
+    $plain = str_replace('section-composition--pricing-tiers', 'section-composition--equal-card-grid', $four);
+    assert_true(!str_contains(implode("\n", SectionComposition::markupWarnings($plain, 'equal-card-grid', 'x')), 'pricing'));
+});
