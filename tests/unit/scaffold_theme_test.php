@@ -645,7 +645,8 @@ test('scaffold-theme centers zigzag rows, sizes the empty plate, and stacks copy
     quietly(fn () => (new ScaffoldThemeStep())->run($project));
     $css = $project->readText('theme/style.css');
     assert_contains('.section-composition--zigzag-steps .wp-block-columns {', $css);
-    assert_contains('.section-composition--zigzag-steps .wp-block-group.step-plate {', $css);
+    assert_contains('.section-composition--zigzag-steps .wp-block-group.step-plate,', $css);
+    assert_contains('.section-composition--zigzag-steps .wp-block-column:not(:has(*)) {', $css, 'an emptied media column keeps the plate shape');
     assert_contains('min-block-size: 14rem', $css);
     assert_contains('.section-composition--zigzag-steps .wp-block-column:has(> .wp-block-heading) {', $css);
     assert_contains('order: -1', $css);

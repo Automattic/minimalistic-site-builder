@@ -872,9 +872,13 @@ final class ScaffoldThemeStep implements Step
         .section-composition--zigzag-steps .wp-block-columns {
             align-items: center;
         }
-        .section-composition--zigzag-steps .wp-block-group.step-plate {
+        .section-composition--zigzag-steps .wp-block-group.step-plate,
+        /* A media column emptied by a dropped image (frm PR-3k) keeps the
+           plate's shape, so the ladder keeps its rhythm without an asset. */
+        .section-composition--zigzag-steps .wp-block-column:not(:has(*)) {
             min-block-size: 14rem;
             border-radius: var(--shape-radius-media, 0);
+            background-color: color-mix(in srgb, currentColor 6%, transparent);
         }
         .section-composition--zigzag-steps .wp-block-column > figure.wp-block-image img {
             width: 100%;
