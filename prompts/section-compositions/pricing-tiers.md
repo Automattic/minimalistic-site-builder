@@ -10,10 +10,12 @@ the recommended plan and inverts its surface.
   card `wp:group` built per the ASSIGNED CARD STYLE. Never a second row, never
   a fourth plan (fold extras into one line under the row).
 - Tier anatomy, in this order inside every card: a level-3 heading with the
-  plan name; one `wp:paragraph` with `"className":"price-figure"` holding the
-  price and its period exactly as the SITE SPEC or the section notes state it
-  (never invent a price; when none is given, write the plan's scope line here
-  instead); one `wp:list` of three to five short features; and one
+  plan name; one `wp:paragraph` holding the price and its period exactly as
+  the SITE SPEC or the section notes state it, with `"className":"price-figure"`
+  and no fontSize or fontFamily of its own (the build sets the figure's scale);
+  never invent a price, and when none is given write the plan's one-line scope
+  as a plain paragraph WITHOUT the `price-figure` class; then one `wp:list` of
+  three to five short features; and one
   `wp:buttons` with `"className":"cta-bottom"` holding ONE `wp:button` — the
   recommended plan's button carries the planned `primary_action`; the other
   plans' buttons use the same destination with their own short label.
